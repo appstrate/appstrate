@@ -33,7 +33,6 @@ function DegradedIntegrationItem({ integrationId }: { integrationId: string }) {
   return (
     <HealthCardItem
       title={data?.manifest.display_name ?? integrationId}
-      cardHeaders
       actions={
         canReach(integrationPath) ? (
           <HealthAction to={integrationPath}>{t("btn.reconnect")}</HealthAction>
@@ -53,36 +52,20 @@ export function ModelFallbackCard({
   chosen,
   used,
   settingsTo,
-  cardHeaders,
 }: {
   chosen: string;
   used: string;
   settingsTo: To | null;
-  cardHeaders: boolean;
 }) {
   const { t } = useTranslation("agents");
   return (
     <div className="mb-6">
-      <HealthCard
-        title={t("run.modelFallback.title")}
-        tone="warning"
-        cardHeaders={cardHeaders}
-        badge={null}
-      >
-        <p
-          className={
-            cardHeaders
-              ? "text-muted-foreground px-4 pt-3 text-xs"
-              : "text-muted-foreground mt-3 text-xs"
-          }
-        >
-          {t("run.modelFallback.message")}
-        </p>
-        <ul className={cardHeaders ? "px-4" : "mt-1"}>
+      <HealthCard title={t("run.modelFallback.title")} tone="warning" badge={null}>
+        <p className="text-muted-foreground px-4 pt-3 text-xs">{t("run.modelFallback.message")}</p>
+        <ul className="px-4">
           <HealthCardItem
             title={t("run.modelFallback.chosen", { model: chosen })}
             description={t("run.modelFallback.used", { model: used })}
-            cardHeaders={cardHeaders}
             actions={
               settingsTo ? (
                 <HealthAction to={settingsTo}>{t("run.modelFallback.change")}</HealthAction>
@@ -111,7 +94,6 @@ function ResolvedModelFallback({
       chosen={models?.find((m) => m.id === fallback.pinnedModelId)?.label ?? fallback.pinnedModelId}
       used={fallback.model}
       settingsTo={reachable ? agentSettingsHref(agentPath, "model") : null}
-      cardHeaders
     />
   );
 }
@@ -145,12 +127,7 @@ export function RunWarnings({
       {modelFallback && <ResolvedModelFallback run={run} fallback={modelFallback} />}
       {degraded.length > 0 && (
         <div className="mb-6">
-          <HealthCard
-            title={t("run.degradedIntegrations.title")}
-            tone="warning"
-            cardHeaders
-            badge={null}
-          >
+          <HealthCard title={t("run.degradedIntegrations.title")} tone="warning" badge={null}>
             <p className="text-muted-foreground px-4 pt-3 text-xs">
               {t("run.degradedIntegrations.message")}
             </p>
@@ -164,12 +141,7 @@ export function RunWarnings({
       )}
       {lost && (
         <div className="mb-6">
-          <HealthCard
-            title={t("run.artifacts.partial.title")}
-            tone="warning"
-            cardHeaders
-            badge={null}
-          >
+          <HealthCard title={t("run.artifacts.partial.title")} tone="warning" badge={null}>
             <p className="text-muted-foreground px-4 pt-3 text-xs">
               {t("run.artifacts.partial.message")}
             </p>
@@ -179,7 +151,6 @@ export function RunWarnings({
                   key={file.name}
                   title={<span className="font-mono text-xs break-all">{file.name}</span>}
                   description={t(artifactFailureCodeKey(file.code))}
-                  cardHeaders
                   actions={null}
                 />
               ))}

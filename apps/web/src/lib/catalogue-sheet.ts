@@ -22,6 +22,7 @@
 
 import type { PackageType } from "@appstrate/core/validation";
 import type { CataloguePlacement, PlacementState } from "./catalogue-placement";
+import type { ActivationGate, ActivationRefusal } from "./catalogue-gates";
 
 export interface SheetSpaceRow {
   id: string;
@@ -34,6 +35,8 @@ export interface SheetSpaceRow {
   offeredBy: string | null;
   /** Whether the reader may flip THIS row's switch, in the direction it would go. */
   mayToggle: boolean;
+  /** Why not, when the reader's standing there is known (`activationGate`). */
+  refusal: ActivationRefusal | null;
 }
 
 export type SheetSpaceMode = "readonly" | "single" | "table";
@@ -42,7 +45,7 @@ export function sheetSpaceRows(
   placement: CataloguePlacement,
   spaces: readonly { id: string; name: string }[],
   /** The reader's verdict for switching it on (`next: true`) or off in that space. */
-  mayToggle: (spaceId: string, next: boolean) => boolean,
+  gateOf: (spaceId: string, next: boolean) => ActivationGate,
   /** The space the reader is in: its row comes first, it is the one they act on. */
   currentSpaceId?: string | null,
 ): SheetSpaceRow[] {
@@ -60,13 +63,15 @@ export function sheetSpaceRows(
         : placement.inactiveIn.includes(space.id)
           ? "inactive"
           : null;
+    const gate = gateOf(space.id, state !== "active");
     return {
       id: space.id,
       name: space.name,
       state,
       home: placement.homeSpaceId === space.id,
       offeredBy: placement.offeredBy[space.id] ?? null,
-      mayToggle: mayToggle(space.id, state !== "active"),
+      mayToggle: gate.allowed,
+      refusal: gate.refusal,
     };
   });
 }

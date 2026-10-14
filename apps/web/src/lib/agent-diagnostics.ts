@@ -13,6 +13,8 @@ import type {
   ReadinessErrorCode,
 } from "@appstrate/core/integration";
 import type { AgentDiagnostic } from "../hooks/use-agent-diagnostics";
+import { primaryDisplayFile } from "./package-files";
+import { agentSettingsHref, type AgentSettingsSection } from "./settings-section-href";
 
 /** Every code the diagnostics carry: readiness, connection and model verdicts, and warnings. */
 type AgentDiagnosticCode =
@@ -144,25 +146,34 @@ export function agentDiagnosticKey(diagnostic: AgentDiagnostic): string {
   return `${diagnostic.code}:${diagnostic.field}`;
 }
 
+/** The server's correction sections that name a Paramètres section of the same name. */
+const CORRECTION_SECTIONS: Partial<Record<string, AgentSettingsSection>> = {
+  skills: "skills",
+  integrations: "integrations",
+  connections: "connections",
+  inputs: "inputs",
+  model: "model",
+};
+
+/**
+ * Where a diagnostic is fixed, or `null` when the page already says it: an
+ * agent switched off here is switched on from the page's own band.
+ */
 export function agentDiagnosticCorrectionTarget(
   diagnostic: AgentDiagnostic,
   pathname: string,
-  currentSearch: string,
-) {
-  if (diagnostic.correction.destination === "schedule") {
-    const scheduleId = diagnostic.correction.params.scheduleId;
-    if (scheduleId) return `/schedules/${scheduleId}`;
-    const search = new URLSearchParams(currentSearch);
-    search.set("agentSettings", "schedules");
-    return { pathname, search: `?${search.toString()}`, hash: "#settings" };
+): string | null {
+  if (diagnostic.code === "agent_not_active") return null;
+  const { destination, section, params } = diagnostic.correction;
+  if (destination === "schedule") {
+    return params.scheduleId
+      ? `/schedules/${params.scheduleId}`
+      : agentSettingsHref(pathname, "schedules");
   }
-
-  const search = new URLSearchParams(currentSearch);
-  if (diagnostic.correction.destination === "bundle") {
-    // The bundle is edited in Paramètres › Définition, section by section.
-    search.set("agentSettings", diagnostic.correction.section ?? "general");
-    return { pathname, search: `?${search.toString()}`, hash: "#settings" };
+  // The prompt is a file of the bundle, opened in Explorer.
+  if (section === "prompt") {
+    return agentSettingsHref(pathname, "files", { file: primaryDisplayFile("agent").name });
   }
-  search.set("agentSettings", diagnostic.correction.section ?? "model");
-  return { pathname, search: `?${search.toString()}`, hash: "#settings" };
+  const named = section ? CORRECTION_SECTIONS[section] : undefined;
+  return agentSettingsHref(pathname, named ?? (destination === "bundle" ? "general" : "model"));
 }

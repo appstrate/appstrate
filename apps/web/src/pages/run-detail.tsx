@@ -226,6 +226,9 @@ export function RunDetailPage() {
   const enrichedRun = run;
   const date = run.started_at ? formatDateField(run.started_at) : "";
   const isInline = enrichedRun.package_ephemeral;
+  const canRerun = !isRunning && !isInline && !!agent && permissionsReady && can("agents:run");
+  // `?rerun=1` opens the form only where the Re-run button itself would.
+  const rerunOpen = rerun.value !== null && canRerun && !rerunRefusal;
   const hasInlineName = !!enrichedRun.agent_name?.trim();
   const inlineName = inlineRunDisplayName(enrichedRun.agent_name, t("runs.inlineBadge"));
 
@@ -284,7 +287,7 @@ export function RunDetailPage() {
               <UIBadge variant="secondary">{t("runs.inlineBadge")}</UIBadge>
             )}
             <RunHeaderActions
-              canRerun={!isRunning && !isInline && !!agent && permissionsReady && can("agents:run")}
+              canRerun={canRerun}
               rerunRefusal={rerunRefusal ? t(rerunRefusal) : null}
               // Hidden for remote-origin runs: the process runs on the caller's
               // host and the platform cannot signal it.
@@ -311,17 +314,20 @@ export function RunDetailPage() {
 
       {agent && canReadAgent && (
         <RunModal
-          open={rerun.value !== null}
+          open={rerunOpen}
           onClose={rerun.close}
           agent={agent}
           onSubmit={(input) => {
             // Re-run the SAME definition the original run executed, as far as
             // this caller may: `version_ref` is "draft" or a concrete semver,
             // and only an author replays a draft (see `replayVersion`).
-            launcher.launch(
-              { input, version: replayVersion(run.version_ref, agent.home_writable) },
-              rerun.close,
-            );
+            // The form leaves the history entry before the launch leaves the
+            // page: Back from the new run lands on this one, not on the form.
+            rerun.close();
+            launcher.launch({
+              input,
+              version: replayVersion(run.version_ref, agent.home_writable),
+            });
           }}
           isPending={launcher.isPending}
           initialInput={(run.input as Record<string, unknown>) ?? undefined}

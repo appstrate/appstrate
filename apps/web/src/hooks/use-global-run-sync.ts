@@ -8,6 +8,7 @@ import { usePermissions } from "./use-permissions";
 import { useCanReach } from "./use-can-reach";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateNotificationQueries } from "./use-notifications";
+import { agentRunActivityKey } from "./use-paginated-runs";
 import { parseSseFrames } from "@appstrate/core/sse";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { SESSIONS_QUERY_KEY as CHAT_SESSIONS_QUERY_KEY } from "@appstrate/module-chat/unread";
@@ -154,8 +155,7 @@ interface BroadInvalidator {
 
 /**
  * Exported for its test. The budget this buys: under sustained traffic at most
- * 4 broad invalidations per `delayMs` per open tab — one per `broadRunKeys`
- * entry — against zero under the debounce it replaced, which never flushed.
+ * one invalidation per `broadRunKeys` entry per `delayMs` per open tab.
  */
 export function createBroadInvalidator(
   getQueryClient: () => QueryClient,
@@ -227,6 +227,8 @@ export function broadRunKeys(orgId: string): readonly (readonly unknown[])[] {
     packageKeys.familyInOrg("agents", orgId),
     // The chat context sidebar reads this typed collection, not paginated-runs.
     ["get", "/api/runs"],
+    // The agent overview's 30-day counts.
+    [...agentRunActivityKey, orgId],
   ];
 }
 

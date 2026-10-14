@@ -24,7 +24,7 @@ import { useProxyColumns } from "../../pages/org-settings/proxies.tsx";
 import {
   useConnectionColumns,
   useIntegrationClientColumns,
-} from "../../pages/integration-columns.tsx";
+} from "../integration-detail/integration-columns.tsx";
 import { useMemberColumns } from "../../pages/org-settings/member-columns.tsx";
 import { useRoleColumns } from "../../pages/org-settings/role-columns.tsx";
 import { useSpaceMemberColumns } from "../../pages/org-settings/space/space-member-columns.tsx";
@@ -46,7 +46,11 @@ import { useWebhookColumns } from "../../modules/webhooks/components/webhook-col
 import { useDocumentColumns } from "../document-columns.tsx";
 import { useIntegrationListColumns } from "../../pages/integration-list-columns.tsx";
 import { useApiKeyColumns } from "../../pages/api-key-columns.tsx";
-import { render } from "./run-fixture.tsx";
+import i18n, { i18nReady } from "../../i18n.ts";
+import { render } from "../../test/render.tsx";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
 
 /**
  * Tailwind's `@xl` and `@4xl`, the two container widths `DataTable` reads —
@@ -117,16 +121,15 @@ const SETS = {
         // The space the app stands in carries an "ici" pill beside its name:
         // the widest head this column set can draw.
         currentSpaceId: "spc_a",
-        type: "agent",
         placementOf: () => undefined,
+        gateOf: () => ({ allowed: true, refusal: null }),
         busy: false,
         onSetActive: () => {},
       }),
       useCatalogueActionsColumn({
         isPending: false,
-        writableOf: () => true,
-        shareableOf: () => true,
-        sharedSpacesOf: () => [],
+        deedsOf: () => ({ moveHome: true, share: true, revokeFrom: [] }),
+        spaceNameOf: (id) => id,
         onOpen: () => {},
         onMoveHome: () => {},
         onShare: () => {},

@@ -14,7 +14,9 @@ import { AgentRunButton } from "./agent-run-button";
 import { Ban, CalendarClock, Play, SearchX } from "lucide-react";
 import { EmptyState, EmptyStateAction } from "../page-states";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
-import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
+import { runStatusValues } from "@appstrate/core/run-status";
+import { readList, useLocalListParams } from "../../lib/list-params";
+import { useRunStatusFilter } from "../../hooks/use-run-status-filter";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
 
@@ -27,55 +29,39 @@ export function AgentRunsTab({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const location = useLocation();
-  const requestedStatus = new URLSearchParams(location.search).get("agentRunStatus");
-  const [search, setSearch] = useState("");
-  const [statuses, setStatuses] = useState<RunStatus[]>(() =>
-    (requestedStatus?.split(",") ?? []).filter((value): value is RunStatus =>
-      runStatusValues.includes(value as RunStatus),
-    ),
-  );
-  const filters: FilterSpec[] = [
-    {
-      id: "status",
-      label: t("runs.filterStatus"),
-      values: statuses,
-      options: runStatusValues.map((value) => ({
-        value,
-        label: t(`status.${value}`, { ns: "common" }),
-      })),
-      onChange: (values) => setStatuses(values as RunStatus[]),
-    },
-  ];
+  // The overview's counters open this tab already filtered (`?agentRunStatus=`).
+  const list = useLocalListParams({
+    status: readList(new URLSearchParams(location.search).get("agentRunStatus"), runStatusValues),
+  });
+  const { statuses, filter: statusFilter } = useRunStatusFilter(list);
 
   return (
     <RunList
       packageId={packageId}
       pageSize={12}
       status={statuses}
-      search={search}
+      search={list.search}
       hideAgentName
       tableSurface="integrated"
       toolbar={() => (
         <ListToolbar
           placement="panel"
           search={{
-            value: search,
-            onChange: setSearch,
+            value: list.search,
+            onChange: list.setSearch,
             placeholder: t("detail.runsSearch"),
           }}
-          filters={filters}
-          onReset={() => {
-            setSearch("");
-            setStatuses([]);
-          }}
+          filters={[statusFilter]}
+          onReset={list.reset}
         />
       )}
       emptyState={
-        search || statuses.length > 0 ? (
+        list.search || statuses.length > 0 ? (
           <EmptyState message={t("runs.emptyFiltered")} icon={SearchX} compact />
         ) : (
           <EmptyState message={t("detail.emptyRuns")} icon={Play} compact>
-            <AgentRunButton packageId={packageId} versionLabel={versionLabel} />
+            {/* The header's launch control answers `?run`: this one only triggers it. */}
+            <AgentRunButton packageId={packageId} versionLabel={versionLabel} inputDialog={false} />
           </EmptyState>
         )
       }

@@ -8,10 +8,11 @@
  * `ProviderRow`s (`lib/model-providers.ts`): a key or the instance, and the models it makes
  * usable. One State column says what is worth saying (`rowStates`), nothing when all is well.
  * Everything a row can do is in its « … » menu; a click on an organization key's row chooses
- * its models.
+ * its models. Another person's key names its holder under its own name.
  */
 
 import { useTranslation } from "react-i18next";
+import { useStore } from "zustand";
 import {
   CheckCircle2,
   FlaskConical,
@@ -29,12 +30,12 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
-import type { OrgModelInfo } from "../../hooks/use-models";
+import { useTestModel, type OrgModelInfo } from "../../hooks/use-models";
 import type {
   ModelProviderCredentialInfo,
   ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials";
-import type { TestResult } from "../../hooks/use-connection-test";
+import { useConnectionTest, type TestResult } from "../../hooks/use-connection-test";
 import type { DataColumn } from "../../components/data-table";
 import { getProviderIcon } from "../../components/icons";
 import { resolveProviderEntry } from "../../lib/provider-registry-helpers";
@@ -44,6 +45,8 @@ import { TableRowActions } from "../../components/table-row-actions";
 import { InlineEditableLabel } from "../../components/inline-editable-label";
 import { ModelsCell } from "../../components/provider-models-cell";
 import { RowStateCell } from "../../components/row-state-cell";
+import { ModelTestResult } from "../../components/model-form/model-test-result";
+import { authStore } from "../../stores/auth-store";
 
 /** What the caller may do with a credential row: the server's verdict (`allowed_actions`). */
 function allowed(
@@ -104,6 +107,9 @@ export function useProviderColumns({
   const { t } = useTranslation(["settings", "common"]);
   const typeText = useTypeText();
   const entries = registry ?? [];
+  const userId = useStore(authStore, (s) => s.user?.id);
+  // The instance's models are tested one by one, from its row's menu.
+  const modelTest = useConnectionTest(useTestModel());
 
   const columns: DataColumn<ProviderRow>[] = [
     {
@@ -153,6 +159,14 @@ export function useProviderColumns({
                   {typeText(row.kind)}
                 </span>
               )}
+              {pk?.owner_type === "user" && pk.owner_id !== userId && pk.owner_name && (
+                <span
+                  className="text-muted-foreground block truncate text-xs"
+                  title={pk.owner_name}
+                >
+                  {pk.owner_name}
+                </span>
+              )}
               {pk?.oauth_email && (
                 <span
                   className="text-muted-foreground block truncate text-xs"
@@ -170,6 +184,16 @@ export function useProviderColumns({
                   />
                 </div>
               )}
+              {row.kind === "system" &&
+                row.models.map((m) => {
+                  const modelResult = modelTest.testResults[m.id];
+                  return modelResult ? (
+                    <div key={m.id} className="relative z-10 flex min-w-0 items-baseline gap-1.5">
+                      <span className="text-muted-foreground shrink-0 text-xs">{m.label}</span>
+                      <ModelTestResult result={modelResult} />
+                    </div>
+                  ) : null;
+                })}
             </div>
           </div>
         );
@@ -226,31 +250,55 @@ export function useProviderColumns({
         const isTesting = testingIds.has(row.id);
         if (row.kind === "system") {
           const choices = row.models.filter((m) => !m.is_default);
-          if (!canWriteModels || choices.length === 0) return null;
+          // An alias has no test: its result would describe the backing it hides.
+          const testable = row.models.filter((m) => !m.aliased);
+          if (!canWriteModels || (choices.length === 0 && testable.length === 0)) return null;
           return (
             <TableRowActions
               menuLabel={t("providers.moreActions", { name: t("providers.type.system") })}
+              isPending={testable.some((m) => modelTest.testingIds.has(m.id))}
               pendingLabel={t("common:loading")}
             >
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <CheckCircle2 />
-                  {t("providers.chooseDefault")}
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  {choices.map((m) => (
-                    <DropdownMenuItem
-                      key={m.id}
-                      onSelect={() => onSetDefault?.(m)}
-                      // The server refuses a default it cannot run: a dead credential.
-                      disabled={m.needs_reconnection}
-                      data-testid={`set-default-model-${m.id}`}
-                    >
-                      {m.label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
+              {choices.length > 0 && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <CheckCircle2 />
+                    {t("providers.chooseDefault")}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {choices.map((m) => (
+                      <DropdownMenuItem
+                        key={m.id}
+                        onSelect={() => onSetDefault?.(m)}
+                        // The server refuses a default it cannot run: a dead credential.
+                        disabled={m.needs_reconnection}
+                        data-testid={`set-default-model-${m.id}`}
+                      >
+                        {m.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              )}
+              {testable.length > 0 && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <FlaskConical />
+                    {t("models.test")}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {testable.map((m) => (
+                      <DropdownMenuItem
+                        key={m.id}
+                        onSelect={() => void modelTest.handleTest(m.id)}
+                        disabled={modelTest.testingIds.has(m.id)}
+                      >
+                        {m.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              )}
             </TableRowActions>
           );
         }

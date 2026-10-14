@@ -150,6 +150,21 @@ export function fileRunHref(file: FileLike): string | undefined {
   return `/agents/${file.packageId}/runs/${encodeURIComponent(file.runId)}`;
 }
 
+/**
+ * Addressable preview URL for a table row. Existing filters, unrelated query
+ * keys and the hash survive, so opening a file is one reversible location
+ * change rather than local UI state.
+ */
+export function filePreviewHref(
+  location: { pathname: string; search: string; hash: string },
+  id: string,
+): string {
+  const params = new URLSearchParams(location.search);
+  params.set("preview", id);
+  const search = params.toString();
+  return `${location.pathname}${search ? `?${search}` : ""}${location.hash}`;
+}
+
 /** Files inside this window (or already past) get the amber "expiring" state. */
 const FILE_EXPIRY_WARNING_MS = 7 * 24 * 60 * 60 * 1000;
 

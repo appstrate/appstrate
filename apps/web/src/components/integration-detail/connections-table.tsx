@@ -13,7 +13,7 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { useAuth } from "../../hooks/use-auth";
 import { authMethodLabel } from "../../lib/integration-presentation";
 import { connectionOptionLabel } from "../../lib/connection-set";
-import { useConnectionColumns } from "../../pages/integration-columns";
+import { useConnectionColumns } from "./integration-columns";
 import type {
   IntegrationAuthStatus,
   IntegrationConnection,
@@ -149,6 +149,7 @@ export function ConnectionsTable({
         }
       />
       <DataTable
+        tableId="integration-connections"
         surface="integrated"
         label={t("integration.connection.tableLabel")}
         columns={columns}

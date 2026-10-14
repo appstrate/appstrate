@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import type { paths } from "../api/schema";
 import {
   withDeclaredConnections,
   withFallbackConnections,
@@ -60,4 +61,97 @@ export function savedScheduleOverrides(state: ScheduleOverridesState): RunOverri
     ),
     state.declared,
   );
+}
+
+export type ScheduleCreateBody =
+  paths["/api/agents/{scope}/{name}/schedules"]["post"]["requestBody"]["content"]["application/json"];
+export type ScheduleUpdateBody =
+  paths["/api/schedules/{id}"]["patch"]["requestBody"]["content"]["application/json"];
+
+/**
+ * The body of a schedule create. Every override is omitted when empty, never `null`; no actor is
+ * the caller.
+ */
+export function scheduleCreatePayload(
+  args: ScheduleOverridesState & {
+    name: string;
+    cron_expression: string;
+    timezone: string;
+    /** What this schedule itself decides, beside the agent's own values. */
+    input: Record<string, unknown>;
+    versionOverride: string | undefined;
+    actor: ActorValue | undefined;
+  },
+): ScheduleCreateBody {
+  const overrides = savedScheduleOverrides(args);
+  const name = args.name.trim();
+  return {
+    ...(name ? { name } : {}),
+    cron_expression: args.cron_expression,
+    timezone: args.timezone,
+    input: args.input,
+    ...(overrides.model_id_override ? { model_id_override: overrides.model_id_override } : {}),
+    ...(overrides.generation_config_override
+      ? { generation_config_override: overrides.generation_config_override }
+      : {}),
+    ...(overrides.proxy_id_override ? { proxy_id_override: overrides.proxy_id_override } : {}),
+    ...(args.versionOverride ? { version_override: args.versionOverride } : {}),
+    ...(overrides.connection_overrides
+      ? { connection_overrides: overrides.connection_overrides }
+      : {}),
+    ...(args.actor ? { actor: args.actor } : {}),
+  };
+}
+
+/**
+ * A PATCH that moves who the fires run as or which version they run. Its connections are those
+ * of the NEXT state, so the caller passes that state's `declared` and verdict: the stored picks
+ * (dropped by an actor change: they named the previous identity's connections) kept to what the
+ * next version declares, plus, when the next actor is the viewer, the set their fallback binds.
+ * `connection_overrides` is always sent, `null` when empty: an absent key on an actor change
+ * would let the server reset the picks and refuse the write anyway. `version_override` is sent
+ * only when it moves, `null` back to inherit.
+ */
+export function scheduleMovePayload(
+  args: Omit<ScheduleOverridesState, "overrides"> & {
+    stored: {
+      actor: ActorValue;
+      versionOverride: string | null;
+      picks: Record<string, string[]> | null;
+    };
+    next: { actor?: ActorValue; versionOverride?: string | null };
+  },
+): ScheduleUpdateBody {
+  const { stored, next } = args;
+  const actorMoves = next.actor !== undefined && !sameActor(next.actor, stored.actor);
+  const versionMoves =
+    next.versionOverride !== undefined && next.versionOverride !== stored.versionOverride;
+  const picks = actorMoves ? undefined : (stored.picks ?? undefined);
+  const { connection_overrides } = savedScheduleOverrides({
+    ...args,
+    overrides: picks ? { connection_overrides: picks } : {},
+  });
+  return {
+    ...(actorMoves ? { actor: next.actor } : {}),
+    ...(versionMoves ? { version_override: next.versionOverride } : {}),
+    connection_overrides: connection_overrides ?? null,
+  };
+}
+
+/**
+ * Any other PATCH of a schedule. The server takes no fallback for an armed schedule: a write that
+ * names no connections and moves no actor is re-checked against the stored set, so it re-sends
+ * `named` — the stored picks plus the set the viewer's fallback binds, for a schedule running as
+ * them ({@link savedScheduleOverrides}).
+ */
+export function armedScheduleWrite<T extends ScheduleUpdateBody>(
+  variables: T,
+  schedule: { enabled: boolean; named: Record<string, string[]> | undefined },
+): T & Pick<ScheduleUpdateBody, "connection_overrides"> {
+  return schedule.enabled &&
+    schedule.named &&
+    !("connection_overrides" in variables) &&
+    !("actor" in variables)
+    ? { ...variables, connection_overrides: schedule.named }
+    : variables;
 }

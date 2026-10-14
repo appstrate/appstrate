@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import i18n from "../i18n";
 import { schemaHasFileFields } from "@appstrate/core/form";
-import { client, type paths } from "../api/client";
+import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
@@ -15,16 +15,9 @@ import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { scheduleKeys } from "../lib/query-keys";
+import type { ScheduleCreateBody, ScheduleUpdateBody } from "../lib/schedule-payload";
 import type { AgentDetail, EnrichedSchedule } from "@appstrate/shared-types";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
-
-// `useScheduleRuns` used to live here: the schedule CARD fetched a schedule's
-// runs purely to count active/unread/last-number, once per card. Those three
-// counters now ride on the schedule itself (`EnrichedSchedule.running_runs` /
-// `unread_count` / `last_run_number`), and the only remaining consumer of the
-// endpoint is `<RunList scheduleId>` on the schedule-detail page, which fetches
-// it through `usePaginatedRuns`. The `scheduleKeys.runs` cache key is still
-// invalidated by `use-global-run-sync` for that list.
 
 // Every schedules read requires `schedules:read`, which some space roles
 // (`runner`, and any custom role without it) do not hold. Gating here rather
@@ -104,16 +97,11 @@ export function warnSchedulesDisabled(qc: ReturnType<typeof useQueryClient>, cou
   invalidateSchedules(qc);
 }
 
-type CreateScheduleBody =
-  paths["/api/agents/{scope}/{name}/schedules"]["post"]["requestBody"]["content"]["application/json"];
-type UpdateScheduleBody =
-  paths["/api/schedules/{id}"]["patch"]["requestBody"]["content"]["application/json"];
-
 export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async (body: CreateScheduleBody) => {
+    mutationFn: async (body: ScheduleCreateBody) => {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
         params: { path: { scope, name } },
@@ -134,7 +122,7 @@ export function useUpdateSchedule() {
   const qc = useQueryClient();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async ({ id, ...body }: UpdateScheduleBody & { id: string }) => {
+    mutationFn: async ({ id, ...body }: ScheduleUpdateBody & { id: string }) => {
       const { data: updated } = await client.PATCH("/api/schedules/{id}", {
         params: { path: { id } },
         body,

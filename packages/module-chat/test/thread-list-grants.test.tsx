@@ -21,7 +21,7 @@ const getHeaders = () => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });
 
 // The list is the shell's navigation, mounted outside `ChatPage`: `t` and `can`
 // arrive as props, and it renders into the host's sidebar.
-function render(granted: string[]): string {
+function render(granted: string[], hasMore = false): string {
   const qc = new QueryClient();
   qc.setQueryData<SessionsCache>(sessionsQueryKey("spc_a"), {
     pages: [
@@ -30,7 +30,7 @@ function render(granted: string[]): string {
           { id: "chs_1", title: "Budget", unread: false, generating: false, updatedAt: "" },
           { id: "chs_2", title: null, unread: false, generating: false, updatedAt: "" },
         ],
-        hasMore: false,
+        hasMore,
       },
     ],
     pageParams: [null],
@@ -64,5 +64,13 @@ describe("the conversation list", () => {
     expect(html).toContain("Budget");
     expect(html).not.toContain("<span>threads.new</span>");
     expect(html).not.toContain('aria-label="threads.actions.delete"');
+  });
+
+  it("loads more with a plain button, which leaves the phone's drawer open", () => {
+    // A menu row closes the drawer on click (packages/ui `SidebarMenuButton`).
+    const html = render(["chat:read"], true);
+    const showMore = html.match(/<button[^>]*>threads\.showMore<\/button>/)?.[0];
+    expect(showMore).toBeDefined();
+    expect(showMore).not.toContain('data-sidebar="menu-button"');
   });
 });

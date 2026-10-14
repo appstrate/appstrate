@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from "zustand";
+import { persistedValue } from "./local-storage";
 
 export type ListView = "cards" | "table";
 
@@ -20,21 +21,21 @@ interface ListViewState {
  * servers are the same catalogue rendered three times, and someone who wants
  * the table for one wants it for the others.
  */
-function createListViewStore(storageKey: string, defaultView: ListView = "cards") {
-  const stored = localStorage.getItem(storageKey);
+function createListViewStore(storageKey: string) {
+  const stored = persistedValue(storageKey, (raw): ListView => (raw === "cards" ? raw : "table"));
   return create<ListViewState>()((set) => ({
-    view: stored === "cards" || stored === "table" ? stored : defaultView,
+    view: stored.read(),
     setView: (view) => {
-      localStorage.setItem(storageKey, view);
+      stored.write(view);
       set({ view });
     },
   }));
 }
 
-export const usePackageViewStore = createListViewStore("appstrate-package-view", "table");
-export const useIntegrationViewStore = createListViewStore("appstrate-integration-view", "table");
+export const usePackageViewStore = createListViewStore("appstrate-package-view");
+export const useIntegrationViewStore = createListViewStore("appstrate-integration-view");
 // Operational collections are separate reading tasks. They persist in the
 // same way, but changing Documents must not unexpectedly redraw Runs.
-export const useDocumentViewStore = createListViewStore("appstrate-document-view", "table");
-export const useRunViewStore = createListViewStore("appstrate-run-view", "table");
-export const useScheduleViewStore = createListViewStore("appstrate-schedule-view", "table");
+export const useDocumentViewStore = createListViewStore("appstrate-document-view");
+export const useRunViewStore = createListViewStore("appstrate-run-view");
+export const useScheduleViewStore = createListViewStore("appstrate-schedule-view");

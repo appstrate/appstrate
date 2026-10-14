@@ -15,7 +15,7 @@ export function AgentRunButton({
 }: {
   packageId: string;
   versionLabel: string | undefined;
-} & Pick<ComponentProps<typeof RunAgentButton>, "variant" | "size" | "className">) {
+} & Pick<ComponentProps<typeof RunAgentButton>, "variant" | "size" | "className" | "inputDialog">) {
   const { t } = useTranslation("agents");
   const { data: detail } = usePackageDetail("agent", packageId);
   const blocker = useAgentRunBlocker(packageId, detail);

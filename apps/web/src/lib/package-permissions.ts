@@ -37,18 +37,6 @@ export function maySetPackageActive(
   return space.permissions.includes(spacePackagePermission(type, next ? "activate" : "deactivate"));
 }
 
-/** The kinds the catalogue offers, in its rail's order. */
-const CATALOGUE_KINDS: PackageType[] = ["agent", "skill", "mcp-server", "integration"];
-
-/**
- * Which kinds of package the catalogue offers this caller in THIS space: the ones they may
- * activate there ({@link maySetPackageActive}, the owner of a personal space included). The
- * navigation entry, the route and the panel's rail all ask this.
- */
-export function catalogueKinds(space: SpaceGrant | undefined): PackageType[] {
-  return CATALOGUE_KINDS.filter((type) => maySetPackageActive(space, type, true));
-}
-
 /**
  * May this caller change how THIS space runs a placed package — the PATCH's
  * `configure` gate (for a skill, `skills:write` in the space)?

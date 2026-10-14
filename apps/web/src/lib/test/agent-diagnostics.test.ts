@@ -21,26 +21,50 @@ function diagnostic(overrides: Partial<AgentDiagnostic> = {}): AgentDiagnostic {
 }
 
 describe("agent diagnostics routing", () => {
-  it("uses the backend correction destination and section", () => {
-    expect(agentDiagnosticCorrectionTarget(diagnostic(), "/agents/@acme/demo", "")).toEqual({
-      pathname: "/agents/@acme/demo",
-      search: "?agentSettings=inputs",
-      hash: "#settings",
-    });
+  const AGENT = "/agents/@acme/demo";
+  const target = (correction: AgentDiagnostic["correction"], code = "invalid_config") =>
+    agentDiagnosticCorrectionTarget(diagnostic({ code, correction }), AGENT);
 
+  it("opens the Paramètres section the backend names, carrying nothing else", () => {
+    expect(target({ destination: "configuration", section: "inputs", params: {} })).toBe(
+      `${AGENT}?agentSettings=inputs#settings`,
+    );
+    expect(target({ destination: "bundle", section: "skills", params: {} })).toBe(
+      `${AGENT}?agentSettings=skills#settings`,
+    );
+    expect(target({ destination: "configuration", section: "connections", params: {} })).toBe(
+      `${AGENT}?agentSettings=connections#settings`,
+    );
+  });
+
+  it("opens the prompt file in Explorer for an empty prompt", () => {
+    expect(target({ destination: "bundle", section: "prompt", params: {} }, "empty_prompt")).toBe(
+      `${AGENT}?agentSettings=files&file=prompt.md#settings`,
+    );
+  });
+
+  it("opens the schedule itself, or the agent's schedules", () => {
     expect(
-      agentDiagnosticCorrectionTarget(
-        diagnostic({
-          correction: { destination: "bundle", section: "skills", params: {} },
-        }),
-        "/agents/@acme/demo",
-        "",
-      ),
-    ).toEqual({
-      pathname: "/agents/@acme/demo",
-      search: "?agentSettings=skills",
-      hash: "#settings",
-    });
+      target({ destination: "schedule", section: "version", params: { scheduleId: "sched_1" } }),
+    ).toBe("/schedules/sched_1");
+    expect(target({ destination: "schedule", section: "version", params: {} })).toBe(
+      `${AGENT}?agentSettings=schedules#settings`,
+    );
+  });
+
+  it("falls back to the destination's first section for a section it does not know", () => {
+    expect(target({ destination: "bundle", section: "brand_new", params: {} })).toBe(
+      `${AGENT}?agentSettings=general#settings`,
+    );
+    expect(target({ destination: "configuration", section: null, params: {} })).toBe(
+      `${AGENT}?agentSettings=model#settings`,
+    );
+  });
+
+  it("links nowhere for an agent switched off here: the page's band holds the switch", () => {
+    expect(
+      target({ destination: "configuration", section: "inputs", params: {} }, "agent_not_active"),
+    ).toBeNull();
   });
 });
 

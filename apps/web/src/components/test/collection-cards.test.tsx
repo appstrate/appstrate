@@ -7,7 +7,12 @@ import { RunCard } from "../run-card.tsx";
 import { ScheduleCard } from "../schedule-card.tsx";
 import { DocumentListPanel } from "../document-list-panel.tsx";
 import { ListFooter } from "../list-toolbar.tsx";
-import { makeRun, render } from "./run-fixture.tsx";
+import i18n, { i18nReady } from "../../i18n.ts";
+import { render } from "../../test/render.tsx";
+import { makeRun } from "./run-fixture.tsx";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
 
 function makeSchedule(overrides: Partial<EnrichedSchedule> = {}): EnrichedSchedule {
   return {

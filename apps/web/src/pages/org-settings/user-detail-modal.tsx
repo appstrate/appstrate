@@ -144,6 +144,7 @@ export function UserDetailModal({
           <section>
             <h3 className="mb-3 text-base font-semibold">{t("userDetail.spacesSection")}</h3>
             <DataTable
+              tableId="user-spaces"
               label={t("userDetail.spacesSection")}
               columns={columns}
               rows={memberships}

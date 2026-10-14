@@ -9,7 +9,6 @@
  * so the OIDC module is always loaded here.
  */
 
-import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, KeyRound } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -18,6 +17,7 @@ import { SettingsPageActions } from "@/components/settings/settings-page-actions
 import { PageActionsMenu } from "@/components/page-actions-menu";
 import { ErrorState, EmptyState, EmptyStateAction } from "@/components/page-states";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useModalParam, useModalTarget } from "@/hooks/use-modal-param";
 import { useOAuthClients } from "../hooks/use-oauth-clients";
 import { OAuthClientFormModal } from "./oauth-client-form-modal";
 import { useOAuthClientColumns } from "./oauth-client-columns";
@@ -30,33 +30,12 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { data, isLoading, error } = useOAuthClients(level);
   const { can } = usePermissions();
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  const selectedId = new URLSearchParams(location.search).get("oauth-client");
-  const selectedClient =
-    selectedId && selectedId !== "new"
-      ? (data?.find((client) => client.clientId === selectedId) ?? null)
-      : null;
-  const modalOpen = selectedId === "new" || selectedClient !== null;
-
-  const setSelectedClient = (clientId: string | null) => {
-    const params = new URLSearchParams(location.search);
-    if (clientId) params.set("oauth-client", clientId);
-    else params.delete("oauth-client");
-    const search = params.toString();
-    navigate(
-      {
-        pathname: location.pathname,
-        search: search ? `?${search}` : "",
-        hash: location.hash,
-      },
-      { replace: clientId === null },
-    );
-  };
+  const newClient = useModalParam("newOAuthClient");
+  const editClient = useModalTarget("oauth-client", data, (client) => client.clientId);
+  const selectedClient = editClient.target ?? null;
 
   const columns = useOAuthClientColumns({
-    onEdit: (client) => setSelectedClient(client.clientId),
+    onEdit: (client) => editClient.open(client.clientId),
   });
 
   return (
@@ -70,7 +49,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
         {can("oauth-clients:write") && (
           <SettingsPageActions>
             <PageActionsMenu>
-              <DropdownMenuItem data-page-action="create" onSelect={() => setSelectedClient("new")}>
+              <DropdownMenuItem data-page-action="create" onSelect={() => newClient.open()}>
                 <Plus />
                 {t("settings:oauthClients.createBtn")}
               </DropdownMenuItem>
@@ -81,11 +60,12 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
 
       <DataTable
         label={t("settings:oauthClients.tableLabel")}
+        tableId="oauth-clients"
         columns={columns}
         rows={data ?? []}
         rowKey={(client) => client.clientId}
         rowAction={
-          can("oauth-clients:write") ? (client) => setSelectedClient(client.clientId) : undefined
+          can("oauth-clients:write") ? (client) => editClient.open(client.clientId) : undefined
         }
         rowLabel={(client) =>
           t("settings:oauthClients.editClient", { name: client.name ?? client.clientId })
@@ -98,7 +78,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
             {can("oauth-clients:write") && (
               <EmptyStateAction
                 label={t("settings:oauthClients.createBtn")}
-                onClick={() => setSelectedClient("new")}
+                onClick={() => newClient.open()}
               />
             )}
           </EmptyState>
@@ -106,8 +86,8 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
       />
 
       <OAuthClientFormModal
-        open={modalOpen}
-        onClose={() => setSelectedClient(null)}
+        open={newClient.value !== null || selectedClient !== null}
+        onClose={selectedClient ? editClient.close : newClient.close}
         client={selectedClient}
         level={level}
       />

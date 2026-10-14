@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { usePaginatedRuns, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
+import { useDebouncedValue } from "../hooks/use-debounced-value";
 import { RunsTable, useRunColumns } from "./runs-table";
 import { RunCard } from "./run-card";
 import { CardGrid } from "./card-grid";
@@ -102,7 +103,10 @@ export function RunList({
   // toolbar renders inside here, so remounting would close its open menu on
   // every tick and make multi-select unusable. The page is derived from the
   // filter set instead: a new set reads as page zero straight away.
-  const signature = `${user ?? ""}|${kind ?? ""}|${status?.join(",") ?? ""}|${search ?? ""}`;
+  // The search asks once the typing pauses; clearing it asks at once.
+  const debouncedSearch = useDebouncedValue(search ?? "");
+  const querySearch = search ? debouncedSearch : "";
+  const signature = `${user ?? ""}|${kind ?? ""}|${status?.join(",") ?? ""}|${querySearch}`;
   const [paging, setPaging] = useState({ signature, page: 0 });
   const page = paging.signature === signature ? paging.page : 0;
   const setPage = (next: number) => setPaging({ signature, page: next });
@@ -113,7 +117,7 @@ export function RunList({
     user,
     kind,
     status,
-    search,
+    search: querySearch || undefined,
     limit: pageSize,
     offset: page * pageSize,
   });
@@ -128,6 +132,8 @@ export function RunList({
   const showLoading = isLoading && page === 0;
 
   // A refused or failed listing is not "no runs": the body says the refusal.
+  // Only when nothing was loaded: a failed background refetch keeps the rows.
+  const failed = isError && !data;
   const errorBody = <ErrorState error={error} compact />;
 
   return (
@@ -140,7 +146,7 @@ export function RunList({
           columns={columns}
           agentName={agentName}
           isLoading={showLoading}
-          isError={isError}
+          isError={failed}
           error={errorBody}
           empty={emptyState}
           banner={page === 0 ? firstPageBanner : undefined}
@@ -153,7 +159,7 @@ export function RunList({
           itemKey={(run) => run.id}
           renderCard={(run) => <RunCard run={run} agentName={agentName(run)} />}
           isLoading={showLoading}
-          isError={isError}
+          isError={failed}
           error={errorBody}
           empty={
             emptyState ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />

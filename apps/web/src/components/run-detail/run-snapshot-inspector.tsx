@@ -19,9 +19,11 @@ import { RunTurnsDetail } from "../run-execution-tab";
 import type { RunTurnRow } from "../log-utils";
 import { RunCostReadout } from "../run-cost-readout";
 import { Modal } from "../modal";
-import { useFiles } from "../../hooks/use-files";
+import { useFiles, type FileDto } from "../../hooks/use-files";
 import { usePermissions } from "../../hooks/use-permissions";
 import { DocumentListPanel } from "../document-list-panel";
+import { JsonView } from "../json-view";
+import { runFileDirection } from "../../lib/files";
 import { formatDateField } from "../../lib/format-date";
 import { runConnectionRows } from "../../lib/run-connections";
 import { runErrorText } from "../../lib/run-error";
@@ -58,24 +60,10 @@ export function RunSnapshotInspector({
 }) {
   const { t } = useTranslation("agents");
   const turnsParam = useModalParam("turns");
-  const inputDocumentsQuery = useFiles({
-    runId: run.id,
-    purpose: "user_upload",
-    limit: 100,
-  });
-  const inputDocuments = inputDocumentsQuery.data?.data ?? [];
-  // The caller may not list files (`files:read`), so none were fetched: the
-  // input still says files were passed, and the fact says why none are shown.
+  // The run's whole file container (the query the Results tab reads too): its
+  // inputs are what it consumed, uploads and files chained in from earlier runs.
+  const filesQuery = useFiles({ runId: run.id, limit: 100 });
   const filesDenied = !usePermissions().can("files:read");
-  const input = (run.input as Record<string, unknown> | null) ?? null;
-  const inputEntries = input ? Object.entries(input) : [];
-  const inputValueEntries = inputEntries.filter(([, value]) => !hasDocumentReference(value));
-  const inputDocumentEntries = inputEntries.filter(([, value]) => hasDocumentReference(value));
-  const inputFileCount = Math.max(run.file_counts.input, countDocumentReferences(input));
-  const inputDocumentLabel =
-    inputDocumentEntries.length === 1
-      ? humanizeInputKey(inputDocumentEntries[0]![0])
-      : t("run.snapshotInputFiles");
   const metadata = (run.metadata as Record<string, unknown> | null) ?? null;
   const usage = run.token_usage;
   // One fact per integration, listing every connection it bound, and one per
@@ -107,11 +95,10 @@ export function RunSnapshotInspector({
       <div data-run-snapshot>
         {problem && (
           <div className="mb-6">
-            <HealthCard title={t("run.overview.problem")} tone="blocking" cardHeaders badge={null}>
+            <HealthCard title={t("run.overview.problem")} tone="blocking" badge={null}>
               <ul className="px-4">
                 <HealthCardItem
                   title={runErrorText(run, t)}
-                  cardHeaders
                   actions={
                     <HealthAction onClick={() => onOpenJournal("errors")}>
                       {t("run.overview.problemJournal")}
@@ -124,7 +111,7 @@ export function RunSnapshotInspector({
         )}
         {cancelled && (
           <div className="mb-6">
-            <HealthCard title={t("run.overview.cancelled")} tone="neutral" cardHeaders badge={null}>
+            <HealthCard title={t("run.overview.cancelled")} tone="neutral" badge={null}>
               <ul className="px-4">
                 {/* The run keeps no name for who stopped it: the platform's reason and the time do. */}
                 <HealthCardItem
@@ -132,7 +119,6 @@ export function RunSnapshotInspector({
                   description={
                     run.completed_at ? formatDateField(run.completed_at, "datetime") : undefined
                   }
-                  cardHeaders
                   actions={null}
                 />
               </ul>
@@ -327,47 +313,14 @@ export function RunSnapshotInspector({
             </RunDetailCard>
 
             <RunDetailCard title={t("run.infoInput")} icon={FileInput} headerInside>
-              {inputValueEntries.length === 0 &&
-              inputFileCount === 0 &&
-              inputDocuments.length === 0 &&
-              !inputDocumentsQuery.isLoading &&
-              !inputDocumentsQuery.error ? (
-                <p className="text-muted-foreground text-sm">{t("run.snapshotNoInput")}</p>
-              ) : (
-                <SnapshotFacts>
-                  {inputValueEntries.map(([key, value]) => (
-                    <SnapshotFact
-                      key={key}
-                      label={humanizeInputKey(key)}
-                      value={formatSnapshotValue(value)}
-                    />
-                  ))}
-                  {(inputFileCount > 0 ||
-                    inputDocumentsQuery.isLoading ||
-                    Boolean(inputDocumentsQuery.error)) && (
-                    <SnapshotFact
-                      label={inputDocumentLabel}
-                      value={
-                        <div className="min-w-0">
-                          <DocumentListPanel
-                            documents={inputDocuments}
-                            isLoading={inputDocumentsQuery.isLoading}
-                            error={inputDocumentsQuery.error}
-                            empty={{
-                              message: filesDenied
-                                ? t("run.noAccess", { ns: "files" })
-                                : t("run.snapshotInputFilesUnavailable"),
-                              compact: true,
-                            }}
-                            showPurposeTabs={false}
-                            display="compact"
-                          />
-                        </div>
-                      }
-                    />
-                  )}
-                </SnapshotFacts>
-              )}
+              <RunInputFacts
+                run={run}
+                files={filesQuery.data?.data ?? []}
+                hasMore={filesQuery.data?.hasMore ?? false}
+                isLoading={filesQuery.isLoading}
+                error={filesQuery.error}
+                filesDenied={filesDenied}
+              />
             </RunDetailCard>
 
             {connections.length > 0 && (
@@ -416,7 +369,7 @@ export function RunSnapshotInspector({
               <RunDetailCard title={t("run.infoMetadata")} icon={Tags} headerInside>
                 <SnapshotFacts columns wide>
                   {Object.entries(metadata).map(([key, value]) => (
-                    <SnapshotFact key={key} label={key} value={formatSnapshotValue(value)} />
+                    <SnapshotFact key={key} label={key} value={snapshotValue(value)} />
                   ))}
                 </SnapshotFacts>
               </RunDetailCard>
@@ -450,6 +403,85 @@ export function RunSnapshotInspector({
         <RunTurnsDetail turns={turns} />
       </Modal>
     </>
+  );
+}
+
+/**
+ * The input the run was given: its values, then the files it consumed. Fed an
+ * already-resolved file list, so what it says without `files:read` or under a
+ * capped page is testable without a query harness.
+ */
+export function RunInputFacts({
+  run,
+  files,
+  hasMore,
+  isLoading,
+  error,
+  filesDenied,
+}: {
+  run: EnrichedRun;
+  /** The run's whole file container; its inputs are read off it here. */
+  files: FileDto[];
+  /** The 100-row page was capped: the container holds more rows. */
+  hasMore: boolean;
+  isLoading: boolean;
+  error: unknown;
+  /** The caller may not list files, so none were fetched. */
+  filesDenied: boolean;
+}) {
+  const { t } = useTranslation("agents");
+  const inputDocuments = files.filter((file) => runFileDirection(file, run.id) === "input");
+  const input = (run.input as Record<string, unknown> | null) ?? null;
+  const inputEntries = input ? Object.entries(input) : [];
+  const inputValueEntries = inputEntries.filter(([, value]) => !hasDocumentReference(value));
+  const inputDocumentEntries = inputEntries.filter(([, value]) => hasDocumentReference(value));
+  const inputFileCount = Math.max(run.file_counts.input, countDocumentReferences(input));
+  const inputDocumentLabel =
+    inputDocumentEntries.length === 1
+      ? humanizeInputKey(inputDocumentEntries[0]![0])
+      : t("run.snapshotInputFiles");
+  // `hasMore` describes the whole container: the inputs are cut only when
+  // fewer of them arrived than the run says it consumed.
+  const inputsCut = hasMore && inputDocuments.length < inputFileCount;
+  const showFiles = inputFileCount > 0 || inputDocuments.length > 0 || isLoading || Boolean(error);
+
+  if (inputValueEntries.length === 0 && !showFiles) {
+    return <p className="text-muted-foreground text-sm">{t("run.snapshotNoInput")}</p>;
+  }
+  return (
+    <SnapshotFacts>
+      {inputValueEntries.map(([key, value]) => (
+        <SnapshotFact key={key} label={humanizeInputKey(key)} value={snapshotValue(value)} />
+      ))}
+      {showFiles && (
+        <SnapshotFact
+          label={inputDocumentLabel}
+          value={
+            <div className="min-w-0">
+              <DocumentListPanel
+                documents={inputDocuments}
+                isLoading={isLoading}
+                error={error}
+                empty={{
+                  message: filesDenied
+                    ? t("run.noAccess", { ns: "files" })
+                    : t("run.snapshotInputFilesUnavailable"),
+                  compact: true,
+                }}
+                display="compact"
+                footer={
+                  inputsCut && (
+                    <p className="text-muted-foreground text-xs">
+                      {t("run.truncated", { ns: "files" })}
+                    </p>
+                  )
+                }
+              />
+            </div>
+          }
+        />
+      )}
+    </SnapshotFacts>
   );
 }
 
@@ -567,11 +599,11 @@ function countDocumentReferences(value: unknown): number {
   return references.size;
 }
 
-function formatSnapshotValue(value: unknown): string {
+/** A scalar as text; an array or an object as the payload itself, never a summary of it. */
+function snapshotValue(value: unknown): ReactNode {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
   if (value == null) return "—";
-  if (Array.isArray(value)) return String(value.length);
-  return JSON.stringify(value);
+  return <JsonView data={value} />;
 }

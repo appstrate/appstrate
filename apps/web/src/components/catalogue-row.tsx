@@ -3,9 +3,8 @@
 /**
  * The deeds that act on a catalogue package itself, drawn twice with ONE list
  * of items: behind a row's "…" in the matrix, and behind the "Actions" menu of
- * the package's sheet. Two copies of the list would be two places for a deed
- * to appear on one surface and not the other — which is how the sheet came to
- * offer none of them.
+ * the package's sheet, so no deed appears on one surface and not the other.
+ * Which deeds a reader gets is `catalogueDeeds` (`lib/catalogue-gates`).
  */
 import { useTranslation } from "react-i18next";
 import type { LucideIcon } from "lucide-react";
@@ -13,15 +12,12 @@ import { Eye, FolderInput, Share2, X } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { TableRowActions } from "./table-row-actions";
 import type { CardItem } from "../pages/package-list";
+import type { CatalogueDeeds } from "../lib/catalogue-gates";
 
 interface CatalogueMenuProps {
   item: CardItem;
-  /** `home_writable`: moving a package is the same authority as editing it. */
-  homeWritable: boolean;
-  /** `home_shareable`: a third verb on the home space, granted on its own. */
-  homeShareable: boolean;
-  /** Spaces the package reaches through a share, so each can be withdrawn. */
-  sharedSpaces: { id: string; name: string }[];
+  deeds: CatalogueDeeds;
+  spaceNameOf: (spaceId: string) => string;
   onMoveHome: (item: CardItem) => void;
   onShare: (item: CardItem) => void;
   onRevoke: (item: CardItem, spaceId: string) => void;
@@ -30,9 +26,8 @@ interface CatalogueMenuProps {
 /** The items, for whichever trigger holds them. */
 export function CatalogueMenuItems({
   item,
-  homeWritable,
-  homeShareable,
-  sharedSpaces,
+  deeds,
+  spaceNameOf,
   open,
   onMoveHome,
   onShare,
@@ -53,32 +48,32 @@ export function CatalogueMenuItems({
           on — a column in the matrix, "Actif ici" on the sheet. A menu item
           could only ever mean the space the app happens to be in. What remains
           are the deeds that act on the package itself. */}
-      {(homeWritable || homeShareable) && <DropdownMenuSeparator />}
-      {homeWritable && (
+      {(deeds.moveHome || deeds.share) && <DropdownMenuSeparator />}
+      {deeds.moveHome && (
         <DropdownMenuItem onSelect={() => onMoveHome(item)}>
           <FolderInput />
           {t("packages.moveHome")}
         </DropdownMenuItem>
       )}
-      {homeShareable && (
+      {deeds.share && (
         <DropdownMenuItem onSelect={() => onShare(item)}>
           <Share2 />
           {t("packages.share")}
         </DropdownMenuItem>
       )}
-      {homeShareable && sharedSpaces.length > 0 && (
+      {deeds.revokeFrom.length > 0 && (
         <>
           <DropdownMenuSeparator />
           {/* Withdrawing an offer removes the package from that space, with the
-              activation it backs: the placement WAS the offer. */}
-          {sharedSpaces.map((space) => (
+              activation it backs: the placement IS the offer. */}
+          {deeds.revokeFrom.map((spaceId) => (
             <DropdownMenuItem
-              key={space.id}
+              key={spaceId}
               className="text-destructive focus:text-destructive"
-              onSelect={() => onRevoke(item, space.id)}
+              onSelect={() => onRevoke(item, spaceId)}
             >
               <X />
-              {t("catalogue.revokeFrom", { space: space.name })}
+              {t("catalogue.revokeFrom", { space: spaceNameOf(spaceId) })}
             </DropdownMenuItem>
           ))}
         </>

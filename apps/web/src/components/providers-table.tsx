@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The providers table, one for the organization (Settings › Models) and one for a person
- * (Preferences › Mes clés). It owns what a row's menu needs to run (the connection test,
+ * The providers table: the organization's keys and the personal keys connected (Settings ›
+ * Models), and a person's own (Preferences › Mes clés). It owns what a row's menu needs to run (the connection test,
  * the name being edited); the page owns what the deeds do.
  */
 
 import { useState, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
 import { KeyRound } from "lucide-react";
 import { DataTable } from "./data-table";
 import { EmptyState, ErrorState } from "./page-states";
@@ -22,6 +21,8 @@ import { useProviderColumns } from "../pages/org-settings/provider-columns";
 import type { ProviderRow } from "../lib/model-providers";
 
 export function ProvidersTable({
+  label,
+  tableId,
   rows,
   isLoading,
   error,
@@ -35,6 +36,10 @@ export function ProvidersTable({
   onDelete,
   onSetDefault,
 }: {
+  /** What the table holds, for its accessible name: the org's keys, the members', the caller's. */
+  label: string;
+  /** Each caller's table has its own column set, so each keeps its own widths. */
+  tableId: string;
   rows: ProviderRow[];
   isLoading: boolean;
   error: unknown;
@@ -51,7 +56,6 @@ export function ProvidersTable({
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onSetDefault?: (m: OrgModelInfo) => void;
 }) {
-  const { t } = useTranslation("settings");
   const { testingIds, testResults, handleTest } = useConnectionTest(
     useTestModelProviderCredential(),
   );
@@ -78,7 +82,8 @@ export function ProvidersTable({
 
   return (
     <DataTable
-      label={t("providers.tableLabel")}
+      label={label}
+      tableId={tableId}
       columns={columns}
       rows={rows}
       rowKey={(row) => row.id}

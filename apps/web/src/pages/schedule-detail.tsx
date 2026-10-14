@@ -13,7 +13,8 @@ import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/ag
 import { DetailSectionCard } from "../components/detail-section-card";
 import { FactGrid } from "../components/package-manifest/manifest-fact";
 import { ListToolbar } from "../components/list-toolbar";
-import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
+import { useLocalListParams } from "../lib/list-params";
+import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { PageActionsMenu } from "../components/page-actions-menu";
@@ -303,8 +304,9 @@ function ScheduleHistory({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const [search, setSearch] = useState("");
-  const [statuses, setStatuses] = useState<RunStatus[]>([]);
+  const list = useLocalListParams();
+  const { search } = list;
+  const { statuses, filter: statusFilter } = useRunStatusFilter(list);
   const { data: agents } = useAgents();
   const agentName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
@@ -362,23 +364,9 @@ function ScheduleHistory({
         <ListToolbar
           placement="panel"
           columns={columns}
-          search={{ value: search, onChange: setSearch, placeholder: t("detail.runsSearch") }}
-          filters={[
-            {
-              id: "status",
-              label: t("runs.filterStatus"),
-              values: statuses,
-              options: runStatusValues.map((value) => ({
-                value,
-                label: t(`status.${value}`, { ns: "common" }),
-              })),
-              onChange: (values) => setStatuses(values as RunStatus[]),
-            },
-          ]}
-          onReset={() => {
-            setSearch("");
-            setStatuses([]);
-          }}
+          search={{ value: search, onChange: list.setSearch, placeholder: t("detail.runsSearch") }}
+          filters={[statusFilter]}
+          onReset={list.reset}
         />
       )}
       fixedAgentName={agentName}

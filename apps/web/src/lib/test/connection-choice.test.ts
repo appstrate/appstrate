@@ -5,9 +5,14 @@ import { ApiError } from "../../api/errors.ts";
 import {
   integrationIdOfField,
   isChoiceRequest,
+  pendingConnectionChoices,
+  picksAfterActorChange,
+  refusalForActor,
   refusalReasonKey,
+  refusedScheduleWrite,
   retryDecision,
   scheduleConnectionChoices,
+  withConnectionPickAs,
   type ConnectionChoice,
   type ConnectionRefusal,
   type MissingIntegrationFieldError,
@@ -74,6 +79,160 @@ describe("scheduleConnectionChoices", () => {
     expect(scheduleConnectionChoices(new Error("network"))).toEqual([]);
     expect(scheduleConnectionChoices(null)).toEqual([]);
     expect(scheduleConnectionChoices(missingConnection(undefined))).toEqual([]);
+  });
+});
+
+describe("pendingConnectionChoices", () => {
+  const choices: ConnectionChoice[] = [
+    { integrationId: "@acme/gmail", code: "must_choose_connection", candidates: [CANDIDATE] },
+    { integrationId: "@acme/notion", code: "override_connection_unavailable", candidates: [] },
+  ];
+  const submitted = { "@acme/notion": ["gone"] };
+  const ids = (current: Record<string, string[]>) =>
+    pendingConnectionChoices(choices, submitted, current).map((c) => c.integrationId);
+
+  it("keeps every choice while the picks are the ones the refused save sent", () => {
+    expect(ids({ "@acme/notion": ["gone"] })).toEqual(["@acme/gmail", "@acme/notion"]);
+  });
+
+  it("clears a choice as soon as its pick moves", () => {
+    expect(ids({ "@acme/gmail": ["c1"], "@acme/notion": ["gone"] })).toEqual(["@acme/notion"]);
+    expect(ids({})).toEqual(["@acme/gmail"]);
+  });
+
+  it("brings it back when the sent set is picked again, in any order", () => {
+    const sent = { "@acme/notion": ["a", "b"] };
+    const pending = (current: Record<string, string[]>) =>
+      pendingConnectionChoices(choices, sent, current).map((c) => c.integrationId);
+    expect(pending({ "@acme/notion": ["a"] })).toEqual(["@acme/gmail"]);
+    expect(pending({ "@acme/notion": ["b", "a"] })).toEqual(["@acme/gmail", "@acme/notion"]);
+  });
+
+  it("takes 'no connection' as an answer — `[]` is not the absent pick the save sent", () => {
+    expect(ids({ "@acme/gmail": [], "@acme/notion": ["gone"] })).toEqual(["@acme/notion"]);
+    expect(ids({ "@acme/gmail": ["c1"], "@acme/notion": [] })).toEqual([]);
+  });
+});
+
+const ALICE = { userId: "usr_alice" };
+const BOB = { userId: "usr_bob" };
+const ALICE_PICKS = { "@acme/gmail": ["c_alice"] };
+const BOB_PICKS = { "@acme/gmail": ["c_bob"] };
+
+describe("picksAfterActorChange", () => {
+  const stored = { actor: ALICE, picks: ALICE_PICKS };
+
+  it("keeps the picks while the identity does not change", () => {
+    expect(
+      picksAfterActorChange({ picks: BOB_PICKS, runsAs: ALICE, nextRunsAs: ALICE, stored }),
+    ).toBe(BOB_PICKS);
+  });
+
+  it("drops them on a real change: they named the previous identity's connections", () => {
+    expect(
+      picksAfterActorChange({ picks: ALICE_PICKS, runsAs: ALICE, nextRunsAs: BOB, stored }),
+    ).toBeUndefined();
+    expect(
+      picksAfterActorChange({ picks: ALICE_PICKS, runsAs: ALICE, nextRunsAs: BOB, stored: null }),
+    ).toBeUndefined();
+  });
+
+  it("restores the stored picks back on the schedule's own actor", () => {
+    expect(
+      picksAfterActorChange({ picks: undefined, runsAs: BOB, nextRunsAs: ALICE, stored }),
+    ).toBe(ALICE_PICKS);
+  });
+
+  it("restores nothing on create, where no picks are stored", () => {
+    expect(
+      picksAfterActorChange({ picks: BOB_PICKS, runsAs: BOB, nextRunsAs: ALICE, stored: null }),
+    ).toBeUndefined();
+  });
+});
+
+describe("withConnectionPickAs", () => {
+  const GMAIL = "@acme/gmail";
+  // The viewer's picker opened a connect popup; this is the set it writes once it settles.
+  const late = { pickedAs: ALICE, integrationId: GMAIL, connectionIds: ["c_alice", "c_new"] };
+
+  it("lands on the overrides as they stand: a model changed while the popup was open is kept", () => {
+    const now = { model_id_override: "m2", connection_overrides: { "@acme/slack": ["c_s"] } };
+    expect(withConnectionPickAs(now, { ...late, runsAs: ALICE })).toEqual({
+      model_id_override: "m2",
+      connection_overrides: { "@acme/slack": ["c_s"], [GMAIL]: ["c_alice", "c_new"] },
+    });
+  });
+
+  it("writes nothing once the schedule runs as someone else: the pick names the viewer's connections", () => {
+    // The actor change dropped the picks; the late write must not put the viewer's back.
+    const cleared = { model_id_override: "m2" };
+    expect(withConnectionPickAs(cleared, { ...late, runsAs: BOB })).toBe(cleared);
+    expect(withConnectionPickAs(cleared, { ...late, runsAs: undefined })).toBe(cleared);
+  });
+
+  it("clears a pick for the actor it was made for", () => {
+    const now = { connection_overrides: { [GMAIL]: ["c_bob"] } };
+    expect(
+      withConnectionPickAs(now, {
+        pickedAs: BOB,
+        runsAs: BOB,
+        integrationId: GMAIL,
+        connectionIds: null,
+      }),
+    ).toEqual({});
+  });
+});
+
+describe("refusalForActor", () => {
+  const choices: ConnectionChoice[] = [
+    { integrationId: "@acme/gmail", code: "must_choose_connection", candidates: [CANDIDATE] },
+  ];
+
+  it("speaks for the identity the refused save was sent for", () => {
+    expect(refusalForActor(choices, { runsAs: ALICE, picks: {} }, ALICE)).toBe(choices);
+  });
+
+  it("goes stale once the actor moves, and comes back with it", () => {
+    const submitted = { runsAs: ALICE, picks: {} };
+    expect(refusalForActor(choices, submitted, BOB)).toEqual([]);
+    expect(refusalForActor(choices, submitted, ALICE)).toBe(choices);
+  });
+
+  it("is empty before any save and without a refusal", () => {
+    expect(refusalForActor(choices, null, ALICE)).toEqual([]);
+    expect(refusalForActor(undefined, { runsAs: ALICE, picks: {} }, ALICE)).toEqual([]);
+  });
+});
+
+describe("refusedScheduleWrite", () => {
+  const outranked = missingConnection([
+    { field: "integrations.@acme/gmail", code: "override_outranked", message: "pinned" },
+  ]);
+  const stored = { actor: ALICE, picks: ALICE_PICKS };
+
+  it("answers a write of any field: a cron change is judged with the stored picks, as Alice", () => {
+    expect(refusedScheduleWrite(outranked, { cron_expression: "0 8 * * *" }, stored)).toEqual({
+      choices: [{ integrationId: "@acme/gmail", code: "override_outranked", candidates: [] }],
+      runsAs: ALICE,
+      picks: ALICE_PICKS,
+    });
+  });
+
+  it("is judged with the picks the write sent, for the actor it moved to", () => {
+    const sent = { actor: BOB, connection_overrides: null };
+    expect(refusedScheduleWrite(outranked, sent, stored)).toMatchObject({ runsAs: BOB, picks: {} });
+    const named = { connection_overrides: BOB_PICKS };
+    expect(refusedScheduleWrite(outranked, named, stored)?.picks).toBe(BOB_PICKS);
+  });
+
+  it("is null for any other outcome", () => {
+    const write = { cron_expression: "0 8 * * *" };
+    expect(refusedScheduleWrite(null, write, stored)).toBeNull();
+    expect(refusedScheduleWrite(new ApiError("forbidden", "no", 403), write, stored)).toBeNull();
+    const notConnected = missingConnection([
+      { field: "integrations.@acme/slack", code: "not_connected", message: "connect" },
+    ]);
+    expect(refusedScheduleWrite(notConnected, write, stored)).toBeNull();
   });
 });
 

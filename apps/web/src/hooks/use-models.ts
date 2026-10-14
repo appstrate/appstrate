@@ -12,7 +12,10 @@ import { packageSightPermissions } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { ModelFormSubmission, ModelFormSubmitOutcome } from "../lib/model-form-payload";
 import { submitModelForm } from "../lib/model-form-submit";
-import { useCreateModelProviderCredential } from "./use-model-provider-credentials";
+import {
+  invalidateCredentialTestQueries,
+  useCreateModelProviderCredential,
+} from "./use-model-provider-credentials";
 import { agentModelKeys, packageKeys } from "../lib/query-keys";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -53,18 +56,23 @@ export function useUpdateModel() {
   });
 }
 
-/** `errorHandledByCaller`: deleting a key's models reports its partial failures itself. */
 export function useDeleteModel() {
   const invalidate = useInvalidateModels();
-  return $api.useMutation("delete", "/api/models/{id}", {
-    meta: { errorHandledByCaller: true },
-    onSuccess: invalidate,
-  });
+  return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });
 }
 
 export function useSetDefaultModel() {
   const invalidate = useInvalidateModels();
   return $api.useMutation("put", "/api/models/default", { onSuccess: invalidate });
+}
+
+/** The test answers inline; it runs through the model's key, which it may rotate or flag dead. */
+export function useTestModel() {
+  const qc = useQueryClient();
+  return $api.useMutation("post", "/api/models/{id}/test", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: () => invalidateCredentialTestQueries(qc),
+  });
 }
 
 export interface OpenRouterModel {

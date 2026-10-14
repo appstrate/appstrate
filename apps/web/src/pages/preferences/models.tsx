@@ -34,7 +34,7 @@ import {
   ownPersonalCredentials,
   personalApiKeyBody,
 } from "../../lib/personal-model-credentials";
-import { providerRows, providersOpenToPersonalKeys } from "../../lib/model-providers";
+import { providerRows } from "../../lib/model-providers";
 import { authStore } from "../../stores/auth-store";
 import { EmptyStateAction } from "../../components/page-states";
 
@@ -138,6 +138,8 @@ export function PreferencesModelsPage() {
       </div>
 
       <ProvidersTable
+        label={t("preferences.tabModels")}
+        tableId="my-providers"
         rows={rows}
         showType
         isLoading={credentialsQuery.isLoading || modelsQuery.isLoading}
@@ -164,7 +166,6 @@ export function PreferencesModelsPage() {
         isPending={createCredential.isPending || updateCredential.isPending}
         onSubmit={submitForm}
         personal
-        onlyProviders={providersOpenToPersonalKeys(modelsQuery.data ?? [], registry ?? [])}
       />
 
       <ConfirmModal

@@ -13,7 +13,11 @@
 import { describe, it, expect } from "bun:test";
 import { ListFooter, ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
 import { toggleValue } from "../../lib/toggle-value.ts";
-import { render } from "./run-fixture.tsx";
+import i18n, { i18nReady } from "../../i18n.ts";
+import { render } from "../../test/render.tsx";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
 
 function filters(over: Partial<Record<"status" | "kind", string[]>> = {}): FilterSpec[] {
   return [

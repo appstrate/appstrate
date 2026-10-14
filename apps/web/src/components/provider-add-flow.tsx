@@ -11,7 +11,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CredentialFormModal, type CredentialFormData } from "./credential-form-modal";
 import { NewProviderModelsModal } from "./model-choice-dialog";
-import type { NewProviderCredential } from "../hooks/use-model-choice";
+import type { NewProviderCredential } from "../hooks/use-apply-model-choice";
 import {
   deduplicateLabel,
   type ModelProviderCredentialInfo,

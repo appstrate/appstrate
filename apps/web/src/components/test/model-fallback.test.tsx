@@ -35,7 +35,6 @@ describe("the run's « Modèle remplacé » card", () => {
         chosen="Mistral local"
         used="Claude Sonnet 5"
         settingsTo={{ pathname: AGENT_PATH, search: "?agentSettings=model", hash: "#settings" }}
-        cardHeaders
       />,
     );
     expect(html).toContain("Modèle remplacé");
@@ -46,7 +45,7 @@ describe("the run's « Modèle remplacé » card", () => {
 
   it("offers no link to a reader who cannot reach the agent's settings", () => {
     const html = render(
-      <ModelFallbackCard chosen="mdl_gone" used="Claude Sonnet 5" settingsTo={null} cardHeaders />,
+      <ModelFallbackCard chosen="mdl_gone" used="Claude Sonnet 5" settingsTo={null} />,
     );
     expect(html).toContain("Modèle choisi : mdl_gone");
     expect(html).not.toContain("<a ");

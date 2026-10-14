@@ -163,6 +163,8 @@ function providersTable(
 ): string {
   return render(
     <ProvidersTable
+      label={settingsFr["providers.tableLabel"]}
+      tableId="org-providers"
       rows={providerRows(models, credentials, SERVICES, "usr_me")}
       showType={over.showType}
       isLoading={false}

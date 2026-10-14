@@ -202,6 +202,7 @@ export function AgentIntegrationsBlock({
         }}
       />
       <DataTable
+        tableId="agent-connections"
         label={t("detail.connectionsTable.label")}
         columns={columns}
         columnMode="scroll"

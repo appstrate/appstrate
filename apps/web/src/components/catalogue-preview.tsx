@@ -70,7 +70,9 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { missingIntegrations } from "../lib/activation-closure";
 import { chatEnforceErrorKey } from "../lib/chat-enforce-errors";
 import { toastError } from "../lib/mutation-error";
-import type { CataloguePlacement } from "../lib/catalogue-placement";
+import { detailSpace, type CataloguePlacement } from "../lib/catalogue-placement";
+import { ACTIVATION_REFUSAL_KEY, type ActivationGate } from "../lib/catalogue-gates";
+import { CATALOGUE_TYPE_LABEL_KEY } from "../lib/catalogue-link";
 import {
   sheetChatEnforce,
   sheetOffers,
@@ -83,29 +85,6 @@ import { packageKeys } from "../lib/query-keys";
 import { ConfirmModal } from "./confirm-modal";
 import { SettingsGroup } from "./settings/setting-row";
 import { SettingsHeading } from "./settings/settings-heading";
-
-/**
- * The space to read the package's detail FROM: the server answers only where
- * it is placed, and the catalogue shows packages placed elsewhere than the
- * space the reader stands in.
- */
-function readingSpace(
-  placement: CataloguePlacement,
-  spaces: readonly LibrarySpace[],
-  current: string | null,
-): string | undefined {
-  if (placement.here) return current ?? undefined;
-  const reachable = (id: string | null) =>
-    id && spaces.some((space) => space.id === id) ? id : undefined;
-  return (
-    reachable(placement.homeSpaceId) ??
-    placement.activeIn[0] ??
-    placement.inactiveIn[0] ??
-    placement.offeredIn[0] ??
-    current ??
-    undefined
-  );
-}
 
 /** The input fields an agent asks for, by the title a launch form shows. */
 function inputNames(detail: AgentDetail): string[] {
@@ -166,7 +145,7 @@ export function CataloguePreview({
   type,
   spaces,
   placement,
-  grantOf,
+  gateOf,
   mayConfigureIn,
   integrations,
   agents,
@@ -181,7 +160,7 @@ export function CataloguePreview({
   /** The row's placement, as the catalogue's own table reads it. */
   placement: CataloguePlacement;
   /** The reader's verdict for switching it on (`next: true`) or off in a space. */
-  grantOf: (spaceId: string, next: boolean) => boolean;
+  gateOf: (spaceId: string, next: boolean) => ActivationGate;
   /**
    * The reader's verdict for changing how a space runs a placed package (the
    * placement PATCH's `configure` gate), which is what imposing a skill on that
@@ -204,7 +183,7 @@ export function CataloguePreview({
   const { currentOrg } = useOrg();
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
-  const from = readingSpace(placement, spaces, currentSpaceId);
+  const from = detailSpace(placement, spaces, currentSpaceId);
   const { data: detail } = useQuery({
     queryKey: packageKeys.detail(
       PACKAGE_TYPE_ROUTE_SEGMENT[type],
@@ -221,7 +200,7 @@ export function CataloguePreview({
   const agent = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
   const other = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
 
-  const rows = sheetSpaceRows(placement, spaces, grantOf, currentSpaceId);
+  const rows = sheetSpaceRows(placement, spaces, gateOf, currentSpaceId);
   const mode = sheetSpaceMode(rows);
   const offers = sheetOffers(rows);
   const home = spaces.find((space) => space.id === placement.homeSpaceId);
@@ -239,13 +218,6 @@ export function CataloguePreview({
       ? t("catalogue.sourceSystem")
       : t("catalogue.sourceOrg", { name: currentOrg?.name ?? "" });
   const version = detail?.version;
-  // Spelled out, so the locale test sees every key it declares used.
-  const typeLabel: Record<PackageType, string> = {
-    agent: t("catalogue.sheet.type.agent"),
-    skill: t("catalogue.sheet.type.skill"),
-    integration: t("catalogue.sheet.type.integration"),
-    "mcp-server": t("catalogue.sheet.type.mcp-server"),
-  };
   const updatedAt = agent?.updatedAt ?? other?.updatedAt;
 
   const stateLabel = (row: SheetSpaceRow) => {
@@ -266,7 +238,7 @@ export function CataloguePreview({
       checked={row.state === "active"}
       disabled={busy || !row.mayToggle}
       aria-label={t("catalogue.spaceSwitch", { package: item.name || item.id, space: row.name })}
-      title={row.mayToggle ? undefined : t("library.cannotActivate", { ns: "common" })}
+      title={row.refusal ? t(ACTIVATION_REFUSAL_KEY[row.refusal], { ns: "common" }) : undefined}
       onCheckedChange={(next) => onSetActive(row.id, next === true)}
     />
   );
@@ -386,7 +358,7 @@ export function CataloguePreview({
       </div>
       {/* What the package IS, in the badges the package's own header uses. */}
       <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="secondary">{typeLabel[type]}</Badge>
+        <Badge variant="secondary">{t(CATALOGUE_TYPE_LABEL_KEY[type])}</Badge>
         {version && (
           <Badge variant="secondary" className="font-mono">
             v{version}

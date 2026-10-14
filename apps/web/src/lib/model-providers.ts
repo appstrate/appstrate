@@ -187,36 +187,19 @@ export function providerRows(
 }
 
 /**
- * The services a person may serve with a key of their own: those with a fixed endpoint that
- * list their models without a key to ask with. The organization opens some of them to
- * personal keys (`personalServiceRows`), and « Choose the models » edits each one's models.
+ * Whether the organization may leave a service's models to each person's own key or subscription
+ * (`binding: "member"`): the service is open to personal keys, and its listing needs no key to ask
+ * with, which a model left to everyone has none of. The model form's « Clé perso » and the
+ * personal keys' « Choose the models » both read it.
  */
-/**
- * The providers a person may add a personal key or subscription for: those whose key would serve
- * at least one model the organization opened to personal keys. Any other one would serve nothing.
- */
-export function providersOpenToPersonalKeys(
-  models: readonly OrgModelInfo[],
-  registry: readonly ProviderRegistryEntry[],
-): Set<string> {
-  const open = memberModels(models).filter((m) => m.enabled);
-  return new Set(
-    registry
-      .filter((p) => p.personal_allowed && open.some((m) => serves(p, m, registry)))
-      .map((p) => p.providerId),
-  );
+export function allowsMemberModels(p: ProviderRegistryEntry): boolean {
+  return p.personal_allowed && modelSource(p) !== "discover";
 }
 
 export function personalModelServices(
   registry: readonly ProviderRegistryEntry[],
 ): ProviderRegistryEntry[] {
-  return registry.filter(
-    (p) =>
-      p.authMode === "api_key" &&
-      p.personal_allowed &&
-      !p.baseUrlOverridable &&
-      modelSource(p) !== "discover",
-  );
+  return registry.filter(allowsMemberModels);
 }
 
 /** A person who connected a personal key or subscription for a service. */

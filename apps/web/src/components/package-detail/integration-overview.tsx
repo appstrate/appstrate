@@ -5,26 +5,32 @@ import { useTranslation } from "react-i18next";
 import { Layers, Plug, Wrench } from "lucide-react";
 import { HealthCard, HealthCardItem, HealthAction, HealthIssueBadge } from "../health-card";
 import type { IntegrationDetailWire, IntegrationAuthStatus } from "../../hooks/use-integrations";
+import { useAgents } from "../../hooks/use-packages";
 import { authMethodLabel } from "../../lib/integration-presentation";
 import { packageDetailPath } from "../../lib/package-paths";
+import { integrationSettingsHref } from "../../lib/settings-section-href";
 import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-keys";
 import { DetailSectionCard } from "../detail-section-card";
 import { OperationalStat } from "../operational-stat";
 
 export function IntegrationOverview({
   detail,
-  agents,
+  dependentIds,
   onOpenConnections,
   onConfigureAuth,
 }: {
   detail: IntegrationDetailWire;
-  agents?: ReadonlyArray<{ id: string; display_name?: string }>;
+  /** The organization's agents depending on this integration, in every space. */
+  dependentIds?: ReadonlyArray<string>;
   onOpenConnections: (authKey?: string) => void;
   /** Omitted for members who cannot configure authentication. */
   onConfigureAuth?: (authKey: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const location = useLocation();
+  // Only the agents of this space open from here: the others' pages answer 404.
+  const { data: spaceAgents } = useAgents();
+  const agents = dependentIds && spaceAgents?.filter((agent) => dependentIds.includes(agent.id));
   const previewAgent = agents?.[0];
   const connections = [
     ...new Map(
@@ -35,17 +41,11 @@ export function IntegrationOverview({
   ];
   const reconnect = connections.filter((connection) => connection.needs_reconnection).length;
   const available = detail.tool_catalog?.length ?? 0;
-  const hidden = detail.tool_catalog_inspection?.entries.filter(
+  const hidden = detail.tool_catalog_inspection.entries.filter(
     (tool) => tool.exposure === "hidden",
   ).length;
   const connectionsTo = { pathname: location.pathname, hash: "#connections" };
-  const toolsParams = new URLSearchParams(location.search);
-  toolsParams.set("integrationSettings", "tools");
-  const toolsTo = {
-    pathname: location.pathname,
-    search: toolsParams.toString(),
-    hash: "#configuration",
-  };
+  const toolsTo = integrationSettingsHref(location.pathname, "tools");
   const labelFor = (auth: IntegrationAuthStatus) =>
     authMethodLabel(auth, detail.auths, t(`integration.auth.type.${auth.type}`));
   const prepared = (auth: IntegrationAuthStatus) =>
@@ -159,7 +159,7 @@ export function IntegrationOverview({
             />
             <OperationalStat
               label={t("integration.summary.hiddenTools")}
-              value={hidden ?? "—"}
+              value={hidden}
               to={hidden ? toolsTo : undefined}
             />
           </dl>

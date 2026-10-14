@@ -86,8 +86,6 @@ interface CredentialFormModalProps {
    * credential is the organization's, a key or a subscription.
    */
   personal?: boolean;
-  /** With `personal`: only these providers, the ones whose key would serve a model the org opened. */
-  onlyProviders?: ReadonlySet<string>;
   /** The key being added comes back here from the next step with what was typed. */
   initial?: CredentialFormData;
   /** Replaces « Save » when the form is a step, not the whole act. */
@@ -133,7 +131,6 @@ function CredentialFormBody({
   onSubmit,
   onClose,
   personal,
-  onlyProviders,
   initial,
   submitLabel,
 }: {
@@ -142,25 +139,13 @@ function CredentialFormBody({
   onSubmit: (data: CredentialFormData) => void;
   onClose: () => void;
   personal: boolean;
-  onlyProviders?: ReadonlySet<string>;
   initial?: CredentialFormData;
   submitLabel?: string;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   const registry = registryQuery.data ?? [];
-  const options = buildOptions(
-    personal
-      ? registry.filter(
-          (p) =>
-            p.personal_allowed &&
-            // An existing credential keeps its own provider listed, whatever the org opened since.
-            (!onlyProviders ||
-              onlyProviders.has(p.providerId) ||
-              p.providerId === credential?.providerId),
-        )
-      : registry,
-  );
+  const options = buildOptions(personal ? registry.filter((p) => p.personal_allowed) : registry);
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     if (initial) return initial.providerId;
@@ -522,7 +507,6 @@ export function CredentialFormModal({
   isPending,
   onSubmit,
   personal = false,
-  onlyProviders,
   initial,
   submitLabel,
 }: CredentialFormModalProps) {
@@ -538,7 +522,6 @@ export function CredentialFormModal({
       onSubmit={onSubmit}
       onClose={onClose}
       personal={personal}
-      onlyProviders={onlyProviders}
       initial={initial}
       submitLabel={submitLabel}
     />

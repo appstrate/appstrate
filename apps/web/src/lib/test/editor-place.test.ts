@@ -9,11 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { leavesEditor } from "../editor-place.ts";
-import {
-  agentSettingsHref,
-  settingsEditorPlace,
-  type AgentSettingsSection,
-} from "../settings-section-href.ts";
+import { agentSettingsHref, settingsEditorPlace } from "../settings-section-href.ts";
 
 const AGENT = "/agents/@acme/worker";
 const origin = "https://app.test";
@@ -21,7 +17,7 @@ const url = (path: string) => new URL(path, origin);
 
 /** The agent view's resolution, for a reader who may configure the agent. */
 const place = (search: URLSearchParams) =>
-  settingsEditorPlace((search.get("agentSettings") ?? "model"), search);
+  settingsEditorPlace(search.get("agentSettings") ?? "model", search);
 
 const leaves = (from: string, to: string) => leavesEditor(url(from), url(to), place);
 

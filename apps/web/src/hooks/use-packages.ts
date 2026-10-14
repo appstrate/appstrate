@@ -14,6 +14,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
+import { invalidateLibraries } from "./use-library";
 import { packagePermission, packageSightPermissions } from "@appstrate/core/permissions";
 import { ApiError } from "../api/errors";
 import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
@@ -312,7 +313,7 @@ function useMovePackageHome(type: PackageType) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+      void invalidateLibraries(qc);
       // The space being left may have lost the package (`keepInPreviousHome:
       // false` drops its offer AND its placement row), so its own package
       // listing is stale too — not just this type's family.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react";
-import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import i18n from "../i18n";
 import { parseScopedName } from "@appstrate/core/naming";
@@ -230,12 +230,23 @@ export function activationStateOf(
   };
 }
 
+/**
+ * Both forms of the library `useCatalogueLibrary` reads: the organization's for
+ * an administrator, each space's for everybody else. Invalidating one alone
+ * leaves the other's reader on a stale list.
+ */
+export function invalidateLibraries(qc: QueryClient) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["get", "/api/library"] }),
+    qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/library"] }),
+  ]);
+}
+
 /** Activation changes affect the library and every space's package/agent cache. */
 export function useInvalidatePackageActivation() {
   const qc = useQueryClient();
   return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/library"] });
+    void invalidateLibraries(qc);
     void qc.invalidateQueries({ queryKey: packageKeys.all });
     void qc.invalidateQueries({ queryKey: agentsKeys.all });
     void invalidateIntegrationQueries(qc);
@@ -270,11 +281,7 @@ export function useSetChatEnforced() {
       toast.success(
         i18n.t(enforced ? "settings:packages.chatEnforced" : "settings:packages.chatUnenforced"),
       ),
-    onSettled: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["get", "/api/library"] }),
-        qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/library"] }),
-      ]),
+    onSettled: () => invalidateLibraries(qc),
   });
 }
 

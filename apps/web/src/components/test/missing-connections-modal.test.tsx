@@ -118,6 +118,23 @@ describe("MissingRow", () => {
     expect(draft).not.toContain(label("detail.integrationUnbound"));
   });
 
+  it("keeps the resolver's own message for an item code this build has no sentence for", () => {
+    const html = render(
+      <MissingRow
+        err={{
+          field: `integrations.${INTEGRATION}`,
+          code: "code_from_a_newer_server" as Code,
+          message: "The resolver explains this one.",
+        }}
+        agentPackageId={AGENT}
+        version={undefined}
+        integrationEntries={undefined}
+      />,
+      { queryClient: new QueryClient() },
+    );
+    expect(html).toContain("The resolver explains this one.");
+  });
+
   it("names why an optional integration runs without, ahead of the resolved header", () => {
     const qc = new QueryClient();
     qc.setQueryData(

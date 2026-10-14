@@ -55,7 +55,6 @@ describe("run document direction badge", () => {
         error={null}
         empty={{ message: "vide", compact: true }}
         runId={RUN}
-        showPurposeTabs={false}
       />,
     );
     expect(count(html, OUTPUT_BADGE)).toBe(1);

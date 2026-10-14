@@ -33,9 +33,10 @@ import { isImageMime } from "@appstrate/core/mime";
 import { useFileImageSrc, type FileDto } from "../hooks/use-files";
 
 /**
- * Relative-expiry badge — rendered only for a file carrying a retention
- * deadline. Amber inside the 7-day warning window (or already past), muted
- * otherwise. Sub-day deadlines read in hours, everything else in whole days.
+ * Relative-expiry badge, the one label every file surface shows for a retention
+ * deadline (tile, table column, artifact header). Warning-toned inside the
+ * 7-day window (or already past), muted otherwise. Sub-day deadlines read in
+ * hours, everything else in whole days.
  */
 export function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
   const { t } = useTranslation("files");
@@ -50,7 +51,7 @@ export function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
     <span
       className={cn(
         "inline-flex items-center gap-1",
-        info.soon ? "text-amber-600 dark:text-amber-500" : "text-muted-foreground",
+        info.soon ? "text-warning" : "text-muted-foreground",
       )}
       title={label}
     >

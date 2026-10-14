@@ -15,9 +15,11 @@ import type { Versioned } from "../../../hooks/use-packages.ts";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
 
 // The file viewers these views reach load the theme store, which reads the
-// system theme and tags the root element at module init.
+// system theme and tags the root element at module init; the package editor
+// they import reaches the auth client, which reads the origin at module init.
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
+  location: { origin: "https://app.example.test" },
   matchMedia: () => ({ matches: false, addEventListener: () => {} }),
 });
 // Loaded before the stub: it injects its stylesheet when it sees a document.

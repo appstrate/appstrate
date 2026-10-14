@@ -183,7 +183,6 @@ const DYNAMIC_KEY_PREFIXES = [
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
   "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
   "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx: one per runtime tool id
-  "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
   "integration.admin.creation.", // pages/integration-detail.tsx — t(`integration.admin.creation.${value}`)
   "integration.admin.orgDefault.connection.", // pages/integration-detail.tsx — forced / default
   "integration.admin.usage.", // pages/integration-detail.tsx — t(`integration.admin.usage.${mode}Help`)

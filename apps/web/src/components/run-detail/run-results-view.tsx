@@ -7,7 +7,7 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
-import { useFiles } from "../../hooks/use-files";
+import { useFiles, type FileDto } from "../../hooks/use-files";
 import { usePermissions } from "../../hooks/use-permissions";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { classifyRunResults } from "../../lib/run-results";
@@ -24,26 +24,53 @@ const keepUnavailableDocumentVisible = () => undefined;
 
 type ResultsSectionId = "production" | "structured" | "memory";
 
-export function RunResultsView({
-  run,
-  packageId,
-  output,
-  hasRunMemory,
-  isRunning,
-}: {
+interface RunResultsProps {
   run: EnrichedRun;
   packageId: string;
   output: Record<string, unknown> | null;
   hasRunMemory: boolean;
   isRunning: boolean;
+}
+
+/** Fetches the run's file container and hands it to the view. */
+export function RunResultsView(props: RunResultsProps) {
+  const { data, isLoading, error } = useFiles({ runId: props.run.id, limit: 100 });
+  const { can } = usePermissions();
+  return (
+    <RunResultsContent
+      {...props}
+      files={data?.data ?? []}
+      hasMore={data?.hasMore ?? false}
+      isLoading={isLoading}
+      error={error}
+      filesDenied={!can("files:read")}
+    />
+  );
+}
+
+/** The results, fed an already-resolved file list: testable without a query harness. */
+export function RunResultsContent({
+  run,
+  packageId,
+  output,
+  hasRunMemory,
+  isRunning,
+  files,
+  hasMore,
+  isLoading,
+  error,
+  filesDenied,
+}: RunResultsProps & {
+  files: FileDto[];
+  /** The 100-row page was capped: the run's file container holds more rows. */
+  hasMore: boolean;
+  isLoading: boolean;
+  error: unknown;
+  /** The caller may not list files (`files:read`), so none were fetched. */
+  filesDenied: boolean;
 }) {
   const { t } = useTranslation("agents");
   const [requestedSection, setRequestedSection] = useState<ResultsSectionId>("production");
-  const documentsQuery = useFiles({ runId: run.id, limit: 100 });
-  // The caller may not list files (`files:read`), so none were fetched: the
-  // run's count still says files were produced, so the section stays and says
-  // why it is empty.
-  const filesDenied = !usePermissions().can("files:read");
   // The labels of the structured output: an inline run carries its manifest,
   // an agent run reads its package (the same query the page already made, so
   // this is a cache hit, and skipped for inline shadows, which would 404).
@@ -55,22 +82,22 @@ export function RunResultsView({
   // What the run PRODUCED: the query answers the run's whole container, so a
   // file chained in from an earlier run arrives carrying `agent_output` and is
   // told apart only by its own `runId` (`producedRunFiles`).
-  const outputDocuments = useMemo(
-    () => producedRunFiles(documentsQuery.data?.data ?? [], run.id),
-    [documentsQuery.data?.data, run.id],
-  );
+  const outputDocuments = useMemo(() => producedRunFiles(files, run.id), [files, run.id]);
+  // `hasMore` describes the whole container, inputs included: the produced list
+  // is cut only when fewer produced rows arrived than the run's own count.
+  const producedCut = hasMore && outputDocuments.length < run.file_counts.output;
   const { hasStructuredOutput, shouldRenderDocuments, hasProduction, isPartial } =
     classifyRunResults({
       status: run.status,
       output,
       expectedDocumentCount: run.file_counts.output,
       loadedDocumentCount: outputDocuments.length,
-      documentsLoading: documentsQuery.isLoading,
-      documentsError: Boolean(documentsQuery.error),
+      documentsLoading: isLoading,
+      documentsError: Boolean(error),
       hasRunMemory,
       // The featured file is DERIVED: a run that produced exactly one file
       // features it, zero or several feature none.
-      hasPrimaryDocument: Boolean(featuredRunFile(documentsQuery.data?.data ?? [], run.id)),
+      hasPrimaryDocument: Boolean(featuredRunFile(files, run.id)),
     });
   const sections = [
     ...(shouldRenderDocuments
@@ -107,7 +134,7 @@ export function RunResultsView({
   const activeSection =
     sections.find((section) => section.id === requestedSection) ?? sections[0] ?? null;
 
-  if (!hasProduction && !documentsQuery.isLoading) {
+  if (!hasProduction && !isLoading) {
     return (
       <div className="p-6">
         <EmptyState
@@ -123,28 +150,35 @@ export function RunResultsView({
 
   const sectionBody = (() => {
     if (activeSection.id === "production") {
-      if (outputDocuments.length === 1 && !documentsQuery.error) {
-        return (
-          <RunDeliverableTab
-            fileId={outputDocuments[0]!.id}
-            onUnavailable={keepUnavailableDocumentVisible}
-          />
-        );
-      }
+      // The single produced file leads in its viewer; its row stays below it,
+      // where its download, keep and delete live.
+      const featured = outputDocuments.length === 1 && !error ? outputDocuments[0] : undefined;
       return (
-        <DocumentListPanel
-          documents={outputDocuments}
-          isLoading={documentsQuery.isLoading}
-          error={documentsQuery.error}
-          empty={{
-            message: filesDenied ? t("run.noAccess", { ns: "files" }) : t("run.resultsNoFiles"),
-            compact: true,
-          }}
-          runId={run.id}
-          showPurposeTabs={false}
-          display="table"
-          tableSurface="integrated"
-        />
+        <>
+          {featured && (
+            <RunDeliverableTab
+              fileId={featured.id}
+              onUnavailable={keepUnavailableDocumentVisible}
+            />
+          )}
+          <DocumentListPanel
+            documents={outputDocuments}
+            isLoading={isLoading}
+            error={error}
+            empty={{
+              message: filesDenied ? t("run.noAccess", { ns: "files" }) : t("run.resultsNoFiles"),
+              compact: true,
+            }}
+            runId={run.id}
+            display="table"
+            tableSurface="integrated"
+            footer={
+              producedCut && (
+                <p className="text-muted-foreground text-xs">{t("run.producedFilesTruncated")}</p>
+              )
+            }
+          />
+        </>
       );
     }
     if (activeSection.id === "structured") {

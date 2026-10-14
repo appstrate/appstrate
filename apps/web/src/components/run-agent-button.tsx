@@ -36,6 +36,12 @@ interface RunAgentButtonProps {
    * still click Run and recover through the modal.
    */
   connectionWarning?: boolean;
+  /**
+   * False for a second button of the same agent on one page (the agent page's
+   * empty runs list): it opens `?run=<agent>` and the page's other button
+   * answers it, so a click never opens two forms.
+   */
+  inputDialog?: boolean;
 }
 
 export function RunAgentButton({
@@ -49,13 +55,14 @@ export function RunAgentButton({
   className,
   showLabel = false,
   connectionWarning = false,
+  inputDialog = true,
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
   const { can } = usePermissions();
   const launcher = useRunLauncher(packageId);
   // The input form's address: `?run=<agent>`, so the agent's own button answers it.
   const runParam = useModalParam("run");
-  const inputOpen = runParam.value === packageId;
+  const inputOpen = inputDialog && runParam.value === packageId;
 
   // Skip the fetch when the parent already provided the detail (detail page
   // case). Otherwise the query stays DISABLED — list pages render N of these
@@ -172,12 +179,17 @@ export function RunAgentButton({
         )}
       </DisabledReasonTooltip>
 
-      {detail && (
+      {inputDialog && detail && (
         <RunModal
           open={inputOpen}
           onClose={runParam.close}
           agent={detail}
-          onSubmit={(input) => launcher.launch({ input, version: runVersion })}
+          onSubmit={(input) => {
+            // The form leaves the history entry before the launch leaves the
+            // page: Back from the run lands on this page, not on the form again.
+            runParam.close();
+            launcher.launch({ input, version: runVersion });
+          }}
           isPending={launcher.isPending}
         />
       )}

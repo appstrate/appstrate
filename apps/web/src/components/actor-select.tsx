@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -17,6 +17,7 @@ import {
 import { cn } from "@appstrate/ui/cn";
 import { $api } from "../api/client";
 import { useCurrentOrgId } from "../hooks/use-org";
+import { useDebouncedValue } from "../hooks/use-debounced-value";
 import { useEndUsers } from "../hooks/use-end-users";
 import { useScheduleCaller } from "../hooks/use-can-write-schedule";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
@@ -61,11 +62,7 @@ export function ActorSelect({
   const [open, setOpen] = useState(false);
 
   const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(query), 300);
-    return () => clearTimeout(timer);
-  }, [query]);
+  const debouncedQuery = useDebouncedValue(query);
 
   const { data: orgData } = $api.useQuery(
     "get",

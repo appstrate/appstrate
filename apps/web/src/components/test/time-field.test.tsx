@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterAll, describe, expect, it } from "bun:test";
-import i18n from "../../i18n.ts";
+import i18n, { i18nReady } from "../../i18n.ts";
 import { TimeField } from "../time-field.tsx";
-import { render } from "./run-fixture.tsx";
+import { render } from "../../test/render.tsx";
+
+await i18nReady;
 
 const inLanguage = async (lng: string) => {
   await i18n.changeLanguage(lng);

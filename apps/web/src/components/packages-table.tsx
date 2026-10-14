@@ -166,6 +166,7 @@ export function PackagesTable({
   // same props and branch on nothing.
   return (
     <DataTable
+      tableId="packages"
       label={t("list.tableLabel")}
       columns={columns}
       rows={items}

@@ -3,26 +3,23 @@
 /**
  * What every body of a collection has to answer, and in which order.
  *
- * A collection has more than one shape — a table, a grid of cards, later an
- * agenda — and a caller should be able to hand any of them the same props and
- * get the same behaviour. That only holds if the ORDER is written down once:
- * the two bodies took the same four props for a day and answered them
- * differently, the grid putting the failure first and the table letting a
- * failed refetch sit silently under stale rows.
+ * A collection has more than one shape — a table, a grid of cards, a list —
+ * and a caller hands any of them the same props and gets the same behaviour,
+ * because the ORDER is written down once, here.
  *
- * **Failure, then loading, then emptiness.** A request that failed is the most
- * important thing on the screen and it outranks everything, including rows
- * still in the cache — showing them is telling someone data is current when
- * nobody knows that. Loading comes next, because "we are fetching" is a truer
- * sentence than "there is nothing". Emptiness is last: it is the only one of
- * the three that is an ANSWER rather than a state of the request.
+ * **Failure, then loading, then emptiness.** A body that is told the request
+ * failed draws the failure, whatever rows it holds. Loading comes next, because
+ * "we are fetching" is a truer sentence than "there is nothing". Emptiness is
+ * last: it is the only one of the three that is an ANSWER rather than a state
+ * of the request.
+ *
+ * What counts as failed is the caller's: the run list passes `isError` only
+ * when nothing was ever loaded, so a failed background refetch leaves the runs
+ * already on screen in place.
  *
  * The verdict is a WORD, not a node, so that `isError` can never be swallowed:
  * a body that gets `"error"` has to draw something, and if the caller supplied
- * no message it owes a default. The first version returned the node and read
- * `isError && error`, which quietly fell through to "there is nothing here" on
- * a 500 whenever the caller had not passed one — the very lie the empty state
- * had already had to be cured of.
+ * no message it owes a default — never "there is nothing here" on a 500.
  */
 
 import type { ReactNode } from "react";

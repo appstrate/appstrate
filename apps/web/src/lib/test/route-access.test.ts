@@ -163,7 +163,7 @@ describe("overlay paths", () => {
     const matched = (url: string) => matchRoutes(routes, url)?.[0]?.route.path;
     expect(matched("/org-settings/general")).toBe("/org-settings/general");
     expect(matched("/workspace-settings/webhooks/wh_1")).toBe("/workspace-settings/webhooks/:id");
-    expect(matched("/catalogue/discover/agent")).toBe("/catalogue/:origin/:type");
+    expect(matched("/catalogue/discover/agent")).toBe("/catalogue/:reading/:type");
     expect(matched("/org-settings/space/general")).toBe("/org-settings/*");
     expect(matched("/preferences/x")).toBe("/preferences/*");
   });

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from "zustand";
+import { persistedValue } from "./local-storage";
 
 export type Theme = "dark" | "light" | "system";
 
@@ -33,29 +34,14 @@ function parseStoredTheme(value: string | null): Theme {
   return value && (THEMES as readonly string[]).includes(value) ? (value as Theme) : "system";
 }
 
-// Accessing localStorage throws when storage is blocked (sandboxed iframe,
-// Safari private mode, cookies-disabled). Guard it so a blocked store can
-// never crash the SPA bootstrap — we just fall back to the default theme.
-function readStoredTheme(): string | null {
-  try {
-    return localStorage.getItem(STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-const stored = parseStoredTheme(readStoredTheme());
+const storedTheme = persistedValue(STORAGE_KEY, parseStoredTheme);
+const stored = storedTheme.read();
 
 export const useTheme = create<ThemeState>()((set) => ({
   theme: stored,
   resolvedTheme: resolve(stored),
   setTheme: (theme) => {
-    // Persist best-effort — a blocked store must not throw out of setTheme.
-    try {
-      localStorage.setItem(STORAGE_KEY, theme);
-    } catch {
-      // Storage blocked — theme just won't persist across reloads.
-    }
+    storedTheme.write(theme);
     const resolvedTheme = resolve(theme);
     applyTheme(resolvedTheme);
     set({ theme, resolvedTheme });

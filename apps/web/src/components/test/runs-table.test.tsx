@@ -12,8 +12,13 @@ import { describe, it, expect } from "bun:test";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import agentsFr from "../../locales/fr/agents.json";
 import { RunsTable, useRunColumns } from "../runs-table.tsx";
-import { makeRun, render, STARTED_AT } from "./run-fixture.tsx";
+import i18n, { i18nReady } from "../../i18n.ts";
+import { render } from "../../test/render.tsx";
+import { makeRun, STARTED_AT } from "./run-fixture.tsx";
 import { formatDateField } from "../../lib/format-date.ts";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
 
 const STARTED_AT_LABEL = formatDateField(STARTED_AT);
 const agentName = () => "Rapport trimestriel";
@@ -88,7 +93,7 @@ describe("the result column", () => {
     const html = table([makeRun({ result: { output: { resume: "Trois points", n: 3 } } })]);
     expect(html).toContain("Trois points");
     expect(html).toContain('title="Trois points"');
-    expect(html).not.toContain("{&quot;");
+    expect(html).not.toContain('{"');
   });
 
   it("counts the fields of an output that holds no text", () => {

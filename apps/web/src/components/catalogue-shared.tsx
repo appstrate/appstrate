@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "Partages en attente": every decision a colleague's share left waiting, one
+ * "Partages en attente": every decision a colleague's share leaves waiting, one
  * list across kinds.
  *
  * With one share, every link goes straight to that package's sheet. With
- * several, the reader needs them side by side — and before this list they were
- * scattered across the kind tabs, where a skill waiting behind an agent was
- * found by nobody. Each row is ONE decision (a package, one space) with its
- * deed on the line; activating it removes the row, because this is a queue of
- * decisions, not a history.
+ * several, the reader needs them side by side rather than scattered across the
+ * kind tabs, where a skill waiting behind an agent is found by nobody. Each row
+ * is ONE decision (a package, one space) with its deed on the line; activating
+ * it removes the row, because this is a queue of decisions, not a history.
  */
 import { useTranslation } from "react-i18next";
 import { Inbox } from "lucide-react";
-import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
 import {
   Table,
@@ -25,6 +23,7 @@ import {
 } from "@appstrate/ui/components/table";
 import type { LibraryPackageItem } from "../hooks/use-library";
 import type { PendingShare } from "../lib/catalogue-placement";
+import { CATALOGUE_TYPE_LABEL_KEY } from "../lib/catalogue-link";
 import { EmptyState } from "./page-states";
 import { SettingsHeading } from "./settings/settings-heading";
 
@@ -45,13 +44,6 @@ export function CatalogueShared({
   onOpen: (pkg: LibraryPackageItem) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  // Spelled out, so the locale test sees every key it declares used.
-  const typeLabel: Record<PackageType, string> = {
-    agent: t("catalogue.sheet.type.agent"),
-    skill: t("catalogue.sheet.type.skill"),
-    integration: t("catalogue.sheet.type.integration"),
-    "mcp-server": t("catalogue.sheet.type.mcp-server"),
-  };
 
   return (
     <div>
@@ -102,7 +94,7 @@ export function CatalogueShared({
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {typeLabel[share.pkg.type]}
+                      {t(CATALOGUE_TYPE_LABEL_KEY[share.pkg.type])}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{share.sharedBy ?? "—"}</TableCell>
                     <TableCell>{space}</TableCell>

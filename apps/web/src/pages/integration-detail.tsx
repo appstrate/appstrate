@@ -690,7 +690,7 @@ export function IntegrationDetailPage() {
         <TabsContent value="overview" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
           <IntegrationOverview
             detail={detail}
-            agents={pkg?.agents}
+            dependentIds={pkg?.agents.map((agent) => agent.id)}
             onOpenConnections={openConnections}
             onConfigureAuth={canConfigure ? openAuthentication : undefined}
           />

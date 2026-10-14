@@ -4,19 +4,19 @@
  * « Choose the models » of a provider: the checklist of the models its service offers, the
  * ones the organization has access to ticked, a star on its default.
  *
- * `useModelChoice` (`hooks/use-model-choice-state.ts`) holds the state (what is ticked, starred,
- * searched, detected) and hands back the plan it amounts to; `ModelChoiceList` draws it. The three dialogs that choose
- * models (an organization key's, the personal keys' per service, and the second step of
- * « Ajouter une clé org ») own their footer and apply the plan, so the same list serves all three.
+ * `useModelChoice` holds the state (what is ticked, starred, searched, detected) and hands back the
+ * plan it amounts to; `ModelChoiceList` draws it. The three dialogs that choose models (an
+ * organization key's, the personal keys' per service, and the second step of « Ajouter une clé
+ * org ») own their footer and apply the plan, so the same list serves all three.
  */
 
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
+import { DiscoveryResult } from "./model-form/discovery-result";
 import { ManualModelEntry } from "./model-form/manual-model-entry";
 import { ModelPickList } from "./model-form/model-pick-list";
-import type { ModelChoice } from "../hooks/use-model-choice-state";
-import { discoveryErrorKey } from "@/lib/model-discovery";
+import type { ModelChoice } from "../hooks/use-model-choice";
 
 export function ModelChoiceList({
   choice,
@@ -41,21 +41,7 @@ export function ModelChoiceList({
           >
             {choice.detecting ? <Spinner /> : t("models.form.discoverButton")}
           </Button>
-          {discovery &&
-            (discovery.outcome === "ok" ? (
-              <div className="text-muted-foreground text-sm">
-                {discovery.models.length > 0
-                  ? t("models.form.discoverCount", { count: discovery.models.length })
-                  : t("models.form.discoverEmpty")}
-                {discovery.truncated && (
-                  <span className="block">{t("models.form.discoverTruncated")}</span>
-                )}
-              </div>
-            ) : (
-              <div className="text-destructive text-sm">
-                {t(discoveryErrorKey(discovery.outcome))}
-              </div>
-            ))}
+          {discovery && <DiscoveryResult discovery={discovery} />}
         </div>
       )}
       <ModelPickList

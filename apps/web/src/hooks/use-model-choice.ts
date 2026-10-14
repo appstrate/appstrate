@@ -1,139 +1,156 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useOpenRouterSearch } from "../components/model-form/use-open-router-search";
+import { useModelDiscovery } from "../components/model-form/use-model-discovery";
+import type { ProviderRegistryEntry } from "./use-model-provider-credentials";
+import type { OrgModelInfo } from "./use-models";
+import { buildDiscoverBody } from "@/lib/model-discovery";
+import { planModelChoice } from "@/lib/model-choice";
 import {
-  useCreateModel,
-  useSetDefaultModel,
-  useUpdateModel,
-  type OrgModelInfo,
-} from "./use-models";
-import { useCreateModelProviderCredential } from "./use-model-provider-credentials";
-import { rowToEntry } from "../lib/model-form-payload";
-import { refusalMessage } from "../lib/mutation-error";
-import { ApiError } from "../api/errors";
-import type { ModelChoicePlan } from "../lib/model-choice";
+  catalogRows,
+  discoveredRows,
+  existingRow,
+  filterRows,
+  modelSource,
+  searchRows,
+  type ModelPickRow,
+} from "@/lib/model-source";
 
-/** Where the models of a choice live: an organization key, or no key (each person's own). */
-interface ModelChoiceTarget {
-  credentialId: string | null;
-  /** The service, named on a model left to personal keys. */
-  providerId: string;
+/** What a listing that needs a key asks with: a saved key, or the one being typed. */
+export type DiscoverWith =
+  { credentialId: string } | { inlineApiKey: string; baseUrl: string } | null;
+
+interface ModelChoiceOptions {
+  provider: ProviderRegistryEntry;
+  /** The models this provider already makes available. */
+  existing: readonly OrgModelInfo[];
+  discoverWith: DiscoverWith;
+  /** « Add a provider »: everything the listing offers starts ticked. */
+  tickAll: boolean;
+  /** The organization already has a default, so a new provider does not star one. */
+  hasDefault: boolean;
 }
 
-/** The key to mint first, in « Add a provider »: nothing else exists until the models are chosen. */
-export interface NewProviderCredential {
-  label: string;
-  providerId: string;
-  apiKey: string;
-  baseUrlOverride?: string;
-}
+export function useModelChoice({
+  provider,
+  existing,
+  discoverWith,
+  tickAll,
+  hasDefault,
+}: ModelChoiceOptions) {
+  const source = modelSource(provider);
+  const search = useOpenRouterSearch(source === "search");
+  const {
+    discovery,
+    detecting,
+    detect: discover,
+  } = useModelDiscovery(JSON.stringify(discoverWith));
 
-interface ModelChoiceOutcome {
-  /** The upstream ids whose creation, activation or deactivation was refused. */
-  failedModelIds: string[];
-  /** What the server said of the first refusal it has a sentence for, else `null`. */
-  refusal: string | null;
-  /** The key minted, to bind a retry to instead of minting a second one. */
-  credentialId: string | null;
-  /** The models created, so a retry knows them (a new key's models are not in the dialog's list). */
-  createdModels: OrgModelInfo[];
-}
+  // Ids typed by hand: a catalog binds only the ids it offers, anything else may name one.
+  const offersManual = source !== "catalog";
+  const [typed, setTyped] = useState<ModelPickRow[]>([]);
 
-/**
- * Applies a {@link ModelChoicePlan}: the key first when there is one to mint, then each model
- * created or switched back on, then the default, then each model switched off (a model is never
- * deleted from here, and the default moves first so the one it leaves can be switched off).
- * A refusal of the key rejects (nothing was written); a refusal of a model is reported in the
- * outcome, and the rest still go through.
- */
-export function useApplyModelChoice() {
-  const createModel = useCreateModel();
-  const updateModel = useUpdateModel();
-  const setDefault = useSetDefaultModel();
-  const createCredential = useCreateModelProviderCredential({ errorHandledByCaller: true });
-  const [isPending, setPending] = useState(false);
+  const listed = useMemo((): ModelPickRow[] => {
+    const offered =
+      source === "search"
+        ? searchRows(search.models)
+        : source === "discover"
+          ? discovery?.outcome === "ok"
+            ? discoveredRows(discovery.models)
+            : []
+          : catalogRows(provider.models);
+    const ids = new Set(offered.map((r) => r.id));
+    return [...offered, ...typed.filter((r) => !ids.has(r.id))];
+  }, [source, search.models, discovery, provider.models, typed]);
 
-  const apply = async (input: {
-    plan: ModelChoicePlan;
-    existing: readonly OrgModelInfo[];
-    target: ModelChoiceTarget;
-    newCredential?: NewProviderCredential;
-  }): Promise<ModelChoiceOutcome> => {
-    const { plan, existing, target, newCredential } = input;
-    setPending(true);
-    try {
-      const minted = newCredential
-        ? await createCredential.mutateAsync({
-            body: {
-              label: newCredential.label,
-              providerId: newCredential.providerId,
-              api_key: newCredential.apiKey,
-              ...(newCredential.baseUrlOverride
-                ? { base_url_override: newCredential.baseUrlOverride }
-                : {}),
-            },
-          })
-        : null;
-      const credentialId = minted?.id ?? target.credentialId;
+  // A model the organization has but the listing no longer offers stays in the list (ticked while
+  // it has access, unticked once withdrawn).
+  const allRows = useMemo(() => {
+    const offered = new Set(listed.map((r) => r.id));
+    const kept = existing.filter((m) => m.modelId !== null && !offered.has(m.modelId));
+    return [...kept.map(existingRow), ...listed];
+  }, [listed, existing]);
+  const rows = source === "search" ? allRows : filterRows(allRows, search.search);
 
-      const failedModelIds: string[] = [];
-      let refusal: string | null = null;
-      const fail = (modelId: string, err: unknown) => {
-        failedModelIds.push(modelId);
-        if (refusal === null && err instanceof ApiError) refusal = refusalMessage(err);
-      };
-      const setEnabled = async (model: OrgModelInfo, enabled: boolean) => {
-        try {
-          await updateModel.mutateAsync({
-            params: { path: { id: model.id } },
-            body: { enabled },
-          });
-        } catch (err) {
-          fail(model.modelId ?? model.id, err);
-        }
-      };
-      const idByModelId = new Map(existing.map((m) => [m.modelId, m.id]));
-      const createdModels: OrgModelInfo[] = [];
-      let defaulted: string | undefined;
-      for (const row of plan.add) {
-        try {
-          const created = await createModel.mutateAsync({
-            body: {
-              ...rowToEntry(row),
-              credentialId,
-              ...(credentialId === null ? { providerId: target.providerId } : {}),
-            },
-          });
-          idByModelId.set(row.id, created.id);
-          createdModels.push(created);
-        } catch (err) {
-          fail(row.id, err);
-        }
-      }
-      for (const model of plan.grant) await setEnabled(model, true);
-      const defaultId = plan.defaultModelId ? idByModelId.get(plan.defaultModelId) : undefined;
-      if (defaultId) {
-        try {
-          await setDefault.mutateAsync({ body: { modelId: defaultId } });
-          defaulted = defaultId;
-        } catch (err) {
-          fail(plan.defaultModelId!, err);
-        }
-      }
-      for (const model of plan.withdraw) await setEnabled(model, false);
-      return {
-        failedModelIds,
-        refusal,
-        credentialId: minted?.id ?? null,
-        // The rows as the server holds them now: the one starred is the default.
-        createdModels: createdModels.map((m) =>
-          m.id === defaulted ? { ...m, is_default: true } : m,
-        ),
-      };
-    } finally {
-      setPending(false);
+  // `null` until the first tick: what stands is then derived from the props, so a list that
+  // arrives late (a detection) is ticked without an effect.
+  const [touched, setTouched] = useState<Map<string, ModelPickRow> | null>(null);
+  const initial = useMemo(() => {
+    const map = new Map<string, ModelPickRow>();
+    // Ticked is access: a row switched off is listed, unticked.
+    for (const m of existing)
+      if (m.modelId !== null && m.enabled) map.set(m.modelId, existingRow(m));
+    // A search lists hundreds: the operator picks, nothing is ticked for them.
+    if (tickAll && source !== "search") for (const row of listed) map.set(row.id, row);
+    return map;
+  }, [existing, tickAll, source, listed]);
+  const picked = touched ?? initial;
+
+  const [starred, setStarred] = useState<string | null | undefined>(undefined);
+  const currentDefault = existing.find((m) => m.is_default)?.modelId ?? null;
+  // A new provider in an organization with no default offers its first recommended model.
+  const suggested =
+    tickAll && !hasDefault
+      ? (listed.find((r) => r.featured && picked.has(r.id))?.id ??
+        listed.find((r) => picked.has(r.id))?.id ??
+        null)
+      : null;
+  const star = starred === undefined ? (currentDefault ?? suggested) : starred;
+
+  const plan = planModelChoice({ picked, existing, starred: star });
+  const canSave =
+    plan.add.length + plan.grant.length + plan.withdraw.length > 0 || plan.defaultModelId !== null;
+
+  // The server refuses to switch off the default model: its box stays ticked until another model
+  // is starred.
+  const lockedId = currentDefault !== null && star === currentDefault ? currentDefault : null;
+
+  const change = (changed: ModelPickRow[], checked: boolean) => {
+    const next = new Map(picked);
+    for (const row of changed) {
+      if (checked) next.set(row.id, row);
+      else if (row.id !== lockedId) next.delete(row.id);
     }
+    setTouched(next);
   };
 
-  return { apply, isPending };
+  /** An id typed by hand joins the list, ticked; an id the list already has is just ticked. */
+  const addManual = (row: ModelPickRow) => {
+    const known = allRows.find((r) => r.id === row.id);
+    if (!known) setTyped((rows) => [...rows, row]);
+    change([known ?? row], true);
+  };
+
+  const detect = () => {
+    if (!discoverWith) return;
+    discover(
+      buildDiscoverBody({
+        credentialId: "credentialId" in discoverWith ? discoverWith.credentialId : null,
+        provider,
+        inlineApiKey: "inlineApiKey" in discoverWith ? discoverWith.inlineApiKey : "",
+        baseUrl: "baseUrl" in discoverWith ? discoverWith.baseUrl : "",
+      }),
+    );
+  };
+
+  return {
+    source,
+    rows,
+    search,
+    picked,
+    change,
+    star,
+    setStar: setStarred,
+    plan,
+    canSave,
+    lockedId,
+    offersManual,
+    addManual,
+    discovery,
+    detecting,
+    detect,
+  };
 }
+
+export type ModelChoice = ReturnType<typeof useModelChoice>;

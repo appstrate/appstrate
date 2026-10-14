@@ -13,9 +13,12 @@
 import { useTranslation } from "react-i18next";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Switch } from "@appstrate/ui/components/switch";
-import type { PackageType } from "@appstrate/core/validation";
-import { maySetPackageActive, type SpaceGrant } from "../lib/package-permissions";
 import type { CataloguePlacement } from "../lib/catalogue-placement";
+import {
+  ACTIVATION_REFUSAL_KEY,
+  type ActivationGate,
+  type CatalogueDeeds,
+} from "../lib/catalogue-gates";
 import type { DataColumn } from "./data-table";
 import { CatalogueRowMenu } from "./catalogue-row";
 import type { CardItem } from "../pages/package-list";
@@ -121,6 +124,8 @@ export function useCatalogueOriginColumn(
   };
 }
 
+const NO_DEEDS: CatalogueDeeds = { moveHome: false, share: false, revokeFrom: [] };
+
 /**
  * The row's deeds, behind the table's standard "…" menu rather than a button
  * in every row: installing is one deed among the preview's, the bulk action is
@@ -128,18 +133,17 @@ export function useCatalogueOriginColumn(
  */
 export function useCatalogueActionsColumn({
   isPending,
-  writableOf,
-  shareableOf,
-  sharedSpacesOf,
+  deedsOf,
+  spaceNameOf,
   onOpen,
   onMoveHome,
   onShare,
   onRevoke,
 }: {
   isPending: boolean;
-  writableOf: (item: CardItem) => boolean;
-  shareableOf: (item: CardItem) => boolean;
-  sharedSpacesOf: (item: CardItem) => { id: string; name: string }[];
+  /** `undefined` for a row the library does not carry: its menu only opens it. */
+  deedsOf: (item: CardItem) => CatalogueDeeds | undefined;
+  spaceNameOf: (spaceId: string) => string;
   onOpen: (item: CardItem) => void;
   onMoveHome: (item: CardItem) => void;
   onShare: (item: CardItem) => void;
@@ -156,9 +160,8 @@ export function useCatalogueActionsColumn({
         item={item}
         // A system package has no home to move and no audience to offer: the
         // server answers `false` for both, so the menu offers neither.
-        homeWritable={writableOf(item)}
-        homeShareable={shareableOf(item)}
-        sharedSpaces={sharedSpacesOf(item)}
+        deeds={deedsOf(item) ?? NO_DEEDS}
+        spaceNameOf={spaceNameOf}
         isPending={isPending}
         onOpen={onOpen}
         onMoveHome={onMoveHome}
@@ -202,9 +205,9 @@ export function useCatalogueProtocolColumn(
  *
  * The switch IS the deed, not a report of it: activating a package in a space
  * it is not placed in shares it there and switches it on in one transaction,
- * which is the door the API already opens. The verdict is the TARGET space's,
- * never the one on screen — owning a personal space authorizes activating in
- * it even where the preset held there grants nothing (RBAC spec §3.6).
+ * which is the door the API already opens. The verdict is the TARGET space's
+ * (`activationGate`), never the one on screen, and a refused switch says which
+ * half is missing.
  *
  * "Offered" is written beside the switch rather than in place of it: it is the
  * one state that asks the reader for a decision, and hiding the control that
@@ -213,19 +216,17 @@ export function useCatalogueProtocolColumn(
 export function useCatalogueSpaceColumns({
   spaces,
   currentSpaceId,
-  type,
   placementOf,
-  shareableOf,
+  gateOf,
   busy,
   onSetActive,
 }: {
-  spaces: readonly { id: string; name: string; grant?: SpaceGrant }[];
+  spaces: readonly { id: string; name: string }[];
   /** The space the app is standing in — named, because the catalogue spans them all. */
   currentSpaceId: string | null;
-  type: PackageType;
   placementOf: (item: CardItem) => CataloguePlacement | undefined;
-  /** `home_shareable`: needed to switch a package on where it is not placed yet. */
-  shareableOf?: (item: CardItem) => boolean;
+  /** The reader's verdict for this switch, in the direction it would go. */
+  gateOf: (item: CardItem, spaceId: string, next: boolean) => ActivationGate;
   busy: boolean;
   onSetActive: (item: CardItem, spaceId: string, next: boolean) => void;
 }): DataColumn<CardItem>[] {
@@ -262,12 +263,7 @@ export function useCatalogueSpaceColumns({
           : placement.inactiveIn.includes(space.id)
             ? "inactive"
             : null;
-      // Switching ON where the package is not placed yet makes the route share
-      // it first, which asks the SHARE right in its home as well: without it
-      // the switch would be one the server refuses.
-      const mayWrite =
-        maySetPackageActive(space.grant, type, state !== "active") &&
-        (state !== null || (shareableOf?.(item) ?? true));
+      const gate = gateOf(item, space.id, state !== "active");
       return (
         // `relative z-10`: the row link paints an overlay over every cell, and
         // anything that answers to the pointer has to sit above it or the row
@@ -275,12 +271,14 @@ export function useCatalogueSpaceColumns({
         <span className="relative z-10 flex min-w-0 items-center gap-1.5 overflow-hidden">
           <Switch
             checked={state === "active"}
-            disabled={busy || !mayWrite}
+            disabled={busy || !gate.allowed}
             aria-label={t("catalogue.spaceSwitch", {
               package: item.displayName,
               space: space.name,
             })}
-            title={mayWrite ? undefined : t("library.cannotActivate", { ns: "common" })}
+            title={
+              gate.refusal ? t(ACTIVATION_REFUSAL_KEY[gate.refusal], { ns: "common" }) : undefined
+            }
             onCheckedChange={(next) => onSetActive(item, space.id, next === true)}
           />
           {state === "offered" && (

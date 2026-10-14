@@ -49,6 +49,7 @@ import {
   Inbox,
   Layers,
   LibraryBig,
+  Plug,
   Wrench,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -59,35 +60,35 @@ import { MOVE_HOME_PARAM, MoveHomeSpaceDialog } from "./package-detail/move-home
 import { SHARE_PARAM, SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ActivationClosureDialog } from "./catalogue-activation-dialog";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
-import { catalogueHref } from "../lib/catalogue-link";
+import { CATALOGUE_KINDS, catalogueHref, type CatalogueReading } from "../lib/catalogue-link";
 import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
-import { fetchPackageDetail } from "../hooks/use-packages";
+import { fetchPackageDetail, useAgents } from "../hooks/use-packages";
 import { packageKeys } from "../lib/query-keys";
 import { missingIntegrations, type MissingDependency } from "../lib/activation-closure";
 import { mayConfigurePackage, maySetPackageActive } from "../lib/package-permissions";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useRevokePackageShare } from "../hooks/use-package-shares";
 import { useAllIntegrations } from "../hooks/use-integrations";
-import { useAgents } from "../hooks/use-packages";
 import { AgentIdentityTile } from "./agent-identity";
 import { IntegrationIcon } from "./integration-icon";
 import {
+  invalidateLibraries,
   useCatalogueLibrary,
   useSetPackageActive,
   type LibraryPackageItem,
 } from "../hooks/use-library";
+import { activationGate, catalogueDeeds, type ActivationGate } from "../lib/catalogue-gates";
 import {
   cataloguePlacement,
+  detailSpace,
   inPlacedTab,
   pendingShares,
   type CataloguePlacement,
   type PlacementState,
 } from "../lib/catalogue-placement";
 import { useModalParam } from "../hooks/use-modal-param";
-import { useCatalogueKinds } from "../hooks/use-catalogue-kinds";
 import { useLocalListParams } from "../lib/list-params";
-import { canInstall } from "../lib/catalogue-install";
 import {
   INTEGRATION_EXECUTIONS,
   integrationExecution,
@@ -116,41 +117,42 @@ import { RailButton } from "./settings/rail-link";
 import { RailGroup, RailHeader } from "./settings/rail-shell";
 import { SettingsHeading } from "./settings/settings-heading";
 import { Spinner } from "./spinner";
-import type { CatalogueScope } from "../lib/catalogue-link";
 
-const KINDS: Array<{ type: PackageType; icon: typeof Layers; titleKey: string }> = [
-  { type: "agent", icon: Layers, titleKey: "packages.type.agents" },
-  { type: "skill", icon: Wrench, titleKey: "packages.type.skills" },
-  // No local MCP servers: a server is the engine of a local integration, never
-  // installed on its own — the integration is what this panel installs.
-  { type: "integration", icon: Boxes, titleKey: "packages.type.integrations" },
-];
+const KIND: Record<PackageType, { icon: typeof Layers; titleKey: string }> = {
+  agent: { icon: Layers, titleKey: "packages.type.agents" },
+  skill: { icon: Wrench, titleKey: "packages.type.skills" },
+  "mcp-server": { icon: Plug, titleKey: "packages.type.mcp-servers" },
+  integration: { icon: Boxes, titleKey: "packages.type.integrations" },
+};
+const KINDS = CATALOGUE_KINDS.map((type) => ({ type, ...KIND[type] }));
 
 /**
  * Columns the catalogue drops. `source` gives way to the catalogue's own origin
  * column, which names the provider instead of badging only one side, and
- * `keywords` goes because the library carries none: it was a column of dashes.
+ * `keywords` goes because the library carries none.
  */
 const CATALOGUE_DROPS = ["state", "actions", "source", "keywords"];
 
-function isPackageType(value: string): value is PackageType {
-  return KINDS.some((kind) => kind.type === value);
+/** One activation waiting on the integration question. */
+interface Closure {
+  item: CardItem;
+  spaceId: string;
+  missing: MissingDependency[];
 }
 
 export function OrgCatalogueModal({
-  scope,
-  type,
+  reading,
+  type: active,
   onSelect,
   onClose,
 }: {
   /** Both from the URL, so a link opens exactly one view. */
-  scope: CatalogueScope;
-  type: string;
-  onSelect: (scope: CatalogueScope, type: PackageType) => void;
+  reading: CatalogueReading;
+  type: PackageType;
+  onSelect: (reading: CatalogueReading, type: PackageType) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const allowed = useCatalogueKinds();
   const spaceId = useCurrentSpaceId();
   const orgId = useCurrentOrgId();
   const { currentOrg } = useOrg();
@@ -167,16 +169,9 @@ export function OrgCatalogueModal({
   const preview = useModalParam("package");
   const qc = useQueryClient();
 
-  const discovering = scope === "discover";
+  const discovering = reading === "discover";
   const view: "cards" | "table" = discovering ? "cards" : "table";
-  const visibleKinds = KINDS.filter((kind) => allowed.includes(kind.type));
-  const active =
-    (isPackageType(type) && visibleKinds.some((k) => k.type === type)
-      ? type
-      : visibleKinds[0]?.type) ??
-    // With no installable kind at all the panel would not have been opened.
-    "agent";
-  const kind = KINDS.find((k) => k.type === active)!;
+  const kind = KIND[active];
   const orgName = currentOrg?.name ?? "";
 
   // Integrations resolve their activation server-side, and only their view
@@ -192,9 +187,8 @@ export function OrgCatalogueModal({
   /**
    * The space the app is standing in leads, always.
    *
-   * The server orders spaces with the organization's default first, so a
-   * reader working in Production opened on Default: the first column they read
-   * was not theirs. Theirs is the anchor — it is where a launch, a run and a
+   * The server orders spaces with the organization's default first; the
+   * reader's own is the anchor instead — it is where a launch, a run and a
    * connection land — so it heads the table, it is the column that survives a
    * narrow width (tier 2, in `useCatalogueSpaceColumns`), and no filter moves
    * it.
@@ -209,14 +203,6 @@ export function OrgCatalogueModal({
   const routerLocation = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  // Every space the reader reaches is a column, theirs first. Narrowing to one
-  // is not a mode or a filter of its own; hiding a column is what the column
-  // menu is for, and "what does my space run" is Découvrir's question.
-  const spaceColumnsInput = spaces.map((space) => ({
-    id: space.id,
-    name: space.name,
-    grant: grantById.get(space.id),
-  }));
 
   /**
    * One row's placement, for every kind but the integrations.
@@ -266,39 +252,32 @@ export function OrgCatalogueModal({
       offeredHere: placement.here === "offered",
     };
   };
-  const canActivate = (item: CardItem) => canInstall(item, stateOf(item));
-  /**
-   * May this reader switch the package ON in that space?
-   *
-   * Two verdicts: the activation right in the target space, and — when the
-   * package is not placed there yet — the SHARE right in its home, since the
-   * route shares it before it activates it (`routes/spaces.ts`). Without the
-   * second, a member would see an "Ajouter" the server refuses.
-   */
+  /** The reader's verdict for one switch, in the direction it would go (`lib/catalogue-gates`). */
+  const gateOf = (pkg: LibraryPackageItem, targetSpaceId: string, next: boolean): ActivationGate =>
+    activationGate(pkg, targetSpaceId, grantById.get(targetSpaceId), next);
   const mayActivateIn = (pkg: LibraryPackageItem, targetSpaceId: string) =>
-    maySetPackageActive(grantById.get(targetSpaceId), pkg.type, true) &&
-    (pkg.placements.some((placement) => placement.space_id === targetSpaceId) ||
-      pkg.home_shareable === true);
+    gateOf(pkg, targetSpaceId, true).allowed;
   const rowOf = (item: Pick<CardItem, "id">) => ofKind.find((row) => row.id === item.id);
+  /** A row joins a bulk activation only when there is something the reader may switch on here. */
+  const canActivate = (item: CardItem) => {
+    const row = rowOf(item);
+    return !!row && !!spaceId && !stateOf(item).activeHere && mayActivateIn(row, spaceId);
+  };
   const writableOf = (item: Pick<CardItem, "id">) => rowOf(item)?.home_writable === true;
-  const shareableOf = (item: CardItem) => rowOf(item)?.home_shareable === true;
-  // Every space the package reaches through an OFFER: each one can be withdrawn,
-  // and withdrawing takes the activation it backs with it.
-  const sharedSpacesOf = (item: CardItem) =>
-    (rowOf(item)?.placements ?? [])
-      .filter((placement) => placement.via === "shared")
-      .map((placement) => ({ id: placement.space_id, name: spaceNameOf(placement.space_id) }));
+  const deedsOf = (item: Pick<CardItem, "id">) => {
+    const row = rowOf(item);
+    return row ? catalogueDeeds(row) : undefined;
+  };
   /**
-   * An activation waiting on a question: switching an agent on in a space its
+   * Activations waiting on a question: switching an agent on in a space its
    * integrations do not run gives an agent that cannot start, and nothing said
    * so. The switch asks before writing, and only when there is something to
-   * ask — every other activation stays one click.
+   * ask — every other activation stays one click. A bulk activation can queue
+   * several; they are asked one at a time.
    */
-  const [closure, setClosure] = useState<{
-    item: CardItem;
-    spaceId: string;
-    missing: MissingDependency[];
-  } | null>(null);
+  const [closures, setClosures] = useState<Closure[]>([]);
+  const closure = closures[0];
+  const nextClosure = () => setClosures((queue) => queue.slice(1));
   const moveHome = useModalParam(MOVE_HOME_PARAM);
   const share = useModalParam(SHARE_PARAM);
   const revoke = useRevokePackageShare();
@@ -318,7 +297,7 @@ export function OrgCatalogueModal({
       },
       {
         onSuccess: () => {
-          void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+          void invalidateLibraries(qc);
           toast.success(t("catalogue.revoked", { space: spaceNameOf(targetSpaceId) }));
         },
       },
@@ -393,22 +372,6 @@ export function OrgCatalogueModal({
     onChange: list.setValues("origin"),
   };
 
-  const activateOne = (item: { id: string }) => {
-    if (!spaceId) return;
-    activate.mutate(
-      { spaceId, packageId: item.id, active: true },
-      {
-        // The mutation says it worked; the row only leaves the selection.
-        onSuccess: () =>
-          setSelected((prev) => {
-            const next = new Set(prev);
-            next.delete(item.id);
-            return next;
-          }),
-      },
-    );
-  };
-
   const offered: CardItem[] = shown.map((item) => {
     const row: CardItem = {
       id: item.id,
@@ -438,7 +401,7 @@ export function OrgCatalogueModal({
         <IntegrationIcon src={integrationById.get(item.id)?.manifest.icon} />
       ) : (
         <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-[10px]">
-          <Wrench className="size-5" aria-hidden />
+          <kind.icon className="size-5" aria-hidden />
         </span>
       );
     // The spaces the add menu shows: where it already runs (ticked, so the
@@ -495,14 +458,14 @@ export function OrgCatalogueModal({
   const activatable = offered.filter(canActivate).map((item) => item.id);
   const allSelected = activatable.length > 0 && activatable.every((id) => selected.has(id));
   const picked = offered.filter((item) => selected.has(item.id));
-  const reading = preview.value ? rows.find((item) => item.id === preview.value) : undefined;
-  const readingItem: CardItem | undefined = reading
+  const previewed = preview.value ? rows.find((item) => item.id === preview.value) : undefined;
+  const previewedItem: CardItem | undefined = previewed
     ? {
-        id: reading.id,
-        displayName: reading.name || reading.id,
-        description: reading.description,
+        id: previewed.id,
+        displayName: previewed.name || previewed.id,
+        description: previewed.description,
         type: active,
-        source: reading.source as CardItem["source"],
+        source: previewed.source as CardItem["source"],
       }
     : undefined;
 
@@ -539,15 +502,21 @@ export function OrgCatalogueModal({
    * Only an AGENT has a closure the target space has to hold: its skills travel
    * with it (judged from its home), its integrations do not. The manifest is
    * read at the moment of the click rather than held open for every row —
-   * turning a switch on is rare, and holding a detail per row is not.
+   * turning a switch on is rare, and holding a detail per row is not — and
+   * from a space that holds the agent, since the one on screen may not.
    */
   const onSetActive = async (item: CardItem, targetSpaceId: string, next: boolean) => {
     if (!next || item.type !== "agent") return setActive(item, targetSpaceId, next);
+    const row = library?.packages.agent.find((agent) => agent.id === item.id);
+    const from = row
+      ? detailSpace(cataloguePlacement(row, spaceId), librarySpaces, spaceId)
+      : undefined;
+    if (!from) return setActive(item, targetSpaceId, next);
     let declared: { id: string }[];
     try {
       const detail = await qc.fetchQuery({
-        queryKey: packageKeys.detail("agents", orgId ?? "", spaceId ?? "", item.id, null),
-        queryFn: () => fetchPackageDetail("agent", item.id),
+        queryKey: packageKeys.detail("agents", orgId ?? "", from, item.id, null),
+        queryFn: () => fetchPackageDetail("agent", item.id, undefined, from),
       });
       declared = detail.dependencies.integrations;
     } catch {
@@ -566,15 +535,24 @@ export function OrgCatalogueModal({
       () => maySetPackageActive(grantById.get(targetSpaceId), "integration", true),
     );
     if (missing.length === 0) return setActive(item, targetSpaceId, next);
-    setClosure({ item, spaceId: targetSpaceId, missing });
+    setClosures((queue) => [...queue, { item, spaceId: targetSpaceId, missing }]);
+  };
+
+  /** The ticked rows, each through the same door as its own switch. */
+  const activatePicked = () => {
+    if (!spaceId) return;
+    for (const item of picked) void onSetActive(item, spaceId, true);
+    setSelected(new Set());
   };
 
   const spaceColumns = useCatalogueSpaceColumns({
-    spaces: spaceColumnsInput,
+    spaces,
     currentSpaceId: spaceId,
-    type: active,
     placementOf: (item) => placementById.get(item.id),
-    shareableOf,
+    gateOf: (item, targetSpaceId, next) => {
+      const row = rowOf(item);
+      return row ? gateOf(row, targetSpaceId, next) : { allowed: false, refusal: null };
+    },
     busy: activate.isPending,
     onSetActive: (item, targetSpaceId, next) => void onSetActive(item, targetSpaceId, next),
   });
@@ -584,20 +562,19 @@ export function OrgCatalogueModal({
   });
   const actionsColumn = useCatalogueActionsColumn({
     isPending: activate.isPending || revoke.isPending,
-    writableOf,
-    shareableOf,
-    sharedSpacesOf,
+    deedsOf,
+    spaceNameOf,
     onOpen: (item) => preview.open(item.id),
     onMoveHome: (item) => moveHome.open(item.id),
     onShare: (item) => share.open(item.id),
     onRevoke: revokeFrom,
   });
 
-  const show = (nextScope: CatalogueScope, nextType: PackageType) => {
+  const show = (nextReading: CatalogueReading, nextType: PackageType) => {
     setSelected(new Set());
     list.reset();
     preview.close();
-    onSelect(nextScope, nextType);
+    onSelect(nextReading, nextType);
   };
 
   /**
@@ -610,14 +587,14 @@ export function OrgCatalogueModal({
    * the list (search, filters, columns), and the rail is left with the one
    * axis that IS a partition: the kinds.
    */
-  const readings: { id: CatalogueScope; label: string }[] = [
-    { id: "discover", label: t("catalogue.scopeDiscover") },
-    { id: "placed", label: t("catalogue.scopePlaced") },
+  const readings: { id: CatalogueReading; label: string }[] = [
+    { id: "discover", label: t("catalogue.readingDiscover") },
+    { id: "placed", label: t("catalogue.readingPlaced") },
   ];
   const readingSwitcher = (
     <div
       role="tablist"
-      aria-label={t("catalogue.scopeSelector")}
+      aria-label={t("catalogue.readingSelector")}
       className="bg-sidebar-accent/40 flex h-8 shrink-0 gap-0.5 rounded-lg p-0.5"
     >
       {readings.map((option) => (
@@ -625,11 +602,11 @@ export function OrgCatalogueModal({
           key={option.id}
           type="button"
           role="tab"
-          aria-selected={scope === option.id}
+          aria-selected={reading === option.id}
           onClick={() => show(option.id, active)}
           className={cn(
             "focus-visible:ring-ring flex items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2",
-            scope === option.id
+            reading === option.id
               ? "bg-card text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
           )}
@@ -639,33 +616,33 @@ export function OrgCatalogueModal({
       ))}
     </div>
   );
-  const kindRows = visibleKinds.map((entry) => (
+  const kindRows = KINDS.map((entry) => (
     <RailButton
       key={entry.type}
       icon={entry.icon}
       label={t(entry.titleKey)}
       count={library?.packages[entry.type]?.length}
-      active={scope !== "shared" && entry.type === active}
-      onClick={() => show(scope === "shared" ? "discover" : scope, entry.type)}
+      active={reading !== "shared" && entry.type === active}
+      onClick={() => show(reading === "shared" ? "discover" : reading, entry.type)}
     />
   ));
   // Every share waiting, across kinds: the list a decision is taken from when
   // there is more than one. Shown while any waits, and while it is open, so
   // the last activation leaves the reader on its empty state, not elsewhere.
   const shares = pendingShares(Object.values(library?.packages ?? {}).flat());
-  const showShared = shares.length > 0 || scope === "shared";
+  const showShared = shares.length > 0 || reading === "shared";
   const sharedRow = showShared ? (
     <RailButton
       icon={Inbox}
       label={t("catalogue.shared.title")}
       count={shares.length}
-      active={scope === "shared"}
+      active={reading === "shared"}
       onClick={() => show("shared", active)}
     />
   ) : null;
 
   // The settings rail, to the pixel: same header, same titled group, same rows.
-  // The two readings left it for the bar; the kinds are its only axis.
+  // The readings sit in the bar; the kinds are the rail's only axis.
   const rail = (
     <div className="flex h-full flex-col">
       <RailHeader icon={LibraryBig} title={t("catalogue.title")} />
@@ -691,7 +668,7 @@ export function OrgCatalogueModal({
             type="button"
             variant="ghost"
             size="sm"
-            aria-pressed={scope === "shared"}
+            aria-pressed={reading === "shared"}
             className="aria-pressed:bg-accent shrink-0 gap-2 px-3"
             onClick={() => show("shared", active)}
           >
@@ -699,15 +676,15 @@ export function OrgCatalogueModal({
             {t("catalogue.shared.title")}
           </Button>
         )}
-        {visibleKinds.map((entry) => (
+        {KINDS.map((entry) => (
           <Button
             key={entry.type}
             type="button"
             variant="ghost"
             size="sm"
-            aria-pressed={scope !== "shared" && entry.type === active}
+            aria-pressed={reading !== "shared" && entry.type === active}
             className="aria-pressed:bg-accent shrink-0 gap-2 px-3"
-            onClick={() => show(scope === "shared" ? "discover" : scope, entry.type)}
+            onClick={() => show(reading === "shared" ? "discover" : reading, entry.type)}
           >
             <entry.icon className="size-4 shrink-0" />
             {t(entry.titleKey)}
@@ -727,7 +704,7 @@ export function OrgCatalogueModal({
       // Where the reader is, kept in place while the pane scrolls: the kind
       // they are browsing, or the package they opened, with the way back.
       contentHeader={(stuck) =>
-        reading ? (
+        previewed ? (
           <div className="flex min-w-0 items-center gap-2">
             <Button
               variant="ghost"
@@ -746,7 +723,7 @@ export function OrgCatalogueModal({
                 stuck ? "opacity-100" : "opacity-0",
               )}
             >
-              {reading.name || reading.id}
+              {previewed.name || previewed.id}
             </span>
           </div>
         ) : (
@@ -762,7 +739,7 @@ export function OrgCatalogueModal({
       }
       onClose={onClose}
     >
-      {scope === "shared" ? (
+      {reading === "shared" ? (
         <CatalogueShared
           shares={shares}
           spaceNameOf={spaceNameOf}
@@ -784,38 +761,33 @@ export function OrgCatalogueModal({
           // Back returns to that kind's list.
           onOpen={(pkg) => navigate(catalogueHref(pkg.type, { packageId: pkg.id }))}
         />
-      ) : reading ? (
+      ) : previewed && previewedItem ? (
         <CataloguePreview
-          item={reading}
+          item={previewed}
           type={active}
-          spaces={library?.spaces ?? []}
-          placement={placementOf(reading)}
-          grantOf={(targetSpaceId, next) =>
-            next
-              ? mayActivateIn(reading, targetSpaceId)
-              : maySetPackageActive(grantById.get(targetSpaceId), active, false)
-          }
+          spaces={librarySpaces}
+          placement={placementOf(previewed)}
+          gateOf={(targetSpaceId, next) => gateOf(previewed, targetSpaceId, next)}
           mayConfigureIn={(targetSpaceId) =>
             mayConfigurePackage(grantById.get(targetSpaceId), active)
           }
           integrations={library?.packages.integration ?? []}
           agents={library?.packages.agent ?? []}
           protocol={
-            active === "integration" && integrationById.get(reading.id)
-              ? integrationProtocol(integrationById.get(reading.id)!)
+            active === "integration" && integrationById.get(previewed.id)
+              ? integrationProtocol(integrationById.get(previewed.id)!)
               : undefined
           }
           actionsMenu={
             <PageActionsMenu>
               <CatalogueMenuItems
-                item={readingItem!}
-                homeWritable={writableOf(readingItem!)}
-                homeShareable={shareableOf(readingItem!)}
-                sharedSpaces={sharedSpacesOf(readingItem!)}
+                item={previewedItem}
+                deeds={catalogueDeeds(previewed)}
+                spaceNameOf={spaceNameOf}
                 open={{
                   label: t("catalogue.openFullPage"),
                   icon: ExternalLink,
-                  onSelect: () => navigate(packageDetailPath(active, reading.id)),
+                  onSelect: () => navigate(packageDetailPath(active, previewed.id)),
                 }}
                 onMoveHome={(item) => moveHome.open(item.id)}
                 onShare={(item) => share.open(item.id)}
@@ -825,11 +797,7 @@ export function OrgCatalogueModal({
           }
           busy={activate.isPending}
           onSetActive={(targetSpaceId, next) =>
-            void onSetActive(
-              { id: reading.id, displayName: reading.name || reading.id, type: active },
-              targetSpaceId,
-              next,
-            )
+            void onSetActive(previewedItem, targetSpaceId, next)
           }
         />
       ) : (
@@ -843,8 +811,7 @@ export function OrgCatalogueModal({
           emptyHint={t(discovering ? "catalogue.emptyDiscoverHint" : "catalogue.emptyPlacedHint")}
           emptyIcon={kind.icon}
           list={list}
-          // The space and the state live in the URL, so the bar's own reset
-          // could not see them: "Réinitialiser" left both chips standing.
+          // The state lives in the URL, out of the bar's own reset's reach.
           onResetFilters={() => setStates([])}
           view={view}
           header={
@@ -916,7 +883,7 @@ export function OrgCatalogueModal({
                   type="button"
                   size="sm"
                   disabled={activate.isPending || !spaceId}
-                  onClick={() => picked.forEach(activateOne)}
+                  onClick={activatePicked}
                 >
                   {activate.isPending && <Spinner />}
                   {t("catalogue.activateSelection", { count: picked.length })}
@@ -935,10 +902,10 @@ export function OrgCatalogueModal({
           spaceName={spaceNameOf(closure.spaceId)}
           missing={closure.missing}
           isPending={activate.isPending}
-          onClose={() => setClosure(null)}
+          onClose={nextClosure}
           onAgentOnly={() => {
             setActive(closure.item, closure.spaceId, true);
-            setClosure(null);
+            nextClosure();
           }}
           onActivateAll={() => {
             // The agent AND what its run needs, in the order a reader would do
@@ -948,7 +915,7 @@ export function OrgCatalogueModal({
             for (const entry of closure.missing) {
               activate.mutate({ spaceId: closure.spaceId, packageId: entry.id, active: true });
             }
-            setClosure(null);
+            nextClosure();
           }}
         />
       )}

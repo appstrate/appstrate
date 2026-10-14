@@ -8,6 +8,7 @@ import { client, type components } from "../api/client";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
+import { invalidateLibraries } from "./use-library";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
 import i18n from "../i18n";
 import {
@@ -216,7 +217,7 @@ export function useImportPackage({
       }
       // The library lists servers for the integration editor's picker, which
       // imports in place and must see the new one.
-      void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+      void invalidateLibraries(qc);
       if (navigateOnSuccess) {
         navigate(packageDetailPath(data.type, data.packageId));
       }

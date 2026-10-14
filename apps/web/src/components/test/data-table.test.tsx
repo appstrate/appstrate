@@ -11,7 +11,14 @@
 
 import { describe, it, expect } from "bun:test";
 import { DataTable, type DataColumn } from "../data-table.tsx";
-import { render } from "./run-fixture.tsx";
+import i18n, { i18nReady } from "../../i18n.ts";
+import { render } from "../../test/render.tsx";
+import { installFakeStorage } from "../../test/fake-storage.ts";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
+
+const storage = installFakeStorage();
 
 interface Row {
   id: string;
@@ -41,6 +48,7 @@ function table(props: Partial<Parameters<typeof DataTable<Row>>[0]> = {}) {
   return render(
     <DataTable
       label="Essai"
+      tableId="essai"
       columns={COLUMNS}
       rows={ROWS}
       rowKey={(r) => r.id}
@@ -241,8 +249,20 @@ describe("resizing", () => {
     });
     expect([...withEnd.matchAll(/role="separator"/g)]).toHaveLength(COLUMNS.length);
   });
+});
 
-  it("draws none in a table without a head band", () => {
-    expect(table({ showHeader: false })).not.toContain('role="separator"');
+describe("remembered widths", () => {
+  it("keys them on the table's id, not on its translated label", () => {
+    storage.setItem("appstrate-column-widths-widths-essai", JSON.stringify({ name: 321 }));
+    const french = table({ tableId: "widths-essai", label: "Essai" });
+    const english = table({ tableId: "widths-essai", label: "Trial" });
+    expect(french).toContain("321px");
+    expect(english).toContain("321px");
+  });
+
+  it("keeps two tables that share a label apart", () => {
+    storage.setItem("appstrate-column-widths-widths-a", JSON.stringify({ name: 333 }));
+    expect(table({ tableId: "widths-a", label: "Liste" })).toContain("333px");
+    expect(table({ tableId: "widths-b", label: "Liste" })).not.toContain("333px");
   });
 });

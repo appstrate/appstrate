@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { useWatch } from "react-hook-form";
+import { FormProvider, useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
@@ -22,18 +22,18 @@ import { EndpointFields } from "./model-form/endpoint-fields";
 import { ManualModelFields } from "./model-form/manual-model-fields";
 import { ModelPickList } from "./model-form/model-pick-list";
 import { ProviderPicker } from "./model-form/provider-picker";
+import { SavedModelActions } from "./model-form/saved-model-actions";
 import { useOpenRouterSearch } from "./model-form/use-open-router-search";
+import { useModelDiscovery } from "./model-form/use-model-discovery";
 import {
-  useDiscoverModels,
   useModelProviderCredentials,
   useProvidersRegistry,
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import { ErrorState, LoadingState } from "./page-states";
-import { ApiError } from "../api/errors";
 import { refusalMessage } from "../lib/mutation-error";
 import { getProviderById } from "@/lib/provider-registry-helpers";
-import { buildDiscoverBody, parsesAsUrl, type DiscoveryState } from "@/lib/model-discovery";
+import { buildDiscoverBody, parsesAsUrl } from "@/lib/model-discovery";
 import {
   buildModelFormPayload,
   buildModelsBatchPayload,
@@ -51,6 +51,7 @@ import {
 } from "@/lib/model-source";
 import { rowOverridesCatalog } from "@/lib/row-overrides-catalog";
 import { selectableCredentials } from "@/lib/model-credential-filter";
+import { allowsMemberModels } from "@/lib/model-providers";
 
 interface ModelFormModalProps {
   open: boolean;
@@ -58,6 +59,8 @@ interface ModelFormModalProps {
   model: OrgModelInfo | null;
   isPending: boolean;
   onSubmit: ModelFormSubmit;
+  /** Editing: deletes the model, for a caller who may (`models:delete`). */
+  onDelete?: () => void;
 }
 
 interface ModelFormBodyProps {
@@ -108,16 +111,7 @@ function ModelForm({
   const catalogEntry = (id: string | null | undefined) =>
     id ? selectedProvider?.models.find((m) => m.id === id) : undefined;
 
-  const {
-    register,
-    handleSubmit,
-    control,
-    setValue,
-    setError,
-    clearErrors,
-    showError,
-    formState: { errors, dirtyFields },
-  } = useAppForm<ModelFormFields>({
+  const form = useAppForm<ModelFormFields>({
     defaultValues: {
       label: model?.label ?? "",
       apiShape: model?.apiShape ?? "",
@@ -133,28 +127,20 @@ function ModelForm({
       reasoning: model?.reasoning ?? false,
     },
   });
-
-  const [
-    apiShape,
-    baseUrl,
-    credentialId,
-    inlineApiKey,
-    capabilitiesExplicit,
-    inputText,
-    inputImage,
-    reasoning,
-  ] = useWatch({
+  const {
+    register,
+    handleSubmit,
     control,
-    name: [
-      "apiShape",
-      "baseUrl",
-      "credentialId",
-      "inlineApiKey",
-      "capabilitiesExplicit",
-      "inputText",
-      "inputImage",
-      "reasoning",
-    ],
+    setValue,
+    setError,
+    clearErrors,
+    showError,
+    formState: { errors, dirtyFields },
+  } = form;
+
+  const [apiShape, baseUrl, credentialId, inlineApiKey, capabilitiesExplicit] = useWatch({
+    control,
+    name: ["apiShape", "baseUrl", "credentialId", "inlineApiKey", "capabilitiesExplicit"],
   });
 
   const credentialsQuery = useModelProviderCredentials();
@@ -172,14 +158,9 @@ function ModelForm({
   );
   const selectedCredential = availableCredentials.find((k) => k.id === credentialId);
 
-  // Offered where a member's own credential can serve the model: the provider
-  // allows personal credentials, an alias hides its binding, and a listing that
-  // still needs a key to ask with has none to lend.
+  // An alias hides its binding.
   const eachMemberOffered =
-    !!selectedProvider &&
-    selectedProvider.personal_allowed &&
-    !model?.aliased &&
-    source !== "discover";
+    !!selectedProvider && allowsMemberModels(selectedProvider) && !model?.aliased;
   // A member-served row (`binding: "member"`) is the saved form of the same choice.
   const [eachMember, setEachMember] = useState(() => !!model && model.binding === "member");
   const unbound = eachMemberOffered && eachMember;
@@ -190,12 +171,12 @@ function ModelForm({
     (!!selectedCredential || unbound || (!isOauth && !!inlineApiKey.trim())) &&
     (!overridable || parsesAsUrl(baseUrl));
 
-  // Discovery persists nothing, so the listing lives here — and only for what
-  // it ran against: editing the URL, the key or the provider makes it stale.
-  const discoverModels = useDiscoverModels();
-  const [discovery, setDiscovery] = useState<DiscoveryState | null>(null);
-  const discoveryKey = [providerId, baseUrl.trim(), credentialId, inlineApiKey.trim()].join("|");
-  const freshDiscovery = discovery?.key === discoveryKey ? discovery : null;
+  // Editing the URL, the key or the provider makes a listing stale.
+  const {
+    discovery: freshDiscovery,
+    detecting,
+    detect,
+  } = useModelDiscovery([providerId, baseUrl.trim(), credentialId, inlineApiKey.trim()].join("|"));
 
   const search = useOpenRouterSearch(source === "search");
 
@@ -340,35 +321,15 @@ function ModelForm({
 
   const handleDiscover = () => {
     if (!selectedProvider) return;
-    const key = discoveryKey;
     switchMode("list");
     dropListing();
-    discoverModels.mutate(
-      {
-        body: buildDiscoverBody({
-          credentialId: selectedCredential?.id ?? null,
-          provider: selectedProvider,
-          inlineApiKey,
-          baseUrl,
-        }),
-      },
-      {
-        onSuccess: (data) =>
-          setDiscovery({
-            key,
-            outcome: data.outcome,
-            models: data.models,
-            truncated: data.truncated,
-          }),
-        onError: (err) =>
-          setDiscovery({
-            key,
-            // The platform's own rate limit; `rate_limited` is the endpoint's.
-            outcome: err instanceof ApiError && err.status === 429 ? "throttled" : "request_failed",
-            models: [],
-            truncated: false,
-          }),
-      },
+    detect(
+      buildDiscoverBody({
+        credentialId: selectedCredential?.id ?? null,
+        provider: selectedProvider,
+        inlineApiKey,
+        baseUrl,
+      }),
     );
   };
 
@@ -475,116 +436,106 @@ function ModelForm({
   );
 
   return (
-    <form id="model-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
-      <input type="hidden" {...register("credentialId", { validate: credentialValidate })} />
-      <ProviderPicker
-        id="mdl-provider"
-        registry={registry}
-        providerId={providerId}
-        // The endpoint belongs to the saved row.
-        disabled={!!model}
-        onChange={(id) => switchProvider(id, false)}
-      />
-
-      <EndpointFields
-        idPrefix="mdl"
-        provider={selectedProvider}
-        providers={registry.filter((p) => p.baseUrlOverridable)}
-        onApiTypeChange={(entry) => switchProvider(entry.providerId, true)}
-        providerLocked={!!model}
-        baseUrlProps={register("baseUrl", {
-          validate: baseUrlValidate,
-          onChange: dropEndpointBinding,
-        })}
-        // The URL is a property of the credential, not of the model.
-        baseUrlLocked={!!selectedCredential}
-        baseUrlError={showError("baseUrl") ? errors.baseUrl?.message : undefined}
-        apiKeyProps={register("inlineApiKey", { onChange: dropEndpointBinding })}
-        apiKeyError={showError("credentialId") ? errors.credentialId?.message : undefined}
-        // Once the typed key HAS been minted, a retry rebinds to it — promising
-        // another automatic create would be a lie.
-        apiKeyHint={
-          !selectedCredential && !createdCredentialId && inlineApiKey.trim()
-            ? t("models.form.createCredentialHint")
-            : undefined
-        }
-        existingKeys={existingKeys}
-        eachMember={eachMemberChoice}
-      />
-
-      {endpointReady && source === "discover" && !model && (
-        <DiscoveryControls
-          mode={mode}
-          discovery={freshDiscovery}
-          isPending={discoverModels.isPending}
-          onDiscover={handleDiscover}
-          onManual={() => switchMode("manual")}
+    <FormProvider {...form}>
+      <form id="model-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
+        <input type="hidden" {...register("credentialId", { validate: credentialValidate })} />
+        <ProviderPicker
+          id="mdl-provider"
+          registry={registry}
+          providerId={providerId}
+          // The endpoint belongs to the saved row.
+          disabled={!!model}
+          onChange={(id) => switchProvider(id, false)}
         />
-      )}
 
-      {listing && (
-        <div className="space-y-2">
-          <Label>{t("models.form.modelId")}</Label>
-          <ModelPickList
-            rows={rows}
-            selectedIds={picked.map((r) => r.id)}
-            onSelectionChange={handleSelectionChange}
-            search={search.search}
-            onSearchChange={search.setSearch}
-            isLoading={source === "search" && search.isLoading}
-            loadingText={t("models.form.modelSearchLoading")}
-            emptyText={t("models.form.modelSearchEmpty")}
-            grouped={source === "catalog"}
+        <EndpointFields
+          idPrefix="mdl"
+          provider={selectedProvider}
+          providers={registry.filter((p) => p.baseUrlOverridable)}
+          onApiTypeChange={(entry) => switchProvider(entry.providerId, true)}
+          providerLocked={!!model}
+          baseUrlProps={register("baseUrl", {
+            validate: baseUrlValidate,
+            onChange: dropEndpointBinding,
+          })}
+          // The URL is a property of the credential, not of the model.
+          baseUrlLocked={!!selectedCredential}
+          baseUrlError={showError("baseUrl") ? errors.baseUrl?.message : undefined}
+          apiKeyProps={register("inlineApiKey", { onChange: dropEndpointBinding })}
+          apiKeyError={showError("credentialId") ? errors.credentialId?.message : undefined}
+          // Once the typed key HAS been minted, a retry rebinds to it — promising
+          // another automatic create would be a lie.
+          apiKeyHint={
+            !selectedCredential && !createdCredentialId && inlineApiKey.trim()
+              ? t("models.form.createCredentialHint")
+              : undefined
+          }
+          existingKeys={existingKeys}
+          eachMember={eachMemberChoice}
+        />
+
+        {endpointReady && source === "discover" && !model && (
+          <DiscoveryControls
+            mode={mode}
+            discovery={freshDiscovery}
+            isPending={detecting}
+            onDiscover={handleDiscover}
+            onManual={() => switchMode("manual")}
           />
-          {modelIdError}
-          {failedModelIds.length > 0 && (
-            <div className="text-destructive text-sm">
-              {t("models.form.addFailed", { ids: failedModelIds.join(", ") })}
-            </div>
-          )}
-          {duplicateModelIds.length > 0 && (
-            <div className="text-muted-foreground text-sm">
-              {t("models.form.addSkippedDuplicate", { ids: duplicateModelIds.join(", ") })}
-            </div>
-          )}
-          {source !== "discover" && offersManual && manualToggle("manual")}
-        </div>
-      )}
+        )}
 
-      {manual && (
-        <>
-          <ManualModelFields
-            idPrefix="mdl"
-            modelIdProps={register("modelId", { validate: modelIdValidate })}
-            modelIdError={showError("modelId") ? errors.modelId?.message : undefined}
-            labelProps={register("label", { validate: labelValidate })}
-            labelError={showError("label") ? errors.label?.message : undefined}
-            labelPlaceholder={model ? undefined : t("models.form.labelPlaceholder")}
-            capabilities={{
-              explicit: capabilitiesExplicit,
-              contextWindowProps: register("contextWindow"),
-              maxTokensProps: register("maxTokens"),
-              inputText,
-              inputImage,
-              reasoning,
-              onExplicitChange: (v) => setValue("capabilitiesExplicit", v),
-              onInputTextChange: (v) => setValue("inputText", v),
-              onInputImageChange: (v) => setValue("inputImage", v),
-              onReasoningChange: (v) => setValue("reasoning", v),
-            }}
-          />
-          {!model && source !== "discover" && offersManual && manualToggle("list")}
-        </>
-      )}
+        {listing && (
+          <div className="space-y-2">
+            <Label>{t("models.form.modelId")}</Label>
+            <ModelPickList
+              rows={rows}
+              selectedIds={picked.map((r) => r.id)}
+              onSelectionChange={handleSelectionChange}
+              search={search.search}
+              onSearchChange={search.setSearch}
+              isLoading={source === "search" && search.isLoading}
+              loadingText={t("models.form.modelSearchLoading")}
+              emptyText={t("models.form.modelSearchEmpty")}
+              grouped={source === "catalog"}
+            />
+            {modelIdError}
+            {failedModelIds.length > 0 && (
+              <div className="text-destructive text-sm">
+                {t("models.form.addFailed", { ids: failedModelIds.join(", ") })}
+              </div>
+            )}
+            {duplicateModelIds.length > 0 && (
+              <div className="text-muted-foreground text-sm">
+                {t("models.form.addSkippedDuplicate", { ids: duplicateModelIds.join(", ") })}
+              </div>
+            )}
+            {source !== "discover" && offersManual && manualToggle("manual")}
+          </div>
+        )}
 
-      {/* Registered even off screen, so saving too early is refused, not a dead button. */}
-      {!manual && !listing && (
-        <>
-          <input type="hidden" {...register("modelId", { validate: modelIdValidate })} />
-          {modelIdError}
-        </>
-      )}
-    </form>
+        {manual && (
+          <>
+            <ManualModelFields
+              idPrefix="mdl"
+              modelIdProps={register("modelId", { validate: modelIdValidate })}
+              modelIdError={showError("modelId") ? errors.modelId?.message : undefined}
+              labelProps={register("label", { validate: labelValidate })}
+              labelError={showError("label") ? errors.label?.message : undefined}
+              labelPlaceholder={model ? undefined : t("models.form.labelPlaceholder")}
+            />
+            {!model && source !== "discover" && offersManual && manualToggle("list")}
+          </>
+        )}
+
+        {/* Registered even off screen, so saving too early is refused, not a dead button. */}
+        {!manual && !listing && (
+          <>
+            <input type="hidden" {...register("modelId", { validate: modelIdValidate })} />
+            {modelIdError}
+          </>
+        )}
+      </form>
+    </FormProvider>
   );
 }
 
@@ -594,6 +545,7 @@ function ModelFormDialog({
   model,
   isPending,
   onSubmit,
+  onDelete,
 }: Omit<ModelFormModalProps, "open">) {
   const { t } = useTranslation(["settings", "common"]);
   const [selectionCount, setSelectionCount] = useState<number | null>(null);
@@ -605,6 +557,7 @@ function ModelFormDialog({
       title={model ? t("models.form.editTitle") : t("models.form.title")}
       actions={
         <>
+          {model && <SavedModelActions model={model} onDelete={onDelete} />}
           <Button type="button" variant="outline" onClick={onClose}>
             {t("btn.cancel")}
           </Button>

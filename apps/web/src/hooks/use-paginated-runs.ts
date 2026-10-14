@@ -31,6 +31,22 @@ interface UsePaginatedRunsOptions {
   offset: number;
 }
 
+/**
+ * Whether the rows of the previous page stay on screen while the next one
+ * loads: yes while PAGING and while SEARCHING (no skeleton per keystroke), no
+ * when a filter changed, so rows read under other filters never sit under the
+ * chips just ticked. The key ends with `search, limit, offset`
+ * (`paginatedRunsKeys.list`); the segments around them are the filters.
+ */
+export function keepsRunRows(previousKey: readonly unknown[], currentKey: readonly unknown[]) {
+  const filters = (key: readonly unknown[]) => [...key.slice(0, -3), key[key.length - 2]];
+  const current = filters(currentKey);
+  const previous = filters(previousKey);
+  return (
+    previous.length === current.length && previous.every((segment, i) => segment === current[i])
+  );
+}
+
 export function usePaginatedRuns({
   packageId,
   scheduleId,
@@ -58,8 +74,8 @@ export function usePaginatedRuns({
       ? `/agents/${packageId}/runs`
       : `/runs`;
 
-  // Key pinned to the legacy shape: use-global-run-sync (and run mutations)
-  // invalidate by the ["paginated-runs"] prefix.
+  // use-global-run-sync and the run mutations invalidate by the
+  // ["paginated-runs"] prefix.
   const currentKey = paginatedRunsKeys.list(
     orgId,
     spaceId,
@@ -109,21 +125,14 @@ export function usePaginatedRuns({
       });
       return data!;
     },
-    // Keep the rows on screen while PAGING, drop them when the filters change,
-    // so rows read under other filters never sit under the chips just ticked.
-    // The offset is the last segment of the key; everything before it is what
-    // the user asked for.
-    placeholderData: (prev, prevQuery) => {
-      const previousKey = prevQuery?.queryKey as unknown[] | undefined;
-      if (!previousKey) return undefined;
-      const sameQuestion = previousKey
-        .slice(0, -1)
-        .every((segment, i) => segment === (currentKey[i] as unknown));
-      return sameQuestion ? prev : undefined;
-    },
+    placeholderData: (prev, prevQuery) =>
+      prevQuery && keepsRunRows(prevQuery.queryKey, currentKey) ? prev : undefined,
     enabled: canRead && !!spaceId,
   });
 }
+
+/** Prefix of every agent's 30-day activity: a run update moves its counts. */
+export const agentRunActivityKey = ["agent-run-activity"] as const;
 
 /** One server-side aggregate for the agent overview's fixed 30-day window. */
 export function useAgentRunActivity(packageId: string | undefined) {
@@ -132,7 +141,7 @@ export function useAgentRunActivity(packageId: string | undefined) {
   const { can } = usePermissions();
 
   return useQuery({
-    queryKey: ["agent-run-activity", orgId, spaceId, packageId],
+    queryKey: [...agentRunActivityKey, orgId, spaceId, packageId],
     queryFn: async () => {
       const { scope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/run-activity", {

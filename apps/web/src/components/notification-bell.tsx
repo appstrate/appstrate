@@ -52,7 +52,7 @@ function notificationTarget(
     // One share, one decision: open THAT package's sheet, where the alert
     // names the space it was shared with and activates it there — not a list
     // the reader has to search.
-    return canReach("/catalogue/:origin/:type")
+    return canReach("/catalogue/:reading/:type")
       ? catalogueHref(sharedKind(payloadString(notification.payload, "package_type")), {
           packageId: packageId ?? undefined,
         })

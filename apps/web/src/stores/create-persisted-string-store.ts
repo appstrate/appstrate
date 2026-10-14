@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createStore, type StoreApi } from "zustand/vanilla";
+import { persistedValue } from "./local-storage";
 
 interface PersistedStringState {
   id: string | null;
@@ -16,14 +17,13 @@ interface PersistedStringState {
  * selections without interfering with each other.
  */
 export function createPersistedStringStore(storageKey: string): StoreApi<PersistedStringState> {
-  const initial = typeof window !== "undefined" ? localStorage.getItem(storageKey) : null;
+  const stored = persistedValue(storageKey, (raw) => raw);
 
   return createStore<PersistedStringState>()((set) => ({
-    id: initial,
+    id: stored.read(),
     setId: (id) => {
       set({ id });
-      if (id) localStorage.setItem(storageKey, id);
-      else localStorage.removeItem(storageKey);
+      stored.write(id || null);
     },
   }));
 }

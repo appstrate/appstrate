@@ -5,9 +5,9 @@
  *
  * They are components rather than closures inside the column set because each
  * one owns state or a mutation, and `cell` is called during the table's render
- * — a hook in there would be a hook inside a loop. Splitting them out of
- * `integration-columns.tsx` also keeps that file what its siblings are: column
- * DATA, exporting nothing but its two hooks.
+ * — a hook in there would be a hook inside a loop. Keeping them apart also
+ * keeps `integration-columns.tsx` what its siblings are: column DATA,
+ * exporting nothing but its two hooks.
  *
  * What the caller may do to a row is the server's verdict, read from the row's `allowed_actions`
  * (rename, share, unshare here) rather than re-derived: the list returns org-shared rows owned by
@@ -20,23 +20,23 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Bot, Pencil, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@appstrate/ui/components/dropdown-menu";
-import { ConfirmModal } from "../components/confirm-modal";
-import { InlineEditableLabel } from "../components/inline-editable-label";
-import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
-import { ConnectionScopeBadge } from "../components/integration-connect/connection-scope-badge";
-import { ConnectionShareEditor } from "../components/integration-connect/connection-share-editor";
-import { ConnectionVariablesLine } from "../components/integration-connect/connection-variables-line";
-import { useHostedConnectPopup } from "../components/integration-connect/use-integration-oauth-popup";
-import { ConnectionDeleteImpact } from "../components/integration-connect/connection-delete-impact";
-import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
-import { connectionLockHintKey } from "../components/integration-connect/connection-ownership";
+import { ConfirmModal } from "../confirm-modal";
+import { InlineEditableLabel } from "../inline-editable-label";
+import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
+import { ConnectionScopeBadge } from "../integration-connect/connection-scope-badge";
+import { ConnectionShareEditor } from "../integration-connect/connection-share-editor";
+import { ConnectionVariablesLine } from "../integration-connect/connection-variables-line";
+import { useHostedConnectPopup } from "../integration-connect/use-integration-oauth-popup";
+import { ConnectionDeleteImpact } from "../integration-connect/connection-delete-impact";
+import { ConnectionTeardownSteps } from "../integration-connect/connection-teardown-steps";
+import { connectionLockHintKey } from "../integration-connect/connection-ownership";
 import {
   useRenameIntegrationConnection,
   useConnectionShare,
@@ -44,19 +44,20 @@ import {
   type IntegrationConnection,
   useAgentsConsumingIntegration,
   useIntegrationPins,
-} from "../hooks/use-integrations";
+} from "../../hooks/use-integrations";
 import {
   useConnectionDeleteImpact,
   useDisconnectIntegrationConnection,
-} from "../hooks/use-me-connections";
-import { isQueryInFlight } from "../lib/query-state";
-import { usePermissions } from "../hooks/use-permissions";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { useCurrentOrgId } from "../hooks/use-org";
-import { useOrgSpaces } from "../hooks/use-spaces";
-import { useCanReach } from "../hooks/use-can-reach";
-import { packageDetailPath } from "../lib/package-paths";
-import { TableRowActions } from "../components/table-row-actions";
+} from "../../hooks/use-me-connections";
+import { isQueryInFlight } from "../../lib/query-state";
+import { usePermissions } from "../../hooks/use-permissions";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useCurrentOrgId } from "../../hooks/use-org";
+import { useOrgSpaces } from "../../hooks/use-spaces";
+import { useCanReach } from "../../hooks/use-can-reach";
+import { packageDetailPath } from "../../lib/package-paths";
+import { integrationSettingsHref } from "../../lib/settings-section-href";
+import { TableRowActions } from "../table-row-actions";
 
 /**
  * The agents an admin pin binds this connection to, named so a locked row says WHICH
@@ -294,6 +295,7 @@ export function ConnectionActionsCell({
     lockKey,
   );
   const canReach = useCanReach();
+  const location = useLocation();
   // Deleting and reconnecting are the owner's; renaming is also a governor's.
   if (!isOwn && !canRename) return <span className="text-muted-foreground text-xs">—</span>;
   const canReconnect =
@@ -361,7 +363,7 @@ export function ConnectionActionsCell({
           {/* And the way to unlock it, one click away, for whoever may. */}
           {isOwn && lockHint && isAdmin && (
             <DropdownMenuItem asChild>
-              <Link to={{ search: "?integrationSettings=access", hash: "#configuration" }}>
+              <Link to={integrationSettingsHref(location.pathname, "access")}>
                 <ShieldCheck />
                 {t("integration.connection.lock.openAccessRules")}
               </Link>

@@ -7,7 +7,7 @@
  */
 
 import { useState } from "react";
-import { useWatch } from "react-hook-form";
+import { FormProvider } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -35,13 +35,8 @@ function ManualModelForm({
   onCancel: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { register, handleSubmit, control, setValue, showError, formState } = useAppForm<Fields>({
-    defaultValues: EMPTY,
-  });
-  const [capabilitiesExplicit, inputText, inputImage, reasoning] = useWatch({
-    control,
-    name: ["capabilitiesExplicit", "inputText", "inputImage", "reasoning"],
-  });
+  const form = useAppForm<Fields>({ defaultValues: EMPTY });
+  const { register, handleSubmit, showError, formState } = form;
 
   const submit = handleSubmit((data) => {
     onAdd(manualRow(data));
@@ -49,35 +44,25 @@ function ManualModelForm({
   });
 
   return (
-    <form onSubmit={submit} noValidate className="space-y-4 px-3 py-3">
-      <ManualModelFields
-        idPrefix="mdl-manual"
-        modelIdProps={register("modelId", {
-          validate: (v) => (v.trim() ? undefined : t("validation.required", { ns: "common" })),
-        })}
-        modelIdError={showError("modelId") ? formState.errors.modelId?.message : undefined}
-        labelProps={register("label")}
-        labelPlaceholder={t("models.form.labelPlaceholder")}
-        capabilities={{
-          explicit: capabilitiesExplicit,
-          contextWindowProps: register("contextWindow"),
-          maxTokensProps: register("maxTokens"),
-          inputText,
-          inputImage,
-          reasoning,
-          onExplicitChange: (v) => setValue("capabilitiesExplicit", v),
-          onInputTextChange: (v) => setValue("inputText", v),
-          onInputImageChange: (v) => setValue("inputImage", v),
-          onReasoningChange: (v) => setValue("reasoning", v),
-        }}
-      />
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onCancel}>
-          {t("btn.cancel")}
-        </Button>
-        <Button type="submit">{t("models.choice.manualConfirm")}</Button>
-      </div>
-    </form>
+    <FormProvider {...form}>
+      <form onSubmit={submit} noValidate className="space-y-4 px-3 py-3">
+        <ManualModelFields
+          idPrefix="mdl-manual"
+          modelIdProps={register("modelId", {
+            validate: (v) => (v.trim() ? undefined : t("validation.required", { ns: "common" })),
+          })}
+          modelIdError={showError("modelId") ? formState.errors.modelId?.message : undefined}
+          labelProps={register("label")}
+          labelPlaceholder={t("models.form.labelPlaceholder")}
+        />
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={onCancel}>
+            {t("btn.cancel")}
+          </Button>
+          <Button type="submit">{t("models.choice.manualConfirm")}</Button>
+        </div>
+      </form>
+    </FormProvider>
   );
 }
 

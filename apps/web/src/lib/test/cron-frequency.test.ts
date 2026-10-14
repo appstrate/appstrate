@@ -7,7 +7,14 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { nextFires, parseCron, toCron, type Frequency } from "../cron-frequency.ts";
+import {
+  HOUR_STEPS,
+  MINUTE_STEPS,
+  nextFires,
+  parseCron,
+  toCron,
+  type Frequency,
+} from "../cron-frequency.ts";
 
 const at = (hour: number, minute = 0) => ({ hour, minute });
 
@@ -36,6 +43,22 @@ describe("parseCron", () => {
 
   it("keeps what it cannot say as the author's expression", () => {
     for (const cron of ["0 9 1 */3 *", "0 9-17 * * *", "0,30 9 * * *", "0 9 1 * 1", "bad"]) {
+      expect(parseCron(cron)).toEqual({ kind: "custom", cron });
+    }
+  });
+});
+
+describe("every N minutes or hours", () => {
+  it("offers only the steps that divide the hour or the day: the rhythm stays even", () => {
+    for (const every of MINUTE_STEPS) expect(60 % every).toBe(0);
+    for (const every of HOUR_STEPS) expect(24 % every).toBe(0);
+  });
+
+  it("keeps a step that restarts unevenly as the raw expression, never « every 45 minutes »", () => {
+    // `*\/45` fires at :00 and :45 of every hour: 45 minutes, then 15.
+    const fires = nextFires("*/45 * * * *", "UTC", 3, new Date("2026-10-08T12:01:00Z"));
+    expect(fires?.map((d) => d.toISOString().slice(11, 16))).toEqual(["12:45", "13:00", "13:45"]);
+    for (const cron of ["*/45 * * * *", "*/7 * * * *", "0 */5 * * *", "0 */7 * * *"]) {
       expect(parseCron(cron)).toEqual({ kind: "custom", cron });
     }
   });

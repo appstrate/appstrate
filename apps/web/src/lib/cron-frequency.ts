@@ -38,11 +38,19 @@ function int(field: string, min: number, max: number): number | null {
   return value >= min && value <= max ? value : null;
 }
 
-/** `*` (every unit, i.e. 1) or `*\/N`. */
-function step(field: string, max: number): number | null {
+/**
+ * The steps « every N » can say. A cron step restarts at each hour (minutes) or each day (hours):
+ * `*\/45` fires at :00 and :45, so only a step that divides the span is an even rhythm.
+ */
+export const MINUTE_STEPS: readonly number[] = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30];
+export const HOUR_STEPS: readonly number[] = [1, 2, 3, 4, 6, 8, 12];
+
+/** `*` (every unit, i.e. 1) or `*\/N` for N one of `steps`. */
+function step(field: string, steps: readonly number[]): number | null {
   if (field === "*") return 1;
   const match = /^\*\/(\d+)$/.exec(field);
-  return match ? int(match[1]!, 1, max) : null;
+  const every = match ? Number(match[1]) : null;
+  return every !== null && steps.includes(every) ? every : null;
 }
 
 /** A weekday field: single days, lists and ranges (`1-5`), 7 read as Sunday. */
@@ -73,13 +81,13 @@ export function parseCron(cron: string): Frequency {
   if (month !== "*") return custom;
 
   if (hour === "*" && dom === "*" && dow === "*") {
-    const every = step(min, 59);
+    const every = step(min, MINUTE_STEPS);
     if (every !== null) return { kind: "minutes", every };
   }
   const minute = int(min, 0, 59);
   if (minute === null) return custom;
   if (dom === "*" && dow === "*") {
-    const every = step(hour, 23);
+    const every = step(hour, HOUR_STEPS);
     if (every !== null) return { kind: "hours", every, minute };
   }
   const h = int(hour, 0, 23);
@@ -134,9 +142,4 @@ export function nextFires(
   } catch {
     return null;
   }
-}
-
-/** The zone a new schedule starts in: the browser's, the one its author lives in. */
-export function browserTimezone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }

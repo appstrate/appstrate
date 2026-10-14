@@ -6,8 +6,12 @@
  *
  * - **Clés org**: the organization's keys, and the instance's own models. An organization key
  *   serves the models bound to it, the instance serves the ones it ships.
- * - **Clés perso**: the setting that lets people use a key or a subscription of their own, and
- *   one row per service open to them: its models, and who plugged a key in.
+ * - **Clés perso**: the setting that lets people use a key or a subscription of their own, one
+ *   row per service open to them (its models, and who plugged a key in), then the personal keys
+ *   themselves, each with what the server lets the caller do with it (`allowed_actions`).
+ *
+ * A model's own deeds (test, delete, its finer settings) are in its form, opened from « Choose the
+ * models »; the instance's models are tested from its row.
  *
  * The tab lives in the URL (`?tab=personal`), like the roles page's.
  */
@@ -16,11 +20,13 @@ import { useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
+import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { cn } from "@appstrate/ui/cn";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
+  useDeleteModel,
   useModels,
   useModelFormHandler,
   useSetDefaultModel,
@@ -37,7 +43,8 @@ import { NoAccessState } from "../../components/route-gate";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
-import { DeleteOrgKeyConfirm } from "../../components/delete-org-key-confirm";
+import { DeleteKeyConfirm } from "../../components/delete-key-confirm";
+import { ConfirmModal } from "../../components/confirm-modal";
 import { CollectionTabs } from "../../components/collection-tabs";
 import { PreferencesModelsLink } from "../../components/preferences-models-link";
 import { EmptyStateAction } from "../../components/page-states";
@@ -51,9 +58,11 @@ import { SettingsGroup } from "../../components/settings/setting-row";
 import { PageActionsMenu } from "../../components/page-actions-menu";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
 import {
+  isSystemModel,
   personalModelServices,
   personalServiceRows,
   providerRows,
+  type ProviderRow,
 } from "../../lib/model-providers";
 import { authStore } from "../../stores/auth-store";
 
@@ -66,6 +75,7 @@ export function OrgSettingsModelsPage() {
   const userId = useStore(authStore, (s) => s.user?.id);
 
   const canWriteModels = can("models:write");
+  const canDeleteModels = can("models:delete");
   const canReadCredentials = can("model-provider-credentials:read");
   const canWriteCredentials = can("model-provider-credentials:write");
   const canConnect = can("model-provider-credentials:connect");
@@ -79,7 +89,10 @@ export function OrgSettingsModelsPage() {
   const editKey = useModalTarget("editCredential", credentials);
   const chooseModels = useModalTarget("models", credentials);
   const personalModels = useModalParam("personalModels");
-  const editModel = useModalTarget("editModel", models);
+  // The form edits what a list offers: never a model the instance ships, which an id typed in
+  // the URL would otherwise open.
+  const editableModels = useMemo(() => models?.filter((m) => !isSystemModel(m)), [models]);
+  const editModel = useModalTarget("editModel", editableModels);
 
   // The tab is a place: `?tab=personal` opens it, and the first one leaves the URL alone.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -96,20 +109,20 @@ export function OrgSettingsModelsPage() {
     );
 
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
+  const [deletingModel, setDeletingModel] = useState<OrgModelInfo | null>(null);
   const updateCredential = useUpdateModelProviderCredential();
   const setDefault = useSetDefaultModel();
+  const deleteModel = useDeleteModel();
   const modelForm = useModelFormHandler({
     editModel: editModel.target ?? null,
     onSuccess: editModel.close,
   });
 
-  const orgRows = useMemo(
-    () =>
-      providerRows(models ?? [], credentials ?? [], registry ?? [], userId).filter(
-        (row) => row.kind === "org-key" || row.kind === "system",
-      ),
-    [models, credentials, registry, userId],
-  );
+  const { orgRows, personalRows } = useMemo(() => {
+    const rows = providerRows(models ?? [], credentials ?? [], registry ?? [], userId);
+    const isOrg = (row: ProviderRow) => row.kind === "org-key" || row.kind === "system";
+    return { orgRows: rows.filter(isOrg), personalRows: rows.filter((row) => !isOrg(row)) };
+  }, [models, credentials, registry, userId]);
   const serviceRows = useMemo(
     () => personalServiceRows(models ?? [], credentials ?? [], registry ?? [], userId),
     [models, credentials, registry, userId],
@@ -126,6 +139,17 @@ export function OrgSettingsModelsPage() {
   const personalOff = orgSettings?.personal_model_credentials === false;
 
   if (!can("models:read")) return <NoAccessState />;
+
+  /** A key's menu, the organization's or a person's: the row offers what the server allows. */
+  const keyDeeds = {
+    onRename: async (pk: ModelProviderCredentialInfo, label: string) => {
+      // A refusal is toasted by the mutation cache; the rejection keeps the label being typed.
+      await updateCredential.mutateAsync({ params: { path: { id: pk.id } }, body: { label } });
+    },
+    onChangeKey: (pk: ModelProviderCredentialInfo) => editKey.open(pk.id),
+    onReconnect: (pk: ModelProviderCredentialInfo) => editKey.open(pk.id),
+    onDelete: setConfirmDelete,
+  };
 
   const emptyOrg = {
     message: t("providers.empty"),
@@ -180,23 +204,21 @@ export function OrgSettingsModelsPage() {
       {tab === "org" && (
         <div className="mb-8">
           <ProvidersTable
+            label={t("providers.tableLabel")}
+            tableId="org-providers"
             rows={orgRows}
             isLoading={modelsLoading || (canReadCredentials && pkLoading)}
             error={modelsError}
             empty={emptyOrg}
             canWriteModels={canWriteModels}
-            onRename={async (pk, label) => {
-              // A refusal is toasted by the mutation cache; the rejection keeps the label being typed.
-              await updateCredential.mutateAsync({
-                params: { path: { id: pk.id } },
-                body: { label },
-              });
-            }}
+            {...keyDeeds}
             onChooseModels={(pk) => chooseModels.open(pk.id)}
-            onChangeKey={(pk) => editKey.open(pk.id)}
-            onReconnect={(pk) => editKey.open(pk.id)}
-            onDelete={setConfirmDelete}
-            onSetDefault={(m: OrgModelInfo) => setDefault.mutate({ body: { modelId: m.id } })}
+            onSetDefault={(m: OrgModelInfo) =>
+              setDefault.mutate(
+                { body: { modelId: m.id } },
+                { onSuccess: () => toast.success(t("models.defaultSet", { name: m.label })) },
+              )
+            }
           />
         </div>
       )}
@@ -220,6 +242,23 @@ export function OrgSettingsModelsPage() {
               onChooseModels={(row) => personalModels.open(row.id)}
             />
           </div>
+          {/* Outside the greyed table: a key already held is deleted whatever the setting says. */}
+          {canReadCredentials && personalRows.length > 0 && (
+            <section className="mb-6">
+              <h3 className="mb-3 text-sm font-semibold">{t("providers.memberKeys")}</h3>
+              <ProvidersTable
+                label={t("providers.memberKeys")}
+                tableId="member-providers"
+                rows={personalRows}
+                showType
+                isLoading={false}
+                error={null}
+                empty={{ message: t("modelCredentials.empty") }}
+                canWriteModels={false}
+                {...keyDeeds}
+              />
+            </section>
+          )}
           {canConnect && personalAllowed && (
             <p className="text-muted-foreground text-sm">
               {t("providers.personalFooter")}{" "}
@@ -265,6 +304,7 @@ export function OrgSettingsModelsPage() {
           providerId={personalModels.value}
           onChangeService={(id) => personalModels.open(id)}
           onClose={personalModels.close}
+          onAdvanced={(id) => editModel.open(id, "personalModels")}
         />
       )}
 
@@ -274,10 +314,33 @@ export function OrgSettingsModelsPage() {
         model={editModel.target ?? null}
         isPending={modelForm.isPending}
         onSubmit={modelForm.onSubmit}
+        onDelete={canDeleteModels ? () => setDeletingModel(editModel.target ?? null) : undefined}
+      />
+
+      {/* Over the model form, which closes with it once the model is gone. */}
+      <ConfirmModal
+        open={deletingModel !== null}
+        onClose={() => setDeletingModel(null)}
+        title={t("models.deleteTitle")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
+        description={deletingModel ? t("models.deleteConfirm", { label: deletingModel.label }) : ""}
+        isPending={deleteModel.isPending}
+        onConfirm={() => {
+          if (!deletingModel) return;
+          deleteModel.mutate(
+            { params: { path: { id: deletingModel.id } } },
+            {
+              onSuccess: () => {
+                setDeletingModel(null);
+                editModel.close();
+              },
+            },
+          );
+        }}
       />
 
       {confirmDelete && (
-        <DeleteOrgKeyConfirm
+        <DeleteKeyConfirm
           credential={confirmDelete}
           models={models ?? []}
           onClose={() => setConfirmDelete(null)}

@@ -22,7 +22,7 @@ import { useUnreadCount } from "@/hooks/use-notifications";
 import { ProductTabs } from "@/components/product-tabs";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { openAsModal } from "@/lib/modal-route";
-import { useCatalogueKinds } from "@/hooks/use-catalogue-kinds";
+import { useCanReach } from "@/hooks/use-can-reach";
 import { usePendingOfferCount, usePendingSharesHref } from "@/hooks/use-pending-offers";
 import { catalogueHref } from "@/lib/catalogue-link";
 import { isUnder } from "@/lib/route-access";
@@ -51,11 +51,11 @@ export function ShellSidebar({
 }) {
   const { t } = useTranslation();
   const location = useLocation();
-  // Two organisation-wide destinations, and each is drawn only when it holds
-  // something: settings when its own rail lists an entry for this caller, the
-  // catalogue when there is a kind of package they may activate.
+  // Two organisation-wide destinations, each drawn only for a caller it admits:
+  // settings when its own rail lists an entry for them, the catalogue when its
+  // route does (`ROUTE_ACCESS`).
   const settingsSections = useSettingsSections();
-  const catalogueKinds = useCatalogueKinds();
+  const canReach = useCanReach();
   const pendingOffers = usePendingOfferCount();
   const pendingHref = usePendingSharesHref();
   // Under a routed modal the page tree renders the modal's background
@@ -97,7 +97,7 @@ export function ShellSidebar({
           inside the context switcher. It sits above the user boundary and
           represents the settings overlay as the active destination. */}
       <SidebarFooter className="gap-0 p-0">
-        <SidebarMenu className="px-2 pb-2" hidden={catalogueKinds.length === 0}>
+        <SidebarMenu className="px-2 pb-2" hidden={!canReach("/catalogue")}>
           <SidebarMenuItem>
             <SidebarMenuButton asChild isActive={catalogueActive} tooltip={t("nav.catalogue")}>
               {catalogueActive ? (
@@ -110,7 +110,7 @@ export function ShellSidebar({
                   // With shares waiting, the entry opens ON them: the count is a
                   // promise, and the first click keeps it (one rule, in
                   // `usePendingSharesHref`).
-                  to={pendingHref ?? catalogueHref(catalogueKinds[0] ?? "agent")}
+                  to={pendingHref ?? catalogueHref("agent")}
                   state={openAsModal(location)}
                 >
                   <LibraryBig />

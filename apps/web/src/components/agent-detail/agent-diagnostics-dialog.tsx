@@ -70,23 +70,18 @@ export function AgentDiagnosticsDialog({
         <ul className="divide-y">
           {result.diagnostics.map((diagnostic) => {
             const text = agentDiagnosticText(diagnostic, t);
+            const target = agentDiagnosticCorrectionTarget(diagnostic, location.pathname);
             return (
               <li key={agentDiagnosticKey(diagnostic)} className="py-4 first:pt-0 last:pb-0">
                 <p className="text-sm font-medium">{text.title}</p>
                 <p className="text-muted-foreground mt-0.5 text-xs">{text.explanation}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-                  <Link
-                    to={agentDiagnosticCorrectionTarget(
-                      diagnostic,
-                      location.pathname,
-                      location.search,
-                    )}
-                    onClick={onClose}
-                    className="text-primary hover:underline"
-                  >
-                    {t("detail.diagnostics.fix")}
-                  </Link>
-                </div>
+                {target && (
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                    <Link to={target} onClick={onClose} className="text-primary hover:underline">
+                      {t("detail.diagnostics.fix")}
+                    </Link>
+                  </div>
+                )}
               </li>
             );
           })}

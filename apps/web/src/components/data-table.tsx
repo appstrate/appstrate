@@ -137,8 +137,15 @@ interface DataTableProps<T> extends CollectionState {
   rowState?: (row: T) => unknown;
   /** Pinned above the first row, inside the frame (e.g. a scheduled next run). */
   banner?: ReactNode;
-  /** Names the table for screen readers (never drawn) and keys the widths its reader gave the columns. */
+  /** Names the table for screen readers (never drawn). */
   label: string;
+  /**
+   * The table's stable, untranslated name (`"runs"`, `"end-users"`), like the
+   * key `useColumnVisibility` takes: it keys the widths its reader gave the
+   * columns, so they survive a language switch and stay apart from another
+   * table's.
+   */
+  tableId: string;
   /**
    * `tiered` keeps the compact collection treatment. `scroll` makes the
    * reader's selected columns authoritative and preserves every selected fact
@@ -147,8 +154,6 @@ interface DataTableProps<T> extends CollectionState {
   columnMode?: "tiered" | "scroll";
   /** Remove the second frame when the table already lives on a white surface. */
   surface?: "framed" | "integrated";
-  /** Compact embedded lists may keep semantic headers without drawing a header band. */
-  showHeader?: boolean;
 }
 
 /**
@@ -477,9 +482,9 @@ export function DataTable<T>({
   rowState,
   banner,
   label,
+  tableId,
   columnMode = "tiered",
   surface = "framed",
-  showHeader = true,
   ...state
 }: DataTableProps<T>) {
   // The order lives in `collection.ts`, shared with the card grid: a caller
@@ -497,7 +502,7 @@ export function DataTable<T>({
   // A phone has its own widths: a name column a person widened on a desktop
   // would otherwise fill the phone's whole width, and the column held in place
   // would hide everything that scrolls under it.
-  const stored = useColumnWidths(useIsMobile() ? `${label}:mobile` : label);
+  const stored = useColumnWidths(useIsMobile() ? `${tableId}:mobile` : tableId);
   const [dragged, setDragged] = useState<ColumnWidths>({});
   const widths: ColumnWidths = { ...stored.widths, ...dragged };
   const resize = (id: string, width: number, commit: boolean) => {
@@ -606,7 +611,7 @@ export function DataTable<T>({
           )}
           style={tracks}
         >
-          <thead role="rowgroup" className={showHeader ? "block" : "sr-only"}>
+          <thead role="rowgroup" className="block">
             <tr
               role="row"
               data-data-table-row
@@ -639,7 +644,7 @@ export function DataTable<T>({
                       )}
                     >
                       <span className="block min-w-0 truncate">{col.headerNode ?? col.header}</span>
-                      {showHeader && isResizable(col) && (
+                      {isResizable(col) && (
                         <ResizeHandle
                           name={col.header}
                           floor={trackFloor(col.width)}

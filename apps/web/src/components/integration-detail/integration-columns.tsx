@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The integration detail's two column sets, out of the 1800-line page they are
- * drawn on.
+ * The column sets of the integration detail's two tables (`connections-table.tsx`,
+ * `clients-table.tsx`).
  *
- * Same reason as `org-settings/model-columns.tsx`: a column set is data, and it
- * has to be reachable by `column-tiers.test.tsx` — a set that is not in that
- * test inherits the tier rule without being checked against it. The page itself
- * cannot be imported by the runner (it reaches the package editor and the
- * connect popup through modules bun does not resolve), so the sets live here.
+ * A column set is data, and it has to be reachable by `column-tiers.test.tsx`:
+ * a set that is not in that test inherits the tier rule without being checked
+ * against it.
  *
  * Both are the same FAMILY as the models, credentials and proxies tables. A
  * stable provenance value gets its own text column; badges are reserved for
@@ -26,18 +24,19 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowUpFromLine, Building2, CircleCheck, Pencil, Trash2 } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
-import type { DataColumn } from "../components/data-table";
-import { DefaultCell } from "../components/default-cell";
-import { TableRowActions } from "../components/table-row-actions";
-import { isConnectionOwnedBy } from "../components/integration-connect/connection-ownership";
-import type { ConnectionAuthContext } from "../lib/integration-presentation";
+import type { DataColumn } from "../data-table";
+import { DefaultCell } from "../default-cell";
+import { TableRowActions } from "../table-row-actions";
+import { isConnectionOwnedBy } from "../integration-connect/connection-ownership";
+import type { ConnectionAuthContext } from "../../lib/integration-presentation";
 import type {
   IntegrationAuthType,
   IntegrationConnection,
   IntegrationManifestView,
-} from "../hooks/use-integrations";
-import { ScopeSummaryText } from "../components/integration-connect/scope-summary-text";
-import type { ClientRow } from "../lib/integration-clients";
+} from "../../hooks/use-integrations";
+import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
+import type { ClientRow } from "../../lib/integration-clients";
+import { formatDateField } from "../../lib/format-date";
 import {
   AccountCell,
   ConnectionActionsCell,
@@ -345,7 +344,7 @@ export function useConnectionColumns({
       tier: 3,
       cell: (c) => (
         <span className="text-muted-foreground block truncate text-xs">
-          {c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : "—"}
+          {formatDateField(c.expiresAt, "date")}
         </span>
       ),
     },

@@ -192,7 +192,7 @@ export function PackageActionsDropdown({
   const isMutable = canWrite && !isBuiltIn && !isHistoricalVersion && isOwned;
   // Its own verdict, not `canWrite`'s: `DELETE` enforces `<type>:delete`, an
   // INDEPENDENT permission string, and a custom space role is an arbitrary
-  // bundle — one granting `write` without `delete` used to render a Supprimer
+  // bundle — one granting `write` without `delete` must not render a Supprimer
   // item that 403s on click. The two travel together in every preset, so this
   // narrows nothing for a preset-only organization.
   const canDelete = homeDeletable === true;
@@ -237,13 +237,46 @@ export function PackageActionsDropdown({
       canShare ||
       (showDelete && Boolean(onDeleteAgent)));
 
+  // Where the package runs and where it lives, the same group in both menus:
+  // moving the home is the same authority as editing, since it is the home
+  // that grants that authority; sharing is a verb of its own on that same space
+  // (RBAC spec §6.10).
+  const placementItems = (
+    <>
+      {showActivate && onActivate && (
+        <DropdownMenuItem disabled={activationPending} onSelect={onActivate}>
+          <PackagePlus size={14} />
+          {t("packages.activate", { ns: "settings" })}
+        </DropdownMenuItem>
+      )}
+      {showDeactivate && onDeactivate && (
+        <DropdownMenuItem disabled={activationPending} onSelect={onDeactivate}>
+          <PackagePlus size={14} className="rotate-180" />
+          {t("packages.deactivate", { ns: "settings" })}
+        </DropdownMenuItem>
+      )}
+      {isMutable && (
+        <DropdownMenuItem onSelect={() => moveHome.open(packageId)}>
+          <FolderInput size={14} />
+          {t("packages.moveHome", { ns: "settings" })}
+        </DropdownMenuItem>
+      )}
+      {canShare && (
+        <DropdownMenuItem onSelect={() => share.open(packageId)}>
+          <Share2 size={14} />
+          {t("packages.share", { ns: "settings" })}
+        </DropdownMenuItem>
+      )}
+    </>
+  );
+
   // The manifest is not reachable from here, and does not need to be:
   // every page that mounts this dropdown carries both tabs — À propos renders
   // the manifest, the Contenu tab serves its raw `manifest.json`. That holds for
   // integrations too, which route to `pages/integration-detail.tsx` and have
-  // their own tab set: dropping the menu item without a file explorer there
-  // left an integration's `manifest.json` and `INTEGRATION.md` reachable only
-  // by downloading the `.afps`, so that page mounts the explorer as well.
+  // their own tab set, and that page mounts the file explorer as well, so an
+  // integration's `manifest.json` and `INTEGRATION.md` are reachable without
+  // downloading the `.afps`.
   return (
     <>
       <PageActionsMenu contentClassName={isAgent ? "min-w-64" : undefined}>
@@ -352,34 +385,7 @@ export function PackageActionsDropdown({
                     {t("detail.clearMemories")}
                   </DropdownMenuItem>
                 )}
-                {showActivate && onActivate && (
-                  <DropdownMenuItem disabled={activationPending} onSelect={onActivate}>
-                    <PackagePlus size={14} />
-                    {t("packages.activate", { ns: "settings" })}
-                  </DropdownMenuItem>
-                )}
-                {showDeactivate && onDeactivate && (
-                  <DropdownMenuItem disabled={activationPending} onSelect={onDeactivate}>
-                    <PackagePlus size={14} className="rotate-180" />
-                    {t("packages.deactivate", { ns: "settings" })}
-                  </DropdownMenuItem>
-                )}
-                {/* Moving the home is the same authority as editing, since it is
-                    the home that grants that authority; sharing is a verb of
-                    its own on that same space (RBAC spec §6.10). Both act on
-                    WHERE the package lives, so both belong in this group. */}
-                {isMutable && (
-                  <DropdownMenuItem onSelect={() => moveHome.open(packageId)}>
-                    <FolderInput size={14} />
-                    {t("packages.moveHome", { ns: "settings" })}
-                  </DropdownMenuItem>
-                )}
-                {canShare && (
-                  <DropdownMenuItem onSelect={() => share.open(packageId)}>
-                    <Share2 size={14} />
-                    {t("packages.share", { ns: "settings" })}
-                  </DropdownMenuItem>
-                )}
+                {placementItems}
                 {showDelete && onDeleteAgent && (
                   <DropdownMenuItem
                     onSelect={onDeleteAgent}
@@ -424,34 +430,7 @@ export function PackageActionsDropdown({
             {(showActivate || showDeactivate || isMutable || canShare || showDelete) && (
               <>
                 <DropdownMenuSeparator />
-                {showActivate && onActivate && (
-                  <DropdownMenuItem disabled={activationPending} onSelect={onActivate}>
-                    <PackagePlus size={14} />
-                    {t("packages.activate", { ns: "settings" })}
-                  </DropdownMenuItem>
-                )}
-                {showDeactivate && onDeactivate && (
-                  <DropdownMenuItem disabled={activationPending} onSelect={onDeactivate}>
-                    <PackagePlus size={14} className="rotate-180" />
-                    {t("packages.deactivate", { ns: "settings" })}
-                  </DropdownMenuItem>
-                )}
-                {/* Moving the home is the same authority as editing, since it is
-                    the home that grants that authority; sharing is a verb of
-                    its own on that same space (RBAC spec §6.10). Both act on
-                    WHERE the package lives, so both belong in this group. */}
-                {isMutable && (
-                  <DropdownMenuItem onSelect={() => moveHome.open(packageId)}>
-                    <FolderInput size={14} />
-                    {t("packages.moveHome", { ns: "settings" })}
-                  </DropdownMenuItem>
-                )}
-                {canShare && (
-                  <DropdownMenuItem onSelect={() => share.open(packageId)}>
-                    <Share2 size={14} />
-                    {t("packages.share", { ns: "settings" })}
-                  </DropdownMenuItem>
-                )}
+                {placementItems}
                 {showDelete && canDeletePackage && onDeletePackage && (
                   <DropdownMenuItem
                     onSelect={onDeletePackage}

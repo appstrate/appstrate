@@ -87,8 +87,27 @@ function AddButton({
 }: AddProps & { connect: (auth: IntegrationAuthStatus) => void; isPending: boolean }) {
   const { t } = useTranslation("settings");
   const allowed = connectableAuthKeys(detail.manifest, detail.auths);
+  const label = t("integration.presentation.addConnection");
+  // The button the server would refuse stays, dead, with the reason on it.
+  const refused = (reason: string, testId: string) => (
+    <DisabledReasonTooltip reason={reason}>
+      <Button
+        variant="outline"
+        size="sm"
+        className="@max-sm/bar:size-8 @max-sm/bar:p-0"
+        aria-label={label}
+        disabled
+        data-testid={testId}
+      >
+        <Plus className="size-4" />
+        <span className="hidden @sm/bar:inline">{label}</span>
+      </Button>
+    </DisabledReasonTooltip>
+  );
   if (!detail.auths.length) return null;
-  if (!allowed.size && !canConfigure) return null;
+  // Only oauth2 methods without a usable client: registering one is an administrator's act.
+  if (!allowed.size && !canConfigure)
+    return refused(t("integration.auth.noClientHint"), "no-oauth-client");
   if (!allowed.size)
     return (
       <Button
@@ -103,24 +122,7 @@ function AddButton({
         <span className="hidden @sm/bar:inline">{t("integration.presentation.configureAuth")}</span>
       </Button>
     );
-  const label = t("integration.presentation.addConnection");
-  // The button the server would refuse stays, dead, with the reason on it.
-  if (blockedReason && canConnect)
-    return (
-      <DisabledReasonTooltip reason={blockedReason}>
-        <Button
-          variant="outline"
-          size="sm"
-          className="@max-sm/bar:size-8 @max-sm/bar:p-0"
-          aria-label={label}
-          disabled
-          data-testid="connections-blocked-by-admin"
-        >
-          <Plus className="size-4" />
-          <span className="hidden @sm/bar:inline">{label}</span>
-        </Button>
-      </DisabledReasonTooltip>
-    );
+  if (blockedReason && canConnect) return refused(blockedReason, "connections-blocked-by-admin");
   // Each method offers what the caller may do with it: connect when it is
   // set up, set it up when it is not.
   const offered = detail.auths.filter((auth) =>

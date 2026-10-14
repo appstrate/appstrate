@@ -29,6 +29,8 @@ import {
   type Frequency,
   type FrequencyKind,
   type TimeOfDay,
+  HOUR_STEPS,
+  MINUTE_STEPS,
   WEEK_ORDER,
   nextFires,
   parseCron,
@@ -207,20 +209,21 @@ export function FrequencyComposer({
         <Field>
           <Label htmlFor="frequency-every">{t("schedule.frequency.every")}</Label>
           <div className="flex items-center gap-2">
-            <Input
-              // Minutes and hours share this field: a new rhythm, a new default.
-              key={frequency.kind}
-              id="frequency-every"
-              type="number"
-              className="w-24"
-              min={1}
-              max={frequency.kind === "minutes" ? 59 : 23}
-              defaultValue={frequency.every}
-              onChange={(e) => {
-                const every = bounded(e.target.value, 1, frequency.kind === "minutes" ? 59 : 23);
-                if (every !== null) update({ ...frequency, every });
-              }}
-            />
+            <Select
+              value={String(frequency.every)}
+              onValueChange={(value) => update({ ...frequency, every: Number(value) })}
+            >
+              <SelectTrigger id="frequency-every" className="w-24">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(frequency.kind === "minutes" ? MINUTE_STEPS : HOUR_STEPS).map((every) => (
+                  <SelectItem key={every} value={String(every)}>
+                    {every}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <span className="text-muted-foreground text-sm">{t(UNIT_LABELS[frequency.kind])}</span>
           </div>
         </Field>

@@ -28,7 +28,8 @@ import { PageHeader } from "../components/page-header";
 import { RunDuration } from "../components/run-duration";
 import { RunAgentButton } from "../components/run-agent-button";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
-import { useAppConfig } from "../hooks/use-app-config";
+import { useCanReach } from "../hooks/use-can-reach";
+import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
 import { formatDateField } from "../lib/format-date";
 import { dashboardSections } from "../lib/dashboard-sections";
@@ -65,7 +66,8 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
 
 function DashboardHeader({ firstName, runningCount }: { firstName: string; runningCount: number }) {
   const { t, i18n } = useTranslation("agents");
-  const { features } = useAppConfig();
+  const canChat = useCanReach()("/chat");
+  const { copy } = useCopyToClipboard();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const isAiOpen = searchParams.get("assist") === "1";
@@ -82,8 +84,8 @@ function DashboardHeader({ firstName, runningCount }: { firstName: string; runni
   };
 
   const copyCodingAgentSetup = async () => {
-    await navigator.clipboard.writeText(CODING_AGENT_SETUP_PROMPT);
-    toast.success(t("dashboard.askAi.codingAgentCopied"));
+    if (await copy(CODING_AGENT_SETUP_PROMPT))
+      toast.success(t("dashboard.askAi.codingAgentCopied"));
   };
 
   const setAiOpen = (open: boolean) => {
@@ -124,27 +126,25 @@ function DashboardHeader({ firstName, runningCount }: { firstName: string; runni
         >
           <p className="text-muted-foreground text-sm">{t("dashboard.askAi.description")}</p>
           <div className="space-y-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="h-auto min-h-16 w-full justify-start gap-3 p-3 text-left whitespace-normal"
-              onClick={openChat}
-              disabled={!features.chat}
-            >
-              <span className="bg-muted grid size-9 shrink-0 place-items-center rounded-md">
-                <MessageSquareText />
-              </span>
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold">{t("dashboard.askAi.chat")}</span>
-                <span className="text-muted-foreground mt-0.5 block text-xs leading-relaxed font-normal">
-                  {t(
-                    features.chat
-                      ? "dashboard.askAi.chatDescription"
-                      : "dashboard.askAi.chatUnavailable",
-                  )}
+            {/* Offered where `/chat` opens: the module loaded AND the caller's grants. */}
+            {canChat && (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-auto min-h-16 w-full justify-start gap-3 p-3 text-left whitespace-normal"
+                onClick={openChat}
+              >
+                <span className="bg-muted grid size-9 shrink-0 place-items-center rounded-md">
+                  <MessageSquareText />
                 </span>
-              </span>
-            </Button>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold">{t("dashboard.askAi.chat")}</span>
+                  <span className="text-muted-foreground mt-0.5 block text-xs leading-relaxed font-normal">
+                    {t("dashboard.askAi.chatDescription")}
+                  </span>
+                </span>
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"
@@ -540,11 +540,17 @@ export function DashboardContent(data: DashboardData) {
   // The dashboard is the fallback route and renders for ANY principal: each
   // section answers to the guard of the query that feeds it.
   const sections = dashboardSections(can);
-  const canReadSchedules = sections.schedules;
   const metrics = dashboardMetrics(data, sections, t);
   const agentById = new Map(data.agents.map((agent) => [agent.id, agent]));
+  // What is DRAWN, not merely readable: a readable section with nothing in it
+  // is left out rather than drawn as an empty box.
+  const shown = {
+    recentAgents: sections.recentAgents && data.agents.length > 0,
+    recentRuns: sections.recentRuns && data.runs.length > 0,
+    schedules: sections.schedules && metrics.activeSchedules.length > 0,
+  };
 
-  if (!sections.recentRuns && !sections.recentAgents && !sections.schedules) {
+  if (!shown.recentAgents && !shown.recentRuns && !shown.schedules) {
     return (
       <div className="space-y-8">
         <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
@@ -569,7 +575,7 @@ export function DashboardContent(data: DashboardData) {
         </div>
       )}
 
-      {sections.recentAgents && (
+      {shown.recentAgents && (
         <section>
           <SectionHeading
             title={t("dashboard.recentAgents")}
@@ -580,19 +586,18 @@ export function DashboardContent(data: DashboardData) {
         </section>
       )}
 
-      {/* The schedules column follows the same permission as its nav entry: a
-          caller who cannot reach `/schedules` was still being shown what is
-          scheduled, with a link that 403s. When it is absent the runs column
-          takes the full width rather than leaving a hole. */}
+      {/* The schedules column follows the same permission as its nav entry, so
+          its link never 403s. When one column is absent the other takes the
+          full width rather than leaving a hole. */}
       <div
         className={cn(
           "grid grid-cols-1 gap-6",
-          canReadSchedules &&
-            sections.recentRuns &&
+          shown.schedules &&
+            shown.recentRuns &&
             "lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]",
         )}
       >
-        {sections.recentRuns && (
+        {shown.recentRuns && (
           <section className="min-w-0">
             <SectionHeading
               title={t("dashboard.recentRuns")}
@@ -602,7 +607,7 @@ export function DashboardContent(data: DashboardData) {
             <RecentRuns runs={data.runs} agentName={data.agentName} agentById={agentById} />
           </section>
         )}
-        {canReadSchedules && (
+        {shown.schedules && (
           <section className="min-w-0">
             <SectionHeading
               title={t("dashboard.upcomingSchedules")}

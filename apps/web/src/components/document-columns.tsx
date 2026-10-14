@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Download, ExternalLink, Pin, Trash2 } from "lucide-react";
-import { Link } from "react-router-dom";
 import { formatBytes } from "../lib/format-bytes";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { FileDto } from "../hooks/use-files";
-import { documentExpiryInfo, documentRunHref } from "../lib/documents";
 import { mimeKind } from "../lib/files";
 import { formatDateField } from "../lib/format-date";
 import type { DataColumn } from "./data-table";
-import { TableRowActions } from "./table-row-actions";
+import { DocumentRowActions } from "./document-row-actions";
+import { ExpiryBadge } from "./file-tile";
 
 export function useDocumentColumns({
   pendingKeepId,
@@ -86,80 +83,31 @@ export function useDocumentColumns({
       header: t("column.retention"),
       width: "112px",
       tier: 3,
-      cell: (doc) => {
-        const expiry = documentExpiryInfo(doc.expiresAt);
-        if (!expiry)
-          return <span className="text-muted-foreground text-xs">{t("retention.permanent")}</span>;
-        const label = expiry.expired
-          ? t("expiry.expired")
-          : expiry.days >= 1
-            ? t("expiry.inDays", { count: expiry.days })
-            : t("expiry.inHours", { count: expiry.hours });
-        return (
-          <span className={expiry.soon ? "text-warning text-xs" : "text-muted-foreground text-xs"}>
-            {label}
-          </span>
-        );
-      },
+      cell: (doc) => (
+        <span className="text-xs">
+          {doc.expiresAt ? (
+            <ExpiryBadge expiresAt={doc.expiresAt} />
+          ) : (
+            <span className="text-muted-foreground">{t("retention.permanent")}</span>
+          )}
+        </span>
+      ),
     },
     {
       id: "actions",
       header: "",
       width: "80px",
       align: "end",
-      cell: (doc) => {
-        const runHref = showRunLink ? documentRunHref(doc) : undefined;
-        const canKeep = doc.capabilities.keep && Boolean(doc.expiresAt);
-        const hasMenu = Boolean(
-          doc.capabilities.download || runHref || canKeep || doc.capabilities.delete,
-        );
-        const hasNonDestructive = Boolean(doc.capabilities.download || runHref || canKeep);
-
-        return (
-          <TableRowActions
-            menuLabel={hasMenu ? t("row.moreActions", { name: doc.name }) : undefined}
-            isPending={pendingKeepId === doc.id}
-            pendingLabel={t("common:loading")}
-          >
-            {hasMenu ? (
-              <>
-                {doc.capabilities.download && (
-                  <DropdownMenuItem onSelect={() => onDownload(doc)}>
-                    <Download />
-                    {t("row.download")}
-                  </DropdownMenuItem>
-                )}
-                {runHref && (
-                  <DropdownMenuItem asChild>
-                    <Link to={runHref}>
-                      <ExternalLink />
-                      {t("row.openRun")}
-                    </Link>
-                  </DropdownMenuItem>
-                )}
-                {canKeep && (
-                  <DropdownMenuItem onSelect={() => onKeep(doc)}>
-                    <Pin />
-                    {t("row.keep")}
-                  </DropdownMenuItem>
-                )}
-                {doc.capabilities.delete && (
-                  <>
-                    {hasNonDestructive && <DropdownMenuSeparator />}
-                    <DropdownMenuItem
-                      onSelect={() => onDelete(doc)}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 />
-                      {t("row.delete")}
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </>
-            ) : undefined}
-          </TableRowActions>
-        );
-      },
+      cell: (doc) => (
+        <DocumentRowActions
+          doc={doc}
+          isPending={pendingKeepId === doc.id}
+          showRunLink={showRunLink}
+          onDownload={onDownload}
+          onKeep={onKeep}
+          onDelete={onDelete}
+        />
+      ),
     },
   ];
 }

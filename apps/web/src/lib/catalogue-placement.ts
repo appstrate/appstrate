@@ -144,3 +144,26 @@ export function pendingShares(packages: readonly LibraryPackageItem[]): PendingS
     })),
   );
 }
+
+/**
+ * The space to read a package's detail FROM. The server answers only where the
+ * package is placed, and the catalogue lists packages placed elsewhere than the
+ * space the reader stands in: its home first, then any space that holds it.
+ */
+export function detailSpace(
+  placement: CataloguePlacement,
+  spaces: readonly { id: string }[],
+  current: string | null,
+): string | undefined {
+  if (placement.here) return current ?? undefined;
+  const reachable = (id: string | null) =>
+    id && spaces.some((space) => space.id === id) ? id : undefined;
+  return (
+    reachable(placement.homeSpaceId) ??
+    placement.activeIn[0] ??
+    placement.inactiveIn[0] ??
+    placement.offeredIn[0] ??
+    current ??
+    undefined
+  );
+}

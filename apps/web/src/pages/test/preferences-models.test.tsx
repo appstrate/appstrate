@@ -147,6 +147,7 @@ describe("the Preferences models page, for a member who holds connect", () => {
   const row = (credential: ModelProviderCredentialInfo) => rowOf(html, credential.label);
 
   it("shows the caller's own credentials and none of the others", () => {
+    expect(html).toContain(`aria-label="${settingsFr["preferences.tabModels"]}"`);
     expect(html).toContain(MY_KEY.label);
     expect(html).toContain(MY_SUBSCRIPTION.label);
     expect(html).not.toContain(ORG_KEY.label);

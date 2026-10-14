@@ -25,13 +25,10 @@
   "type.archive": "Archive",
   "type.spreadsheet": "Spreadsheet",
   "type.file": "File",
-  "filter.all": "All",
   "filter.agent_output": "Agent outputs",
   "filter.user_upload": "Uploads",
   "purpose.agent_output": "Agent output",
   "purpose.user_upload": "Upload",
-  "filter.output": "Produced",
-  "filter.input": "Imported",
   "row.download": "Download",
   "row.preview": "Preview",
   "row.keep": "Keep",
@@ -58,5 +55,6 @@
   "artifact.copyFailed": "Could not copy the content.",
   "artifact.fullscreen": "Full screen",
   "artifact.exitFullscreen": "Exit full screen",
-  "run.noAccess": "Your role does not give access to this space's files."
+  "run.noAccess": "Your role does not give access to this space's files.",
+  "run.truncated": "Only the first 100 files of this run are shown."
 }

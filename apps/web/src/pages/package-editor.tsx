@@ -685,7 +685,7 @@ function IntegrationEditorInner({
   presentation?: Presentation;
   tab?: GenericEditorTab;
   onTabRequest?: (tab: GenericEditorTab) => void;
-  /** Embedded: the server's reading of the saved tool catalog. */
+  /** Embedded: the server's reading of the saved tool catalog, shown with its policy. */
   toolInspection?: IntegrationToolInspection;
 }) {
   const { t } = useTranslation(["agents", "common"]);
@@ -822,7 +822,7 @@ function IntegrationEditorInner({
       )}
 
       {activeTab === "tools" &&
-        (embedded ? (
+        (toolInspection ? (
           <IntegrationToolsSection
             integrationId={packageId ?? "new"}
             inspection={toolInspection}
@@ -886,7 +886,7 @@ export function IntegrationDefinitionEditor({
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
   onSection: (section: IntegrationDefinitionSection) => void;
-  toolInspection?: IntegrationToolInspection;
+  toolInspection: IntegrationToolInspection;
 }) {
   return (
     <IntegrationEditorInner

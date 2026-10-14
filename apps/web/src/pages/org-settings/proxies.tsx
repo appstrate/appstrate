@@ -238,6 +238,7 @@ export function OrgSettingsProxiesPage() {
       )}
 
       <DataTable
+        tableId="proxies"
         label={t("proxies.tabTitle")}
         columns={columns}
         rows={proxies ?? []}

@@ -21,8 +21,8 @@ import { Modal } from "./modal";
 import { Spinner } from "./spinner";
 import { ErrorState, LoadingState } from "./page-states";
 import { ModelChoiceList } from "./model-choice";
-import { useModelChoice, type DiscoverWith } from "../hooks/use-model-choice-state";
-import { useApplyModelChoice, type NewProviderCredential } from "../hooks/use-model-choice";
+import { useModelChoice, type DiscoverWith } from "../hooks/use-model-choice";
+import { useApplyModelChoice, type NewProviderCredential } from "../hooks/use-apply-model-choice";
 import {
   useProvidersRegistry,
   type ModelProviderCredentialInfo,
@@ -47,7 +47,6 @@ interface ChoiceDialogProps {
   onBack?: () => void;
   discoverWith: DiscoverWith;
   tickAll: boolean;
-  allowDefault: boolean;
   hasDefault: boolean;
   submitLabel: string;
   onClose: () => void;
@@ -67,7 +66,6 @@ function ChoiceDialog({
   onBack,
   discoverWith,
   tickAll,
-  allowDefault,
   hasDefault,
   submitLabel,
   onClose,
@@ -83,7 +81,6 @@ function ChoiceDialog({
     existing,
     discoverWith,
     tickAll,
-    allowDefault,
     hasDefault,
   });
   const { apply, isPending } = useApplyModelChoice();
@@ -218,7 +215,6 @@ export function ProviderModelsModal({
       credentialId={credential.id}
       discoverWith={{ credentialId: credential.id }}
       tickAll={false}
-      allowDefault
       hasDefault={models.some((m) => m.is_default)}
       submitLabel={t("btn.save")}
       onClose={onClose}
@@ -233,18 +229,21 @@ export function PersonalModelsModal({
   providerId,
   onChangeService,
   onClose,
+  onAdvanced,
 }: {
-  /** The services a person may serve with a key of their own. */
+  /** The services whose models may be left to each person's own key (`personalModelServices`). */
   services: ProviderRegistryEntry[];
   providerId: string;
   onChangeService: (providerId: string) => void;
   onClose: () => void;
+  onAdvanced: (modelId: string) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const modelsQuery = useModels();
   const provider = services.find((s) => s.providerId === providerId) ?? services[0];
+  const models = modelsQuery.data;
 
-  if (!modelsQuery.data || !provider) {
+  if (!models || !provider) {
     return (
       <Modal open onClose={onClose} title={t("models.choice.personalTitle")}>
         {modelsQuery.error ? <ErrorState error={modelsQuery.error} compact /> : <LoadingState />}
@@ -258,14 +257,14 @@ export function PersonalModelsModal({
       title={t("models.choice.personalTitle")}
       intro={t("models.choice.personalIntro")}
       provider={provider}
-      existing={memberModels(modelsQuery.data).filter((m) => m.providerId === provider.providerId)}
+      existing={memberModels(models).filter((m) => m.providerId === provider.providerId)}
       credentialId={null}
       discoverWith={null}
       tickAll={false}
-      allowDefault={false}
-      hasDefault
+      hasDefault={models.some((m) => m.is_default)}
       submitLabel={t("btn.save")}
       onClose={onClose}
+      onAdvanced={onAdvanced}
       header={
         <div className="space-y-2">
           <Label htmlFor="personal-models-service">{t("models.form.provider")}</Label>
@@ -326,7 +325,6 @@ export function NewProviderModelsModal({
       onBack={onBack}
       discoverWith={{ inlineApiKey: draft.apiKey, baseUrl: draft.baseUrlOverride ?? "" }}
       tickAll
-      allowDefault
       hasDefault={modelsQuery.data.some((m) => m.is_default)}
       submitLabel={t("credentials.add")}
       onClose={onClose}

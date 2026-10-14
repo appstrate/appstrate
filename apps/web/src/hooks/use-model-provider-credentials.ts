@@ -117,7 +117,7 @@ export function useDeleteModelProviderCredential(meta?: MutationMeta) {
   });
 }
 
-/** A test of a subscription may rotate or terminally flag it: the credentials and the models they serve are re-read. */
+/** A test may rotate or terminally flag the subscription it runs through: the credentials and the models they serve are re-read. */
 export async function invalidateCredentialTestQueries(qc: QueryClient): Promise<void> {
   await Promise.all([
     qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] }),

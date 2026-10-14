@@ -44,6 +44,7 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
 import { AgentRunsTab, AgentMemoryTab } from "../components/package-detail/agent-tabs";
+import { AgentApiTab } from "../components/package-detail/agent-api-tab";
 import { AgentInactiveAlert } from "../components/package-detail/agent-inactive-alert";
 import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
 import { AgentSettingsView } from "../components/agent-detail/agent-settings-view";
@@ -56,9 +57,9 @@ import { useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
 import { agentDiagnosticText } from "../lib/agent-diagnostics";
 import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
 
-type DetailTab = "overview" | "runs" | "settings" | "memory" | "usedBy";
+type DetailTab = "overview" | "runs" | "settings" | "memory" | "api" | "usedBy";
 
-const AGENT_DETAIL_TABS = ["overview", "runs", "memory", "settings"] as const;
+const AGENT_DETAIL_TABS = ["overview", "runs", "memory", "api", "settings"] as const;
 
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
 
@@ -266,8 +267,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // the page reads the same whatever the role and only its content changes.
   const allValidTabs: readonly DetailTab[] =
     type === "agent" ? AGENT_DETAIL_TABS : ["overview", "settings", "usedBy"];
-  // Every detail has a useful summary; explicit file/version deep links still win.
-  const defaultTab: DetailTab = "overview";
+  // Every detail opens on its summary, an agent the reader may only run on what
+  // that role reads: its runs, else how to launch it.
+  const defaultTab: DetailTab = fullRead ? "overview" : tabReads.runs ? "runs" : "api";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   const newVersion = useModalParam("newVersion");
   // ── Loading / Error ──
@@ -369,6 +371,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     overview: t("detail.overview.summary"),
     runs: t("detail.tabRuns"),
     memory: t("detail.tabMemory"),
+    api: t("detail.tabApi"),
     settings: t("detail.tabSettings"),
   };
   const agentTabs: Array<{ id: DetailTab; label: string }> = AGENT_DETAIL_TABS.map((id) => ({
@@ -634,6 +637,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               ) : (
                 <RoleLimitNotice className="m-6">{t("detail.roleLimit.memory")}</RoleLimitNotice>
               )}
+            </TabsContent>
+            <TabsContent
+              value="api"
+              className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
+            >
+              <AgentApiTab packageId={packageId} />
             </TabsContent>
           </Tabs>
         </div>

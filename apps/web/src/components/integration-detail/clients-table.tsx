@@ -21,7 +21,7 @@ import { DataTable } from "../data-table";
 import { EmptyState, ErrorState } from "../page-states";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useModalParam } from "../../hooks/use-modal-param";
-import { useIntegrationClientColumns } from "../../pages/integration-columns";
+import { useIntegrationClientColumns } from "./integration-columns";
 import { mergeClientTiers, type ClientRow } from "../../lib/integration-clients";
 import {
   useIntegrationDetail,
@@ -393,8 +393,8 @@ export function ClientsTable({
         {canManageOrg && <ChevronDown size={14} />}
       </Button>
     );
-    // Two levels to register at: the choice is made before the form,
-    // not inside it, so the form stays the one it always was.
+    // Two levels to register at: the level is chosen before the form,
+    // so one form serves both.
     if (!canManageOrg) return trigger;
     return (
       <DropdownMenu>
@@ -435,6 +435,7 @@ export function ClientsTable({
       )}
 
       <DataTable
+        tableId="integration-clients"
         surface="integrated"
         columnMode="scroll"
         label={t("integration.clients.title")}

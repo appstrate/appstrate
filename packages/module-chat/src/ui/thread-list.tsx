@@ -158,16 +158,18 @@ export function ChatConversationList({
               canWrite={canWrite}
             />
           ))}
+          {/* A plain button, not a menu row: a menu row closes the phone's
+              drawer, and loading more must leave it open on the list. */}
           {hasNextPage && (
             <SidebarMenuItem>
-              <SidebarMenuButton
-                size="sm"
+              <button
+                type="button"
                 disabled={isFetchingNextPage}
                 onClick={() => void fetchNextPage()}
-                className="text-sidebar-foreground/70"
+                className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-sidebar-ring flex h-7 w-full items-center rounded-md px-2 text-left text-xs outline-none focus-visible:ring-2 disabled:opacity-50"
               >
-                <span>{isFetchingNextPage ? t("threads.loadingMore") : t("threads.showMore")}</span>
-              </SidebarMenuButton>
+                {isFetchingNextPage ? t("threads.loadingMore") : t("threads.showMore")}
+              </button>
             </SidebarMenuItem>
           )}
         </SidebarMenu>

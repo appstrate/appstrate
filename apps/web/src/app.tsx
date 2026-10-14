@@ -347,7 +347,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
       <CataloguePage />
     </LazyRoute>
   ),
-  "/catalogue/:origin/:type": (
+  "/catalogue/:reading/:type": (
     <LazyRoute>
       <CataloguePage />
     </LazyRoute>

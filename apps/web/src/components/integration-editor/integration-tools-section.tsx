@@ -4,13 +4,12 @@
  * Package AFPS › Outils: an integration's tools and the policy each one
  * carries, as one table.
  *
- * The catalog was an Explorer section and its policy a separate Définition
- * form, yet both come from the package alone: the local server's declared
- * `tools[]` (or the manifest's `tools_policy` keys) for the catalog, the
- * manifest's `tools_policy` for the scopes a tool requires. Nothing about
- * them is set per organisation or per space, and which tools an agent may
- * call is chosen in the agent. So they are one section of the package: the
- * catalog as a table, the policy edited from each row, in a modal.
+ * Both come from the package alone: the local server's declared `tools[]`
+ * (or the manifest's `tools_policy` keys) for the catalog, the manifest's
+ * `tools_policy` for the scopes a tool requires. Nothing about them is set
+ * per organisation or per space, and which tools an agent may call is chosen
+ * in the agent. So they are one section of the package: the catalog as a
+ * table, the policy edited from each row, in a modal.
  *
  * The exposure and origin columns are the server's reading of the SAVED
  * package; the scopes follow the draft, so an applied change shows at once.
@@ -43,8 +42,6 @@ import {
   type ToolPolicyState,
 } from "./utils";
 
-const NO_ENTRIES: IntegrationToolInspectionEntry[] = [];
-
 export function IntegrationToolsSection({
   inspection,
   integrationId,
@@ -52,7 +49,7 @@ export function IntegrationToolsSection({
   edit,
   showBasis = true,
 }: {
-  inspection?: IntegrationToolInspection;
+  inspection: IntegrationToolInspection;
   /** The integration whose tools these are: it names a tool's inspection in the URL. */
   integrationId?: string;
   /** Read-only: whether the saved package lets agents call undeclared tools. */
@@ -64,7 +61,7 @@ export function IntegrationToolsSection({
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const policyModal = useModalParam("toolPolicy");
-  const saved = inspection?.entries ?? NO_ENTRIES;
+  const saved = inspection.entries;
   const policies = edit ? getToolsPolicy(edit.manifest) : null;
 
   // The saved catalog, its scopes replaced by the draft's, then the tools the
@@ -82,7 +79,7 @@ export function IntegrationToolsSection({
             name: policy.name,
             origin: "manifest" as const,
             exposure:
-              inspection?.basis === "manifest"
+              inspection.basis === "manifest"
                 ? ("available" as const)
                 : ("not_in_catalog" as const),
             policy: { required_scopes: policy.requiredScopes },
@@ -111,7 +108,7 @@ export function IntegrationToolsSection({
       )}
       <PackageToolCatalog
         tools={[]}
-        inspection={{ basis: inspection?.basis ?? "manifest", entries }}
+        inspection={{ basis: inspection.basis, entries }}
         integrationId={integrationId}
         showBasis={showBasis}
         actions={

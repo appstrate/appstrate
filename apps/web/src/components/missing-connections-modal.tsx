@@ -143,9 +143,8 @@ export function MissingRow({
   const loadingVerdict = pickable && !canRenderPicker;
 
   const displayName = detail?.manifest.display_name ?? packageId;
-  // An item code this build has no sentence for says so in the user's language, never the
-  // resolver's English message.
-  const message = refusalMessage(err) ?? t("error.generic", { ns: "common" });
+  // An item code this build has no sentence for keeps the resolver's own message.
+  const message = refusalMessage(err) ?? err.message;
   const Icon = resolved ? Check : isStructural ? XCircle : AlertTriangle;
   const colorClass = resolved
     ? "text-emerald-600"

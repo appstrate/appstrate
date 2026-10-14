@@ -7,9 +7,9 @@ import type {
 } from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
 import {
+  personalModelServices,
   personalServiceRows,
   providerRows,
-  providersOpenToPersonalKeys,
   rowStates,
 } from "../model-providers.ts";
 
@@ -219,8 +219,9 @@ describe("personalServiceRows", () => {
   const rows = personalServiceRows(models, [ORG_KEY, BOB_SUBSCRIPTION, MY_KEY], REGISTRY, "usr_me");
   const row = (id: string) => rows.find((r) => r.id === id)!;
 
-  it("makes a row of each service with a model left to personal keys", () => {
-    expect(rows.map((r) => r.id)).toEqual(["anthropic", "mistral"]);
+  it("makes a row of each service with a model left to personal keys, or a key connected for it", () => {
+    // Claude Code: Bob's subscription was connected for it.
+    expect(rows.map((r) => r.id)).toEqual(["anthropic", "claude-code", "mistral"]);
     expect(row("anthropic").models.map((m) => m.id)).toEqual(["mdl_m"]);
   });
 
@@ -271,19 +272,17 @@ describe("rowStates", () => {
   });
 });
 
-describe("providersOpenToPersonalKeys", () => {
-  it("offers only the providers whose key would serve a model opened to personal keys", () => {
-    // Claude A is opened: Anthropic's key and the Claude Code subscription both serve it.
-    const open = providersOpenToPersonalKeys([BOUND, MEMBER_A], REGISTRY);
-    expect([...open].sort()).toEqual(["anthropic", "claude-code"]);
+describe("personalModelServices", () => {
+  const services = (registry: ProviderRegistryEntry[]) =>
+    personalModelServices(registry).map((p) => p.providerId);
+
+  it("opens a subscription service to the models left to each member, as an API-key one", () => {
+    expect(services(REGISTRY)).toEqual(["anthropic", "claude-code", "mistral"]);
   });
 
-  it("offers nothing while the organization opened no model to personal keys", () => {
-    expect(providersOpenToPersonalKeys([BOUND, SYSTEM], REGISTRY).size).toBe(0);
-  });
-
-  it("leaves out a provider whose opened models are all disabled", () => {
-    const open = providersOpenToPersonalKeys([{ ...MEMBER_MISTRAL, enabled: false }], REGISTRY);
-    expect(open.has("mistral")).toBe(false);
+  it("leaves out a service closed to personal keys, and one whose listing needs a key to ask with", () => {
+    const closed = provider({ providerId: "closed", personal_allowed: false });
+    const discovered = provider({ providerId: "discovered", models: [] });
+    expect(services([closed, discovered])).toEqual([]);
   });
 });

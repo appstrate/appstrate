@@ -37,6 +37,7 @@ export function OrgRolesList({ onPreview }: { onPreview?: (role: ViewAsOrgRole) 
   const columns = useOrgRoleColumns({ onPreview });
   return (
     <DataTable
+      tableId="org-roles"
       label={t("roles.tabOrg")}
       columns={columns}
       rows={[...ORG_ROLES_ORDER]}

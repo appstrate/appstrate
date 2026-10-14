@@ -228,6 +228,7 @@ export function IntegrationsPage() {
 
       {view === "table" ? (
         <DataTable
+          tableId="integrations"
           label={t("integrations.tableLabel")}
           columns={columns}
           columnMode="scroll"

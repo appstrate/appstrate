@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { isValidElement, type ComponentProps, type ReactNode } from "react";
 import type { DataColumn } from "../data-table.tsx";
-import { TableRowActions } from "../table-row-actions.tsx";
 import { useDocumentColumns } from "../document-columns.tsx";
 import type { FileDto } from "../../hooks/use-files.ts";
-import { render } from "./run-fixture.tsx";
+import i18n, { i18nReady } from "../../i18n.ts";
+import { render } from "../../test/render.tsx";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
 
 function columnsFrom<T>(useColumns: () => DataColumn<T>[]): DataColumn<T>[] {
   let captured: DataColumn<T>[] = [];
@@ -18,19 +20,11 @@ function columnsFrom<T>(useColumns: () => DataColumn<T>[]): DataColumn<T>[] {
   return captured;
 }
 
-function rowActions(node: ReactNode): ComponentProps<typeof TableRowActions> {
-  if (
-    !isValidElement<ComponentProps<typeof TableRowActions>>(node) ||
-    node.type !== TableRowActions
-  )
-    throw new Error("Expected TableRowActions");
-  return node.props;
-}
-
-function actionCell<T>(columns: DataColumn<T>[], row: T) {
+/** The row's « … » cell as rendered: the menu's trigger, or nothing. */
+function actionCell<T>(columns: DataColumn<T>[], row: T): string {
   const actions = columns.find((column) => column.id === "actions");
   if (!actions) throw new Error("Missing Actions column");
-  return rowActions(actions.cell(row));
+  return render(<>{actions.cell(row)}</>);
 }
 
 const editable: FileDto = {
@@ -100,10 +94,9 @@ describe("document row capabilities", () => {
         onDelete: () => {},
       }),
     );
-    const actions = actionCell(columns, editable);
+    const html = actionCell(columns, editable);
 
-    expect(actions.menuLabel).toContain(editable.name);
-    expect(actions.children).toBeTruthy();
+    expect(html).toContain(`aria-label="Plus d'actions pour ${editable.name}"`);
   });
 
   it("does not invent actions for a document whose capabilities deny them", () => {
@@ -115,9 +108,8 @@ describe("document row capabilities", () => {
         onDelete: () => {},
       }),
     );
-    const actions = actionCell(columns, restricted);
+    const html = actionCell(columns, restricted);
 
-    expect(actions.menuLabel).toBeUndefined();
-    expect(actions.children).toBeUndefined();
+    expect(html).not.toContain("<button");
   });
 });

@@ -325,6 +325,7 @@ export function PackageToolCatalog({
         }}
       />
       <DataTable
+        tableId="package-tools"
         label={t("manifest.tools")}
         columns={columns}
         rows={rows}

@@ -2,12 +2,14 @@
 
 import { NavOrg } from "@/components/nav-org";
 import { ShellSidebar } from "@/components/shell-frame";
+import { SidebarCredits } from "@/components/sidebar-credits";
 
 /** Studio's sidebar: the shell frame, filled with Studio's navigation. */
 export function AppSidebar() {
   return (
     <ShellSidebar>
       <NavOrg />
+      <SidebarCredits />
     </ShellSidebar>
   );
 }

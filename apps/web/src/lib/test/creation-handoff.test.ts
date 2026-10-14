@@ -6,8 +6,6 @@ import settingsFr from "../../locales/fr/settings.json";
 import {
   buildChatCreationDraft,
   chatDraftNavigationState,
-  creationResourceFromSearch,
-  creationSearch,
   readChatComposerDraft,
   type CreationResource,
 } from "../creation-handoff.ts";
@@ -38,15 +36,6 @@ function translator(locale: keyof typeof dictionaries) {
 }
 
 describe("creation handoff", () => {
-  it("opens and closes an addressable chooser without dropping unrelated URL state", () => {
-    expect(creationSearch("?q=mail&catalogue=1", "integration")).toBe(
-      "?q=mail&catalogue=1&create=integration",
-    );
-    expect(creationResourceFromSearch("?q=mail&create=integration")).toBe("integration");
-    expect(creationSearch("?q=mail&create=integration", null)).toBe("?q=mail");
-    expect(creationResourceFromSearch("?create=unknown")).toBeNull();
-  });
-
   it.each(resources)("builds a short, specific Chat draft for %s", (resource) => {
     expect(buildChatCreationDraft(resource, translator("fr"))).toBe(frenchChatDrafts[resource]);
   });

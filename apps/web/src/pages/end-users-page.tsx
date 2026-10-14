@@ -143,7 +143,8 @@ function EndUsersPageContent() {
 
   if (!spaceId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
 
-  // Reading is the route's gate (`end-users:read`); every deed is `end-users:write`.
+  // Reading is the route's gate (`end-users:read`); creating and editing need
+  // `end-users:write`, deleting `end-users:delete` (the row menu checks it).
   return (
     <div>
       {canWrite && (
@@ -168,6 +169,7 @@ function EndUsersPageContent() {
       />
 
       <DataTable
+        tableId="end-users"
         label={t("endUsers.pageTitle")}
         columns={columns}
         rows={filtered}

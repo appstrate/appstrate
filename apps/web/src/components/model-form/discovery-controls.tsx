@@ -8,7 +8,8 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "../spinner";
-import { discoveryErrorKey, type DiscoveryState } from "@/lib/model-discovery";
+import type { DiscoveryState } from "@/lib/model-discovery";
+import { DiscoveryResult } from "./discovery-result";
 
 export function DiscoveryControls({
   mode,
@@ -45,23 +46,7 @@ export function DiscoveryControls({
           {t("models.form.manualButton")}
         </Button>
       </div>
-      {mode === "list" &&
-        discovery &&
-        (discovery.outcome === "ok" ? (
-          <div className="text-muted-foreground text-sm">
-            {discovery.models.length > 0
-              ? t("models.form.discoverCount", { count: discovery.models.length })
-              : t("models.form.discoverEmpty")}
-            {/* A capped listing is short of what the endpoint serves — saying so
-                is the difference between "these are the models" and "these are
-                the first models". */}
-            {discovery.truncated ? (
-              <span className="block">{t("models.form.discoverTruncated")}</span>
-            ) : null}
-          </div>
-        ) : (
-          <div className="text-destructive text-sm">{t(discoveryErrorKey(discovery.outcome))}</div>
-        ))}
+      {mode === "list" && discovery && <DiscoveryResult discovery={discovery} />}
     </div>
   );
 }

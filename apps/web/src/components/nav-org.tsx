@@ -105,47 +105,55 @@ export function NavOrg() {
       </SidebarNavLink>
     ));
 
+  const canReachRuns = canReach("/runs");
+
+  // A group whose entries are all closed to the caller is not drawn: its label
+  // would head nothing.
   return (
     <>
-      <SidebarGroup>
-        <SidebarGroupLabel>{t("nav.section.activity")}</SidebarGroupLabel>
-        <SidebarMenu>
-          {renderItems(activityItems)}
-          {/* Runs — with unread badge + running indicator */}
-          {canReach("/runs") && (
-            <SidebarMenuItem className="relative">
-              <SidebarMenuButton
-                asChild
-                isActive={visiblePathname.startsWith("/runs")}
-                tooltip={t("nav.runs")}
-              >
-                <Link to="/runs">
-                  <span className="flex size-4 shrink-0 items-center justify-center">
-                    {hasRunning ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : (
-                      <Activity size={16} />
-                    )}
-                  </span>
-                  <span>{t("nav.runs")}</span>
-                </Link>
-              </SidebarMenuButton>
-              {unread > 0 && (
-                <SidebarMenuBadge>
-                  <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-                    {unread > 99 ? "99+" : unread}
-                  </span>
-                </SidebarMenuBadge>
-              )}
-            </SidebarMenuItem>
-          )}
-        </SidebarMenu>
-      </SidebarGroup>
+      {(activityItems.length > 0 || canReachRuns) && (
+        <SidebarGroup>
+          <SidebarGroupLabel>{t("nav.section.activity")}</SidebarGroupLabel>
+          <SidebarMenu>
+            {renderItems(activityItems)}
+            {/* Runs — with unread badge + running indicator */}
+            {canReachRuns && (
+              <SidebarMenuItem className="relative">
+                <SidebarMenuButton
+                  asChild
+                  isActive={visiblePathname.startsWith("/runs")}
+                  tooltip={t("nav.runs")}
+                >
+                  <Link to="/runs">
+                    <span className="flex size-4 shrink-0 items-center justify-center">
+                      {hasRunning ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : (
+                        <Activity size={16} />
+                      )}
+                    </span>
+                    <span>{t("nav.runs")}</span>
+                  </Link>
+                </SidebarMenuButton>
+                {unread > 0 && (
+                  <SidebarMenuBadge>
+                    <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+                  </SidebarMenuBadge>
+                )}
+              </SidebarMenuItem>
+            )}
+          </SidebarMenu>
+        </SidebarGroup>
+      )}
 
-      <SidebarGroup>
-        <SidebarGroupLabel>{t("nav.section.build")}</SidebarGroupLabel>
-        <SidebarMenu>{renderItems(buildItems)}</SidebarMenu>
-      </SidebarGroup>
+      {buildItems.length > 0 && (
+        <SidebarGroup>
+          <SidebarGroupLabel>{t("nav.section.build")}</SidebarGroupLabel>
+          <SidebarMenu>{renderItems(buildItems)}</SidebarMenu>
+        </SidebarGroup>
+      )}
     </>
   );
 }

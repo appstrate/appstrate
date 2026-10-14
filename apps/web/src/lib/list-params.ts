@@ -87,10 +87,14 @@ export function useListParams(filterKeys: readonly string[]) {
   };
 }
 
-/** The same state, held in the component — for a panel, which has no URL of its own. */
-export function useLocalListParams(): ListState {
+/**
+ * The same state, held in the component — for a panel, which has no URL of its
+ * own. `initial` is the filter the panel opens on (a link into it); `reset`
+ * clears every dimension, that one included.
+ */
+export function useLocalListParams(initial: Record<string, string[]> = {}): ListState {
   const [search, setSearch] = useState("");
-  const [values, setValues] = useState<Record<string, string[]>>({});
+  const [values, setValues] = useState<Record<string, string[]>>(initial);
 
   return {
     search,

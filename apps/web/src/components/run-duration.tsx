@@ -23,13 +23,7 @@ import { cn } from "@appstrate/ui/cn";
 /** The statuses that mean "still going" are owned by the wire contract. */
 const ACTIVE = ACTIVE_RUN_STATUSES as ReadonlySet<string>;
 
-export function ElapsedDuration({
-  startedAt,
-  className,
-}: {
-  startedAt: string;
-  className?: string;
-}) {
+function ElapsedDuration({ startedAt, className }: { startedAt: string; className?: string }) {
   const [elapsed, setElapsed] = useState(() => Date.now() - new Date(startedAt).getTime());
 
   useEffect(() => {

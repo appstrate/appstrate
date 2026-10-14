@@ -8,6 +8,7 @@ import {
   sheetSpaceRows,
 } from "../catalogue-sheet.ts";
 import type { CataloguePlacement } from "../catalogue-placement.ts";
+import type { ActivationGate } from "../catalogue-gates.ts";
 
 function placement(overrides: Partial<CataloguePlacement> = {}): CataloguePlacement {
   return {
@@ -22,6 +23,9 @@ function placement(overrides: Partial<CataloguePlacement> = {}): CataloguePlacem
   };
 }
 
+const ALLOW = (): ActivationGate => ({ allowed: true, refusal: null });
+const DENY = (): ActivationGate => ({ allowed: false, refusal: "activate" });
+
 const spaces = [
   { id: "spc_a", name: "Default" },
   { id: "spc_b", name: "Bac à sable" },
@@ -29,7 +33,7 @@ const spaces = [
 
 describe("sheetSpaceRows", () => {
   it("puts the reader's own space first", () => {
-    const rows = sheetSpaceRows(placement({}), spaces, () => true, "spc_b");
+    const rows = sheetSpaceRows(placement({}), spaces, ALLOW, "spc_b");
     expect(rows[0]?.id).toBe("spc_b");
     expect(rows).toHaveLength(spaces.length);
   });
@@ -43,7 +47,7 @@ describe("sheetSpaceRows", () => {
         homeSpaceId: "spc_a",
       }),
       spaces,
-      () => true,
+      ALLOW,
     );
     expect(rows).toEqual([
       {
@@ -53,6 +57,7 @@ describe("sheetSpaceRows", () => {
         home: true,
         offeredBy: null,
         mayToggle: true,
+        refusal: null,
       },
       {
         id: "spc_b",
@@ -61,6 +66,7 @@ describe("sheetSpaceRows", () => {
         home: false,
         offeredBy: "Bob Martin",
         mayToggle: true,
+        refusal: null,
       },
     ]);
   });
@@ -69,7 +75,7 @@ describe("sheetSpaceRows", () => {
     const asked: Array<[string, boolean]> = [];
     sheetSpaceRows(placement({ activeIn: ["spc_a"] }), spaces, (id, next) => {
       asked.push([id, next]);
-      return true;
+      return ALLOW();
     });
     expect(asked).toEqual([
       ["spc_a", false],
@@ -78,29 +84,36 @@ describe("sheetSpaceRows", () => {
   });
 });
 
+describe("sheetSpaceRows refusals", () => {
+  it("carries the gate's reason beside a dead switch", () => {
+    const rows = sheetSpaceRows(placement(), spaces.slice(0, 1), DENY);
+    expect(rows[0]).toMatchObject({ mayToggle: false, refusal: "activate" });
+  });
+});
+
 describe("sheetSpaceMode", () => {
   it("is read-only when the reader may switch it nowhere", () => {
     const p = placement({ activeIn: ["spc_a"] });
-    expect(sheetSpaceMode(sheetSpaceRows(p, spaces, () => false))).toBe("readonly");
+    expect(sheetSpaceMode(sheetSpaceRows(p, spaces, DENY))).toBe("readonly");
   });
 
   it("is one line, not a table, with one space within reach", () => {
     const p = placement();
-    expect(sheetSpaceMode(sheetSpaceRows(p, spaces.slice(0, 1), () => true))).toBe("single");
+    expect(sheetSpaceMode(sheetSpaceRows(p, spaces.slice(0, 1), ALLOW))).toBe("single");
   });
 
   it("is a table as soon as there are two spaces to compare", () => {
     const p = placement();
-    expect(sheetSpaceMode(sheetSpaceRows(p, spaces, (id) => id === "spc_b"))).toBe("table");
+    expect(
+      sheetSpaceMode(sheetSpaceRows(p, spaces, (id) => (id === "spc_b" ? ALLOW() : DENY()))),
+    ).toBe("table");
   });
 });
 
 describe("sheetOffers", () => {
   it("keeps the offers alone", () => {
     const p = placement({ activeIn: ["spc_a"], offeredIn: ["spc_b"] });
-    expect(sheetOffers(sheetSpaceRows(p, spaces, () => true)).map((row) => row.id)).toEqual([
-      "spc_b",
-    ]);
+    expect(sheetOffers(sheetSpaceRows(p, spaces, ALLOW)).map((row) => row.id)).toEqual(["spc_b"]);
   });
 });
 

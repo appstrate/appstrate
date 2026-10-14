@@ -148,7 +148,6 @@ function DocumentsCollection({
         isLoading={isLoading}
         error={error}
         display={view}
-        showPurposeTabs={false}
         tableLabel={t("tableLabel")}
         tableColumnMode="scroll"
         toolbar={({ columns }) => (

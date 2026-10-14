@@ -56,12 +56,6 @@ const EXCEPTIONS: Exception[] = [
     reason: "Re-authentication confirming an act (unlinking an account): a confirmation of an act.",
   },
   {
-    file: "apps/web/src/components/org-catalogue-modal.tsx",
-    tag: "ActivationClosureDialog",
-    state: "closure",
-    reason: "Confirms an activation and what it drags along: a confirmation of an act.",
-  },
-  {
     file: "packages/module-chat/src/ui/chat-run-progress-card.tsx",
     tag: "Modal",
     state: "open",

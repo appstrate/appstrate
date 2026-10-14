@@ -82,21 +82,16 @@ export function AgentHealthSection({
             >
               {visible.map((diagnostic) => {
                 const text = agentDiagnosticText(diagnostic, t);
+                const target = agentDiagnosticCorrectionTarget(diagnostic, location.pathname);
                 return (
                   <HealthCardItem
                     key={`${diagnostic.code}:${diagnostic.field}`}
                     title={text.title}
                     description={text.explanation}
                     actions={
-                      <HealthAction
-                        to={agentDiagnosticCorrectionTarget(
-                          diagnostic,
-                          location.pathname,
-                          location.search,
-                        )}
-                      >
-                        {t("detail.diagnostics.fix")}
-                      </HealthAction>
+                      target && (
+                        <HealthAction to={target}>{t("detail.diagnostics.fix")}</HealthAction>
+                      )
                     }
                   />
                 );

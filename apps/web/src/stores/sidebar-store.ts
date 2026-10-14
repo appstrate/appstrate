@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from "zustand";
+import { persistedValue } from "./local-storage";
 
 interface SidebarState {
   open: boolean;
@@ -15,11 +16,11 @@ interface SidebarState {
  * shared flag would have the chat quietly re-fold Studio's navigation.
  */
 function createSidebarStore(storageKey: string) {
-  const stored = localStorage.getItem(storageKey);
+  const stored = persistedValue(storageKey, (raw) => raw !== "false");
   return create<SidebarState>()((set) => ({
-    open: stored === null ? true : stored === "true",
+    open: stored.read(),
     setOpen: (open) => {
-      localStorage.setItem(storageKey, String(open));
+      stored.write(open);
       set({ open });
     },
   }));

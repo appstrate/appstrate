@@ -9,8 +9,8 @@ import {
 import type { OrgModelInfo } from "../hooks/use-models";
 import { keyDeletionPrompt } from "../lib/key-deletion";
 
-/** « Supprimer la clé » for an organization key: only a key no model uses can go. */
-export function DeleteOrgKeyConfirm({
+/** « Supprimer » on a key of Settings › Models: an organization key goes only once no model uses it. */
+export function DeleteKeyConfirm({
   credential,
   models,
   onClose,

@@ -2,7 +2,11 @@
 
 import { describe, expect, it } from "bun:test";
 import { SaveFeedback } from "../settings/save-feedback.tsx";
-import { render } from "./run-fixture.tsx";
+import i18n, { i18nReady } from "../../i18n.ts";
+import { render } from "../../test/render.tsx";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
 
 describe("SaveFeedback", () => {
   it("says what the write did, one line at a time", () => {

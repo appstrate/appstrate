@@ -25,13 +25,10 @@
   "type.archive": "Archive",
   "type.spreadsheet": "Tableur",
   "type.file": "Fichier",
-  "filter.all": "Tous",
   "filter.agent_output": "Produits par les agents",
   "filter.user_upload": "Importés",
   "purpose.agent_output": "Sortie d'agent",
   "purpose.user_upload": "Importé",
-  "filter.output": "Produits",
-  "filter.input": "Importés",
   "row.download": "Télécharger",
   "row.preview": "Aperçu",
   "row.keep": "Conserver",
@@ -58,5 +55,6 @@
   "artifact.copyFailed": "Impossible de copier le contenu.",
   "artifact.fullscreen": "Plein écran",
   "artifact.exitFullscreen": "Quitter le plein écran",
-  "run.noAccess": "Votre rôle ne donne pas accès aux fichiers de cet espace."
+  "run.noAccess": "Votre rôle ne donne pas accès aux fichiers de cet espace.",
+  "run.truncated": "Seuls les 100 premiers fichiers de ce run sont affichés."
 }

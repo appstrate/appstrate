@@ -2,10 +2,12 @@
 
 /**
  * Creating a schedule: a small object, so a modal (like a model or a webhook),
- * not a page (like a package). It asks only what a schedule needs to exist —
- * the agent, a name, when it fires, the inputs the agent asks for — and the
- * schedule's Paramètres tab takes the rest (identity, version, model, proxy,
- * connections).
+ * not a page (like a package). It asks what a schedule needs to exist — the
+ * agent, a name, when it fires, the inputs the agent asks for — and, folded,
+ * what may decide whether it can be created at all: who it runs as, the
+ * version (an agent never published fires only its draft) and the model (one
+ * no organization credential serves is refused). The schedule's Paramètres tab
+ * takes the connections.
  *
  * Opened from anywhere by the `newSchedule` URL parameter (`useModalParam`),
  * carrying the agent to preselect or `1` for none: the schedules list, an
@@ -15,9 +17,16 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { ChevronDown } from "lucide-react";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
+import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import { Field, FieldGroup } from "@appstrate/ui/components/field";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
+import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -28,27 +37,44 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { Modal } from "./modal";
+import { ActorSelect } from "./actor-select";
 import { AgentInputForm } from "./agent-input-form";
 import { FrequencyComposer } from "./frequency-composer";
-import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
+import { AgentVersionField } from "./package-version-select";
+import { RunOverridesPanel } from "./run-overrides-panel";
+import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
 import { ErrorState, LoadingState } from "./page-states";
+import { useActorName } from "../hooks/use-actor-name";
+import { useAuth } from "../hooks/use-auth";
 import { useModalParam } from "../hooks/use-modal-param";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useCreateSchedule, useScheduleFormDeps } from "../hooks/use-schedules";
 import { changedInputValues, hasInputFields, initialInputValues } from "../lib/agent-input";
-import { scheduleConnectionChoices } from "../lib/connection-choice";
-import { withConnectionOverride } from "../lib/connection-set";
-import { browserTimezone } from "../lib/cron-frequency";
-import { savedScheduleOverrides } from "../lib/schedule-payload";
+import {
+  type SubmittedPicks,
+  picksAfterActorChange,
+  refusalForActor,
+  scheduleConnectionChoices,
+  withConnectionPickAs,
+} from "../lib/connection-choice";
+import type { ConnectionSet } from "../lib/connection-set";
+import {
+  type ActorValue,
+  type RunOverridesValue,
+  sameActor,
+  scheduleCreatePayload,
+} from "../lib/schedule-payload";
+import { VERSION_INHERIT } from "../lib/schedule-options";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
 
 /** The URL parameter that opens the modal; its value is the agent to preselect, or `1`. */
 export const NEW_SCHEDULE_PARAM = "newSchedule";
 
-/** A new schedule's first rhythm: weekdays at 9. */
-const DEFAULT_CRON = "0 9 * * 1-5";
+/** A new schedule's first rhythm: every day at 9, in UTC. */
+const DEFAULT_CRON = "0 9 * * *";
+const DEFAULT_TIMEZONE = "UTC";
 
 /** Mounted once in the shell: the modal answers the parameter on any page. */
 export function NewScheduleModalHost() {
@@ -134,7 +160,7 @@ function ScheduleFields({
   );
 }
 
-function ScheduleFieldsReady({
+export function ScheduleFieldsReady({
   deps,
   agentId,
   onCreated,
@@ -146,47 +172,86 @@ function ScheduleFieldsReady({
   onCancel: () => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
+  const { user } = useAuth();
   const create = useCreateSchedule(agentId);
   const wrapper = deps.inputWrapper;
   const [name, setName] = useState("");
   const [cron, setCron] = useState<string | null>(DEFAULT_CRON);
-  const [timezone, setTimezone] = useState(browserTimezone);
+  const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
   // Seeded from the agent's resolved values; only what differs is sent, so a
   // later change of the agent's own value still reaches every fire.
   const [values, setValues] = useState<Record<string, unknown>>(() =>
     initialInputValues(wrapper, wrapper, undefined),
   );
-  // A scheduled fire cannot ask which connection to use: when the server
-  // refuses over it, the choice is made here, in the same write.
-  const choices = scheduleConnectionChoices(create.error);
-  const [picks, setPicks] = useState<Record<string, string[]>>({});
-  // A new schedule inherits the version: the latest published one is what fires. Its `required`
-  // flags tell which integrations may run with "Aucune connexion".
-  const firedIntegrations = usePackageDetail("agent", agentId, { version: VERSION_PUBLISHED }).data
+  // Who a fire runs as (`undefined`: the creator) and the overrides stored for it. One state:
+  // the connection picks belong to the actor, so a write to either reads the other as it stands.
+  const [{ actor, overrides }, setRun] = useState<{
+    actor: ActorValue | undefined;
+    overrides: RunOverridesValue;
+  }>({ actor: undefined, overrides: {} });
+  // `undefined`: inherit, the latest published version at every fire.
+  const [versionOverride, setVersionOverride] = useState<string | undefined>();
+  const [optionsOpen, setOptionsOpen] = useState(false);
+
+  const creator: ActorValue | undefined = user ? { userId: user.id } : undefined;
+  const runsAs = actor ?? creator;
+  const runsAsViewer = !!user && sameActor(runsAs, { userId: user.id });
+  const actorName = useActorName(runsAs);
+  const firedVersion = versionOverride ?? VERSION_PUBLISHED;
+  // Its `required` flags tell which integrations may run with "Aucune connexion".
+  const firedIntegrations = usePackageDetail("agent", agentId, { version: firedVersion }).data
     ?.dependencies.integrations;
-  // A new schedule runs as its creator. The server takes no fallback for an enabled schedule, so
-  // the connection their fallback binds is named in the write, from the verdict for that version.
+  // The server takes no fallback for an enabled schedule, so the connection the viewer's fallback
+  // binds is named in the write — from their own verdict, asked only when the fires run as them.
   const { data: readiness, isLoading: readinessLoading } = useAgentConnectionReadiness(
-    agentId,
-    VERSION_PUBLISHED,
+    runsAsViewer ? agentId : undefined,
+    firedVersion,
   );
+  const picks = overrides.connection_overrides ?? {};
+
+  // A scheduled fire cannot ask which connection to use: a refusal over it is answered here, in
+  // the same write. It speaks for the identity it was sent for, stale once the actor moves.
+  const [submitted, setSubmitted] = useState<SubmittedPicks | null>(null);
+  const refused = refusalForActor(scheduleConnectionChoices(create.error), submitted, runsAs);
+
+  const changeActor = (next: ActorValue | undefined) =>
+    setRun((prev) => {
+      const { connection_overrides: prevPicks, ...rest } = prev.overrides;
+      const kept = picksAfterActorChange({
+        picks: prevPicks,
+        runsAs: prev.actor ?? creator,
+        nextRunsAs: next ?? creator,
+        stored: null,
+      });
+      return { actor: next, overrides: kept ? { ...rest, connection_overrides: kept } : rest };
+    });
+  const setConnectionPick = (integrationId: string, connectionIds: ConnectionSet) =>
+    setRun((prev) => ({
+      ...prev,
+      overrides: withConnectionPickAs(prev.overrides, {
+        pickedAs: runsAs,
+        runsAs: prev.actor ?? creator,
+        integrationId,
+        connectionIds,
+      }),
+    }));
 
   const submit = () => {
     if (!cron) return;
-    const { connection_overrides } = savedScheduleOverrides({
-      overrides: { connection_overrides: picks },
-      runsAsViewer: true,
-      viewerReadiness: readiness?.integrations,
-      declared: firedIntegrations?.map((i) => i.id),
-    });
+    setSubmitted({ runsAs, picks });
     create.mutate(
-      {
-        ...(name.trim() ? { name: name.trim() } : {}),
+      scheduleCreatePayload({
+        overrides,
+        runsAsViewer,
+        viewerReadiness: readiness?.integrations,
+        declared: firedIntegrations?.map((i) => i.id),
+        name,
         cron_expression: cron,
         timezone,
         input: changedInputValues(wrapper, wrapper, values),
-        ...(connection_overrides ? { connection_overrides } : {}),
-      },
+        versionOverride,
+        actor,
+      }),
       { onSuccess: onCreated },
     );
   };
@@ -231,17 +296,66 @@ function ScheduleFieldsReady({
           />
         </Field>
       )}
-      {choices.length > 0 && (
-        <ScheduleActorConnectionChoice
-          choices={choices}
-          integrations={firedIntegrations ?? []}
+      {/* Open while a refusal speaks for this actor: answering it may mean changing them. */}
+      <Collapsible open={optionsOpen || refused.length > 0} onOpenChange={setOptionsOpen}>
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
+          >
+            <span>{t("schedule.optionsTitle")}</span>
+            <ChevronDown
+              className={cn(
+                "text-muted-foreground size-4 transition-transform",
+                (optionsOpen || refused.length > 0) && "rotate-180",
+              )}
+            />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-4 pt-3">
+          <Field>
+            <Label>{t("schedule.actorTitle")}</Label>
+            <ActorSelect
+              value={actor}
+              onChange={changeActor}
+              placeholder={t("schedule.actorDefaultSelf")}
+            />
+            <FieldDescription>{t("schedule.actorHint")}</FieldDescription>
+          </Field>
+          <AgentVersionField
+            packageId={agentId}
+            label={t("run.overrides.versionLabel")}
+            value={versionOverride ?? VERSION_INHERIT}
+            onChange={(next) => setVersionOverride(next === VERSION_INHERIT ? undefined : next)}
+            leadingOptions={[
+              { value: VERSION_INHERIT, label: t("run.overrides.versionPublished") },
+              // The working copy is its writers' to run: anyone else would be refused at every
+              // fire (403 `draft_not_writable`).
+              ...(deps.homeWritable
+                ? [{ value: "draft", label: t("run.overrides.versionDraft") }]
+                : []),
+            ]}
+          />
+          <RunOverridesPanel
+            packageId={agentId}
+            persistedModelId={deps.persistedModelId}
+            persistedGenerationConfig={deps.persistedGenerationConfig}
+            persistedProxyId={deps.persistedProxyId}
+            value={overrides}
+            onChange={(next) => setRun((prev) => ({ ...prev, overrides: next }))}
+            version={firedVersion}
+            scheduled
+          />
+        </CollapsibleContent>
+      </Collapsible>
+      {refused.length > 0 && (
+        <ScheduleConnectionAnswer
+          choices={refused}
+          submitted={submitted?.picks ?? {}}
           value={picks}
-          onChange={(integrationId, connectionIds) =>
-            setPicks(
-              withConnectionOverride({ connection_overrides: picks }, integrationId, connectionIds)
-                .connection_overrides ?? {},
-            )
-          }
+          integrations={firedIntegrations ?? []}
+          actorName={actorName}
+          onChange={setConnectionPick}
         />
       )}
       <p className="text-muted-foreground text-xs">{t("schedule.newHint")}</p>

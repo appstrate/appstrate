@@ -106,7 +106,10 @@ function GeneralForm({
   // Each control commits on its own — "the control IS the setting". No Save
   // button under this form: in the settings surfaces a change is a change
   // without pressing something else.
-  const save = (change: SpaceSettingChange, onSuccess?: () => void) => {
+  const save = (
+    change: SpaceSettingChange,
+    { onSuccess, onError }: { onSuccess?: () => void; onError?: () => void } = {},
+  ) => {
     const { field } = change;
     setWrite({ field, state: "pending" });
     updateMutation.mutate(
@@ -119,14 +122,19 @@ function GeneralForm({
         onError: (error) => {
           setWrite({ field, state: "error" });
           toastError(error);
+          onError?.();
         },
       },
     );
   };
 
+  // A refused write shows the stored value again, not the one the server refused.
   const commitVisibility = (next: SpaceVisibility) => {
     setEditedVisibility(next);
-    save({ field: "visibility", value: next }, () => setPendingClose(null));
+    save(
+      { field: "visibility", value: next },
+      { onSuccess: () => setPendingClose(null), onError: () => setEditedVisibility(null) },
+    );
   };
 
   const chooseVisibility = (next: SpaceVisibility) => {
@@ -137,7 +145,7 @@ function GeneralForm({
 
   const commitDefaultRole = (next: SpaceRolePreset) => {
     setEditedDefaultRole(next);
-    save({ field: "defaultRole", value: next });
+    save({ field: "defaultRole", value: next }, { onError: () => setEditedDefaultRole(null) });
   };
 
   const commitDomains = (next: string[]) => {

@@ -51,13 +51,11 @@ export function HealthCard({
   title,
   badge,
   tone,
-  cardHeaders = true,
   children,
 }: {
   title: string;
   badge: ReactNode;
   tone: string;
-  cardHeaders?: boolean;
   children: ReactNode;
 }) {
   const id = useId();
@@ -66,15 +64,12 @@ export function HealthCard({
     <section
       aria-labelledby={id}
       className={cn(
-        "border-border rounded-lg border",
-        cardHeaders ? "bg-muted/35 overflow-hidden" : "bg-card p-4",
+        "border-border bg-muted/35 overflow-hidden rounded-lg border",
         tone === "blocking" && "border-destructive/30",
         tone === "warning" && "border-warning/30",
       )}
     >
-      <div
-        className={cn("flex flex-wrap items-center gap-2", cardHeaders && "bg-muted/35 px-4 py-3")}
-      >
+      <div className="bg-muted/35 flex flex-wrap items-center gap-2 px-4 py-3">
         <Icon
           className={cn(
             "size-4 shrink-0",
@@ -91,9 +86,7 @@ export function HealthCard({
         </h2>
         {badge}
       </div>
-      <div className={cn(cardHeaders && "bg-card overflow-hidden rounded-t-lg border-t")}>
-        {children}
-      </div>
+      <div className="bg-card overflow-hidden rounded-t-lg border-t">{children}</div>
     </section>
   );
 }
@@ -102,20 +95,13 @@ export function HealthCardItem({
   title,
   description,
   actions,
-  cardHeaders = true,
 }: {
   title: ReactNode;
   description?: ReactNode;
   actions: ReactNode;
-  cardHeaders?: boolean;
 }) {
   return (
-    <li
-      className={cn(
-        "grid gap-2 py-4 sm:grid-cols-[minmax(0,1fr)_auto]",
-        cardHeaders ? "first:pt-4 last:pb-4" : "first:pt-0 last:pb-0",
-      )}
-    >
+    <li className="grid gap-2 py-4 sm:grid-cols-[minmax(0,1fr)_auto]">
       <div className="min-w-0">
         <p className="text-sm font-medium">{title}</p>
         {description && <p className="text-muted-foreground mt-0.5 text-xs">{description}</p>}

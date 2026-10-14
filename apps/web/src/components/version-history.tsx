@@ -80,6 +80,7 @@ export function VersionHistory({
         }}
       />
       <DataTable
+        tableId="versions"
         label={t("version.history")}
         rows={rows}
         rowKey={(version) => String(version.id)}

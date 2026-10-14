@@ -69,6 +69,15 @@ export function InvitationsTable({
     },
   });
 
+  // Resolved on click: the origin is a browser fact, and nothing on screen
+  // shows the clipboard changed, hence the toast. A refused copy toasts its own
+  // error instead.
+  const copyLink = async (invitation: Invitation) => {
+    if (await copy(`${window.location.origin}/invite/${invitation.token}`)) {
+      toast.success(t("orgSettings.invitationLinkCopied"));
+    }
+  };
+
   const columns = useInvitationColumns({
     assignments: (invitation) =>
       invitation.space_assignments.map(
@@ -81,12 +90,7 @@ export function InvitationsTable({
     canEdit,
     isCanceling: cancel.isPending,
     onEdit: (invitation) => editParam.open(invitation.id),
-    // Resolved on click: the origin is a browser fact, and nothing on screen
-    // shows the clipboard changed, hence the toast.
-    onCopyLink: (invitation) => {
-      void copy(`${window.location.origin}/invite/${invitation.token}`);
-      toast.success(t("orgSettings.invitationLinkCopied"));
-    },
+    onCopyLink: (invitation) => void copyLink(invitation),
     onCancel: (invitation) => setCancelingId(invitation.id),
   });
 
@@ -96,6 +100,7 @@ export function InvitationsTable({
     <SettingsGroup title={t("orgSettings.pendingInvitations")} className="mt-8">
       <DataTable
         label={t("orgSettings.pendingInvitations")}
+        tableId="invitations"
         columns={columns}
         rows={visible}
         rowKey={(invitation) => invitation.id}

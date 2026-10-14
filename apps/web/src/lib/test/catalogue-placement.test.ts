@@ -9,6 +9,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   cataloguePlacement,
+  detailSpace,
   inPlacedTab,
   pendingOfferCount,
   pendingShares,
@@ -192,5 +193,39 @@ describe("pendingShares", () => {
         ]),
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("detailSpace", () => {
+  const spaces = [{ id: "spc_here" }, { id: "spc_home" }, { id: "spc_b" }];
+
+  it("reads an agent not placed in the current space from its home, not from the current space", () => {
+    // The space the reader stands in cannot read it: the detail answers only
+    // where the package is placed, and a failed read would skip the
+    // activation's integration question.
+    const placement = cataloguePlacement(
+      pkg([{ space_id: "spc_home", state: "active", via: "home" }]),
+      "spc_here",
+    );
+    expect(detailSpace(placement, spaces, "spc_here")).toBe("spc_home");
+  });
+
+  it("CONTROL: reads a package placed here from here", () => {
+    const placement = cataloguePlacement(
+      pkg([
+        { space_id: "spc_home", state: "active", via: "home" },
+        { space_id: "spc_here", state: "none" },
+      ]),
+      "spc_here",
+    );
+    expect(detailSpace(placement, spaces, "spc_here")).toBe("spc_here");
+  });
+
+  it("falls back to a space that holds it when the home is out of reach", () => {
+    const placement = cataloguePlacement(
+      pkg([{ space_id: "spc_b", state: "inactive" }], "spc_hidden"),
+      "spc_here",
+    );
+    expect(detailSpace(placement, spaces, "spc_here")).toBe("spc_b");
   });
 });

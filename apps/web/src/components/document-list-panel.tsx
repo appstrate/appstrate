@@ -1,47 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared documents panel — the purpose tab strip, loading/error/empty states,
- * the DocumentTile grid, and the delete + preview modals. Used by both the
- * gallery page and the run-detail Documents tab. Data fetching and pagination
- * stay with the caller; this component is fed an already-resolved list and owns
- * only the delete/preview interaction (download + delete gating live here since
- * they are identical on both surfaces).
+ * Shared documents panel — loading/error/empty states, the three bodies
+ * (cards, table, compact list), and the delete + preview modals. Used by the
+ * gallery page and the run page. Data fetching and pagination stay with the
+ * caller; this component is fed an already-resolved list and owns only the
+ * delete/preview interaction (download + delete gating live here since they
+ * are identical on every surface).
  */
 
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Download, Eye, FileText, Pin, Trash2 } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
 import { ErrorState, EmptyState } from "./page-states";
 import { CardGrid } from "./card-grid";
+import { ItemList } from "./item-list";
 import { DataTable, columnMenu, visibleColumns } from "./data-table";
 import type { ColumnMenuSpec } from "./list-toolbar";
 import { FileTile } from "./file-tile";
 import { useDocumentColumns } from "./document-columns";
+import { DocumentRowActions } from "./document-row-actions";
 import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
-import { TableRowActions } from "./table-row-actions";
-import { documentPreviewHref } from "../lib/documents";
-import { runFileDirection } from "../lib/files";
+import { filePreviewHref, runFileDirection } from "../lib/files";
 import { useColumnVisibility } from "../stores/column-visibility-store";
-
-export type PurposeFilter = "all" | "agent_output" | "user_upload";
-
-const PURPOSE_TABS: PurposeFilter[] = ["all", "agent_output", "user_upload"];
-const ignorePurposeChange = () => undefined;
 
 export function DocumentListPanel({
   documents,
   isLoading,
   error,
-  purpose = "all",
-  onPurposeChange = ignorePurposeChange,
   empty,
   showRunLink,
   runId,
@@ -49,18 +39,14 @@ export function DocumentListPanel({
   onDeleted,
   onKept,
   display = "cards",
-  showPurposeTabs = true,
   toolbar,
   tableLabel,
   tableColumnMode = "tiered",
   tableSurface = "framed",
-  tableShowHeader = true,
 }: {
   documents: FileDto[];
   isLoading: boolean;
   error: unknown;
-  purpose?: PurposeFilter;
-  onPurposeChange?: (p: PurposeFilter) => void;
   empty: { message: string; hint?: string; compact?: boolean };
   /** Gallery tiles link to the producing run. */
   showRunLink?: boolean;
@@ -71,7 +57,7 @@ export function DocumentListPanel({
    * from an earlier run is an input the run consumed.
    */
   runId?: string;
-  /** Gallery's "Load more" control, rendered after the grid. */
+  /** Rendered after the list: the gallery's "Load more", a run's truncation notice. */
   footer?: ReactNode;
   /** Let the caller prune its own list (e.g. the gallery's page accumulator). */
   onDeleted?: (id: string) => void;
@@ -81,10 +67,8 @@ export function DocumentListPanel({
    * the pinned row loses its expiry badge without a full remount.
    */
   onKept?: (id: string) => void;
-  /** The main Documents page offers both; compact run tabs keep the gallery. */
+  /** The main Documents page offers cards and table; the run overview lists compactly. */
   display?: "cards" | "table" | "compact";
-  /** The main page puts this dimension in ListToolbar instead of a tab strip. */
-  showPurposeTabs?: boolean;
   /** Apparatus owned by the caller, built from the table's real columns. */
   toolbar?: (context: { columns: ColumnMenuSpec }) => ReactNode;
   tableLabel?: string;
@@ -92,8 +76,6 @@ export function DocumentListPanel({
   tableColumnMode?: "tiered" | "scroll";
   /** Integrated rails already provide the surrounding surface. */
   tableSurface?: "framed" | "integrated";
-  /** The compact snapshot list names the group in its accordion trigger. */
-  tableShowHeader?: boolean;
 }) {
   const { t } = useTranslation("files");
   const download = useFileDownload();
@@ -169,10 +151,11 @@ export function DocumentListPanel({
   };
 
   const pendingKeepId = keepDoc.isPending ? (keepDoc.variables?.params.path.id ?? null) : null;
+  const onDownload = (doc: FileDto) => void download(doc.id, doc.name);
   const allColumns = useDocumentColumns({
     pendingKeepId,
     showRunLink,
-    onDownload: (doc) => void download(doc.id, doc.name),
+    onDownload,
     onKeep,
     onDelete,
   });
@@ -185,103 +168,43 @@ export function DocumentListPanel({
     <>
       {toolbar?.({ columns: columnMenu(allColumns, visibility) })}
 
-      {showPurposeTabs && (
-        <div className="mb-4 flex items-center gap-1">
-          {PURPOSE_TABS.map((p) => (
-            <Button
-              key={p}
-              variant={purpose === p ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => onPurposeChange(p)}
-            >
-              {t(`filter.${p}`)}
-            </Button>
-          ))}
-        </div>
-      )}
-
       <div className="flex flex-col gap-3">
         {display === "compact" ? (
-          isLoading ? (
-            <Skeleton className="h-7 w-full" />
-          ) : error ? (
-            <ErrorState error={error} compact />
-          ) : documents.length === 0 ? (
-            emptyState
-          ) : (
-            <ul className="grid gap-1">
-              {documents.map((doc) => {
-                const canKeep = doc.capabilities.keep && Boolean(doc.expiresAt);
-                const hasMenu = Boolean(
-                  doc.capabilities.preview ||
-                  doc.capabilities.download ||
-                  canKeep ||
-                  doc.capabilities.delete,
-                );
-                const hasNonDestructiveAction = Boolean(
-                  doc.capabilities.preview || doc.capabilities.download || canKeep,
-                );
-
-                return (
-                  <li key={doc.id} className="flex min-w-0 items-center gap-2 py-0.5">
-                    <span className="min-w-0 flex-1 truncate text-sm" title={doc.name}>
-                      {doc.name}
-                    </span>
-                    <TableRowActions
-                      menuLabel={hasMenu ? t("row.moreActions", { name: doc.name }) : undefined}
-                      isPending={pendingKeepId === doc.id}
-                    >
-                      {hasMenu ? (
-                        <>
-                          {doc.capabilities.preview && (
-                            <DropdownMenuItem onSelect={() => setPreviewParam(doc.id)}>
-                              <Eye />
-                              {t("row.preview")}
-                            </DropdownMenuItem>
-                          )}
-                          {doc.capabilities.download && (
-                            <DropdownMenuItem onSelect={() => void download(doc.id, doc.name)}>
-                              <Download />
-                              {t("row.download")}
-                            </DropdownMenuItem>
-                          )}
-                          {canKeep && (
-                            <DropdownMenuItem onSelect={() => onKeep(doc)}>
-                              <Pin />
-                              {t("row.keep")}
-                            </DropdownMenuItem>
-                          )}
-                          {doc.capabilities.delete && (
-                            <>
-                              {hasNonDestructiveAction && <DropdownMenuSeparator />}
-                              <DropdownMenuItem
-                                onSelect={() => onDelete(doc)}
-                                className="text-destructive focus:text-destructive"
-                              >
-                                <Trash2 />
-                                {t("row.delete")}
-                              </DropdownMenuItem>
-                            </>
-                          )}
-                        </>
-                      ) : undefined}
-                    </TableRowActions>
-                  </li>
-                );
-              })}
-            </ul>
-          )
+          <ItemList
+            items={documents}
+            itemKey={(doc) => doc.id}
+            isLoading={isLoading}
+            isError={Boolean(error)}
+            error={<ErrorState error={error} compact />}
+            empty={emptyState}
+            renderItem={(doc) => (
+              <div className="flex min-w-0 items-center gap-2 rounded-md border px-3 py-1.5">
+                <span className="min-w-0 flex-1 truncate text-sm" title={doc.name}>
+                  {doc.name}
+                </span>
+                <DocumentRowActions
+                  doc={doc}
+                  isPending={pendingKeepId === doc.id}
+                  showRunLink={showRunLink}
+                  onPreview={(d) => setPreviewParam(d.id)}
+                  onDownload={onDownload}
+                  onKeep={onKeep}
+                  onDelete={onDelete}
+                />
+              </div>
+            )}
+          />
         ) : display === "table" ? (
           <DataTable
+            tableId="documents"
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
             columnMode={tableColumnMode}
             surface={tableSurface}
-            showHeader={tableShowHeader}
             rows={documents}
             rowKey={(doc) => doc.id}
             rowHref={(doc) =>
-              doc.capabilities.preview ? documentPreviewHref(location, doc.id) : undefined
+              doc.capabilities.preview ? filePreviewHref(location, doc.id) : undefined
             }
             rowLabel={(doc) => doc.name}
             isLoading={isLoading}

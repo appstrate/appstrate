@@ -2,7 +2,6 @@
 
 import { useTranslation } from "react-i18next";
 import { CheckCheck, SearchX } from "lucide-react";
-import { runStatusValues } from "@appstrate/core/run-status";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
@@ -16,6 +15,7 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
 import { useRunViewStore } from "../stores/list-view-store";
 import { usePermissions } from "../hooks/use-permissions";
+import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 
 /**
  * The filters live in the URL, so a filtered list is a link. They also come
@@ -49,7 +49,7 @@ export function RunsPage() {
 
   const scopes = list.values("user", SCOPES);
   const kinds = list.values("kind", KINDS);
-  const statuses = list.values("status", runStatusValues);
+  const { statuses, filter: statusFilter } = useRunStatusFilter(list);
   const search = list.search;
   const view = useRunViewStore((state) => state.view);
   const setView = useRunViewStore((state) => state.setView);
@@ -76,16 +76,7 @@ export function RunsPage() {
       ],
       onChange: list.setValues("kind"),
     },
-    {
-      id: "status",
-      label: t("runs.filterStatus"),
-      values: statuses,
-      options: runStatusValues.map((value) => ({
-        value,
-        label: t(`status.${value}`, { ns: "common" }),
-      })),
-      onChange: list.setValues("status"),
-    },
+    statusFilter,
   ];
 
   // The endpoint takes ONE kind, so "both ticked" is spelled "no kind

@@ -103,6 +103,7 @@ export function OrgSettingsSpacesPage() {
       )}
 
       <DataTable
+        tableId="spaces"
         label={t("spaces.pageTitle")}
         columns={columns}
         rows={spaces ?? []}
