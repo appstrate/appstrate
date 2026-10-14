@@ -5,11 +5,13 @@ import { createContext, useContext } from "react";
 
 /**
  * The few strings the primitives of this package render themselves (a dialog's
- * close button, the sidebar's screen-reader chrome). The package carries no
+ * close button, the sidebar's screen-reader chrome, a carousel's arrows). The package carries no
  * i18n runtime: the host application provides its translations once, at its
  * root, and every primitive reads them from there. English is the default.
  */
 interface UiLabels {
+  carouselNext: string;
+  carouselPrevious: string;
   close: string;
   sidebar: string;
   sidebarDescription: string;
@@ -17,6 +19,8 @@ interface UiLabels {
 }
 
 export const UiLabelsContext = createContext<UiLabels>({
+  carouselNext: "Next slide",
+  carouselPrevious: "Previous slide",
   close: "Close",
   sidebar: "Sidebar",
   sidebarDescription: "Displays the mobile sidebar.",

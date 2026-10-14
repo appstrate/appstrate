@@ -34,6 +34,7 @@
   ],
   "exports": {
     "./schema-form": "./src/schema-form/index.tsx",
+    "./components/carousel-context": "./src/components/carousel-context.ts",
     "./components/sidebar-context": "./src/components/sidebar-context.ts",
     "./components/ui-labels": "./src/components/ui-labels.ts",
     "./components/model-generation-labels": "./src/components/model-generation-labels.ts",
@@ -64,6 +65,8 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "embla-carousel-react": "^8.6.0",
+    "embla-carousel-wheel-gestures": "^8.1.0",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.7.0"
   },
