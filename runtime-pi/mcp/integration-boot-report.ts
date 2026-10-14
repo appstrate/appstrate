@@ -24,9 +24,10 @@ const RETRY_DELAY_CAP_MS = 2_000;
  * therefore reads this report BEFORE listing tools.
  *
  * Reachable on the same per-run network the MCP client just handshook over.
- * Only a transport failure (the request never reached a listener) is retried,
- * until the deadline; a deadline abort, an HTTP error or an unreadable body
- * is final. We do NOT swallow a definitive failure: the run must abort when
+ * Any fetch rejection other than the deadline abort is retried until the
+ * deadline — a refused connection, or a reset after the request was sent,
+ * which is harmless to repeat because the GET is idempotent. The deadline
+ * abort, an HTTP error and an unreadable body are final. We do NOT swallow a definitive failure: the run must abort when
  * integration health can't be confirmed (the platform contract — an
  * integration that didn't launch as declared fails the run, every tier).
  *

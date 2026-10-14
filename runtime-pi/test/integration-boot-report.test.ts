@@ -2,8 +2,8 @@
 
 /**
  * `fetchIntegrationBootReport` has one deadline for every attempt together,
- * and retries only a request that never reached a listener: a deadline abort
- * or an HTTP error is final.
+ * and retries a fetch rejection other than that deadline's abort: the abort
+ * and an HTTP error are final.
  */
 
 import { describe, it, expect, afterEach, jest } from "bun:test";

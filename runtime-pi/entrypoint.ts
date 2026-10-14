@@ -195,6 +195,30 @@ const sink = new HttpSink({
 const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });
 const bridgedSink = bridge.sink;
 
+// --- Liveness keep-alive ---
+//
+// Start the runner-side heartbeat against POST {SINK_URL}/heartbeat.
+// The server bumps `runs.last_heartbeat_at` on every ping; the stall
+// watchdog reads that column to detect a crashed container (network
+// partition, SIGKILL, Docker daemon drop). This path is identical to
+// the CLI's — same helper, same endpoint, same HMAC auth — so platform
+// and remote runs share one liveness mechanism. It starts before the
+// runner's first event, which retires the platform's boot-phase pump:
+// provisioning, the MCP connect and the integration boot report can each
+// outlast the stall threshold. Every exit below is a `process.exit`, which
+// ends the timer with the process.
+const heartbeat = startSinkHeartbeat({
+  url: `${env.sink.url.replace(/\/$/, "")}/heartbeat`,
+  runSecret: env.sink.secret,
+  intervalMs: HEARTBEAT_INTERVAL_MS,
+  onError: (err) => {
+    // Non-fatal — stall watchdog is the backstop. Keep it on stderr so
+    // container log forwarding captures it without polluting the event
+    // stream.
+    process.stderr.write(`[heartbeat] ${getErrorMessage(err)}\n`);
+  },
+});
+
 // --- 0b. File publishing (run → platform) ---
 // Server `${sha256}:${name}` identities and canonical source-path → sha256
 // identities this run has published, shared by the `publish_file` tool and
@@ -377,29 +401,6 @@ const [, bundle] = await Promise.all([
     die(`Failed to read the provisioned agent package: ${getErrorMessage(err)}`),
   ),
 ]);
-
-// --- Liveness keep-alive ---
-//
-// Start the runner-side heartbeat against POST {SINK_URL}/heartbeat.
-// The server bumps `runs.last_heartbeat_at` on every ping; the stall
-// watchdog reads that column to detect a crashed container (network
-// partition, SIGKILL, Docker daemon drop). This path is identical to
-// the CLI's — same helper, same endpoint, same HMAC auth — so platform
-// and remote runs share one liveness mechanism. It starts before the
-// runner's first event, which retires the platform's boot-phase pump:
-// the sidecar waits below (MCP connect, integration boot report) can each
-// outlast the stall threshold.
-const heartbeat = startSinkHeartbeat({
-  url: `${env.sink.url.replace(/\/$/, "")}/heartbeat`,
-  runSecret: env.sink.secret,
-  intervalMs: HEARTBEAT_INTERVAL_MS,
-  onError: (err) => {
-    // Non-fatal — stall watchdog is the backstop. Keep it on stderr so
-    // container log forwarding captures it without polluting the event
-    // stream.
-    process.stderr.write(`[heartbeat] ${getErrorMessage(err)}\n`);
-  },
-});
 
 phaseTimings.provisioningMs = Math.round(performance.now() - provisionStart);
 await progress("workspace initialized · agent package read", {
