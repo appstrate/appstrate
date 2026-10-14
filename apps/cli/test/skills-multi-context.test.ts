@@ -176,7 +176,7 @@ describe("multi-space skill distribution regressions", () => {
       "Library-only draft reference",
     );
     const mcp = JSON.parse(await readFile(join(pluginRoot(), ".mcp.json"), "utf8"));
-    expect(mcp.mcpServers.appstrate.url).toEndWith("/s/spc_active");
+    expect(mcp.mcpServers.appstrate.url).toEndWith("/api/mcp/o/org_1");
     expect((await getProfile("default"))?.spaceId).toBe("spc_active");
   });
 
@@ -293,7 +293,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
 
   it("warns when the pinned space died, and still syncs the spaces that live", async () => {
     // The pin no longer supplies any skill, so nothing else in the run would
-    // notice it broke — but it is still what `.mcp.json` sends.
+    // notice it broke — but it is still where the agent commands come from.
     installSpaces(TWO_SPACES, BOTH, { reachable: ["spc_library"] });
     const { io, stderr } = createMemoryIO();
 
@@ -305,7 +305,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
       "shared",
     ]);
     const mcp = JSON.parse(await readFile(join(pluginRoot(), ".mcp.json"), "utf8"));
-    expect(mcp.mcpServers.appstrate.url).toEndWith("/s/spc_active");
+    expect(mcp.mcpServers.appstrate.url).toEndWith("/api/mcp/o/org_1");
   });
 
   // A space the org lists so a member can ASK to join it (`closed`,
@@ -385,8 +385,8 @@ describe("multi-space skill distribution — access decides the sources", () => 
   });
 
   it("warns about the pinned space when it is listed but not joined", async () => {
-    // The MCP header carries the pin, and the server refuses it for a space
-    // with no membership exactly as it does for one that is not listed at all.
+    // A space with no membership supplies no agent, exactly as one that is
+    // not listed at all.
     installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_active"] });
     const { io, stderr } = createMemoryIO();
 

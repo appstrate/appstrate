@@ -429,10 +429,10 @@ describe("materializeAgent", () => {
       name: "weekly-report",
       version: "1.2.0",
       input: {},
+      space_id: SPACE_ID,
     });
     expect(dollarSequences(body).sort()).toEqual(["$ARGUMENTS", "$" + "{CLAUDE_SKILL_DIR}"]);
     expect(body).not.toContain("!`");
-    expect(body).not.toContain(SPACE_ID);
     expect(body).toContain("Ask only for missing fields in `schema.required`");
     expect(body).toContain("`no_published_version`");
     expect(body).toContain(`never call \`${pluginTool("run_and_wait")}\` again`);
@@ -557,6 +557,18 @@ describe("materializeAgent", () => {
     expect(checkSkillMarkdown(skillMd)).toBeNull();
   });
 
+  // The plugin's MCP URL is the organization's: every space-acting call must name its space.
+  it("names the agent's space in every call it prescribes", () => {
+    const space = `"space_id": "${SPACE_ID}"`;
+    const { body } = renderAgent(agentView());
+    expect(body).toContain(
+      `\`{ "operation_id": "getRun", "path_params": { "id": "<id>" }, "query": { "wait": true }, ${space} }\``,
+    );
+    expect(body).toContain(`\`{ "runId": "<id>", ${space} }\``);
+    const upload = renderAgent(fileSchemaView([])).body;
+    expect(upload).toContain(`both with \`${space}\``);
+  });
+
   it("includes the upload recipe only when an unlocked file field exists", () => {
     const withFile = renderAgent(fileSchemaView([])).body;
     for (const tool of ["run_and_wait", "invoke_operation", "describe_operation", "list_files"]) {
@@ -586,7 +598,12 @@ describe("materializeAgent", () => {
 
   it("renders a run_and_wait call that core's launcher accepts", async () => {
     const { body } = renderAgent(agentView());
-    const call = JSON.parse(/```json\n([\s\S]*?)\n\s*```/.exec(body)![1]!) as unknown;
+    const parsed = JSON.parse(/```json\n([\s\S]*?)\n\s*```/.exec(body)![1]!) as {
+      space_id: unknown;
+    };
+    // The org-wide server consumes `space_id` before `run_and_wait` sees its arguments.
+    const { space_id: spaceId, ...call } = parsed;
+    expect(spaceId).toBe(SPACE_ID);
     const requested: string[] = [];
     const fakeFetch = (async (url: string | URL | Request) => {
       requested.push(String(url));
@@ -622,6 +639,12 @@ describe("materializeAgent", () => {
       { version: "1.2" },
       { version: "latest" },
       { version: "$" + "{HOME}" },
+      { spaceId: "" },
+      { spaceId: "spc_" },
+      { spaceId: "app_0f8fad5b" },
+      { spaceId: `${SPACE_ID}"` },
+      { spaceId: `${SPACE_ID}\n!\`id\`` },
+      { spaceId: "spc_$" + "{HOME}" },
     ];
     for (const overrides of bad) {
       expect(() => materializeAgent("run-weekly-report", agentView(overrides))).toThrow(

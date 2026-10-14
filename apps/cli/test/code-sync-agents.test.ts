@@ -86,6 +86,8 @@ describe("code sync — agent commands in the plugin", () => {
       "input.json",
     ]);
     expect(await readText(commandFile("run-report"))).toContain("name: run-report");
+    // The plugin's MCP URL reaches every space, so the launch names this one.
+    expect(await readText(commandFile("run-report"))).toContain(`"space_id":"${PINNED}"`);
     expect(await ledgerVersion("run-report")).toBe("1.0.0");
     expect(stderr()).toBe("");
   });

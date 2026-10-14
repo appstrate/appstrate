@@ -16,7 +16,8 @@ import type { SessionNotice } from "./notice.ts";
 
 /**
  * BUMP whenever PER-SKILL materialized output changes: the server-side digests
- * cannot answer "would this CLI produce the same bytes?". A mismatch marks
+ * cannot answer "would this CLI produce the same bytes?". An agent command
+ * needs no bump: its digest is of the tree this CLI rendered. A mismatch marks
  * every entry stale; it does NOT discard ownership.
  */
 export const STATE_VERSION = 1;
@@ -37,10 +38,10 @@ export interface ManagedSkill {
  * not accumulate installations, so every managed directory under a target was
  * written by this context.
  *
- * The pinned space is NOT part of it: it selects no skill (D14), it only fills
- * the endpoint URL of the generated `.mcp.json` — content
- * `pluginTreeMatches` already compares and rewrites. Switching space installs
- * the same skills, so it is a property of the plugin, not a different owner.
+ * The pinned space is NOT part of it: it selects no skill (D14) and the
+ * generated `.mcp.json` names the organization alone. It selects the agent
+ * commands, which the ordinary plan replaces like any other entry. Switching
+ * space installs the same skills, so it is not a different owner.
  */
 export interface SyncContext {
   profileName: string;

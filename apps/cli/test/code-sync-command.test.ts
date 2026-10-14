@@ -90,7 +90,7 @@ describe("code sync — claude-plugin target", () => {
     expect(manifest.name).toBe("appstrate");
     expect(manifest).not.toHaveProperty("version");
     expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(
-      '{\n  "mcpServers": {\n    "appstrate": {\n      "type": "http",\n      "url": "https://app.example.com/api/mcp/o/org_1/s/spc_1"\n    }\n  }\n}\n',
+      '{\n  "mcpServers": {\n    "appstrate": {\n      "type": "http",\n      "url": "https://app.example.com/api/mcp/o/org_1"\n    }\n  }\n}\n',
     );
     expect(await readText(join(pluginRoot(), "README.md"))).toContain("appstrate code sync");
 
@@ -136,13 +136,12 @@ describe("code sync — claude-plugin target", () => {
   });
 
   for (const [changed, profile, url] of [
-    ["organization", { orgId: "org_2" }, "https://app.example.com/api/mcp/o/org_2/s/spc_1"],
+    ["organization", { orgId: "org_2" }, "https://app.example.com/api/mcp/o/org_2"],
     [
       "instance",
       { instance: "https://other.example.com/" },
-      "https://other.example.com/api/mcp/o/org_1/s/spc_1",
+      "https://other.example.com/api/mcp/o/org_1",
     ],
-    ["space", { spaceId: "spc_2" }, "https://app.example.com/api/mcp/o/org_1/s/spc_2"],
   ] as const) {
     it(`updates the MCP ${changed} without re-downloading unchanged skills`, async () => {
       const server = createSkillServer(ONE_SKILL);
@@ -163,6 +162,25 @@ describe("code sync — claude-plugin target", () => {
       expect(stdout()).toBe(`${pluginRoot()}\n`);
     });
   }
+
+  // The organization's URL reaches every space: the pin is not part of it.
+  it("keeps connected plugin bytes unchanged when only the pinned space changes", async () => {
+    const server = createSkillServer(ONE_SKILL);
+    server.install();
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+    const before = await snapshot(pluginRoot());
+    const mcpStats = await lstat(join(pluginRoot(), ".mcp.json"));
+    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_2" });
+
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+
+    expect(await snapshot(pluginRoot())).toEqual(before);
+    expect((await lstat(join(pluginRoot(), ".mcp.json"))).ino).toBe(mcpStats.ino);
+    expect(
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
+    ).toBe("https://app.example.com/api/mcp/o/org_1");
+    expect(server.downloads()).toBe(1);
+  });
 
   it("keeps connected plugin bytes unchanged when only the login changes", async () => {
     const server = createSkillServer(ONE_SKILL);
@@ -195,7 +213,7 @@ describe("code sync — claude-plugin target", () => {
       mcpServers: {
         appstrate: {
           type: "http",
-          url: "https://app.example.com/api/mcp/o/org_1/s/spc_1",
+          url: "https://app.example.com/api/mcp/o/org_1",
         },
       },
     });
@@ -1707,7 +1725,7 @@ describe("code sync — multiple spaces", () => {
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
   });
 
-  it("unions selected spaces, scopes downloads, and keeps MCP in the active space", async () => {
+  it("unions selected spaces, scopes downloads, and keeps MCP on the organization", async () => {
     const second = { id: "@acme/other", skillMd: skillMd("other", "Other skill.") };
     createSkillServer([...ONE_SKILL, second]).install();
     const serve = globalThis.fetch;
@@ -1738,7 +1756,7 @@ describe("code sync — multiple spaces", () => {
     expect(seen.filter((path) => path.endsWith("/download"))).toHaveLength(2);
     expect(
       JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
-    ).toBe("https://app.example.com/api/mcp/o/org_1/s/spc_1");
+    ).toBe("https://app.example.com/api/mcp/o/org_1");
     expect(await exists(join(pluginRoot(), "skills", "other", "SKILL.md"))).toBe(true);
   });
 });
@@ -1771,8 +1789,8 @@ describe("code sync — active context replacement", () => {
     await codeSyncCommand({ target: ["claude-plugin"] }, io);
     const previousMcp = await readText(join(pluginRoot(), ".mcp.json"));
     const previousState = await readText(getStatePath());
-    // The organization is what an installation belongs to; the pinned space is
-    // `.mcp.json` content and switching it is not a switch of installation.
+    // The organization is what an installation belongs to; switching the
+    // pinned space is not a switch of installation.
     await updateProfile("default", { orgId: "org_2" });
     const nextSkill = {
       id: "@acme/new-context",
@@ -1789,7 +1807,7 @@ describe("code sync — active context replacement", () => {
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["new-context"]);
     expect(
       JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
-    ).toBe("https://app.example.com/api/mcp/o/org_2/s/spc_1");
+    ).toBe("https://app.example.com/api/mcp/o/org_2");
   });
 
   it("rejects a context changed while downloading before writing any installation", async () => {
@@ -1809,7 +1827,7 @@ describe("code sync — active context replacement", () => {
     expect(await exists(pluginRoot())).toBe(false);
   });
 
-  it("rewrites the MCP space over a skill that cannot be resolved at all", async () => {
+  it("keeps a skill that cannot be resolved at all across a space switch", async () => {
     // A space switch installs the same skills, so it is NOT a context switch:
     // the all-or-nothing rule does not apply and a package that persistently
     // fails to resolve is kept, exactly as it is on any other run.
@@ -1827,16 +1845,13 @@ describe("code sync — active context replacement", () => {
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toContain("Skipped @acme/pdf-tools");
-    expect(
-      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
-    ).toBe("https://app.example.com/api/mcp/o/org_1/s/spc_2");
     expect(await readText(skillPath)).toBe(before);
     expect(server.downloads()).toBe(0);
   });
 
   it("rejects a pinned space changed while downloading and keeps the previous plugin", async () => {
-    // The pin is not part of the context, but `.mcp.json` was already built
-    // from it: swapping now would publish a header naming the previous space.
+    // The pin is not part of the context, but the agent commands were already
+    // selected from it: swapping now would publish the previous space's agents.
     const { updateProfile } = await import("../src/lib/config.ts");
     createSkillServer(ONE_SKILL).install();
     await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);

@@ -181,9 +181,9 @@ export async function codeSyncCommand(
 
     const context = syncContext(profileName, profile!);
     // The pin is checked here although it is NOT part of the context: it is
-    // what `fixedFiles` was computed from at the start of the run, so a swap
-    // after it moved would commit a `.mcp.json` naming the previous space.
-    // The next run rewrites that file without treating anything as a switch.
+    // what the agent commands were selected from at the start of the run, so a
+    // swap after it moved would commit the previous space's agents. The next
+    // run replaces them without treating anything as a switch.
     const validate = async (): Promise<void> => {
       const current = await resolveActiveProfile(opts.profile);
       if (
@@ -237,11 +237,7 @@ export async function codeSyncCommand(
       reportPlans(plans, catalogue.bySlug, io.stdout);
       return;
     }
-    const fixedFiles = pluginFixedFiles({
-      instance: profile!.instance,
-      orgId: profile!.orgId!,
-      spaceId: profile!.spaceId!,
-    });
+    const fixedFiles = pluginFixedFiles({ instance: profile!.instance, orgId: profile!.orgId! });
     pluginOk = await executePlans(
       profileName,
       source,
@@ -775,15 +771,14 @@ async function selectSources(
     return { skillSpaces: [] };
   }
   // Skill sources do not depend on the pin, so a pin that died would sync
-  // clean and leave `.mcp.json` naming a space the server will refuse. Nothing
-  // else notices any more: say it here, where the space list is already in hand.
-  // Listed-but-not-joined is the same refusal as absent — the MCP request sends
-  // the header either way — so membership, not presence in the list, is the test.
+  // clean and silently drop every agent command. Nothing else notices: say it
+  // here, where the space list is already in hand. Listed-but-not-joined
+  // supplies no agent either, so membership, not presence in the list, is the test.
   const pinned = spaces.find((space) => space.id === profile.spaceId);
-  if (profile.spaceId && (!pinned || pinned.access === "none")) {
+  if (withAgents && profile.spaceId && (!pinned || pinned.access === "none")) {
     report.note(
       switchFix(
-        `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused`,
+        `Pinned space "${profile.spaceId}" is not accessible in the active organization — no agent command is synced from it`,
         "space",
         profileName,
       ),
