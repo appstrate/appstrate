@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Download,
@@ -21,47 +22,63 @@ import {
 import { PageActionsMenu } from "../page-actions-menu";
 import type { PackageType } from "@appstrate/core/validation";
 import { packagePermission } from "@appstrate/core/permissions";
-import { maySetPackageActive } from "../../lib/package-permissions";
-import { usePermissions, useCurrentSpaceGrant } from "../../hooks/use-permissions";
+import { usePermissions } from "../../hooks/use-permissions";
+import { useDeletePackage } from "../../hooks/use-packages";
+import { usePackageActivation } from "../../hooks/use-library";
+import { splitPackageRef } from "../../lib/package-paths";
+import { ConfirmModal } from "../confirm-modal";
+import { ForkPackageModal } from "../fork-package-modal";
+import { isOwnedSource } from "./owned-source";
 import { MoveHomeSpaceDialog, MOVE_HOME_PARAM } from "./move-home-space-dialog";
 import { SharePackageDialog, SHARE_PARAM } from "./share-package-dialog";
 import { useModalParam } from "../../hooks/use-modal-param";
 
+/**
+ * What the menu reads off the package's own detail response (`AgentDetail` or
+ * `OrgPackageItemDetail`): the home contract, whose verdicts gate every act on
+ * the live object, and the facts the confirmations name.
+ */
+export interface PackageActionsDetail {
+  id: string;
+  name?: string | null;
+  display_name?: string;
+  source: "system" | "local";
+  /**
+   * The package's home space, for the move dialog's "everything but the
+   * current home" list. `null` when the caller does not reach that space — the
+   * server withholds the id (RBAC spec §6.9).
+   */
+  home_space_id: string | null;
+  /**
+   * Whether this caller holds the type's `write` in its home space. Editing,
+   * publishing and moving are gated on it, because it IS the predicate the server
+   * enforces (`assertPackageMutationAccess`) — the SPA derives no write
+   * authority of its own.
+   */
+  home_writable: boolean;
+  /**
+   * Whether this caller holds the type's `delete` in the home space. Gates
+   * "Supprimer" on its own, because `<type>:delete` is an independent permission
+   * string and `DELETE` enforces it in its own right — a custom space role
+   * granting `write` without it made the item appear and 403 on click.
+   */
+  home_deletable: boolean;
+  /**
+   * Whether this caller holds the type's `share` in the home space. Gates
+   * "Share…" on its own — a custom role may grant `write` without it, or it
+   * without `write` (RBAC spec §6.10).
+   */
+  home_shareable: boolean;
+  /** Skills, MCP servers and integrations: the agents using it. Deleting one that is used is refused. */
+  agents?: unknown[];
+}
+
 interface PackageActionsDropdownProps {
   packageId: string;
   type: PackageType;
-  isOwned: boolean;
-  isBuiltIn: boolean;
+  /** `undefined` while the detail is loading, which every gate reads as "no". */
+  detail: PackageActionsDetail | undefined;
   isHistoricalVersion: boolean;
-  /**
-   * The package's home space (`home_space_id`), for the move dialog's
-   * "everything but the current home" list. `null` when the caller does not
-   * reach that space — the server withholds the id (RBAC spec §6.9).
-   */
-  homeSpaceId?: string | null;
-  /**
-   * `home_writable` off the package's own read: whether this caller holds the
-   * type's `write` in its home space. Editing, publishing, moving and deleting
-   * are gated on it, because it IS the predicate the server enforces
-   * (`assertPackageMutationAccess`) — the SPA derives no write authority of its
-   * own. `undefined` while the detail is loading, which reads as "no".
-   */
-  homeWritable?: boolean;
-  /**
-   * `home_deletable` off the same read: whether this caller holds the type's
-   * `delete` in the home space. Gates "Supprimer" on its own, because
-   * `<type>:delete` is an independent permission string and `DELETE` enforces
-   * it in its own right — a custom space role granting `write` without it made
-   * the item appear and 403 on click. `undefined` while the detail is loading,
-   * which reads as "no".
-   */
-  homeDeletable?: boolean;
-  /**
-   * `home_shareable` off the same read: whether this caller holds the type's
-   * `share` in the home space. Gates "Share…" on its own — a custom role may
-   * grant `write` without it, or it without `write` (RBAC spec §6.10).
-   */
-  homeShareable?: boolean;
   downloadVersion?: string;
   onDownload?: (version: string) => void;
   /** Agent-only: export the full transitive bundle (.afps-bundle). */
@@ -72,21 +89,21 @@ interface PackageActionsDropdownProps {
    *  menu item and surface a tooltip pointing to "Créer une version". */
   hasPublishedVersion?: boolean;
   /**
-   * Whether the package is ACTIVE in the current space. The bundle export route
-   * runs the execution gate (`isPackageActiveHere`), not the read gate, so a
-   * package merely placed here — or placed and switched off — answers 404 on
-   * click.
+   * Whether the package is ACTIVE in the current space; `undefined` when not
+   * known yet, which offers neither switch. The bundle export route runs the
+   * execution gate (`isPackageActiveHere`), not the read gate, so a package
+   * merely placed here — or placed and switched off — answers 404 on click.
    */
   isActiveHere?: boolean;
   onCreateVersion?: () => void;
   /** Why « Créer une version » is held back, already translated; `undefined` when it is not. */
   createVersionBlockedReason?: string;
-  onFork?: () => void;
   // Agent-specific
   runningRuns?: number;
   hasRuns?: boolean;
   hasMemories?: boolean;
   hasFileInput?: boolean;
+  /** Agent-only: deleting an agent is the agent page's own confirmation. */
   onDeleteAgent?: () => void;
   onDeleteRuns?: () => void;
   onAddSchedule?: () => void;
@@ -100,21 +117,6 @@ interface PackageActionsDropdownProps {
    * `undefined` means launchable.
    */
   runBlockedReason?: string;
-  // Skill/Tool-specific
-  canDeletePackage?: boolean;
-  onDeletePackage?: () => void;
-  // Activate in / deactivate from the current space — ONE verb, one pair of
-  // doors (`POST` / `DELETE /api/spaces/{spaceId}/packages…`), for all four
-  // package families. Activating is offered because the index page lists what
-  // the space READS: a package placed here and switched off is reachable, and
-  // this is where its reader turns that into a run. Deactivating is not
-  // destructive — the placement and its settings stay, and so do connections.
-  canActivate?: boolean;
-  onActivate?: () => void;
-  canDeactivate?: boolean;
-  onDeactivate?: () => void;
-  /** One mutation drives both directions, so one pending flag covers both. */
-  activationPending?: boolean;
 }
 
 /** A disabled menu item takes no focus or pointer event: its reason is shown, not titled. */
@@ -131,13 +133,8 @@ function DisabledItemLabel({ label, reason }: { label: string; reason?: string }
 export function PackageActionsDropdown({
   packageId,
   type,
-  isOwned,
-  isBuiltIn,
+  detail,
   isHistoricalVersion,
-  homeSpaceId,
-  homeWritable,
-  homeDeletable,
-  homeShareable,
   downloadVersion,
   onDownload,
   onDownloadBundle,
@@ -145,7 +142,6 @@ export function PackageActionsDropdown({
   isActiveHere,
   onCreateVersion,
   createVersionBlockedReason,
-  onFork,
   runningRuns = 0,
   hasRuns,
   hasMemories,
@@ -156,51 +152,50 @@ export function PackageActionsDropdown({
   onDeleteMemories,
   onRunWithOptions,
   runBlockedReason,
-  canDeletePackage,
-  onDeletePackage,
-  canActivate,
-  onActivate,
-  canDeactivate,
-  onDeactivate,
-  activationPending,
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   const { can } = usePermissions();
-  const spaceGrant = useCurrentSpaceGrant();
+  const activation = usePackageActivation(type, packageId);
+  const deletePkg = useDeletePackage(type);
   const moveHome = useModalParam(MOVE_HOME_PARAM);
   const share = useModalParam(SHARE_PARAM);
+  const fork = useModalParam("fork");
+  const [confirm, setConfirm] = useState<"delete" | "deactivate" | null>(null);
+
+  const isOwned = isOwnedSource(detail?.source);
+  const displayName = detail?.display_name || detail?.name || packageId;
 
   const isAgent = type === "agent";
   // The server's own verdict, not a re-derivation of it.
-  const canWrite = homeWritable === true;
+  const canWrite = detail?.home_writable === true;
   // The exports carry the manifest and every authored file, so the two download
   // routes ask for `<type>:read` — the permission a summary-only caller (an
   // `agents:run` runner) does not hold. Without this the items 403 on click.
   const canRead = can(packagePermission(type, "read"));
-  const isMutable = canWrite && !isBuiltIn && !isHistoricalVersion && isOwned;
+  const isMutable = canWrite && !isHistoricalVersion && isOwned;
   // Its own verdict, not `canWrite`'s: `DELETE` enforces `<type>:delete`, an
   // INDEPENDENT permission string, and a custom space role is an arbitrary
   // bundle — one granting `write` without `delete` must not render a Supprimer
   // item that 403s on click. The two travel together in every preset, so this
   // narrows nothing for a preset-only organization.
-  const canDelete = homeDeletable === true;
+  const canDelete = detail?.home_deletable === true;
   // Its own verdict, not `canWrite`'s: sharing is a third verb on the home
   // space, and a system package answers `false` (it is already readable
   // everywhere, and the route refuses it).
-  const canShare = homeShareable === true && !isBuiltIn && !isHistoricalVersion && isOwned;
-  // The activation verdict is the target space's, not the org∪space union `can`
-  // computes: owning a personal space authorizes activating there even though
-  // the `operator` preset held in it carries no `agents:configure` (§3.6). The
-  // props say whether the action EXISTS here; `maySetPackageActive` says
-  // whether this caller may perform it.
-  const showDeactivate =
-    !!canDeactivate && !!onDeactivate && maySetPackageActive(spaceGrant, type, false);
-  const showActivate =
-    !!canActivate && !!onActivate && !showDeactivate && maySetPackageActive(spaceGrant, type, true);
-  const showDelete = !isBuiltIn && isOwned && canDelete;
+  const canShare = detail?.home_shareable === true && !isHistoricalVersion && isOwned;
+  // Activating is a space placement switch, one pair of doors for every family;
+  // deactivating keeps the placement and its settings. Whether the act EXISTS
+  // follows the package's state here; `usePackageActivation` says whether this
+  // caller may perform it — the target space's verdict, not the org∪space union
+  // `can` computes (owning a personal space authorizes it, §3.6).
+  const showDeactivate = isActiveHere === true && activation.mayDeactivate;
+  const showActivate = isActiveHere === false && activation.mayActivate;
+  const showDelete = isOwned && canDelete;
+  // Deleting a skill, MCP server or integration an agent still uses is refused.
+  const canDeletePackage = !!detail?.agents && detail.agents.length === 0;
   // Forking writes a NEW package in the current space, so it asks the current
   // space's write, not the home's verdict on a package it never writes.
-  const showFork = can(packagePermission(type, "write")) && !isOwned && Boolean(onFork);
+  const showFork = can(packagePermission(type, "write")) && !isOwned;
   // Clearing runs deletes every member's runs of this agent, so the route asks
   // `runs:read-all` on top of `runs:delete`; clearing memories is its own verb.
   const showDeleteRuns =
@@ -241,14 +236,14 @@ export function PackageActionsDropdown({
   // (RBAC spec §6.10).
   const placementItems = (
     <>
-      {showActivate && onActivate && (
-        <DropdownMenuItem disabled={activationPending} onSelect={onActivate}>
+      {showActivate && (
+        <DropdownMenuItem disabled={activation.pending} onSelect={() => activation.activate()}>
           <PackagePlus size={14} />
           {t("packages.activate", { ns: "settings" })}
         </DropdownMenuItem>
       )}
-      {showDeactivate && onDeactivate && (
-        <DropdownMenuItem disabled={activationPending} onSelect={onDeactivate}>
+      {showDeactivate && (
+        <DropdownMenuItem disabled={activation.pending} onSelect={() => setConfirm("deactivate")}>
           <PackagePlus size={14} className="rotate-180" />
           {t("packages.deactivate", { ns: "settings" })}
         </DropdownMenuItem>
@@ -285,7 +280,7 @@ export function PackageActionsDropdown({
                 <DropdownMenuLabel>{t("detail.actions.agent")}</DropdownMenuLabel>
                 {createVersionItem}
                 {showFork && (
-                  <DropdownMenuItem onSelect={onFork}>
+                  <DropdownMenuItem onSelect={() => fork.open()}>
                     <GitFork size={14} />
                     {t("fork.button")}
                   </DropdownMenuItem>
@@ -389,7 +384,7 @@ export function PackageActionsDropdown({
             )}
             {createVersionItem}
             {showFork && (
-              <DropdownMenuItem onSelect={onFork}>
+              <DropdownMenuItem onSelect={() => fork.open()}>
                 <GitFork size={14} />
                 {t("fork.button")}
               </DropdownMenuItem>
@@ -398,8 +393,8 @@ export function PackageActionsDropdown({
               <>
                 <DropdownMenuSeparator />
                 {placementItems}
-                {showDelete && canDeletePackage && onDeletePackage && (
-                  <DropdownMenuItem onSelect={onDeletePackage} variant="destructive">
+                {showDelete && canDeletePackage && (
+                  <DropdownMenuItem onSelect={() => setConfirm("delete")} variant="destructive">
                     <Trash2 size={14} />
                     {t("btn.delete")}
                   </DropdownMenuItem>
@@ -416,7 +411,7 @@ export function PackageActionsDropdown({
           onClose={moveHome.close}
           packageId={packageId}
           type={type}
-          homeSpaceId={homeSpaceId}
+          homeSpaceId={detail?.home_space_id}
         />
       )}
       {share.value === packageId && canShare && (
@@ -424,13 +419,49 @@ export function PackageActionsDropdown({
           onClose={share.close}
           packageId={packageId}
           type={type}
-          homeSpaceId={homeSpaceId}
-          canPublish={homeWritable === true}
+          homeSpaceId={detail?.home_space_id}
+          canPublish={canWrite}
           onMoveHome={() => {
             moveHome.open(packageId, SHARE_PARAM);
           }}
         />
       )}
+      {fork.value !== null && showFork && (
+        <ForkPackageModal
+          open
+          onClose={fork.close}
+          onLeave={fork.leave}
+          packageId={packageId}
+          defaultName={splitPackageRef(packageId).name}
+          type={type}
+        />
+      )}
+
+      <ConfirmModal
+        open={confirm !== null}
+        onClose={() => setConfirm(null)}
+        title={t(confirm === "deactivate" ? "detail.deactivateTitle" : "detail.deletePackageTitle")}
+        description={
+          confirm === "deactivate"
+            ? t("packages.deactivateConfirm", { name: displayName, ns: "settings" })
+            : t("packages.deleteConfirm", {
+                type: t(`packages.type.${type}`, { ns: "settings" }),
+                name: displayName,
+                ns: "settings",
+              })
+        }
+        confirmLabel={
+          confirm === "deactivate"
+            ? t("packages.deactivate", { ns: "settings" })
+            : t("btn.delete", { ns: "common" })
+        }
+        isPending={activation.pending || deletePkg.isPending}
+        onConfirm={() => {
+          const onSuccess = () => setConfirm(null);
+          if (confirm === "deactivate") activation.deactivate({ onSuccess });
+          else deletePkg.mutate(packageId, { onSuccess });
+        }}
+      />
     </>
   );
 }

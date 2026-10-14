@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as React from "react";
-import { TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
 
 /** The fade is drawn on the edge that hides tabs, nothing when they all fit. */
@@ -57,4 +57,59 @@ export function DetailTabsTrigger({
   ...props
 }: React.ComponentPropsWithoutRef<typeof TabsTrigger>) {
   return <TabsTrigger className={cn("max-sm:px-2", className)} {...props} />;
+}
+
+export interface DetailTab<T extends string> {
+  value: T;
+  label: string;
+}
+
+/** The tabs root of a detail page; the header, the tab bar and the panels all live inside it. */
+export function DetailTabs<T extends string>({
+  value,
+  onChange,
+  children,
+}: {
+  value: T;
+  onChange: (value: T) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tabs value={value} onValueChange={(next) => onChange(next as T)}>
+      {children}
+    </Tabs>
+  );
+}
+
+/** The tab bar of `tabs`. */
+export function DetailTabBar<T extends string>({ tabs }: { tabs: readonly DetailTab<T>[] }) {
+  return (
+    <DetailTabsList>
+      {tabs.map((tab) => (
+        <DetailTabsTrigger key={tab.value} value={tab.value}>
+          {tab.label}
+        </DetailTabsTrigger>
+      ))}
+    </DetailTabsList>
+  );
+}
+
+/** One tab's card; `flush` for content that draws its own padding. */
+export function DetailTabPanel({
+  value,
+  flush,
+  children,
+}: {
+  value: string;
+  flush?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <TabsContent
+      value={value}
+      className={cn("bg-card mt-0 overflow-hidden rounded-lg border shadow-sm", !flush && "p-6")}
+    >
+      {children}
+    </TabsContent>
+  );
 }

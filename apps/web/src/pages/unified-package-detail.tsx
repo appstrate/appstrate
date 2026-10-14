@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { Button } from "@appstrate/ui/components/button";
-import { Info, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
@@ -14,20 +14,14 @@ import {
   useVersionDetail,
   useAgentBundleExport,
   usePackageDownload,
-  useDeletePackage,
   useVersionInfo,
   type Versioned,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import { useHomeSpaceName } from "../hooks/use-permissions";
-import {
-  canReadRuns,
-  packagePermission,
-  packageSightPermissions,
-} from "@appstrate/core/permissions";
+import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import type { SchemaWrapper } from "@appstrate/core/form";
-import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { usePackageActivationState } from "../hooks/use-library";
 import { EmptyState, ResourceErrorState } from "../components/page-states";
 import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
@@ -35,21 +29,21 @@ import { isQueryInFlight } from "../lib/query-state";
 import { packageDetailPath } from "../lib/package-paths";
 
 // Shared components
-import { ConfirmModal } from "../components/confirm-modal";
 import { PackageDetailSkeleton, SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
 import { PackageOverview } from "../components/package-detail/package-overview";
+import { isOwnedSource } from "../components/package-detail/owned-source";
+import { PackageOwnershipNotice } from "../components/package-detail/package-ownership";
 import { useModalParam } from "../hooks/use-modal-param";
 import { CreateVersionModal } from "../components/create-version-modal";
-import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
 import { AgentRunsTab, AgentMemoryTab } from "../components/package-detail/agent-tabs";
 import { AgentInactiveAlert } from "../components/package-detail/agent-inactive-alert";
 import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
 import { AgentSettingsView } from "../components/agent-detail/agent-settings-view";
-import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
+import { DetailTabsList, DetailTabsTrigger } from "../components/detail-tabs";
 import { AgentRunButton } from "../components/package-detail/agent-run-button";
 import { PackageUsage } from "../components/package-detail/package-usage";
 import { PackageSettingsView } from "../components/package-detail/package-settings-view";
@@ -149,10 +143,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const hasUnarchivedChanges =
     agentDetail?.has_unarchived_changes ?? pkgDetail?.has_unarchived_changes;
   const forkedFrom = agentDetail?.forked_from ?? pkgDetail?.forked_from ?? null;
-  // Mutability is gated on whether the org owns the package row, not on its scope name.
-  // Every package returned here is already org-scoped server-side, so anything that is not a
-  // read-only system package is freely editable/deletable (registry checks happen at publish).
-  const isOwned = source !== "system";
+  const isOwned = isOwnedSource(source);
 
   const versionQuery = useVersionDetail(type, packageId, versionParam);
   const { data: versionDetail, error: versionError } = versionQuery;
@@ -179,9 +170,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const downloadPackage = usePackageDownload(scope, name);
   const downloadBundle = useAgentBundleExport(scope, name);
-  const deletePkgMutation = useDeletePackage(type);
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
   // Only a skill or an MCP server needs this: their detail response carries no
   // `active`, so the library's projection of the placement is the only answer
   // available. An agent's detail answers for itself (`AgentDetail.active`,
@@ -198,13 +186,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const homeSpaceId = (agentDetail ?? pkgDetail)?.home_space_id;
   const homeWritable = (agentDetail ?? pkgDetail)?.home_writable;
   const homeDeletable = (agentDetail ?? pkgDetail)?.home_deletable;
-  const homeShareable = (agentDetail ?? pkgDetail)?.home_shareable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
-  const fork = useModalParam("fork");
-  const [confirmAction, setConfirmAction] = useState<{
-    type: "deletePackage" | "deactivatePackage";
-    description: string;
-  } | null>(null);
 
   // ── State ──
   // The tabs this caller may MOUNT — the single gate, since `useTabWithHash`
@@ -337,7 +319,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // The triggers' own verdicts, which also bound their `?newVersion` / `?fork` URLs.
   const canCreateVersion = !!homeWritable && !isBuiltIn && !isHistoricalVersion && isOwned;
-  const canFork = can(packagePermission(type, "write")) && !isOwned;
   // Publishing or running reads the stored draft, not the edits held on screen.
   const unsavedReason = editorDirty ? t("detail.unsavedBlocksAction") : undefined;
 
@@ -388,13 +369,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             type === "agent" ? (
               <AgentActions
                 packageId={packageId}
-                isOwned={isOwned}
                 isHistoricalVersion={isHistoricalVersion}
                 downloadVersion={downloadVersion}
                 downloadPackage={downloadPackage}
                 downloadBundle={downloadBundle}
                 onCreateVersion={() => newVersion.open()}
-                onFork={() => fork.open()}
                 unsavedReason={unsavedReason}
               />
             ) : (
@@ -402,52 +381,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 <PackageActionsDropdown
                   packageId={packageId}
                   type={type}
-                  isOwned={isOwned}
-                  isBuiltIn={isBuiltIn}
+                  detail={pkgDetail}
                   isHistoricalVersion={isHistoricalVersion}
-                  homeSpaceId={homeSpaceId}
-                  homeWritable={homeWritable}
-                  homeDeletable={homeDeletable}
-                  homeShareable={homeShareable}
                   downloadVersion={downloadVersion}
                   onDownload={downloadPackage}
                   onCreateVersion={() => newVersion.open()}
                   createVersionBlockedReason={unsavedReason}
-                  onFork={() => fork.open()}
-                  canDeletePackage={!!pkgDetail && pkgDetail.agents.length === 0}
-                  onDeletePackage={() => {
-                    if (!pkgDetail) return;
-                    const nameStr = pkgDetail.name || pkgDetail.id;
-                    const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
-                    setConfirmAction({
-                      type: "deletePackage",
-                      description: t("packages.deleteConfirm", {
-                        type: typeLabel,
-                        name: nameStr,
-                        ns: "settings",
-                      }),
-                    });
-                  }}
-                  // ONE pair of doors, for every family: a skill or an MCP
-                  // server is switched on and off in a space exactly like an
-                  // agent, through `POST` / `DELETE /api/spaces/{id}/packages`.
-                  // Switching off keeps the placement and its settings.
-                  canActivate={isActiveInCurrentSpace === false}
-                  onActivate={() => {
-                    if (!currentSpaceId) return;
-                    setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
-                  }}
-                  canDeactivate={isActiveInCurrentSpace === true}
-                  onDeactivate={() => {
-                    setConfirmAction({
-                      type: "deactivatePackage",
-                      description: t("packages.deactivateConfirm", {
-                        name: displayName,
-                        ns: "settings",
-                      }),
-                    });
-                  }}
-                  activationPending={setActive.isPending}
+                  isActiveHere={isActiveInCurrentSpace}
                 />
               </div>
             )
@@ -473,44 +413,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           — and the page renders at all precisely because reading a definition
           is not running it. True of every package type: the server answers
           `definition` for all four from one function. */}
-        {definition === "draft" && !homeWritable && (
-          <Alert className="mb-4">
-            <AlertDescription>{t("detail.draftReadOnly")}</AlertDescription>
-          </Alert>
-        )}
-
-        {!isOwned && type !== "agent" && (
-          <Alert variant="info" className="mb-4">
-            <Info />
-            <AlertDescription className="flex flex-wrap items-center gap-x-3">
-              <span>{t("ownership.readOnly")}</span>
-              {forkedFrom && (
-                <span className="text-muted-foreground">
-                  {t("ownership.forkedFrom")}
-                  <Link
-                    to={packageDetailPath(type, forkedFrom)}
-                    className="text-primary hover:underline"
-                  >
-                    {forkedFrom}
-                  </Link>
-                </span>
-              )}
-            </AlertDescription>
-          </Alert>
-        )}
-        {isOwned && forkedFrom && (
-          <div className="border-border/50 bg-muted/30 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
-            <span className="text-muted-foreground">
-              {t("ownership.forkedFrom")}
-              <Link
-                to={packageDetailPath(type, forkedFrom)}
-                className="text-primary hover:underline"
-              >
-                {forkedFrom}
-              </Link>
-            </span>
-          </div>
-        )}
+        <PackageOwnershipNotice
+          type={type}
+          isOwned={isOwned}
+          forkedFrom={forkedFrom}
+          draftReadOnly={definition === "draft" && !homeWritable}
+        />
 
         {type === "agent" && agentDetail && (
           <div className="overflow-visible" data-agent-detail-surface>
@@ -646,49 +554,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             etag={(agentDetail ?? pkgDetail)?.etag}
           />
         )}
-
-        {fork.value !== null && canFork && (
-          <ForkPackageModal
-            open
-            onClose={fork.close}
-            onLeave={fork.leave}
-            packageId={packageId}
-            defaultName={name ?? ""}
-            type={type}
-          />
-        )}
-
-        <ConfirmModal
-          open={!!confirmAction}
-          onClose={() => setConfirmAction(null)}
-          title={
-            confirmAction?.type === "deactivatePackage"
-              ? t("detail.deactivateTitle")
-              : t("detail.deletePackageTitle")
-          }
-          description={confirmAction?.description ?? ""}
-          isPending={deletePkgMutation.isPending || setActive.isPending}
-          confirmLabel={
-            confirmAction?.type === "deactivatePackage"
-              ? t("packages.deactivate", { ns: "settings" })
-              : t("btn.delete", { ns: "common" })
-          }
-          onConfirm={() => {
-            if (!confirmAction) return;
-            const close = () => setConfirmAction(null);
-            if (confirmAction.type === "deactivatePackage") {
-              if (!currentSpaceId) return;
-              setActive.mutate(
-                { spaceId: currentSpaceId, packageId, active: false },
-                {
-                  onSuccess: close,
-                },
-              );
-            } else {
-              deletePkgMutation.mutate(packageId, { onSuccess: close });
-            }
-          }}
-        />
       </div>
     </EditorDirtyReportContext.Provider>
   );

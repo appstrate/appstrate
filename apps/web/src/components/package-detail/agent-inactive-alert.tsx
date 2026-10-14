@@ -4,10 +4,7 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { Alert, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
-import { useSetPackageActive } from "../../hooks/use-library";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
-import { maySetPackageActive } from "../../lib/package-permissions";
+import { usePackageActivation } from "../../hooks/use-library";
 
 /**
  * The agent is placed in this space and switched OFF.
@@ -35,10 +32,7 @@ import { maySetPackageActive } from "../../lib/package-permissions";
  */
 export function AgentInactiveAlert({ packageId }: { packageId: string }) {
   const { t } = useTranslation("agents");
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
-  const spaceGrant = useCurrentSpaceGrant();
-  const mayActivate = maySetPackageActive(spaceGrant, "agent", true);
+  const { mayActivate, activate, pending } = usePackageActivation("agent", packageId);
 
   return (
     <Alert variant="destructive" className="mb-4">
@@ -47,13 +41,8 @@ export function AgentInactiveAlert({ packageId }: { packageId: string }) {
           which is where the alert's icon sits too. */}
       <div className="flex items-start justify-between gap-3">
         <AlertTitle>{t("detail.deactivatedHere")}</AlertTitle>
-        {mayActivate && currentSpaceId && (
-          <Button
-            size="sm"
-            className="-my-1.5"
-            disabled={setActive.isPending}
-            onClick={() => setActive.mutate({ spaceId: currentSpaceId, packageId, active: true })}
-          >
+        {mayActivate && (
+          <Button size="sm" className="-my-1.5" disabled={pending} onClick={() => activate()}>
             {t("detail.activate")}
           </Button>
         )}

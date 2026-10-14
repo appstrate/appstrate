@@ -12,8 +12,6 @@ import {
   useDeleteAllMemories,
   useRunLauncher,
 } from "../../hooks/use-mutations";
-import { useSetPackageActive } from "../../hooks/use-library";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { usePermissions } from "../../hooks/use-permissions";
 import { PackageActionsDropdown } from "./package-actions-dropdown";
 import { ConfirmModal } from "../confirm-modal";
@@ -28,29 +26,24 @@ const CONFIRM_TITLES = {
   deleteAgent: "detail.deleteTitle",
   clearRuns: "detail.clearRunsTitle",
   clearMemories: "detail.clearMemoriesTitle",
-  deactivateAgent: "detail.deactivateTitle",
 } as const;
 
 export function AgentActions({
   packageId,
-  isOwned,
   isHistoricalVersion,
   downloadVersion,
   downloadPackage,
   downloadBundle,
   onCreateVersion,
-  onFork,
   unsavedReason,
 }: {
   packageId: string;
-  isOwned: boolean;
   isHistoricalVersion: boolean;
   downloadVersion: string | undefined;
   downloadPackage: (v: string) => void;
   /** Export the agent + transitive deps as a single .afps-bundle. */
   downloadBundle?: (v?: string) => void;
   onCreateVersion: () => void;
-  onFork?: () => void;
   /** Set while the page holds unsaved definition edits a version or run would not carry. */
   unsavedReason?: string;
 }) {
@@ -62,12 +55,10 @@ export function AgentActions({
   const deleteAgent = useDeleteAgent();
   const deleteRuns = useDeleteAgentRuns(packageId);
   const deleteAllMemories = useDeleteAllMemories(packageId);
-  const setActive = useSetPackageActive();
   const launcher = useRunLauncher(packageId);
-  const currentSpaceId = useCurrentSpaceId();
 
   const [confirmState, setConfirmState] = useState<{
-    type: "deleteAgent" | "clearRuns" | "clearMemories" | "deactivateAgent";
+    type: "deleteAgent" | "clearRuns" | "clearMemories";
     label: string;
   } | null>(null);
   const runOptions = useModalParam("runOptions");
@@ -100,10 +91,6 @@ export function AgentActions({
       case "clearMemories":
         deleteAllMemories.mutate(undefined, { onSuccess });
         break;
-      case "deactivateAgent":
-        if (!currentSpaceId) return;
-        setActive.mutate({ spaceId: currentSpaceId, packageId, active: false }, { onSuccess });
-        break;
     }
   };
 
@@ -112,21 +99,20 @@ export function AgentActions({
       <PackageActionsDropdown
         packageId={packageId}
         type="agent"
-        isOwned={isOwned}
-        isBuiltIn={detail.source === "system"}
+        detail={detail}
         isHistoricalVersion={isHistoricalVersion}
-        homeSpaceId={detail.home_space_id}
-        homeWritable={detail.home_writable}
-        homeDeletable={detail.home_deletable}
-        homeShareable={detail.home_shareable}
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
         onDownloadBundle={downloadBundle}
         hasPublishedVersion={(detail.version_count ?? 0) > 0}
+        // The agents index lists what this space READS — an agent placed here
+        // and switched off is on it, and running it needs the switch on. A
+        // SYSTEM agent is not exempt: "active here" has one definition for the
+        // four families, the row wins over the platform's default, and switching
+        // one off per space is the sticky opt-out the run gate then honours.
         isActiveHere={activeHere}
         onCreateVersion={onCreateVersion}
         createVersionBlockedReason={unsavedReason}
-        onFork={onFork}
         runningRuns={detail.running_runs}
         // Under the same run visibility as the list the item would clear.
         hasRuns={detail.last_run !== null}
@@ -138,29 +124,6 @@ export function AgentActions({
             label: t("detail.deleteConfirm", { name: detail.display_name }),
           })
         }
-        // The agents index lists what this space READS — an agent placed here
-        // and switched off is on it, and running it needs the switch on. This is
-        // the door: the same `POST /api/spaces/{spaceId}/packages` the library
-        // calls, reached from the page the index links to. A SYSTEM agent is
-        // not exempt: "active here" has one definition for the four families,
-        // the row wins over the platform's default, and switching one off per
-        // space is the sticky opt-out the run gate then honours.
-        canActivate={!activeHere}
-        onActivate={() => {
-          if (!currentSpaceId) return;
-          setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
-        }}
-        canDeactivate={activeHere}
-        onDeactivate={() =>
-          setConfirmState({
-            type: "deactivateAgent",
-            label: t("packages.deactivateConfirm", {
-              name: detail.display_name,
-              ns: "settings",
-            }),
-          })
-        }
-        activationPending={setActive.isPending}
         onDeleteRuns={() =>
           setConfirmState({
             type: "clearRuns",
@@ -198,17 +161,8 @@ export function AgentActions({
         onConfirm={handleConfirm}
         title={confirmState ? t(CONFIRM_TITLES[confirmState.type]) : ""}
         description={confirmState?.label ?? ""}
-        confirmLabel={
-          confirmState?.type === "deactivateAgent"
-            ? t("packages.deactivate", { ns: "settings" })
-            : t("btn.delete", { ns: "common" })
-        }
-        isPending={
-          deleteAgent.isPending ||
-          deleteRuns.isPending ||
-          deleteAllMemories.isPending ||
-          setActive.isPending
-        }
+        confirmLabel={t("btn.delete", { ns: "common" })}
+        isPending={deleteAgent.isPending || deleteRuns.isPending || deleteAllMemories.isPending}
       />
     </>
   );

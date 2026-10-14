@@ -4,7 +4,6 @@ import { useCallback, useMemo, useEffect } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
 import { agentLaunchRefusal } from "../hooks/use-agent-readiness";
 import { useRun, useRunLogs } from "../hooks/use-runs";
@@ -38,7 +37,13 @@ import { RunResultsView } from "../components/run-detail/run-results-view";
 import { RunSnapshotInspector } from "../components/run-detail/run-snapshot-inspector";
 import { Button } from "@appstrate/ui/components/button";
 import { ArrowRight } from "lucide-react";
-import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
+import {
+  DetailTabs,
+  DetailTabBar,
+  DetailTabPanel,
+  type DetailTab,
+} from "../components/detail-tabs";
+import { activeTabLabel } from "../lib/active-tab-label";
 import { Badge } from "../components/status-badge";
 import { RunProvenanceBadges } from "../components/run-cells";
 import type { JournalOverviewFilter } from "../components/log-viewer";
@@ -274,11 +279,11 @@ export function RunDetailPage() {
     inlineName,
     numberedTitle: runCrumbLabel,
   });
-  const tabLabel: Record<RunDetailTab, string> = {
-    overview: t("run.tabOverview"),
-    journal: t("run.tabJournal"),
-    results: t("run.tabResults"),
-  };
+  const tabs: DetailTab<RunDetailTab>[] = [
+    { value: "overview", label: t("run.tabOverview") },
+    { value: "journal", label: t("run.tabJournal") },
+    { value: "results", label: t("run.tabResults") },
+  ];
 
   const breadcrumbs = [
     { label: t("detail.breadcrumb"), href: "/agents" },
@@ -289,7 +294,7 @@ export function RunDetailPage() {
           { label: t("detail.tabRuns"), href: `/agents/${packageId}#runs` },
           { label: runCrumbLabel, href: location.pathname },
         ]),
-    { label: tabLabel[tab] },
+    { label: activeTabLabel(tabs, tab) },
   ];
 
   return (
@@ -355,18 +360,11 @@ export function RunDetailPage() {
         integrationEntries={agent?.dependencies.integrations}
       />
 
-      <Tabs value={tab} onValueChange={(value) => setTab(value as RunDetailTab)}>
+      <DetailTabs value={tab} onChange={setTab}>
         <div className="overflow-visible" data-run-detail-surface>
-          <DetailTabsList>
-            <DetailTabsTrigger value="overview">{t("run.tabOverview")}</DetailTabsTrigger>
-            <DetailTabsTrigger value="journal">{t("run.tabJournal")}</DetailTabsTrigger>
-            <DetailTabsTrigger value="results">{t("run.tabResults")}</DetailTabsTrigger>
-          </DetailTabsList>
+          <DetailTabBar tabs={tabs} />
 
-          <TabsContent
-            value="overview"
-            className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
-          >
+          <DetailTabPanel value="overview">
             <RunSnapshotInspector
               run={enrichedRun}
               turns={turnRows}
@@ -377,12 +375,9 @@ export function RunDetailPage() {
               onOpenJournal={(filter) => openTab("#journal", filter)}
               onOpenResults={() => openTab("#results")}
             />
-          </TabsContent>
+          </DetailTabPanel>
 
-          <TabsContent
-            value="journal"
-            className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
-          >
+          <DetailTabPanel value="journal" flush>
             <RunExecutionView
               run={enrichedRun}
               logs={allLogs}
@@ -396,12 +391,9 @@ export function RunDetailPage() {
                 ) : undefined
               }
             />
-          </TabsContent>
+          </DetailTabPanel>
 
-          <TabsContent
-            value="results"
-            className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
-          >
+          <DetailTabPanel value="results" flush>
             <RunResultsView
               run={enrichedRun}
               packageId={packageId}
@@ -409,9 +401,9 @@ export function RunDetailPage() {
               hasRunMemory={hasRunMemory}
               isRunning={isRunning}
             />
-          </TabsContent>
+          </DetailTabPanel>
         </div>
-      </Tabs>
+      </DetailTabs>
     </div>
   );
 }

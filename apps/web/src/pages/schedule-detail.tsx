@@ -8,8 +8,13 @@ import { useCanReach } from "../hooks/use-can-reach";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
-import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
+import {
+  DetailTabs,
+  DetailTabBar,
+  DetailTabPanel,
+  type DetailTab,
+} from "../components/detail-tabs";
+import { activeTabLabel } from "../lib/active-tab-label";
 import { DetailSectionCard } from "../components/detail-section-card";
 import { Fact, FactGrid } from "../components/fact-grid";
 import { ManifestFacts } from "../components/package-manifest/manifest-fact";
@@ -33,7 +38,11 @@ import { isQueryInFlight } from "../lib/query-state";
 import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { ScheduleActionsMenu, ScheduleSettings } from "../components/schedule-settings";
-import { scheduleSettingsHref, type ScheduleSettingsSection } from "../lib/schedule-options";
+import {
+  scheduleNextRunAt,
+  scheduleSettingsHref,
+  type ScheduleSettingsSection,
+} from "../lib/schedule-options";
 import { formatDateField } from "../lib/format-date";
 import { parseCron } from "../lib/cron-frequency";
 import { describeFrequency } from "../lib/frequency-summary";
@@ -67,13 +76,18 @@ export function ScheduleDetailPage() {
       />
     );
   if (error || !schedule) return <ResourceErrorState error={error} />;
+  const tabs: DetailTab<ScheduleTab>[] = [
+    { value: "details", label: t("detail.overview.summary") },
+    { value: "runs", label: t("schedule.tabRuns") },
+    { value: "settings", label: t("schedule.tabSettings") },
+  ];
   const disabledReason = schedule.disabled_reason
     ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
     : null;
 
   return (
     <div>
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScheduleTab)}>
+      <DetailTabs value={activeTab} onChange={setActiveTab}>
         <PageHeader
           title={schedule.name || t("schedule.unnamed")}
           titleClassName="text-xl"
@@ -89,14 +103,7 @@ export function ScheduleDetailPage() {
               label: schedule.name || t("schedule.unnamed"),
               href: scheduleDetailPath(schedule.id),
             },
-            {
-              label:
-                activeTab === "details"
-                  ? t("detail.overview.summary")
-                  : activeTab === "runs"
-                    ? t("schedule.tabRuns")
-                    : t("schedule.tabSettings"),
-            },
+            { label: activeTabLabel(tabs, activeTab) },
           ]}
           actions={
             <>
@@ -141,31 +148,24 @@ export function ScheduleDetailPage() {
             </AlertDescription>
           </Alert>
         )}
-        <DetailTabsList>
-          <DetailTabsTrigger value="details">{t("detail.overview.summary")}</DetailTabsTrigger>
-          <DetailTabsTrigger value="runs">{t("schedule.tabRuns")}</DetailTabsTrigger>
-          <DetailTabsTrigger value="settings">{t("schedule.tabSettings")}</DetailTabsTrigger>
-        </DetailTabsList>
+        <DetailTabBar tabs={tabs} />
 
-        <TabsContent value="runs" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+        <DetailTabPanel value="runs">
           {readsRuns ? (
             <ScheduleHistory schedule={schedule} />
           ) : (
             <RoleLimitNotice>{t("schedule.roleLimit.runs")}</RoleLimitNotice>
           )}
-        </TabsContent>
+        </DetailTabPanel>
 
-        <TabsContent value="details" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+        <DetailTabPanel value="details">
           <ScheduleParams schedule={schedule} />
-        </TabsContent>
+        </DetailTabPanel>
 
-        <TabsContent
-          value="settings"
-          className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
-        >
+        <DetailTabPanel value="settings" flush>
           <ScheduleSettings schedule={schedule} />
-        </TabsContent>
-      </Tabs>
+        </DetailTabPanel>
+      </DetailTabs>
 
       <ConfirmModal
         open={confirmOpen}
@@ -198,6 +198,7 @@ function ScheduleParams({
   const { data: agents } = useAgents();
   const canReach = useCanReach();
   const agentPath = `/agents/${schedule.packageId}`;
+  const nextRunAt = scheduleNextRunAt(schedule);
   const agentDisplayName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
   const input = schedule.input;
@@ -266,10 +267,9 @@ function ScheduleParams({
             { labelKey: "schedule.paramTimezone", value: schedule.timezone },
             {
               labelKey: "schedule.paramNextRun",
-              value:
-                schedule.enabled && schedule.next_run_at
-                  ? formatDateField(schedule.next_run_at, "datetime", schedule.timezone)
-                  : t("schedule.noNextRun"),
+              value: nextRunAt
+                ? formatDateField(nextRunAt, "datetime", schedule.timezone)
+                : t("schedule.noNextRun"),
             },
             {
               labelKey: "schedule.paramLastRun",
@@ -342,13 +342,14 @@ function ScheduleHistory({
   }, [lastStartedAt]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  const nextRunAt = scheduleNextRunAt(schedule);
   const previewRow =
-    isActive && showNext && schedule.next_run_at ? (
+    isActive && showNext && nextRunAt ? (
       <NextRunPreview
         runNumber={(firstExec?.runNumber ?? 0) + 1}
         agentName={agentName}
         schedule_name={schedule.name || t("schedule.unnamed")}
-        next_run_at={schedule.next_run_at}
+        next_run_at={nextRunAt}
         timezone={schedule.timezone}
       />
     ) : null;

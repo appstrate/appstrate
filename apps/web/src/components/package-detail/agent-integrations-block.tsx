@@ -16,12 +16,9 @@ import {
   type IntegrationDetailWire,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
-import { useSetPackageActive } from "../../hooks/use-library";
+import { usePackageActivation } from "../../hooks/use-library";
 import { ApiError } from "../../api/errors";
 import { errorMessage } from "../../lib/mutation-error";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
-import { maySetPackageActive } from "../../lib/package-permissions";
 import type { ConnectionSet } from "../../lib/connection-set";
 import { matchesSearch } from "../../lib/strings";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
@@ -358,12 +355,7 @@ function ManagedIntegration({
 /** Switched off in this space: the reason and the activation button. Only a required one blocks. */
 function InactiveIntegration({ packageId, required }: { packageId: string; required: boolean }) {
   const { t } = useTranslation(["agents", "common"]);
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
-  // The tree's ONE activation verdict (`maySetPackageActive`), not a third
-  // spelling: the type's grant in THIS space, or owning it (RBAC §3.6).
-  const spaceGrant = useCurrentSpaceGrant();
-  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
+  const { mayActivate, activate, pending } = usePackageActivation("integration", packageId);
 
   return (
     <span className="flex items-center justify-end gap-3">
@@ -383,19 +375,12 @@ function InactiveIntegration({ packageId, required }: { packageId: string; requi
       <Button
         variant="outline"
         size="sm"
-        disabled={setActive.isPending || !currentSpaceId || !canActivate}
-        title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
-        onClick={() => {
-          if (!currentSpaceId || !canActivate) return;
-          setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
-        }}
+        disabled={pending || !mayActivate}
+        title={mayActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
+        onClick={() => activate()}
         data-testid={`integration-activate-${packageId}`}
       >
-        {setActive.isPending ? (
-          <Loader2 className="size-3.5 animate-spin" />
-        ) : (
-          t("editor.activateIntegration")
-        )}
+        {pending ? <Loader2 className="size-3.5 animate-spin" /> : t("editor.activateIntegration")}
       </Button>
     </span>
   );

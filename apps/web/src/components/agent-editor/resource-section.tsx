@@ -52,12 +52,10 @@ import {
   TableRow,
 } from "@appstrate/ui/components/table";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
-import { useSetPackageActive } from "../../hooks/use-library";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useCurrentSpaceGrant, usePermissions } from "../../hooks/use-permissions";
+import { usePackageActivation } from "../../hooks/use-library";
+import { usePermissions } from "../../hooks/use-permissions";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { packagePermission } from "@appstrate/core/permissions";
-import { maySetPackageActive } from "../../lib/package-permissions";
 import { TextSkeleton } from "../loading-skeletons";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
@@ -78,6 +76,23 @@ interface ResourceSectionProps {
    */
   leadingItems?: ReactNode;
   surface?: "card" | "settings";
+}
+
+/** Switches a declared integration on in this space; dead, with the reason, for a caller the route would refuse. */
+function ActivateIntegrationButton({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["agents", "common"]);
+  const { mayActivate, activate, pending } = usePackageActivation("integration", packageId);
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={pending || !mayActivate}
+      title={mayActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
+      onClick={() => activate()}
+    >
+      {pending ? <Spinner /> : t("editor.activateIntegration")}
+    </Button>
+  );
 }
 
 function VersionSelect({
@@ -159,14 +174,6 @@ export function ResourceSection({
   const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
   const canReach = useCanReach();
   const upload = useUploadPackage(type);
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
-  // The tree's ONE activation verdict, the same one the library and the package
-  // dropdown ask: the type's grant in THIS space, or owning it (RBAC §3.6).
-  // Offering the cure to somebody the route will refuse is a worse sentence
-  // than saying so on the button.
-  const spaceGrant = useCurrentSpaceGrant();
-  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
@@ -416,18 +423,7 @@ export function ResourceSection({
                 </div>
               </label>
               {type === "integration" && canReadCatalog && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={setActive.isPending || !currentSpaceId || !canActivate}
-                  title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
-                  onClick={() => {
-                    if (!currentSpaceId || !canActivate) return;
-                    setActive.mutate({ spaceId: currentSpaceId, packageId: id, active: true });
-                  }}
-                >
-                  {setActive.isPending ? <Spinner /> : t("editor.activateIntegration")}
-                </Button>
+                <ActivateIntegrationButton packageId={id} />
               )}
             </div>
           ))}
@@ -474,13 +470,6 @@ export function ResourceSection({
               }),
           ])
         }
-        // One door for every family: activating is a space placement
-        // switch, not an integration-only verb.
-        onActivate={(id) => {
-          if (!currentSpaceId || !canActivate) return;
-          setActive.mutate({ spaceId: currentSpaceId, packageId: id, active: true });
-        }}
-        activating={setActive.isPending}
       />
     );
   }
@@ -522,8 +511,6 @@ function SelectedResources({
   onVersion,
   onReplace,
   onAdd,
-  onActivate,
-  activating,
 }: {
   type: PackageType;
   title: string;
@@ -543,8 +530,6 @@ function SelectedResources({
   onVersion: (id: string, version: string) => void;
   onReplace: (id: string, next: ResourceEntry) => void;
   onAdd: (ids: string[]) => void;
-  onActivate: (id: string) => void;
-  activating: boolean;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const picker = useModalParam("add");
@@ -654,16 +639,7 @@ function SelectedResources({
                             {entry.version ?? "*"}
                           </span>
                         ) : (
-                          isIntegration && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={activating}
-                              onClick={() => onActivate(entry.id)}
-                            >
-                              {activating ? <Spinner /> : t("editor.activateIntegration")}
-                            </Button>
-                          )
+                          isIntegration && <ActivateIntegrationButton packageId={entry.id} />
                         )
                       ) : (
                         <VersionSelect
