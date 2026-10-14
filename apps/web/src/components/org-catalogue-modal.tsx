@@ -752,6 +752,7 @@ export function OrgCatalogueModal({
           isLoading={isLoading}
           error={error instanceof Error ? error : null}
           holds={active}
+          tableId={`catalogue-${active}`}
           entity={t(kind.titleKey)}
           emptyMessage={t(discovering ? "catalogue.emptyDiscover" : "catalogue.emptyPlaced")}
           emptyHint={t(discovering ? "catalogue.emptyDiscoverHint" : "catalogue.emptyPlacedHint")}

@@ -10,7 +10,7 @@ import { PACKAGE_WRITE_PERMISSIONS, spacePackagePermission } from "@appstrate/co
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
-import { usePackageViewStore } from "../stores/list-view-store";
+import { useListView } from "../stores/list-view-store";
 import { useListParams } from "../lib/list-params";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { PackageCollection } from "../components/package-collection";
@@ -77,8 +77,7 @@ export function PackageTab({
   holds,
   extraActions,
 }: PackageTabProps) {
-  const view = usePackageViewStore((s) => s.view);
-  const setView = usePackageViewStore((s) => s.setView);
+  const [view, setView] = useListView(holds);
   const list = useListParams(["origin", "activity"]);
 
   return (
@@ -92,6 +91,7 @@ export function PackageTab({
         />
       ) : null}
       <PackageCollection
+        tableId={`packages-${holds}`}
         items={items}
         isLoading={isLoading}
         error={error}

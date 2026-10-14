@@ -19,7 +19,7 @@ import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
 import { matchesSearch } from "../lib/strings";
-import { useScheduleViewStore } from "../stores/list-view-store";
+import { useListView } from "../stores/list-view-store";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { useModalParam } from "../hooks/use-modal-param";
 import { NEW_SCHEDULE_PARAM } from "../components/new-schedule-modal";
@@ -34,8 +34,7 @@ export function SchedulesListPage() {
   const { data: schedules, isLoading, isError, error } = useAllSchedules();
   const { data: agents } = useAgents();
   const placeholder = useSearchPlaceholder(t("schedules.title"));
-  const view = useScheduleViewStore((state) => state.view);
-  const setView = useScheduleViewStore((state) => state.setView);
+  const [view, setView] = useListView("schedules");
 
   const actions = (
     <PageActionsMenu>
