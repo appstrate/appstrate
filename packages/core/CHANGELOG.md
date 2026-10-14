@@ -7,17 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Release plan: this section ships as `16.0.0`.** Order, each step waiting for
-the one before it to be on npm:
-
-1. `@appstrate/afps-shared` **0.13.0**. Core requires `^0.13.0`, which carries
-   the `./request-template` and `./json-text` subpaths (`jsonText`,
-   `jsonTextMap`), `parseTokenUsage` and the `./ssrf` egress helpers.
-2. `@appstrate/core` **16.0.0** (tag `core@16.0.0`).
-3. `connect-helper` moves its range to `^16.0.0`, right after the tag.
-
-Procedure: `docs/deployment/RELEASING_CORE.md`.
-
 ### Added
 
 - **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,

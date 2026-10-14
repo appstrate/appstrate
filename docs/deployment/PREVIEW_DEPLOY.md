@@ -51,12 +51,16 @@ Staging itself tracks `main` and redeploys on every merge
 ## 3. Roll back
 
 Preview tags are additive — nothing is overwritten. To roll back, set
-`APPSTRATE_VERSION` back to the version you were on (the previous `pr-<n>`, a
-released `vX.Y.Z`, or `latest`) and redeploy:
+`APPSTRATE_VERSION` back to the version you were on (the previous `pr-<n>`, or
+a released version written **without the `v`** — GHCR tags carry none) and
+redeploy:
 
 ```sh
-APPSTRATE_VERSION=v1.4.0   # or the previous preview tag
+APPSTRATE_VERSION=1.0.0-beta.66   # or the previous preview tag
 ```
+
+A prerelease has no `latest` to fall back on: `latest` is only ever moved by a
+stable release.
 
 ## Notes
 
