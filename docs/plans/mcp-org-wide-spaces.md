@@ -47,7 +47,8 @@ is readable in any client's configuration and usable by a client that sends no
 custom header (a claude.ai connector), which a header pin is not. The endpoint
 therefore reads no `X-Space-Id`: a request carrying one is a `400` naming the
 URL form, never a header silently ignored (`docs/NO_TRANSITIONAL_CODE.md`). The
-CLI's Claude Code plugin and the in-process chat both pin by URL.
+in-process chat pins by URL. The CLI's Claude Code plugin pinned by URL too
+until #1972 moved it to the organization URL.
 
 It is its own OAuth resource, `<APP_URL>/api/mcp/o/:org/s/:space`, with its own
 PRM at `/.well-known/oauth-protected-resource/api/mcp/o/:org/s/:space` whose
@@ -187,5 +188,7 @@ admission read, the same one a pinned URL costs. No new table, no cache.
   tell the user to ask for access?
 - A size limit for the bracketed index: past some number of spaces, the
   brackets could give way to `granted_in` on `search_operations` only.
-- The CLI plugin pins the active space by URL; leaving it org-wide would let
-  skills synced from several spaces act in their own space.
+- ~~The CLI plugin pins the active space by URL; leaving it org-wide would let
+  skills synced from several spaces act in their own space.~~ Settled by #1972:
+  the plugin uses the organization URL, and each agent command names its
+  space.

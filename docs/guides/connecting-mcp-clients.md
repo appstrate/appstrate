@@ -151,6 +151,12 @@ What happens under the hood:
 > reads no `X-Space-Id`: a request carrying one is a `400` naming the URL form.
 > An API key is always pinned to its own space, and a URL naming another one is
 > a `403`.
+>
+> Appstrate's own clients use the organization's URL: the claude.ai connector,
+> and the Claude Code plugin installed by `appstrate code sync`. A plugin
+> command that launches an agent names its space; a free-form request names
+> none, so the model takes `space_id` from it or asks. The CLI's pinned space
+> (`appstrate space switch`) is the default of its REST commands only.
 
 ### Self-hosting requirements for Path B
 

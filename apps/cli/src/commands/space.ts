@@ -2,9 +2,10 @@
 
 /**
  * `appstrate space` — manage the pinned space for the active CLI
- * profile. Counterpart to the `spaceId` written at `appstrate login` time:
- * lets users re-pin, create, or inspect their space
- * without re-running the device flow.
+ * profile: the default space of its REST commands (`X-Space-Id`). Counterpart
+ * to the `spaceId` written at `appstrate login` time: lets users re-pin,
+ * create, or inspect it without re-running the device flow. `code sync` never
+ * reads it — the Claude Code plugin reaches every space through the org URL.
  *
  * Mirror of `./org.ts` — the command family, wiring conventions, and
  * interactive-picker semantics are identical so adding a third layer

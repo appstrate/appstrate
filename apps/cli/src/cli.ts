@@ -11,7 +11,7 @@
  *   - `appstrate whoami`:  server-authoritative identity check.
  *   - `appstrate token`:   print access + refresh token metadata (debug).
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
- *   - `appstrate space`:   manage the pinned space (`X-Space-Id`).
+ *   - `appstrate space`:   manage the default space of REST commands (`X-Space-Id`).
  *   - `appstrate code`:    project the spaces' skills and agents into
  *                           coding-agent tools (Claude Code plugin, `~/.claude/skills`, Codex).
  *   - `appstrate packages`: pull a package into a folder, compare it, push it to its draft,
@@ -493,11 +493,13 @@ orgGroup
     });
   });
 
-// ─── `appstrate space …` — manage the pinned space ────────
+// ─── `appstrate space …` — manage the default space ────────
 
 const spaceGroup = program
   .command("space")
-  .description("Manage the pinned space for the active profile");
+  .description(
+    "Manage the active profile's default space for REST commands (`appstrate api`, `run`, `packages`); Claude Code reaches every space",
+  );
 
 spaceGroup
   .command("list")
@@ -518,7 +520,7 @@ spaceGroup
 spaceGroup
   .command("switch [ref]")
   .description(
-    "Re-pin the active space on the profile. With no argument, show an interactive picker.",
+    "Pin another default space on the profile. With no argument, show an interactive picker.",
   )
   .action(async (ref: string | undefined) => {
     const globalOpts = program.opts<{ profile?: string }>();
