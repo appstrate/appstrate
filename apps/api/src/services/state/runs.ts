@@ -1751,7 +1751,11 @@ export type PackageRunActivity = {
 export async function getPackageRunActivity(
   scope: SpaceScope,
   packageId: string,
-  options: { endUserId?: string | null; now?: Date } = {},
+  options: {
+    /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
+    visibility?: SQL;
+    now?: Date;
+  } = {},
 ): Promise<PackageRunActivity> {
   const windowDays = 30;
   const windowStart = new Date(
@@ -1763,7 +1767,7 @@ export async function getPackageRunActivity(
     eq(runs.spaceId, scope.spaceId),
     gte(runs.startedAt, windowStart),
   ];
-  if (options.endUserId) conditions.push(eq(runs.endUserId, options.endUserId));
+  if (options.visibility) conditions.push(options.visibility);
 
   const [row] = await db
     .select({

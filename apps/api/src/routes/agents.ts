@@ -406,6 +406,9 @@ export function createAgentsRouter() {
     requireAgent(),
     async (c) => {
       const agent = c.get("package");
+      // The same door as `connection-readiness`: a `draft` selector only for a
+      // caller who may write the agent, else the definition the detail page renders.
+      await assertDraftSelectorAllowed(c, agent.id, c.req.query("version"));
       return c.json(
         await getAgentDiagnostics({
           scope: getSpaceScope(c),
@@ -414,7 +417,9 @@ export function createAgentsRouter() {
           canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
           canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
           payerUserId: requestPayerUserId(c),
-          version: c.req.query("version"),
+          version: c.req.query("version") || (await defaultDefinitionSelector(c, agent)).selector,
+          canReadSchedules: c.get("permissions")?.has("schedules:read") ?? false,
+          runVisibility: runVisibilityFilter(c),
         }),
       );
     },

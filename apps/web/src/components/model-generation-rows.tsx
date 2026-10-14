@@ -9,6 +9,7 @@
 
 import { CircleSlash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { withStoredTemperature } from "../lib/temperature-options";
 import {
   Select,
   SelectContent,
@@ -43,7 +44,7 @@ export function GenerationSettingRows({
   inheritLabels?: { temperature?: string; reasoning?: string };
   onChange: (next: ModelGenerationSettings) => void;
 }) {
-  const { t } = useTranslation(["settings", "agents"]);
+  const { t, i18n } = useTranslation(["settings", "agents"]);
   const temperatureUnsupported = model?.generation?.temperature === "unsupported";
   const supportedReasoningLevels = MODEL_REASONING_LEVELS.filter(
     (level) => model?.generation?.reasoning.levels[level] === "supported",
@@ -54,14 +55,18 @@ export function GenerationSettingRows({
   // The level names, the default level and the `off` of a model that sends
   // nothing for it (the API's `reasoning.off`), worded once for every surface.
   const labels = buildGenerationLabels(t, model?.generation);
-  const temperatureOptions = [
-    { value: INHERIT, label: inheritLabels?.temperature ?? t("models.generation.inherit") },
-    { value: "0", label: t("detail.configuration.temperature.precise", { ns: "agents" }) },
-    { value: "0.2", label: t("detail.configuration.temperature.focused", { ns: "agents" }) },
-    { value: "0.5", label: t("detail.configuration.temperature.balanced", { ns: "agents" }) },
-    { value: "0.8", label: t("detail.configuration.temperature.creative", { ns: "agents" }) },
-    { value: "1", label: t("detail.configuration.temperature.exploratory", { ns: "agents" }) },
-  ];
+  const temperatureOptions = withStoredTemperature(
+    [
+      { value: INHERIT, label: inheritLabels?.temperature ?? t("models.generation.inherit") },
+      { value: "0", label: t("detail.configuration.temperature.precise", { ns: "agents" }) },
+      { value: "0.2", label: t("detail.configuration.temperature.focused", { ns: "agents" }) },
+      { value: "0.5", label: t("detail.configuration.temperature.balanced", { ns: "agents" }) },
+      { value: "0.8", label: t("detail.configuration.temperature.creative", { ns: "agents" }) },
+      { value: "1", label: t("detail.configuration.temperature.exploratory", { ns: "agents" }) },
+    ],
+    generation.temperature,
+    (value) => new Intl.NumberFormat(i18n.language).format(value),
+  );
   const unsupportedItem = (
     <SelectItem value={UNSUPPORTED}>
       <span className="inline-flex items-center gap-2">

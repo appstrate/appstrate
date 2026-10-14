@@ -524,11 +524,9 @@ export function createRunsRouter() {
     requireAgent(),
     async (c) => {
       const agent = c.get("package");
-      const scope = getSpaceScope(c);
-      const endUser = c.get("endUser");
       return c.json(
-        await getPackageRunActivity(scope, agent.id, {
-          endUserId: endUser?.id,
+        await getPackageRunActivity(getSpaceScope(c), agent.id, {
+          visibility: runVisibilityFilter(c),
         }),
       );
     },

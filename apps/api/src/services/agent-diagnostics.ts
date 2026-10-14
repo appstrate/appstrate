@@ -9,13 +9,14 @@
  * same result without each rebuilding readiness rules.
  */
 
+import type { SQL } from "drizzle-orm";
 import type { LoadedPackage } from "../types/index.ts";
 import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getSpacePackageSettings } from "./space-packages.ts";
 import { collectAgentReadiness } from "./agent-readiness.ts";
-import { resolveAgentRunVersion, VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
+import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { resolveAgentConnectionReadiness } from "./integration-pins-service.ts";
 import { resolveModelCascade } from "./org-models.ts";
 import { listPackageSchedules } from "./scheduler.ts";
@@ -136,11 +137,20 @@ export async function getAgentDiagnostics(args: {
   canConfigureIntegrations: boolean;
   /** Who would pay the model of a launch: `requestPayerUserId(c)`, computed at the door. */
   payerUserId: string | null;
-  version?: string;
+  /**
+   * The definition judged, decided by the router exactly as for the detail page:
+   * an explicit selector (`draft` only for a caller who may write the agent),
+   * else `defaultDefinitionSelector`.
+   */
+  version: string;
+  /** Schedules are reported only to a caller holding `schedules:read`. */
+  canReadSchedules: boolean;
+  /** The caller's run-read predicate (`runVisibilityFilter(c)`), as the schedule list applies it. */
+  runVisibility: SQL | undefined;
 }): Promise<AgentDiagnosticsResult> {
   const { scope, principal, canConnect, canConfigureIntegrations, payerUserId } = args;
   const { actor } = principal;
-  const versionRef = args.version?.trim() || VERSION_SELECTOR_DRAFT;
+  const versionRef = args.version;
   const { agent } = await resolveAgentRunVersion(args.agent, versionRef);
   const packageConfig = await getSpacePackageSettings(scope, agent.id);
 
@@ -162,7 +172,9 @@ export async function getAgentDiagnostics(args: {
       version: versionRef,
     }),
     resolveModelCascade(scope.orgId, agent.id, packageConfig.modelId, payerUserId),
-    listPackageSchedules(scope, agent.id, actor, undefined),
+    args.canReadSchedules
+      ? listPackageSchedules(scope, agent.id, actor, args.runVisibility)
+      : Promise.resolve([]),
   ]);
 
   const readinessFields = new Set(readinessErrors.map((error) => error.field));
