@@ -18,7 +18,7 @@
  * the Docker HTTP API, not a Bun pipe).
  */
 
-import { mkdir, rm, readdir, stat } from "node:fs/promises";
+import { chmod, mkdir, rm, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
@@ -78,6 +78,41 @@ function workspaceDirFor(runId: string): string {
 }
 
 /**
+ * The workloads of a run, each with a `TMPDIR` of its own and that directory's
+ * mode. Both are SIGKILLed at teardown and remove nothing themselves, so what
+ * they leave under `os.tmpdir()` goes with these directories.
+ *
+ * The sidecar's is searchable by other uids: where an operator supplies a setuid
+ * runner wrapper (without one this mode refuses local runners), its integration
+ * runners read their bundle and the run CA in place below it, each on a uid of
+ * its own. The entries inside keep their own modes.
+ */
+const WORKLOAD_TMP_DIRS = [
+  { role: "sidecar", mode: 0o711 },
+  { role: "agent", mode: 0o700 },
+] as const;
+
+type WorkloadRole = (typeof WORKLOAD_TMP_DIRS)[number]["role"];
+
+/**
+ * Compute the host path for a workload's `TMPDIR`. Named by a hash rather than
+ * the run id: the sidecar binds unix sockets below its own
+ * (`<dir>/mitm-XXXXXX/<n>.sock`), and `sun_path` holds 104 bytes on macOS, where
+ * `os.tmpdir()` alone takes 48 of them.
+ */
+function tmpDirFor(runId: string, role: WorkloadRole): string {
+  const tag = new Bun.CryptoHasher("sha256").update(`${role}:${runId}`).digest("hex").slice(0, 12);
+  return join(tmpdir(), `appstrate-tmp-${tag}`);
+}
+
+/** Start removing every workload `TMPDIR` of a run: one promise per directory. */
+function removeTmpDirs(runId: string): Promise<void>[] {
+  return WORKLOAD_TMP_DIRS.map(({ role }) =>
+    rm(tmpDirFor(runId, role), { recursive: true, force: true }),
+  );
+}
+
+/**
  * Name of the ownership marker written into every run workspace.
  *
  * Holds the pid of the platform process that created the run. It is the
@@ -126,7 +161,9 @@ async function ownerIsAlive(runId: string): Promise<boolean> {
 
 /**
  * Scan `os.tmpdir()` for orphaned per-run workspace directories
- * (`appstrate-ws-*`) owned by THIS process's uid and remove them.
+ * (`appstrate-ws-*`) owned by THIS process's uid and remove them, each with
+ * its run's workload `TMPDIR`s: the workspace name is what carries the run id
+ * those are named from, whatever the working directory.
  * Boot-time recovery only. Returns the count of dirs reclaimed for the
  * {@link CleanupReport}.
  *
@@ -162,10 +199,13 @@ async function reapOrphanWorkspaceDirs(): Promise<number> {
         const st = await stat(path);
         if (st.uid !== myUid) continue;
       }
-      if (await ownerIsAlive(name.slice(WORKSPACE_DIR_PREFIX.length))) {
+      const runId = name.slice(WORKSPACE_DIR_PREFIX.length);
+      if (await ownerIsAlive(runId)) {
         logger.info("Preserved workspace of a live sibling instance", { workspace: name });
         continue;
       }
+      // Before the workspace: once it is gone nothing names the run any more.
+      await Promise.allSettled(removeTmpDirs(runId));
       await rm(path, { recursive: true, force: true });
       count++;
     } catch {
@@ -411,6 +451,16 @@ export class ProcessOrchestrator implements RunOrchestrator {
       mkdir(workspacePath, { recursive: true, mode: 0o700 }).then(() =>
         Bun.write(ownerMarkerPathFor(runId), String(process.pid)),
       ),
+      // Not recursive: a path that already exists, a planted symlink included,
+      // fails the launch instead of becoming a workload's `TMPDIR`.
+      // `mkdir` applies the umask to its mode; `chmod` does not.
+      Promise.all(
+        WORKLOAD_TMP_DIRS.map(async ({ role, mode }) => {
+          const tmp = tmpDirFor(runId, role);
+          await mkdir(tmp, { mode });
+          await chmod(tmp, mode);
+        }),
+      ),
     ]);
     this.sidecarPorts.set(runId, ports);
     return {
@@ -432,15 +482,24 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // doesn't leak one map entry per run.
     const runId = boundary.name.replace(/^process-/, "");
     this.sidecarPorts.delete(runId);
-    // Race boundary teardown and workspace teardown — independent
-    // paths, errors swallowed individually so a stuck workspace can't
-    // block the pidfile dir cleanup.
-    await Promise.allSettled([
+    // Race the removals — independent paths, so a stuck one blocks none of the
+    // others. Each failure is reported: the boot sweep finds a run's `TMPDIR`s
+    // through its workspace, so one left behind here is not found again.
+    const removals = await Promise.allSettled([
       rm(boundary.id, { recursive: true, force: true }),
       boundary.workspace.kind === "directory"
         ? rm(boundary.workspace.path, { recursive: true, force: true })
         : Promise.resolve(),
+      ...removeTmpDirs(runId),
     ]);
+    for (const removal of removals) {
+      if (removal.status === "rejected") {
+        logger.warn("Failed to remove a run directory", {
+          runId,
+          error: getErrorMessage(removal.reason),
+        });
+      }
+    }
   }
 
   async createSidecar(
@@ -473,6 +532,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // The agent reaches the sidecar over loopback, and nothing else may: on the host every
     // interface is reachable, and the forward proxy has no runner peers to tell apart here.
     env.LISTEN_HOST = LOOPBACK;
+    env.TMPDIR = tmpDirFor(runId, "sidecar");
 
     // Sidecar stdout goes to a FILE, not a drained pipe, for two reasons:
     //   - connect-runs capture the credential bundle by tailing it via
@@ -534,6 +594,8 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // spread would. This matches the Docker path, which passes only spec.env.
     const env: Record<string, string> = { ...systemBaselineEnv(), ...spec.env };
     env.WORKSPACE_DIR = resolve(workDir);
+    // Set after `spec.env`, like the workspace: the orchestrator owns both paths.
+    env.TMPDIR = tmpDirFor(spec.runId, "agent");
 
     this.pendingSpecs.set(id, { entrypoint: AGENT_ENTRY, workDir, env });
     this.processes.set(id, { proc: null, role: spec.role, runId: spec.runId, workDir });
