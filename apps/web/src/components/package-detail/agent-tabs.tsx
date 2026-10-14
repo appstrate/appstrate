@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { MemoryPanel } from "../persistence/memory-panel";
 import { useSchedules } from "../../hooks/use-schedules";
@@ -21,6 +21,28 @@ import { matchesSearch } from "../../lib/strings";
 import { useRunStatusFilter } from "../../hooks/use-run-status-filter";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
+import { searchOf } from "../../lib/url-search";
+
+/**
+ * A deep link's one-shot filter (`?agentRunStatus=`, `?agentMemory=`): read at
+ * mount, then dropped from the address so it does not stick to the tab.
+ */
+function useConsumedSearchParam(name: string): string | null {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const urlValue = new URLSearchParams(location.search).get(name);
+  const [value] = useState(urlValue);
+  useEffect(() => {
+    if (urlValue === null) return;
+    const params = new URLSearchParams(location.search);
+    params.delete(name);
+    void navigate(
+      { search: searchOf(params), hash: location.hash },
+      { replace: true, state: location.state },
+    );
+  }, [name, urlValue, location.search, location.hash, location.state, navigate]);
+  return value;
+}
 
 export function AgentRunsTab({
   packageId,
@@ -30,11 +52,9 @@ export function AgentRunsTab({
   versionLabel: string | undefined;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const location = useLocation();
-  // The overview's counters open this tab already filtered (`?agentRunStatus=`).
-  const list = useLocalListParams({
-    status: readList(new URLSearchParams(location.search).get("agentRunStatus"), runStatusValues),
-  });
+  // The overview's counters open this tab already filtered.
+  const requestedStatus = useConsumedSearchParam("agentRunStatus");
+  const list = useLocalListParams({ status: readList(requestedStatus, runStatusValues) });
   const { statuses, filter: statusFilter } = useRunStatusFilter(list);
 
   return (
@@ -153,8 +173,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
 }
 
 export function AgentMemoryTab({ packageId }: { packageId: string }) {
-  const location = useLocation();
-  const requestedType = new URLSearchParams(location.search).get("agentMemory");
+  const requestedType = useConsumedSearchParam("agentMemory");
   const initialTypes: Array<"pinned" | "archive"> =
     requestedType === "pinned" || requestedType === "archive" ? [requestedType] : [];
   return <MemoryPanel packageId={packageId} initialTypes={initialTypes} />;

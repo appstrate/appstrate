@@ -24,12 +24,11 @@ function expiresCell(): DataColumn<IntegrationConnection>["cell"] {
   function Probe(): ReactElement | null {
     columns = useConnectionColumns({
       packageId: "@appstrate/google-drive",
-      authKey: "drive",
-      authType: "oauth2",
-      canRenew: true,
       manifest: {} as IntegrationManifestView,
       userId: "user_1",
       isAdmin: false,
+      authForConnection: () => ({ authKey: "drive", authType: "oauth2", canRenew: true }),
+      methodLabel: () => "OAuth",
     });
     return null;
   }

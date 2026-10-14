@@ -29,11 +29,7 @@ import type { DataColumn } from "../data-table";
 import { TableRowActions } from "../table-row-actions";
 import { isConnectionOwnedBy } from "../integration-connect/connection-ownership";
 import type { ConnectionAuthContext } from "../../lib/integration-presentation";
-import type {
-  IntegrationAuthType,
-  IntegrationConnection,
-  IntegrationManifestView,
-} from "../../hooks/use-integrations";
+import type { IntegrationConnection, IntegrationManifestView } from "../../hooks/use-integrations";
 import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import type { ClientRow } from "../../lib/integration-clients";
 import { formatDateField } from "../../lib/format-date";
@@ -84,7 +80,6 @@ export function useIntegrationClientColumns({
   canUseHere,
   canManageOrg,
   canChooseOrgDefault,
-  canPromote,
   pendingClientRef,
   onUseHere,
   onUseForOrg,
@@ -98,8 +93,6 @@ export function useIntegrationClientColumns({
   canManageOrg: boolean;
   /** Same rule for the organization's own choice. */
   canChooseOrgDefault: boolean;
-  /** Moving a space's own client up to the organization. */
-  canPromote: boolean;
   /** The row with a write in flight — only that row shows pending. */
   pendingClientRef: string | null;
   onUseHere: (row: ClientRow) => void;
@@ -154,7 +147,7 @@ export function useIntegrationClientColumns({
       cell: (row) => {
         const { client, level } = row;
         const { ownLevel, editable } = clientDeeds(row, canManageOrg);
-        const promotable = level === "space" && !client.auto_provisioned && canPromote;
+        const promotable = level === "space" && !client.auto_provisioned && canManageOrg;
         const useHere = canUseHere && row.inSpaceList && !row.usedHere;
         const useForOrg = canChooseOrgDefault && row.inOrgList && !row.orgDefault;
         if (!ownLevel && !useHere && !useForOrg) return null;
@@ -232,8 +225,7 @@ export function useIntegrationClientColumns({
  * drawn for a row the caller does not own is a button that answers 403.
  *
  * Tier one is the account and its action end. Status and the scope with
- * its share editor wait for 36rem; the method (a table that mixes several
- * authentications asks for it with `methodLabel`), the owner, the granted
+ * its share editor wait for 36rem; the method, the owner, the granted
  * scopes and the expiry wait for 56rem because they are the longest and least
  * often read facts. The floors are written so that the whole set, method
  * included, holds in 56rem (`column-tiers.test.tsx`) and a 1440px page needs no
@@ -241,9 +233,6 @@ export function useIntegrationClientColumns({
  */
 export function useConnectionColumns({
   packageId,
-  authKey,
-  authType,
-  canRenew,
   manifest,
   userId,
   isAdmin,
@@ -251,19 +240,14 @@ export function useConnectionColumns({
   methodLabel,
 }: {
   packageId: string;
-  authKey: string;
-  /** From the manifest — the renew CTA is oauth2 only. */
-  authType: IntegrationAuthType;
-  /** False when no OAuth client is usable yet: renewing would 403. */
-  canRenew: boolean;
   /** Names the granted scopes by each auth's `scope_catalog`. */
   manifest: IntegrationManifestView;
   userId: string | undefined;
   isAdmin: boolean;
-  /** Mixed-method tables resolve renew against the row's own authentication. */
-  authForConnection?: (connection: IntegrationConnection) => ConnectionAuthContext;
-  /** Mixed-method tables name each row's authentication in a column of its own. */
-  methodLabel?: (connection: IntegrationConnection) => string;
+  /** The row's own authentication: renew and the scope names resolve against it. */
+  authForConnection: (connection: IntegrationConnection) => ConnectionAuthContext;
+  /** Names each row's authentication: the table mixes every method of the integration. */
+  methodLabel: (connection: IntegrationConnection) => string;
 }): DataColumn<IntegrationConnection>[] {
   const { t } = useTranslation("settings");
   // The row whose name is in edit: « Rename » is in one column, the name in another.
@@ -283,21 +267,17 @@ export function useConnectionColumns({
         />
       ),
     },
-    ...(methodLabel
-      ? [
-          {
-            id: "method",
-            header: t("integration.presentation.method"),
-            width: "minmax(84px,1fr)" as const,
-            tier: 3 as const,
-            cell: (c: IntegrationConnection) => (
-              <span className="text-muted-foreground block truncate text-xs" title={methodLabel(c)}>
-                {methodLabel(c)}
-              </span>
-            ),
-          },
-        ]
-      : []),
+    {
+      id: "method",
+      header: t("integration.presentation.method"),
+      width: "minmax(84px,1fr)",
+      tier: 3,
+      cell: (c) => (
+        <span className="text-muted-foreground block truncate text-xs" title={methodLabel(c)}>
+          {methodLabel(c)}
+        </span>
+      ),
+    },
     {
       id: "status",
       header: t("integration.connection.col.status"),
@@ -328,7 +308,7 @@ export function useConnectionColumns({
         c.scopes_granted.length > 0 ? (
           <ScopeSummaryText
             manifest={manifest}
-            authKey={authForConnection?.(c).authKey ?? authKey}
+            authKey={authForConnection(c).authKey}
             scopes={c.scopes_granted}
             className="text-muted-foreground block truncate text-[0.65rem]"
           />
@@ -364,7 +344,7 @@ export function useConnectionColumns({
         <ConnectionActionsCell
           connection={c}
           packageId={packageId}
-          {...(authForConnection?.(c) ?? { authKey, authType, canRenew })}
+          {...authForConnection(c)}
           isOwn={isConnectionOwnedBy(c, userId)}
           isAdmin={isAdmin}
           renaming={renamingId === c.id}

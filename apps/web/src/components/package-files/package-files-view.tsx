@@ -5,9 +5,9 @@
  * packages it depends on.
  *
  * One explorer, because a skill, an integration and a local MCP server are
- * AFPS bundles exactly as an agent is. The tree says so: `Bundle AFPS/` is the
+ * AFPS bundles exactly as an agent is. The tree says so: its bundle folder is the
  * archive itself (manifest.json, the type's main file, references/, scripts/),
- * `Dépendances/` what runs beside it (an agent's skills, the local server an
+ * its dependencies folder what runs beside it (an agent's skills, the local server an
  * integration launches), shown only when there is something to show.
  *
  * It is also the ONE place a package's files are changed. For whoever may
@@ -112,7 +112,31 @@ interface VirtualFile {
   dependency?: PackageReference;
 }
 
-const BUNDLE_ROOT = "Bundle AFPS/";
+// Stable tree keys; `useTreeFolderLabels` names them in the UI language.
+const TREE_BUNDLE = "bundle";
+const TREE_DEPENDENCIES = "dependencies";
+const TREE_SKILLS = "dependencies/skills";
+const TREE_MCP_SERVERS = "dependencies/mcp-servers";
+const BUNDLE_ROOT = `${TREE_BUNDLE}/`;
+
+function useTreeFolderLabels(): Readonly<Record<string, string>> {
+  const { t } = useTranslation("agents");
+  return useMemo(
+    () => ({
+      [TREE_BUNDLE]: t("files.treeBundle"),
+      [TREE_DEPENDENCIES]: t("files.treeDependencies"),
+      [TREE_SKILLS]: t("files.treeSkills"),
+      [TREE_MCP_SERVERS]: t("files.treeMcpServers"),
+    }),
+    [t],
+  );
+}
+
+/** A tree path as the user reads it: each keyed folder replaced by its label. */
+function displayTreePath(path: string, labels: Readonly<Record<string, string>>): string {
+  const parts = path.split("/");
+  return parts.map((part, i) => labels[parts.slice(0, i + 1).join("/")] ?? part).join("/");
+}
 
 /** The file gestures a bundle file offers, when its draft is being edited. */
 interface FileGestures {
@@ -180,6 +204,7 @@ export function PackageFilesView({
   editable?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
+  const folderLabels = useTreeFolderLabels();
   const scope = useOrgScope();
   const queryClient = useQueryClient();
   const [selectedVersion, setSelectedVersion] = useState(initialVersion ?? "draft");
@@ -370,7 +395,7 @@ export function PackageFilesView({
           sourceEntry: entry,
           treeEntry: {
             ...entry,
-            path: `Dépendances/Skills/${packageFolderName(skill.id)}/${entry.path}`,
+            path: `${TREE_SKILLS}/${packageFolderName(skill.id)}/${entry.path}`,
           },
         }));
     });
@@ -383,7 +408,7 @@ export function PackageFilesView({
         sourceEntry: entry,
         treeEntry: {
           ...entry,
-          path: `Dépendances/Serveurs MCP/${packageFolderName(server.id)}/${entry.path}`,
+          path: `${TREE_MCP_SERVERS}/${packageFolderName(server.id)}/${entry.path}`,
         },
       }));
     });
@@ -391,8 +416,11 @@ export function PackageFilesView({
   }, [bundleEntries, localMcpIndexes, mcpServers, packageId, skillIndexes, skills]);
 
   const visibleFiles = useMemo(
-    () => files.filter((file) => matchesSearch(query, [file.treeEntry.path])),
-    [files, query],
+    () =>
+      files.filter((file) =>
+        matchesSearch(query, [displayTreePath(file.treeEntry.path, folderLabels)]),
+      ),
+    [files, folderLabels, query],
   );
   const fileByPath = useMemo(
     () => new Map(visibleFiles.map((file) => [file.treeEntry.path, file])),
@@ -401,7 +429,7 @@ export function PackageFilesView({
   const editedFile = editingFile.value
     ? files.find((file) => file.bundlePath === editingFile.value)
     : undefined;
-  const mainFile = `Bundle AFPS/${initialPath ?? primaryDisplayFile(type).name}`;
+  const mainFile = `${BUNDLE_ROOT}${initialPath ?? primaryDisplayFile(type).name}`;
   const defaultFile =
     visibleFiles.find((file) => file.treeEntry.path === mainFile) ?? visibleFiles[0];
   // A selected file is re-read from the current tree: an edit replaces its entry.
@@ -435,8 +463,8 @@ export function PackageFilesView({
       return;
     }
     const dependency = [...skills, ...mcpServers].find((candidate) => {
-      const group = candidate.type === "skill" ? "Skills" : "Serveurs MCP";
-      const root = `Dépendances/${group}/${packageFolderName(candidate.id)}`;
+      const group = candidate.type === "skill" ? TREE_SKILLS : TREE_MCP_SERVERS;
+      const root = `${group}/${packageFolderName(candidate.id)}`;
       return path === root || path.startsWith(`${root}/`);
     });
     setSelected({ kind: "folder", path, ...(dependency ? { dependency } : {}) });
@@ -591,11 +619,12 @@ export function PackageFilesView({
                 <FileTree
                   entries={visibleFiles.map((file) => file.treeEntry)}
                   directories={[
-                    "Bundle AFPS",
-                    ...(skills.length > 0 ? ["Dépendances", "Dépendances/Skills"] : []),
-                    ...(mcpServers.length > 0 ? ["Dépendances", "Dépendances/Serveurs MCP"] : []),
+                    TREE_BUNDLE,
+                    ...(skills.length > 0 ? [TREE_DEPENDENCIES, TREE_SKILLS] : []),
+                    ...(mcpServers.length > 0 ? [TREE_DEPENDENCIES, TREE_MCP_SERVERS] : []),
                   ]}
-                  initialCollapsedPaths={["Dépendances/Skills", "Dépendances/Serveurs MCP"]}
+                  initialCollapsedPaths={[TREE_SKILLS, TREE_MCP_SERVERS]}
+                  directoryLabels={folderLabels}
                   selectedPath={
                     activeSelection?.kind === "file"
                       ? activeSelection.file.treeEntry.path
@@ -791,7 +820,11 @@ function SelectionHeader({
   editHref?: (path: string) => string | undefined;
   gestures?: FileGestures;
 }) {
-  const path = selection.kind === "file" ? selection.file.treeEntry.path : selection.path;
+  const folderLabels = useTreeFolderLabels();
+  const path = displayTreePath(
+    selection.kind === "file" ? selection.file.treeEntry.path : selection.path,
+    folderLabels,
+  );
   const dependency = selection.kind === "file" ? selection.file.dependency : selection.dependency;
   const pathParts = path.split("/");
 
@@ -1021,11 +1054,12 @@ function DependencySelectionActions({ dependency }: { dependency: PackageReferen
 
 function FolderPreview({ path, dependency }: { path: string; dependency?: PackageReference }) {
   const { t } = useTranslation("agents");
+  const folderLabels = useTreeFolderLabels();
   return (
     <div className="h-full p-6 text-left">
       <div className="flex items-center gap-3">
         <FolderOpen className="text-muted-foreground size-5" aria-hidden />
-        <h3 className="font-mono text-sm font-semibold">{path}</h3>
+        <h3 className="font-mono text-sm font-semibold">{displayTreePath(path, folderLabels)}</h3>
       </div>
       {dependency && (
         <p className="text-muted-foreground mt-3 max-w-lg text-sm">

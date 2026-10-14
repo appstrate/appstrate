@@ -36,6 +36,16 @@ type AgentModelBlocker = "detail.titleModel" | "detail.titleNoDefaultModel";
 type AgentRunBlocker =
   AgentLaunchRefusal | "detail.titleEmptyPrompt" | "detail.titleMissingSkill" | AgentModelBlocker;
 
+/** Every blocker key, checked exhaustive by `satisfies`: the run button renders `t(blocker)`, so a test holds each in both locales. */
+export const AGENT_RUN_BLOCKERS = Object.keys({
+  "detail.titleNotActive": true,
+  "detail.titleNeverPublished": true,
+  "detail.titleEmptyPrompt": true,
+  "detail.titleMissingSkill": true,
+  "detail.titleModel": true,
+  "detail.titleNoDefaultModel": true,
+} satisfies Record<AgentRunBlocker, true>);
+
 /**
  * The refusals no launch option can cure, as i18n keys (namespace `agents`).
  * Switched off here comes first: its cure is one click away on the page.

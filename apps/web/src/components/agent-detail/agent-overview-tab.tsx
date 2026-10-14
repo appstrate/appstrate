@@ -11,6 +11,8 @@ import { useAgentRunActivity } from "../../hooks/use-paginated-runs";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { Badge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
+import { latestMemoryDate, runSuccessRate } from "../../lib/agent-overview";
+import { runDetailPath } from "../../lib/package-paths";
 import { agentSettingsHref } from "../../lib/settings-section-href";
 import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
@@ -63,35 +65,20 @@ function OperationalSummary({
     data: memories,
     isLoading: memoriesLoading,
     isError: memoriesError,
-    isSuccess: memoriesSuccess,
   } = useAgentMemories(packageId);
   const {
     data: pinned,
     isLoading: pinnedLoading,
     isError: pinnedError,
-    isSuccess: pinnedSuccess,
   } = useAgentPinned(packageId);
   const nextSchedule = schedules?.find((schedule) => schedule.enabled && schedule.next_run_at);
   const activeScheduleCount = schedules?.filter((schedule) => schedule.enabled).length;
   const unknown = t("detail.overview.unknown");
-  const memoryDates = [
-    ...(pinned ?? []).flatMap((item) => [item.updatedAt, item.createdAt]),
-    ...(memories ?? []).map((item) => item.createdAt),
-  ].filter((date): date is string => Boolean(date));
-  const latestMemoryDate =
-    pinnedSuccess && memoriesSuccess
-      ? memoryDates.sort((a, b) => Date.parse(b) - Date.parse(a))[0]
-      : undefined;
+  const latestMemory = pinned && memories ? latestMemoryDate(pinned, memories) : undefined;
 
   const activity = runActivity.data;
   const failedRunCount = activity ? activity.failed + activity.timeout : undefined;
-  const successRateDenominator = activity
-    ? activity.success + activity.failed + activity.timeout
-    : undefined;
-  const successRate =
-    successRateDenominator && successRateDenominator > 0
-      ? activity!.success / successRateDenominator
-      : null;
+  const successRate = activity ? runSuccessRate(activity) : null;
   const successRateLabel =
     successRate === null
       ? "—"
@@ -130,7 +117,7 @@ function OperationalSummary({
             <div className="flex min-w-0 flex-col">
               {detail.last_run ? (
                 <Link
-                  to={`/agents/${packageId}/runs/${detail.last_run.id}`}
+                  to={runDetailPath(packageId, detail.last_run.id)}
                   className="group hover:bg-muted/20 focus-visible:ring-ring relative flex min-w-0 flex-1 flex-col justify-center p-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
                 >
                   <div className="min-w-0">
@@ -341,8 +328,8 @@ function OperationalSummary({
                   ? "…"
                   : pinnedError || memoriesError
                     ? unknown
-                    : latestMemoryDate
-                      ? formatDateField(latestMemoryDate, "datetime")
+                    : latestMemory
+                      ? formatDateField(latestMemory, "datetime")
                       : "—"
               }
             />
