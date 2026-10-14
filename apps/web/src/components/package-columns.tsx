@@ -32,9 +32,9 @@ import type { CardItem } from "../pages/package-list";
  * the actions column empty: they are left out. A column that can never say
  * anything is not a column.
  */
-export function usePackageColumns(holds?: PackageType): DataColumn<CardItem>[] {
+export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
   const { t } = useTranslation(["agents", "common"]);
-  const runnable = holds === undefined || holds === "agent";
+  const runnable = holds === "agent";
   const origin = useCatalogueOriginColumn<CardItem>(useOrg().currentOrg?.name ?? "");
 
   const columns: DataColumn<CardItem>[] = [

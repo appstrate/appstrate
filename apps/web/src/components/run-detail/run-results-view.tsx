@@ -21,8 +21,6 @@ import { RailButton } from "../settings/rail-link";
 import { featuredRunFile, producedRunFiles } from "../../lib/files";
 import { RunDeliverableTab } from "../run-deliverable-tab";
 
-const keepUnavailableDocumentVisible = () => undefined;
-
 type ResultsSectionId = "production" | "structured" | "memory";
 
 interface RunResultsProps {
@@ -156,12 +154,7 @@ export function RunResultsContent({
       const featured = outputDocuments.length === 1 && !error ? outputDocuments[0] : undefined;
       return (
         <>
-          {featured && (
-            <RunDeliverableTab
-              fileId={featured.id}
-              onUnavailable={keepUnavailableDocumentVisible}
-            />
-          )}
+          {featured && <RunDeliverableTab fileId={featured.id} />}
           <DocumentListPanel
             documents={outputDocuments}
             isLoading={isLoading}

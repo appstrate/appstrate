@@ -88,6 +88,8 @@ interface RunOverridesPanelProps {
    * The connection hint then speaks of every fire instead of this run.
    */
   scheduled?: boolean;
+  /** Set when the form sits in a URL-param modal: a picker's way out leaves that modal. */
+  onLeave?: (to: string) => void;
 }
 
 /** One override: a labelled field in a launch form, a settings row elsewhere. */
@@ -144,6 +146,7 @@ export function RunOverridesPanel({
   version,
   layout = "launch",
   scheduled = false,
+  onLeave,
 }: RunOverridesPanelProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgModels } = useModels();
@@ -333,6 +336,7 @@ export function RunOverridesPanel({
           scheduled={scheduled}
           value={value.connection_overrides ?? {}}
           onChange={onConnectionPick}
+          onLeave={onLeave}
         />
       )}
     </div>
@@ -358,6 +362,7 @@ function ConnectionOverridesSection({
   scheduled,
   value,
   onChange,
+  onLeave,
 }: {
   agentPackageId: string;
   integrations: AgentIntegrationRef[];
@@ -365,6 +370,7 @@ function ConnectionOverridesSection({
   scheduled: boolean;
   value: Record<string, string[]>;
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
+  onLeave?: (to: string) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   return (
@@ -382,6 +388,7 @@ function ConnectionOverridesSection({
             version={version}
             value={value[integ.id] ?? null}
             onChange={(connIds) => onChange(integ.id, connIds)}
+            onLeave={onLeave}
           />
         ))}
       </div>
@@ -395,6 +402,7 @@ function IntegrationOverrideRow({
   version,
   value,
   onChange,
+  onLeave,
 }: {
   agentPackageId: string;
   integration: AgentIntegrationRef;
@@ -402,6 +410,7 @@ function IntegrationOverrideRow({
   /** This form's pick: `null` = none (the row shows what the agent binds), `[]` = no connection. */
   value: ConnectionSet;
   onChange: (next: ConnectionSet) => void;
+  onLeave?: (to: string) => void;
 }) {
   const { data: detail } = useIntegrationDetail(integration.id);
   const displayName = detail?.manifest.display_name ?? integration.id;
@@ -427,6 +436,7 @@ function IntegrationOverrideRow({
         agentScopes={integration.scopes}
         persistence={{ mode: "override", value, onChange }}
         version={version}
+        onLeave={onLeave}
       />
     </div>
   );

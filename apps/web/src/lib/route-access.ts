@@ -34,11 +34,6 @@ type RouteAccess = {
     }
 );
 
-const HOME_SPACE_EDITOR: RouteAccess = {
-  open:
-    "write authority is the package's HOME space (`home_writable`, RBAC spec §6.9), " +
-    "which the editor reads off the loaded detail — not the space being browsed",
-};
 const OWN_ACCOUNT: RouteAccess = { open: "the caller's own account; no org or space permission" };
 /**
  * One screen graded inside by what the caller may do. Its floor is the space's
@@ -54,7 +49,6 @@ export const ROUTE_ACCESS = {
 
   "/agents": { anyOf: AGENT_SIGHT, operations: ["listAgents"] },
   "/agents/new": { anyOf: ["agents:write"], operations: ["createAgent"] },
-  "/agents/:scope/:name/edit": HOME_SPACE_EDITOR,
   "/agents/:scope/:name": { anyOf: AGENT_SIGHT, operations: ["getAgentPackage"] },
   // A version is the full manifest; `agents:run` reads only the summary (RBAC spec §3.4).
   "/agents/:scope/:name/:version": {
@@ -70,7 +64,6 @@ export const ROUTE_ACCESS = {
 
   "/skills": { anyOf: ["skills:read"], operations: ["listSkills"] },
   "/skills/new": { anyOf: ["skills:write"], operations: ["createSkill"] },
-  "/skills/:scope/:name/edit": HOME_SPACE_EDITOR,
   "/skills/:scope/:name": { anyOf: ["skills:read"], operations: ["getSkill"] },
   "/skills/:scope/:name/:version": {
     anyOf: ["skills:read"],
@@ -79,11 +72,9 @@ export const ROUTE_ACCESS = {
 
   "/integrations": { anyOf: ["integrations:read"], operations: ["listIntegrations"] },
   "/integrations/new": { anyOf: ["integrations:write"], operations: ["createIntegrationPackage"] },
-  "/integrations/:scope/:name/edit": HOME_SPACE_EDITOR,
   "/integrations/:scope/:name": { anyOf: ["integrations:read"], operations: ["getIntegration"] },
 
   "/mcp-servers": { anyOf: ["mcp-servers:read"], operations: ["listMcpServerPackages"] },
-  "/mcp-servers/:scope/:name/edit": HOME_SPACE_EDITOR,
   "/mcp-servers/:scope/:name": { anyOf: ["mcp-servers:read"], operations: ["getMcpServerPackage"] },
   "/mcp-servers/:scope/:name/:version": {
     anyOf: ["mcp-servers:read"],

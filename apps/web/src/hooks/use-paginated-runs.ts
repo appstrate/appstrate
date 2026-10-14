@@ -7,7 +7,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
-import { paginatedRunsKeys } from "../lib/query-keys";
+import { agentRunActivityKeys, paginatedRunsKeys } from "../lib/query-keys";
 import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
 
@@ -131,9 +131,6 @@ export function usePaginatedRuns({
   });
 }
 
-/** Prefix of every agent's 30-day activity: a run update moves its counts. */
-export const agentRunActivityKey = ["agent-run-activity"] as const;
-
 /** One server-side aggregate for the agent overview's fixed 30-day window. */
 export function useAgentRunActivity(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
@@ -141,7 +138,7 @@ export function useAgentRunActivity(packageId: string | undefined) {
   const { can } = usePermissions();
 
   return useQuery({
-    queryKey: [...agentRunActivityKey, orgId, spaceId, packageId],
+    queryKey: agentRunActivityKeys.detail(orgId, spaceId, packageId),
     queryFn: async () => {
       const { scope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/run-activity", {

@@ -34,22 +34,22 @@ import {
 } from "../lib/integration-collection";
 import { readList, useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
-import { useAllIntegrations, type IntegrationSummaryWire } from "../hooks/use-integrations";
+import { usePackageList } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useIntegrationViewStore } from "../stores/list-view-store";
 import { useIntegrationListColumns } from "./integration-list-columns";
+import type { IntegrationIndexItem } from "@appstrate/shared-types";
 
 function IntegrationCard({
   integration,
   orgName,
 }: {
-  integration: IntegrationSummaryWire;
+  integration: IntegrationIndexItem;
   orgName: string;
 }) {
   const { t } = useTranslation("settings");
-  const manifest = integration.manifest;
   const origin = integrationOrigin(integration);
 
   return (
@@ -60,19 +60,17 @@ function IntegrationCard({
       className="bg-card hover:border-primary/40 flex flex-col rounded-lg border p-4 transition-colors hover:shadow-md"
     >
       <div className="flex items-start gap-3">
-        <IntegrationIcon src={manifest.icon} />
+        <IntegrationIcon src={integration.icon ?? undefined} />
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold">
-            {manifest.display_name ?? integration.id}
-          </h3>
+          <h3 className="truncate text-sm font-semibold">{integration.name}</h3>
           <p className="text-muted-foreground truncate text-xs">
             {origin === "system" ? t("catalogue.sourceSystem") : orgName}
-            {manifest.version ? ` · ${manifest.version}` : ""}
+            {integration.version ? ` · ${integration.version}` : ""}
           </p>
         </div>
       </div>
-      {manifest.description && (
-        <p className="text-muted-foreground mt-3 line-clamp-2 text-sm">{manifest.description}</p>
+      {integration.description && (
+        <p className="text-muted-foreground mt-3 line-clamp-2 text-sm">{integration.description}</p>
       )}
     </Link>
   );
@@ -82,7 +80,9 @@ export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const orgName = useOrg().currentOrg?.name ?? "";
-  const { data, isLoading, error } = useAllIntegrations();
+  // The server answers the active set of this space: the index route every
+  // type page asks, not the management listing.
+  const { data: active = [], isLoading, error } = usePackageList("integration");
   const list = useListParams(["origin", "protocol"]);
   const view = useIntegrationViewStore((state) => state.view);
   const setView = useIntegrationViewStore((state) => state.setView);
@@ -107,7 +107,6 @@ export function IntegrationsPage() {
   );
   const query = list.search;
 
-  const active = useMemo(() => (data ?? []).filter((integration) => integration.active), [data]);
   const shown = useMemo(
     () =>
       filterIntegrations(active, {
@@ -120,7 +119,7 @@ export function IntegrationsPage() {
   );
   const filtering = query.trim() !== "" || origins.length > 0 || protocols.length > 0;
   const countOf = (value: IntegrationExecution) =>
-    active.filter((row) => integrationExecution(row) === value).length;
+    active.filter((row) => integrationExecution(row.source_kind) === value).length;
 
   const allColumns = useIntegrationListColumns().filter((column) =>
     execution === "local" ? column.id !== "protocol" : column.id !== "server",
@@ -229,7 +228,7 @@ export function IntegrationsPage() {
           rows={shown}
           rowKey={(integration) => integration.id}
           rowHref={(integration) => `/integrations/${integration.id}`}
-          rowLabel={(integration) => integration.manifest.display_name ?? integration.id}
+          rowLabel={(integration) => integration.name}
           isLoading={isLoading}
           isError={Boolean(error)}
           error={<ErrorState error={error} compact />}

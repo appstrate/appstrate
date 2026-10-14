@@ -1185,6 +1185,70 @@
         }
       }
     },
+    "/api/agents/{scope}/{name}/diagnostics": {
+      "get": {
+        "operationId": "getAgentDiagnostics",
+        "tags": ["Agents"],
+        "summary": "Get shared diagnostics for an agent",
+        "description": "Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview and the launch header. Diagnostics are ordered with blockers first and carry their correction destinations. Connection verdicts are included only for a caller holding `integrations:read`, and schedule warnings only for one holding `schedules:read`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Agent definition to inspect: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitted inspects what the agent detail page renders — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft when nothing is published. `draft` named explicitly requires that write authority. Ignored for system agents."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent diagnostics, including an explicit healthy empty state",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentDiagnostics"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden",
+            "description": "Insufficient permissions — including `draft_not_writable` when `version=draft` is named by a caller who cannot WRITE the package."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/VersionArtifactUnavailable"
+          }
+        }
+      }
+    },
     "/api/agents/{scope}/{name}/persistence": {
       "get": {
         "operationId": "listAgentPersistence",
@@ -2183,6 +2247,12 @@
           },
           {
             "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/RunStatusFilter"
+          },
+          {
+            "$ref": "#/components/parameters/RunSearch"
           }
         ],
         "responses": {
@@ -2312,6 +2382,92 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/agents/{scope}/{name}/run-activity": {
+      "get": {
+        "operationId": "getAgentRunActivity",
+        "tags": ["Runs"],
+        "summary": "Get recent run activity for an agent",
+        "description": "Return one tenant-scoped aggregate for the last 30 days. The success rate is intentionally derived by clients from success / (success + failed + timeout); cancelled, pending, and running runs are excluded from that denominator.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Thirty-day run activity aggregate",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "window_days": {
+                      "type": "integer",
+                      "enum": [30]
+                    },
+                    "window_start": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "success": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "failed": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "timeout": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "window_days",
+                    "window_start",
+                    "total",
+                    "success",
+                    "failed",
+                    "timeout"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -2793,13 +2949,7 @@
             "description": "Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened."
           },
           {
-            "name": "status",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": ["pending", "running", "success", "failed", "timeout", "cancelled"]
-            },
-            "description": "Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened."
+            "$ref": "#/components/parameters/RunStatusFilter"
           },
           {
             "name": "start_date",
@@ -2824,6 +2974,9 @@
               "type": "string"
             },
             "description": "Return only runs launched from this chat session."
+          },
+          {
+            "$ref": "#/components/parameters/RunSearch"
           }
         ],
         "responses": {
@@ -5508,6 +5661,12 @@
           },
           {
             "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/RunStatusFilter"
+          },
+          {
+            "$ref": "#/components/parameters/RunSearch"
           }
         ],
         "responses": {
@@ -5841,6 +6000,7 @@
                     "manifest",
                     "auths",
                     "tool_catalog",
+                    "tool_catalog_inspection",
                     "allow_undeclared_tools",
                     "active",
                     "block_user_connections",
@@ -6077,6 +6237,58 @@
                                     "type": "string"
                                   }
                                 }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "tool_catalog_inspection": {
+                      "type": "object",
+                      "description": "Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory.",
+                      "required": ["basis", "entries"],
+                      "properties": {
+                        "basis": {
+                          "type": "string",
+                          "enum": ["mcp_package", "manifest", "platform"]
+                        },
+                        "entries": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": ["name", "origin", "exposure"],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "policy": {
+                                "type": "object",
+                                "properties": {
+                                  "required_scopes": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "origin": {
+                                "type": "string",
+                                "enum": ["mcp_package", "manifest", "appstrate"]
+                              },
+                              "exposure": {
+                                "type": "string",
+                                "enum": ["available", "hidden", "not_in_catalog"]
+                              },
+                              "hidden_reason": {
+                                "type": "string",
+                                "enum": ["manifest", "connection", "dependency"]
                               }
                             }
                           }
@@ -8562,6 +8774,7 @@
                     "manifest",
                     "auths",
                     "tool_catalog",
+                    "tool_catalog_inspection",
                     "allow_undeclared_tools",
                     "active",
                     "block_user_connections",
@@ -8798,6 +9011,58 @@
                                     "type": "string"
                                   }
                                 }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "tool_catalog_inspection": {
+                      "type": "object",
+                      "description": "Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory.",
+                      "required": ["basis", "entries"],
+                      "properties": {
+                        "basis": {
+                          "type": "string",
+                          "enum": ["mcp_package", "manifest", "platform"]
+                        },
+                        "entries": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": ["name", "origin", "exposure"],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "policy": {
+                                "type": "object",
+                                "properties": {
+                                  "required_scopes": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "origin": {
+                                "type": "string",
+                                "enum": ["mcp_package", "manifest", "appstrate"]
+                              },
+                              "exposure": {
+                                "type": "string",
+                                "enum": ["available", "hidden", "not_in_catalog"]
+                              },
+                              "hidden_reason": {
+                                "type": "string",
+                                "enum": ["manifest", "connection", "dependency"]
                               }
                             }
                           }
@@ -12868,6 +13133,7 @@
                       "id": "550e8400-e29b-41d4-a716-446655440000",
                       "name": "Acme Corp",
                       "slug": "acme-corp",
+                      "logo": null,
                       "role": "owner",
                       "permissions": ["org:read", "org:update", "members:invite"],
                       "createdAt": "2026-01-10T08:00:00Z",
@@ -12934,7 +13200,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["id", "name", "slug", "role", "createdAt"],
+                  "required": ["id", "name", "slug", "logo", "role", "createdAt"],
                   "properties": {
                     "id": {
                       "type": "string",
@@ -12945,6 +13211,9 @@
                     },
                     "slug": {
                       "type": "string"
+                    },
+                    "logo": {
+                      "type": ["string", "null"]
                     },
                     "role": {
                       "type": "string",
@@ -12960,6 +13229,7 @@
                   "id": "550e8400-e29b-41d4-a716-446655440001",
                   "name": "New Organization",
                   "slug": "new-org",
+                  "logo": null,
                   "role": "owner",
                   "createdAt": "2026-01-15T10:30:00Z"
                 }
@@ -13015,6 +13285,7 @@
                   "id": "550e8400-e29b-41d4-a716-446655440000",
                   "name": "Acme Corp",
                   "slug": "acme-corp",
+                  "logo": null,
                   "members": [
                     {
                       "userId": "usr_abc123",
@@ -13051,7 +13322,7 @@
         "operationId": "updateOrganization",
         "tags": ["Organizations"],
         "summary": "Update organization",
-        "description": "Update organization name and/or slug. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+        "description": "Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
           {
             "name": "orgId",
@@ -13076,6 +13347,11 @@
                   "slug": {
                     "type": "string",
                     "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+                  },
+                  "logo": {
+                    "type": ["string", "null"],
+                    "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial.",
+                    "maxLength": 48000
                   }
                 },
                 "additionalProperties": false
@@ -14043,7 +14319,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["id", "name", "slug", "role", "createdAt"],
+                        "required": ["id", "name", "slug", "logo", "role", "createdAt"],
                         "properties": {
                           "id": {
                             "type": "string"
@@ -14053,6 +14329,10 @@
                           },
                           "slug": {
                             "type": "string"
+                          },
+                          "logo": {
+                            "type": ["string", "null"],
+                            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial."
                           },
                           "role": {
                             "type": "string",
@@ -14086,6 +14366,7 @@
                       "id": "org_abc123",
                       "name": "Acme Corp",
                       "slug": "acme",
+                      "logo": null,
                       "role": "owner",
                       "permissions": ["org:read", "org:update", "members:invite"],
                       "createdAt": "2026-01-10T08:00:00Z"
@@ -15727,6 +16008,7 @@
                   "id": "550e8400-e29b-41d4-a716-446655440000",
                   "name": "Acme Corp",
                   "slug": "acme-corp",
+                  "logo": null,
                   "role": "member",
                   "permissions": ["org:read", "spaces:read"],
                   "createdAt": "2026-01-10T08:00:00Z",
@@ -20283,7 +20565,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/OrgPackageItem"
+                        "$ref": "#/components/schemas/IntegrationIndexItem"
                       }
                     },
                     "hasMore": {
@@ -24369,7 +24651,7 @@
         "operationId": "listFiles",
         "tags": ["Files"],
         "summary": "List files",
-        "description": "List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `runId`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`. An unknown query parameter or an invalid `purpose` is rejected with 400.",
+        "description": "List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `runId`, `packageId`, `chat_session_id`, or a chat session's complete context; search names with `q`, and paginate with `startingAfter` + `limit`. An unknown query parameter or an invalid `purpose` is rejected with 400.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -24422,6 +24704,16 @@
               "type": "string"
             },
             "description": "Filter to the private conversation context: direct attachments plus files produced or consumed by runs launched from the session."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Case-insensitive substring search over document names. Longer than 200 characters is rejected with `400`."
           },
           {
             "name": "startingAfter",
@@ -30226,6 +30518,27 @@
           "default": 0
         }
       },
+      "RunStatusFilter": {
+        "name": "status",
+        "in": "query",
+        "required": false,
+        "description": "Filter runs by lifecycle status: one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.",
+        "schema": {
+          "type": "string",
+          "pattern": "^(\\s*(pending|running|success|failed|timeout|cancelled)\\s*(,\\s*(pending|running|success|failed|timeout|cancelled)\\s*)*)?$",
+          "example": "failed,timeout"
+        }
+      },
+      "RunSearch": {
+        "name": "q",
+        "in": "query",
+        "required": false,
+        "description": "Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`.",
+        "schema": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
       "IfMatch": {
         "name": "If-Match",
         "in": "header",
@@ -31217,7 +31530,16 @@
       },
       "Organization": {
         "type": "object",
-        "required": ["id", "name", "slug", "role", "permissions", "createdAt", "deleting_at"],
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "logo",
+          "role",
+          "permissions",
+          "createdAt",
+          "deleting_at"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -31227,6 +31549,10 @@
           },
           "slug": {
             "type": "string"
+          },
+          "logo": {
+            "type": ["string", "null"],
+            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial."
           },
           "role": {
             "type": "string",
@@ -31347,6 +31673,10 @@
           "slug": {
             "type": "string"
           },
+          "logo": {
+            "type": ["string", "null"],
+            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -31428,6 +31758,14 @@
         "properties": {
           "id": {
             "type": "string"
+          },
+          "icon": {
+            "type": "string",
+            "description": "AFPS manifest icon used for the Agent identity tile."
+          },
+          "color": {
+            "type": "string",
+            "description": "Presentation token from `_meta[\"dev.appstrate/ui\"].color`."
           },
           "display_name": {
             "type": "string"
@@ -31537,6 +31875,14 @@
         "properties": {
           "id": {
             "type": "string"
+          },
+          "icon": {
+            "type": "string",
+            "description": "AFPS manifest icon used for the Agent identity tile."
+          },
+          "color": {
+            "type": "string",
+            "description": "Presentation token from `_meta[\"dev.appstrate/ui\"].color`."
           },
           "display_name": {
             "type": "string"
@@ -32747,6 +33093,123 @@
           }
         }
       },
+      "IntegrationIndexItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "createdAt",
+          "updatedAt",
+          "name",
+          "description",
+          "icon",
+          "keywords",
+          "created_by",
+          "used_by_agents",
+          "version",
+          "auto_installed",
+          "forked_from",
+          "home_space_id",
+          "home_writable",
+          "home_deletable",
+          "home_shareable",
+          "source_kind",
+          "server"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "orgId": {
+            "type": ["string", "null"],
+            "description": "Owning organization ID (null for system packages)"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": ["string", "null"]
+          },
+          "icon": {
+            "type": ["string", "null"],
+            "description": "The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone."
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description."
+          },
+          "source": {
+            "type": "string",
+            "enum": ["local", "system"]
+          },
+          "created_by": {
+            "type": ["string", "null"]
+          },
+          "created_by_name": {
+            "type": "string"
+          },
+          "used_by_agents": {
+            "type": "integer"
+          },
+          "version": {
+            "type": ["string", "null"],
+            "description": "Manifest version (semver)"
+          },
+          "auto_installed": {
+            "type": "boolean"
+          },
+          "forked_from": {
+            "type": ["string", "null"],
+            "description": "Source package ID if forked"
+          },
+          "home_space_id": {
+            "type": ["string", "null"],
+            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority."
+          },
+          "home_writable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that."
+          },
+          "home_deletable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete."
+          },
+          "home_shareable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source_kind": {
+            "type": "string",
+            "enum": ["local", "remote", "none"],
+            "description": "The manifest's `source.kind`: `local` runs an MCP server package in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself)."
+          },
+          "server": {
+            "type": ["object", "null"],
+            "required": ["name", "version"],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string",
+                "description": "Semver range"
+              }
+            },
+            "description": "`source.server` of a `local` integration — the MCP server package it runs and its version range. `null` for any other source."
+          }
+        }
+      },
       "OrgPackageItemDetail": {
         "type": "object",
         "required": [
@@ -32807,6 +33270,7 @@
           },
           "manifest": {
             "type": "object",
+            "additionalProperties": true,
             "description": "Full manifest object"
           },
           "manifest_name": {
@@ -33523,6 +33987,70 @@
                 },
                 "resolution": {
                   "$ref": "#/components/schemas/IntegrationAgentResolution"
+                }
+              }
+            }
+          }
+        }
+      },
+      "AgentDiagnostics": {
+        "type": "object",
+        "description": "Shared, ordered diagnostics for one agent installation and definition. An empty diagnostics array with status healthy is a successful result.",
+        "required": ["status", "blocking_count", "warning_count", "diagnostics"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["healthy", "warning", "blocking"]
+          },
+          "blocking_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "warning_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["code", "severity", "title", "explanation", "field", "correction"],
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": ["blocking", "warning"]
+                },
+                "title": {
+                  "type": "string"
+                },
+                "explanation": {
+                  "type": "string"
+                },
+                "field": {
+                  "type": "string"
+                },
+                "correction": {
+                  "type": "object",
+                  "required": ["destination", "section", "params"],
+                  "properties": {
+                    "destination": {
+                      "type": "string",
+                      "enum": ["bundle", "configuration", "schedule"]
+                    },
+                    "section": {
+                      "type": ["string", "null"]
+                    },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "The values the diagnostic names, keyed so a client can word it by `code`: `integration`, `skill`, `model`, `default_model`, `scheduleId`, `schedule`, `schedule_version`, `inspected_version` — each only where it applies."
+                    }
+                  }
                 }
               }
             }

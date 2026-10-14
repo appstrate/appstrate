@@ -62,7 +62,8 @@ export function PreferencesModelsPage() {
   const credentials = ownPersonalCredentials(credentialsQuery.data ?? [], userId);
   const editParam = useModalTarget("editCredential", credentialsQuery.data && credentials);
   const editCredential = editParam.target ?? null;
-  const formOpen = newParam.value !== null || editCredential !== null;
+  // `?newCredential` opens only for a caller the add action is offered to.
+  const formOpen = (newParam.value !== null && canAdd) || editCredential !== null;
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
 
   const rows = providerRows(modelsQuery.data ?? [], credentials, registry ?? [], userId).filter(

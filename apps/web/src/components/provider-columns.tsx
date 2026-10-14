@@ -30,23 +30,23 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
-import { useTestModel, type OrgModelInfo } from "../../hooks/use-models";
+import { useTestModel, type OrgModelInfo } from "../hooks/use-models";
 import type {
   ModelProviderCredentialInfo,
   ProviderRegistryEntry,
-} from "../../hooks/use-model-provider-credentials";
-import { useConnectionTest, type TestResult } from "../../hooks/use-connection-test";
-import type { DataColumn } from "../../components/data-table";
-import { getProviderIcon } from "../../components/icons";
-import { resolveProviderEntry } from "../../lib/provider-registry-helpers";
-import { rowStates, type ProviderKind, type ProviderRow } from "../../lib/model-providers";
-import { TestResultSpan } from "../../components/test-result-span";
-import { TableRowActions } from "../../components/table-row-actions";
-import { InlineEditableLabel } from "../../components/inline-editable-label";
-import { ModelsCell } from "../../components/provider-models-cell";
-import { RowStateCell } from "../../components/row-state-cell";
-import { ModelTestResult } from "../../components/model-form/model-test-result";
-import { authStore } from "../../stores/auth-store";
+} from "../hooks/use-model-provider-credentials";
+import { useConnectionTest, type TestResult } from "../hooks/use-connection-test";
+import type { DataColumn } from "./data-table";
+import { getProviderIcon } from "./icons";
+import { resolveProviderEntry } from "../lib/provider-registry-helpers";
+import { rowStates, type ProviderKind, type ProviderRow } from "../lib/model-providers";
+import { TestResultSpan } from "./test-result-span";
+import { TableRowActions } from "./table-row-actions";
+import { InlineEditableLabel } from "./inline-editable-label";
+import { ModelsCell } from "./provider-models-cell";
+import { RowStateCell } from "./row-state-cell";
+import { ModelTestResult } from "./model-form/model-test-result";
+import { authStore } from "../stores/auth-store";
 
 /** What the caller may do with a credential row: the server's verdict (`allowed_actions`). */
 function allowed(

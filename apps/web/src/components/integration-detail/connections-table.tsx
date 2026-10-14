@@ -79,9 +79,6 @@ export function ConnectionsTable({
     detail.auths.find((item) => item.auth_key === connection.auth_key);
   const columns = useConnectionColumns({
     packageId,
-    authKey: "",
-    authType: "custom",
-    canRenew: false,
     manifest: detail.manifest,
     userId: user?.id,
     isAdmin: canConfigure,

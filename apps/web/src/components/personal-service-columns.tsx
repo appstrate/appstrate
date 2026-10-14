@@ -10,12 +10,12 @@
 import { useTranslation } from "react-i18next";
 import { KeyRound, ListChecks } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
-import type { DataColumn } from "../../components/data-table";
-import { getProviderIcon } from "../../components/icons";
-import { ModelsCell } from "../../components/provider-models-cell";
-import { RowStateCell } from "../../components/row-state-cell";
-import { TableRowActions } from "../../components/table-row-actions";
-import { rowStates, type PersonalServiceRow } from "../../lib/model-providers";
+import type { DataColumn } from "./data-table";
+import { getProviderIcon } from "./icons";
+import { ModelsCell } from "./provider-models-cell";
+import { RowStateCell } from "./row-state-cell";
+import { TableRowActions } from "./table-row-actions";
+import { rowStates, type PersonalServiceRow } from "../lib/model-providers";
 
 interface PersonalServiceColumnsArgs {
   /** Resolved once by the page: the deed absent here 403s if clicked. */

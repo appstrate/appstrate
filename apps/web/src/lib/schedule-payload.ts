@@ -141,6 +141,17 @@ export function scheduleMovePayload(
 }
 
 /**
+ * A move held until the NEXT state's facts have settled ({@link scheduleMovePayload}): `null`
+ * before, since a write sent with no `declared` yet would keep every pick, and one sent before
+ * the viewer's verdict would name no fallback.
+ */
+export function dueScheduleMove(
+  args: Parameters<typeof scheduleMovePayload>[0] & { ready: boolean },
+): ScheduleUpdateBody | null {
+  return args.ready ? scheduleMovePayload(args) : null;
+}
+
+/**
  * The PATCH of one connection pick: the stored picks with `integrationId`'s set replaced (`null`
  * removes it), written like every other save ({@link savedScheduleOverrides}) — for a schedule
  * running as the viewer, each integration no pick covers is named with the set their fallback
@@ -180,4 +191,29 @@ export function armedScheduleWrite<T extends ScheduleUpdateBody>(
     !("actor" in variables)
     ? { ...variables, connection_overrides: schedule.named }
     : variables;
+}
+
+/** The PATCH of the execution overrides: each one sent, `null` when cleared. */
+export function scheduleExecutionPayload(
+  overrides: RunOverridesValue,
+): Pick<
+  ScheduleUpdateBody,
+  "model_id_override" | "generation_config_override" | "proxy_id_override"
+> {
+  return {
+    model_id_override: overrides.model_id_override ?? null,
+    generation_config_override: overrides.generation_config_override ?? null,
+    proxy_id_override: overrides.proxy_id_override ?? null,
+  };
+}
+
+/**
+ * The answer to a write refused over connections: the same write sent again with the picks,
+ * which replace the whole map it was sent with (`null` when none is picked).
+ */
+export function scheduleRefusalAnswerPayload<T extends ScheduleUpdateBody>(
+  sent: T,
+  picks: Record<string, string[]>,
+): T {
+  return { ...sent, connection_overrides: Object.keys(picks).length > 0 ? picks : null };
 }

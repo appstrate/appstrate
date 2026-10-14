@@ -3,9 +3,9 @@
 /**
  * How long a run took, live or frozen.
  *
- * Its own file because two surfaces need it — the run table and the row pinned
- * under the run-detail header — and because of what the live variant is: a
- * LEAF. An interval in the row itself would re-render badges, trigger, links
+ * Its own file because several surfaces need it — the run table and cards, the
+ * dashboard, the run-detail header and its overview — and because of what the
+ * live variant is: a LEAF. An interval in the row itself would re-render badges, trigger, links
  * and popover ten times a second, per running run on screen. Here the state
  * that changes is owned by the only node that shows it, and a tick re-renders
  * one `<span>`.

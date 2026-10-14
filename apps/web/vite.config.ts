@@ -90,8 +90,12 @@ export default defineConfig({
   // instead of rebuilding the whole bundle and reloading the tab.
   //
   // `proxy` forwards API + auth + SSE traffic to the local backend so the
-  // same-origin cookie and `/api` paths keep working from port 5173, so
-  // `dev:hmr` works against a real instance with no further setup.
+  // cookie and the `/api` paths keep working from port 5173. Two limits:
+  // - the browser's Origin stays `http://localhost:5173`, which Better Auth
+  //   refuses unless the API runs with `TRUSTED_ORIGINS=http://localhost:5173`;
+  // - `window.__APP_CONFIG__` is injected only into the `index.html` the API
+  //   serves, so this page runs on `useAppConfig()`'s defaults: social sign-in,
+  //   SMTP, OIDC and module features (the chat included) read as off.
   server: {
     port: 5173,
     proxy: {

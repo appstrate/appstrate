@@ -58,7 +58,7 @@ import { PackageUsage } from "../components/package-detail/package-usage";
 import { PackageSettingsView } from "../components/package-detail/package-settings-view";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
-import { agentDiagnosticText } from "../lib/agent-diagnostics";
+import { agentDiagnosticText, agentDiagnosticsTitle } from "../lib/agent-diagnostics";
 import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
 import { EditorDirtyReportContext } from "../hooks/use-editor-state";
 
@@ -83,9 +83,9 @@ function AgentReadinessBadge({
     ? t("detail.diagnostics.assessing")
     : result?.status === "healthy"
       ? t("detail.diagnostics.readyBadge")
-      : result?.status === "blocking"
-        ? t("detail.diagnostics.blockingTitle", { count: result.blocking_count })
-        : t("detail.diagnostics.warningTitle", { count: result?.warning_count ?? 0 });
+      : result
+        ? agentDiagnosticsTitle(result, t)
+        : t("detail.diagnostics.unknownTitle");
 
   return (
     <Popover>

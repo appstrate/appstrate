@@ -9,17 +9,17 @@
 import { isValidElement, type ReactNode } from "react";
 import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
-import { installFakeStorage } from "../../../test/fake-storage.ts";
-import { orgModelFixture as model } from "../../../test/org-model-fixture.ts";
-import type { OrgModelInfo } from "../../../hooks/use-models.ts";
+import { installFakeStorage } from "../../test/fake-storage.ts";
+import { orgModelFixture as model } from "../../test/org-model-fixture.ts";
+import type { OrgModelInfo } from "../../hooks/use-models.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
 const { useProviderColumns } = await import("../provider-columns.tsx");
-const { providerRows } = await import("../../../lib/model-providers.ts");
-const { render } = await import("../../../test/render.tsx");
+const { providerRows } = await import("../../lib/model-providers.ts");
+const { render } = await import("../../test/render.tsx");
 
 const BUILT_IN = model({
   id: "mdl_builtin",

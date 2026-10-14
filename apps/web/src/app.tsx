@@ -47,8 +47,8 @@ import {
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
 // lazy-loaded so their bundle is never fetched when the corresponding module
-// is disabled (zero-footprint invariant): `RouteGate` redirects before
-// rendering a route whose declared `feature` is off.
+// is disabled (zero-footprint invariant): `RouteGate` renders its unavailable
+// state, never the page, for a route whose declared `feature` is off.
 const WebhooksPage = lazy(() =>
   import("./modules/webhooks/pages/webhooks-page").then((m) => ({ default: m.WebhooksPage })),
 );
@@ -229,11 +229,6 @@ const PAGES: Record<RoutePath, ReactNode> = {
       <PackageEditorPage type="agent" />
     </LazyRoute>
   ),
-  "/agents/:scope/:name/edit": (
-    <LazyRoute>
-      <PackageEditorPage type="agent" />
-    </LazyRoute>
-  ),
   "/agents/:scope/:name": (
     <LazyRoute>
       <UnifiedPackageDetailPage type="agent" />
@@ -279,11 +274,6 @@ const PAGES: Record<RoutePath, ReactNode> = {
       <PackageEditorPage type="skill" />
     </LazyRoute>
   ),
-  "/skills/:scope/:name/edit": (
-    <LazyRoute>
-      <PackageEditorPage type="skill" />
-    </LazyRoute>
-  ),
   "/skills/:scope/:name": (
     <LazyRoute>
       <UnifiedPackageDetailPage type="skill" />
@@ -304,11 +294,6 @@ const PAGES: Record<RoutePath, ReactNode> = {
       <PackageEditorPage type="integration" />
     </LazyRoute>
   ),
-  "/integrations/:scope/:name/edit": (
-    <LazyRoute>
-      <PackageEditorPage type="integration" />
-    </LazyRoute>
-  ),
   "/integrations/:scope/:name": (
     <LazyRoute>
       <IntegrationDetailPage />
@@ -317,11 +302,6 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/mcp-servers": (
     <LazyRoute>
       <McpServersPage />
-    </LazyRoute>
-  ),
-  "/mcp-servers/:scope/:name/edit": (
-    <LazyRoute>
-      <PackageEditorPage type="mcp-server" />
     </LazyRoute>
   ),
   "/mcp-servers/:scope/:name": (
@@ -377,9 +357,9 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/org-settings/oauth": <OrgSettingsOAuthPage />,
   "/org-settings/cli-sessions": <OrgSettingsCliSessionsPage />,
   "/org-settings/billing": <OrgSettingsBillingPage />,
-  // Workspace settings are their own surface: everything below is scoped by
-  // `X-Space-Id`, which is a different scope from the org, not a subsection
-  // of it.
+  // Workspace settings are their own surface, scoped by `X-Space-Id` — a
+  // different scope from the org, not a subsection of it. The one exception is
+  // webhooks: that page also manages the organization's own (`org-webhooks:read`).
   "/workspace-settings": <Outlet />,
   "/workspace-settings/general": <WorkspaceSettingsGeneralPage />,
   // Space membership and its custom roles: who is in THIS space, and as what.

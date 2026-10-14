@@ -63,25 +63,41 @@ export function useCatalogueLibrary({ enabled = true }: { enabled?: boolean } = 
   const { orgRole } = usePermissions();
   const isOrgAdmin = hasFullOrgAccess(orgRole);
   const org = useLibrary({ enabled: enabled && isOrgAdmin });
-  const { data: spaces } = useSpaces(enabled && !isOrgAdmin);
+  const spaces = useSpaces(enabled && !isOrgAdmin);
   const perSpace = useQueries({
-    queries: readableLibrarySpaces(isOrgAdmin ? [] : (spaces ?? [])).map((space) => ({
+    queries: readableLibrarySpaces(isOrgAdmin ? [] : (spaces.data ?? [])).map((space) => ({
       ...$api.queryOptions("get", "/api/spaces/{spaceId}/library", {
         params: { path: { spaceId: space.id }, header: scope.header },
       }),
       enabled: enabled && scope.enabled,
     })),
   });
-  // Merged on every render rather than memoised: a handful of spaces, a few
-  // hundred rows, and no dependency list that could fall out of step.
-  const merged =
-    isOrgAdmin || perSpace.some((query) => !query.data)
-      ? undefined
-      : mergeSpaceLibraries(perSpace.map((query) => query.data!));
   if (isOrgAdmin) return { data: org.data, isLoading: org.isLoading, error: org.error };
+  return combineSpaceLibraries(spaces, perSpace);
+}
+
+type QueryState<T> = { data: T | undefined; isLoading: boolean; error: unknown };
+
+/**
+ * A member's catalogue from the space listing and each space's library. Nothing
+ * is answered until the listing is: its failure is the catalogue's failure, and
+ * a listing that is not being read (`enabled: false`) is not loading either.
+ *
+ * Merged on every call rather than memoised: a handful of spaces, a few hundred
+ * rows, and no dependency list that could fall out of step.
+ */
+export function combineSpaceLibraries(
+  spaces: QueryState<unknown>,
+  perSpace: readonly QueryState<Pick<LibraryResponse, "spaces" | "packages">>[],
+): QueryState<Pick<LibraryResponse, "spaces" | "packages">> {
+  if (spaces.data === undefined) {
+    return { data: undefined, isLoading: spaces.isLoading, error: spaces.error };
+  }
   return {
-    data: merged,
-    isLoading: spaces === undefined || perSpace.some((query) => query.isLoading),
+    data: perSpace.some((query) => !query.data)
+      ? undefined
+      : mergeSpaceLibraries(perSpace.map((query) => query.data!)),
+    isLoading: perSpace.some((query) => query.isLoading),
     error: perSpace.find((query) => query.error)?.error ?? null,
   };
 }

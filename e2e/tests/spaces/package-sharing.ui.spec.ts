@@ -364,6 +364,31 @@ test("a guest finds an offer in the catalogue and switches it on", async ({
     );
     await page.getByRole("button", { name: "Activer dans Mon espace", exact: true }).click();
     expect((await activated).status()).toBe(201);
+
+    // Off again from the space's switch, and back on. Deactivating keeps the placement: the
+    // switch stays, unchecked, and switching it back on is another 201.
+    const toggle = page.getByRole("switch", {
+      name: `Activer Test Agent ${name} dans Mon espace`,
+      exact: true,
+    });
+    await expect(toggle).toBeChecked();
+    const deactivated = page.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        response.url().includes(`/packages/${scope}/${name}`),
+    );
+    await toggle.click();
+    expect((await deactivated).status()).toBe(204);
+    await expect(toggle).not.toBeChecked();
+
+    const reactivated = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith(`/spaces/${guestSpaceId}/packages`),
+    );
+    await toggle.click();
+    expect((await reactivated).status()).toBe(201);
+    await expect(toggle).toBeChecked();
   } finally {
     await page.context().close();
   }

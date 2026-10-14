@@ -743,6 +743,18 @@ export interface OrgPackageItem extends BasePackageListItem {
   home_shareable: boolean;
 }
 
+/**
+ * A row of the integration INDEX (`GET /api/packages/integrations`): the
+ * common row plus the two facts of the manifest's `source` the page splits and
+ * labels its list by, so it draws itself without the manifest.
+ */
+export interface IntegrationIndexItem extends OrgPackageItem {
+  /** The manifest's `source.kind`: a sandboxed server, a hosted MCP, or no MCP backing. */
+  source_kind: "local" | "remote" | "none";
+  /** `source.server` of a `local` integration — the package it runs and its range. `null` otherwise. */
+  server: { name: string; version: string } | null;
+}
+
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is
 // dropped from the base via Omit (a sub-interface can't loosen a required
 // field to optional). `icon` and `keywords` go the same way and for the

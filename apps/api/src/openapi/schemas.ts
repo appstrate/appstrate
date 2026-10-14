@@ -204,6 +204,67 @@ const RUN_AND_WAIT_COMMON_PROPERTIES = {
 };
 
 /**
+ * `OrgPackageItem`, a const so `IntegrationIndexItem` extends it in the SAME
+ * schema object: verify-openapi's shared-type check reads only the properties
+ * declared there, never through `allOf`.
+ */
+const ORG_PACKAGE_ITEM_SCHEMA = {
+  type: "object",
+  // Always emitted by the listOrgItems mapper. `created_by_name` stays
+  // optional (omitted when there's no creator); `scope` is not emitted by
+  // the org-package list (shared-type marks it optional).
+  required: [
+    "id",
+    "source",
+    "createdAt",
+    "updatedAt",
+    "name",
+    "description",
+    "icon",
+    "keywords",
+    "created_by",
+    "used_by_agents",
+    "version",
+    "auto_installed",
+    "forked_from",
+    "home_space_id",
+    "home_writable",
+    "home_deletable",
+    "home_shareable",
+  ],
+  properties: {
+    id: { type: "string" },
+    orgId: {
+      type: ["string", "null"],
+      description: "Owning organization ID (null for system packages)",
+    },
+    name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
+    description: { type: ["string", "null"] },
+    icon: {
+      type: ["string", "null"],
+      description:
+        "The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone.",
+    },
+    keywords: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description.",
+    },
+    source: { type: "string", enum: [...packageSourceValues] },
+    created_by: { type: ["string", "null"] },
+    created_by_name: { type: "string" },
+    used_by_agents: { type: "integer" },
+    version: { type: ["string", "null"], description: "Manifest version (semver)" },
+    auto_installed: { type: "boolean" },
+    forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+    ...PACKAGE_HOME_PROPERTIES,
+    createdAt: { type: "string", format: "date-time" },
+    updatedAt: { type: "string", format: "date-time" },
+  },
+} as const;
+
+/**
  * All OpenAPI schema definitions (components/schemas).
  */
 export const schemas = {
@@ -1795,59 +1856,28 @@ export const schemas = {
       createdAt: { type: "string", format: "date-time" },
     },
   },
-  OrgPackageItem: {
-    type: "object",
-    // Always emitted by the listOrgItems mapper. `created_by_name` stays
-    // optional (omitted when there's no creator); `scope` is not emitted by
-    // the org-package list (shared-type marks it optional).
-    required: [
-      "id",
-      "source",
-      "createdAt",
-      "updatedAt",
-      "name",
-      "description",
-      "icon",
-      "keywords",
-      "created_by",
-      "used_by_agents",
-      "version",
-      "auto_installed",
-      "forked_from",
-      "home_space_id",
-      "home_writable",
-      "home_deletable",
-      "home_shareable",
-    ],
+  OrgPackageItem: ORG_PACKAGE_ITEM_SCHEMA,
+  IntegrationIndexItem: {
+    ...ORG_PACKAGE_ITEM_SCHEMA,
+    required: [...ORG_PACKAGE_ITEM_SCHEMA.required, "source_kind", "server"],
     properties: {
-      id: { type: "string" },
-      orgId: {
-        type: ["string", "null"],
-        description: "Owning organization ID (null for system packages)",
-      },
-      name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
-      description: { type: ["string", "null"] },
-      icon: {
-        type: ["string", "null"],
+      ...ORG_PACKAGE_ITEM_SCHEMA.properties,
+      source_kind: {
+        type: "string",
+        enum: ["local", "remote", "none"],
         description:
-          "The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone.",
+          "The manifest's `source.kind`: `local` runs an MCP server package in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).",
       },
-      keywords: {
-        type: "array",
-        items: { type: "string" },
+      server: {
+        type: ["object", "null"],
+        required: ["name", "version"],
+        properties: {
+          name: { type: "string" },
+          version: { type: "string", description: "Semver range" },
+        },
         description:
-          "The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description.",
+          "`source.server` of a `local` integration — the MCP server package it runs and its version range. `null` for any other source.",
       },
-      source: { type: "string", enum: [...packageSourceValues] },
-      created_by: { type: ["string", "null"] },
-      created_by_name: { type: "string" },
-      used_by_agents: { type: "integer" },
-      version: { type: ["string", "null"], description: "Manifest version (semver)" },
-      auto_installed: { type: "boolean" },
-      forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
-      ...PACKAGE_HOME_PROPERTIES,
-      createdAt: { type: "string", format: "date-time" },
-      updatedAt: { type: "string", format: "date-time" },
     },
   },
   OrgPackageItemDetail: {
@@ -2447,7 +2477,7 @@ export const schemas = {
                   type: "object",
                   additionalProperties: { type: "string" },
                   description:
-                    "The values the diagnostic names, keyed so a client can word it by `code`: `integration`, `skill`, `field`, `model`, `default_model`, `scheduleId`, `schedule`, `schedule_version`, `inspected_version` — each only where it applies.",
+                    "The values the diagnostic names, keyed so a client can word it by `code`: `integration`, `skill`, `model`, `default_model`, `scheduleId`, `schedule`, `schedule_version`, `inspected_version` — each only where it applies.",
                 },
               },
             },

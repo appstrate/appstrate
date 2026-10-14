@@ -355,7 +355,6 @@ export function ClientsTable({
     canUseHere: (spaceClients.data?.length ?? 0) > 1,
     canManageOrg,
     canChooseOrgDefault: canManageOrg && (orgClients.data?.length ?? 0) > 1,
-    canPromote: canManageOrg,
     pendingClientRef,
     onUseHere: (row) =>
       setSpaceDefault.mutate({

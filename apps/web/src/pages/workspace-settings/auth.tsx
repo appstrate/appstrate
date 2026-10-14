@@ -2,7 +2,6 @@
 
 import { lazy, Suspense } from "react";
 import { usePermissions } from "../../hooks/use-permissions";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { LoadingState } from "../../components/page-states";
 import { NoAccessState, UnavailableState } from "../../components/route-gate";
@@ -15,10 +14,9 @@ const SpaceAuthTab = lazy(() =>
 
 export function WorkspaceSettingsAuthPage() {
   const { can } = usePermissions();
-  const { features } = useAppConfig();
   const spaceId = useCurrentSpaceId();
 
-  if (!spaceId || !features.oidc) return <UnavailableState />;
+  if (!spaceId) return <UnavailableState />;
   if (!can("space-settings:write")) return <NoAccessState />;
 
   return (

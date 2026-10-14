@@ -10,6 +10,8 @@ import { buildStoredManifest } from "./manifest.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { packageStorageDeletionJobs } from "../package-storage-deletion.ts";
 import { asRecord } from "@appstrate/core/safe-json";
+import type { IntegrationManifest } from "@appstrate/core/integration";
+import { getIntegrationSourceKind, getLocalServerRef } from "../integration-manifest-helpers.ts";
 import {
   orgOrSystemFilter,
   getPackageDisplayName,
@@ -241,6 +243,20 @@ export async function updateOrgItem(
   return rows[0] ?? null;
 }
 
+/**
+ * What the integration index draws beyond the common row: how the integration
+ * reaches its service (`source.kind`) and, for a local one, the server package
+ * the sandbox runs. A source that is neither `local` nor `remote` has no MCP
+ * backing, which is what `none` states and what the runtime does with it.
+ */
+function integrationIndexFields(manifest: IntegrationManifest) {
+  const server = getLocalServerRef(manifest);
+  return {
+    source_kind: getIntegrationSourceKind(manifest) ?? "none",
+    server: server ? { name: server.name, version: server.version } : null,
+  };
+}
+
 /** List the items of a type this space RUNS — the activation rule, per type. */
 export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceId: string) {
   // The index page of a type answers ONE question — "what can I launch here?"
@@ -323,6 +339,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceI
       version: typeof m.version === "string" ? m.version : null,
       auto_installed: row.autoInstalled,
       forked_from: row.forkedFrom ?? null,
+      ...(cfg.type === "integration" ? integrationIndexFields(m as IntegrationManifest) : {}),
       // camelCase, and NOT on the wire: the route projects the pair
       // `home_space_id` / `home_writable` through `homeWireForCaller`, which
       // needs the caller's reach and so cannot live in a service.

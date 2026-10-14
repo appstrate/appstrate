@@ -152,6 +152,9 @@ async function addTypedModel(
   await dialog.getByRole("button", { name: "Ajouter un identifiant de modèle" }).click();
   await dialog.getByLabel("Modèle", { exact: true }).fill(modelId);
   if (capabilities) {
+    // Nothing describes a typed-in id, so the limits are a question only the operator can
+    // answer; the toggle starts off, showing the fallback chain rather than empty fields.
+    await expect(dialog.locator("#mdl-ctx")).toBeHidden();
     await dialog
       .getByRole("checkbox", { name: "Définir moi-même les limites et capacités" })
       .click();
@@ -285,19 +288,30 @@ test.describe("Custom endpoint model — UI", () => {
 
   // The retry asks only for what failed: the model the first attempt saved is not posted again
   // (the server would answer 409 `model_already_added`) and is not reported as failed.
-  test("re-offers only what failed after a partly refused batch", async ({ authedPage: page }) => {
+  test("re-offers only what failed after a partly refused batch", async ({
+    authedPage: page,
+    apiClient,
+  }) => {
     const dialog = await submitPartlyRefusedBatch(page);
 
-    const retried: string[] = [];
+    const retried: Array<{ modelId: string; credentialId: string }> = [];
     page.on("request", (request) => {
       if (request.url().endsWith("/api/models") && request.method() === "POST") {
-        retried.push(request.postDataJSON().modelId);
+        retried.push(request.postDataJSON());
       }
     });
     await submitAddKey(dialog).click();
     await expect(dialog.getByText(`Impossible de terminer pour : ${REFUSED_MODEL}`)).toBeVisible();
 
-    expect(retried).toEqual([REFUSED_MODEL]);
+    expect(retried.map((body) => body.modelId)).toEqual([REFUSED_MODEL]);
+    // The retry reuses the key the first attempt created rather than minting a second one.
+    // The org's own keys only: a built-in (system) key may be listed alongside.
+    const credentials = await apiClient.get("/model-provider-credentials");
+    const keys = ((await credentials.json()).data as Array<{ id: string; source: string }>).filter(
+      (k) => k.source === "custom",
+    );
+    expect(keys).toHaveLength(1);
+    expect(retried[0]!.credentialId).toBe(keys[0]!.id);
   });
 
   test("detects through a key the org already saved", async ({ authedPage: page, apiClient }) => {
@@ -359,6 +373,7 @@ test.describe("Custom endpoint model — UI", () => {
     await submitAddKey(dialog).click();
 
     await expect(dialog).toBeHidden();
+    await expect(page.getByRole("row").filter({ hasText: "llama3" })).toBeVisible();
     const created = (await listModels(apiClient)).find((m) => m.modelId === "llama3");
     // No name typed: the server names the row after the id. The limits are the operator's own.
     expect(created).toMatchObject({

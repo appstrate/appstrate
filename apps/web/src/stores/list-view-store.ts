@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from "zustand";
-import { persistedValue } from "./local-storage";
+import { persistedScalar } from "./persisted-scalar-store";
 
 export type ListView = "cards" | "table";
-
-interface ListViewState {
-  view: ListView;
-  setView: (view: ListView) => void;
-}
 
 /**
  * Whether a list is drawn as cards or as a table, remembered across reloads.
@@ -22,14 +17,8 @@ interface ListViewState {
  * the table for one wants it for the others.
  */
 function createListViewStore(storageKey: string) {
-  const stored = persistedValue(storageKey, (raw): ListView => (raw === "cards" ? raw : "table"));
-  return create<ListViewState>()((set) => ({
-    view: stored.read(),
-    setView: (view) => {
-      stored.write(view);
-      set({ view });
-    },
-  }));
+  const parse = (raw: string | null): ListView => (raw === "cards" ? raw : "table");
+  return create(persistedScalar(storageKey, parse, "view", "setView"));
 }
 
 export const usePackageViewStore = createListViewStore("appstrate-package-view");

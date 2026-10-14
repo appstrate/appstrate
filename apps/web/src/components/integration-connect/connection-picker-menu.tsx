@@ -50,9 +50,12 @@ const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1
 export function PickerMenu({
   integrationId,
   picker,
+  onLeave,
 }: {
   integrationId: string;
   picker: ConnectionPicker;
+  /** Replaces the plain navigation when the menu sits in a URL-param modal. */
+  onLeave?: (to: string) => void;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
   const navigate = useNavigate();
@@ -302,7 +305,7 @@ export function PickerMenu({
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onSelect={() => navigate(integrationPath)}
+                onSelect={() => (onLeave ? onLeave(integrationPath) : navigate(integrationPath))}
                 data-testid={`member-pick-manage-${integrationId}`}
               >
                 <Settings className="size-3.5" />

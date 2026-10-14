@@ -58,7 +58,8 @@ import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "../page-actions-menu";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import type { JSONSchema7, JSONSchema7TypeName } from "@appstrate/core/form";
-import { toLiveSlug, toSlug } from "../../lib/strings";
+import { toLiveSlug } from "../../lib/strings";
+import { fieldKeyVerdict } from "../../lib/schema-field-key";
 import { Modal } from "../modal";
 import { EmptyState, EmptyStateAction } from "../page-states";
 import { TableRowActions } from "../table-row-actions";
@@ -296,12 +297,9 @@ function FieldModal({
 
   const { prop } = draft;
   const setProp = (next: JSONSchema7) => set({ prop: next });
-  const key = toSlug(draft.key);
-  const keyError = !key
-    ? t("editor.fieldKeyRequired")
-    : takenKeys.includes(key)
-      ? t("editor.fieldKeyTaken")
-      : null;
+  const verdict = fieldKeyVerdict(draft.key, takenKeys);
+  const { key } = verdict;
+  const keyError = verdict.error ? t(verdict.error) : null;
   const type = fieldType(prop, mode);
   const kind = fileKind(prop, mode);
   const isFile = kind !== "none";

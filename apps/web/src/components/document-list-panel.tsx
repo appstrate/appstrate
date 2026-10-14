@@ -27,7 +27,6 @@ import { DocumentRowActions } from "./document-row-actions";
 import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
 import { filePreviewHref, runFileDirection } from "../lib/files";
-import { searchOf } from "../lib/url-search";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 
 export function DocumentListPanel({
@@ -97,23 +96,15 @@ export function DocumentListPanel({
     ? { id: previewId, name: documents.find((d) => d.id === previewId)?.name ?? "" }
     : null;
 
-  // Navigate while preserving the URL hash (the run page keeps its active tab in
-  // the hash — react-router's setSearchParams would drop it) and any other
-  // existing search params.
+  // `filePreviewHref` keeps the hash (the run page's active tab — react-router's
+  // setSearchParams would drop it) and the other search params.
   //
   // Opening PUSHES (so the back button closes the preview); closing REPLACES.
   // Pushing on close too would stack `[page, page?preview=x, page]`, and then
   // "back" from the closed state would REOPEN the preview instead of leaving
   // the page — worse with every document consulted.
-  const setPreviewParam = (id: string | null) => {
-    const params = new URLSearchParams(location.search);
-    if (id) params.set("preview", id);
-    else params.delete("preview");
-    navigate(
-      { pathname: location.pathname, search: searchOf(params), hash: location.hash },
-      { replace: id === null },
-    );
-  };
+  const setPreviewParam = (id: string | null) =>
+    navigate(filePreviewHref(location, id), { replace: id === null });
 
   // Wire the delete/keep handlers unconditionally — per-document visibility is
   // driven by the server-computed `capabilities` (delete/keep) inside the tile,

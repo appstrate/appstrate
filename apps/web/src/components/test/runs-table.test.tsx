@@ -36,9 +36,9 @@ function Harness({
 }: {
   runs: EnrichedRun[];
   hideAgentName?: boolean;
-} & Omit<Parameters<typeof RunsTable>[0], "runs" | "columns" | "agentName">) {
+} & Omit<Parameters<typeof RunsTable>[0], "runs" | "columns" | "agentName" | "empty">) {
   const columns = useRunColumns({ agentName, hideAgentName });
-  return <RunsTable runs={runs} columns={columns} agentName={agentName} {...props} />;
+  return <RunsTable runs={runs} columns={columns} agentName={agentName} empty={null} {...props} />;
 }
 
 function table(runs = [makeRun()], props = {}) {
@@ -76,7 +76,7 @@ describe("the runs column set", () => {
 });
 
 describe("the result column", () => {
-  it("shows what broke, which the list could not say before", () => {
+  it("shows what broke on a failed run", () => {
     const message = "Connexion refusée : le code 2FA a expiré.";
     const html = table([makeRun({ status: "failed", error: message })]);
     expect(html).toContain(message);

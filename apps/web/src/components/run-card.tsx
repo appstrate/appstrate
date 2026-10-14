@@ -11,38 +11,7 @@ import { RunDuration } from "./run-duration";
 import { RunTrigger } from "./run-trigger";
 import { formatDateField } from "../lib/format-date";
 import { runDetailPath } from "../lib/package-paths";
-import { runErrorText } from "../lib/run-error";
-import { useFiles } from "../hooks/use-files";
-import { FilePreview } from "./file-preview";
-import { useModalParam } from "../hooks/use-modal-param";
-import { MimeIcon } from "./file-tile";
-
-/**
- * The one file a run produced, on its card: name and type icon, opening the
- * preview. Only asked for when the run produced exactly one (a count the card
- * already has), which is also when the run page features it.
- */
-function ProducedFile({ runId }: { runId: string }) {
-  // The same `?preview=<file>` address the file lists use.
-  const preview = useModalParam("preview");
-  const { data } = useFiles({ runId, purpose: "agent_output", limit: 1 });
-  const file = data?.data[0];
-  if (!file) return null;
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => preview.open(file.id)}
-        disabled={!file.capabilities.preview}
-        className="bg-background hover:bg-accent relative z-10 mt-3 flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs"
-      >
-        <MimeIcon mime={file.mime} className="text-muted-foreground size-4 shrink-0" />
-        <span className="text-foreground truncate">{file.name}</span>
-      </button>
-      {preview.value === file.id && <FilePreview file={file} onClose={preview.close} />}
-    </>
-  );
-}
+import { runErrorText, runErrorTone } from "../lib/run-error";
 
 /** A second, genuinely card-shaped reading of the rows already fetched by RunList. */
 export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: string }) {
@@ -55,7 +24,7 @@ export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: strin
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <h2 className="truncate text-sm font-medium">
-              {/* The card's link, stretched over it so the file button can sit inside. */}
+              {/* The card's link, stretched over the whole card. */}
               {href ? (
                 <Link
                   to={href}
@@ -81,11 +50,9 @@ export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: strin
         <Badge status={run.status} unread={run.unread} />
       </div>
 
-      {run.file_counts.output === 1 && <ProducedFile runId={run.id} />}
-
       {run.error && (
         <p
-          className="text-destructive mt-3 line-clamp-2 font-mono text-xs"
+          className={cn(runErrorTone(run), "mt-3 line-clamp-2 font-mono text-xs")}
           title={runErrorText(run, t)}
         >
           {runErrorText(run, t)}

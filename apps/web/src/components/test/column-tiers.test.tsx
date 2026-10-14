@@ -37,8 +37,8 @@ import {
 } from "../catalogue-columns.tsx";
 import { useUserSpaceColumns } from "../../pages/org-settings/user-space-columns.tsx";
 import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
-import { useProviderColumns } from "../../pages/org-settings/provider-columns.tsx";
-import { usePersonalServiceColumns } from "../../pages/org-settings/personal-service-columns.tsx";
+import { useProviderColumns } from "../provider-columns.tsx";
+import { usePersonalServiceColumns } from "../personal-service-columns.tsx";
 import { useOAuthClientColumns } from "../../modules/oidc/components/oauth-client-columns.tsx";
 import { useCliSessionColumns } from "../../pages/org-settings/cli-session-columns.tsx";
 import { useEndUserColumns } from "../../pages/end-user-columns.tsx";
@@ -178,7 +178,7 @@ const SETS = {
     ),
   runs: () => columnsFrom(() => useRunColumns({ agentName: () => "Compta trimestrielle" })),
   schedules: () => columnsFrom(() => useScheduleColumns({ agentName: () => "Wiki-brain" })),
-  packages: () => columnsFrom(() => usePackageColumns()),
+  packages: () => columnsFrom(() => usePackageColumns("agent")),
   // The organization's providers table, no Type column.
   providers: () =>
     columnsFrom(() =>
@@ -239,7 +239,6 @@ const SETS = {
         canUseHere: true,
         canManageOrg: true,
         canChooseOrgDefault: true,
-        canPromote: true,
         pendingClientRef: null,
         onUseHere: () => {},
         onUseForOrg: () => {},
@@ -265,26 +264,10 @@ const SETS = {
     columnsFrom(() =>
       useConnectionColumns({
         packageId: "@appstrate/google-drive",
-        authKey: "drive",
-        authType: "oauth2",
-        canRenew: true,
         manifest: {} as IntegrationManifestView,
         userId: "user_1",
         isAdmin: true,
-      }),
-    ),
-  // The integration page's table, which mixes authentications and so draws the
-  // method column too: the widest of the two.
-  connectionsWithMethod: () =>
-    columnsFrom(() =>
-      useConnectionColumns({
-        packageId: "@appstrate/google-drive",
-        authKey: "",
-        authType: "custom",
-        canRenew: false,
-        manifest: {} as IntegrationManifestView,
-        userId: "user_1",
-        isAdmin: true,
+        authForConnection: () => ({ authKey: "drive", authType: "oauth2", canRenew: true }),
         methodLabel: () => "OAuth",
       }),
     ),

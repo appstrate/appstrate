@@ -22,15 +22,7 @@ import type { RoutePath } from "../lib/route-access";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { formatDateField } from "../lib/format-date";
 import { catalogueHref } from "../lib/catalogue-link";
-import type { PackageType } from "@appstrate/core/validation";
 import type { paths } from "../api/client";
-
-const SHARED_KINDS: readonly PackageType[] = ["agent", "skill", "integration", "mcp-server"];
-
-/** The catalogue tab a shared package belongs on; a payload that names none opens on agents. */
-function sharedKind(value: string | null | undefined): PackageType {
-  return SHARED_KINDS.find((kind) => kind === value) ?? "agent";
-}
 
 /** One notification as returned by `GET /api/notifications`. */
 type NotificationItem =
@@ -52,10 +44,9 @@ function notificationTarget(
     // One share, one decision: open THAT package's sheet, where the alert
     // names the space it was shared with and activates it there — not a list
     // the reader has to search.
-    return canReach("/catalogue/:reading/:type")
-      ? catalogueHref(sharedKind(payloadString(notification.payload, "package_type")), {
-          packageId: packageId ?? undefined,
-        })
+    const share = notification.payload;
+    return share && canReach("/catalogue/:reading/:type")
+      ? catalogueHref(share.package_type, { packageId: share.packageId })
       : null;
   }
   if (packageId && notification.runId) {

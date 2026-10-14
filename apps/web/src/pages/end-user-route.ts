@@ -8,7 +8,7 @@ interface LocationParts {
   hash: string;
 }
 
-export type EndUserEditReturn = "list" | "detail";
+type EndUserEditReturn = "list" | "detail";
 
 const EDIT_RETURN_KEY = "endUserEditReturn";
 

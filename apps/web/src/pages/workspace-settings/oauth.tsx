@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense } from "react";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { LoadingState } from "../../components/page-states";
 import { UnavailableState } from "../../components/route-gate";
@@ -13,10 +12,9 @@ const OAuthClientsTab = lazy(() =>
 );
 
 export function WorkspaceSettingsOAuthPage() {
-  const { features } = useAppConfig();
   const spaceId = useCurrentSpaceId();
 
-  if (!spaceId || !features.oidc) return <UnavailableState />;
+  if (!spaceId) return <UnavailableState />;
 
   return (
     <Suspense fallback={<LoadingState />}>

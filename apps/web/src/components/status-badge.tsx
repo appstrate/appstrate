@@ -11,9 +11,9 @@ import type { BadgeProps } from "@appstrate/ui/components/badge";
  * The outline counterpart to {@link Badge}: it qualifies WHAT a row is
  * ("Inline", "Distant", "Supprimé") where the status badge says how it ended.
  *
- * Here rather than in one of its callers because both run surfaces render the
- * same three of them — the table and the strip under the run-detail header —
- * and the same twenty-word class string has one home rather than two.
+ * Shared by the run provenance badges (`RunProvenanceBadges`: run table, run
+ * cards, dashboard, run-detail header) and the catalogue's "auto-installed"
+ * badge, so the class string has one home.
  */
 export function MetaBadge({
   label,

@@ -110,11 +110,11 @@ function useRunAgent(packageId: string) {
 
 interface LaunchOptions {
   /**
-   * The launch comes from a form addressed in the URL (`?run=`, `?rerun=`):
-   * the run page replaces the form's history entry, so Back does not reopen
-   * it, and a refused launch leaves the form open with what was typed.
+   * The launch comes from a modal addressed in the URL (`?run=`, `?rerun=`):
+   * the modal's `leave` goes to the run page, so Back does not reopen it, and
+   * a refused launch leaves the form open with what was typed.
    */
-  replace?: boolean;
+  leave?: (to: string) => void;
 }
 
 /**
@@ -141,7 +141,7 @@ export function useRunLauncher(packageId: string) {
     flight.run(
       () =>
         runAgent.mutateAsync(launch).then((run) => {
-          navigate(runDetailPath(packageId, run.id), { replace: options.replace });
+          (options.leave ?? navigate)(runDetailPath(packageId, run.id));
         }),
       {
         onSuccess: () => setRefusal(null),
@@ -245,9 +245,11 @@ export function useImportFromGithub() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
-      // Same reason as `useImportPackage`: the draft artifact was replaced.
+      // Same reasons as `useImportPackage`: the draft artifact was replaced,
+      // and the library feeds the integration editor's picker.
       invalidatePackageFiles(qc);
       if (data.type === "integration") void invalidateIntegrationQueries(qc);
+      void invalidateLibraries(qc);
     },
   });
 }

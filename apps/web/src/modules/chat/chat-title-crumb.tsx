@@ -17,6 +17,7 @@
  * BELOW the chat's context providers, and `ChatShell` is what puts them up.
  */
 
+import { useMemo } from "react";
 import { ChatConversationTitle, type ChatCan, type ChatTranslate } from "@appstrate/module-chat/ui";
 import { useSessions } from "@appstrate/module-chat/unread";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
@@ -33,17 +34,15 @@ export function ChatTitleCrumb({
   const { data: sessions } = useSessions();
   const session = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
   const title = session ? (session.title ?? t("threads.new")) : null;
-
-  usePageBreadcrumb(
-    conversationId && title !== null
-      ? [
-          {
-            label: title,
-            node: <ChatConversationTitle activeId={conversationId} t={t} can={can} />,
-          },
-        ]
-      : [],
+  // One element per conversation: the store keeps a trail whose node is the
+  // same object, so a fresh element each render would rewrite it every render.
+  const node = useMemo(
+    () =>
+      conversationId ? <ChatConversationTitle activeId={conversationId} t={t} can={can} /> : null,
+    [conversationId, t, can],
   );
+
+  usePageBreadcrumb(node && title !== null ? [{ label: title, node }] : []);
 
   return null;
 }

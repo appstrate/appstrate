@@ -3,7 +3,22 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 /**
- * Page Object for the skill editor's *Fichiers* tab (`/skills/:scope/:name/edit`).
+ * The query parameter naming a detail page's settings section, and the hash of the tab holding
+ * it, per route segment (`apps/web/src/lib/settings-section-href.ts`).
+ */
+const SETTINGS_ADDRESS: Record<string, [param: string, tab: string]> = {
+  agents: ["agentSettings", "settings"],
+  skills: ["packageSettings", "settings"],
+  "mcp-servers": ["packageSettings", "settings"],
+  integrations: ["integrationSettings", "configuration"],
+};
+
+/**
+ * Page Object for the package file editor, in its two places: Paramètres › Fichiers on a saved
+ * package's detail page ({@link goto}), where a file's text is changed in a modal from the file's
+ * « Actions » menu ({@link editFile}); and the *Fichiers* tab of a creation page (`/:type/new`,
+ * {@link openFilesTab}), where the selected file is open in a pane ({@link typeIntoEditor}).
+ * Both stage every change until « Enregistrer ».
  *
  * The surface carries no test ids: it is driven the way an author drives it —
  * the tab by its label, the tree by its ARIA role, the row gestures by the
@@ -21,11 +36,19 @@ export class PackageEditorPage {
     private type = "skills",
   ) {}
 
-  async goto() {
-    await this.page.goto(`/${this.type}/${this.scope}/${this.name}/edit`);
+  /** The saved package's Paramètres › Fichiers address. */
+  get settingsUrl(): string {
+    const [param, tab] = SETTINGS_ADDRESS[this.type]!;
+    return `/${this.type}/${this.scope}/${this.name}?${param}=files#${tab}`;
   }
 
-  /** Open *Fichiers* and wait for the tree to render. */
+  /** Open the saved package's Paramètres › Fichiers section and wait for the tree to render. */
+  async goto() {
+    await this.page.goto(this.settingsUrl);
+    await expect(this.tree).toBeVisible();
+  }
+
+  /** On a creation page, open the *Fichiers* tab and wait for the tree to render. */
   async openFilesTab() {
     await this.page.getByRole("tab", { name: "Fichiers" }).click();
     await expect(this.tree).toBeVisible();
@@ -73,8 +96,34 @@ export class PackageEditorPage {
     await expect(this.dialog).toHaveCount(0);
   }
 
+  /** Select `path` in the tree and open one item of its « Actions » menu (detail page). */
+  async fileAction(path: string, item: string) {
+    await this.fileRow(path).click();
+    // The selected file's pane: its header over the preview the tree controls
+    // (`aria-controls`). The page header carries an « Actions » menu of its own.
+    const pane = this.page.locator("div:has(> #agent-file-preview)");
+    await pane.getByRole("button", { name: "Actions", exact: true }).click();
+    await this.page.getByRole("menuitem", { name: item, exact: true }).click();
+  }
+
   /**
-   * Type into the Monaco pane showing `path`.
+   * Detail page: open `path` through « Actions › Modifier », replace its text with `text`, and
+   * apply it. Staged until Save.
+   */
+  async editFile(path: string, text: string) {
+    await this.fileAction(path, "Modifier");
+    const modal = this.page.getByRole("dialog", { name: `Modifier ${path}` });
+    const lines = modal.locator(".monaco-editor .view-lines");
+    await expect(lines).toBeVisible();
+    await lines.click();
+    await this.page.keyboard.press("ControlOrMeta+A");
+    await this.page.keyboard.type(text);
+    await modal.getByRole("button", { name: "Appliquer", exact: true }).click();
+    await expect(modal).toHaveCount(0);
+  }
+
+  /**
+   * Creation page: type into the Monaco pane showing `path`.
    *
    * Monaco owns its own hidden textarea, so text reaches it through real key
    * events rather than a `fill`. The pane is a labelled region, which is how

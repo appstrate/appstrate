@@ -179,7 +179,7 @@ export function PackageList() {
           ) : undefined
         }
       />
-      {importParam.value !== null && (
+      {importParam.value !== null && canImport && (
         <ImportModal onClose={importParam.close} onLeave={importParam.leave} />
       )}
       {creation.isOpen && (

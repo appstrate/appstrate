@@ -21,6 +21,7 @@ import { packagePermission, packageSightPermissions } from "@appstrate/core/perm
 import { ApiError } from "../api/errors";
 import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
 import type {
+  IntegrationIndexItem,
   OrgPackageItem,
   OrgPackageItemDetail,
   AgentListItem,
@@ -160,6 +161,11 @@ async function fetchPackageDetail(
   return { ...normalizePackageItemDetail(data!), etag: response.headers.get("ETag") };
 }
 
+/** The integration index adds the `source` facts its page splits by. */
+type PackageIndexItem<T extends PackageType> = T extends "integration"
+  ? IntegrationIndexItem
+  : OrgPackageItem;
+
 /**
  * One type's INDEX for the current space: what runs here, and nothing else.
  *
@@ -170,18 +176,21 @@ async function fetchPackageDetail(
  * the one management view. There is no selector: a narrower and a wider list
  * would be two answers to one question.
  */
-function usePackageList(type: PackageType) {
+function usePackageList<T extends PackageType>(type: T) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
-  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
+  // Widened to the union, which the typed client resolves to its four paths.
+  const segment: (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[PackageType] =
+    PACKAGE_TYPE_ROUTE_SEGMENT[type];
   const canRead = useCanReadPackages(type);
   return useQuery({
     queryKey: packageKeys.list(segment, orgId, spaceId),
-    queryFn: async (): Promise<OrgPackageItem[]> => {
+    queryFn: async (): Promise<PackageIndexItem<T>[]> => {
       const { data } = await client.GET(`/api/packages/${segment}`);
       // The spec marks most item fields optional — normalize to the
       // non-optional shape consumers have always used. `scope` is not
-      // returned by the list endpoints.
+      // returned by the list endpoints. The spread carries an integration
+      // row's own fields; `segment` is a union, so the cast ties them to `T`.
       return data!.data.map((item) => ({
         ...item,
         name: item.name,
@@ -197,7 +206,7 @@ function usePackageList(type: PackageType) {
         created_by_name: item.created_by_name ?? null,
         used_by_agents: item.used_by_agents,
         auto_installed: item.auto_installed,
-      }));
+      })) as PackageIndexItem<T>[];
     },
     enabled: canRead && !!orgId && !!spaceId,
   });

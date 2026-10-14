@@ -18,6 +18,7 @@ import {
   listSyncableSkills,
   resolveAgent,
   resolveSkill,
+  type PlannedEntry,
   type ResolvedSkill,
 } from "../src/lib/skills-sync/plan.ts";
 import { treeIntegrity, type AgentLaunchView } from "../src/lib/skills-sync/materialize.ts";
@@ -232,16 +233,27 @@ describe("assignSlugs", () => {
   });
 });
 
-function view(packageId: string): AgentLaunchView {
+// Platform-shaped: the command writes it, and refuses any other shape.
+const SPACE = "spc_00000000-0000-4000-8000-000000000001";
+const SECOND = "spc_00000000-0000-4000-8000-000000000002";
+
+function view(packageId: string, spaceId = SPACE, spaceName = "Space One"): AgentLaunchView {
   return {
     packageId,
-    // Platform-shaped: the command writes it, and refuses any other shape.
-    spaceId: "spc_00000000-0000-4000-8000-000000000001",
+    spaceId,
+    spaceName,
     version: "1.0.0",
     title: packageId,
     description: "Does a thing.",
     input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
   };
+}
+
+/** A ledger's `slug → claimant`: an agent entry records its space, a skill entry none. */
+function holding(pairs: [string, string][], spaceId?: string) {
+  return new Map(
+    pairs.map(([slug, packageId]) => [slug, spaceId ? { packageId, spaceId } : { packageId }]),
+  );
 }
 
 describe("assignSlugs — agent commands (D23)", () => {
@@ -278,7 +290,7 @@ describe("assignSlugs — agent commands (D23)", () => {
     const { planned } = assignSlugs(
       [resolved({ packageId: "@zed/run-foo", frontmatterName: "run-foo" })],
       [view("@acme/foo"), view("@other/acme-foo")],
-      new Map([["run-acme-foo", "@gone/unresolved"]]),
+      holding([["run-acme-foo", "@gone/unresolved"]], SPACE),
     );
 
     expect(planned.map((entry) => entry.slug)).toEqual([
@@ -294,7 +306,7 @@ describe("assignSlugs — agent commands (D23)", () => {
       [{ ...view("@acme/foo"), version: "not-semver" }, view("@zed/foo")],
     );
 
-    expect(failed.map((f) => f.packageId)).toEqual(["@acme/foo"]);
+    expect(failed.map((f) => f.view.packageId)).toEqual(["@acme/foo"]);
     expect(planned.map((entry) => [entry.packageId, entry.slug])).toEqual([
       ["@zed/foo", "run-foo"],
     ]);
@@ -309,7 +321,7 @@ describe("assignSlugs — an installed name stays with its package", () => {
     const { planned } = assignSlugs(
       [],
       [view("@alpha/report"), view("@zeta/report")],
-      new Map([["run-report", "@zeta/report"]]),
+      holding([["run-report", "@zeta/report"]], SPACE),
     );
 
     expect(slugsOf(planned)).toEqual({
@@ -318,28 +330,39 @@ describe("assignSlugs — an installed name stays with its package", () => {
     });
   });
 
-  it("keeps a fallback holder on its fallback, and gives it the name once its holder left", () => {
+  it("keeps an agent on its fallback, even once the name's holder left", () => {
     const agents = [view("@alpha/report"), view("@zeta/report")];
-    const both = new Map([
-      ["run-report", "@zeta/report"],
-      ["run-alpha-report", "@alpha/report"],
-    ]);
+    const both = holding(
+      [
+        ["run-report", "@zeta/report"],
+        ["run-alpha-report", "@alpha/report"],
+      ],
+      SPACE,
+    );
     expect(slugsOf(assignSlugs([], agents, both).planned)).toEqual({
       "@alpha/report": "run-alpha-report",
       "@zeta/report": "run-report",
     });
 
-    const left = new Map([["run-alpha-report", "@alpha/report"]]);
+    // An agent's command is never renamed under it: `/appstrate:run-alpha-report` keeps working.
+    const left = holding([["run-alpha-report", "@alpha/report"]], SPACE);
     expect(slugsOf(assignSlugs([], [view("@alpha/report")], left).planned)).toEqual({
+      "@alpha/report": "run-alpha-report",
+    });
+    // A newcomer, holding nothing, takes the freed name.
+    expect(slugsOf(assignSlugs([], [view("@alpha/report")]).planned)).toEqual({
       "@alpha/report": "run-report",
     });
   });
 
   // A newcomer whose PREFERRED slug is somebody's installed fallback.
-  const held = new Map([
-    ["run-report", "@zeta/report"],
-    ["run-alpha-report", "@alpha/report"],
-  ]);
+  const held = holding(
+    [
+      ["run-report", "@zeta/report"],
+      ["run-alpha-report", "@alpha/report"],
+    ],
+    SPACE,
+  );
 
   it("never hands a held fallback to a newcomer that prefers it", () => {
     const agents = [view("@a/alpha-report"), view("@alpha/report"), view("@zeta/report")];
@@ -359,7 +382,7 @@ describe("assignSlugs — an installed name stays with its package", () => {
         resolved({ packageId: "@acme/two", frontmatterName: "two" }),
       ],
       [],
-      new Map([
+      holding([
         ["two", "@acme/one"],
         ["one", "@acme/two"],
       ]),
@@ -376,7 +399,7 @@ describe("assignSlugs — an installed name stays with its package", () => {
         resolved({ packageId: "@zed/tools", frontmatterName: "tools" }),
       ],
       [],
-      new Map([["pdf", "@zed/tools"]]),
+      holding([["pdf", "@zed/tools"]]),
     );
 
     expect(slugsOf(planned)).toEqual({ "@acme/pdf": "acme-pdf", "@zed/tools": "tools" });
@@ -388,12 +411,83 @@ describe("assignSlugs — an installed name stays with its package", () => {
         resolved({ packageId: "@zed/tools", frontmatterName: "tools" }),
       ],
       [],
-      new Map([
+      holding([
         ["acme-pdf", "@acme/pdf"],
         ["tools", "@zed/tools"],
       ]),
     );
     expect(slugsOf(next.planned)).toEqual({ "@acme/pdf": "pdf", "@zed/tools": "tools" });
+  });
+});
+
+describe("assignSlugs — one agent active in several spaces (#1972)", () => {
+  const spacesOf = (planned: PlannedEntry[]) =>
+    planned.map((entry) => [entry.kind === "agent" ? entry.spaceId : "", entry.slug]);
+
+  it("names the first claimant run-<name> and the next run-<space>-<name>", () => {
+    const { planned } = assignSlugs(
+      [],
+      [view("@acme/report"), view("@acme/report", SECOND, "Lab Team")],
+    );
+
+    expect(spacesOf(planned)).toEqual([
+      [SPACE, "run-report"],
+      [SECOND, "run-lab-team-report"],
+    ]);
+    expect(planned[1]!.renamedFrom).toBe("run-report");
+  });
+
+  it("keeps run-<name> with the space that holds it, whichever space comes first", () => {
+    const held = new Map([["run-report", { packageId: "@acme/report", spaceId: SECOND }]]);
+    const { planned } = assignSlugs(
+      [],
+      [view("@acme/report"), view("@acme/report", SECOND, "Lab")],
+      held,
+    );
+
+    expect(spacesOf(planned)).toEqual([
+      [SPACE, "run-space-one-report"],
+      [SECOND, "run-report"],
+    ]);
+  });
+
+  it("counts on when the space fallback is taken, and keeps run-<scope>-<name> for another package", () => {
+    const { planned } = assignSlugs(
+      [resolved({ packageId: "@zed/run-lab-report", frontmatterName: "run-lab-report" })],
+      [view("@acme/report"), view("@acme/report", SECOND, "Lab"), view("@other/report")],
+    );
+
+    expect(planned.map((entry) => entry.slug)).toEqual([
+      "run-lab-report",
+      "run-report",
+      "run-lab-report-2",
+      "run-other-report",
+    ]);
+  });
+});
+
+describe("assignSlugs — the space fallback", () => {
+  it("names the second space's command after its space when another package holds run-<name>", () => {
+    const { planned } = assignSlugs(
+      [],
+      [view("@acme/report"), view("@acme/report", SECOND, "Lab")],
+      holding([["run-report", "@zeta/report"]], SPACE),
+    );
+
+    expect(planned.map((entry) => entry.slug)).toEqual(["run-acme-report", "run-lab-report"]);
+  });
+
+  it("cuts a long space name, never the agent's name", () => {
+    const space = "a".repeat(60);
+    const { planned } = assignSlugs(
+      [],
+      [view("@acme/weekly-report"), view("@acme/weekly-report", SECOND, space)],
+    );
+
+    const slug = planned[1]!.slug;
+    expect(slug.length).toBeLessThanOrEqual(64);
+    expect(slug.startsWith("run-aaaa")).toBe(true);
+    expect(slug.endsWith("-weekly-report")).toBe(true);
   });
 });
 
@@ -418,6 +512,8 @@ describe("listSyncableAgents", () => {
 });
 
 describe("resolveAgent", () => {
+  const ONE = { id: "spc_1", name: "One" };
+
   it("pins the latest published version and carries the space's input layer", async () => {
     createSkillServer([], undefined, [
       {
@@ -431,9 +527,10 @@ describe("resolveAgent", () => {
       },
     ]).install();
 
-    expect(await resolveAgent("default", "@acme/report", "published", "spc_1")).toEqual({
+    expect(await resolveAgent("default", "@acme/report", "published", ONE)).toEqual({
       packageId: "@acme/report",
       spaceId: "spc_1",
+      spaceName: "One",
       version: "1.2.0",
       title: "Weekly report",
       description: "Writes the report.",
@@ -448,14 +545,14 @@ describe("resolveAgent", () => {
   it("titles an agent with no display name by its package id", async () => {
     createSkillServer([], undefined, [{ id: "@acme/report", display_name: " " }]).install();
 
-    const agent = (await resolveAgent("default", "@acme/report", "published", "spc_1"))!;
+    const agent = (await resolveAgent("default", "@acme/report", "published", ONE))!;
     expect(agent.title).toBe("@acme/report");
   });
 
   it("returns null — not an error — when the agent was never published", async () => {
     createSkillServer([], undefined, [{ id: "@acme/report", versions: [] }]).install();
 
-    expect(await resolveAgent("default", "@acme/report", "published", "spc_1")).toBeNull();
+    expect(await resolveAgent("default", "@acme/report", "published", ONE)).toBeNull();
   });
 
   it("names the draft and pins the command to it", async () => {
@@ -463,7 +560,7 @@ describe("resolveAgent", () => {
       { id: "@acme/report", description: "Published.", draft: { description: "Working copy." } },
     ]).install();
 
-    const agent = (await resolveAgent("default", "@acme/report", "draft", "spc_1"))!;
+    const agent = (await resolveAgent("default", "@acme/report", "draft", ONE))!;
     expect(agent.version).toBe("draft");
     expect(agent.description).toBe("Working copy.");
   });
@@ -473,7 +570,7 @@ describe("resolveAgent", () => {
       { id: "@acme/report", draft: { notWritable: true } },
     ]).install();
 
-    const err = await resolveAgent("default", "@acme/report", "draft", "spc_1").then(
+    const err = await resolveAgent("default", "@acme/report", "draft", ONE).then(
       () => null,
       (e: unknown) => e,
     );
