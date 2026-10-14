@@ -479,11 +479,13 @@ function MainLayout() {
           {/* Opened by `?newSchedule=` from any page: the schedules list, an agent. */}
           <NewScheduleModalHost />
           {/* Full-bleed surfaces (anything that owns its own height) opt out
-              with `data-full-bleed` on their root. */}
+              with `data-full-bleed` on their root. The chat's row fills its
+              child (`*:flex-1`), so a loading, refused or crashed state is
+              centred in the panel instead of hugging its left edge. */}
           <div
             className={
               product === "chat"
-                ? "flex min-h-0 min-w-0 flex-1"
+                ? "flex min-h-0 min-w-0 flex-1 *:flex-1"
                 : "max-w-page px-gutter mx-auto w-full pt-8 pb-18 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0"
             }
           >
