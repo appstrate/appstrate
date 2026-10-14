@@ -548,14 +548,14 @@ export function DataTable<T>({
   // "no runs".
   if (verdict === "error" || verdict === "empty") {
     return (
-      <div className={frameClass}>
+      <div data-data-table-frame className={frameClass}>
         {verdict === "error" ? (state.error ?? <ErrorState compact />) : state.empty}
       </div>
     );
   }
 
   return (
-    <div ref={frameRef} className={frameClass}>
+    <div ref={frameRef} data-data-table-frame className={frameClass}>
       <ScrollArea data-data-table-scroll>
         <table
           ref={tableRef}

@@ -319,6 +319,8 @@ const config: KnipConfig = {
    */
   ignoreIssues: {
     "packages/ui/src/components/*.tsx": ["exports"],
+    "apps/web/src/lab/fixtures.ts": ["exports"],
+    "apps/web/src/lab/handlers.ts": ["exports"],
     /** The map's wire types, exported for the screens still to be built. */
     "apps/web/src/modules/agent-map/use-agent-map.ts": ["types"],
   },
@@ -477,6 +479,11 @@ const config: KnipConfig = {
         // Type-level guard over the generated OpenAPI types: it exists to be
         // type-checked, so it has no importer by design.
         "src/api/schema.assert.ts",
+        // Lab mode. `src/lab/install.ts` is injected as a module script by the
+        // serve-only `labMode()` Vite plugin, BEFORE `src/main.tsx` — there is
+        // no static import to follow, so everything it pulls in reads as
+        // unreachable. See `apps/web/vite.config.ts` and docs/redesign-2026.md.
+        "src/lab/install.ts",
       ],
     },
 
@@ -622,7 +629,15 @@ const config: KnipConfig = {
       entry: [...manifestEntries("packages/ui", ["./components/*"])],
     },
     // Playwright specs, discovered by the runner, not imported.
-    e2e: { entry: [...manifestEntries("e2e"), "**/*.spec.ts"] },
+    e2e: {
+      entry: [
+        ...manifestEntries("e2e"),
+        "**/*.spec.ts",
+        // Lab drivers: each is run by its own `lab:*` root script (`bun
+        // lab/shots.mjs`), so nothing imports them — they ARE the entry.
+        "lab/*.mjs",
+      ],
+    },
   },
 };
 

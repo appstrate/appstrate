@@ -68,7 +68,7 @@ export function CreationHandoffModal({
 
   return (
     <Modal open onClose={onClose} title={t(TITLE_KEYS[resource])} className="sm:max-w-xl">
-      <div className="space-y-2">
+      <div className="space-y-2" data-creation-chooser={resource}>
         {methods.map(({ id, icon: Icon, title, description, onClick, disabled }) => (
           <Button
             key={id}
@@ -77,6 +77,7 @@ export function CreationHandoffModal({
             className="h-auto min-h-16 w-full justify-start gap-3 p-3 text-left whitespace-normal"
             onClick={onClick}
             disabled={disabled}
+            data-creation-method={id}
           >
             <span className="bg-muted grid size-9 shrink-0 place-items-center rounded-md">
               <Icon />

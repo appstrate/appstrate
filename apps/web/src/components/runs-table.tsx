@@ -46,9 +46,10 @@ export function RunsTable({
       columns={columns}
       rows={runs}
       isLoading={isLoading}
-      // A failed request is NOT an empty list: a 500 on `GET /api/runs` must
-      // not read as "Aucun run". The two travel as separate props, so no caller
-      // can fold one into the other.
+      // A failed request is NOT an empty list — the lab's `error` scenario is
+      // what showed it, with `GET /api/runs` answering 500 and the page saying
+      // "Aucun run". The two travel as separate props now, so no caller can
+      // fold one into the other again.
       isError={isError}
       error={error}
       empty={empty ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />}
