@@ -205,7 +205,8 @@ export async function runnerInstallCommand(opts: RunnerInstallOptions = {}): Pro
     // install deterministic and bootable instead of tracking a moving `latest`.
     config.artifactsVersion = version === "latest" ? undefined : version;
 
-    // 4. Provision state dirs + config + unit (warning only once the backup exists).
+    // 4. Provision state dirs + config + unit. Log after writeHostFiles so the
+    //    backup the warning names exists.
     const warning = await writeHostFiles(config, d, previousEnv);
     if (warning) logWarn(warning);
 
@@ -243,9 +244,9 @@ interface PreviousEnv {
 function droppedEnvKeysWarning(keys: readonly string[]): string {
   return (
     `${RUNNER_ENV_PATH} is re-rendered whole: it drops ${keys.join(", ")} ` +
-    `(previous file kept at ${RUNNER_ENV_PREVIOUS_PATH}). Set each in a systemd drop-in ` +
-    `instead: \`systemctl edit ${RUNNER_SERVICE_NAME}\`, then \`Environment=KEY=value\` ` +
-    `under [Service].`
+    `(previous file kept at ${RUNNER_ENV_PREVIOUS_PATH}; it holds the runner token, delete it ` +
+    `once the variables are moved). Set each in a systemd drop-in instead: ` +
+    `\`systemctl edit ${RUNNER_SERVICE_NAME}\`, then \`Environment=KEY=value\` under [Service].`
   );
 }
 

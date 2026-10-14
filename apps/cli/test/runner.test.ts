@@ -525,6 +525,14 @@ describe("install over an env file with unmanaged keys", () => {
     expect(resolved.previousEnv).toBeUndefined();
   });
 
+  it("resolveInstallConfig carries no previousEnv for an empty or comment-only file", async () => {
+    for (const text of ["", "# only a comment\n\n"]) {
+      const { deps } = depsWith({ [RUNNER_ENV_PATH]: text });
+      const resolved = await resolveInstallConfig({ ...base, token: "x".repeat(16) }, deps);
+      expect(resolved.previousEnv).toBeUndefined();
+    }
+  });
+
   it("writeHostFiles keeps the previous file (0600) and warns with keys, never values", async () => {
     const { fake, deps } = depsWith({ [RUNNER_ENV_PATH]: existing });
     const warning = await writeHostFiles(config, deps, {
@@ -538,6 +546,7 @@ describe("install over an env file with unmanaged keys", () => {
     expect(warning).toContain(RUNNER_ENV_PREVIOUS_PATH);
     expect(warning).toContain("systemctl edit appstrate-runner");
     expect(warning).toContain("Environment=KEY=value");
+    expect(warning).toContain("it holds the runner token, delete it");
     expect(warning).not.toContain("secret-ish-value");
   });
 
@@ -568,6 +577,12 @@ describe("parseSystemdEnvironment", () => {
   it("ignores tokens without = and returns nothing for empty output", () => {
     expect(parseSystemdEnvironment("junk =x K=v")).toEqual({ K: "v" });
     expect(parseSystemdEnvironment("")).toEqual({});
+  });
+
+  it("tolerates an unterminated quote and a trailing backslash", () => {
+    expect(parseSystemdEnvironment('"A=b c')).toEqual({ A: "b c" });
+    expect(parseSystemdEnvironment('"A=b\\')).toEqual({ A: "b\\" });
+    expect(parseSystemdEnvironment("A=b\\")).toEqual({ A: "b\\" });
   });
 });
 
@@ -1138,6 +1153,35 @@ describe("runnerDoctor", () => {
     );
     expect(report.jailer.installed).toBe(false);
     expect(report.ok).toBe(true);
+  });
+
+  it("ignores `systemctl show` output when the call fails", async () => {
+    const marker = runnerDataPaths(config.dataDir).artifactsMarker;
+    const { fs } = fakeFs({
+      "/etc/appstrate-runner/env": renderRunnerEnvFile(config),
+      "/etc/systemd/system/appstrate-runner.service": "unit",
+      [marker]: JSON.stringify({ version: "1.2.3", guest_protocol: 1 }),
+    });
+    const { exec } = fakeExec({
+      "systemctl is-active": () => ({ ok: true, exitCode: 0, stdout: "active\n", stderr: "" }),
+      "systemctl is-enabled": () => ({ ok: true, exitCode: 0, stdout: "enabled\n", stderr: "" }),
+      "systemctl show": () => ({
+        ok: false,
+        exitCode: 1,
+        stdout: "FIRECRACKER_JAILER=off\n",
+        stderr: "",
+      }),
+    });
+    const report = await runnerDoctor({
+      deps: {
+        fs,
+        exec,
+        http: fakeHttp({ health: { status: 200, body: { protocol: 1, initialized: true } } }),
+        preflight: async () => ({ ok: true, arch: "x86_64", checks: [] }),
+      },
+    });
+    // The jailer is absent; had the failed output been read, `off` would make this ok.
+    expect(report.ok).toBe(false);
   });
 
   it("lets the env file win over a drop-in for the same key", async () => {

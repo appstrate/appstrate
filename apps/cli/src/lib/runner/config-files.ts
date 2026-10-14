@@ -240,8 +240,8 @@ export function parseRunnerEnvFile(text: string): Record<string, string> {
 
 /**
  * Parse `systemctl show <unit> -p Environment --value`: the unit's (and its
- * drop-ins') `Environment=` assignments, space-separated, with an assignment
- * holding spaces or special chars double-quoted with C-style escapes.
+ * drop-ins') `Environment=` assignments, space-separated; an assignment holding
+ * spaces or special chars is double-quoted, with backslash-escaped characters.
  * Tokens without `=` are ignored; a later assignment wins, as in systemd.
  */
 export function parseSystemdEnvironment(output: string): Record<string, string> {
