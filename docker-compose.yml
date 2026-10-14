@@ -286,7 +286,7 @@ services:
       # ── Core ──
       - PORT=3000
       - APP_URL
-      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
+      - TRUSTED_ORIGINS
       - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
       - TRUST_PROXY
       - LOG_LEVEL

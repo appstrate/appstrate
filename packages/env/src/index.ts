@@ -465,9 +465,12 @@ export const envSchema = z
         }
         return url.origin;
       }),
+    // Origins trusted with credentials beyond `APP_URL` (CORS + Better Auth).
+    // Unset or empty trusts none: same-origin calls need no CORS grant, and
+    // Better Auth always trusts its own `baseURL`.
     TRUSTED_ORIGINS: z
       .string()
-      .default("http://localhost:3000,http://localhost:5173")
+      .default("")
       .transform((s) =>
         s
           .split(",")

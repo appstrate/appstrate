@@ -89,6 +89,7 @@ export const CODE_DEFAULTS: Record<string, string> = {
   SYSTEM_PROVIDER_KEYS: "[]",
   SYSTEM_PROXIES: "[]",
   TRUST_PROXY: "false",
+  TRUSTED_ORIGINS: "",
   WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: "300",
   // `RUN_TOKEN_SECRET` is required (no code default) — like
   // `UPLOAD_SIGNING_SECRET` it is intentionally absent from this table;
@@ -101,9 +102,6 @@ export const CODE_DEFAULTS: Record<string, string> = {
   // `RUN_ADAPTER` code default is `process`; compose intentionally
   // overrides to `docker` (see ALLOWLIST).
   RUN_ADAPTER: "process",
-  // `TRUSTED_ORIGINS` code default is the dev localhost CSV; compose
-  // intentionally overrides to empty (see ALLOWLIST).
-  TRUSTED_ORIGINS: "http://localhost:3000,http://localhost:5173",
   // `PI_IMAGE` / `SIDECAR_IMAGE` code default is Docker Hub `:latest`;
   // compose intentionally overrides to GHCR (see ALLOWLIST).
   PI_IMAGE: "appstrate-pi:latest",
@@ -137,11 +135,6 @@ export const ALLOWLIST: Record<string, { yamlDefault: string; reason: string }> 
     yamlDefault: "docker",
     reason:
       "Code default `process` is for OSS dev; containerized self-host requires Docker isolation.",
-  },
-  TRUSTED_ORIGINS: {
-    yamlDefault: "",
-    reason:
-      "Code default includes dev localhost ports; prod self-host correctly defaults to empty so operator opts in to their public domain explicitly.",
   },
   S3_BUCKET: {
     yamlDefault: "appstrate",

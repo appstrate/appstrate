@@ -544,7 +544,7 @@ export async function resolveAppUrl(
     if (inherited) {
       if (requested !== undefined && requested !== inherited) {
         logWarn(
-          `app URL ${requested} ignored on upgrade — existing .env pins APP_URL=${inherited}, and config is preserved across upgrades (see mergeEnv). Edit <dir>/.env manually (APP_URL + TRUSTED_ORIGINS + TRUST_PROXY) to change the public URL.`,
+          `app URL ${requested} ignored on upgrade — existing .env pins APP_URL=${inherited}, and config is preserved across upgrades (see mergeEnv). Edit <dir>/.env manually (APP_URL + TRUST_PROXY) to change the public URL.`,
         );
       }
       return inherited;
@@ -562,7 +562,7 @@ export async function resolveAppUrl(
   if (opts.tier === 0 || opts.nonInteractive) return fallback;
 
   note(
-    `Remote deployment (behind a reverse proxy)? Enter the public URL users will\nhit, e.g. https://appstrate.example.com — it drives OAuth redirects, CORS\n(TRUSTED_ORIGINS), and email links. The reverse proxy itself (TLS, forwarding\nto localhost:${port}) is not provisioned by the installer.\nPress Enter to keep the local default.`,
+    `Remote deployment (behind a reverse proxy)? Enter the public URL users will\nhit, e.g. https://appstrate.example.com — it drives OAuth redirects, the\nsign-in origin, and email links. The reverse proxy itself (TLS, forwarding\nto localhost:${port}) is not provisioned by the installer.\nPress Enter to keep the local default.`,
     "Public URL (optional)",
   );
   const answer = (await askText("Public URL", fallback)).trim();
@@ -576,7 +576,7 @@ export async function resolveAppUrl(
  * Reject a plain-http loopback app URL whose port disagrees with the
  * host bind port. Such a URL is accessed directly — on localhost there
  * is no reverse proxy to bridge the two ports — so every derived
- * artifact (TRUSTED_ORIGINS/CORS, the /claim banner, email links) would
+ * artifact (the sign-in origin, the /claim banner, email links) would
  * point at a port nothing listens on, while the install itself looks
  * green (the healthcheck polls the bind port). Fail fast with the fix.
  *
@@ -1920,9 +1920,9 @@ async function installDockerTier(
   }
 
   await openBrowser(postInstallBrowserUrl(localUrl, opts.bootstrap));
-  // Remote deployment: the installer wired APP_URL / TRUSTED_ORIGINS /
-  // TRUST_PROXY, but provisioning the reverse proxy (TLS, forwarding
-  // the public domain to the host port) is the operator's job — say so
+  // Remote deployment: the installer wired APP_URL / TRUST_PROXY, but
+  // provisioning the reverse proxy (TLS, forwarding the public domain to
+  // the host port) is the operator's job — say so
   // explicitly instead of letting a dead public URL look like a failed
   // install.
   if (isRemoteAppUrl(appUrl)) {
