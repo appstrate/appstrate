@@ -14,7 +14,7 @@ import { baseName, previewBlockReason, type PackageFileEntry } from "../../lib/p
  * `Content-Length: "0"` before `parseAs` is honoured and returns
  * `{ data: undefined }` — on a fully successful 200. So `data` alone cannot
  * tell a zero-byte file apart from a file that was never fetched, and
- * `file-preview` treats `text === undefined` as "still loading": an infinite
+ * `package-file-source` treats `text === undefined` as "still loading": an infinite
  * spinner on every empty file in an artifact.
  *
  * The success flag is what separates the two cases, and it has to be consulted:

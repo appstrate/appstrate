@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "../spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { useTestModel, type OrgModelInfo } from "../../hooks/use-models";
 import { ModelTestResult } from "./model-test-result";

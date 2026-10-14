@@ -30,7 +30,7 @@ import { describe, it, expect } from "bun:test";
 const read = async (relative: string) =>
   await Bun.file(decodeURIComponent(new URL(relative, import.meta.url).pathname)).text();
 
-const previewSource = await read("../package-files/file-preview.tsx");
+const previewSource = await read("../package-files/package-file-source.tsx");
 const primitiveSource = await read("../../lib/blob-download.ts");
 
 /**

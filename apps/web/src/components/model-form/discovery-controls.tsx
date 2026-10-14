@@ -7,7 +7,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "../spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import type { DiscoveryState } from "@/lib/model-discovery";
 import { DiscoveryResult } from "./discovery-result";
 

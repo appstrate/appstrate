@@ -23,7 +23,7 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { OrgModelOption } from "./models-data.ts";
-import { isModelLive } from "../model-liveness.ts";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
 import { useChatHost } from "./runtime-context.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -124,7 +124,7 @@ export function ModelSelect({
               groups={groups}
               value={selectedId}
               onSelect={(id) => id !== null && onSelect(id)}
-              selectable={isModelLive}
+              selectable={isModelSelectable}
               // `settings:` — the picker's labels live in the settings bundle (a boot
               // namespace, so already loaded); the host binds `t` to `chat`.
               labels={buildModelPickerLabels((key, options) => t(`settings:${key}`, options))}

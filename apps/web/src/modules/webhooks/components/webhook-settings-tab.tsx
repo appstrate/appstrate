@@ -7,7 +7,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { ConfirmModal } from "@/components/confirm-modal";
-import { Spinner } from "@/components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleValue } from "@/lib/toggle-value";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";

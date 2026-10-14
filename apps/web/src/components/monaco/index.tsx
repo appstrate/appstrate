@@ -2,7 +2,7 @@
 
 import { lazy, Suspense } from "react";
 import type { EditorProps, DiffEditorProps } from "@monaco-editor/react";
-import { Spinner } from "../spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 
 /**
  * Lazy facade over the self-hosted Monaco setup (`./setup.ts`).

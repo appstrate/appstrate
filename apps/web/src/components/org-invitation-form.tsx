@@ -22,7 +22,7 @@ import {
   type AssignmentDraft,
 } from "../lib/space-assignments";
 import { SpaceAssignmentsField } from "./space-assignments-field";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { errorMessage } from "../lib/mutation-error";
 
 interface InviteFormValues {

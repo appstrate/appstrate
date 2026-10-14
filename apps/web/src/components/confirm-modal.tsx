@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { createConfirmer } from "../lib/confirm-settle";
 
 interface ConfirmModalProps {

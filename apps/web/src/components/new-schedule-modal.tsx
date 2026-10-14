@@ -39,7 +39,7 @@ import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
 import { ErrorState } from "./page-states";
 import { SettingsSkeleton } from "./loading-skeletons";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { isQueryInFlight } from "../lib/query-state";
 import { useActorName } from "../hooks/use-actor-name";
 import { useAuth } from "../hooks/use-auth";

@@ -19,6 +19,7 @@ const { client } = await import("../../api/client.ts");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
 const { useFileTextCopy } = await import("../use-files.ts");
+const { TranslatedUiLabels } = await import("../../components/translated-ui-labels.tsx");
 
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
@@ -30,7 +31,11 @@ function fileTextCopy() {
     captured.push(useFileTextCopy());
     return null;
   }
-  render(<Probe />);
+  render(
+    <TranslatedUiLabels>
+      <Probe />
+    </TranslatedUiLabels>,
+  );
   return captured[0]!;
 }
 

@@ -107,7 +107,7 @@ import {
 import { RailLink } from "./settings/rail-link";
 import { RailGroup, RailHeader } from "./settings/rail-shell";
 import { SettingsHeading } from "./settings/settings-heading";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 
 const KIND: Record<PackageType, { icon: LucideIcon; titleKey: string }> = {
   agent: { icon: PACKAGE_TYPE_ICON.agent, titleKey: "packages.type.agents" },

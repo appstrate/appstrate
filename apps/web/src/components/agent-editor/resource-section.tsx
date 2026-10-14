@@ -28,7 +28,7 @@ import {
   Upload,
   Wrench,
 } from "lucide-react";
-import { Spinner } from "../spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { ListToolbar } from "../list-toolbar";
 import { Badge } from "@appstrate/ui/components/badge";
 import { ErrorState, EmptyState, EmptyStateAction, NoMatchState } from "../page-states";

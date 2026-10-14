@@ -104,6 +104,19 @@ const READINESS_KEY = $api.queryOptions("get", "/api/agents/{scope}/{name}/conne
   },
 }).queryKey;
 
+/** The integration detail the picker reads its manifest and auths from. */
+const DETAIL_KEY = $api.queryOptions("get", "/api/integrations/{packageId}", {
+  params: {
+    path: { packageId: INTEGRATION },
+    header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
+  },
+}).queryKey;
+
+function withDetail(qc: QueryClient): QueryClient {
+  qc.setQueryData(DETAIL_KEY, { manifest: MANIFEST, auths: [] });
+  return qc;
+}
+
 function readiness(res: Resolution, runBlocking = false, required = false) {
   return {
     blocks_run: runBlocking,
@@ -126,16 +139,12 @@ function renderPicker(
   persistence?: Persistence,
   required = false,
 ): string {
-  const qc = new QueryClient();
+  const qc = withDetail(new QueryClient());
   qc.setQueryData(READINESS_KEY, readiness(res, runBlocking, required));
   return render(
     <IntegrationConnectionPicker
-      integrationId={INTEGRATION}
+      integration={{ id: INTEGRATION }}
       agentPackageId={AGENT}
-      manifest={MANIFEST}
-      authStatuses={[]}
-      agentTools={undefined}
-      agentScopes={undefined}
       {...(persistence ? { persistence } : {})}
     />,
     { queryClient: qc },
@@ -806,15 +815,8 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     expect(html).toBe("");
     expect(pickers).toEqual([null]);
     const loading = render(
-      <IntegrationConnectionPicker
-        integrationId={INTEGRATION}
-        agentPackageId={AGENT}
-        manifest={MANIFEST}
-        authStatuses={[]}
-        agentTools={undefined}
-        agentScopes={undefined}
-      />,
-      { queryClient: new QueryClient() },
+      <IntegrationConnectionPicker integration={{ id: INTEGRATION }} agentPackageId={AGENT} />,
+      { queryClient: withDetail(new QueryClient()) },
     );
     expect(loading).toContain(`member-picker-${INTEGRATION}`);
     expect(loading).not.toContain(`member-pick-none-${INTEGRATION}`);

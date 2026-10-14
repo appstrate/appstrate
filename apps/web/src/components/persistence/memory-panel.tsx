@@ -13,7 +13,7 @@ import { Modal } from "../modal";
 import { ConfirmModal } from "../confirm-modal";
 import { formatDateField } from "../../lib/format-date";
 import { filterMemoryItems, memoryText } from "../../lib/memory-items";
-import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
+import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { useModalTarget } from "../../hooks/use-modal-param";
 import {
   useAgentMemories,

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { realtimeRunsUrl } from "@appstrate/core/realtime-url";
 import { useEffect, useRef } from "react";
 import { useQueryClient, type InvalidateOptions, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
@@ -12,7 +13,6 @@ import { parseSseFrames } from "@appstrate/core/sse";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { SESSIONS_QUERY_KEY as CHAT_SESSIONS_QUERY_KEY } from "@appstrate/module-chat/unread";
 import { chatSessionUpdateEventSchema } from "@appstrate/shared-types";
-import { withViewAsParam } from "../lib/scoping-headers";
 import { endPreviewIfRefused } from "../lib/view-as-refusal";
 import { useViewAsHeader } from "../stores/view-as-store";
 import {
@@ -433,10 +433,7 @@ export function useGlobalRunSync() {
       const res = await fetch(
         // `verbose` is deliberately absent: it only affects `run_log`, which
         // we no longer subscribe to.
-        withViewAsParam(
-          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=${channels}`,
-          viewAs,
-        ),
+        realtimeRunsUrl({ orgId, spaceId, channels: channels.split(","), viewAs }),
         {
           credentials: "include",
           signal: controller.signal,

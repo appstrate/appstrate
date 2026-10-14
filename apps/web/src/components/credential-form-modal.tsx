@@ -27,10 +27,9 @@ import { useState } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
-import { Modal } from "./modal";
 import { FormModal } from "./form-modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { TestResultSpan } from "./test-result-span";
 import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
@@ -61,9 +60,8 @@ import { EndpointFields } from "./model-form/endpoint-fields";
 import { CustomEndpointItem } from "./model-form/provider-picker";
 import { PROVIDER_ICONS } from "./icons";
 import { ProviderPickerGroups } from "./provider-picker-groups";
-import { OAuthPairingBody } from "./oauth-pairing-body";
+import { PairingModal } from "./pairing-modal";
 import { PreferencesModelsLink } from "./preferences-models-link";
-import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 
 /**
  * Canonical payload shape submitted to `POST /api/model-provider-credentials`.
@@ -273,8 +271,6 @@ export function CredentialFormModal({
   const apiKeyValidate = (v: string) =>
     !credential && !v.trim() ? t("validation.required", { ns: "common" }) : undefined;
 
-  const oauthDismiss = usePairingDismissConfirm(onClose);
-
   const title = !credential
     ? t(personal ? "credentials.form.titlePersonal" : "credentials.form.title")
     : isOAuthSelected
@@ -328,32 +324,23 @@ export function CredentialFormModal({
       ? !!credential.needs_reconnection && credential.allowed_actions.includes("reconnect")
       : true;
     return (
-      <>
-        <Modal open onClose={oauthDismiss.requestClose} title={title}>
-          <div className="space-y-4">
-            {!isEditing && (
-              <div className="space-y-2">
-                <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
-                {providerPicker}
-              </div>
-            )}
-            {showPairing && (
-              <OAuthPairingBody
-                key={selectedOption.providerId}
-                providerId={selectedOption.providerId}
-                target={
-                  credential
-                    ? { credentialId: credential.id }
-                    : { ownerType: personal ? "user" : "org" }
-                }
-                onConnected={() => onClose()}
-                onBusyChange={oauthDismiss.onBusyChange}
-              />
-            )}
+      <PairingModal
+        title={title}
+        onClose={onClose}
+        providerId={selectedOption.providerId}
+        target={
+          credential ? { credentialId: credential.id } : { ownerType: personal ? "user" : "org" }
+        }
+        onConnected={() => onClose()}
+        showPairing={showPairing}
+      >
+        {!isEditing && (
+          <div className="space-y-2">
+            <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
+            {providerPicker}
           </div>
-        </Modal>
-        {oauthDismiss.confirmDialog}
-      </>
+        )}
+      </PairingModal>
     );
   }
 

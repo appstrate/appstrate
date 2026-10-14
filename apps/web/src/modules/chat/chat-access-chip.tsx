@@ -120,10 +120,7 @@ export function ChatCapabilityList({
             {off ? (
               <BotOffIcon aria-hidden="true" className="text-muted-foreground size-3.5 shrink-0" />
             ) : granted ? (
-              <CheckIcon
-                aria-hidden="true"
-                className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-              />
+              <CheckIcon aria-hidden="true" className="text-success size-3.5 shrink-0" />
             ) : (
               <XIcon aria-hidden="true" className="text-muted-foreground/60 size-3.5 shrink-0" />
             )}

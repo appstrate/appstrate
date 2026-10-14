@@ -4,7 +4,7 @@ import { useRef, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "./modal";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import type { AgentInputFormHandle } from "./agent-input-form";
 
 /**

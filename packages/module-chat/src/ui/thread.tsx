@@ -25,7 +25,6 @@ import {
   ArrowDownIcon,
   CheckIcon,
   CopyIcon,
-  FileIcon,
   PaperclipIcon,
   RotateCcwIcon,
   SendHorizontalIcon,
@@ -45,7 +44,7 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
-import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
+import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
@@ -212,19 +211,26 @@ function ComposerAttachmentChip() {
   const size = useAuiState((s) => s.attachment.file?.size ?? 0);
   const { formatBytes, t } = useChatHost();
   return (
-    <AttachmentPrimitive.Root className="bg-muted flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs">
-      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="max-w-40 truncate font-medium">{name}</span>
-      {size > 0 && <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>}
-      <AttachmentPrimitive.Remove asChild>
-        <button
-          type="button"
-          aria-label={t("composer.removeAttachment")}
-          className="text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
-        >
-          <XIcon className="size-3.5" />
-        </button>
-      </AttachmentPrimitive.Remove>
+    <AttachmentPrimitive.Root className="inline-flex">
+      <InertAttachmentChip
+        name={name}
+        trailing={
+          <>
+            {size > 0 && (
+              <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
+            )}
+            <AttachmentPrimitive.Remove asChild>
+              <button
+                type="button"
+                aria-label={t("composer.removeAttachment")}
+                className="text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </AttachmentPrimitive.Remove>
+          </>
+        }
+      />
     </AttachmentPrimitive.Root>
   );
 }
@@ -234,11 +240,10 @@ function ComposerAttachmentChip() {
  * (ai-SDK `FileUIPart`) carries no byte size, so the chip shows the name + icon
  * only (the composer chip shows the size, read from the picked File).
  */
-function FileAttachmentPart(props: { filename?: string }) {
+function FileAttachmentPart({ filename }: { filename?: string }) {
   return (
-    <div className="bg-background text-foreground mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs">
-      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="max-w-52 truncate font-medium">{props.filename ?? UNNAMED_FILE}</span>
+    <div className="mt-1">
+      <InertAttachmentChip name={filename ?? ""} />
     </div>
   );
 }

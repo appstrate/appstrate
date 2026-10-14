@@ -29,7 +29,7 @@ import {
   type ModelGenerationCapabilities,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-import { isModelLive } from "../model-liveness.ts";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
 
 const KEY = "appstrate.chat.modelPick";
 const GENERATION_KEY = "appstrate.chat.generation";
@@ -144,7 +144,7 @@ export function setModelCatalog(
   generationCapabilities = new Map(
     models.flatMap((model) => (model.generation ? [[model.id, model.generation] as const] : [])),
   );
-  const live = models.filter(isModelLive);
+  const live = models.filter(isModelSelectable);
   liveModelIds = new Set(live.map((m) => m.id));
 
   orgDefaultModelId = (live.find((m) => m.is_default) ?? live[0])?.id ?? null;

@@ -33,7 +33,7 @@ import {
 import { ErrorState } from "./page-states";
 import { SettingsSkeleton } from "./loading-skeletons";
 import { SectionCard } from "./section-card";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 
 /**
  * Where invoices, receipts and dunning mail go instead of every owner's inbox.

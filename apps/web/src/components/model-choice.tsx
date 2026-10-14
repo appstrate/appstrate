@@ -12,7 +12,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { DiscoveryResult } from "./model-form/discovery-result";
 import { ManualModelEntry } from "./model-form/manual-model-entry";
 import { ModelPickList } from "./model-form/model-pick-list";

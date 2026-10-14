@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cn } from "@appstrate/ui/cn";
-import { CopyButton } from "./copy-button";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
 
 /**
  * Read-only value with a copy button.

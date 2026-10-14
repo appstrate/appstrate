@@ -15,7 +15,7 @@ import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { Label } from "@appstrate/ui/components/label";
 import { type OrgModelInfo } from "../hooks/use-models";
 import { DiscoveryControls } from "./model-form/discovery-controls";

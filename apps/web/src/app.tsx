@@ -51,7 +51,7 @@ import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
 import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
-import { Spinner } from "./components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { AppToaster } from "./components/app-toaster";

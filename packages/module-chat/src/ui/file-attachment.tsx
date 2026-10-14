@@ -13,6 +13,7 @@
  * seam, so callers pass a file and nothing else.
  */
 
+import type { ReactNode } from "react";
 import { DownloadIcon, EyeIcon, FileIcon } from "lucide-react";
 import { isImageMime } from "@appstrate/core/mime";
 import { fileActivation } from "./file-activation.ts";
@@ -30,12 +31,25 @@ const ATTACHMENT_CHIP_CLASS =
  */
 export const ATTACHMENT_IMAGE_CLASS = "size-16 shrink-0 rounded-lg border object-cover";
 
-/** Inert chip: no file id to act on yet, or no grant to act on it. */
-export function InertAttachmentChip({ name, title }: { name: string; title?: string }) {
+/**
+ * Non-activatable chip: a file with no id to act on yet, no grant to act on it,
+ * or a staged upload. `trailing` adds what follows the name (a pending
+ * upload's size and remove button).
+ */
+export function InertAttachmentChip({
+  name,
+  title,
+  trailing,
+}: {
+  name: string;
+  title?: string;
+  trailing?: ReactNode;
+}) {
   return (
     <div className={ATTACHMENT_CHIP_CLASS} title={title}>
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
       <span className="truncate font-medium">{name || UNNAMED_FILE}</span>
+      {trailing}
     </div>
   );
 }

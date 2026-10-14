@@ -18,7 +18,7 @@ import { SettingsSkeleton } from "../components/loading-skeletons";
 import { useModalParam } from "../hooks/use-modal-param";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
-import { Spinner } from "../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
 import { DataTable } from "../components/data-table";

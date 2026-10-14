@@ -10,10 +10,8 @@ import {
   useIntegrationReadinessEntry,
   useAgentsConsumingIntegration,
   type AgentIntegrationEntry,
-  type IntegrationAuthStatus,
   type IntegrationCandidate,
   type IntegrationDetailWire,
-  type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import { usePackageActivation } from "../../hooks/use-library";
 import { ApiError } from "../../api/errors";
@@ -143,11 +141,8 @@ export function AgentIntegrationsBlock({
       control: true,
       cell: ({ entry, state }) => (
         <IntegrationConnectionCell
-          packageId={entry.id}
+          entry={entry}
           state={state}
-          agentTools={entry.tools}
-          agentScopes={entry.scopes}
-          required={entry.required === true}
           agentPackageId={agentPackageId}
           {...(scheduleOverrides ? { scheduleOverrides } : {})}
         />
@@ -211,24 +206,20 @@ export function AgentIntegrationsBlock({
 }
 
 function IntegrationConnectionCell({
-  packageId,
+  entry,
   state,
-  agentTools,
-  agentScopes,
-  required,
   agentPackageId,
   scheduleOverrides,
 }: {
-  packageId: string;
+  /** The agent's dependency; its `required` flag decides whether an inactive one refuses the run. */
+  entry: AgentIntegrationEntry;
   state: DetailState;
-  agentTools: string[] | "*" | undefined;
-  agentScopes: string[] | undefined;
-  /** The agent's `required` flag: an inactive required integration refuses the run. */
-  required: boolean;
   agentPackageId: string;
   scheduleOverrides?: ScheduleOverrides;
 }) {
   const { detail, isLoading, error } = state;
+  const packageId = entry.id;
+  const required = entry.required === true;
 
   if (!detail) {
     // A placeholder only while a fetch is in flight: a disabled read (no `integrations:read`) never settles.
@@ -251,12 +242,8 @@ function IntegrationConnectionCell({
   if (scheduleOverrides) {
     return (
       <IntegrationConnectionPicker
-        integrationId={packageId}
+        integration={entry}
         agentPackageId={agentPackageId}
-        manifest={detail.manifest}
-        authStatuses={detail.auths}
-        agentTools={agentTools}
-        agentScopes={agentScopes}
         persistence={{
           mode: "override",
           value: scheduleOverrides.value[packageId] ?? null,
@@ -267,16 +254,7 @@ function IntegrationConnectionCell({
     );
   }
 
-  return (
-    <ManagedIntegration
-      packageId={packageId}
-      agentPackageId={agentPackageId}
-      manifest={detail.manifest}
-      authStatuses={detail.auths}
-      agentTools={agentTools}
-      agentScopes={agentScopes}
-    />
-  );
+  return <ManagedIntegration entry={entry} agentPackageId={agentPackageId} />;
 }
 
 /**
@@ -285,21 +263,14 @@ function IntegrationConnectionCell({
  * the parent's loading / not-active guards have passed — when the picker renders.
  */
 function ManagedIntegration({
-  packageId,
+  entry: integration,
   agentPackageId,
-  manifest,
-  authStatuses,
-  agentTools,
-  agentScopes,
 }: {
-  packageId: string;
+  entry: AgentIntegrationEntry;
   agentPackageId: string;
-  manifest: IntegrationManifestView;
-  authStatuses: IntegrationAuthStatus[];
-  agentTools: string[] | "*" | undefined;
-  agentScopes: string[] | undefined;
 }) {
   const { t } = useTranslation(["agents"]);
+  const packageId = integration.id;
   const { data: entry } = useIntegrationReadinessEntry(packageId, agentPackageId);
   const resolution = entry?.resolution;
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
@@ -327,14 +298,7 @@ function ManagedIntegration({
 
   return (
     <div className="min-w-0">
-      <IntegrationConnectionPicker
-        integrationId={packageId}
-        agentPackageId={agentPackageId}
-        manifest={manifest}
-        authStatuses={authStatuses}
-        agentTools={agentTools}
-        agentScopes={agentScopes}
-      />
+      <IntegrationConnectionPicker integration={integration} agentPackageId={agentPackageId} />
       {note && (
         <p
           className={cn(

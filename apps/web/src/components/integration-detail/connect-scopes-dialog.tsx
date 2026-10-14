@@ -7,7 +7,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import { Modal } from "../modal";
-import { useHostedConnectPopup } from "../integration-connect/use-integration-oauth-popup";
+import { useHostedConnectPopup } from "../integration-connect/use-hosted-connect-popup";
 import { scopeLabels } from "../integration-connect/scope-labels";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { connectPopupInput, type ScopeTarget } from "./connect-scope-choice";

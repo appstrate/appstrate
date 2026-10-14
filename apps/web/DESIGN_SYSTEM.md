@@ -42,7 +42,7 @@ they start with `packages/` or `e2e/`.
   read is on its way: no `0`, no « Aucun… », no switch or field holding a value
   the server has not given (a click on it would write that default). A route waits on its chunk and its
   permissions under the skeleton its page draws (`skeletonOf`, `app.tsx`), so
-  nothing jumps. `Spinner` (`components/spinner.tsx`) is work in flight on a
+  nothing jumps. `Spinner` (`@appstrate/ui/components/spinner`) is work in flight on a
   control (a button, a row being saved), never content on its way; no centred
   spinner, no « Chargement… » sentence. `BootScreen` is the one exception: before
   the shell exists there is no page to draw.

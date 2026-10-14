@@ -22,7 +22,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon } from "lucide-react";
+import { PlusIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { relativeAge } from "@appstrate/core/format";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
 import {
   Dialog,
@@ -64,19 +66,18 @@ import { useSessions } from "./use-sessions.ts";
  * than a 56px column holds, so the unit comes from the bundle (plural rules
  * included) and only the number is computed here.
  */
+const AGE_KEY = {
+  now: "threads.age.now",
+  minute: "threads.age.minutes",
+  hour: "threads.age.hours",
+  day: "threads.age.days",
+  month: "threads.age.months",
+  year: "threads.age.years",
+} as const;
+
 function relativeTime(iso: string, now: number, t: ChatTranslate): string {
-  const sec = Math.round((now - new Date(iso).getTime()) / 1000);
-  if (Number.isNaN(sec)) return "";
-  if (sec < 60) return t("threads.age.now");
-  const min = Math.round(sec / 60);
-  if (min < 60) return t("threads.age.minutes", { count: min });
-  const hour = Math.round(min / 60);
-  if (hour < 24) return t("threads.age.hours", { count: hour });
-  const day = Math.round(hour / 24);
-  if (day < 30) return t("threads.age.days", { count: day });
-  const month = Math.round(day / 30);
-  if (month < 12) return t("threads.age.months", { count: month });
-  return t("threads.age.years", { count: Math.round(day / 365) });
+  const age = relativeAge(iso, now);
+  return age ? t(AGE_KEY[age.unit], { count: age.count }) : "";
 }
 
 /**
@@ -178,7 +179,7 @@ export function ChatConversationList({
                 onClick={() => void fetchNextPage()}
                 className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-sidebar-ring flex h-7 w-full items-center rounded-md px-2 text-left text-xs outline-none focus-visible:ring-2 disabled:opacity-50"
               >
-                {isFetchingNextPage && <Loader2Icon className="mr-1.5 size-3 animate-spin" />}
+                {isFetchingNextPage && <Spinner className="mr-1.5 size-3" />}
                 {t("threads.showMore")}
               </button>
             </SidebarMenuItem>
@@ -283,9 +284,9 @@ function ConversationRow({
         className={`absolute top-1 right-1 flex h-6 w-14 items-center justify-end rounded-md ${canWrite ? "group-hover/menu-item:bg-sidebar-accent" : ""}`}
       >
         {session.generating ? (
-          <Loader2Icon
-            className="text-sidebar-foreground/70 size-3.5 animate-spin"
-            aria-label={t("threads.generating")}
+          <Spinner
+            className="text-sidebar-foreground/70 size-3.5"
+            label={t("threads.generating")}
           />
         ) : unread ? (
           <span

@@ -7,10 +7,11 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { isQueryInFlight } from "../lib/query-state";
 import { OptionSelect, SelectItem } from "@appstrate/ui/components/select";
 import { useModels } from "../hooks/use-models";
-import { isModelSelectable } from "../lib/model-selectability";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
 import { ModelSelect } from "./model-select";
 import { useProxies } from "../hooks/use-proxies";
 import { useIntegrationDetail } from "../hooks/use-integrations";
+import { useIntegrationName } from "../hooks/use-integration-name";
 import {
   connectableAuthKeysForAgent,
   resolveEffectiveToolSelection,
@@ -424,7 +425,7 @@ function IntegrationOverrideRow({
 }) {
   const detailQuery = useIntegrationDetail(integration.id);
   const { data: detail } = detailQuery;
-  const displayName = detail?.manifest.display_name ?? integration.id;
+  const displayName = useIntegrationName(integration.id);
 
   // Gate the row on whether the agent can connect this integration at all
   // (declared auth the actor can start a flow on, given its EFFECTIVE tool
@@ -447,12 +448,8 @@ function IntegrationOverrideRow({
     <div className="space-y-1.5" data-testid={`conn-override-row-${integration.id}`}>
       <div className="text-xs font-medium">{displayName}</div>
       <IntegrationConnectionPicker
-        integrationId={integration.id}
+        integration={integration}
         agentPackageId={agentPackageId}
-        manifest={detail.manifest}
-        authStatuses={detail.auths}
-        agentTools={integration.tools}
-        agentScopes={integration.scopes}
         persistence={{ mode: "override", value, onChange }}
         version={version}
         onLeave={onLeave}

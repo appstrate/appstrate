@@ -25,18 +25,14 @@
  */
 
 import * as React from "react";
-import {
-  AlertTriangleIcon,
-  CheckIcon,
-  ExternalLinkIcon,
-  Loader2Icon,
-  LockIcon,
-} from "lucide-react";
+import { AlertTriangleIcon, ExternalLinkIcon, LockIcon } from "lucide-react";
+import { RunStatusIcon } from "@appstrate/ui/components/run-status";
+import { Spinner } from "@appstrate/ui/components/spinner";
+import { useLiveElapsedMs } from "@appstrate/ui/use-live-elapsed-ms";
 import { Modal } from "./modal.tsx";
 import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
-import { useLiveElapsedMs } from "./use-elapsed.ts";
 import { useChatHost } from "./runtime-context.ts";
 import {
   autoPresentFile,
@@ -71,21 +67,12 @@ function FileChips({ files }: { files: ChatRunFile[] }) {
   );
 }
 
-const STATUS_TONE: Record<RunStatus, string> = {
-  pending: "text-muted-foreground",
-  running: "text-blue-600 dark:text-blue-400",
-  success: "text-emerald-600 dark:text-emerald-400",
-  failed: "text-destructive",
-  timeout: "text-amber-600 dark:text-amber-400",
-  cancelled: "text-muted-foreground",
-};
-
 /**
  * Leading status glyph (no label — the icon IS the status). Prefers the run's
  * real status (SSE / launch result); until that exists it falls back to the
  * tool-call phase so a just-started run still shows a spinner (or an error
- * state) rather than nothing. A non-terminal run spins; success shows a check;
- * any other terminal state shows a warning triangle.
+ * state) rather than nothing. A non-terminal run spins; each way of ending has its
+ * own icon.
  */
 function StatusIcon({
   status,
@@ -98,18 +85,12 @@ function StatusIcon({
 }) {
   if (denied) return <LockIcon className="text-muted-foreground size-4 shrink-0" />;
   if (status) {
-    if (!isTerminalStatus(status)) {
-      return <Loader2Icon className={`size-4 shrink-0 animate-spin ${STATUS_TONE[status]}`} />;
-    }
-    if (status === "success") {
-      return <CheckIcon className={`size-4 shrink-0 ${STATUS_TONE[status]}`} />;
-    }
-    return <AlertTriangleIcon className={`size-4 shrink-0 ${STATUS_TONE[status]}`} />;
+    return <RunStatusIcon status={status} className="size-4 shrink-0" />;
   }
   if (phase === "error") {
     return <AlertTriangleIcon className="text-destructive size-4 shrink-0" />;
   }
-  return <Loader2Icon className="text-muted-foreground size-4 shrink-0 animate-spin" />;
+  return <Spinner className="text-muted-foreground size-4 shrink-0" />;
 }
 
 export function ChatRunProgressCard({

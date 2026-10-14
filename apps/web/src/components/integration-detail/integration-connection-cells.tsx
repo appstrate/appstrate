@@ -28,7 +28,7 @@ import { ConnectionStatusBadge } from "../integration-connect/connection-status-
 import { ConnectionScopeBadge } from "../integration-connect/connection-scope-badge";
 import { ConnectionShareEditor } from "../integration-connect/connection-share-editor";
 import { ConnectionVariablesLine } from "../integration-connect/connection-variables-line";
-import { useHostedConnectPopup } from "../integration-connect/use-integration-oauth-popup";
+import { useHostedConnectPopup } from "../integration-connect/use-hosted-connect-popup";
 import { ConnectionDeleteConfirm } from "../integration-connect/connection-delete-confirm";
 import { connectionLockHintKey } from "../integration-connect/connection-ownership";
 import {

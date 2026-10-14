@@ -47,7 +47,7 @@ import {
 } from "../../lib/package-file-tree";
 import { usePackageFile, usePackageFileDownload } from "./use-package-file";
 
-interface FilePreviewProps {
+interface PackageFileSourceProps {
   /** Target of the tree's `aria-controls` — see `FileTree`'s `controlsId`. */
   id: string;
   packageId: string | undefined;
@@ -66,7 +66,7 @@ interface FilePreviewProps {
   downloadPath?: string | null;
 }
 
-export function FilePreview({
+export function PackageFileSource({
   id,
   packageId,
   version,
@@ -75,7 +75,7 @@ export function FilePreview({
   hideHeader = false,
   actions,
   downloadPath = entry.path,
-}: FilePreviewProps) {
+}: PackageFileSourceProps) {
   const { t } = useTranslation("agents");
   const { resolvedTheme } = useTheme();
   const { text, isLoading, isError } = usePackageFile(packageId, version, entry);

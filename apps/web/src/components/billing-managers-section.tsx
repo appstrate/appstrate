@@ -34,7 +34,7 @@ import { memberLabel } from "../lib/members";
 import { ErrorState } from "./page-states";
 import { SettingsSkeleton } from "./loading-skeletons";
 import { SectionCard } from "./section-card";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 
 /** What a row the server would now refuse says about itself. */
 const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, string]> = {

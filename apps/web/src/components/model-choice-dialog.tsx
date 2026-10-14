@@ -12,7 +12,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { OptionSelect } from "@appstrate/ui/components/select";
 import { Modal } from "./modal";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { ErrorState } from "./page-states";
 import { TextSkeleton } from "./loading-skeletons";
 import { ModelChoiceList } from "./model-choice";

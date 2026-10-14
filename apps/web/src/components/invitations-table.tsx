@@ -19,7 +19,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useSpaceLabelOf, useSpaces } from "../hooks/use-spaces";
 import { invitationUrl } from "../lib/invitation-url";
 import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { useModalTarget } from "../hooks/use-modal-param";
 import { ConfirmModal } from "./confirm-modal";
 import { DataTable } from "./data-table";

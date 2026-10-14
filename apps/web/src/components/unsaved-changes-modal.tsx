@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { UnsavedBlocker } from "../hooks/use-unsaved-changes";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 
 interface UnsavedChangesModalProps {
   blocker: UnsavedBlocker;

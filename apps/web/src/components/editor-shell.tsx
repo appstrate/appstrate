@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { PageHeader } from "./page-header";
 import { SettingsHeading } from "./settings/settings-heading";
 import { packageListPath } from "../lib/package-paths";

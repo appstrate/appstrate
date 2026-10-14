@@ -5,16 +5,16 @@ import { AlertTriangle, XCircle, Puzzle, Check } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { unboundLabel } from "./integration-connect/integration-run-readiness";
 import {
   blockingIntegrationIds,
   useAgentConnectionReadiness,
-  useIntegrationDetail,
   useIntegrationReadinessEntry,
 } from "../hooks/use-integrations";
+import { useIntegrationName } from "../hooks/use-integration-name";
 import { usePermissions } from "../hooks/use-permissions";
 import {
   integrationIdOfField,
@@ -114,7 +114,6 @@ export function MissingRow({
 }) {
   const { t } = useTranslation(["agents"]);
   const packageId = integrationIdOfField(err.field);
-  const { data: detail } = useIntegrationDetail(packageId);
   const readsIntegrations = usePermissions().can("integrations:read");
   // Structural failures can't be fixed by connecting — an admin must activate
   // the integration, or the agent's dependency or configuration must change. No picker.
@@ -140,10 +139,10 @@ export function MissingRow({
   // `integrations:read`: without it neither lands, so the row names the
   // integration and waits for nothing.
   const pickable = !isStructural && readsIntegrations;
-  const canRenderPicker = pickable && !!detail && !!verdict;
+  const canRenderPicker = pickable && !!verdict;
   const loadingVerdict = pickable && !canRenderPicker;
 
-  const displayName = detail?.manifest.display_name ?? packageId;
+  const displayName = useIntegrationName(packageId);
   // An item code this build has no sentence for keeps the resolver's own message.
   const message = refusalMessage(err) ?? err.message;
   const Icon = resolved ? Check : isStructural ? XCircle : AlertTriangle;
@@ -176,12 +175,8 @@ export function MissingRow({
       {canRenderPicker && (
         <div className="border-border/60 mt-1 border-t pt-2">
           <IntegrationConnectionPicker
-            integrationId={packageId}
+            integration={{ id: packageId, tools: entry?.tools, scopes: entry?.scopes }}
             agentPackageId={agentPackageId}
-            manifest={detail.manifest}
-            authStatuses={detail.auths}
-            agentTools={entry?.tools}
-            agentScopes={entry?.scopes}
             version={version}
           />
         </div>

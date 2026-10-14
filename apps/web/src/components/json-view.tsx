@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { JsonView as JsonViewLite, allExpanded, defaultStyles } from "react-json-view-lite";
 import "react-json-view-lite/dist/index.css";
-import { CopyButton } from "./copy-button";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
 
 interface JsonViewProps {
   data: unknown;

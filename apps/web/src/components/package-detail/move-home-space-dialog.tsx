@@ -9,7 +9,7 @@ import { CheckboxField } from "@appstrate/ui/components/checkbox";
 import { FormItem } from "@appstrate/ui/components/field";
 import type { PackageType } from "@appstrate/core/validation";
 import { Modal } from "../modal";
-import { Spinner } from "../spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { spaceLabel } from "../../lib/space-label";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useMovePackageHome } from "../../hooks/use-packages";

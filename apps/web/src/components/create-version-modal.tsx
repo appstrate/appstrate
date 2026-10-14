@@ -8,7 +8,7 @@ import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
 import { ApiError } from "../api/errors";
 import { errorMessage } from "../lib/mutation-error";

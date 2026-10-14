@@ -15,7 +15,8 @@
 
 import type { IntegrationConnectCompletion } from "@appstrate/core/connect-handshake";
 import { readConnectOffers } from "../connect-offer.ts";
-import { asRecord, unwrapResult } from "./tool-result.ts";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
+import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 
 export interface AuthOffer {
   authUrl: string;
@@ -140,7 +141,7 @@ export function extractRunAndWaitAuthOffers(part: {
 
 /** A started run (it has an id), not a refused launch. */
 export function isStartedRunResult(result: unknown): boolean {
-  return typeof asRecord(unwrapResult(result))?.id === "string";
+  return typeof asRecordOrNull(unwrapMcpResult(result))?.id === "string";
 }
 
 /** The resume turn's instruction: a run that started anyway is re-run only if the user asks. */

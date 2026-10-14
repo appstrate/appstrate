@@ -11,7 +11,7 @@ import { ApiError, client, type paths } from "../api/client";
 import { useAuth } from "../hooks/use-auth";
 import { useHostedAuthRedirect, isHostedAuthEnabled } from "../hooks/use-hosted-auth-redirect";
 import { orgStore } from "../stores/org-store";
-import { Spinner } from "../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { AuthLayout } from "../components/auth-layout";
 import { RegisterForm } from "../components/register-form";
 import { LoginForm } from "../components/login-form";

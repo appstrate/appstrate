@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, XCircle, Clock, Ban } from "lucide-react";
-import { Spinner } from "./spinner";
 import { cn } from "@appstrate/ui/cn";
+import { RunStatusIcon } from "@appstrate/ui/components/run-status";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import type { BadgeProps } from "@appstrate/ui/components/badge";
 
@@ -50,24 +49,6 @@ const statusVariantMap: Record<string, BadgeProps["variant"]> = {
   cancelled: "cancelled",
 };
 
-const statusColorMap: Record<string, string> = {
-  success: "text-success",
-  failed: "text-destructive",
-  running: "text-primary",
-  pending: "text-muted-foreground",
-  timeout: "text-warning",
-  cancelled: "text-muted-foreground",
-};
-
-const statusIconMap: Record<string, React.ReactNode> = {
-  running: <Spinner className="h-3 w-3" />,
-  pending: <Spinner className="h-3 w-3" />,
-  success: <CheckCircle2 className="h-3 w-3" />,
-  failed: <XCircle className="h-3 w-3" />,
-  timeout: <Clock className="h-3 w-3" />,
-  cancelled: <Ban className="h-3 w-3" />,
-};
-
 export function Badge({
   status,
   compact,
@@ -79,7 +60,7 @@ export function Badge({
 }) {
   const { t } = useTranslation();
   const variant = statusVariantMap[status] || "pending";
-  const icon = statusIconMap[status];
+  const icon = <RunStatusIcon status={status} className="h-3 w-3" />;
   const dot = unread && (
     <span className="bg-destructive absolute -top-1 -right-1 size-2 rounded-full" />
   );
@@ -98,12 +79,8 @@ export function Badge({
 
   return (
     <span className="relative shrink-0">
-      {/* Mobile: bare icon with status color */}
-      <span
-        className={`sm:hidden [&_svg]:h-4 [&_svg]:w-4 ${statusColorMap[status] ?? "text-muted-foreground"}`}
-      >
-        {icon}
-      </span>
+      {/* Mobile: bare icon, toned by its status */}
+      <span className="sm:hidden [&_svg]:h-4 [&_svg]:w-4">{icon}</span>
       {/* Desktop: full badge */}
       <UIBadge variant={variant} className="hidden gap-1 sm:inline-flex">
         {icon}

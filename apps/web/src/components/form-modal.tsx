@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
 import { Modal } from "./modal";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 
 interface FormModalProps {
   title: string;

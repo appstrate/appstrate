@@ -8,7 +8,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { client } from "../api/client";
 import { orgStore } from "../stores/org-store";
-import { Spinner } from "../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { AuthLayout } from "../components/auth-layout";
 import { errorMessage } from "../lib/mutation-error";
 

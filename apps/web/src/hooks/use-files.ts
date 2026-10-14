@@ -9,7 +9,7 @@ import { downloadOrToast } from "../lib/blob-download";
 import { invalidateOrgDetail, invalidatePaths, invalidateRunDetails } from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
-import { useCopyToClipboard } from "./use-copy-to-clipboard";
+import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 
 /** Wire shape of a single file (OpenAPI list-item schema). */
 export type FileDto =

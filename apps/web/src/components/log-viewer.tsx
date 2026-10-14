@@ -41,7 +41,7 @@ import { Badge } from "./status-badge";
 import { formatDateField } from "../lib/format-date";
 import { historyRuns, recalledMemories } from "../lib/runtime-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 
 const levelIconConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
   debug: { icon: Bug, className: "text-muted-foreground", label: "DEBUG" },

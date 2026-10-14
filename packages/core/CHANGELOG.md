@@ -21,6 +21,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`LUCIDE_ICON_PREFIX`** is `"lucide:"`, the prefix of an agent's icon.
 - **`ORG_LOGO_MAX_BYTES`** (`@appstrate/core/validation`): the largest
   organization logo image `PUT /api/orgs/{orgId}/logo` accepts, 36 000 bytes.
+- **`unwrapMcpResult(value)`** (`@appstrate/core/mcp-result`): the payload inside
+  an MCP tool result — a `CallToolResult`, a bare content array or a JSON
+  string — recovered even when a prose text part (the turn-budget note) follows
+  it.
+- **`realtimeRunsUrl({ orgId, spaceId, runId?, channels?, verbose?, viewAs? })`**
+  (`@appstrate/core/realtime-url`): the URL of the realtime SSE stream, org-wide
+  or one run's, scope and role preview carried in the query.
+- **`isModelSelectable(model)`** (`@appstrate/core/model-selectable`): whether a
+  listed model can be picked — enabled, and its credential not flagged for
+  reconnection.
+- **`relativeAge(iso, now)`** and **`RelativeAgeUnit`** (`@appstrate/core/format`):
+  how long ago a timestamp was, as a rounded `{ unit, count }` the caller words
+  in its own language.
+- **`listenConnectCompletion(target, onCompletion, host)`**, **`connectPopupName(packageId)`**
+  and **`CONNECT_POPUP_FEATURES`** (`@appstrate/core/connect-handshake`): the
+  completion listener both connect surfaces share (origin-checked `postMessage`
+  plus `BroadcastChannel`), the per-integration popup window name, and the one
+  popup size.
+
+### Changed
+
+- **`acceptsCompletionMessage`** (`@appstrate/core/connect-handshake`) is now a
+  type guard: a `true` narrows `event.data` to `IntegrationConnectCompletion`.
 
 ## [16.0.0] — 2026-10-14
 

@@ -21,7 +21,7 @@ import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListView } from "../stores/list-view-store";
-import { Spinner } from "../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
 

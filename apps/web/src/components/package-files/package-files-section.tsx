@@ -12,16 +12,14 @@
  */
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
-import { $api } from "../../api/client";
 import { useModalParam } from "../../hooks/use-modal-param";
-import { useOrgScope } from "../../hooks/use-org-scope";
 import { bundleFileRole, type BundleFileRole } from "../../lib/bundle-file-role";
-import { splitPackageRef } from "../../lib/package-paths";
 import { DataTable } from "../data-table";
 import { JsonEditor } from "../json-editor";
 import { Modal } from "../modal";
 import { SettingsHeading } from "../settings/settings-heading";
 import { usePackageFileColumns } from "./package-files-columns";
+import { usePackageFileIndex } from "./use-package-file-index";
 
 /** The manifest first, then the main file, then the rest by path. */
 const ROLE_ORDER: BundleFileRole[] = ["manifest", "main", "documentation", "entry-point"];
@@ -40,13 +38,7 @@ export function PackageFilesSection({
   filesHref: (path: string) => string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const scope = useOrgScope();
-  const { data, error } = $api.useQuery(
-    "get",
-    "/api/packages/{scope}/{name}/files",
-    { params: { path: splitPackageRef(packageId), header: scope.header } },
-    { enabled: scope.enabled },
-  );
+  const { data, error } = usePackageFileIndex(packageId);
   const columns = usePackageFileColumns(type, manifest);
   const rank = (path: string) => {
     const index = ROLE_ORDER.indexOf(bundleFileRole(type, path, manifest));

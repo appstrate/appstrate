@@ -20,7 +20,7 @@ import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../../api/errors";
 import { Modal } from "../modal";
-import { Spinner } from "../spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { SpaceRoleSelect } from "../space-role-select";
 import { splitPackageRef } from "../../lib/package-paths";
 import { useOrgDetail } from "../../hooks/use-org";

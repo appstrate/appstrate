@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { orderRowActions, type RowAction } from "../lib/row-action-order";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 
 export type { RowAction };
 

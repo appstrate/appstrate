@@ -29,7 +29,7 @@ import { OptionSelect } from "@appstrate/ui/components/select";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SettingsSkeleton } from "@/components/loading-skeletons";
-import { Spinner } from "@/components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { Modal } from "@/components/modal";
 import { GitHubIcon, GoogleIcon } from "@/components/icons";

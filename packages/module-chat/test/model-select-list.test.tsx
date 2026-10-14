@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ModelPickerList } from "@appstrate/ui/components/model-picker";
 import { groupModelsForPicker } from "@appstrate/ui/components/model-picker-groups";
 import { buildModelPickerLabels } from "@appstrate/ui/components/model-picker-labels";
-import { isModelLive } from "../src/model-liveness.ts";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
 
 const unpaid = {
   id: "unpaid",
@@ -56,7 +56,7 @@ describe("composer model list", () => {
         value={null}
         onSelect={() => {}}
         labels={labels}
-        selectable={isModelLive}
+        selectable={isModelSelectable}
       />,
     );
     expect(disabledByLabel(html)).toEqual({ Claude: false, Mistral: true, GPT: false });

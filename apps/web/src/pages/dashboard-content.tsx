@@ -29,7 +29,7 @@ import { RunRow } from "../components/run-row";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem } from "../lib/package-card-item";
 import { useCanReach } from "../hooks/use-can-reach";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
 import { formatDateField } from "../lib/format-date";
 import { dashboardSections } from "../lib/dashboard-sections";

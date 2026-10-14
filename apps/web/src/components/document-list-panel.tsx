@@ -183,7 +183,8 @@ export function DocumentListPanel({
             renderCard={(doc) => (
               <FileTile
                 file={doc}
-                onDownload={download}
+                isKeepPending={pendingKeepId === doc.id}
+                onDownload={onDownload}
                 onDelete={onDelete}
                 onKeep={onKeep}
                 onPreview={(d) => preview.open(d.id)}

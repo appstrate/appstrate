@@ -6,7 +6,7 @@ import { Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
@@ -151,37 +151,25 @@ export function RunAgentButton({
   return (
     <>
       <DisabledReasonTooltip reason={blockedTitle}>
-        {showLabel ? (
-          <Button
-            variant={variant}
-            size={size}
-            onClick={handleClick}
-            disabled={isDisabled}
-            title={blockedTitle ? undefined : t("detail.run")}
-            className={cn("relative", className)}
-          >
-            {isPending ? (
-              <Spinner />
-            ) : (
-              <Play className={cn("size-3.5", variant === "outline" && "text-primary")} />
-            )}
-            {t("detail.run")}
-            {warningDot}
-          </Button>
-        ) : (
-          <Button
-            variant={variant}
-            size={size}
-            className={cn("relative", className)}
-            onClick={handleClick}
-            disabled={isDisabled}
-            title={blockedTitle ? undefined : t("detail.run")}
-            aria-label={t("detail.run")}
-          >
-            {isPending ? <Spinner /> : <Play size={14} />}
-            {warningDot}
-          </Button>
-        )}
+        <Button
+          variant={variant}
+          size={size}
+          className={cn("relative", className)}
+          onClick={handleClick}
+          disabled={isDisabled}
+          title={blockedTitle ? undefined : t("detail.run")}
+          aria-label={showLabel ? undefined : t("detail.run")}
+        >
+          {isPending ? (
+            <Spinner />
+          ) : (
+            <Play
+              className={cn("size-3.5", showLabel && variant === "outline" && "text-primary")}
+            />
+          )}
+          {showLabel && t("detail.run")}
+          {warningDot}
+        </Button>
       </DisabledReasonTooltip>
 
       {inputDialog && detail && (

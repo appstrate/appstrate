@@ -192,7 +192,6 @@ export function RunResultsContent({
               message: filesDenied ? t("run.noAccess", { ns: "files" }) : t("run.resultsNoFiles"),
               compact: true,
             }}
-            runId={run.id}
             display="table"
             tableSurface="integrated"
             footer={

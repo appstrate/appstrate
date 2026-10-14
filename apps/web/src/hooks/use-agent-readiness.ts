@@ -3,7 +3,7 @@
 import type { AgentDetail } from "@appstrate/shared-types";
 import { useAgentModel, useModels, type OrgModelInfo } from "./use-models";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
-import { isModelSelectable } from "../lib/model-selectability";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
 
 /**
  * Will a run get a model? Mirrors the server cascade (`resolveModel`): the

@@ -6,7 +6,7 @@ import { jsonText } from "@appstrate/afps-shared/json-text";
 import { Modal } from "./modal";
 import { FormModal } from "./form-modal";
 import { ConfirmModal } from "./confirm-modal";
-import { CopyButton } from "./copy-button";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import { Badge } from "@appstrate/ui/components/badge";
