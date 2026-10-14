@@ -10,9 +10,11 @@
  * Drizzle `0086` left every row space-scoped; this widens the user-owned rows not minted by a space
  * client (`widenConnectionsToOrgScope`). Run in the deploy window, after the migrate service and
  * `0044`, the app stopped until `0045` has run: a schedule fire answering `must_choose_connection`
- * in between disables its schedule. `pg_dump` first. Refuses an empty `DATABASE_URL` (the client
- * would open `./data/pglite`). One transaction per organization, so the label locks stay bounded;
- * dry run by default (each rolled back), `--apply` commits each. Idempotent.
+ * in between disables its schedule. `pg_dump` first.
+ * Targets `DATABASE_URL`, or an embedded database named by `PGLITE_DATA_DIR` (the platform stopped:
+ * PGlite opens in one process); with neither set it refuses, rather than open `./data/pglite`.
+ * One transaction per organization, so the label locks stay bounded; dry run by default (each
+ * rolled back), `--apply` commits each. Idempotent.
  */
 
 import { parseArgs } from "node:util";
@@ -103,8 +105,11 @@ if (import.meta.main) {
       strict: true,
     });
     const apply = values.apply === true;
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is empty — refusing the embedded ./data/pglite; load the .env");
+    if (!process.env.DATABASE_URL && !process.env.PGLITE_DATA_DIR) {
+      throw new Error(
+        "neither DATABASE_URL nor PGLITE_DATA_DIR is set — refusing the default ./data/pglite; " +
+          "load the .env, or name an embedded database with PGLITE_DATA_DIR",
+      );
     }
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);

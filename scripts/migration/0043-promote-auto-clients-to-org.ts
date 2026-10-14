@@ -22,10 +22,11 @@
  *
  * Run in the deploy window after `0044` and `0041`, the app stopped until `0045` has run (a schedule
  * fire answering `must_choose_connection` in between disables its schedule), `pg_dump` first.
- * Refuses an empty `DATABASE_URL` (the client would open `./data/pglite`). One transaction per
- * organization; dry run by default (each rolled back), `--apply` commits each. With `--apply`, the
- * space-tier auto clients left must be 0, else it exits 1. Idempotent: a second run finds nothing
- * to promote.
+ * Targets `DATABASE_URL`, or an embedded database named by `PGLITE_DATA_DIR` (the platform stopped:
+ * PGlite opens in one process); with neither set it refuses, rather than open `./data/pglite`.
+ * One transaction per organization; dry run by default (each rolled back), `--apply` commits
+ * each. With `--apply`, the space-tier auto clients left must be 0, else it exits 1. Idempotent: a
+ * second run finds nothing to promote.
  */
 
 import { parseArgs } from "node:util";
@@ -233,8 +234,11 @@ if (import.meta.main) {
       strict: true,
     });
     const apply = values.apply === true;
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is empty — refusing the embedded ./data/pglite; load the .env");
+    if (!process.env.DATABASE_URL && !process.env.PGLITE_DATA_DIR) {
+      throw new Error(
+        "neither DATABASE_URL nor PGLITE_DATA_DIR is set — refusing the default ./data/pglite; " +
+          "load the .env, or name an embedded database with PGLITE_DATA_DIR",
+      );
     }
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);

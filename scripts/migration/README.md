@@ -65,7 +65,13 @@ them for.
 The order only; each step's detail, counts and rollback are in its `Detail` section below and in
 the root `CHANGELOG.md` (Operators). The release image carries `scripts/migration/`: a `.ts` script
 runs from it as `docker compose run --rm --no-deps appstrate bun scripts/migration/<script>.ts`,
-which is the dry run, `--apply` appended to commit.
+which is the dry run, `--apply` appended to commit. On an embedded database (no `DATABASE_URL`), a
+script runs from the platform's directory with the database named,
+`PGLITE_DATA_DIR=./data/pglite bun scripts/migration/<script>.ts` (the `.env`'s value if it sets
+one), the platform stopped: PGlite opens in one process at a time. With neither variable set a
+window script refuses to run rather than open the default directory. The platform applies the
+migrations itself there: start it once, stop it (it stops itself while `0044` is pending), then
+run steps 3 to 6.
 
 **Before the deploy, on the running release (read-only):**
 
@@ -82,7 +88,7 @@ which is the dry run, `--apply` appended to commit.
    `migrate` with `examples/self-hosting/`): it applies the pending drizzle migrations, `0084` to
    `0095`.
 3. `0044` dry run, then `--apply`: `shared_space_ids` copied into `integration_connection_shares`.
-   The release refuses to boot until it has run.
+   The release refuses to boot while a connection still holds an entry there, naming the command.
 4. `0041` dry run, then `--apply`: connections widened to org scope.
 5. `0043` dry run, then `--apply`: space-tier auto-provisioned OAuth clients moved to their org.
 6. `0045` dry run, then `--apply`: the connection a member made in a space pinned for the agents
@@ -1183,7 +1189,7 @@ ones before it stay committed and a re-run widens what is left. With `--apply`, 
 widen must then be 0. Run it in the deploy window, after the migrate service and `0044`, the app
 still stopped (why: the `0045` section below), `pg_dump` first:
 `set -a && . ./.env && set +a && bun scripts/migration/0041-widen-connections-to-org-scope.ts`
-is the dry run; `--apply` commits. It refuses an empty `DATABASE_URL`.
+is the dry run; `--apply` commits. It refuses to run with neither `DATABASE_URL` nor `PGLITE_DATA_DIR` set (an embedded database is named, the platform stopped).
 
 Rollback:
 
@@ -1240,7 +1246,8 @@ boot while a connection still holds an entry in `shared_space_ids` (`assertConne
 6. Start the app.
 
 Each is `set -a && . ./.env && set +a && bun scripts/migration/<script>.ts` for the dry run (rolled
-back), `--apply` to commit; each refuses an empty `DATABASE_URL`.
+back), `--apply` to commit; each refuses to run with neither `DATABASE_URL`
+nor `PGLITE_DATA_DIR` set (an embedded database is named, the platform stopped).
 
 Rollback: see the table above.
 
@@ -1286,7 +1293,7 @@ after `0041 --apply` and `0043 --apply`, in the same window, the app still stopp
 between `0041 --apply` and the pins this writes disables the schedule they were for. `pg_dump`
 first:
 `set -a && . ./.env && set +a && bun scripts/migration/0045-pin-connection-made-in-space.ts` is the
-dry run; `--apply` commits. It refuses an empty `DATABASE_URL`.
+dry run; `--apply` commits. It refuses to run with neither `DATABASE_URL` nor `PGLITE_DATA_DIR` set (an embedded database is named, the platform stopped).
 
 Rollback: see the table above.
 
@@ -1335,5 +1342,5 @@ Rollback: see the table above.
 | 0040 | not applied         | runs whose `token_usage` `parseTokenUsage` keeps only in part rewritten to what it keeps — undeclared keys and malformed `tiers` bands dropped; a value malformed as a whole (not an object, a counter that is not a non-negative integer) listed and left as is — the read paths serve it as `null` and warn on each read until it is rewritten (#1846) — **one pass after deploying the release that publishes `token_usage` as the strict `TokenUsage` component: dry run, `--apply` only if it lists a run**                                                                                                                                                                             | each run listed with its value before and after, malformed ones apart, then the totals; exits 1 while a malformed row remains                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 0041 | not applied         | user-owned connections minted by a system or org OAuth client, or by none, widened to org scope (`space_id` NULL, `origin_space_id` the old space, shares kept, a duplicate owner label renamed `<label> (n)`); end users' and space clients' rows left as they are (#1870) — **run in the deploy window carrying drizzle `0086`, after `0044`, app stopped**; `.ts`, dry run by default, `--apply` to commit                                                                                                                                                                                                                                                                                | rows to widen, then per organization (one transaction each, rolled back on a dry run) the widened/relabeled counts and each relabel; on `--apply`, the rows left to widen, which must be 0 (exit 1 otherwise; earlier organizations stay committed and a re-run widens the rest)                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 0043 | not applied         | space-tier auto-provisioned (DCR/CIMD) OAuth clients moved to their org tier: per (integration, auth, issuer) the client of either tier with the most connections, a tie going to the org tier, is the winner; the others are merged into it and a space-tier winner promoted (connections re-pointed and flagged `needs_reconnection`, client deleted) and the key's user-owned rows widened to org scope, each audited `scope_widened` by the `system` actor (#1910) — **run in the deploy window carrying drizzle `0089`, after `0044` and `0041`, app stopped**; `.ts`, dry run by default, `--apply` to commit                                                                          | per organization (one transaction each, rolled back on a dry run) the promoted, merged, re-pointed and widened counts; on `--apply`, the space-tier auto clients left, which must be 0 (exit 1 otherwise); idempotent, a second run finds nothing to promote                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 0044 | not applied         | `integration_connections.shared_space_ids` copied into `integration_connection_shares` (`ON CONFLICT DO NOTHING`, each audited `share_added` with `reason: migrated`) and emptied, a missing or other-organization target space skipped and printed, then the shares whose owner no longer reaches their space withdrawn as a live access loss does (#1910) — **run after the migrate service (`appstrate-migrate`) applies drizzle `0089` and BEFORE the app starts**: an app serving `0089` before it runs sees no existing share, so the release refuses to boot until it has; `.ts`, dry run by default, `--apply` to commit                                                             | rows copied, targets skipped (each printed), columns emptied, shares withdrawn and schedules disabled, in one transaction rolled back on a dry run; a second `--apply` inserts nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 0044 | not applied         | `integration_connections.shared_space_ids` copied into `integration_connection_shares` (`ON CONFLICT DO NOTHING`, each audited `share_added` with `reason: migrated`) and emptied, a missing or other-organization target space skipped and printed, then the shares whose owner no longer reaches their space withdrawn as a live access loss does (#1910) — **run after the migrate service (`appstrate-migrate`) applies drizzle `0089` and BEFORE the app starts**: an app serving `0089` before it runs sees no existing share, so the release refuses to boot while a row still holds an entry; `.ts`, dry run by default, `--apply` to commit                                         | rows copied, targets skipped (each printed), columns emptied, shares withdrawn and schedules disabled, in one transaction rolled back on a dry run; a second `--apply` inserts nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 0045 | not applied         | member pins naming the connection a member of the organization made in a space, where they own several connections usable there, exactly one made there and none of the others shared into it: one per agent whose last run by them there recording the integration bound exactly that connection by `fallback_auto` after the others were created, no org default on the integration, no pin of theirs or admin pin on the agent (#1929); each audited `integration.member_pin.upserted` by the `system` actor — **run after `0041` and `0043`, app stopped: a fire answering `must_choose_connection` disables its schedule**; `.ts`, dry run by default, `--apply` to commit              | UNMEASURED — the state it repairs exists only after `0041 --apply`, which no reachable database has run. Refuses to run while `0041` or `0043` has work left; prints the pins to write and the schedules with no pin, then per organization (one transaction each, rolled back on a dry run) each pin and, listed and not written, each enabled schedule naming no set for an integration its member owns several usable connections of: `binds through the pin` or `no pin: name the set`; on `--apply`, the pins left to write, which must be 0 (exit 1 otherwise); idempotent                                                                                                                             |

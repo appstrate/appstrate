@@ -310,9 +310,9 @@ between the migrations and the start; their release notes say so.
 
 This upgrade runs four data tasks between the migrations and the start, with
 the app stopped so the scheduler fires nothing until the last one has run. The
-platform refuses to boot until `0044-connection-shares.ts --apply` has run:
-before it, every shared connection is invisible to the spaces it is shared
-with. Each script without `--apply` is a dry run that commits nothing; read its
+platform refuses to boot while a connection is still shared the old way, until
+`0044-connection-shares.ts --apply` has run: before it, every shared connection
+is invisible to the spaces it is shared with. Each script without `--apply` is a dry run that commits nothing; read its
 output before applying, and stop at the first one that exits non-zero.
 
 ```bash
@@ -342,9 +342,18 @@ docker compose exec appstrate bun scripts/migration/0040-token-usage-shape.ts
 ```
 
 Upgraded with the installer, which starts the stack? The app refuses to boot
-until `0044` has run and restarts on its own the moment it has, so run
+while `0044` is pending and restarts on its own the moment it has run, so run
 `docker compose stop appstrate` first, then the scripts from `0044` on (the
 migrations have already run).
+
+Tier 0 (no Docker, embedded database): the platform applies the migrations
+itself when it starts. Start the new version once and stop it (it stops itself
+while `0044` is pending; a schedule due in the seconds it runs can fire), then,
+from its directory and with it stopped (the embedded database opens in one
+process at a time), run the same four scripts in the same order, each as
+`PGLITE_DATA_DIR=./data/pglite bun scripts/migration/<script>.ts`, then with
+`--apply` (use the `PGLITE_DATA_DIR` of your `.env` if it sets one), and start
+it again.
 
 `0045` lists the schedules it could not settle (`no pin: name the set`): each is
 disabled at its next fire, until its member names the connection set on it and

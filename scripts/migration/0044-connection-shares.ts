@@ -17,10 +17,12 @@
  * them, as a live access loss does. Each share added is audited `integration.connection.share_added`
  * (`reason: migrated`), each withdrawal `share_removed` (`reason: access_lost`), both by the
  * `system` actor. The target spaces are locked `FOR KEY SHARE` in id order before any connection
- * row, the order a space delete takes. Run after the migrate service (`appstrate-migrate`) has applied `0089` and BEFORE
- * the app starts, `pg_dump` first: an app serving `0089` before it runs sees no existing share.
- * Refuses an empty `DATABASE_URL` (the client would open `./data/pglite`). One transaction; dry run
- * by default (rolled back), `--apply` commits. A second `--apply` finds the column empty and
+ * row, the order a space delete takes. Run after the migrate service (`appstrate-migrate`) has
+ * applied `0089` and BEFORE the app starts, `pg_dump` first: an app serving `0089` before it runs
+ * sees no existing share, and the platform refuses to boot until it has.
+ * Targets `DATABASE_URL`, or an embedded database named by `PGLITE_DATA_DIR` (the platform stopped:
+ * PGlite opens in one process); with neither set it refuses, rather than open `./data/pglite`.
+ * One transaction; dry run by default (rolled back), `--apply` commits. A second `--apply` finds the column empty and
  * inserts nothing, so a share withdrawn since the first stays withdrawn.
  */
 
@@ -194,8 +196,11 @@ if (import.meta.main) {
       strict: true,
     });
     const apply = values.apply === true;
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is empty — refusing the embedded ./data/pglite; load the .env");
+    if (!process.env.DATABASE_URL && !process.env.PGLITE_DATA_DIR) {
+      throw new Error(
+        "neither DATABASE_URL nor PGLITE_DATA_DIR is set — refusing the default ./data/pglite; " +
+          "load the .env, or name an embedded database with PGLITE_DATA_DIR",
+      );
     }
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
