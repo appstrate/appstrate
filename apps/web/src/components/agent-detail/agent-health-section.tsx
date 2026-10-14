@@ -105,7 +105,12 @@ export function AgentHealthSection({
           </OverviewCardAction>
         )}
       </HealthCard>
-      <AgentDiagnosticsDialog result={result} open={issues.value !== null} onClose={issues.close} />
+      <AgentDiagnosticsDialog
+        result={result}
+        open={issues.value !== null}
+        onClose={issues.close}
+        onLeave={issues.leave}
+      />
     </>
   );
 }

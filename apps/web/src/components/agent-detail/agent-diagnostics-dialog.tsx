@@ -42,10 +42,13 @@ export function AgentDiagnosticsDialog({
   result,
   open,
   onClose,
+  onLeave,
 }: {
   result: AgentDiagnostics | undefined;
   open: boolean;
   onClose: () => void;
+  /** Leaves the dialog for the section that corrects a diagnostic, in one navigation. */
+  onLeave: (to: string) => void;
 }) {
   const { t } = useTranslation("agents");
   const location = useLocation();
@@ -77,7 +80,16 @@ export function AgentDiagnosticsDialog({
                 <p className="text-muted-foreground mt-0.5 text-xs">{text.explanation}</p>
                 {target && (
                   <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-                    <Link to={target} onClick={onClose} className="text-primary hover:underline">
+                    <Link
+                      to={target}
+                      onClick={(event) => {
+                        // A modified click opens a new tab and leaves this one as it is.
+                        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+                        event.preventDefault();
+                        onLeave(target);
+                      }}
+                      className="text-primary hover:underline"
+                    >
                       {t("detail.diagnostics.fix")}
                     </Link>
                   </div>
