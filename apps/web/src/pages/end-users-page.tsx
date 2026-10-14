@@ -25,7 +25,7 @@ import { DataTable } from "../components/data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { ListToolbar } from "../components/list-toolbar";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
-import type { PageAction } from "../components/page-actions-menu";
+import type { MenuAction } from "../components/menu-action";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { endUserLabel } from "../lib/members";
 import { useEndUserColumns } from "./end-user-columns";
@@ -82,7 +82,7 @@ function EndUsersPageContent() {
   const visibility = useColumnVisibility("end-users");
   const columns = visibleColumns(allColumns, visibility.hidden);
 
-  const create: PageAction = {
+  const create: MenuAction = {
     id: "create",
     icon: Plus,
     label: t("spaces.newEndUser"),

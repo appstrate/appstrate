@@ -2,7 +2,8 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { PageActionItem, PageActionsMenu, type PageAction } from "../page-actions-menu";
+import { PageActionsMenu } from "../page-actions-menu";
+import type { MenuAction } from "../menu-action";
 
 const SettingsPageActionTargetContext = createContext<HTMLElement | null | undefined>(undefined);
 
@@ -30,20 +31,13 @@ export function SettingsPageActions({
   actions,
   children,
 }: {
-  actions?: PageAction[];
+  actions?: MenuAction[];
   children?: ReactNode;
 }) {
   const target = useContext(SettingsPageActionTargetContext);
-  const offered = (actions ?? []).filter((action) => !action.hidden);
   const content = (
     <>
-      {offered.length > 0 && (
-        <PageActionsMenu>
-          {offered.map((action) => (
-            <PageActionItem key={action.id} action={action} />
-          ))}
-        </PageActionsMenu>
-      )}
+      <PageActionsMenu actions={actions} />
       {children}
     </>
   );

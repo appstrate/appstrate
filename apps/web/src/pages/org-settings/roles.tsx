@@ -33,7 +33,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { DataTable } from "../../components/data-table";
 import { Modal } from "../../components/modal";
 import { FormModal } from "../../components/form-modal";
-import type { PageAction } from "../../components/page-actions-menu";
+import type { MenuAction } from "../../components/menu-action";
 import { ScopeMultiSelect } from "../../components/scope-multi-select";
 import { SettingsGroup } from "../../components/settings/setting-row";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
@@ -155,7 +155,7 @@ export function OrgSettingsRolesPage() {
   const openRole = (role: RoleObject) => roleParam.open(role.key);
   const target = roleParam.target;
   const editable = !!target && target.kind === "custom" && canWrite;
-  const create: PageAction = {
+  const create: MenuAction = {
     id: "create",
     icon: Plus,
     testId: "create-role-button",
@@ -163,7 +163,7 @@ export function OrgSettingsRolesPage() {
     onSelect: () => newRole.open(),
     hidden: !deeds.includes("create"),
   };
-  const viewAs: PageAction = {
+  const viewAs: MenuAction = {
     id: "view-as",
     icon: Eye,
     testId: "view-as-button",

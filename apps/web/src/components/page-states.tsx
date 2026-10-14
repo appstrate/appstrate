@@ -6,7 +6,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { errorDetail } from "../lib/mutation-error";
 import { ApiError } from "../api/errors";
-import type { PageAction } from "./page-actions-menu";
+import type { MenuAction } from "./menu-action";
 
 /**
  * The request failed — drawn the way the empty state is drawn.
@@ -173,14 +173,14 @@ export function NoMatchState({
 /**
  * The creation button of an empty collection, in the treatment every addition has
  * (a white outline button with a `+`). It does exactly what the page's Actions menu
- * entry does, so the page declares that `PageAction` once and hands it to both; a
+ * entry does, so the page declares that `MenuAction` once and hands it to both; a
  * `hidden` action (a person who may not create) renders nothing. A caller with no
- * menu entry passes an inline `{ label, onSelect }`. An `href` action has no button here.
+ * menu entry passes an inline `{ label, onSelect }`. A `to` or `href` action has no button here.
  */
 export function EmptyStateAction({
   action,
 }: {
-  action: Pick<PageAction, "label" | "onSelect" | "hidden">;
+  action: Pick<MenuAction, "label" | "onSelect" | "hidden">;
 }) {
   if (action.hidden) return null;
   return (

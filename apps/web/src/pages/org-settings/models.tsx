@@ -54,7 +54,7 @@ import { PersonalModelsModal, ProviderModelsModal } from "../../components/model
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { SettingsGroup } from "../../components/settings/setting-row";
-import type { PageAction } from "../../components/page-actions-menu";
+import type { MenuAction } from "../../components/menu-action";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
 import {
@@ -147,7 +147,7 @@ export function OrgSettingsModelsPage() {
     onDelete: setConfirmDelete,
   };
 
-  const addCredential: PageAction = {
+  const addCredential: MenuAction = {
     id: "create-credential",
     icon: Plus,
     label: t("credentials.add"),
@@ -155,7 +155,7 @@ export function OrgSettingsModelsPage() {
     hidden: !canWriteCredentials,
   };
   // The deed of the tab in view; a member who may write nothing has no menu.
-  const allowPersonalModels: PageAction = {
+  const allowPersonalModels: MenuAction = {
     id: "open-personal-service",
     icon: Plus,
     label: t("providers.allowPersonalModels"),

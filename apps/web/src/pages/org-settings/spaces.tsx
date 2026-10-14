@@ -27,7 +27,7 @@ import { EmptyState, EmptyStateAction } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
-import type { PageAction } from "../../components/page-actions-menu";
+import type { MenuAction } from "../../components/menu-action";
 import { useSpaceColumns } from "./space-columns";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SPACE_PARAM, SpaceCreateModal } from "../../components/space-create-modal";
@@ -83,7 +83,7 @@ export function OrgSettingsSpacesPage() {
   });
 
   // Reading is the route's gate (`spaces:read`); creating is its own permission.
-  const create: PageAction = {
+  const create: MenuAction = {
     id: "create",
     icon: Plus,
     testId: "create-space-button",

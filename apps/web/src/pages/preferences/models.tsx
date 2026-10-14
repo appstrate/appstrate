@@ -15,7 +15,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { ProvidersTable } from "../../components/providers-table";
-import type { PageAction } from "../../components/page-actions-menu";
+import type { MenuAction } from "../../components/menu-action";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import {
   deduplicateLabel,
@@ -117,7 +117,7 @@ export function PreferencesModelsPage() {
     );
   };
 
-  const addCredential: PageAction = {
+  const addCredential: MenuAction = {
     id: "create-credential",
     icon: Plus,
     label: t("credentials.addPersonal"),

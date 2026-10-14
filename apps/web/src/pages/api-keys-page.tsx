@@ -15,7 +15,7 @@ import {
 import { EmptyState, EmptyStateAction } from "../components/page-states";
 import { DataTable } from "../components/data-table";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
-import type { PageAction } from "../components/page-actions-menu";
+import type { MenuAction } from "../components/menu-action";
 import { useModalParam } from "../hooks/use-modal-param";
 import { ApiKeyCreateModal, NEW_API_KEY_PARAM } from "../components/api-key-create-modal";
 import { useApiKeyColumns } from "./api-key-columns";
@@ -31,7 +31,7 @@ export function ApiKeysPage() {
   const newApiKey = useModalParam(NEW_API_KEY_PARAM);
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
-  const create: PageAction = {
+  const create: MenuAction = {
     id: "create",
     icon: Plus,
     label: t("settings:apiKeys.createBtn"),

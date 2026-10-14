@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Pencil, Power, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { SecretRevealModal } from "../../../components/secret-reveal-modal";
-import { TableRowActions, type RowAction } from "../../../components/table-row-actions";
+import { TableRowActions } from "../../../components/table-row-actions";
+import type { MenuAction } from "../../../components/menu-action";
 import { usePermissions } from "../../../hooks/use-permissions";
 import {
   useDeleteOAuthClient,
@@ -72,7 +73,7 @@ export function OAuthClientActions({
   // delete has no menu at all.
   if (!canWrite && !canDelete) return null;
 
-  const actions: RowAction[] = [
+  const actions: MenuAction[] = [
     {
       id: "edit",
       label: t("common:btn.edit"),

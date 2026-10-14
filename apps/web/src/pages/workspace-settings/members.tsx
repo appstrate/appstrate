@@ -47,7 +47,7 @@ import { DataTable } from "../../components/data-table";
 import { InvitationsTable } from "../../components/invitations-table";
 import { Modal } from "../../components/modal";
 import { FormModal } from "../../components/form-modal";
-import type { PageAction } from "../../components/page-actions-menu";
+import type { MenuAction } from "../../components/menu-action";
 import { RoleCatalogState } from "../../components/role-catalog-state";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -153,7 +153,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     memberToRemove?.org_role === "member" && space?.visibility === "open";
   const canManageRoles = canInvite || canChangeRole;
   const deeds = spaceMembersPageDeeds({ canInvite, canPreview });
-  const add: PageAction = {
+  const add: MenuAction = {
     id: "add",
     icon: Plus,
     testId: "add-space-member-button",
@@ -161,7 +161,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     onSelect: () => addParam.open(),
     hidden: !deeds.includes("add"),
   };
-  const viewAs: PageAction = {
+  const viewAs: MenuAction = {
     id: "view-as",
     icon: Eye,
     testId: "view-as-space-button",

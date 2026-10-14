@@ -6,7 +6,7 @@ import { useWebhooks } from "../hooks/use-webhooks";
 import { EmptyState, EmptyStateAction } from "@/components/page-states";
 import { DataTable } from "@/components/data-table";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
-import type { PageAction } from "@/components/page-actions-menu";
+import type { MenuAction } from "@/components/menu-action";
 import { useWebhookColumns } from "../components/webhook-columns";
 import { useModalParam } from "@/hooks/use-modal-param";
 import { NEW_WEBHOOK_PARAM, WebhookCreateModal } from "../components/webhook-create-modal";
@@ -26,7 +26,7 @@ export function WebhooksPage() {
   const createLevels = (["space", "org"] as const).filter((level) =>
     can(`${webhookResource(level)}:write`),
   );
-  const create: PageAction = {
+  const create: MenuAction = {
     id: "create",
     icon: Plus,
     label: t("settings:webhooks.createTitle"),

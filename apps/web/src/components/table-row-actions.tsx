@@ -1,42 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Children, useRef, type ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { MoreHorizontal } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
-import { orderRowActions, type RowAction } from "../lib/row-action-order";
 import { Spinner } from "@appstrate/ui/components/spinner";
-
-export type { RowAction };
-
-function RowActionItem({ action }: { action: RowAction }) {
-  const Icon = action.icon;
-  const body = (
-    <>
-      <Icon />
-      {action.label}
-    </>
-  );
-  return (
-    <DropdownMenuItem
-      variant={action.destructive ? "destructive" : "default"}
-      disabled={action.disabled}
-      onSelect={action.onSelect}
-      asChild={action.href !== undefined}
-      {...(action.testId ? { "data-testid": action.testId } : {})}
-    >
-      {action.href !== undefined ? <Link to={action.href}>{body}</Link> : body}
-    </DropdownMenuItem>
-  );
-}
+import { MenuActionItem, splitMenuActions, type MenuAction } from "./menu-action";
 
 /**
  * The shared end of an actionable table row, and its ONLY way to act: one « … »
@@ -59,7 +34,7 @@ export function TableRowActions({
   children,
 }: {
   menuLabel?: string;
-  actions?: RowAction[];
+  actions?: MenuAction[];
   isPending?: boolean;
   /**
    * True while the row's name is in inline edit, started from this menu's
@@ -73,7 +48,7 @@ export function TableRowActions({
 }) {
   const { t } = useTranslation("common");
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const { plain, destructive } = orderRowActions(actions ?? []);
+  const { plain, destructive } = splitMenuActions(actions ?? []);
   const hasChildren = Children.toArray(children).length > 0;
   const hasItems = plain.length > 0 || destructive.length > 0 || hasChildren;
   return (
@@ -106,14 +81,14 @@ export function TableRowActions({
             }}
           >
             {plain.map((action) => (
-              <RowActionItem key={action.id} action={action} />
+              <MenuActionItem key={action.id} action={action} />
             ))}
             {children}
             {(plain.length > 0 || hasChildren) && destructive.length > 0 && (
               <DropdownMenuSeparator />
             )}
             {destructive.map((action) => (
-              <RowActionItem key={action.id} action={action} />
+              <MenuActionItem key={action.id} action={action} />
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
