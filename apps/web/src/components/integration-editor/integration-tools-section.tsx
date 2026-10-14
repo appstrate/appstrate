@@ -11,16 +11,13 @@
  * in the agent. So they are one section of the package: the catalog as a
  * table, the policy edited from each row, in a modal.
  *
- * The exposure and origin columns are the server's reading of the SAVED
- * package; the scopes follow the draft, so an applied change shows at once.
+ * The catalog is the server's reading of the SAVED package; the scopes follow
+ * the draft, so an applied change shows at once.
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import type {
-  IntegrationToolInspection,
-  IntegrationToolInspectionEntry,
-} from "@appstrate/core/integration";
+import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
 import { Switch } from "@appstrate/ui/components/switch";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -30,7 +27,7 @@ import { useModalParam } from "../../hooks/use-modal-param";
 import { Modal } from "../modal";
 import { SettingRow, SettingsGroup } from "../settings/setting-row";
 import { PageActionsMenu } from "../page-actions-menu";
-import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
+import { PackageToolCatalog, type PackageTool } from "../package-detail/package-tool-catalog";
 import { TableRowActions } from "../table-row-actions";
 import { RequiredScopesField } from "./required-scopes-field";
 import {
@@ -43,49 +40,35 @@ import {
 } from "./utils";
 
 export function IntegrationToolsSection({
-  inspection,
-  integrationId,
+  tools,
   allowUndeclaredTools,
   edit,
-  showBasis = true,
 }: {
-  inspection: IntegrationToolInspection;
-  /** The integration whose tools these are: it names a tool's inspection in the URL. */
-  integrationId?: string;
+  /** The saved package's effective tool catalog (`tool_catalog`). */
+  tools: IntegrationToolCatalogEntry[];
   /** Read-only: whether the saved package lets agents call undeclared tools. */
   allowUndeclaredTools?: boolean;
-  /** Off under the Outils heading, whose description says where the list comes from. */
-  showBasis?: boolean;
   /** The draft manifest, when the reader may change the package. */
   edit?: { manifest: Record<string, unknown>; onChange: (next: Record<string, unknown>) => void };
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const policyModal = useModalParam("toolPolicy");
-  const saved = inspection.entries;
   const policies = edit ? getToolsPolicy(edit.manifest) : null;
 
   // The saved catalog, its scopes replaced by the draft's, then the tools the
   // draft declares a policy for that the saved catalog does not list yet.
-  const entries: IntegrationToolInspectionEntry[] = policies
-    ? [
-        ...saved.map((entry) => {
-          const policy = policies.find((candidate) => candidate.name === entry.name);
-          const { policy: _saved, ...rest } = entry;
-          return policy ? { ...rest, policy: { required_scopes: policy.requiredScopes } } : rest;
-        }),
-        ...policies
-          .filter((policy) => !saved.some((entry) => entry.name === policy.name))
-          .map((policy) => ({
-            name: policy.name,
-            origin: "manifest" as const,
-            exposure:
-              inspection.basis === "manifest"
-                ? ("available" as const)
-                : ("not_in_catalog" as const),
-            policy: { required_scopes: policy.requiredScopes },
-          })),
-      ]
-    : saved;
+  const entries: PackageTool[] = [
+    ...tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      permissions: policies
+        ? policies.find((policy) => policy.name === tool.name)?.requiredScopes
+        : tool.policy?.required_scopes,
+    })),
+    ...(policies ?? [])
+      .filter((policy) => !tools.some((tool) => tool.name === policy.name))
+      .map((policy) => ({ name: policy.name, permissions: policy.requiredScopes })),
+  ];
 
   const allowUndeclared = edit ? getAllowUndeclaredTools(edit.manifest) : allowUndeclaredTools;
   const commit = (next: ToolPolicyState[]) => edit?.onChange(setToolsPolicy(edit.manifest, next));
@@ -107,10 +90,7 @@ export function IntegrationToolsSection({
         )
       )}
       <PackageToolCatalog
-        tools={[]}
-        inspection={{ basis: inspection.basis, entries }}
-        integrationId={integrationId}
-        showBasis={showBasis}
+        tools={entries}
         actions={
           edit && (
             <PageActionsMenu>

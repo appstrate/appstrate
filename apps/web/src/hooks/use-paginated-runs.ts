@@ -7,7 +7,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
-import { agentRunActivityKeys, paginatedRunsKeys } from "../lib/query-keys";
+import { paginatedRunsKeys } from "../lib/query-keys";
 import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
 
@@ -128,24 +128,5 @@ export function usePaginatedRuns({
     placeholderData: (prev, prevQuery) =>
       prevQuery && keepsRunRows(prevQuery.queryKey, currentKey) ? prev : undefined,
     enabled: canRead && !!spaceId,
-  });
-}
-
-/** One server-side aggregate for the agent overview's fixed 30-day window. */
-export function useAgentRunActivity(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
-  const { can } = usePermissions();
-
-  return useQuery({
-    queryKey: agentRunActivityKeys.detail(orgId, spaceId, packageId),
-    queryFn: async () => {
-      const { scope, name } = splitPackageRef(packageId!);
-      const { data } = await client.GET("/api/agents/{scope}/{name}/run-activity", {
-        params: { path: { scope, name } },
-      });
-      return data!;
-    },
-    enabled: canReadRuns(can) && !!orgId && !!spaceId && !!packageId,
   });
 }

@@ -41,7 +41,6 @@ export function SharedHeader({
   hasUnarchivedChanges,
   latestPublishedVersion,
   activeSubpage,
-  statusBadges,
   actionsLeft,
   actionsRight,
 }: {
@@ -50,7 +49,6 @@ export function SharedHeader({
   hasUnarchivedChanges?: boolean;
   latestPublishedVersion?: string | null;
   activeSubpage?: { label: string };
-  statusBadges?: React.ReactNode;
   actionsLeft?: React.ReactNode;
   actionsRight?: React.ReactNode;
 }) {
@@ -180,7 +178,6 @@ export function SharedHeader({
                 v{detail.version}
               </Badge>
             )}
-            {detail.type === "agent" && statusBadges}
             {actionsLeft}
             {actionsRight}
           </>

@@ -941,19 +941,6 @@ export interface IntegrationToolCatalogEntry {
   policy?: IntegrationToolPolicy;
 }
 
-/** Explanatory inventory only. Never use it as an agent allowlist. */
-export interface IntegrationToolInspectionEntry extends IntegrationToolCatalogEntry {
-  origin: "mcp_package" | "manifest" | "appstrate";
-  exposure: "available" | "hidden" | "not_in_catalog";
-  hidden_reason?: "manifest" | "connection" | "dependency";
-}
-
-export interface IntegrationToolInspection {
-  /** Package/manifest metadata only, never a live upstream MCP query. */
-  basis: "mcp_package" | "manifest" | "platform";
-  entries: IntegrationToolInspectionEntry[];
-}
-
 export interface ResolveIntegrationToolCatalogInput {
   integration: IntegrationManifest;
   /**
@@ -966,9 +953,8 @@ export interface ResolveIntegrationToolCatalogInput {
 }
 
 /**
- * Single source of truth for the catalog used by the picker and validators.
- * The runtime separately snapshots live MCP tools/list and applies the policy.
- * Resolution:
+ * Single source of truth for what the agent's picker sees and what
+ * `tools/list` exposes at runtime. Resolution:
  *
  *   1. Base catalog (the integration's own surface)
  *      - local + mcpServerTools provided → MCPB-canonical entries
@@ -986,14 +972,6 @@ export interface ResolveIntegrationToolCatalogInput {
 export function resolveIntegrationToolCatalog(
   input: ResolveIntegrationToolCatalogInput,
 ): IntegrationToolCatalogEntry[] {
-  return resolveIntegrationToolSurface(input).catalog;
-}
-
-/** Compute the effective catalog and its explanation from the same rules. */
-export function resolveIntegrationToolSurface(input: ResolveIntegrationToolCatalogInput): {
-  catalog: IntegrationToolCatalogEntry[];
-  inspection: IntegrationToolInspection;
-} {
   const { integration, mcpServerTools } = input;
 
   // Step 1 — the integration's own MCP catalog
@@ -1036,71 +1014,21 @@ export function resolveIntegrationToolSurface(input: ResolveIntegrationToolCatal
   // Step 4 — attach policy from the sparse `tools_policy{}` table
   const policyTable = integration.tools_policy ?? {};
   const out: IntegrationToolCatalogEntry[] = [];
-  const entries: IntegrationToolInspectionEntry[] = [];
-  const explicitHidden = new Set(integration.hidden_tools ?? []);
-  const connectionTools = new Set(getConnectToolNames(integration));
-  const hiddenReason = (name: string): IntegrationToolInspectionEntry["hidden_reason"] =>
-    explicitHidden.has(name) ? "manifest" : connectionTools.has(name) ? "connection" : "dependency";
   for (const entry of base) {
+    if (hidden.has(entry.name)) continue;
     const raw = policyTable[entry.name];
-    const resolved: IntegrationToolCatalogEntry = raw
-      ? {
-          ...entry,
-          policy: {
-            required_scopes: raw.required_scopes as IntegrationToolPolicy["required_scopes"],
-          },
-        }
-      : entry;
-    const isHidden = hidden.has(entry.name);
-    if (!isHidden) out.push(resolved);
-    entries.push({
-      ...resolved,
-      origin: syntheticApiNames.has(entry.name)
-        ? "appstrate"
-        : mcpServerTools !== undefined
-          ? "mcp_package"
-          : "manifest",
-      exposure: isHidden ? "hidden" : "available",
-      ...(isHidden ? { hidden_reason: hiddenReason(entry.name) } : {}),
+    if (!raw) {
+      out.push(entry);
+      continue;
+    }
+    out.push({
+      ...entry,
+      policy: {
+        required_scopes: raw.required_scopes as IntegrationToolPolicy["required_scopes"],
+      },
     });
   }
-  // Keep orphan policy/hide references visible without inventing upstream tools
-  // or widening the effective catalog. API tool aliases already resolve above.
-  const known = new Set(entries.map((entry) => entry.name));
-  for (const name of new Set([
-    ...Object.keys(policyTable),
-    ...explicitHidden,
-    ...connectionTools,
-  ])) {
-    if (known.has(name) || syntheticApiNames.has(name)) continue;
-    const raw = policyTable[name];
-    const isHidden = hidden.has(name);
-    entries.push({
-      name,
-      origin: "manifest",
-      exposure: isHidden ? "hidden" : "not_in_catalog",
-      ...(isHidden ? { hidden_reason: hiddenReason(name) } : {}),
-      ...(raw
-        ? {
-            policy: {
-              required_scopes: raw.required_scopes as IntegrationToolPolicy["required_scopes"],
-            },
-          }
-        : {}),
-    });
-  }
-  return {
-    catalog: out,
-    inspection: {
-      basis:
-        mcpServerTools !== undefined
-          ? "mcp_package"
-          : integration.source?.kind === "none"
-            ? "platform"
-            : "manifest",
-      entries,
-    },
-  };
+  return out;
 }
 
 function hiddenToolNames(
@@ -1745,27 +1673,6 @@ export const CONNECTION_RESOLUTION_ERROR_CODES = [
 
 /** Error codes the resolver emits per integration. */
 export type ConnectionResolutionErrorCode = (typeof CONNECTION_RESOLUTION_ERROR_CODES)[number];
-
-/**
- * Where each resolver code is cleared: `connection` — a connection, the set binding one (pick,
- * pin, default, override) or the integration's activation; `agent` — the agent's own
- * integration configuration (its `auth_key` or tool selection), which no connection clears.
- * Exhaustive, so a new code must be classified.
- */
-export const CONNECTION_RESOLUTION_ERROR_REMEDY = {
-  not_connected: "connection",
-  needs_reconnection: "connection",
-  pinned_connection_unavailable: "connection",
-  override_connection_unavailable: "connection",
-  override_outranked: "connection",
-  must_choose_connection: "connection",
-  insufficient_scopes: "connection",
-  auth_key_mismatch: "connection",
-  auth_serves_no_selected_tool: "connection",
-  auth_key_serves_no_selected_tool: "agent",
-  required_integration_unbound: "connection",
-  integration_not_active: "connection",
-} as const satisfies Record<ConnectionResolutionErrorCode, "connection" | "agent">;
 
 export const INTEGRATION_MANIFEST_FAILURE_CODES = [
   "integration_not_found",

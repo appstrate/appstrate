@@ -16,7 +16,6 @@ import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
 import { invalidateLibraries } from "./use-library";
 import { invalidateIntegrationQueries } from "./use-integrations";
-import { invalidateAgentDiagnostics } from "./use-agent-diagnostics";
 import { packagePermission, packageSightPermissions } from "@appstrate/core/permissions";
 import { ApiError } from "../api/errors";
 import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
@@ -500,7 +499,6 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       // A published artifact appeared or vanished: a pinned Files tab and any
       // dist-tag-resolved read of it are now wrong.
       invalidatePackageFiles(qc);
-      void invalidateAgentDiagnostics(qc);
     },
     // A refusal that moved or settled the draft (`precondition_failed`: someone
     // wrote it; `no_changes`: the server cleared its dirty marker) leaves the page stale.
@@ -535,7 +533,6 @@ export function useDeleteVersion(type: PackageType, packageId: string) {
       // A published artifact appeared or vanished: a pinned Files tab and any
       // dist-tag-resolved read of it are now wrong.
       invalidatePackageFiles(qc);
-      void invalidateAgentDiagnostics(qc);
     },
   });
 }
@@ -564,7 +561,6 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
       qc.invalidateQueries({ queryKey: packageKeys.all });
       // A restore overwrites the DRAFT artifact wholesale.
       invalidatePackageFiles(qc);
-      void invalidateAgentDiagnostics(qc);
     },
   });
 }

@@ -19,18 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`ORG_LOGO_MAX_LENGTH`** (`@appstrate/core/validation`): the organization
   logo's wire form — `emoji:<grapheme>` or a `data:image/webp;base64,` URL —
   and its longest accepted value, 48 000 characters.
-- **`resolveIntegrationToolSurface`**, **`IntegrationToolInspection`** and
-  **`IntegrationToolInspectionEntry`** (`@appstrate/core/integration`): the
-  catalog `resolveIntegrationToolCatalog` returns, plus an explanatory
-  inventory of every tool the integration names, each with its `origin`
-  (`mcp_package`, `manifest`, `appstrate`), its `exposure` (`available`,
-  `hidden`, `not_in_catalog`) and why it is hidden. Read by an integration's
-  Outils tab; never an agent allowlist.
-- **`CONNECTION_RESOLUTION_ERROR_REMEDY`** (`@appstrate/core/integration`):
-  where each `CONNECTION_RESOLUTION_ERROR_CODES` code is cleared —
-  `connection` (a connection, the set binding one, or the integration's
-  activation) or `agent` (the agent's own `auth_key` or tool selection).
-  Exhaustive over the codes.
 
 ## [16.0.0] — 2026-10-14
 

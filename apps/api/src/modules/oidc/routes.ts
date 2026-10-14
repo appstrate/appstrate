@@ -734,22 +734,6 @@ export function createOidcRouter() {
     return next();
   });
 
-  /**
-   * SMTP and social sign-in serve the end-users of a space's own OAuth clients,
-   * and a personal space takes neither (`personal_space_takes_no_oauth_clients`,
-   * `personal_space_takes_no_end_users`): configuring them there would be dead
-   * config. A 409, not a 404: only that space's owner reaches it. The deletes
-   * stay open, so a row that exists there can always be removed.
-   */
-  const refusePersonalSpace = (c: Context<AppEnv>) => {
-    if (c.get("space")?.ownerUserId) {
-      throw conflict(
-        "personal_space_takes_no_end_user_sign_in",
-        "A personal space takes no end-user sign-in configuration (SMTP, social providers): it takes no OAuth client and no end-users. Configure it in a team space.",
-      );
-    }
-  };
-
   router.use("/api/spaces/:id/smtp-config/*", pinnedSpaceScopeGuard, enterParamSpace);
   router.use("/api/spaces/:id/social-providers/*", pinnedSpaceScopeGuard, enterParamSpace);
 
@@ -777,7 +761,6 @@ export function createOidcRouter() {
     rateLimit(20),
     requireCorePermission("space-settings", "write"),
     async (c) => {
-      refusePersonalSpace(c);
       const spaceId = c.req.param("id")!;
       const data = await readJsonBody(c, smtpConfigUpsertSchema);
       // SSRF: block configurations that would make Appstrate bounce
@@ -891,7 +874,6 @@ export function createOidcRouter() {
     rateLimit(20),
     requireCorePermission("space-settings", "write"),
     async (c) => {
-      refusePersonalSpace(c);
       const spaceId = c.req.param("id")!;
       const provider = parseProvider(c.req.param("provider")!);
       const data = await readJsonBody(c, socialProviderUpsertSchema);

@@ -819,15 +819,6 @@ export const oidcPaths = {
           $ref: "#/components/responses/NotFound",
           description: "Space or configuration not found",
         },
-        "409": {
-          description:
-            "The space is a personal space, which takes no end-user sign-in configuration (`personal_space_takes_no_end_user_sign_in`).",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1001,15 +992,6 @@ export const oidcPaths = {
         "404": {
           $ref: "#/components/responses/NotFound",
           description: "Space or configuration not found",
-        },
-        "409": {
-          description:
-            "The space is a personal space, which takes no end-user sign-in configuration (`personal_space_takes_no_end_user_sign_in`).",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
         },
         "429": { $ref: "#/components/responses/RateLimited" },
       },

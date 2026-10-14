@@ -100,14 +100,6 @@ export const paginatedRunsKeys = {
     ] as const,
 };
 
-/** An agent's 30-day run activity. A run update moves its counts. */
-export const agentRunActivityKeys = {
-  /** Prefix — every agent's activity in the org. */
-  org: (orgId: Id) => ["agent-run-activity", orgId] as const,
-  detail: (orgId: Id, spaceId: Id, packageId: Id) =>
-    ["agent-run-activity", orgId, spaceId, packageId] as const,
-};
-
 /**
  * Package caches (agents/skills/mcp-servers/integrations). `path` is the
  * plural route segment (`"agents"`, `"skills"`, …) — NOT the singular type.

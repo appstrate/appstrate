@@ -285,26 +285,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{scope}/{name}/diagnostics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get shared diagnostics for an agent
-         * @description Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview and the launch header. Diagnostics are ordered with blockers first and carry their correction destinations. Connection verdicts are included only for a caller holding `integrations:read`, and schedule warnings only for one holding `schedules:read`.
-         */
-        get: operations["getAgentDiagnostics"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/agents/{scope}/{name}/input-settings": {
         parameters: {
             query?: never;
@@ -451,26 +431,6 @@ export interface paths {
          * @description Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a file and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same files, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases. The body is closed: an unknown field, or a field whose type does not match, is a `400` rather than a silently ignored value, and a malformed JSON body is a `400` rather than an input-less run. Send no body at all for a run whose input resolves entirely from stored values.
          */
         post: operations["runAgent"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{scope}/{name}/run-activity": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get recent run activity for an agent
-         * @description Return one tenant-scoped aggregate for the last 30 days. The success rate is intentionally derived by clients from success / (success + failed + timeout); cancelled, pending, and running runs are excluded from that denominator.
-         */
-        get: operations["getAgentRunActivity"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5592,30 +5552,6 @@ export interface components {
             /** @description Whether the agent is ACTIVE in the space this detail was read from — the placement row's `enabled` where the package is placed here, the deployment's default where the space holds no row. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. The agents INDEX carries no such field — it lists the active set — so a page that must render an inactive agent reaches it from the space library. Always emitted. */
             active: boolean;
         };
-        /** @description Shared, ordered diagnostics for one agent installation and definition. An empty diagnostics array with status healthy is a successful result. */
-        AgentDiagnostics: {
-            /** @enum {string} */
-            status: "healthy" | "warning" | "blocking";
-            blocking_count: number;
-            warning_count: number;
-            diagnostics: {
-                code: string;
-                /** @enum {string} */
-                severity: "blocking" | "warning";
-                title: string;
-                explanation: string;
-                field: string;
-                correction: {
-                    /** @enum {string} */
-                    destination: "bundle" | "configuration" | "schedule";
-                    section: string | null;
-                    /** @description The values the diagnostic names, keyed so a client can word it by `code`: `integration`, `skill`, `model`, `default_model`, `scheduleId`, `schedule`, `schedule_version`, `inspected_version` — each only where it applies. */
-                    params: {
-                        [key: string]: string;
-                    };
-                };
-            }[];
-        };
         /** @description The agent's stored input settings for one space: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged. */
         AgentInputSettings: {
             /** @description Values stored for this space. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch. */
@@ -8309,46 +8245,6 @@ export interface operations {
             422: components["responses"]["VersionArtifactUnavailable"];
         };
     };
-    getAgentDiagnostics: {
-        parameters: {
-            query?: {
-                /** @description Agent definition to inspect: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitted inspects what the agent detail page renders — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft when nothing is published. `draft` named explicitly requires that write authority. Ignored for system agents. */
-                version?: string;
-            };
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Agent diagnostics, including an explicit healthy empty state */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentDiagnostics"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            /** @description Insufficient permissions — including `draft_not_writable` when `version=draft` is named by a caller who cannot WRITE the package. */
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["VersionArtifactUnavailable"];
-        };
-    };
     saveAgentInputSettings: {
         parameters: {
             query?: never;
@@ -8963,50 +8859,6 @@ export interface operations {
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
-        };
-    };
-    getAgentRunActivity: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Thirty-day run activity aggregate */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {integer} */
-                        window_days: 30;
-                        /** Format: date-time */
-                        window_start: string;
-                        total: number;
-                        success: number;
-                        failed: number;
-                        timeout: number;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
         };
     };
     listAgentRuns: {
@@ -13613,26 +13465,6 @@ export interface operations {
                                 };
                             };
                         }[];
-                        /** @description Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory. */
-                        tool_catalog_inspection: {
-                            /** @enum {string} */
-                            basis: "mcp_package" | "manifest" | "platform";
-                            entries: {
-                                name: string;
-                                description?: string;
-                                policy?: {
-                                    required_scopes?: {
-                                        [key: string]: string[];
-                                    };
-                                };
-                                /** @enum {string} */
-                                origin: "mcp_package" | "manifest" | "appstrate";
-                                /** @enum {string} */
-                                exposure: "available" | "hidden" | "not_in_catalog";
-                                /** @enum {string} */
-                                hidden_reason?: "manifest" | "connection" | "dependency";
-                            }[];
-                        };
                         default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
@@ -15020,26 +14852,6 @@ export interface operations {
                                 };
                             };
                         }[];
-                        /** @description Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory. */
-                        tool_catalog_inspection: {
-                            /** @enum {string} */
-                            basis: "mcp_package" | "manifest" | "platform";
-                            entries: {
-                                name: string;
-                                description?: string;
-                                policy?: {
-                                    required_scopes?: {
-                                        [key: string]: string[];
-                                    };
-                                };
-                                /** @enum {string} */
-                                origin: "mcp_package" | "manifest" | "appstrate";
-                                /** @enum {string} */
-                                exposure: "available" | "hidden" | "not_in_catalog";
-                                /** @enum {string} */
-                                hidden_reason?: "manifest" | "connection" | "dependency";
-                            }[];
-                        };
                         default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
@@ -25648,15 +25460,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
             404: components["responses"]["NotFound"];
-            /** @description The space is a personal space, which takes no end-user sign-in configuration (`personal_space_takes_no_end_user_sign_in`). */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -25786,15 +25589,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
             404: components["responses"]["NotFound"];
-            /** @description The space is a personal space, which takes no end-user sign-in configuration (`personal_space_takes_no_end_user_sign_in`). */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
             429: components["responses"]["RateLimited"];
         };
     };

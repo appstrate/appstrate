@@ -1731,61 +1731,6 @@ export async function listPackageRuns(
   return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
 }
 
-export type PackageRunActivity = {
-  window_days: number;
-  window_start: string;
-  total: number;
-  success: number;
-  failed: number;
-  timeout: number;
-};
-
-/**
- * Aggregate one agent's recent activity in a single tenant-scoped query.
- *
- * This deliberately returns the raw terminal-status counts instead of a
- * precomputed rate. The caller can then render an honest unavailable state
- * when there are no terminal runs, while the contract remains useful to
- * clients that need the underlying numbers.
- */
-export async function getPackageRunActivity(
-  scope: SpaceScope,
-  packageId: string,
-  options: {
-    /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
-    visibility?: SQL;
-  } = {},
-): Promise<PackageRunActivity> {
-  const windowDays = 30;
-  const windowStart = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
-  const conditions = [
-    eq(runs.packageId, packageId),
-    eq(runs.orgId, scope.orgId),
-    eq(runs.spaceId, scope.spaceId),
-    gte(runs.startedAt, windowStart),
-  ];
-  if (options.visibility) conditions.push(options.visibility);
-
-  const [row] = await db
-    .select({
-      total: sql<string>`count(*)`,
-      success: sql<string>`count(*) filter (where ${eq(runs.status, "success")})`,
-      failed: sql<string>`count(*) filter (where ${eq(runs.status, "failed")})`,
-      timeout: sql<string>`count(*) filter (where ${eq(runs.status, "timeout")})`,
-    })
-    .from(runs)
-    .where(and(...conditions));
-
-  return {
-    window_days: windowDays,
-    window_start: windowStart.toISOString(),
-    total: Number(row?.total ?? 0),
-    success: Number(row?.success ?? 0),
-    failed: Number(row?.failed ?? 0),
-    timeout: Number(row?.timeout ?? 0),
-  };
-}
-
 /**
  * List runs across all packages in an org+space, paginated, with
  * optional kind / status / date / end-user filters. Powers the global

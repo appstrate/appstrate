@@ -4,29 +4,24 @@ import { Link, useLocation, type To } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, Brain, ChartNoAxesCombined, Database, PlayCircle } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { useSchedules } from "../../hooks/use-schedules";
-import { useAgentRunActivity } from "../../hooks/use-paginated-runs";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { Badge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
-import { latestMemoryDate, runSuccessRate } from "../../lib/agent-overview";
+import { latestMemoryDate } from "../../lib/agent-overview";
 import { runDetailPath } from "../../lib/package-paths";
 import { agentSettingsHref } from "../../lib/settings-section-href";
 import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
-import { AgentHealthSection } from "./agent-health-section";
 
 export function AgentOverviewTab({
   packageId,
   detail,
-  version,
   isHistorical,
 }: {
   packageId: string;
   detail: AgentDetail;
-  version: string | undefined;
   isHistorical: boolean;
 }) {
   const { t } = useTranslation("agents");
@@ -39,20 +34,12 @@ export function AgentOverviewTab({
       </div>
     );
   }
-  return <OperationalSummary packageId={packageId} detail={detail} version={version} />;
+  return <OperationalSummary packageId={packageId} detail={detail} />;
 }
 
 /** The live counters, read only where they are shown. */
-function OperationalSummary({
-  packageId,
-  detail,
-  version,
-}: {
-  packageId: string;
-  detail: AgentDetail;
-  version: string | undefined;
-}) {
-  const { t, i18n } = useTranslation("agents");
+function OperationalSummary({ packageId, detail }: { packageId: string; detail: AgentDetail }) {
+  const { t } = useTranslation("agents");
   const location = useLocation();
   const {
     data: schedules,
@@ -60,7 +47,6 @@ function OperationalSummary({
     isError: schedulesError,
     isSuccess: schedulesSuccess,
   } = useSchedules(packageId);
-  const runActivity = useAgentRunActivity(packageId);
   const {
     data: memories,
     isLoading: memoriesLoading,
@@ -76,16 +62,6 @@ function OperationalSummary({
   const unknown = t("detail.overview.unknown");
   const latestMemory = pinned && memories ? latestMemoryDate(pinned, memories) : undefined;
 
-  const activity = runActivity.data;
-  const failedRunCount = activity ? activity.failed + activity.timeout : undefined;
-  const successRate = activity ? runSuccessRate(activity) : null;
-  const successRateLabel =
-    successRate === null
-      ? "—"
-      : new Intl.NumberFormat(i18n.language, {
-          style: "percent",
-          maximumFractionDigits: 1,
-        }).format(successRate);
   const destination = (hash: string, key?: string, value?: string) => {
     const search = new URLSearchParams(location.search);
     if (hash === "#runs") search.delete("agentRunStatus");
@@ -96,8 +72,6 @@ function OperationalSummary({
 
   return (
     <div className="space-y-8" data-agent-operational-overview>
-      <AgentHealthSection packageId={packageId} version={version} />
-
       <div className="grid gap-6 xl:grid-cols-3">
         <section
           className="border-border bg-muted/35 flex min-w-0 flex-col overflow-hidden rounded-lg border"
@@ -186,73 +160,14 @@ function OperationalSummary({
             id="agent-activity-heading"
             icon={ChartNoAxesCombined}
             title={t("detail.overview.activity")}
-            trailing={
-              <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] font-medium">
-                {t("detail.overview.lastThirtyDays")}
-              </span>
-            }
-            to={activity && activity.total > 0 ? destination("#runs") : undefined}
-            actionLabel={t("detail.overview.openRuns")}
           />
           <dl
             className={cn(
-              "border-border bg-card grid h-full grid-cols-2 divide-x overflow-hidden rounded-lg border md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0",
+              "border-border bg-card grid h-full grid-cols-2 divide-x overflow-hidden rounded-lg border xl:grid-cols-1 xl:divide-x-0 xl:divide-y",
               "rounded-t-lg border-x-0 border-b-0",
             )}
           >
             <OperationalStat
-              className="xl:border-border xl:border-r xl:border-b"
-              label={t("detail.overview.totalRuns")}
-              value={
-                runActivity.isLoading
-                  ? "…"
-                  : runActivity.isError || !activity
-                    ? unknown
-                    : String(activity.total)
-              }
-              to={activity && activity.total > 0 ? destination("#runs") : undefined}
-            />
-            <OperationalStat
-              className="xl:border-border xl:border-b"
-              label={t("detail.overview.successRate")}
-              value={
-                runActivity.isLoading ? (
-                  "…"
-                ) : runActivity.isError || !activity ? (
-                  unknown
-                ) : (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span
-                        tabIndex={0}
-                        className="focus-visible:ring-ring cursor-help border-b border-dotted outline-none focus-visible:ring-2"
-                      >
-                        {successRateLabel}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>{t("detail.overview.successRateHelp")}</TooltipContent>
-                  </Tooltip>
-                )
-              }
-            />
-            <OperationalStat
-              className="xl:border-border xl:border-r xl:border-b"
-              label={t("detail.overview.failedRuns")}
-              value={
-                runActivity.isLoading
-                  ? "…"
-                  : runActivity.isError || failedRunCount === undefined
-                    ? unknown
-                    : String(failedRunCount)
-              }
-              to={
-                failedRunCount && failedRunCount > 0
-                  ? destination("#runs", "agentRunStatus", "failed,timeout")
-                  : undefined
-              }
-            />
-            <OperationalStat
-              className="xl:border-border xl:border-b"
               label={t("detail.overview.runningRuns")}
               value={String(detail.running_runs)}
               to={
@@ -262,7 +177,6 @@ function OperationalSummary({
               }
             />
             <OperationalStat
-              className="xl:col-span-2"
               label={t("detail.overview.activeSchedules")}
               value={
                 schedulesLoading
@@ -344,14 +258,12 @@ function OverviewSectionHeading({
   id,
   icon: Icon,
   title,
-  trailing,
   to,
   actionLabel,
 }: {
   id: string;
   icon: typeof Brain;
   title: string;
-  trailing?: React.ReactNode;
   to?: To;
   actionLabel?: string;
 }) {
@@ -361,7 +273,6 @@ function OverviewSectionHeading({
       <h2 id={id} className="text-sm font-semibold">
         {title}
       </h2>
-      {trailing}
       {to && (
         <ArrowRight className="text-muted-foreground group-hover:text-primary group-focus-visible:text-primary ml-auto size-4 shrink-0 transition-all group-hover:translate-x-0.5 group-focus-visible:translate-x-0.5" />
       )}

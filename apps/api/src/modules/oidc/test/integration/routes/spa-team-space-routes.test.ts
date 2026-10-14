@@ -6,9 +6,6 @@
  * write it exists for must be one the server refuses there by rule (409
  * `personal_space_*`). The core suite pins the flags of core pages; this one
  * pins the pages of the `oidc` feature and fails until each has an entry here.
- *
- * `/workspace-settings/auth` is not flagged: it stays reachable in a personal
- * space so a row held there can still be deleted, while its creates are refused.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -76,36 +73,4 @@ describe("SPA teamSpaceOnly OIDC routes ↔ personal-space refusals", () => {
       expect(problem.code).toMatch(/^personal_space_/);
     });
   }
-
-  it("/workspace-settings/auth: an SMTP config is refused in a personal space", async () => {
-    const res = await app.request(`/api/spaces/${personalId}/smtp-config`, {
-      method: "PUT",
-      headers: {
-        ...authHeaders(ctx, { "X-Space-Id": personalId }),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        host: "smtp.example.com",
-        port: 587,
-        username: "mailer",
-        pass: "secret",
-        from_address: "noreply@example.com",
-      }),
-    });
-    const problem = await expectProblem(res, 409);
-    expect(problem.code).toBe("personal_space_takes_no_end_user_sign_in");
-  });
-
-  it("/workspace-settings/auth: a social provider is refused there too", async () => {
-    const res = await app.request(`/api/spaces/${personalId}/social-providers/google`, {
-      method: "PUT",
-      headers: {
-        ...authHeaders(ctx, { "X-Space-Id": personalId }),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ client_id: "id", client_secret: "secret" }),
-    });
-    const problem = await expectProblem(res, 409);
-    expect(problem.code).toBe("personal_space_takes_no_end_user_sign_in");
-  });
 });

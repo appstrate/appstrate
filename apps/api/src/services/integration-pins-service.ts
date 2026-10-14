@@ -43,7 +43,6 @@ import {
 import { notFound } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
-import type { LoadedPackage } from "../types/index.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
@@ -692,6 +691,7 @@ export async function resolveAgentConnectionReadiness(args: {
   version: string;
 }): Promise<AgentConnectionReadiness> {
   const { scope, agentPackageId, principal, canConnect, canConfigureIntegrations, version } = args;
+  const actor = principal.actor;
   const loaded = await getPackage(agentPackageId, scope.orgId);
   if (!loaded) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
   // The SPACE's own switch, asked here and reported rather than thrown. The run
@@ -702,49 +702,6 @@ export async function resolveAgentConnectionReadiness(args: {
   // back on wants to know what ELSE is missing, in one pass.
   const agentActive = await isPackageActiveHere(scope, agentPackageId);
   const { agent } = await resolveAgentRunVersion(loaded, version);
-  const readiness = await resolveDefinitionConnectionReadiness({
-    scope,
-    agent,
-    principal,
-    canConnect,
-    canConfigureIntegrations,
-  });
-  if (agentActive) return readiness;
-  // First in the list: every other entry describes something to configure,
-  // and none of it can run while the space has the agent switched off.
-  return {
-    ...readiness,
-    blocks_run: true,
-    errors: [agentNotActiveError(agent.id), ...readiness.errors],
-  };
-}
-
-/** The readiness error of an agent the space has switched off. */
-export function agentNotActiveError(
-  agentPackageId: string,
-): ValidationFieldError & { code: ReadinessErrorCode } {
-  return {
-    field: "agent",
-    code: "agent_not_active",
-    title: "Agent Not Active",
-    message: `Agent '${agentPackageId}' is not active in this space.`,
-  };
-}
-
-/**
- * {@link resolveAgentConnectionReadiness} over a definition the caller already
- * resolved, without the space's activation verdict.
- */
-export async function resolveDefinitionConnectionReadiness(args: {
-  scope: SpaceScope;
-  /** The resolved definition (`resolveAgentRunVersion`). */
-  agent: LoadedPackage;
-  principal: ConnectionPrincipal;
-  canConnect: boolean;
-  canConfigureIntegrations: boolean;
-}): Promise<AgentConnectionReadiness> {
-  const { scope, agent, principal, canConnect, canConfigureIntegrations } = args;
-  const actor = principal.actor;
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const declared = parseManifestIntegrations(agentManifest);
 
@@ -833,6 +790,17 @@ export async function resolveDefinitionConnectionReadiness(args: {
   );
 
   const errors: ValidationFieldError[] = runResolution.errors.map(translateResolutionError);
+  if (!agentActive) {
+    // First in the list: every other entry describes something to configure,
+    // and none of it can run while the space has the agent switched off.
+    const notActive: ValidationFieldError & { code: ReadinessErrorCode } = {
+      field: "agent",
+      code: "agent_not_active",
+      title: "Agent Not Active",
+      message: `Agent '${agent.id}' is not active in this space.`,
+    };
+    errors.unshift(notActive);
+  }
 
   return {
     blocks_run: errors.length > 0,

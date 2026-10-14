@@ -726,11 +726,12 @@ export async function listSchedules(
   return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer, visibility);
 }
 
-/** An agent's schedules in this space, bare rows, oldest first. */
-export async function listPackageScheduleRows(
+export async function listPackageSchedules(
   scope: SpaceScope,
   packageId: string,
-): Promise<ScheduleWireDto[]> {
+  viewer: Actor | null,
+  visibility: SQL | undefined,
+): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(schedules)
@@ -742,21 +743,7 @@ export async function listPackageScheduleRows(
       }),
     )
     .orderBy(asc(schedules.createdAt));
-  return rows.map(toSchedule);
-}
-
-export async function listPackageSchedules(
-  scope: SpaceScope,
-  packageId: string,
-  viewer: Actor | null,
-  visibility: SQL | undefined,
-): Promise<EnrichedSchedule[]> {
-  return enrichSchedules(
-    await listPackageScheduleRows(scope, packageId),
-    scope.orgId,
-    viewer,
-    visibility,
-  );
+  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer, visibility);
 }
 
 /** The bare schedule row, before any enrichment — what a write path reads to diff against. */

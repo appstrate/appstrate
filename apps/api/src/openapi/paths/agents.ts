@@ -269,51 +269,6 @@ export const agentsPaths = {
       },
     },
   },
-  "/api/agents/{scope}/{name}/diagnostics": {
-    get: {
-      operationId: "getAgentDiagnostics",
-      tags: ["Agents"],
-      summary: "Get shared diagnostics for an agent",
-      description:
-        "Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview and the launch header. Diagnostics are ordered with blockers first and carry their correction destinations. Connection verdicts are included only for a caller holding `integrations:read`, and schedule warnings only for one holding `schedules:read`.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        {
-          name: "version",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description:
-            "Agent definition to inspect: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitted inspects what the agent detail page renders — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft when nothing is published. `draft` named explicitly requires that write authority. Ignored for system agents.",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Agent diagnostics, including an explicit healthy empty state",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/AgentDiagnostics" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": {
-          $ref: "#/components/responses/Forbidden",
-          description:
-            "Insufficient permissions — including `draft_not_writable` when `version=draft` is named by a caller who cannot WRITE the package.",
-        },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
-      },
-    },
-  },
   "/api/agents/{scope}/{name}/persistence": {
     get: {
       operationId: "listAgentPersistence",

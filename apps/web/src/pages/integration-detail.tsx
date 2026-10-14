@@ -236,7 +236,7 @@ function IntegrationSettings({
                 const railId = DEFINITION_RAIL.find(([, section]) => section === next)?.[0];
                 if (railId) void navigate(sectionHref(railId));
               }}
-              toolInspection={detail.tool_catalog_inspection}
+              toolCatalog={detail.tool_catalog ?? []}
             />
           </Suspense>
         ) : active === "bundle" ? (
@@ -299,8 +299,7 @@ function IntegrationSettings({
                   if (section === "tools")
                     return (
                       <IntegrationToolsSection
-                        integrationId={packageId}
-                        inspection={detail.tool_catalog_inspection}
+                        tools={detail.tool_catalog ?? []}
                         allowUndeclaredTools={detail.allow_undeclared_tools}
                       />
                     );
@@ -349,10 +348,8 @@ function IntegrationSettings({
               description={t("integrationEditor.description.tools", { ns: "agents" })}
             />
             <IntegrationToolsSection
-              integrationId={packageId}
-              inspection={detail.tool_catalog_inspection}
+              tools={detail.tool_catalog ?? []}
               allowUndeclaredTools={detail.allow_undeclared_tools}
-              showBasis={false}
             />
           </div>
         ) : !detail.active ? (

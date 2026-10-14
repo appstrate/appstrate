@@ -98,14 +98,13 @@ function manifestFailureError(
   }
 }
 
-/**
- * The readiness errors that do not depend on who launches: the prompt, the
- * declared skills and the health of each declared integration's manifest.
- */
-export async function collectBundleReadinessErrors(
-  params: Pick<AgentReadinessParams, "agent" | "orgId" | "spaceId" | "manifestCache">,
-): Promise<ValidationFieldError[]> {
-  const { agent, orgId, spaceId } = params;
+/** Every readiness error and warning (non-throwing); `validateAgentReadiness` delegates to this. */
+export async function collectAgentReadiness(params: AgentReadinessParams): Promise<{
+  errors: ValidationFieldError[];
+  resolutionErrors: ConnectionResolutionError[];
+  warnings: ResolutionFieldError[];
+}> {
+  const { agent, orgId, spaceId, actor, launchOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
 
@@ -162,18 +161,6 @@ export async function collectBundleReadinessErrors(
   for (const { id, result } of manifestResults) {
     if (!result.ok) errors.push(manifestFailureError(id, result.failure));
   }
-  return errors;
-}
-
-/** Every readiness error and warning (non-throwing); `validateAgentReadiness` delegates to this. */
-export async function collectAgentReadiness(params: AgentReadinessParams): Promise<{
-  errors: ValidationFieldError[];
-  resolutionErrors: ConnectionResolutionError[];
-  warnings: ResolutionFieldError[];
-}> {
-  const { agent, orgId, spaceId, actor, launchOverrides } = params;
-  const { manifest } = agent;
-  const errors = await collectBundleReadinessErrors(params);
 
   const resolution = await resolveConnectionsForRun({
     agentManifest: manifest as Record<string, unknown>,
