@@ -155,8 +155,10 @@ test("space settings retain edits and expose a forbidden save response", async (
   );
   await name.press("Enter");
   await refused;
-  // The refusal is said next to the setting, and what was typed stays typed.
-  await expect(page.getByText("Space update denied for this role").first()).toBeVisible();
+  // The refusal is toasted, and what was typed stays typed.
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "Space update denied for this role" }),
+  ).toBeVisible();
   await expect(name).toHaveValue("Unpersisted name");
   const persisted = await orgOnlyClient.get(`/spaces/${browserCtx.org.defaultSpaceId}`);
   expect((await persisted.json()).name).not.toBe("Unpersisted name");
