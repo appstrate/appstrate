@@ -43,6 +43,8 @@ interface RunWithOptionsModalProps {
   agent: AgentDetail;
   onSubmit: (payload: RunWithOptionsSubmit) => void;
   isPending?: boolean;
+  /** A connection picker's way out to the integration page leaves this modal. */
+  onLeave?: (to: string) => void;
 }
 
 /**
@@ -59,6 +61,7 @@ export function RunWithOptionsModal({
   agent,
   onSubmit,
   isPending,
+  onLeave,
 }: RunWithOptionsModalProps) {
   const { t } = useTranslation(["agents", "common"]);
   const guardedClose = () => {
@@ -77,6 +80,7 @@ export function RunWithOptionsModal({
           onClose={guardedClose}
           onSubmit={onSubmit}
           isPending={isPending}
+          onLeave={onLeave}
         />
       )}
     </Modal>
@@ -88,11 +92,13 @@ function RunWithOptionsForm({
   onClose,
   onSubmit,
   isPending,
+  onLeave,
 }: {
   agent: AgentDetail;
   onClose: () => void;
   onSubmit: (payload: RunWithOptionsSubmit) => void;
   isPending?: boolean;
+  onLeave?: (to: string) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   // Seeded from the STORED values only — they are per-space and do not
@@ -183,6 +189,7 @@ function RunWithOptionsForm({
             setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds))
           }
           version={version}
+          onLeave={onLeave}
         />
       )}
 

@@ -3,9 +3,9 @@
 /**
  * A page of runs: the query, the paging, and the table underneath.
  *
- * It holds no presentation of its own: agent names resolve in
- * `use-run-agent-name.ts` and the states belong to `RunsTable`, so what is
- * left here is fetching.
+ * Agent names resolve in `use-run-agent-name.ts`; the table and the card grid
+ * draw the rows. What is left here is fetching, and the one empty state both
+ * views show.
  */
 
 import { useState } from "react";
@@ -135,6 +135,9 @@ export function RunList({
   // Only when nothing was loaded: a failed background refetch keeps the rows.
   const failed = isError && !data;
   const errorBody = <ErrorState error={error} compact />;
+  const emptyBody = emptyState ?? (
+    <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />
+  );
 
   return (
     <div>
@@ -148,7 +151,7 @@ export function RunList({
           isLoading={showLoading}
           isError={failed}
           error={errorBody}
-          empty={emptyState}
+          empty={emptyBody}
           banner={page === 0 ? firstPageBanner : undefined}
           columnMode={tableColumnMode}
           surface={tableSurface}
@@ -161,9 +164,7 @@ export function RunList({
           isLoading={showLoading}
           isError={failed}
           error={errorBody}
-          empty={
-            emptyState ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />
-          }
+          empty={emptyBody}
         />
       )}
 

@@ -3,7 +3,8 @@
 import { useTranslation } from "react-i18next";
 import { FileInput, FileOutput } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
-import { runErrorText } from "../lib/run-error";
+import { cn } from "@appstrate/ui/cn";
+import { runErrorText, runErrorTone } from "../lib/run-error";
 import { MetaBadge } from "./status-badge";
 import { summarizeRunOutput } from "../lib/run-output-summary";
 
@@ -13,7 +14,7 @@ export function RunResult({ run }: { run: EnrichedRun }) {
   if (run.error) {
     return (
       <span
-        className="text-destructive relative z-10 truncate font-mono text-xs"
+        className={cn(runErrorTone(run), "relative z-10 truncate font-mono text-xs")}
         title={runErrorText(run, t)}
       >
         {runErrorText(run, t)}

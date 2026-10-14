@@ -36,3 +36,8 @@ export function runErrorText(run: { status: string; error?: string | null }, t: 
   const message = providerMessage(provider[2]!);
   return message ? t("run.error.model", { status, message }) : raw;
 }
+
+/** A cancelled run's error is a member's choice, not a failure: muted, never red. */
+export function runErrorTone(run: { status: string }): string {
+  return run.status === "cancelled" ? "text-muted-foreground" : "text-destructive";
+}

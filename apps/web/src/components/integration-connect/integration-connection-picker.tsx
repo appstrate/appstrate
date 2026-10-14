@@ -44,8 +44,13 @@ const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
  */
 export function IntegrationConnectionPicker({
   persistence = DEFAULT_PERSISTENCE,
+  onLeave,
   ...options
-}: Omit<ConnectionPickerOptions, "persistence"> & { persistence?: ConnectionPickerPersistence }) {
+}: Omit<ConnectionPickerOptions, "persistence"> & {
+  persistence?: ConnectionPickerPersistence;
+  /** Inside a URL-param modal: the way out to the integration page leaves it (`useModalParam.leave`). */
+  onLeave?: (to: string) => void;
+}) {
   const { t } = useTranslation(["agents", "settings"]);
   const { integrationId, agentPackageId, version } = options;
   const picker = useConnectionPicker({ ...options, persistence });
@@ -108,7 +113,7 @@ export function IntegrationConnectionPicker({
 
   return (
     <div data-testid={`member-picker-${integrationId}`}>
-      <PickerMenu integrationId={integrationId} picker={picker} />
+      <PickerMenu integrationId={integrationId} picker={picker} onLeave={onLeave} />
       {/* A stored member is unusable: the run is refused until the set is re-picked
           — or, for the space default, until the member picks their own or an
           admin fixes the default. */}

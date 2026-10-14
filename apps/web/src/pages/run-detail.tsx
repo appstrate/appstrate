@@ -39,7 +39,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { ArrowRight } from "lucide-react";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
 import { Badge } from "../components/status-badge";
-import { Badge as UIBadge } from "@appstrate/ui/components/badge";
+import { RunProvenanceBadges } from "../components/run-cells";
 import type { JournalOverviewFilter } from "../components/log-viewer";
 import { isQueryInFlight } from "../lib/query-state";
 import { findModelFallback } from "../lib/run-model-fallback";
@@ -291,9 +291,7 @@ export function RunDetailPage() {
           <>
             {/* No unread dot here: this page is the reading. */}
             <Badge status={enrichedRun.status} />
-            {enrichedRun.package_ephemeral && (
-              <UIBadge variant="secondary">{t("runs.inlineBadge")}</UIBadge>
-            )}
+            <RunProvenanceBadges run={enrichedRun} />
             <RunHeaderActions
               canRerun={canRerun}
               rerunRefusal={rerunRefusal ? t(rerunRefusal) : null}
@@ -331,7 +329,7 @@ export function RunDetailPage() {
             // and only an author replays a draft (see `replayVersion`).
             launcher.launch(
               { input, version: replayVersion(run.version_ref, agent.home_writable) },
-              { replace: true },
+              { leave: rerun.leave },
             );
           }}
           isPending={launcher.isPending}
