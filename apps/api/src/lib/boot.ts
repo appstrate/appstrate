@@ -656,9 +656,9 @@ async function unfoldedSelfServiceClientCount(): Promise<number> {
  * — i.e. while `scripts/migration/0044-connection-shares.ts` has not been run on this database.
  *
  * Drizzle `0089` creates `integration_connection_shares` empty and leaves the column standing,
- * read by `0044` only. Every share lives in the table, so until `0044` copies the column into it
- * every existing share is invisible: the members of the target space no longer reach the
- * connection, and a schedule naming it is disabled at its next fire, for good.
+ * read only by `0044` and this guard. Every share lives in the table, so until `0044` copies the
+ * column into it every existing share is invisible: the members of the target space no longer
+ * reach the connection, and a schedule naming it is disabled at its next fire, for good.
  *
  * Refusing rather than warning, for the reason {@link assertOAuthResourceColumnsPresent} does.
  *

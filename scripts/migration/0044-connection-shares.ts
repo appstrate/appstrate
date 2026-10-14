@@ -8,8 +8,9 @@
  *     bun scripts/migration/0044-connection-shares.ts [--apply]
  *
  * Drizzle `0089` creates `integration_connection_shares` and leaves `shared_space_ids` in place,
- * read by nothing but this script. Each `(id, unnest(shared_space_ids))` becomes one share row in
- * the connection's org, `ON CONFLICT DO NOTHING`; a target space that no longer exists or belongs
+ * read only by this script and the boot guard `assertConnectionSharesCopied`. Each
+ * `(id, unnest(shared_space_ids))` becomes one share row in the connection's org,
+ * `ON CONFLICT DO NOTHING`; a target space that no longer exists or belongs
  * to another organization is skipped and printed. The column is then emptied, and `updated_at`
  * bumped, on every row that held one (its owner's open pages refetch). Then, in each organization
  * that gained a share, the access-loss sweep (`unshareConnectionsOfOwnersWithoutAccess`) withdraws
@@ -20,8 +21,7 @@
  * row, the order a space delete takes. Run after the migrations (the migrate service) have
  * applied `0089` and BEFORE the app starts, `pg_dump` first: an app serving `0089` before it runs
  * sees no existing share, and the platform refuses to boot until it has.
- * Targets `DATABASE_URL`, or an embedded database named by `PGLITE_DATA_DIR` (the platform stopped:
- * PGlite opens in one process); with neither set it refuses, rather than open `./data/pglite`.
+ * Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`).
  * One transaction; dry run by default (rolled back), `--apply` commits. A second `--apply` finds the column empty and
  * inserts nothing, so a share withdrawn since the first stays withdrawn.
  */
@@ -35,6 +35,7 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 class DryRunRollback extends Error {}
 
@@ -187,6 +188,7 @@ export async function runConnectionShares(options: {
 }
 
 if (import.meta.main) {
+  exitUnlessDatabaseNamed();
   let code = 1;
   let closeDb: (() => Promise<void>) | undefined;
   try {
@@ -196,12 +198,6 @@ if (import.meta.main) {
       strict: true,
     });
     const apply = values.apply === true;
-    if (!process.env.DATABASE_URL && !process.env.PGLITE_DATA_DIR) {
-      throw new Error(
-        "neither DATABASE_URL nor PGLITE_DATA_DIR is set — refusing the default ./data/pglite; " +
-          "load the .env, or name an embedded database with PGLITE_DATA_DIR",
-      );
-    }
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
     out(`0044 — ${apply ? "APPLY" : "DRY RUN"}`);

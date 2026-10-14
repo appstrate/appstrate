@@ -6,7 +6,7 @@
  * `0089`. A fresh database boots, a database holding the column refuses with the operator command
  * for its tier, and the same database boots once `0044 --apply` has run, a skipped target space
  * included. On an embedded database the command it names is run through the script's entry point.
- * See docs/NO_TRANSITIONAL_CODE.md §5 — this check must never repair.
+ * See docs/NO_TRANSITIONAL_CODE.md §4 — this check must never repair.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
@@ -152,7 +152,7 @@ describe("assertConnectionSharesCopied — live database", () => {
       );
       for (const name of WINDOW_SCRIPTS) {
         const implicit = Bun.spawnSync(["bun", script(name), "--apply"], { cwd, env });
-        expect(implicit.exitCode).not.toBe(0);
+        expect(implicit.exitCode).toBe(2);
         expect(implicit.stdout.toString()).toContain(
           "neither DATABASE_URL nor PGLITE_DATA_DIR is set",
         );

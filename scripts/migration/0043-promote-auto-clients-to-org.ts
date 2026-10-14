@@ -22,8 +22,7 @@
  *
  * Run in the deploy window after `0044` and `0041`, the app stopped until `0045` has run (a schedule
  * fire answering `must_choose_connection` in between disables its schedule), `pg_dump` first.
- * Targets `DATABASE_URL`, or an embedded database named by `PGLITE_DATA_DIR` (the platform stopped:
- * PGlite opens in one process); with neither set it refuses, rather than open `./data/pglite`.
+ * Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`).
  * One transaction per organization; dry run by default (each rolled back), `--apply` commits
  * each. With `--apply`, the space-tier auto clients left must be 0, else it exits 1. Idempotent: a
  * second run finds nothing to promote.
@@ -39,6 +38,7 @@ import {
 } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { WidenedConnection } from "../../apps/api/src/services/integration-connections.ts";
+import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 class DryRunRollback extends Error {}
 
@@ -225,6 +225,7 @@ export async function runPromoteAutoClientsToOrg(options: {
 }
 
 if (import.meta.main) {
+  exitUnlessDatabaseNamed();
   let code = 1;
   let closeDb: (() => Promise<void>) | undefined;
   try {
@@ -234,12 +235,6 @@ if (import.meta.main) {
       strict: true,
     });
     const apply = values.apply === true;
-    if (!process.env.DATABASE_URL && !process.env.PGLITE_DATA_DIR) {
-      throw new Error(
-        "neither DATABASE_URL nor PGLITE_DATA_DIR is set — refusing the default ./data/pglite; " +
-          "load the .env, or name an embedded database with PGLITE_DATA_DIR",
-      );
-    }
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
     out(`0043 — ${apply ? "APPLY" : "DRY RUN"}`);

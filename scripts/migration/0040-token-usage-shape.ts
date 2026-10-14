@@ -13,15 +13,15 @@
  * non-negative integer — a fraction the earlier rule accepted included) is listed and left as it
  * is, for an operator to decide. A row written after the scan is left alone: the update matches the
  * value read. Dry run by default (rolled back). Exit 1 while a malformed row remains, in both modes.
- * One pass after the deploy. Targets `DATABASE_URL`, or an embedded database named by
- * `PGLITE_DATA_DIR` (the platform stopped: PGlite opens in one process); with neither set it exits 2,
- * rather than open `./data/pglite`.
+ * One pass after the deploy. Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither
+ * (`lib/database-target.ts`).
  */
 
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { organizations, runs } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { parseTokenUsage } from "@appstrate/afps-shared/token-usage";
+import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 class DryRunRollback extends Error {}
 
@@ -85,16 +85,9 @@ export async function runTokenUsageShape(options: {
 }
 
 if (import.meta.main) {
+  exitUnlessDatabaseNamed();
   const apply = process.argv.includes("--apply");
   const out = (line: string) => process.stdout.write(`${line}\n`);
-  // With neither set, `@appstrate/db/client` would open the default ./data/pglite.
-  if (!process.env.DATABASE_URL && !process.env.PGLITE_DATA_DIR) {
-    out(
-      "neither DATABASE_URL nor PGLITE_DATA_DIR is set — refusing the default ./data/pglite; " +
-        "load the .env, or name an embedded database with PGLITE_DATA_DIR",
-    );
-    process.exit(2);
-  }
   const { closeDb } = await import("@appstrate/db/client");
   let code = 1;
   try {
