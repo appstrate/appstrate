@@ -351,9 +351,10 @@ operator who lists a private host in `EGRESS_ALLOW_INTERNAL_HOSTS` must also
 leave its range out of `FIRECRACKER_EGRESS_DENY_CIDRS` (both set in a runner
 drop-in, _Env vars_); that list is the runner host's `forward` chain for every
 guest, so narrowing it removes the L3 backstop for that range on every run,
-leaving only the sidecar's app-layer floor (`SIDECAR.md` → "Runner egress allowlist"). Everything else
-guest→internet is masqueraded and reserved, inside the guest, to the sidecar
-uid (default-deny `output` chain; IPv6 is disabled in the guest entirely).
+leaving only the sidecar's app-layer floor (`SIDECAR.md` → "Runner egress
+allowlist"). Everything else guest→internet is masqueraded and reserved, inside
+the guest, to the sidecar uid (default-deny `output` chain; IPv6 is disabled in
+the guest entirely).
 
 **Guest firewall** (`guest/firewall.ts`, applied by the supervisor before
 any workload starts): the `output` chain drops MMDS for every uid, then
@@ -741,21 +742,19 @@ boots on a bare KVM host with only these variables.
 | `EGRESS_ALLOW_INTERNAL_HOSTS`     | _(unset)_ | Internal hosts guest sidecars may reach, same grammar as the platform's (`docs/ENV.md`). Guests take it from HERE, not from the platform; a malformed list refuses boot |
 
 `/etc/appstrate-runner/env` belongs to `appstrate runner install`, which renders
-it whole from its own options. It writes the `FIRECRACKER_RUNNER_*` keys above
-(token, platform URL, socket or host/port), `FIRECRACKER_BIN`,
-`FIRECRACKER_JAILER_BIN`, `FIRECRACKER_KERNEL_PATH`, `FIRECRACKER_ROOTFS_PATH`,
-`FIRECRACKER_DATA_DIR`, `FIRECRACKER_ARTIFACTS_VERSION` and
-`FIRECRACKER_ARTIFACTS_PUBKEY` (`RUNNER_ENV_MANAGED_KEYS`,
-`apps/cli/src/lib/runner/config-files.ts`). A re-install keeps the token and a
-`FIRECRACKER_ARTIFACTS_PUBKEY` override, drops every other key, warns naming
-each dropped key and keeps the previous file as
+it whole from its own options. It writes the keys in `RUNNER_ENV_MANAGED_KEYS`
+(`apps/cli/src/lib/runner/config-files.ts`): the `FIRECRACKER_RUNNER_*` link
+keys, the binary and artifact paths, and the artifacts pin and pubkey. A
+re-install keeps the token and a `FIRECRACKER_ARTIFACTS_PUBKEY` override, drops
+every other key, warns naming each dropped key and keeps the previous file as
 `/etc/appstrate-runner/env.previous` (0600). That copy holds the token: delete it
 once its variables are in the drop-in. `appstrate runner update` rewrites only
 `FIRECRACKER_ARTIFACTS_VERSION`. Do not edit that file by hand.
 
 Every other daemon variable (`EGRESS_ALLOW_INTERNAL_HOSTS`,
-`FIRECRACKER_EGRESS_DENY_CIDRS`, `FIRECRACKER_JAILER`, the rest of the engine
-table below) goes in a systemd drop-in, one `Environment=` line per variable:
+`FIRECRACKER_EGRESS_DENY_CIDRS`, `FIRECRACKER_JAILER`, every engine variable
+below that install does not write) goes in a systemd drop-in, one
+`Environment=` line per variable:
 
 ```sh
 systemctl edit appstrate-runner
@@ -771,6 +770,10 @@ Environment=FIRECRACKER_EGRESS_DENY_CIDRS=169.254.0.0/16,172.16.0.0/12,192.168.0
 ```sh
 systemctl restart appstrate-runner
 ```
+
+The `FIRECRACKER_EGRESS_DENY_CIDRS` value above is today's default
+(`apps/api/src/modules/firecracker/runner/host-env.ts`) minus `10.0.0.0/8`. An
+override freezes the list: re-check it against the default on upgrade.
 
 Install rewrites the unit file, never its `.d/` directory, so the drop-in
 survives a re-install; `appstrate runner uninstall` removes it with the unit.
