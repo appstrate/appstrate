@@ -39,6 +39,8 @@ export interface CardItem {
   icon?: ReactNode;
   /** An agent's chosen icon and colour: its identity tile, in the cards and the table alike. */
   identity?: { icon?: string | null; color?: string | null };
+  /** An integration's logo (its manifest `icon`), next to its name in the table. */
+  logo?: string;
   /** The card's state, top right: what a browsing reader looks for first. */
   status?: ReactNode;
   /** One muted line under the description: who provides it, what it carries. */

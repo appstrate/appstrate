@@ -21,6 +21,7 @@ import type { DataColumn } from "./data-table";
 import { Badge } from "./status-badge";
 import { RunAgentButton } from "./run-agent-button";
 import { AgentIdentityTile } from "./agent-identity";
+import { IntegrationIcon } from "./integration-icon";
 import { useCatalogueOriginColumn } from "./catalogue-columns";
 import { useOrg } from "../hooks/use-org";
 import type { CardItem } from "../pages/package-list";
@@ -54,6 +55,7 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
               iconClassName="size-4"
             />
           )}
+          {item.type === "integration" && <IntegrationIcon src={item.logo} size="sm" />}
           <div className="flex min-w-0 flex-col">
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate font-medium">{item.displayName}</span>
