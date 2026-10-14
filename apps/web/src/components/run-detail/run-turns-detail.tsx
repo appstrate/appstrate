@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
-import { formatDuration } from "@appstrate/core/format";
+import { formatDuration } from "../../lib/format-duration";
 import {
   Table,
   TableBody,

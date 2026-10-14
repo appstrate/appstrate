@@ -2,6 +2,7 @@
 
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { cn } from "@appstrate/ui/cn";
 import { Badge } from "./status-badge";
 import { ScheduleStatusBadge, ScheduleUnreadBadge } from "./schedule-status-badge";
 import { ActorLabel } from "./actor-label";
@@ -9,6 +10,7 @@ import type { EnrichedSchedule } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/format-date";
 import { scheduleDetailPath } from "../lib/package-paths";
 import { scheduleNextRunAt } from "../lib/schedule-options";
+import { describeSchedule } from "../lib/frequency-summary";
 
 interface ScheduleCardProps {
   schedule: EnrichedSchedule;
@@ -22,6 +24,7 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
   // services/scheduler.ts) as whole-history counts: the card fetches nothing.
   const runningRuns = schedule.running_runs;
   const nextRunAt = scheduleNextRunAt(schedule);
+  const recurrence = describeSchedule(schedule);
 
   return (
     <Link
@@ -45,13 +48,18 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
       <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
         <div className="min-w-0">
           <dt className="text-muted-foreground">{t("schedules.column.cron")}</dt>
-          <dd className="mt-1 truncate font-mono" title={schedule.timezone ?? undefined}>
-            {schedule.cron_expression}
+          <dd
+            className={cn("mt-1 truncate", recurrence.isCron && "font-mono")}
+            title={recurrence.text}
+          >
+            {recurrence.text}
           </dd>
         </div>
         <div className="min-w-0">
           <dt className="text-muted-foreground">{t("schedules.column.next")}</dt>
-          <dd className="mt-1 truncate">{nextRunAt ? formatDateField(nextRunAt) : "—"}</dd>
+          <dd className="mt-1 truncate">
+            {nextRunAt ? formatDateField(nextRunAt, "datetime", schedule.timezone) : "—"}
+          </dd>
         </div>
       </dl>
 

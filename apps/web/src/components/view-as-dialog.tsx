@@ -62,7 +62,10 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
-  const { data: spaces } = useSpaces();
+  // A personal space has one member and no roles to preview: nobody else can
+  // ever stand in it.
+  const { data: allSpaces } = useSpaces();
+  const spaces = allSpaces?.filter((s) => !s.personal);
   const navigate = useNavigate();
   const closeOverlay = useCloseOverlay();
 
@@ -129,7 +132,9 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
       // Committing a preview the user already left would persist it, and a
       // persona the server accepts is never stopped later: nothing would undo it.
       if (abandoned.current) return;
-      enterViewAs(persona, orgs);
+      // Only a preview that moves the admin has a space to bring them back to.
+      const moves = !!space && !!roleOption && space.id !== currentSpaceId;
+      enterViewAs(persona, orgs, moves ? currentSpaceId : null);
     } catch (err) {
       if (abandoned.current) return;
       setEntering(false);

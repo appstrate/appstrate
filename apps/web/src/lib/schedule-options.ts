@@ -92,3 +92,16 @@ export type ScheduleSettingsSection = (typeof SCHEDULE_SETTINGS_SECTIONS)[number
 export function scheduleSettingsHref(scheduleId: string, section: ScheduleSettingsSection) {
   return sectionHref(scheduleDetailPath(scheduleId), "settings", "scheduleSettings", section);
 }
+
+/**
+ * A write's state as one section of the Paramètres tab says it. Every section saves through
+ * one mutation, so without this the « Enregistré » of a name typed in Général would still be
+ * shown under Récurrence: a section speaks of the writes made from it, and is quiet otherwise.
+ */
+export function sectionWriteState<
+  T extends { isPending: boolean; isSuccess: boolean; isError: boolean },
+>(write: T, writtenFrom: ScheduleSettingsSection | null, section: ScheduleSettingsSection): T {
+  return writtenFrom === section
+    ? write
+    : { ...write, isPending: false, isSuccess: false, isError: false };
+}

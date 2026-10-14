@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import { Check, Loader2 } from "lucide-react";
+import { cn } from "@appstrate/ui/cn";
 
 /**
  * What a self-saving setting says about its write: Enregistrement… / Enregistré /
@@ -20,14 +22,26 @@ export function SaveFeedback({
 }) {
   const { t } = useTranslation("common");
   return (
-    <p className="text-muted-foreground min-h-5 text-xs" aria-live="polite">
-      {pending
-        ? t("saveFeedback.saving")
-        : error
-          ? t("saveFeedback.error")
-          : success
-            ? t("saveFeedback.saved")
-            : ""}
+    <p
+      className={cn(
+        "flex min-h-5 items-center gap-1 text-xs",
+        error ? "text-destructive" : !pending && success ? "text-success" : "text-muted-foreground",
+      )}
+      aria-live="polite"
+    >
+      {pending ? (
+        <>
+          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          {t("saveFeedback.saving")}
+        </>
+      ) : error ? (
+        t("saveFeedback.error")
+      ) : success ? (
+        <>
+          <Check className="size-3.5" aria-hidden />
+          {t("saveFeedback.saved")}
+        </>
+      ) : null}
     </p>
   );
 }

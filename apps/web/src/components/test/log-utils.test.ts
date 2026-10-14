@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { formatDuration } from "@appstrate/core/format";
 import {
   buildLogEntries,
   buildTurnRows,
@@ -124,14 +123,6 @@ describe("buildLogEntries — tool durations", () => {
     ];
     const { entries } = buildLogEntries(logs);
     expect(toolEntry(entries).durationMs).toBeUndefined();
-  });
-
-  it("formats durations sub-second in ms and above in one-decimal seconds", () => {
-    // The viewer renders `LogEntry.durationMs` through the shared
-    // `@appstrate/core/format` helper rather than a local copy; this pins the
-    // contract the log line depends on.
-    expect(formatDuration(842)).toBe("842ms");
-    expect(formatDuration(1500)).toBe("1.5s");
   });
 });
 

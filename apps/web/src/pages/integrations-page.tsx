@@ -38,7 +38,7 @@ import { usePackageList } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
-import { useIntegrationViewStore } from "../stores/list-view-store";
+import { useListView } from "../stores/list-view-store";
 import { useIntegrationListColumns } from "./integration-list-columns";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
 
@@ -84,8 +84,7 @@ export function IntegrationsPage() {
   // type page asks, not the management listing.
   const { data: active = [], isLoading, error } = usePackageList("integration");
   const list = useListParams(["origin", "protocol"]);
-  const view = useIntegrationViewStore((state) => state.view);
-  const setView = useIntegrationViewStore((state) => state.setView);
+  const [view, setView] = useListView("integrations");
   const visibility = useColumnVisibility("integrations");
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
   const canCreate = can("integrations:write");

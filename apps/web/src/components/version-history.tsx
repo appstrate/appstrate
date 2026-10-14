@@ -105,7 +105,7 @@ export function VersionHistory({
           {
             id: "version",
             header: t("version.version"),
-            width: "minmax(120px,1fr)",
+            width: "minmax(80px,1fr)",
             cell: (version) =>
               type === "integration" ? (
                 <span className="font-mono text-sm">{version.version}</span>
@@ -121,13 +121,13 @@ export function VersionHistory({
           {
             id: "date",
             header: t("version.created"),
-            width: "minmax(180px,1fr)",
+            width: "minmax(120px,1fr)",
             cell: (version) => (version.createdAt ? formatDateField(version.createdAt) : "–"),
           },
           {
             id: "status",
             header: t("version.status"),
-            width: "minmax(160px,1fr)",
+            width: "minmax(100px,1fr)",
             cell: (version) => (
               <Badge variant={version.yanked ? "warning" : "secondary"}>
                 {t(version.yanked ? "version.yanked" : "version.published")}

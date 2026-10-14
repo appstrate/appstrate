@@ -75,6 +75,7 @@ import {
   SCHEDULE_SETTINGS_SECTIONS as SECTIONS,
   type ScheduleSettingsSection,
   scheduleSettingsHref,
+  sectionWriteState,
   scheduleVersionOptions,
   VERSION_INHERIT,
 } from "../lib/schedule-options";
@@ -328,7 +329,16 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   const mayWrite = can("schedules:write") && governs;
   const requested = new URLSearchParams(location.search).get("scheduleSettings");
   const active = SECTIONS.find((s) => s.id === requested) ?? SECTIONS[0];
-  const update = useScheduleWrite(schedule);
+  const write = useScheduleWrite(schedule);
+  // The section the last field write came from: its state is that section's to say.
+  const [writtenFrom, setWrittenFrom] = useState<ScheduleSettingsSection | null>(null);
+  const update: Save = {
+    ...sectionWriteState(write, writtenFrom, active.id),
+    mutate: (variables, options) => {
+      setWrittenFrom(active.id);
+      write.mutate(variables, options);
+    },
+  };
   // Moves write through their own: a field saved while a move is in flight
   // would take over the move's answer.
   const moveWrite = useScheduleWrite(schedule);
@@ -337,6 +347,7 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   return (
     <AgentDetailSplit
       data-schedule-settings
+      phoneMenu={t("schedule.tabSettings")}
       rail={
         <SectionRail
           label={t("schedule.tabSettings")}
@@ -366,7 +377,7 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
           </RoleLimitNotice>
         ) : (
           <>
-            <RefusedWriteAnswer schedule={schedule} update={update} />
+            <RefusedWriteAnswer schedule={schedule} update={write} />
             <RefusedWriteAnswer schedule={schedule} update={moveWrite} />
             {/* Every control writes: none is offered before its write can name the
                 connections the server re-checks. */}
@@ -411,7 +422,16 @@ function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save
   const agent = agents?.find((a) => a.id === schedule.packageId);
   return (
     <>
-      <SettingRow label={t("schedule.name")}>
+      <SettingRow
+        label={t("schedule.name")}
+        status={
+          <SaveFeedback
+            pending={update.isPending}
+            success={update.isSuccess}
+            error={update.isError}
+          />
+        }
+      >
         <InlineTextSetting
           value={schedule.name ?? ""}
           placeholder={t("schedule.namePlaceholder")}
@@ -445,7 +465,6 @@ function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save
           <ArrowRight className="text-muted-foreground size-4 shrink-0" aria-hidden />
         </Link>
       </SettingRow>
-      <SaveFeedback pending={update.isPending} success={update.isSuccess} error={update.isError} />
     </>
   );
 }

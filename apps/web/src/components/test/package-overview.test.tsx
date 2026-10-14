@@ -46,6 +46,15 @@ describe("package overview", () => {
     expect(html).not.toContain("Lire les instructions complètes");
     expect(html).toContain("Parcourir les fichiers");
   });
+  it("previews the instructions, not the frontmatter that names the skill", () => {
+    const html = render({
+      content:
+        "---\nname: rapprochement\ndescription: Rapproche les pièces.\n---\n\nVérifiez les pièces sources.",
+    });
+    expect(html).toContain("Vérifiez les pièces sources.");
+    expect(html).not.toContain("name: rapprochement");
+    expect(html).not.toContain("<h2>");
+  });
   it("does not offer an empty usage link", () => {
     expect(render({ agentCount: 0 })).not.toContain("Voir les agents utilisateurs");
   });

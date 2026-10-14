@@ -21,6 +21,7 @@ interface PageHeaderProps {
   children?: ReactNode;
 }
 
+/** The page's title: its one `<h1>`, every section below it an `<h2>`. */
 export function PageHeader({
   title,
   variant = "default",
@@ -44,7 +45,7 @@ export function PageHeader({
             : "flex min-h-9 items-center justify-between gap-4"
         }
       >
-        <h2
+        <h1
           className={cn(
             "flex items-center gap-2 font-semibold",
             variant === "collection" ? "text-lg md:text-2xl" : "text-lg",
@@ -53,7 +54,7 @@ export function PageHeader({
         >
           {icon}
           {title}
-        </h2>
+        </h1>
         {actions && (
           <div
             data-page-actions

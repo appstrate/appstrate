@@ -178,4 +178,25 @@ describe("the dashboard", () => {
     expect(html).toContain("Aucun run prévu");
     expect(html).not.toContain("Planifications à venir");
   });
+
+  it("titles the page with its one h1", () => {
+    const html = asOrgMember(READER, <DashboardContent {...content()} />);
+    expect(html).toMatch(/<h1[^>]*>Bonjour, Ada<\/h1>/);
+  });
+
+  it("gives no success rate until a run has finished", () => {
+    const running = makeRun({ id: "run_live", packageId: null, status: "running" });
+    const pending = asOrgMember(
+      READER,
+      <DashboardContent {...content({ runs: [running], runTotal: 1 })} />,
+    );
+    expect(pending).toMatch(/Réussite des derniers runs<\/span><div><p[^>]*>—<\/p>/);
+
+    const failed = makeRun({ id: "run_ko", packageId: null, status: "failed" });
+    const done = asOrgMember(
+      READER,
+      <DashboardContent {...content({ runs: [run, failed], runTotal: 2 })} />,
+    );
+    expect(done).toMatch(/Réussite des derniers runs<\/span><div><p[^>]*>50\u00a0%<\/p>/);
+  });
 });

@@ -233,7 +233,8 @@ export function useProviderColumns({
     {
       id: "state",
       header: t("providers.col.state"),
-      width: "minmax(100px,1.2fr)",
+      // A badge or two: the room it does not need goes to the name and models.
+      width: "minmax(100px,0.6fr)",
       tier: 2,
       cell: (row) => (
         <RowStateCell

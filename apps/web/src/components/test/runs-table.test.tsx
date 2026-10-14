@@ -63,7 +63,7 @@ describe("the runs column set", () => {
     expect(html).toContain("Rapport trimestriel");
     expect(html).toContain("Alice"); // trigger
     expect(html).toContain('aria-label="eu-proxy"'); // the egress it went through
-    expect(html).toContain("4.2s"); // duration
+    expect(html).toContain("4,2\u202fs"); // duration
     expect(html).toContain(STARTED_AT_LABEL);
   });
 
