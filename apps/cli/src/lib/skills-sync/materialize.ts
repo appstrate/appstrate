@@ -77,14 +77,21 @@ export function collisionSlug(packageId: string, taken: ReadonlySet<string>, pre
   return freeSlug(`${prefix}${withoutAt}`, taken, packageId);
 }
 
-/** `run-<space>-<name>`, then the same counter: one agent claimed from a second space. */
+/**
+ * `run-<space>-<name>`, then the same counter: one agent claimed from a second
+ * space. The SPACE is what gets cut to fit, so a long space name never hides
+ * which agent the command launches.
+ */
 export function spaceCollisionSlug(
   packageNameSegment: string,
   spaceName: string,
   taken: ReadonlySet<string>,
 ): string {
+  const name = toSlug(packageNameSegment);
+  const room = SKILL_NAME_MAX_LENGTH - AGENT_SLUG_PREFIX.length - name.length - 1;
+  const space = room > 0 ? toSlug(spaceName).slice(0, room) : spaceName;
   return freeSlug(
-    `${AGENT_SLUG_PREFIX}${spaceName}-${packageNameSegment}`,
+    `${AGENT_SLUG_PREFIX}${space}-${packageNameSegment}`,
     taken,
     `${spaceName}/${packageNameSegment}`,
   );
@@ -308,8 +315,9 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
       `- \`warnings\` items (${CONNECTION_RESOLUTION_WARNING_CODES.map(code).join(", ")}): the ` +
         "run started without those integrations. Say so with the result; do not retry. They " +
         `carry no link: connect a ${code("not_connected")} or ${code("auth_key_mismatch")} one ` +
-        "only if the user asks, with `initiateIntegrationConnect` as the Appstrate server's " +
-        `instructions describe; a ${code("must_choose_connection")} one needs a connection ` +
+        "only if the user asks, with `initiateIntegrationConnect` through " +
+        `\`${INVOKE_OPERATION}\` and \`${space}\`, as the Appstrate server's instructions ` +
+        `describe; a ${code("must_choose_connection")} one needs a connection ` +
         `picked; an ${code("integration_not_active")} one is activated in the space, not ` +
         `connected; an ${code("integration_unbound")} one was bound to none on purpose (its ` +
         "`source` says by whom).",

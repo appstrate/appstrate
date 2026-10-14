@@ -461,6 +461,31 @@ describe("assignSlugs — one agent active in several spaces (#1972)", () => {
   });
 });
 
+describe("assignSlugs — the space fallback", () => {
+  it("names the second space's command after its space when another package holds run-<name>", () => {
+    const { planned } = assignSlugs(
+      [],
+      [view("@acme/report"), view("@acme/report", SECOND, "Lab")],
+      holding([["run-report", "@zeta/report"]], SPACE),
+    );
+
+    expect(planned.map((entry) => entry.slug)).toEqual(["run-acme-report", "run-lab-report"]);
+  });
+
+  it("cuts a long space name, never the agent's name", () => {
+    const space = "a".repeat(60);
+    const { planned } = assignSlugs(
+      [],
+      [view("@acme/weekly-report"), view("@acme/weekly-report", SECOND, space)],
+    );
+
+    const slug = planned[1]!.slug;
+    expect(slug.length).toBeLessThanOrEqual(64);
+    expect(slug.startsWith("run-aaaa")).toBe(true);
+    expect(slug.endsWith("-weekly-report")).toBe(true);
+  });
+});
+
 describe("listSyncableAgents", () => {
   const agents: AgentFixture[] = [
     { id: "@acme/zebra", activeIn: ["spc_2"] },

@@ -528,7 +528,7 @@ With the `claude-plugin` target, sync also installs one command per agent ACTIVE
 
 **Keeping commands current.** A command pins the version it launches (`--source published`: the latest published; `--source draft`: `draft`, removed if you cannot write the agent; a system agent always uses its published version). A republish, or a schema, lock or default change in its space, rewrites it at the next sync. A command that fell behind says so at launch and tells you to run `claude plugin update appstrate@appstrate`, which re-runs the sync and reinstalls the plugin.
 
-**Names.** `run-<name>`, under the skill directory rule above: an installed command keeps its name while its agent is still active in its space, and skills are named before agents. A newcomer whose name is taken by the same agent in another space becomes `run-<space name>-<name>`; one whose name is taken by another package becomes `run-<scope>-<name>`; both continue with `-2`, `-3`, … So activating an agent in a second space never renames the command it already has.
+**Names.** `run-<name>`, under the skill directory rule above: an installed command keeps its name while its agent is still active in its space, and skills are named before agents. A newcomer whose name is taken becomes `run-<space name>-<name>` when the same agent has a command in another space, else `run-<scope>-<name>`; both continue with `-2`, `-3`, … A long space name is shortened, never the agent's name. So activating an agent in a second space never renames the command it already has.
 
 #### Codex, and running without a Claude Code plugin
 

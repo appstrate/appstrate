@@ -263,7 +263,7 @@ describe("code sync — agents come from the selected spaces (#1972)", () => {
     expect(await spaceOf("run-report")).toBe(ONE);
     expect(await spaceOf("run-space-two-report")).toBe(TWO);
     expect(stderr()).toContain(
-      'Renamed @acme/report to "run-space-two-report" — "run-report" is already taken.',
+      'Renamed @acme/report in space "Space Two" to "run-space-two-report" — "run-report" is already taken.',
     );
   });
 
@@ -391,10 +391,7 @@ describe("code sync — agents come from the selected spaces (#1972)", () => {
 });
 
 describe("code sync — a ledger written before agents recorded their space", () => {
-  it("keeps every skill and re-renders the agent commands once, under the same names", async () => {
-    const server = serve([REPORT]);
-    await codeSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
-    const command = await readText(commandFile("run-report"));
+  const stripSpaces = async (): Promise<void> => {
     // The shape the previous CLI wrote: no `spaceId` on any entry.
     const state = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, { spaceId?: string }> }>;
@@ -403,6 +400,32 @@ describe("code sync — a ledger written before agents recorded their space", ()
       for (const entry of Object.values(target.managed)) delete entry.spaceId;
     }
     await writeFile(getStatePath(), JSON.stringify(state));
+  };
+
+  // Accepted limitation (#1972): an entry without a space claims no name on the
+  // upgrade run, so selection order decides, not the space it was synced from.
+  it("gives run-<name> to the first selected space on the upgrade run, then keeps it", async () => {
+    serve([{ ...REPORT, activeIn: [TWO] }]);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+    await stripSpaces();
+
+    serve([{ ...REPORT, activeIn: [ONE, TWO] }]);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+
+    const spaceOf = async (slug: string) =>
+      /"space_id":"([^"]+)"/.exec(await readText(commandFile(slug)))?.[1];
+    expect(await spaceOf("run-report")).toBe(ONE);
+    expect(await spaceOf("run-space-two-report")).toBe(TWO);
+
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+    expect(await spaceOf("run-report")).toBe(ONE);
+  });
+
+  it("keeps every skill and re-renders the agent commands once, under the same names", async () => {
+    const server = serve([REPORT]);
+    await codeSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+    const command = await readText(commandFile("run-report"));
+    await stripSpaces();
     const agentFile = await lstat(commandFile("run-report"));
     const { io, stderr } = createMemoryIO();
 
@@ -484,7 +507,7 @@ describe("code sync — agent command names (D23)", () => {
     ]);
     expect(await readText(commandFile("run-pdf-tools"))).toBe(skillMd("run-pdf-tools"));
     expect(stderr()).toContain(
-      'Renamed @team/pdf-tools to "run-team-pdf-tools" — "run-pdf-tools" is already taken.',
+      'Renamed @team/pdf-tools in space "Space One" to "run-team-pdf-tools" — "run-pdf-tools" is already taken.',
     );
   });
 });
@@ -502,7 +525,12 @@ describe("code sync — an installed name stays with its package", () => {
 
     expect(await readText(commandFile("run-report"))).toContain("@zeta/report");
     expect(await readText(commandFile("run-alpha-report"))).toContain("@alpha/report");
-    expect(stderr()).toContain('Renamed @alpha/report to "run-alpha-report"');
+    expect(stderr()).toContain('Renamed @alpha/report in space "Space One" to "run-alpha-report"');
+
+    // Keeping the fallback it already holds is not news.
+    const again = createMemoryIO();
+    await codeSyncCommand({ target: ["claude-plugin"] }, again.io);
+    expect(again.stderr()).not.toContain("Renamed");
 
     // Once the incumbent leaves, the name goes to the newcomer.
     serve([alpha]);

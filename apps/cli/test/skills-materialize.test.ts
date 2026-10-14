@@ -570,6 +570,9 @@ describe("materializeAgent", () => {
     expect(body).toContain(`\`{ "runId": "<id>", ${space} }\``);
     const upload = renderAgent(fileSchemaView([])).body;
     expect(upload).toContain(`both with \`${space}\``);
+    expect(body).toContain(
+      `\`initiateIntegrationConnect\` through \`${pluginTool("invoke_operation")}\` and \`${space}\``,
+    );
   });
 
   it("includes the upload recipe only when an unlocked file field exists", () => {

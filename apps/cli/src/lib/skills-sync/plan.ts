@@ -86,7 +86,7 @@ export interface ResolvedSkill {
 
 interface SlugClaim {
   slug: string;
-  /** Set when a collision forced the `<scope>-<name>` fallback (D4, D23). */
+  /** Set when a collision forced a fallback newly assigned this run (D4, D23). */
   renamedFrom?: string;
 }
 
@@ -98,6 +98,8 @@ interface PlannedAgent extends SlugClaim {
   kind: "agent";
   packageId: string;
   spaceId: string;
+  /** Messages only. */
+  spaceName: string;
   version: string;
   /** SRI of the rendered tree (D22): a template, lock or space change moves it. */
   integrity: string;
@@ -357,8 +359,8 @@ interface SlugAssignment {
  * another claimant this run: an unattended sync must never make
  * `/appstrate:<slug>` launch a different one, nor the same agent in another
  * space. A claimant takes its preferred slug when free, else the one it holds,
- * else a fallback: `run-<space>-<name>` when the slug belongs to the same agent
- * in another space, `<scope>-<name>` when it belongs to another package.
+ * else a fallback: `run-<space>-<name>` when the same agent has a command in
+ * another space (claimed this run, or held), `<scope>-<name>` otherwise.
  */
 export function assignSlugs(
   skills: ResolvedSkill[],
@@ -370,7 +372,7 @@ export function assignSlugs(
   const pick = (
     claimant: Claimant,
     preferred: string,
-    fallback: (blocked: ReadonlySet<string>, holder: Claimant | undefined) => string,
+    fallback: (blocked: ReadonlySet<string>) => string,
   ): SlugClaim => {
     const key = claimKey(claimant);
     const blocked = new Set(taken.keys());
@@ -379,10 +381,9 @@ export function assignSlugs(
       if (claimKey(holder) !== key) blocked.add(slug);
       else own ??= slug;
     }
-    const slug = !blocked.has(preferred)
-      ? preferred
-      : (own ?? fallback(blocked, taken.get(preferred) ?? incumbents.get(preferred)));
-    return slug === preferred ? { slug } : { slug, renamedFrom: preferred };
+    const slug = !blocked.has(preferred) ? preferred : (own ?? fallback(blocked));
+    // Keeping the fallback it already holds is not news: only a new name is reported.
+    return slug === preferred || slug === own ? { slug } : { slug, renamedFrom: preferred };
   };
 
   const planned: PlannedEntry[] = skills.map((skill) => {
@@ -394,12 +395,16 @@ export function assignSlugs(
   });
   const failed: SlugAssignment["failed"] = [];
   for (const view of agents) {
-    const { packageId, spaceId, version } = view;
+    const { packageId, spaceId, spaceName, version } = view;
     const name = nameOf(packageId);
+    const key = claimKey({ packageId, spaceId });
+    const inAnotherSpace = [...taken.values(), ...incumbents.values()].some(
+      (claimant) => claimant.packageId === packageId && claimKey(claimant) !== key,
+    );
     try {
-      const naming = pick({ packageId, spaceId }, agentSlug(name), (blocked, holder) =>
-        holder?.packageId === packageId
-          ? spaceCollisionSlug(name, view.spaceName, blocked)
+      const naming = pick({ packageId, spaceId }, agentSlug(name), (blocked) =>
+        inAnotherSpace
+          ? spaceCollisionSlug(name, spaceName, blocked)
           : collisionSlug(packageId, blocked, AGENT_SLUG_PREFIX),
       );
       const files = materializeAgent(naming.slug, view);
@@ -408,6 +413,7 @@ export function assignSlugs(
         kind: "agent",
         packageId,
         spaceId,
+        spaceName,
         version,
         integrity: treeIntegrity(files),
         files,

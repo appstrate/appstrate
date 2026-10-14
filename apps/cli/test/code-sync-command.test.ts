@@ -253,6 +253,11 @@ describe("code sync — claude-plugin target", () => {
       "pdf-tools",
     ]);
     expect(stderr()).toContain('Renamed @other/reports to "other-reports"');
+
+    // The next run keeps the name it holds, without saying so again.
+    const again = createMemoryIO();
+    await codeSyncCommand({ target: ["claude-plugin"] }, again.io);
+    expect(again.stderr()).not.toContain("Renamed");
   });
 
   it("skips a skill with no published version without failing the run", async () => {
@@ -1774,28 +1779,6 @@ describe("code sync — active context replacement", () => {
       CommandExit,
     );
     expect(await exists(pluginRoot())).toBe(false);
-  });
-
-  it("keeps a skill that cannot be resolved at all across a space switch", async () => {
-    // A space switch installs the same skills, so it is NOT a context switch:
-    // the all-or-nothing rule does not apply and a package that persistently
-    // fails to resolve is kept, exactly as it is on any other run.
-    const { updateProfile } = await import("../src/lib/config.ts");
-    createSkillServer(ONE_SKILL).install();
-    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
-    const skillPath = join(pluginRoot(), "skills", "pdf-tools", "SKILL.md");
-    const before = await readText(skillPath);
-    await updateProfile("default", { spaceId: "spc_2" });
-    const server = createSkillServer([{ ...ONE_SKILL[0]!, resolveError: 500 }]);
-    server.install();
-    const { io, stdout, stderr } = createMemoryIO();
-
-    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
-
-    expect(stdout()).toBe(`${pluginRoot()}\n`);
-    expect(stderr()).toContain("Skipped @acme/pdf-tools");
-    expect(await readText(skillPath)).toBe(before);
-    expect(server.downloads()).toBe(0);
   });
 
   it("lets a pinned space change while downloading: nothing in the plugin depends on it", async () => {

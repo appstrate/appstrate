@@ -225,7 +225,7 @@ export async function codeSyncCommand(
     for (const plan of plans) {
       for (const slug of plan.blocked) {
         report.skill(
-          `Skipped ${catalogue.bySlug.get(slug)!.packageId} on ${plan.target}: ${skillDir(plan.target, slug)} exists and is not managed by appstrate — remove or rename it`,
+          `Skipped ${entryLabel(catalogue.bySlug.get(slug)!)} on ${plan.target}: ${skillDir(plan.target, slug)} exists and is not managed by appstrate — remove or rename it`,
         );
       }
     }
@@ -451,7 +451,7 @@ async function resolveAll(
     bySlug.set(entry.slug, entry);
     if (entry.renamedFrom) {
       report.note(
-        `Renamed ${entry.packageId} to "${entry.slug}" — "${entry.renamedFrom}" is already taken.`,
+        `Renamed ${entryLabel(entry)} to "${entry.slug}" — "${entry.renamedFrom}" is already taken.`,
       );
     }
   }
@@ -564,7 +564,7 @@ async function fetchTrees(
   for (const result of results) {
     if ("error" in result) {
       if (fixOf(result.error)) throw result.error;
-      report.skill(`Failed ${result.entry.packageId}: ${formatError(result.error)}`);
+      report.skill(`Failed ${entryLabel(result.entry)}: ${formatError(result.error)}`);
       continue;
     }
     trees.set(result.tree.slug, result.tree);
@@ -667,6 +667,10 @@ function ledgerEntry(entry: PlannedEntry): ManagedSkill {
 /** Which of an agent's commands: the same package can be active in several spaces. */
 function agentLabel(packageId: string, spaceName: string): string {
   return `${packageId} in space "${spaceName}"`;
+}
+
+function entryLabel(entry: PlannedEntry): string {
+  return entry.kind === "agent" ? agentLabel(entry.packageId, entry.spaceName) : entry.packageId;
 }
 
 /** Versions come from the ledger (before) and the catalogue (after): the only place to read them. */
