@@ -533,6 +533,28 @@ export async function selectAccessibleConnection(
   throw mustChoose(packageId, candidatesOf(set), "The org default holds several connections");
 }
 
+/**
+ * The {@link usableInSpace} rows of `integrationIds`, {@link OLDEST_FIRST}: what the actor may bind
+ * in `spaceId`, the one listing the resolver, the picker and the settings list each project.
+ */
+export async function loadUsableConnections(
+  spaceId: string,
+  actor: Actor,
+  integrationIds: string[],
+): Promise<(typeof integrationConnections.$inferSelect)[]> {
+  if (integrationIds.length === 0) return [];
+  return db
+    .select()
+    .from(integrationConnections)
+    .where(
+      and(
+        inArray(integrationConnections.integrationId, integrationIds),
+        usableInSpace(spaceId, actor),
+      ),
+    )
+    .orderBy(...OLDEST_FIRST);
+}
+
 export function listReachableConnections(
   context: { spaceId: string; actor: Actor },
   reach: ProxyReach,
@@ -3357,7 +3379,7 @@ export async function saveIntegrationConnection(
 }
 
 /**
- * The resolver's set ({@link usableInSpace}), each row projected for `caller`
+ * The resolver's set ({@link loadUsableConnections}), each row projected for `caller`
  * ({@link connectionViewOf}), with the actions it holds and, for its owner, the spaces it may share
  * it into under its org role `orgRole` here (`null`: none). `locked_by`: what a 409 would refuse —
  * an own row's delete (a lock anywhere), another's withdrawal from this space.
@@ -3370,12 +3392,7 @@ export async function listIntegrationConnections(
 ): Promise<IntegrationConnectionSummary[]> {
   await assertSpaceInScope(scope);
   const actor = caller.principal.actor;
-  const rows = await db
-    .select()
-    .from(integrationConnections)
-    .where(
-      and(eq(integrationConnections.integrationId, packageId), usableInSpace(scope.spaceId, actor)),
-    );
+  const rows = await loadUsableConnections(scope.spaceId, actor, [packageId]);
   const ownerName = await resolveConnectionOwnerNames(rows);
   const own = rows.filter((row) => actorOwns(actor, row)).map((row) => row.id);
   const others = rows.filter((row) => !actorOwns(actor, row)).map((row) => row.id);

@@ -53,8 +53,9 @@ import {
   connectionReach,
   connectionViewOf,
   loadConnectionShares,
+  loadUsableConnections,
 } from "./integration-connections.ts";
-import { OLDEST_FIRST, sharedInSpace, usableInSpace } from "./connection-reach.ts";
+import { sharedInSpace, usableInSpace } from "./connection-reach.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -469,8 +470,8 @@ export async function listMemberPinsForAgent(
  * (space, integration), oldest first. Used by the UI picker:
  * own + shared, with caller-facing labels.
  *
- * Same set — and the same predicate (`usableInSpace`) — as `listIntegrationConnections`
- * on the settings surface; only the projected DTO differs (this one carries
+ * The same rows ({@link loadUsableConnections}) as `listIntegrationConnections` on the
+ * settings surface; only the projected DTO differs (this one carries
  * `owner_name` and the split owner ids the picker keys on, the other the
  * full connection summary).
  */
@@ -479,17 +480,7 @@ export async function listAccessibleConnections(
   integrationId: string,
   principal: ConnectionPrincipal,
 ): Promise<AccessibleIntegrationConnection[]> {
-  const actor = principal.actor;
-  const rows = await db
-    .select()
-    .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.integrationId, integrationId),
-        usableInSpace(scope.spaceId, actor),
-      ),
-    )
-    .orderBy(...OLDEST_FIRST);
+  const rows = await loadUsableConnections(scope.spaceId, principal.actor, [integrationId]);
   const ownerName = await resolveConnectionOwnerNames(rows);
   const shares = await loadConnectionShares(
     db,
