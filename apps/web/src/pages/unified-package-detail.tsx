@@ -349,9 +349,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     canDelete: !isBuiltIn && !!homeDeletable,
     // The page's « Créer une version » (PackageActionsDropdown's `isMutable`).
     onCreate: canCreateVersion ? () => newVersion.open() : undefined,
-    latestVersion: latestVersionForDiff,
-    currentManifest,
-    currentContent,
     hasUnarchivedChanges: hasArchivableChanges && !isVersionView,
   };
 
@@ -570,8 +567,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   version={versionLabel}
                   isHistorical={isHistoricalVersion}
                   inputWrapperOverride={historicalInputWrapper}
-                  currentManifest={currentManifest}
-                  currentContent={currentContent}
                 />
               </TabsContent>
               <TabsContent

@@ -8,17 +8,16 @@ import { MemoryPanel } from "../persistence/memory-panel";
 import { useSchedules } from "../../hooks/use-schedules";
 import { schemaHasFileFields } from "@appstrate/core/form";
 import { usePermissions } from "../../hooks/use-permissions";
-import { RunList } from "../run-list";
+import { ScopedRunList } from "../scoped-run-list";
 import { SchedulesTable } from "../schedules-table";
 import { useScheduleColumns } from "../schedule-columns";
 import { AgentRunButton } from "./agent-run-button";
-import { Ban, CalendarClock, Play, SearchX } from "lucide-react";
+import { Ban, CalendarClock, Play } from "lucide-react";
 import { EmptyState, EmptyStateAction } from "../page-states";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { runStatusValues } from "@appstrate/core/run-status";
-import { readList, useLocalListParams } from "../../lib/list-params";
+import { readList } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
-import { useRunStatusFilter } from "../../hooks/use-run-status-filter";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
 import { searchOf } from "../../lib/url-search";
@@ -54,38 +53,16 @@ export function AgentRunsTab({
   const { t } = useTranslation(["agents", "common"]);
   // The overview's counters open this tab already filtered.
   const requestedStatus = useConsumedSearchParam("agentRunStatus");
-  const list = useLocalListParams({ status: readList(requestedStatus, runStatusValues) });
-  const { statuses, filter: statusFilter } = useRunStatusFilter(list);
 
   return (
-    <RunList
-      packageId={packageId}
-      pageSize={12}
-      status={statuses}
-      search={list.search}
-      hideAgentName
-      tableSurface="integrated"
-      toolbar={() => (
-        <ListToolbar
-          placement="panel"
-          search={{
-            value: list.search,
-            onChange: list.setSearch,
-            placeholder: t("detail.runsSearch"),
-          }}
-          filters={[statusFilter]}
-          onReset={list.reset}
-        />
-      )}
+    <ScopedRunList
+      scope={{ packageId }}
+      initialStatus={readList(requestedStatus, runStatusValues)}
       emptyState={
-        list.search || statuses.length > 0 ? (
-          <EmptyState message={t("runs.emptyFiltered")} icon={SearchX} compact />
-        ) : (
-          <EmptyState message={t("detail.emptyRuns")} icon={Play} compact>
-            {/* The header's launch control answers `?run`: this one only triggers it. */}
-            <AgentRunButton packageId={packageId} versionLabel={versionLabel} inputDialog={false} />
-          </EmptyState>
-        )
+        <EmptyState message={t("detail.emptyRuns")} icon={Play} compact>
+          {/* The header's launch control answers `?run`: this one only triggers it. */}
+          <AgentRunButton packageId={packageId} versionLabel={versionLabel} inputDialog={false} />
+        </EmptyState>
       }
     />
   );

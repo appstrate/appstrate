@@ -272,7 +272,6 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
   // regenerated client stops producing the hit and `deadExclusions` reports
   // this line. Delete it then — do not edit the generated file.
   { path: "apps/web/src/api/schema.d.ts", keys: ["iconUrl"], reason: WIRE_DTO },
-  { path: "apps/web/src/components/editor-shell.tsx", keys: ["displayName"], reason: WIRE_DTO },
   { path: "apps/web/src/components/package-detail/", keys: ["displayName"], reason: WIRE_DTO },
   {
     path: "apps/web/src/pages/unified-package-detail.tsx",

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useState } from "react";
+import { useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { RunLaunchModal } from "./run-launch-modal";
 import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { initialInputValues } from "../lib/agent-input";
 import { useModels, useAgentModel } from "../hooks/use-models";
@@ -29,74 +27,55 @@ export function RunModal({
   isPending,
   initialInput,
 }: RunModalProps) {
-  const { t } = useTranslation(["agents", "common"]);
-
-  const guardedClose = () => {
-    if (!isPending) onClose();
-  };
-
+  const { t } = useTranslation(["agents"]);
   return (
-    <Modal
+    <RunLaunchModal
       open={open}
-      onClose={guardedClose}
+      onClose={onClose}
       title={t("input.title", { name: agent.display_name })}
-      actions={null}
+      isPending={isPending}
     >
-      {open && (
+      {(formRef) => (
         <RunModalForm
+          formRef={formRef}
           agent={agent}
-          onClose={guardedClose}
           onSubmit={onSubmit}
-          isPending={isPending}
           initialInput={initialInput}
         />
       )}
-    </Modal>
+    </RunLaunchModal>
   );
 }
 
 function RunModalForm({
+  formRef,
   agent,
-  onClose,
   onSubmit,
-  isPending,
   initialInput,
 }: {
+  formRef: RefObject<AgentInputFormHandle | null>;
   agent: AgentDetail;
-  onClose: () => void;
   onSubmit: (input: Record<string, unknown>) => void;
-  isPending?: boolean;
   initialInput?: Record<string, unknown>;
 }) {
-  const { t } = useTranslation(["agents", "common"]);
   // `agent.input` carries both halves: the AFPS wrapper and this space's
   // stored values + locks.
   const [inputData, setInputData] = useState<Record<string, unknown>>(() =>
     initialInputValues(agent.input, agent.input, initialInput),
   );
-  const inputFormRef = useRef<AgentInputFormHandle>(null);
 
   return (
-    <div className="space-y-5">
+    <>
       <ResolvedModelHint packageId={agent.id} />
       <AgentInputForm
-        ref={inputFormRef}
+        ref={formRef}
         wrapper={agent.input}
         settings={agent.input}
         value={inputData}
         onChange={setInputData}
         onSubmit={onSubmit}
       />
-
-      <div className="flex justify-end gap-2 pt-1">
-        <Button variant="outline" onClick={onClose} disabled={isPending}>
-          {t("btn.cancel")}
-        </Button>
-        <Button onClick={() => inputFormRef.current?.submit()} disabled={isPending}>
-          {isPending ? <Spinner /> : t("input.run")}
-        </Button>
-      </div>
-    </div>
+    </>
   );
 }
 

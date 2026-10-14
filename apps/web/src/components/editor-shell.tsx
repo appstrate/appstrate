@@ -1,29 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Spinner } from "./spinner";
-import { PageHeader, type BreadcrumbEntry } from "./page-header";
+import { PageHeader } from "./page-header";
 import { SettingsHeading } from "./settings/settings-heading";
-import { packageDetailPath, packageListPath } from "../lib/package-paths";
+import { packageListPath } from "../lib/package-paths";
 
-/** Every type is edited in its Package AFPS; only the page (create) shows the breadcrumb. */
-type EditablePackageType = "agent" | "skill" | "integration" | "mcp-server";
+/** Every type is edited embedded, in its Package AFPS; these three are also created on a page. */
+export type EditablePackageType = "agent" | "skill" | "integration" | "mcp-server";
+type CreatablePackageType = Exclude<EditablePackageType, "mcp-server">;
 
-const breadcrumbNewKeys: Record<EditablePackageType, string> = {
-  agent: "editor.breadcrumbNew",
-  skill: "editor.breadcrumbNewSkill",
-  integration: "editor.breadcrumbNewIntegration",
-  "mcp-server": "editor.breadcrumbEdit",
-};
-
-const listLabelKeys: Record<EditablePackageType, { key: string; ns?: string }> = {
-  agent: { key: "detail.breadcrumb" },
-  skill: { key: "packages.type.skills", ns: "settings" },
-  integration: { key: "packages.type.integrations", ns: "settings" },
-  "mcp-server": { key: "packages.type.mcp-servers", ns: "settings" },
+const createPages: Record<
+  CreatablePackageType,
+  { title: string; list: { key: string; ns?: string } }
+> = {
+  agent: { title: "editor.breadcrumbNew", list: { key: "detail.breadcrumb" } },
+  skill: {
+    title: "editor.breadcrumbNewSkill",
+    list: { key: "packages.type.skills", ns: "settings" },
+  },
+  integration: {
+    title: "editor.breadcrumbNewIntegration",
+    list: { key: "packages.type.integrations", ns: "settings" },
+  },
 };
 
 interface EditorTab {
@@ -33,16 +36,12 @@ interface EditorTab {
 
 interface EditorShellProps {
   type: EditablePackageType;
-  packageId: string | undefined;
-  isEdit: boolean;
-  displayName: string | undefined;
   tabs: EditorTab[];
   activeTab: string;
   onTabChange: (tab: string) => void;
   error: string | null;
   isPending: boolean;
   onSubmit: () => void;
-  onCancel: () => void;
   hideSubmitBar?: boolean;
   /**
    * `page` to create; `embedded` inside a package's Définition, whose settings
@@ -58,16 +57,12 @@ interface EditorShellProps {
 
 export function EditorShell({
   type,
-  packageId,
-  isEdit,
-  displayName,
   tabs,
   activeTab,
   onTabChange,
   error,
   isPending,
   onSubmit,
-  onCancel,
   hideSubmitBar = false,
   presentation = "page",
   activeDescription,
@@ -76,37 +71,7 @@ export function EditorShell({
   children,
 }: EditorShellProps) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-  const listLabel = listLabelKeys[type];
-  const listPath = packageListPath(type);
-
-  const breadcrumbs: BreadcrumbEntry[] = [
-    { label: t(listLabel.key, { ns: listLabel.ns }), href: listPath },
-  ];
-
-  if (isEdit && packageId) {
-    breadcrumbs.push({
-      label: displayName || packageId,
-      href: packageDetailPath(type, packageId),
-    });
-    breadcrumbs.push({ label: t("editor.breadcrumbEdit") });
-  } else {
-    breadcrumbs.push({ label: t(breadcrumbNewKeys[type]) });
-  }
-
-  const title = isEdit
-    ? displayName || packageId || t("editor.breadcrumbEdit")
-    : t(breadcrumbNewKeys[type]);
-
-  const submitBar = !hideSubmitBar && (
-    <div className="border-border mt-6 flex justify-end gap-2 border-t pt-4">
-      <Button variant="outline" type="button" onClick={onCancel}>
-        {t("btn.cancel")}
-      </Button>
-      <Button type="button" onClick={onSubmit} disabled={isPending}>
-        {isPending ? <Spinner /> : isEdit ? t("btn.save") : t("btn.create")}
-      </Button>
-    </div>
-  );
+  const navigate = useNavigate();
 
   // Only when there is something to save, as the files explorer's bar is: a
   // permanent bar saying "nothing to save", with two dead buttons, is furniture.
@@ -155,9 +120,19 @@ export function EditorShell({
     );
   }
 
+  // Only the three creatable types reach the page (`PackageEditorPage`).
+  const page = createPages[type as CreatablePackageType];
+  const listPath = packageListPath(type);
+
   return (
     <div className="space-y-4">
-      <PageHeader title={title} breadcrumbs={breadcrumbs} />
+      <PageHeader
+        title={t(page.title)}
+        breadcrumbs={[
+          { label: t(page.list.key, { ns: page.list.ns }), href: listPath },
+          { label: t(page.title) },
+        ]}
+      />
 
       {error && (
         <div className="bg-destructive/15 text-destructive mb-4 rounded-md px-3 py-2 text-sm">
@@ -179,7 +154,16 @@ export function EditorShell({
         {children}
       </div>
 
-      {submitBar}
+      {!hideSubmitBar && (
+        <div className="border-border mt-6 flex justify-end gap-2 border-t pt-4">
+          <Button variant="outline" type="button" onClick={() => navigate(listPath)}>
+            {t("btn.cancel")}
+          </Button>
+          <Button type="button" onClick={onSubmit} disabled={isPending}>
+            {isPending ? <Spinner /> : t("btn.create")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

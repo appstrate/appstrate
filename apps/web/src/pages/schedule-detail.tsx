@@ -13,9 +13,6 @@ import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/ag
 import { DetailSectionCard } from "../components/detail-section-card";
 import { Fact, FactGrid } from "../components/fact-grid";
 import { ManifestFacts } from "../components/package-manifest/manifest-fact";
-import { ListToolbar } from "../components/list-toolbar";
-import { useLocalListParams } from "../lib/list-params";
-import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { PageHeader } from "../components/page-header";
@@ -25,7 +22,7 @@ import { DetailPageSkeleton } from "../components/loading-skeletons";
 import { JsonView } from "../components/json-view";
 import { ActorLabel } from "../components/actor-label";
 import { Badge } from "@appstrate/ui/components/badge";
-import { RunList } from "../components/run-list";
+import { ScopedRunList } from "../components/scoped-run-list";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
@@ -308,20 +305,18 @@ function ScheduleHistory({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const list = useLocalListParams();
-  const { search } = list;
-  const { statuses, filter: statusFilter } = useRunStatusFilter(list);
   const { data: agents } = useAgents();
   const agentName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
 
   const isActive = schedule.enabled;
 
-  // Use the same hook as RunList so React Query deduplicates the fetch.
+  // The same query ScopedRunList makes for its first page (12 rows), so React
+  // Query serves both from one fetch.
   // We only need the first run for the "next run" preview row.
   const { data } = usePaginatedRuns({
     scheduleId: schedule.id,
-    limit: 20,
+    limit: 12,
     offset: 0,
   });
   const firstExec = data?.data?.[0];
@@ -348,7 +343,7 @@ function ScheduleHistory({
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const previewRow =
-    !search && statuses.length === 0 && isActive && showNext && schedule.next_run_at ? (
+    isActive && showNext && schedule.next_run_at ? (
       <NextRunPreview
         runNumber={(firstExec?.runNumber ?? 0) + 1}
         agentName={agentName}
@@ -359,32 +354,14 @@ function ScheduleHistory({
     ) : null;
 
   return (
-    <RunList
-      scheduleId={schedule.id}
-      pageSize={12}
-      status={statuses}
-      search={search}
-      tableSurface="integrated"
-      toolbar={({ columns }) => (
-        <ListToolbar
-          placement="panel"
-          columns={columns}
-          search={{ value: search, onChange: list.setSearch, placeholder: t("detail.runsSearch") }}
-          filters={[statusFilter]}
-          onReset={list.reset}
-        />
-      )}
-      fixedAgentName={agentName}
-      firstPageBanner={previewRow}
+    <ScopedRunList
+      scope={{ scheduleId: schedule.id, agentName }}
+      banner={previewRow}
       emptyState={
         <div>
           {previewRow}
           <div className="p-6">
-            <EmptyState
-              message={t(search || statuses.length ? "runs.emptyFiltered" : "schedule.noRuns")}
-              icon={Clock}
-              compact
-            />
+            <EmptyState message={t("schedule.noRuns")} icon={Clock} compact />
           </div>
         </div>
       }

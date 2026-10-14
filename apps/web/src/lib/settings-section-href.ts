@@ -20,9 +20,15 @@ export type AgentDefinitionSection = (typeof AGENT_DEFINITION_SECTIONS)[number];
 
 /** Package AFPS › Contenu is `bundle` in the URL: `files` is Explorer's tree. */
 export type AgentSettingsSection =
-  ConfigurationSection | AgentDefinitionSection | "bundle" | "files" | "versions";
+  ConfigurationSection | AgentDefinitionSection | PackageCommonSectionId;
 
-export type PackageSettingsSection = "files" | "versions" | "general" | "bundle";
+/** The sections every package's Paramètres has (`PackageCommonSection`). */
+export type PackageCommonSectionId = "files" | "versions" | "bundle";
+
+export const isPackageCommonSection = (section: string): section is PackageCommonSectionId =>
+  section === "files" || section === "versions" || section === "bundle";
+
+export type PackageSettingsSection = PackageCommonSectionId | "general";
 
 export type IntegrationSettingsSection =
   | "files"
@@ -51,14 +57,6 @@ export function sectionHref(
 
 export function agentSettingsHref(pathname: string, section: AgentSettingsSection, extra?: Extra) {
   return sectionHref(pathname, "settings", "agentSettings", section, extra);
-}
-
-export function packageSettingsHref(
-  pathname: string,
-  section: PackageSettingsSection,
-  extra?: Extra,
-) {
-  return sectionHref(pathname, "settings", "packageSettings", section, extra);
 }
 
 /** An integration's Paramètres is its `configuration` tab. */

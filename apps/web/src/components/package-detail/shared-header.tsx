@@ -7,7 +7,8 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { packageDetailPath, packageListPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
-import { PageHeader, type BreadcrumbEntry } from "../page-header";
+import { PageHeader } from "../page-header";
+import type { BreadcrumbEntry } from "@/stores/breadcrumb-store";
 import { DetailPageSkeleton } from "../loading-skeletons";
 import { PackageIcon } from "../package-icon";
 

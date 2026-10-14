@@ -9,12 +9,10 @@
  * ownership gates. The sections live in `components/integration-detail/`.
  */
 
-import { lazy, Suspense, useCallback, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
 import { IntegrationFunctioning } from "../components/package-detail/integration-structure";
-import { PackageFilesView } from "../components/package-files/package-files-view";
-import { PackageFilesSection } from "../components/package-files/package-files-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 
 const INTEGRATION_TABS = ["overview", "connections", "configuration"] as const;
@@ -42,13 +40,16 @@ import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { ErrorState, ResourceErrorState } from "../components/page-states";
 import { SettingsSkeleton } from "../components/loading-skeletons";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
-import { AgentDetailSplit } from "../components/agent-detail/agent-detail-split";
 import { SettingsHeading } from "../components/settings/settings-heading";
-import { SectionRail, type SectionRailItem } from "../components/settings/section-rail";
+import type { SectionRailItem } from "../components/settings/section-rail";
+import {
+  SettingsRailView,
+  type SettingsRailGroup,
+} from "../components/settings/settings-rail-view";
 import { PackageDetailSkeleton, SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
-import { PackageVersionsSection } from "../components/package-detail/package-versions-section";
+import { PackageCommonSection } from "../components/package-detail/package-common-section";
 import { useModalParam } from "../hooks/use-modal-param";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
@@ -67,11 +68,9 @@ import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-i
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useSetPackageActive } from "../hooks/use-library";
-import { EditorPlaceContext } from "../hooks/use-unsaved-changes";
-import type { EditorPlace } from "../lib/editor-place";
 import {
   integrationSettingsHref,
-  settingsEditorPlace,
+  isPackageCommonSection,
   type IntegrationSettingsSection,
 } from "../lib/settings-section-href";
 
@@ -126,35 +125,19 @@ function IntegrationSettings({
   versionGrants: { canRestore: boolean; canDelete: boolean };
 }) {
   const { t } = useTranslation(["settings", "agents"]);
-  const location = useLocation();
   const navigate = useNavigate();
-  const hasDefinition = !!definition;
-  const sectionOf = useCallback(
-    (search: URLSearchParams): IntegrationSettingsSection => {
-      const requested = search.get("integrationSettings");
-      return requested === "tools" ||
-        requested === "functioning" ||
-        (requested === "versions" && isOwned) ||
-        requested === "bundle" ||
-        (hasDefinition && requested && DEFINITION_SECTIONS.includes(requested))
-        ? (requested as IntegrationSettingsSection)
-        : requested === "files" || !canConfigure
-          ? "files"
-          : requested === "access"
-            ? "access"
-            : "authentication";
-    },
-    [isOwned, hasDefinition, canConfigure],
-  );
-  const params = new URLSearchParams(location.search);
-  const active = sectionOf(params);
-  const requestedFile = params.get("file") ?? undefined;
-  const editorPlace = useCallback<EditorPlace>(
-    (search) => settingsEditorPlace(sectionOf(search), search, DEFINITION_SECTIONS),
-    [sectionOf],
-  );
-  const sectionHref = (section: IntegrationSettingsSection, extra?: Record<string, string>) =>
-    integrationSettingsHref(location.pathname, section, extra);
+  const resolve = (requested: string | null): IntegrationSettingsSection =>
+    requested === "tools" ||
+    requested === "functioning" ||
+    (requested === "versions" && isOwned) ||
+    requested === "bundle" ||
+    (definition && requested && DEFINITION_SECTIONS.includes(requested))
+      ? (requested as IntegrationSettingsSection)
+      : requested === "files" || !canConfigure
+        ? "files"
+        : requested === "access"
+          ? "access"
+          : "authentication";
   const steps = detail.manifest.setup_guide?.steps ?? [];
   // Same order as an agent's: Explorer (see it: files, versions), then
   // what is set here, then the AFPS package, what the integration IS for every
@@ -164,7 +147,7 @@ function IntegrationSettings({
     id: IntegrationSettingsSection,
     icon: SectionRailItem["icon"],
     label: string,
-  ): SectionRailItem => ({ id, to: sectionHref(id), icon, label });
+  ): SettingsRailGroup<IntegrationSettingsSection>["items"][number] => ({ id, icon, label });
   const groups = [
     {
       title: t("detail.settings.exploreGroup", { ns: "agents" }),
@@ -205,57 +188,41 @@ function IntegrationSettings({
       ],
     },
   ];
-  const definitionSection = definition
-    ? DEFINITION_RAIL.find(([id]) => id === active)?.[1]
-    : undefined;
   return (
-    <EditorPlaceContext.Provider value={editorPlace}>
-      <AgentDetailSplit
-        phoneMenu={t("integration.tabs.configuration")}
-        rail={
-          <SectionRail
-            label={t("integration.tabs.configuration")}
-            groups={groups}
-            active={active}
-          />
-        }
-      >
-        {definition && definitionSection ? (
+    <SettingsRailView
+      param="integrationSettings"
+      tab="configuration"
+      label={t("integration.tabs.configuration")}
+      groups={groups}
+      resolve={resolve}
+      definitionSections={DEFINITION_SECTIONS}
+    >
+      {({ active, file, href }) => {
+        const definitionSection = definition
+          ? DEFINITION_RAIL.find(([id]) => id === active)?.[1]
+          : undefined;
+        return definition && definitionSection ? (
           <Suspense fallback={<SettingsSkeleton />}>
             <IntegrationDefinitionEditor
               detail={definition}
               section={definitionSection}
               onSection={(next) => {
                 const railId = DEFINITION_RAIL.find(([, section]) => section === next)?.[0];
-                if (railId) void navigate(sectionHref(railId));
+                if (railId) void navigate(href(railId));
               }}
               toolCatalog={detail.tool_catalog ?? []}
             />
           </Suspense>
-        ) : active === "bundle" ? (
-          <PackageFilesSection
+        ) : isPackageCommonSection(active) ? (
+          <PackageCommonSection
+            section={active}
             type="integration"
             packageId={packageId}
             manifest={detail.manifest}
-            filesHref={(path) => sectionHref("files", { file: path })}
-          />
-        ) : active === "versions" ? (
-          <PackageVersionsSection type="integration" packageId={packageId} {...versionGrants} />
-        ) : active === "files" ? (
-          <PackageFilesView
-            key={requestedFile}
-            type="integration"
-            packageId={packageId}
-            initialPath={requestedFile}
-            editable={Boolean(definition)}
-            editHref={
-              definition
-                ? (path) =>
-                    path === "manifest.json"
-                      ? sectionHref("identity", { editManifest: "1" })
-                      : undefined
-                : undefined
-            }
+            file={file}
+            href={href}
+            manifestSection={definition ? "identity" : undefined}
+            versions={versionGrants}
           />
         ) : active === "functioning" ? (
           <div className="p-6">
@@ -345,9 +312,9 @@ function IntegrationSettings({
               />
             )}
           </div>
-        )}
-      </AgentDetailSplit>
-    </EditorPlaceContext.Provider>
+        );
+      }}
+    </SettingsRailView>
   );
 }
 

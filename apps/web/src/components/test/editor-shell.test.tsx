@@ -16,16 +16,12 @@ function shell(isPending: boolean) {
   return render(
     <EditorShell
       type="agent"
-      packageId="@acme/worker"
-      isEdit
-      displayName="Worker"
       tabs={[{ id: "general", label: "Général" }]}
       activeTab="general"
       onTabChange={() => {}}
       error={null}
       isPending={isPending}
       onSubmit={() => {}}
-      onCancel={() => {}}
       presentation="embedded"
       isDirty
     >

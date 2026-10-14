@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ArrowRight, Lock, Pause, Play, Trash2, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
@@ -21,9 +21,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "./page-actions-menu";
 import { toastScheduleConnectionChoice } from "../lib/mutation-error";
-import { AgentDetailSplit } from "./agent-detail/agent-detail-split";
 import { SettingsHeading } from "./settings/settings-heading";
-import { SectionRail } from "./settings/section-rail";
+import { SettingsRailView } from "./settings/settings-rail-view";
 import { SettingRow } from "./settings/setting-row";
 import { InlineTextSetting } from "./settings/inline-text-setting";
 import { RoleLimitNotice } from "./role-limit-notice";
@@ -75,7 +74,6 @@ import { VERSION_PUBLISHED } from "../lib/version-selector";
 import {
   SCHEDULE_SETTINGS_SECTIONS as SECTIONS,
   type ScheduleSettingsSection,
-  scheduleSettingsHref,
   sectionWriteState,
   scheduleVersionOptions,
   VERSION_INHERIT,
@@ -324,12 +322,47 @@ function RefusedWriteForm({
 
 export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   const { t } = useTranslation(["agents", "common"]);
-  const location = useLocation();
   const { can } = usePermissions();
   const governs = useCanWriteSchedule(schedule);
   const mayWrite = can("schedules:write") && governs;
-  const requested = new URLSearchParams(location.search).get("scheduleSettings");
-  const active = SECTIONS.find((s) => s.id === requested) ?? SECTIONS[0];
+
+  return (
+    <SettingsRailView
+      param="scheduleSettings"
+      tab="settings"
+      label={t("schedule.tabSettings")}
+      groups={[
+        {
+          title: t("detail.settings.configurationGroup"),
+          items: SECTIONS.map((section) => ({
+            id: section.id,
+            icon: section.icon,
+            label: t(section.labelKey),
+            locked: !mayWrite,
+          })),
+        },
+      ]}
+      resolve={(requested) => SECTIONS.find((s) => s.id === requested)?.id ?? SECTIONS[0].id}
+    >
+      {({ active }) => (
+        <ScheduleSettingsPanel schedule={schedule} section={active} mayWrite={mayWrite} />
+      )}
+    </SettingsRailView>
+  );
+}
+
+function ScheduleSettingsPanel({
+  schedule,
+  section,
+  mayWrite,
+}: {
+  schedule: Schedule;
+  section: ScheduleSettingsSection;
+  mayWrite: boolean;
+}) {
+  const { t } = useTranslation(["agents", "common"]);
+  const { can } = usePermissions();
+  const active = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
   const write = useScheduleWrite(schedule);
   // The section the last field write came from: its state is that section's to say.
   const [writtenFrom, setWrittenFrom] = useState<ScheduleSettingsSection | null>(null);
@@ -346,57 +379,34 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   const move = useScheduleMove(schedule, moveWrite);
 
   return (
-    <AgentDetailSplit
-      data-schedule-settings
-      phoneMenu={t("schedule.tabSettings")}
-      rail={
-        <SectionRail
-          label={t("schedule.tabSettings")}
-          active={active.id}
-          groups={[
-            {
-              title: t("detail.settings.configurationGroup"),
-              items: SECTIONS.map((section) => ({
-                id: section.id,
-                to: scheduleSettingsHref(schedule.id, section.id),
-                icon: section.icon,
-                label: t(section.labelKey),
-                locked: !mayWrite,
-              })),
-            },
-          ]}
-        />
-      }
-    >
-      <section className="min-w-0 p-6">
-        <SettingsHeading title={t(active.labelKey)} description={t(active.descriptionKey)} />
-        {/* Same tabs and sections for every role: what a role does not allow
-            is said where the controls would be. */}
-        {!mayWrite ? (
-          <RoleLimitNotice>
-            {t(can("schedules:write") ? "schedule.memberGoverned" : "schedule.settings.roleLimit")}
-          </RoleLimitNotice>
-        ) : (
-          <>
-            <RefusedWriteAnswer schedule={schedule} update={write} />
-            <RefusedWriteAnswer schedule={schedule} update={moveWrite} />
-            {/* Every control writes: none is offered before its write can name the
-                connections the server re-checks. */}
-            {update.ready ? (
-              <SectionBody
-                section={active.id}
-                schedule={schedule}
-                update={update}
-                moveWrite={moveWrite}
-                move={move}
-              />
-            ) : (
-              <SettingsSkeleton />
-            )}
-          </>
-        )}
-      </section>
-    </AgentDetailSplit>
+    <section className="min-w-0 p-6">
+      <SettingsHeading title={t(active.labelKey)} description={t(active.descriptionKey)} />
+      {/* Same tabs and sections for every role: what a role does not allow
+          is said where the controls would be. */}
+      {!mayWrite ? (
+        <RoleLimitNotice>
+          {t(can("schedules:write") ? "schedule.memberGoverned" : "schedule.settings.roleLimit")}
+        </RoleLimitNotice>
+      ) : (
+        <>
+          <RefusedWriteAnswer schedule={schedule} update={write} />
+          <RefusedWriteAnswer schedule={schedule} update={moveWrite} />
+          {/* Every control writes: none is offered before its write can name the
+              connections the server re-checks. */}
+          {update.ready ? (
+            <SectionBody
+              section={active.id}
+              schedule={schedule}
+              update={update}
+              moveWrite={moveWrite}
+              move={move}
+            />
+          ) : (
+            <SettingsSkeleton />
+          )}
+        </>
+      )}
+    </section>
   );
 }
 

@@ -17,12 +17,8 @@ import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { useVersionDetail } from "../../hooks/use-packages";
-import { DiffTab } from "../diff-tab";
-import { Modal } from "../modal";
 import { VersionHistory } from "../version-history";
-import { TextSkeleton } from "../loading-skeletons";
-
-type LatestVersion = Parameters<typeof DiffTab>[0]["latestVersion"];
+import { CompareWithDraftModal } from "./compare-with-draft-modal";
 
 export function PackageVersionsSection({
   type,
@@ -30,9 +26,6 @@ export function PackageVersionsSection({
   canRestore,
   canDelete,
   onCreate,
-  latestVersion,
-  currentManifest,
-  currentContent,
   hasUnarchivedChanges,
 }: {
   type: PackageType;
@@ -40,21 +33,16 @@ export function PackageVersionsSection({
   canRestore: boolean;
   canDelete: boolean;
   onCreate?: () => void;
-  latestVersion?: LatestVersion;
-  currentManifest?: Record<string, unknown>;
-  currentContent?: string | null;
   hasUnarchivedChanges?: boolean;
 }) {
   const { t } = useTranslation("agents");
   // `?compare=<version>`: the comparison with the draft has an address.
-  const compareParam = useModalParam("compare");
-  const compare = compareParam.value;
-  // The latest version is already loaded by the page; any other row is fetched
-  // when its comparison is asked for.
-  const picked = compare && compare !== latestVersion?.version ? compare : undefined;
-  const { data: pickedDetail } = useVersionDetail(type, packageId, picked);
-  const compared =
-    compare === null ? null : picked ? (pickedDetail ?? null) : (latestVersion ?? null);
+  const compare = useModalParam("compare");
+  const { data: latestVersion } = useVersionDetail(
+    type,
+    packageId,
+    hasUnarchivedChanges ? "latest" : undefined,
+  );
 
   return (
     <div className="space-y-4 p-6">
@@ -65,7 +53,7 @@ export function PackageVersionsSection({
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => compareParam.open(latestVersion.version)}
+            onClick={() => compare.open(latestVersion.version)}
           >
             <GitCompareArrows />
             {t("version.compare")}
@@ -78,26 +66,9 @@ export function PackageVersionsSection({
         canRestore={canRestore}
         canDelete={canDelete}
         onCreate={onCreate}
-        onCompare={(version) => compareParam.open(version)}
+        onCompare={(version) => compare.open(version)}
       />
-
-      <Modal
-        open={compare !== null}
-        onClose={compareParam.close}
-        title={t("detail.files.compareTitle", { version: compare })}
-        className="max-w-5xl"
-      >
-        {compared ? (
-          <DiffTab
-            type={type}
-            latestVersion={compared}
-            currentManifest={currentManifest}
-            currentContent={currentContent}
-          />
-        ) : (
-          <TextSkeleton lines={8} />
-        )}
-      </Modal>
+      <CompareWithDraftModal type={type} packageId={packageId} compare={compare} />
     </div>
   );
 }

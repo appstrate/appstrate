@@ -82,7 +82,7 @@ import {
 import { errorMessage } from "../../lib/mutation-error";
 import { packageFilesErrorKey, primaryDisplayFile } from "../../lib/package-files";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
-import { DiffTab } from "../diff-tab";
+import { CompareWithDraftModal } from "../package-detail/compare-with-draft-modal";
 import { Modal } from "../modal";
 import { ErrorState } from "../page-states";
 import { TextSkeleton } from "../loading-skeletons";
@@ -181,8 +181,6 @@ export function PackageFilesView({
   type,
   packageId,
   initialVersion,
-  currentManifest,
-  currentContent,
   editHref,
   initialPath,
   editable = false,
@@ -190,9 +188,6 @@ export function PackageFilesView({
   type: PackageType;
   packageId: string;
   initialVersion?: string | undefined;
-  /** The draft the page is editing, when it holds one; else the stored draft is read. */
-  currentManifest?: Record<string, unknown> | undefined;
-  currentContent?: string | null | undefined;
   /**
    * Where "Modifier" sends a bundle file the definition can edit (the prompt,
    * the manifest): its Définition section, modal open. Undefined for a file
@@ -210,7 +205,6 @@ export function PackageFilesView({
   const queryClient = useQueryClient();
   const [selectedVersion, setSelectedVersion] = useState(initialVersion ?? "draft");
   const compareParam = useModalParam("compareFiles");
-  const compareVersion = compareParam.value;
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [selected, setSelected] = useState<SelectedItem | null>(null);
@@ -218,17 +212,12 @@ export function PackageFilesView({
   const { data: versions } = usePackageVersions(type, packageId);
   const { data: storedDraft } = usePackageDetail(
     type,
-    currentManifest || selectedVersion !== "draft" ? undefined : packageId,
+    selectedVersion === "draft" ? packageId : undefined,
   );
   const { data: selectedVersionDetail } = useVersionDetail(
     type,
     packageId,
     selectedVersion === "draft" ? undefined : selectedVersion,
-  );
-  const { data: compareVersionDetail } = useVersionDetail(
-    type,
-    packageId,
-    compareVersion ?? undefined,
   );
   const { data: bundleIndex, error: bundleError } = $api.useQuery(
     "get",
@@ -316,8 +305,8 @@ export function PackageFilesView({
   const isPinned = (bundlePath: string) =>
     bundlePath === "manifest.json" || isPinnedEntry(type, bundlePath);
 
-  const draftManifest = currentManifest ?? storedDraft?.manifest;
-  const manifest = selectedVersion === "draft" ? draftManifest : selectedVersionDetail?.manifest;
+  const manifest =
+    selectedVersion === "draft" ? storedDraft?.manifest : selectedVersionDetail?.manifest;
   const skills = useMemo(() => dependencyReferences(manifest, "skills", "skill"), [manifest]);
   const mcpServers = useMemo(
     () => [
@@ -786,26 +775,7 @@ export function PackageFilesView({
       )}
       <UnsavedChangesModal blocker={blocker} onSaveDraft={base ? saveEdits : undefined} />
 
-      <Modal
-        open={compareVersion !== null}
-        onClose={compareParam.close}
-        title={t("agents:detail.files.compareTitle", { version: compareVersion })}
-        className="max-w-5xl"
-      >
-        {compareVersionDetail ? (
-          <DiffTab
-            type={type}
-            latestVersion={compareVersionDetail}
-            currentManifest={draftManifest}
-            currentContent={
-              currentContent ??
-              (storedDraft && "content" in storedDraft ? storedDraft.content : null)
-            }
-          />
-        ) : (
-          <TextSkeleton lines={8} />
-        )}
-      </Modal>
+      <CompareWithDraftModal type={type} packageId={packageId} compare={compareParam} />
     </div>
   );
 }
