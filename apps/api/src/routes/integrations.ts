@@ -61,6 +61,7 @@ import {
   invalidRequest,
   internalError,
   notFound,
+  parseBody,
   validationFailed,
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -787,6 +788,24 @@ export function createIntegrationsRouter() {
   // Allowlisted projection keys for the `fields` selector — `manifest` is the
   // heavy field (full AFPS manifest per row); dropping it lets a caller that
   // only needs "which integrations exist" fetch a fraction of the payload.
+  /**
+   * `id` is a form array (`id=@a/x,@b/y`, OpenAPI `style: form, explode: false`),
+   * bounded like a page so one request answers it. Not `.strict()`: the
+   * pagination and `fields` params are read by their own parsers.
+   */
+  const listIntegrationsQuerySchema = z.object({
+    q: z.string().max(200).trim().optional(),
+    id: z
+      .string()
+      .optional()
+      .transform((raw) =>
+        raw === undefined
+          ? undefined
+          : [...new Set(raw.split(",").map((part) => part.trim()))].filter(Boolean),
+      )
+      .pipe(z.array(z.string()).max(100).optional()),
+  });
+
   const INTEGRATION_FIELDS = [
     "id",
     "manifest",
@@ -800,7 +819,11 @@ export function createIntegrationsRouter() {
     const scope = getSpaceScope(c);
     const fields = parseFieldSelection(c, INTEGRATION_FIELDS);
     const pagination = parseListPagination(c, { defaultLimit: 100 });
-    const summaries = await listIntegrations(scope);
+    const query = parseBody(listIntegrationsQuerySchema, c.req.query());
+    const summaries = await listIntegrations(scope, {
+      ...(query.id ? { ids: query.id } : {}),
+      ...(query.q ? { search: query.q } : {}),
+    });
     // Decorate with `active` + `block_user_connections` flags for the current
     // space via the shared resolver — the single source of truth, also
     // used by the agent-editor detail endpoint, so the two surfaces can never

@@ -12963,6 +12963,10 @@ export interface operations {
                 offset?: components["parameters"]["Offset"];
                 /** @description Comma-separated allowlist of fields to return per item (`id` is always included). Allowed: id, manifest, orgId, source, active, block_user_connections. An unknown field is a 400. */
                 fields?: string;
+                /** @description Free-text filter, combined with every other filter: a case-insensitive substring of the package id, the manifest's `display_name` or its `description`, `%` and `_` taken as typed. Longer than 200 characters is rejected with `400`. */
+                q?: string;
+                /** @description Only these integrations, by package id, comma-separated on the wire (`id=@acme/gmail,@acme/slack`). An id not placed in this space is absent from the answer, never an error. At most 100 ids. Omit (or send an empty value) for every integration. */
+                id?: string[];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */

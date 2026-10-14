@@ -5603,6 +5603,32 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Free-text filter, combined with every other filter: a case-insensitive substring of the package id, the manifest's `display_name` or its `description`, `%` and `_` taken as typed. Longer than 200 characters is rejected with `400`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "description": "Only these integrations, by package id, comma-separated on the wire (`id=@acme/gmail,@acme/slack`). An id not placed in this space is absent from the answer, never an error. At most 100 ids. Omit (or send an empty value) for every integration.",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string"
+              },
+              "example": ["@acme/gmail", "@acme/slack"]
+            }
           }
         ],
         "responses": {
