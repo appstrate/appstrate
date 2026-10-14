@@ -8,15 +8,10 @@ import { useModalParam } from "../hooks/use-modal-param";
 import { RevealedSecret } from "./revealed-secret";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import { Spinner } from "./spinner";
 import { ScopeMultiSelect } from "./scope-multi-select";
 import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
@@ -201,10 +196,8 @@ function ApiKeyCreateForm({
     >
       <form id="create-api-key-form" onSubmit={onSubmit} className="space-y-4">
         {/* Name */}
-        <div className="space-y-2">
-          <Label htmlFor="api-key-name">{t("apiKeys.nameLabel")}</Label>
+        <FormItem id="api-key-name" label={t("apiKeys.nameLabel")}>
           <Input
-            id="api-key-name"
             type="text"
             {...register("name", { required: true })}
             placeholder={t("apiKeys.namePlaceholder")}
@@ -212,30 +205,28 @@ function ApiKeyCreateForm({
             required
             autoFocus
           />
-        </div>
+        </FormItem>
 
         {/* Expiration */}
-        <div className="space-y-2">
-          <Label htmlFor="api-key-expires">{t("apiKeys.expiresLabel")}</Label>
-          <Controller
-            name="expiresIn"
-            control={control}
-            render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger id="api-key-expires">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="30">{t("apiKeys.expires30")}</SelectItem>
-                  <SelectItem value="90">{t("apiKeys.expires90")}</SelectItem>
-                  <SelectItem value="180">{t("apiKeys.expires180")}</SelectItem>
-                  <SelectItem value="365">{t("apiKeys.expires365")}</SelectItem>
-                  <SelectItem value="never">{t("apiKeys.expiresNever")}</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          />
-        </div>
+        <Controller
+          name="expiresIn"
+          control={control}
+          render={({ field }) => (
+            <FormItem id="api-key-expires" label={t("apiKeys.expiresLabel")}>
+              <OptionSelect
+                value={field.value}
+                onValueChange={field.onChange}
+                options={[
+                  { value: "30", label: t("apiKeys.expires30") },
+                  { value: "90", label: t("apiKeys.expires90") },
+                  { value: "180", label: t("apiKeys.expires180") },
+                  { value: "365", label: t("apiKeys.expires365") },
+                  { value: "never", label: t("apiKeys.expiresNever") },
+                ]}
+              />
+            </FormItem>
+          )}
+        />
 
         {/* Permissions */}
         {availableScopes && (
@@ -249,7 +240,7 @@ function ApiKeyCreateForm({
           </div>
         )}
 
-        {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
+        {errors.root?.message && <FieldError>{errors.root.message}</FieldError>}
       </form>
     </Modal>
   );

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
 import {
+  OptionSelect,
   Select,
   SelectContent,
   SelectGroup,
@@ -20,6 +21,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../../api/errors";
 import { Modal } from "../modal";
 import { Spinner } from "../spinner";
+import { SpaceRoleSelect } from "../space-role-select";
 import { splitPackageRef } from "../../lib/package-paths";
 import { useOrgDetail } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
@@ -484,34 +486,26 @@ function CoeditTab({
     <div className="space-y-2" data-testid="coedit-invite">
       <Label htmlFor="coedit-member">{t("packages.coeditLabel")}</Label>
       <div className="flex gap-2">
-        <Select value={member || undefined} onValueChange={setMember}>
-          <SelectTrigger id="coedit-member" className="w-full">
-            <SelectValue placeholder={t("packages.coeditPlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            {candidates.map((candidate) => (
-              <SelectItem key={candidate.userId} value={candidate.userId}>
-                {candidate.displayName || candidate.email || candidate.userId}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={role} onValueChange={setRole}>
-          <SelectTrigger
-            id="coedit-role"
-            className="w-48"
-            aria-label={t("packages.coeditRoleLabel")}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {roles.options.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <OptionSelect
+          id="coedit-member"
+          value={member || undefined}
+          onValueChange={setMember}
+          placeholder={t("packages.coeditPlaceholder")}
+          className="w-full"
+          options={candidates.map((candidate) => ({
+            value: candidate.userId,
+            label: candidate.displayName || candidate.email || candidate.userId,
+          }))}
+        />
+        <SpaceRoleSelect
+          id="coedit-role"
+          value={role}
+          options={roles.options}
+          fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
+          className="w-48"
+          ariaLabel={t("packages.coeditRoleLabel")}
+          onValueChange={setRole}
+        />
         <Button type="button" disabled={!member || addMember.isPending} onClick={submit}>
           {addMember.isPending ? <Spinner /> : t("packages.coeditSubmit")}
         </Button>

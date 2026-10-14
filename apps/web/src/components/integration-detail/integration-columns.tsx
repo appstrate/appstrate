@@ -24,15 +24,15 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowUpFromLine, Building2, CircleCheck, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../data-table";
 import { TableRowActions } from "../table-row-actions";
+import { rowActionsColumn } from "../row-actions-column";
+import { CellDate, CellEmpty, CellText } from "../table-cells";
 import { isConnectionOwnedBy } from "../integration-connect/connection-ownership";
 import type { ConnectionAuthContext } from "../../lib/integration-presentation";
 import type { IntegrationConnection, IntegrationManifestView } from "../../hooks/use-integrations";
 import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import type { ClientRow } from "../../lib/integration-clients";
-import { formatDateField } from "../../lib/format-date";
 import {
   AccountCell,
   ConnectionActionsCell,
@@ -109,9 +109,9 @@ export function useIntegrationClientColumns({
       header: t("integration.clients.col.clientId"),
       width: "minmax(200px,2fr)",
       cell: ({ client }) => (
-        <span className="text-muted-foreground block truncate text-sm" title={client.client_id}>
+        <CellText title={client.client_id} className="text-sm">
           {client.client_id}
-        </span>
+        </CellText>
       ),
     },
     {
@@ -119,11 +119,7 @@ export function useIntegrationClientColumns({
       header: t("integration.clients.col.level"),
       width: "104px",
       tier: 3,
-      cell: (row) => (
-        <span className="text-muted-foreground block truncate text-xs">
-          {t(clientLevelKey(row))}
-        </span>
-      ),
+      cell: (row) => <CellText>{t(clientLevelKey(row))}</CellText>,
     },
     {
       id: "use",
@@ -134,81 +130,68 @@ export function useIntegrationClientColumns({
         row.usedHere ? (
           <Badge variant="success">{t("integration.clients.usedHere")}</Badge>
         ) : row.orgDefault ? (
-          <span className="text-muted-foreground block truncate text-xs">
-            {t("integration.clients.orgDefault")}
-          </span>
+          <CellText>{t("integration.clients.orgDefault")}</CellText>
         ) : null,
     },
-    {
-      id: "actions",
-      header: "",
-      width: "80px",
-      align: "end",
-      cell: (row) => {
-        const { client, level } = row;
-        const { ownLevel, editable } = clientDeeds(row, canManageOrg);
-        const promotable = level === "space" && !client.auto_provisioned && canManageOrg;
-        const useHere = canUseHere && row.inSpaceList && !row.usedHere;
-        const useForOrg = canChooseOrgDefault && row.inOrgList && !row.orgDefault;
-        if (!ownLevel && !useHere && !useForOrg) return null;
-        return (
-          <TableRowActions
-            menuLabel={t("integration.oauthClient.moreActions", { name: client.client_id })}
-            isPending={pendingClientRef === client.client_ref}
-          >
-            {useHere && (
-              <DropdownMenuItem
-                onSelect={() => onUseHere(row)}
-                disabled={pendingClientRef !== null}
-                data-testid={`set-default-client-${client.client_ref}`}
-              >
-                <CircleCheck />
-                {t("integration.clients.useHere")}
-              </DropdownMenuItem>
-            )}
-            {useForOrg && (
-              <DropdownMenuItem
-                onSelect={() => onUseForOrg(row)}
-                disabled={pendingClientRef !== null}
-                data-testid={`org-set-default-client-${client.client_ref}`}
-              >
-                <Building2 />
-                {t("integration.clients.useForOrg")}
-              </DropdownMenuItem>
-            )}
-            {promotable && (
-              <DropdownMenuItem
-                onSelect={() => onPromote(row)}
-                data-testid={`oauth-client-promote-${client.client_ref}`}
-              >
-                <ArrowUpFromLine />
-                {t("integration.clients.promote.action")}
-              </DropdownMenuItem>
-            )}
-            {editable && (
-              <DropdownMenuItem
-                onSelect={() => onEdit(row)}
-                data-testid={`oauth-client-edit-${client.client_ref}`}
-              >
-                <Pencil />
-                {t("integration.oauthClient.btnEdit")}
-              </DropdownMenuItem>
-            )}
-            {ownLevel && (
-              <DropdownMenuItem
-                onSelect={() => onDelete(row)}
-                disabled={pendingClientRef === client.client_ref}
-                data-testid={`oauth-client-delete-${client.client_ref}`}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 />
-                {t("integration.oauthClient.btnDelete")}
-              </DropdownMenuItem>
-            )}
-          </TableRowActions>
-        );
-      },
-    },
+    rowActionsColumn((row) => {
+      const { client, level } = row;
+      const { ownLevel, editable } = clientDeeds(row, canManageOrg);
+      const promotable = level === "space" && !client.auto_provisioned && canManageOrg;
+      const useHere = canUseHere && row.inSpaceList && !row.usedHere;
+      const useForOrg = canChooseOrgDefault && row.inOrgList && !row.orgDefault;
+      return (
+        <TableRowActions
+          menuLabel={t("integration.oauthClient.moreActions", { name: client.client_id })}
+          isPending={pendingClientRef === client.client_ref}
+          actions={[
+            {
+              id: "use-here",
+              label: t("integration.clients.useHere"),
+              icon: CircleCheck,
+              onSelect: () => onUseHere(row),
+              disabled: pendingClientRef !== null,
+              hidden: !useHere,
+              testId: `set-default-client-${client.client_ref}`,
+            },
+            {
+              id: "use-for-org",
+              label: t("integration.clients.useForOrg"),
+              icon: Building2,
+              onSelect: () => onUseForOrg(row),
+              disabled: pendingClientRef !== null,
+              hidden: !useForOrg,
+              testId: `org-set-default-client-${client.client_ref}`,
+            },
+            {
+              id: "promote",
+              label: t("integration.clients.promote.action"),
+              icon: ArrowUpFromLine,
+              onSelect: () => onPromote(row),
+              hidden: !promotable,
+              testId: `oauth-client-promote-${client.client_ref}`,
+            },
+            {
+              id: "edit",
+              label: t("integration.oauthClient.btnEdit"),
+              icon: Pencil,
+              onSelect: () => onEdit(row),
+              hidden: !editable,
+              testId: `oauth-client-edit-${client.client_ref}`,
+            },
+            {
+              id: "delete",
+              label: t("integration.oauthClient.btnDelete"),
+              icon: Trash2,
+              onSelect: () => onDelete(row),
+              disabled: pendingClientRef === client.client_ref,
+              destructive: true,
+              hidden: !ownLevel,
+              testId: `oauth-client-delete-${client.client_ref}`,
+            },
+          ]}
+        />
+      );
+    }),
   ];
 }
 
@@ -272,11 +255,7 @@ export function useConnectionColumns({
       header: t("integration.presentation.method"),
       width: "minmax(84px,1fr)",
       tier: 3,
-      cell: (c) => (
-        <span className="text-muted-foreground block truncate text-xs" title={methodLabel(c)}>
-          {methodLabel(c)}
-        </span>
-      ),
+      cell: (c) => <CellText title={methodLabel(c)}>{methodLabel(c)}</CellText>,
     },
     {
       id: "status",
@@ -292,11 +271,7 @@ export function useConnectionColumns({
       tier: 3,
       cell: (c) => {
         const owner = c.owner_name ?? t("integration.connection.ownerUnknown");
-        return (
-          <span className="text-muted-foreground block truncate text-xs" title={owner}>
-            {owner}
-          </span>
-        );
+        return <CellText title={owner}>{owner}</CellText>;
       },
     },
     {
@@ -313,7 +288,7 @@ export function useConnectionColumns({
             className="text-muted-foreground block truncate text-[0.65rem]"
           />
         ) : (
-          <span className="text-muted-foreground text-xs">—</span>
+          <CellEmpty />
         ),
     },
     {
@@ -321,11 +296,8 @@ export function useConnectionColumns({
       header: t("integration.connection.col.expires"),
       width: "84px",
       tier: 3,
-      cell: (c) => (
-        <span className="text-muted-foreground block truncate text-xs">
-          {formatDateField(c.expiresAt, "date")}
-        </span>
-      ),
+      align: "end",
+      cell: (c) => <CellDate value={c.expiresAt} granularity="date" />,
     },
     {
       id: "shared",
@@ -335,22 +307,16 @@ export function useConnectionColumns({
       control: true,
       cell: (c) => <ScopeCell connection={c} packageId={packageId} isAdmin={isAdmin} />,
     },
-    {
-      id: "actions",
-      header: "",
-      width: "80px",
-      align: "end",
-      cell: (c) => (
-        <ConnectionActionsCell
-          connection={c}
-          packageId={packageId}
-          {...authForConnection(c)}
-          isOwn={isConnectionOwnedBy(c, userId)}
-          isAdmin={isAdmin}
-          renaming={renamingId === c.id}
-          onRename={() => setRenamingId(c.id)}
-        />
-      ),
-    },
+    rowActionsColumn((c) => (
+      <ConnectionActionsCell
+        connection={c}
+        packageId={packageId}
+        {...authForConnection(c)}
+        isOwn={isConnectionOwnedBy(c, userId)}
+        isAdmin={isAdmin}
+        renaming={renamingId === c.id}
+        onRename={() => setRenamingId(c.id)}
+      />
+    )),
   ];
 }

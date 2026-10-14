@@ -3,6 +3,8 @@
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { DataColumn } from "../../../components/data-table";
+import { rowActionsColumn } from "../../../components/row-actions-column";
+import { CellText } from "../../../components/table-cells";
 import type { OAuthClient } from "../hooks/use-oauth-clients";
 import { OAuthClientActions } from "./oauth-client-actions";
 
@@ -18,9 +20,7 @@ export function useOAuthClientColumns({
       id: "client",
       header: t("oauthClients.nameLabel"),
       width: "minmax(72px,1.3fr)",
-      cell: (client) => (
-        <span className="block truncate text-sm font-medium">{client.name ?? client.clientId}</span>
-      ),
+      cell: (client) => <CellText strong>{client.name ?? client.clientId}</CellText>,
     },
     {
       id: "clientId",
@@ -39,11 +39,11 @@ export function useOAuthClientColumns({
       width: "60px",
       tier: 2,
       cell: (client) => (
-        <span className="text-muted-foreground block truncate text-xs">
+        <CellText>
           {client.isFirstParty
             ? t("oauthClients.firstPartyBadge")
             : t("oauthClients.standardClient")}
-        </span>
+        </CellText>
       ),
     },
     {
@@ -72,12 +72,8 @@ export function useOAuthClientColumns({
         );
       },
     },
-    {
-      id: "actions",
-      header: "",
-      width: "80px",
-      align: "end",
-      cell: (client) => <OAuthClientActions client={client} onEdit={() => onEdit(client)} />,
-    },
+    rowActionsColumn((client) => (
+      <OAuthClientActions client={client} onEdit={() => onEdit(client)} />
+    )),
   ];
 }

@@ -3,12 +3,13 @@
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, FlaskConical, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../../components/data-table";
 import type { OrgProxyInfo } from "../../hooks/use-proxies";
 import type { TestResult } from "../../hooks/use-connection-test";
 import { TestResultSpan } from "../../components/test-result-span";
 import { TableRowActions } from "../../components/table-row-actions";
+import { rowActionsColumn } from "../../components/row-actions-column";
+import { CellEmpty, CellText } from "../../components/table-cells";
 
 /**
  * The proxy column set. A proxy has no page of its own: a click on a custom
@@ -42,7 +43,7 @@ export function useProxyColumns({
       width: "minmax(80px,1.3fr)",
       cell: (p) => (
         <div className="min-w-0">
-          <span className="block truncate text-sm font-medium">{p.label}</span>
+          <CellText strong>{p.label}</CellText>
           {testResults[p.id] && (
             <div className="@xl/table:hidden">
               <TestResultSpan
@@ -72,9 +73,7 @@ export function useProxyColumns({
       width: "72px",
       tier: 2,
       cell: (p) => (
-        <span className="text-muted-foreground block truncate text-xs">
-          {p.source === "built-in" ? t("source.builtIn") : t("source.custom")}
-        </span>
+        <CellText>{p.source === "built-in" ? t("source.builtIn") : t("source.custom")}</CellText>
       ),
     },
     {
@@ -101,63 +100,53 @@ export function useProxyColumns({
       width: "96px",
       tier: 2,
       cell: (p) =>
-        p.is_default ? (
-          <Badge variant="success">{t("proxies.default")}</Badge>
-        ) : (
-          <span className="text-muted-foreground text-xs">—</span>
-        ),
+        p.is_default ? <Badge variant="success">{t("proxies.default")}</Badge> : <CellEmpty />,
     },
-    {
-      id: "actions",
-      header: "",
-      width: "80px",
-      align: "end",
-      cell: (p) => {
-        const isTesting = testingIds.has(p.id);
-        const isSettingDefault = settingDefaultId === p.id;
-        const isCustom = p.source !== "built-in";
-        return (
-          <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
-            <TableRowActions
-              menuLabel={t("proxies.moreActions", { name: p.label })}
-              isPending={isTesting || isSettingDefault}
-            >
-              {isCustom && onEdit && (
-                <DropdownMenuItem onSelect={() => onEdit(p)}>
-                  <Pencil />
-                  {t("proxies.edit")}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onSelect={() => onTest(p.id)} disabled={isTesting}>
-                <FlaskConical />
-                {t("proxies.test")}
-              </DropdownMenuItem>
-              {!p.is_default && onSetDefault && (
-                <DropdownMenuItem
-                  onSelect={() => onSetDefault(p)}
-                  disabled={settingDefaultId !== null}
-                  data-testid={`set-default-proxy-${p.id}`}
-                >
-                  <CheckCircle2 />
-                  {t("proxies.setDefault")}
-                </DropdownMenuItem>
-              )}
-              {isCustom && onDelete && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={() => onDelete(p)}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 />
-                    {t("proxies.delete")}
-                  </DropdownMenuItem>
-                </>
-              )}
-            </TableRowActions>
-          </div>
-        );
-      },
-    },
+    rowActionsColumn((p: OrgProxyInfo) => {
+      const isTesting = testingIds.has(p.id);
+      const isSettingDefault = settingDefaultId === p.id;
+      const isCustom = p.source !== "built-in";
+      return (
+        <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
+          <TableRowActions
+            menuLabel={t("proxies.moreActions", { name: p.label })}
+            isPending={isTesting || isSettingDefault}
+            actions={[
+              {
+                id: "edit",
+                label: t("proxies.edit"),
+                icon: Pencil,
+                onSelect: () => onEdit?.(p),
+                hidden: !isCustom || !onEdit,
+              },
+              {
+                id: "test",
+                label: t("proxies.test"),
+                icon: FlaskConical,
+                onSelect: () => onTest(p.id),
+                disabled: isTesting,
+              },
+              {
+                id: "set-default",
+                label: t("proxies.setDefault"),
+                icon: CheckCircle2,
+                onSelect: () => onSetDefault?.(p),
+                disabled: settingDefaultId !== null,
+                hidden: p.is_default || !onSetDefault,
+                testId: `set-default-proxy-${p.id}`,
+              },
+              {
+                id: "delete",
+                label: t("proxies.delete"),
+                icon: Trash2,
+                onSelect: () => onDelete?.(p),
+                destructive: true,
+                hidden: !isCustom || !onDelete,
+              },
+            ]}
+          />
+        </div>
+      );
+    }),
   ];
 }

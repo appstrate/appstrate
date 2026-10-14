@@ -41,17 +41,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import {
-  ArrowLeft,
-  Boxes,
-  Check,
-  ExternalLink,
-  Inbox,
-  Layers,
-  LibraryBig,
-  Plug,
-  Wrench,
-} from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, Inbox, LibraryBig, type LucideIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import type { PackageType } from "@appstrate/core/validation";
@@ -70,8 +60,8 @@ import { mayConfigurePackage, maySetPackageActive } from "../lib/package-permiss
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useRevokePackageShare } from "../hooks/use-package-shares";
 import { useAllIntegrations } from "../hooks/use-integrations";
-import { AgentIdentityTile } from "./agent-identity";
-import { IntegrationIcon } from "./integration-icon";
+import { PackageIcon } from "./package-icon";
+import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 import {
   invalidateLibraries,
   useCatalogueLibrary,
@@ -118,11 +108,11 @@ import { RailGroup, RailHeader } from "./settings/rail-shell";
 import { SettingsHeading } from "./settings/settings-heading";
 import { Spinner } from "./spinner";
 
-const KIND: Record<PackageType, { icon: typeof Layers; titleKey: string }> = {
-  agent: { icon: Layers, titleKey: "packages.type.agents" },
-  skill: { icon: Wrench, titleKey: "packages.type.skills" },
-  "mcp-server": { icon: Plug, titleKey: "packages.type.mcp-servers" },
-  integration: { icon: Boxes, titleKey: "packages.type.integrations" },
+const KIND: Record<PackageType, { icon: LucideIcon; titleKey: string }> = {
+  agent: { icon: PACKAGE_TYPE_ICON.agent, titleKey: "packages.type.agents" },
+  skill: { icon: PACKAGE_TYPE_ICON.skill, titleKey: "packages.type.skills" },
+  "mcp-server": { icon: PACKAGE_TYPE_ICON["mcp-server"], titleKey: "packages.type.mcp-servers" },
+  integration: { icon: PACKAGE_TYPE_ICON.integration, titleKey: "packages.type.integrations" },
 };
 const KINDS = CATALOGUE_KINDS.map((type) => ({ type, ...KIND[type] }));
 
@@ -371,21 +361,14 @@ export function OrgCatalogueModal({
     // other spaces?") is the matrix, one tab away.
     const placement = placementById.get(item.id);
     const activeHere = placement?.here === "active";
-    const icon =
-      active === "agent" ? (
-        <AgentIdentityTile
-          agentId={item.id}
-          icon={look?.icon}
-          color={look?.color}
-          className="size-10 rounded-[10px]"
-        />
-      ) : active === "integration" ? (
-        <IntegrationIcon src={integrationById.get(item.id)?.manifest.icon} />
-      ) : (
-        <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-[10px]">
-          <kind.icon className="size-5" aria-hidden />
-        </span>
-      );
+    const icon = (
+      <PackageIcon
+        type={active}
+        id={item.id}
+        icon={active === "agent" ? look?.icon : integrationById.get(item.id)?.manifest.icon}
+        color={look?.color}
+      />
+    );
     // The spaces the add menu shows: where it already runs (ticked, so the
     // picture is whole and nothing vanishes after a click) and where this
     // reader could still add it (`mayActivateIn`). Their own space comes

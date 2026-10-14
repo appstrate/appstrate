@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { Badge } from "./status-badge";
+import { CountBadge } from "./count-badge";
 import { RunAgentButton } from "./run-agent-button";
 import { AgentIdentityTile } from "./agent-identity";
 import { packageDetailPath } from "../lib/package-paths";
@@ -104,11 +105,10 @@ export function PackageCard({
                   {t("list.badgeAutoInstalled")}
                 </span>
               )}
-              {!!unreadCount && unreadCount > 0 && (
-                <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-                  {unreadCount > 99 ? "99+" : unreadCount}
-                </span>
-              )}
+              <CountBadge
+                count={unreadCount ?? 0}
+                label={t("dashboard.unreadRuns", { ns: "agents", count: unreadCount ?? 0 })}
+              />
               {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
               {type === "agent" && showRun && (
                 <div onClick={(e) => e.stopPropagation()}>

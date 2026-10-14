@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy } from "lucide-react";
 import { jsonText } from "@appstrate/afps-shared/json-text";
 import { Modal } from "./modal";
 import { ConfirmModal } from "./confirm-modal";
+import { CopyButton } from "./copy-button";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -17,7 +18,6 @@ import { formatDateField } from "../lib/format-date";
 import { EndUserMetadataEditor } from "./end-user-metadata-editor";
 import { entriesToMetadata, metadataToEntries, type MetadataEntry } from "../lib/end-user-metadata";
 import { errorMessage } from "../lib/mutation-error";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 
 interface Props {
   open: boolean;
@@ -29,23 +29,12 @@ interface Props {
 }
 
 function CopyableField({ label, value }: { label: string; value: string }) {
-  const { copied, copy } = useCopyToClipboard(1500);
-  const { t } = useTranslation("common");
-
-  const handleCopy = () => void copy(value);
-
   return (
     <div className="space-y-1">
       <Label className="text-muted-foreground text-xs">{label}</Label>
       <div className="flex items-center gap-2">
         <span className="text-sm break-all">{value}</span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="text-muted-foreground hover:text-foreground shrink-0 transition-colors"
-        >
-          {copied ? <span className="text-xs">{t("btn.copied")}</span> : <Copy size={12} />}
-        </button>
+        <CopyButton value={value} />
       </div>
     </div>
   );
@@ -171,41 +160,33 @@ export function EndUserDetailModal({
             }}
             className="space-y-4"
           >
-            <div className="space-y-2">
-              <Label htmlFor="eu-edit-name">{t("spaces.endUserName")}</Label>
+            <FormItem id="eu-edit-name" label={t("spaces.endUserName")}>
               <Input
-                id="eu-edit-name"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 placeholder={t("spaces.endUserNamePlaceholder")}
                 autoFocus
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="eu-edit-email">{t("spaces.endUserEmail")}</Label>
+            </FormItem>
+            <FormItem id="eu-edit-email" label={t("spaces.endUserEmail")}>
               <Input
-                id="eu-edit-email"
                 type="email"
                 value={editEmail}
                 onChange={(e) => setEditEmail(e.target.value)}
                 placeholder="alice@example.com"
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="eu-edit-extid">{t("spaces.endUserExternalId")}</Label>
+            </FormItem>
+            <FormItem id="eu-edit-extid" label={t("spaces.endUserExternalId")}>
               <Input
-                id="eu-edit-extid"
                 value={editExternalId}
                 onChange={(e) => setEditExternalId(e.target.value)}
                 placeholder="my_user_123"
               />
-            </div>
+            </FormItem>
 
             <EndUserMetadataEditor entries={editMetadata} onChange={setEditMetadata} />
 
-            {updateMutation.error && (
-              <p className="text-destructive text-sm">{errorMessage(updateMutation.error)}</p>
-            )}
+            {updateMutation.error && <FieldError>{errorMessage(updateMutation.error)}</FieldError>}
           </form>
         </Modal>
       </>

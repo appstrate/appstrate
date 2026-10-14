@@ -5,7 +5,8 @@ import { useTranslation } from "react-i18next";
 import { Trash2, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Checkbox, CheckboxField } from "@appstrate/ui/components/checkbox";
+import { FieldError } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
 import { FormField } from "../form-field";
 import { EditorSection, type EditorSurface } from "./editor-section";
@@ -134,20 +135,14 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
           )}
 
           {/* api_call tool opt-in (`_meta["dev.appstrate/api"].auths[key]`) */}
-          <label className="flex items-start gap-2 text-sm">
-            <Checkbox
-              checked={auth.apiCallEnabled}
-              onCheckedChange={(c) => updateAuth(idx, { apiCallEnabled: Boolean(c) })}
-              className="mt-0.5"
-              data-testid={`auth-api-call-${auth.key}`}
-            />
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="font-medium">{t("integrationEditor.auths.apiCall")}</span>
-              <span className="text-muted-foreground text-xs">
-                {t("integrationEditor.auths.apiCallDesc")}
-              </span>
-            </span>
-          </label>
+          <CheckboxField
+            id={`auth-api-call-${idx}`}
+            label={t("integrationEditor.auths.apiCall")}
+            description={t("integrationEditor.auths.apiCallDesc")}
+            checked={auth.apiCallEnabled}
+            onCheckedChange={(c) => updateAuth(idx, { apiCallEnabled: Boolean(c) })}
+            data-testid={`auth-api-call-${auth.key}`}
+          />
 
           {/* Credential delivery (HTTP header injection) */}
           {auth.type === "mtls" ? (
@@ -207,12 +202,9 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
                 placeholder="read"
               />
               {wildcardEnabled && !hasWildcardUsableAuth && (
-                <p
-                  className="text-destructive text-xs"
-                  data-testid={`auth-default-scopes-wildcard-warning-${auth.key}`}
-                >
+                <FieldError data-testid={`auth-default-scopes-wildcard-warning-${auth.key}`}>
                   {t("integrationEditor.auths.defaultScopesRequiredForWildcard")}
-                </p>
+                </FieldError>
               )}
               <ScopeCatalogEditor
                 entries={auth.scopeCatalog}

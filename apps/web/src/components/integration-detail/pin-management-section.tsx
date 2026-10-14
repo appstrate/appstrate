@@ -5,13 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import {
   Table,
   TableHeader,
@@ -191,18 +185,14 @@ export function NewPinForm({
         <Label htmlFor="pin-add-agent" className="mb-2 block text-sm">
           {t("integration.admin.pinManagement.colAgent")}
         </Label>
-        <Select value={newAgent} onValueChange={setNewAgent}>
-          <SelectTrigger id="pin-add-agent" data-testid="pin-add-agent">
-            <SelectValue placeholder={t("integration.admin.pinManagement.colAgent")} />
-          </SelectTrigger>
-          <SelectContent>
-            {agents.map((a) => (
-              <SelectItem key={a.agent_package_id} value={a.agent_package_id}>
-                {a.display_name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <OptionSelect
+          id="pin-add-agent"
+          value={newAgent}
+          onValueChange={setNewAgent}
+          placeholder={t("integration.admin.pinManagement.colAgent")}
+          data-testid="pin-add-agent"
+          options={agents.map((a) => ({ value: a.agent_package_id, label: a.display_name }))}
+        />
       </div>
       <div className="min-w-[12rem] flex-1">
         <p className="mb-2 block text-sm font-medium">

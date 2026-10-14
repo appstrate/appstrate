@@ -15,6 +15,7 @@
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { DataColumn } from "@/components/data-table";
+import { CellText } from "@/components/table-cells";
 import type { components } from "@/api/schema";
 
 type Webhook = components["schemas"]["WebhookObject"];
@@ -71,11 +72,7 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
       header: t("settings:webhooks.agentColumn"),
       width: "minmax(80px,1fr)",
       tier: 2,
-      cell: (wh) => (
-        <span className="text-muted-foreground block truncate text-xs">
-          {wh.packageId || t("settings:webhooks.allAgents")}
-        </span>
-      ),
+      cell: (wh) => <CellText>{wh.packageId || t("settings:webhooks.allAgents")}</CellText>,
     },
     {
       id: "payload",
@@ -83,11 +80,11 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
       width: "72px",
       tier: 2,
       cell: (wh) => (
-        <span className="text-muted-foreground block truncate text-xs">
+        <CellText>
           {wh.payloadMode === "full"
             ? t("settings:webhooks.payloadModeFull")
             : t("settings:webhooks.payloadModeSummary")}
-        </span>
+        </CellText>
       ),
     },
   ];

@@ -1,15 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, type ReactNode } from "react";
+import { Children, useRef, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { MoreHorizontal } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
+import { orderRowActions, type RowAction } from "../lib/row-action-order";
 import { Spinner } from "./spinner";
+
+export type { RowAction };
+
+function RowActionItem({ action }: { action: RowAction }) {
+  const Icon = action.icon;
+  const body = (
+    <>
+      <Icon />
+      {action.label}
+    </>
+  );
+  return (
+    <DropdownMenuItem
+      variant={action.destructive ? "destructive" : "default"}
+      disabled={action.disabled}
+      onSelect={action.onSelect}
+      asChild={action.href !== undefined}
+      {...(action.testId ? { "data-testid": action.testId } : {})}
+    >
+      {action.href !== undefined ? <Link to={action.href}>{body}</Link> : body}
+    </DropdownMenuItem>
+  );
+}
 
 /**
  * The shared end of an actionable table row, and its ONLY way to act: one « … »
@@ -18,16 +45,21 @@ import { Spinner } from "./spinner";
  * delete last behind a separator. What a click on the row opens (the edit, or
  * the detail through `rowHref`) is the table's, not this component's.
  * Callers own the menu items because permissions and pending states belong to
- * the resource, not to the table primitive. A row with nothing to offer renders
- * no menu at all (no `menuLabel`, or no children).
+ * the resource, not to the table primitive: they pass `actions` (ordered and
+ * separated here) and, for what `actions` cannot say (sub-menus, a hint, a rich
+ * item), their own `children`, drawn after the plain deeds and before the
+ * destructive ones. A row with nothing to offer renders no menu at all (no
+ * `menuLabel`, or no visible action and no rendered child).
  */
 export function TableRowActions({
   menuLabel,
   isPending = false,
   renaming = false,
+  actions,
   children,
 }: {
   menuLabel?: string;
+  actions?: RowAction[];
   isPending?: boolean;
   /**
    * True while the row's name is in inline edit, started from this menu's
@@ -40,10 +72,13 @@ export function TableRowActions({
 }) {
   const { t } = useTranslation("common");
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const { plain, destructive } = orderRowActions(actions ?? []);
+  const hasChildren = Children.toArray(children).length > 0;
+  const hasItems = plain.length > 0 || destructive.length > 0 || hasChildren;
   return (
     <div className="relative z-10 flex items-center justify-end gap-1">
       {isPending && <Spinner label={t("loading")} />}
-      {children && menuLabel && (
+      {hasItems && menuLabel && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -69,7 +104,16 @@ export function TableRowActions({
               field?.select();
             }}
           >
+            {plain.map((action) => (
+              <RowActionItem key={action.id} action={action} />
+            ))}
             {children}
+            {(plain.length > 0 || hasChildren) && destructive.length > 0 && (
+              <DropdownMenuSeparator />
+            )}
+            {destructive.map((action) => (
+              <RowActionItem key={action.id} action={action} />
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
       )}

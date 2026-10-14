@@ -3,12 +3,12 @@
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../../components/data-table";
 import { CliSessionIcon } from "../../components/cli-session-icon";
 import { TableRowActions } from "../../components/table-row-actions";
+import { rowActionsColumn } from "../../components/row-actions-column";
+import { CellDate, CellEmpty, CellText } from "../../components/table-cells";
 import { deriveLabel, displayIp, type CliSessionDisplay } from "../../lib/cli-sessions";
-import { formatDateField } from "../../lib/format-date";
 
 export interface AdminCliSession extends CliSessionDisplay {
   userId: string;
@@ -50,12 +50,7 @@ export function useCliSessionColumns({
       width: "minmax(60px,1fr)",
       tier: 2,
       cell: (session) => (
-        <span
-          className="text-muted-foreground block truncate text-xs"
-          title={cliSessionUserLabel(session)}
-        >
-          {cliSessionUserLabel(session)}
-        </span>
+        <CellText title={cliSessionUserLabel(session)}>{cliSessionUserLabel(session)}</CellText>
       ),
     },
     {
@@ -67,7 +62,7 @@ export function useCliSessionColumns({
         session.current ? (
           <Badge variant="running">{t("orgCliSessions.current")}</Badge>
         ) : (
-          <span className="text-muted-foreground text-xs">—</span>
+          <CellEmpty />
         ),
     },
     {
@@ -75,25 +70,24 @@ export function useCliSessionColumns({
       header: t("devices.userAgentLabel"),
       width: "minmax(96px,1fr)",
       tier: 2,
-      cell: (session) => (
-        <span
-          className="text-muted-foreground relative z-10 truncate font-mono text-xs"
-          title={session.userAgent ?? ""}
-        >
-          {session.userAgent || "—"}
-        </span>
-      ),
+      cell: (session) =>
+        session.userAgent ? (
+          <CellText mono title={session.userAgent}>
+            {session.userAgent}
+          </CellText>
+        ) : (
+          <CellEmpty />
+        ),
     },
     {
       id: "ip",
       header: t("devices.createdIpLabel"),
       width: "110px",
       tier: 3,
-      cell: (session) => (
-        <span className="text-muted-foreground font-mono text-xs">
-          {displayIp(session.createdIp) || "—"}
-        </span>
-      ),
+      cell: (session) => {
+        const ip = displayIp(session.createdIp);
+        return ip ? <CellText mono>{ip}</CellText> : <CellEmpty />;
+      },
     },
     {
       id: "created",
@@ -101,11 +95,7 @@ export function useCliSessionColumns({
       width: "100px",
       align: "end",
       tier: 3,
-      cell: (session) => (
-        <span className="text-muted-foreground text-xs">
-          {formatDateField(session.createdAt, "date")}
-        </span>
-      ),
+      cell: (session) => <CellDate value={session.createdAt} granularity="date" />,
     },
     {
       id: "lastUsed",
@@ -113,39 +103,33 @@ export function useCliSessionColumns({
       width: "120px",
       align: "end",
       tier: 2,
-      cell: (session) => (
-        <span className="text-muted-foreground text-xs">
-          {session.lastUsedAt
-            ? formatDateField(session.lastUsedAt, "date")
-            : t("devices.neverUsed")}
-        </span>
-      ),
+      cell: (session) =>
+        session.lastUsedAt ? (
+          <CellDate value={session.lastUsedAt} granularity="date" />
+        ) : (
+          <CellText>{t("devices.neverUsed")}</CellText>
+        ),
     },
-    {
-      id: "actions",
-      header: "",
-      width: "48px",
-      align: "end",
-      cell: (session) => {
-        const revoke = onRevoke;
-        if (!revoke) return null;
-        const isPending = revokingFamilyId === session.familyId;
-        return (
-          <TableRowActions
-            menuLabel={t("orgCliSessions.moreActions", { device: deriveLabel(session, t) })}
-            isPending={isPending}
-          >
-            <DropdownMenuItem
-              onSelect={() => revoke(session)}
-              disabled={session.current || isPending}
-              className="text-destructive focus:text-destructive"
-            >
-              <Trash2 />
-              {t("devices.revoke")}
-            </DropdownMenuItem>
-          </TableRowActions>
-        );
-      },
-    },
+    rowActionsColumn((session: AdminCliSession) => {
+      const revoke = onRevoke;
+      if (!revoke) return null;
+      const isPending = revokingFamilyId === session.familyId;
+      return (
+        <TableRowActions
+          menuLabel={t("orgCliSessions.moreActions", { device: deriveLabel(session, t) })}
+          isPending={isPending}
+          actions={[
+            {
+              id: "revoke",
+              label: t("devices.revoke"),
+              icon: Trash2,
+              onSelect: () => revoke(session),
+              disabled: session.current || isPending,
+              destructive: true,
+            },
+          ]}
+        />
+      );
+    }),
   ];
 }

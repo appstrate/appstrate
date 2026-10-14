@@ -17,13 +17,7 @@ import { useTranslation } from "react-i18next";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import { ToggleGroup, ToggleGroupItem } from "@appstrate/ui/components/toggle-group";
 import {
   type Frequency,
@@ -195,42 +189,31 @@ export function FrequencyComposer({
     <FieldGroup className="gap-5">
       <Field>
         <Label htmlFor="frequency-kind">{t("schedule.frequency.repeat")}</Label>
-        <Select
+        <OptionSelect
+          id="frequency-kind"
           value={frequency.kind}
           onValueChange={(kind) => update(switchKind(frequency, kind as FrequencyKind))}
-        >
-          <SelectTrigger id="frequency-kind">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(KIND_LABELS).map(([kind, label]) => (
-              <SelectItem key={kind} value={kind}>
-                {t(label)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          options={Object.entries(KIND_LABELS).map(([kind, label]) => ({
+            value: kind,
+            label: t(label),
+          }))}
+        />
       </Field>
 
       {(frequency.kind === "minutes" || frequency.kind === "hours") && (
         <Field>
           <Label htmlFor="frequency-every">{t("schedule.frequency.every")}</Label>
           <div className="flex items-center gap-2">
-            <Select
+            <OptionSelect
+              id="frequency-every"
+              className="w-24"
               value={String(frequency.every)}
               onValueChange={(value) => update({ ...frequency, every: Number(value) })}
-            >
-              <SelectTrigger id="frequency-every" className="w-24">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(frequency.kind === "minutes" ? MINUTE_STEPS : HOUR_STEPS).map((every) => (
-                  <SelectItem key={every} value={String(every)}>
-                    {every}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={(frequency.kind === "minutes" ? MINUTE_STEPS : HOUR_STEPS).map((every) => ({
+                value: String(every),
+                label: every,
+              }))}
+            />
             <span className="text-muted-foreground text-sm">{t(UNIT_LABELS[frequency.kind])}</span>
           </div>
         </Field>

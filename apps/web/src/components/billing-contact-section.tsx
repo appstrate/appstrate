@@ -7,7 +7,13 @@ import { X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
-import { Field, FieldGroup } from "@appstrate/ui/components/field";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FormItem,
+} from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -65,7 +71,6 @@ export function BillingContactSection() {
   const dirty = hasBillingContactChanges(patch);
   const emailInvalid =
     current.billing_email.trim() !== "" && !isBillingEmail(current.billing_email.trim());
-  const emailDescribed = emailInvalid || current.billing_email.trim() === "";
 
   const edit = (next: Partial<BillingContactDraft>) => setDraft({ ...current, ...next });
 
@@ -122,31 +127,25 @@ export function BillingContactSection() {
       <p className="text-muted-foreground text-sm">{t("billingContact.description")}</p>
 
       <FieldGroup>
-        <Field data-invalid={emailInvalid}>
-          <Label htmlFor="billing-contact-email">{t("billingContact.emailLabel")}</Label>
+        <FormItem
+          id="billing-contact-email"
+          label={t("billingContact.emailLabel")}
+          hint={
+            !emailInvalid && current.billing_email.trim() === ""
+              ? t("billingContact.emailFallback")
+              : undefined
+          }
+          error={emailInvalid ? t("validation.emailFormat", { ns: "common" }) : undefined}
+        >
           <Input
-            id="billing-contact-email"
             type="email"
             autoComplete="email"
             placeholder="billing@example.com"
             value={current.billing_email}
-            aria-invalid={emailInvalid}
-            aria-describedby={emailDescribed ? "billing-contact-email-hint" : undefined}
             disabled={update.isPending}
             onChange={(event) => edit({ billing_email: event.target.value })}
           />
-          {emailInvalid ? (
-            <p id="billing-contact-email-hint" role="alert" className="text-destructive text-sm">
-              {t("validation.emailFormat", { ns: "common" })}
-            </p>
-          ) : (
-            current.billing_email.trim() === "" && (
-              <p id="billing-contact-email-hint" className="text-muted-foreground text-sm">
-                {t("billingContact.emailFallback")}
-              </p>
-            )
-          )}
-        </Field>
+        </FormItem>
 
         <Field>
           <Label htmlFor="billing-contact-cc">{t("billingContact.ccLabel")}</Label>
@@ -197,13 +196,11 @@ export function BillingContactSection() {
             </Button>
           </div>
           {ccError ? (
-            <p id="billing-contact-cc-hint" role="alert" className="text-destructive text-sm">
-              {ccError}
-            </p>
+            <FieldError id="billing-contact-cc-hint">{ccError}</FieldError>
           ) : (
-            <p id="billing-contact-cc-hint" className="text-muted-foreground text-sm">
+            <FieldDescription id="billing-contact-cc-hint">
               {t("billingContact.ccHint", { max: MAX_BILLING_CC })}
-            </p>
+            </FieldDescription>
           )}
         </Field>
       </FieldGroup>

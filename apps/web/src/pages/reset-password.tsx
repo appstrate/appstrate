@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { AlertCircle, CheckCircle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { cn } from "@appstrate/ui/cn";
 import { AuthLayout } from "../components/auth-layout";
 import { AuthSuccessState } from "../components/auth-success-state";
@@ -96,10 +96,8 @@ export function ResetPasswordPage() {
           </p>
         </div>
         <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-sm flex-col gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="password">{t("resetPassword.newPassword")}</Label>
+          <FormItem id="password" label={t("resetPassword.newPassword")}>
             <Input
-              id="password"
               type="password"
               placeholder="••••••••"
               autoComplete="new-password"
@@ -107,11 +105,9 @@ export function ResetPasswordPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="confirm-password">{t("resetPassword.confirmPassword")}</Label>
+          </FormItem>
+          <FormItem id="confirm-password" label={t("resetPassword.confirmPassword")}>
             <Input
-              id="confirm-password"
               type="password"
               placeholder="••••••••"
               autoComplete="new-password"
@@ -122,8 +118,8 @@ export function ResetPasswordPage() {
               )}
               required
             />
-          </div>
-          {error && <p className="text-destructive text-sm">{error}</p>}
+          </FormItem>
+          <FieldError>{error}</FieldError>
           {revocationFailed && (
             <Link
               to="/forgot-password"

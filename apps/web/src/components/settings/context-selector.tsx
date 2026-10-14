@@ -5,13 +5,7 @@
  * workspace, which catalogue. One control, so a panel that switches context
  * always switches it the same way.
  */
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "@appstrate/ui/components/select";
 
 /**
  * Transparent until it is a dialog's own surface, where the trigger has to
@@ -40,17 +34,18 @@ export function ContextSelector({
   onValueChange: (value: string) => void;
 }) {
   return (
-    <Select value={value} disabled={disabled} onValueChange={onValueChange}>
-      <SelectTrigger className={TRIGGER} aria-label={label} data-settings-context-selector>
-        <SelectValue placeholder={label} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((option) => (
-          <SelectItem key={option.id} value={option.id} disabled={option.disabled}>
-            {option.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <OptionSelect
+      value={value}
+      disabled={disabled}
+      onValueChange={onValueChange}
+      placeholder={label}
+      className={TRIGGER}
+      aria-label={label}
+      options={options.map((option) => ({
+        value: option.id,
+        label: option.name,
+        disabled: option.disabled,
+      }))}
+    />
   );
 }

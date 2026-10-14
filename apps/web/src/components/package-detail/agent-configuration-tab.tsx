@@ -7,13 +7,7 @@ import { Globe, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect, SelectItem } from "@appstrate/ui/components/select";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import { useUploadClient } from "../../hooks/use-upload";
 import {
@@ -358,28 +352,22 @@ export function ProxySection({ packageId }: { packageId: string }) {
         label={t("detail.configuration.proxyRoute")}
         description={t("detail.configuration.proxyDescription")}
       >
-        <Select
+        <OptionSelect
           value={agentProxyId ?? "__inherit__"}
           onValueChange={(v) => setAgentProxy.mutate(v === "__inherit__" ? null : v)}
           disabled={setAgentProxy.isPending}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__inherit__">
-              {orgDefaultProxy
-                ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
-                : t("proxies.agent.inheritNoDefault", { ns: "settings" })}
-            </SelectItem>
-            <SelectItem value="none">{t("proxies.agent.none", { ns: "settings" })}</SelectItem>
-            {orgProxies.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.label}
+          leading={
+            <>
+              <SelectItem value="__inherit__">
+                {orgDefaultProxy
+                  ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
+                  : t("proxies.agent.inheritNoDefault", { ns: "settings" })}
               </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+              <SelectItem value="none">{t("proxies.agent.none", { ns: "settings" })}</SelectItem>
+            </>
+          }
+          options={orgProxies.map((p) => ({ value: p.id, label: p.label }))}
+        />
       </SettingRow>
       <SaveFeedback
         pending={setAgentProxy.isPending}

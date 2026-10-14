@@ -18,6 +18,9 @@ import { Modal } from "@/components/modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
+import { CheckboxField } from "@appstrate/ui/components/checkbox";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import { Spinner } from "@/components/spinner";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { useAppForm } from "@/hooks/use-app-form";
@@ -314,25 +317,20 @@ function OAuthClientFormBody({
         onSubmit={handleSubmit(onSubmit)}
         className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1"
       >
-        <div className="space-y-2">
-          <Label htmlFor="oauth-client-name">{t("settings:oauthClients.nameLabel")}</Label>
+        <FormItem
+          id="oauth-client-name"
+          label={t("settings:oauthClients.nameLabel")}
+          hint={isEditing ? t("settings:oauthClients.nameReadonlyHint") : undefined}
+          error={showError("name") ? t("common:validation.required") : undefined}
+        >
           <Input
-            id="oauth-client-name"
             type="text"
             {...register("name", { required: !isEditing, maxLength: 200 })}
             placeholder={t("settings:oauthClients.namePlaceholder")}
             disabled={isEditing}
             autoFocus={!isEditing}
           />
-          {isEditing && (
-            <p className="text-muted-foreground text-xs">
-              {t("settings:oauthClients.nameReadonlyHint")}
-            </p>
-          )}
-          {showError("name") && (
-            <p className="text-destructive text-xs">{t("common:validation.required")}</p>
-          )}
-        </div>
+        </FormItem>
 
         <UriListField
           label={t("settings:oauthClients.redirectUris")}
@@ -359,17 +357,14 @@ function OAuthClientFormBody({
           <div className="flex flex-col gap-1.5">
             {(availableScopes ?? Array.from(REQUIRED_SCOPES)).map((scope) => {
               const required = REQUIRED_SCOPES.has(scope);
-              const checked = selectedScopes.has(scope);
               return (
-                <label key={scope} className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={required}
-                    onChange={() => toggleScope(scope)}
-                    className="accent-primary mt-0.5 h-4 w-4"
-                  />
-                  <span className="flex flex-col">
+                <CheckboxField
+                  key={scope}
+                  id={`oauth-scope-${scope}`}
+                  checked={selectedScopes.has(scope)}
+                  disabled={required}
+                  onCheckedChange={() => toggleScope(scope)}
+                  label={
                     <span className="flex items-center gap-2">
                       <span>
                         {t(`oauthClients.scopeLabels.${scope}`, {
@@ -385,9 +380,9 @@ function OAuthClientFormBody({
                         </span>
                       )}
                     </span>
-                    <span className="text-muted-foreground font-mono text-xs">{scope}</span>
-                  </span>
-                </label>
+                  }
+                  description={<span className="font-mono">{scope}</span>}
+                />
               );
             })}
           </div>
@@ -395,20 +390,13 @@ function OAuthClientFormBody({
 
         {can("oauth-clients:write") && (
           <div className="space-y-2">
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={isFirstParty}
-                onChange={() => setIsFirstParty((v) => !v)}
-                className="accent-primary mt-0.5 h-4 w-4"
-              />
-              <span className="flex flex-col">
-                <span>{t("settings:oauthClients.isFirstPartyLabel")}</span>
-                <span className="text-muted-foreground text-xs">
-                  {t("settings:oauthClients.isFirstPartyHint")}
-                </span>
-              </span>
-            </label>
+            <CheckboxField
+              id="oauth-client-first-party"
+              checked={isFirstParty}
+              onCheckedChange={(checked) => setIsFirstParty(checked === true)}
+              label={t("settings:oauthClients.isFirstPartyLabel")}
+              description={t("settings:oauthClients.isFirstPartyHint")}
+            />
           </div>
         )}
 
@@ -439,7 +427,7 @@ function OAuthClientFormBody({
           />
         )}
 
-        {errors.root && <p className="text-destructive text-sm">{errors.root.message}</p>}
+        <FieldError>{errors.root?.message}</FieldError>
       </form>
     </Modal>
   );
@@ -484,44 +472,35 @@ export function SignupPolicyFields({
   const { t } = useTranslation(["settings", "common"]);
   return (
     <div className="space-y-3 rounded-md border p-3">
-      <label className="flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={allowSignup}
-          onChange={onAllowSignupChange}
-          className="accent-primary mt-0.5 h-4 w-4"
-        />
-        <span className="flex flex-col">
-          <span>{t("settings:oauthClients.allowSignupLabel")}</span>
-          <span className="text-muted-foreground text-xs">
-            {t("settings:oauthClients.allowSignupHint")}
-          </span>
-        </span>
-      </label>
+      <CheckboxField
+        id="oauth-client-allow-signup"
+        checked={allowSignup}
+        onCheckedChange={onAllowSignupChange}
+        label={t("settings:oauthClients.allowSignupLabel")}
+        description={t("settings:oauthClients.allowSignupHint")}
+      />
       {isOrgLevel && (
-        <div className="space-y-1">
-          <Label htmlFor="oauth-client-signup-role">
-            {t("settings:oauthClients.signupRoleLabel")}
-          </Label>
-          <select
-            id="oauth-client-signup-role"
+        <FormItem
+          id="oauth-client-signup-role"
+          label={t("settings:oauthClients.signupRoleLabel")}
+          hint={
+            <>
+              {t(`settings:orgSettings.roleHint.${signupRole}`)}
+              <br />
+              {t("settings:oauthClients.signupRoleHint")}
+            </>
+          }
+        >
+          <OptionSelect
             value={signupRole}
-            onChange={(e) => onSignupRoleChange(e.target.value as AssignableOrgRole)}
+            onValueChange={(value) => onSignupRoleChange(value as AssignableOrgRole)}
             disabled={isPending}
-            className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {ASSIGNABLE_ORG_ROLES.map((role) => (
-              <option key={role} value={role}>
-                {t(`settings:oauthClients.signupRoleOption.${role}`)}
-              </option>
-            ))}
-          </select>
-          <p className="text-muted-foreground text-xs">
-            {t(`settings:orgSettings.roleHint.${signupRole}`)}
-            <br />
-            {t("settings:oauthClients.signupRoleHint")}
-          </p>
-        </div>
+            options={ASSIGNABLE_ORG_ROLES.map((role) => ({
+              value: role,
+              label: t(`settings:oauthClients.signupRoleOption.${role}`),
+            }))}
+          />
+        </FormItem>
       )}
       {isOrgLevel && (
         <SpaceAssignmentsField

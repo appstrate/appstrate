@@ -748,7 +748,8 @@ export function PackageFilesView({
               {t("editor.discardChanges")}
             </Button>
             <Button type="button" disabled={busy} onClick={() => void saveEdits().catch(() => {})}>
-              {busy ? <Spinner /> : t("btn.save", { ns: "common" })}
+              {busy && <Spinner />}
+              {t("btn.save", { ns: "common" })}
             </Button>
           </div>
         </div>
@@ -1010,7 +1011,7 @@ function FileSelectionActions({
             <DropdownMenuItem
               disabled={gestures.busy}
               onSelect={gestures.onDelete}
-              className="text-destructive focus:text-destructive"
+              variant="destructive"
             >
               <Trash2 />
               {t("files.delete")}

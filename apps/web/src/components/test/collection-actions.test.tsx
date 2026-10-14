@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { Fragment, isValidElement, type ReactElement, type ReactNode } from "react";
 import { DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../data-table.tsx";
+import { orderRowActions, type RowAction } from "../../lib/row-action-order.ts";
 import { useDocumentColumns } from "../document-columns.tsx";
 import type { FileDto } from "../../hooks/use-files.ts";
 import { documents } from "../../lab/fixtures.ts";
@@ -42,12 +43,19 @@ function menuEntries<T>(columns: DataColumn<T>[], row: T): string[] {
   const cell = actions.cell(row) as ReactElement<object>;
   let entries: string[] = [];
   function Probe() {
-    const menu = (cell.type as (props: object) => ReactElement<{ children?: ReactNode }>)(
-      cell.props,
-    );
-    entries = flatten(menu.props.children).map((item) =>
+    const menu = (
+      cell.type as (props: object) => ReactElement<{ actions?: RowAction[]; children?: ReactNode }>
+    )(cell.props);
+    const { plain, destructive } = orderRowActions(menu.props.actions ?? []);
+    const children = flatten(menu.props.children).map((item) =>
       item.type === DropdownMenuSeparator ? "—" : textsOf(item).join(""),
     );
+    entries = [
+      ...plain.map((action) => action.label),
+      ...children,
+      ...(plain.length + children.length > 0 && destructive.length > 0 ? ["—"] : []),
+      ...destructive.map((action) => action.label),
+    ];
     return null;
   }
   render(<Probe />);

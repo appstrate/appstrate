@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, SearchX, Users } from "lucide-react";
+import { Plus, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -14,7 +14,13 @@ import {
   type EndUserInfo,
 } from "../hooks/use-end-users";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { LoadingState, ErrorState, EmptyState, EmptyStateAction } from "../components/page-states";
+import {
+  LoadingState,
+  ErrorState,
+  EmptyState,
+  EmptyStateAction,
+  NoMatchState,
+} from "../components/page-states";
 import { useModalParam } from "../hooks/use-modal-param";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
@@ -182,11 +188,10 @@ function EndUsersPageContent() {
           })
         }
         isLoading={isLoading}
-        isError={Boolean(error)}
-        error={<ErrorState error={error} compact />}
+        failure={error}
         empty={
           search.trim() ? (
-            <EmptyState message={t("spaces.noMatchingEndUsers")} icon={SearchX} compact />
+            <NoMatchState message={t("spaces.noMatchingEndUsers")} />
           ) : (
             <EmptyState
               message={t("spaces.noEndUsers")}

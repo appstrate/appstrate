@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
+import { CountBadge } from "./count-badge";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import type { RoutePath } from "../lib/route-access";
 import { useCanReach } from "../hooks/use-can-reach";
@@ -95,9 +96,7 @@ export function NavOrg() {
       >
         {item.badge && item.badge > 0 ? (
           <SidebarMenuBadge>
-            <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-              {item.badge > 99 ? "99+" : item.badge}
-            </span>
+            <CountBadge count={item.badge} label={item.label} />
           </SidebarMenuBadge>
         ) : null}
       </SidebarNavLink>
@@ -135,9 +134,10 @@ export function NavOrg() {
                 </SidebarMenuButton>
                 {unread > 0 && (
                   <SidebarMenuBadge>
-                    <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-                      {unread > 99 ? "99+" : unread}
-                    </span>
+                    <CountBadge
+                      count={unread}
+                      label={t("dashboard.unreadRuns", { ns: "agents", count: unread })}
+                    />
                   </SidebarMenuBadge>
                 )}
               </SidebarMenuItem>

@@ -5,6 +5,7 @@ import { Children, isValidElement, type ReactElement, type ReactNode } from "rea
 import { QueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/client.ts";
 import type { DataColumn } from "../../components/data-table.tsx";
+import { orderRowActions, type RowAction } from "../../lib/row-action-order.ts";
 import type { EndUserInfo } from "../../hooks/use-end-users.ts";
 import { orgStore } from "../../stores/org-store.ts";
 import { render } from "../../test/render.tsx";
@@ -67,16 +68,21 @@ function columnsFor(permissions: string[]): DataColumn<EndUserInfo>[] {
 function rowMenuLabels(columns: DataColumn<EndUserInfo>[]): string[] {
   const actions = columns.find((column) => column.id === "actions");
   if (!actions) return [];
-  const menu = actions.cell(endUser) as ReactElement<{ children?: ReactNode }>;
+  const menu = actions.cell(endUser) as ReactElement<{
+    actions?: RowAction[];
+    children?: ReactNode;
+  }>;
   const text = (node: ReactNode): string =>
     typeof node === "string"
       ? node
       : isValidElement<{ children?: ReactNode }>(node)
         ? Children.toArray(node.props.children).map(text).join("")
         : "";
-  return Children.toArray(menu.props.children)
-    .map(text)
-    .filter((label) => label !== "");
+  return [
+    ...orderRowActions(menu.props.actions ?? []).plain.map((action) => action.label),
+    ...Children.toArray(menu.props.children).map(text),
+    ...orderRowActions(menu.props.actions ?? []).destructive.map((action) => action.label),
+  ].filter((label) => label !== "");
 }
 
 describe("the end-user row menu", () => {

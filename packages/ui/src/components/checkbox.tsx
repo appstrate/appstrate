@@ -24,4 +24,37 @@ const Checkbox = React.forwardRef<
 ));
 Checkbox.displayName = CheckboxPrimitive.Root.displayName;
 
-export { Checkbox };
+/**
+ * A checkbox with its label and an optional line under it. Both lines sit in
+ * the `<label>`, so the whole text toggles the box.
+ */
+function CheckboxField({
+  id,
+  label,
+  description,
+  className,
+  disabled,
+  ...props
+}: Omit<React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>, "id"> & {
+  id: string;
+  label: React.ReactNode;
+  description?: React.ReactNode;
+}) {
+  return (
+    <div className={cn("flex items-start gap-2", className)}>
+      <Checkbox id={id} className="mt-0.5" disabled={disabled} {...props} />
+      <label
+        htmlFor={id}
+        className={cn(
+          "grid gap-1 leading-none",
+          disabled ? "cursor-not-allowed opacity-70" : "cursor-pointer",
+        )}
+      >
+        <span className="text-sm font-medium">{label}</span>
+        {description && <span className="text-muted-foreground text-xs">{description}</span>}
+      </label>
+    </div>
+  );
+}
+
+export { Checkbox, CheckboxField };

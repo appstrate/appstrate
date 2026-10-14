@@ -6,8 +6,8 @@ import { useForm, useWatch } from "react-hook-form";
 import { SLUG_REGEX } from "@appstrate/core/naming";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { useForkPackage } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
@@ -109,10 +109,12 @@ export function ForkPackageModal({ open, onClose, onLeave, packageId, defaultNam
       }
     >
       <form id="fork-package-form" onSubmit={onSubmit}>
-        <div className="space-y-2">
-          <Label htmlFor="fork-name">{t("fork.nameLabel")}</Label>
+        <FormItem
+          id="fork-name"
+          label={t("fork.nameLabel")}
+          error={name.length > 0 && !SLUG_REGEX.test(name) ? t("fork.invalidName") : undefined}
+        >
           <Input
-            id="fork-name"
             type="text"
             {...register("name", {
               required: true,
@@ -123,19 +125,14 @@ export function ForkPackageModal({ open, onClose, onLeave, packageId, defaultNam
             required
             autoFocus
           />
-          {name.length > 0 && !SLUG_REGEX.test(name) && (
-            <p className="text-destructive text-sm">{t("fork.invalidName")}</p>
-          )}
-        </div>
+        </FormItem>
         <p className="text-muted-foreground mt-3 text-sm">
           {t("fork.prefix")}{" "}
           <code className="text-foreground">
             @{orgSlug}/{name || "..."}
           </code>
         </p>
-        {errors.root?.message && (
-          <p className="text-destructive mt-2 text-sm">{errors.root.message}</p>
-        )}
+        {errors.root?.message && <FieldError className="mt-2">{errors.root.message}</FieldError>}
       </form>
     </Modal>
   );

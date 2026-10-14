@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import { readManifestOverview } from "../../lib/package-manifest";
 import { DetailSectionCard } from "../detail-section-card";
-import { FactGrid } from "./manifest-fact";
+import { ManifestFacts } from "./manifest-fact";
 
 export function ManifestOverview({ manifest }: { manifest: unknown }) {
   const { t } = useTranslation("agents");
@@ -29,7 +29,7 @@ export function ManifestOverview({ manifest }: { manifest: unknown }) {
 
       {overview.facts.length > 0 && (
         <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.metadata")}>
-          <FactGrid facts={overview.facts} />
+          <ManifestFacts facts={overview.facts} />
         </DetailSectionCard>
       )}
 
@@ -50,7 +50,7 @@ export function ManifestOverview({ manifest }: { manifest: unknown }) {
 
       {overview.links.length > 0 && (
         <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.links")}>
-          <FactGrid facts={overview.links} />
+          <ManifestFacts facts={overview.links} />
         </DetailSectionCard>
       )}
 

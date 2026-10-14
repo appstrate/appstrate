@@ -20,6 +20,7 @@ import { useTranslation } from "react-i18next";
 import { Modal } from "../modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
+import { FormItem } from "@appstrate/ui/components/field";
 import {
   validateNewPath,
   NEW_PATH_ERROR_KEYS,
@@ -47,7 +48,6 @@ export function FilePathDialog({
 }: FilePathDialogProps) {
   const { t } = useTranslation(["agents", "common"]);
   const inputId = useId();
-  const errorId = `${inputId}-error`;
   const [path, setPath] = useState(initialPath);
 
   const rejection = path === "" ? null : validateNewPath(entries, path);
@@ -74,20 +74,18 @@ export function FilePathDialog({
         </>
       }
     >
-      <div className="space-y-2">
-        <label htmlFor={inputId} className="text-sm font-medium">
-          {t("files.pathLabel")}
-        </label>
+      <FormItem
+        id={inputId}
+        label={t("files.pathLabel")}
+        error={rejection ? t(NEW_PATH_ERROR_KEYS[rejection]) : undefined}
+      >
         <Input
-          id={inputId}
           value={path}
           autoFocus
           // A rename opens on the current path: typing replaces it.
           onFocus={(e) => e.currentTarget.select()}
           spellCheck={false}
           placeholder={t("files.pathPlaceholder")}
-          aria-invalid={rejection !== null}
-          aria-describedby={rejection ? errorId : undefined}
           onChange={(e) => setPath(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== "Enter") return;
@@ -95,12 +93,7 @@ export function FilePathDialog({
             submit();
           }}
         />
-        {rejection && (
-          <p id={errorId} role="alert" className="text-destructive text-sm">
-            {t(NEW_PATH_ERROR_KEYS[rejection])}
-          </p>
-        )}
-      </div>
+      </FormItem>
     </Modal>
   );
 }

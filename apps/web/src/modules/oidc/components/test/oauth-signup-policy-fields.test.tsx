@@ -43,8 +43,10 @@ function renderFields(overrides: { isOrgLevel?: boolean; allowSignup?: boolean }
  * Absent is not "not disabled", so presence is asserted before attributes are.
  */
 function signupRoleSelect(html: string): string | null {
-  const start = html.indexOf('<select id="oauth-client-signup-role"');
-  return start === -1 ? null : html.slice(start, html.indexOf(">", start));
+  const at = html.indexOf('id="oauth-client-signup-role"');
+  if (at === -1) return null;
+  const start = html.lastIndexOf("<", at);
+  return html.slice(start, html.indexOf(">", at));
 }
 
 describe("org-level signup policy", () => {

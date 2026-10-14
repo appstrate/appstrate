@@ -558,7 +558,9 @@ export function DataTable<T>({
   if (verdict === "error" || verdict === "empty") {
     return (
       <div data-data-table-frame className={frameClass}>
-        {verdict === "error" ? (state.error ?? <ErrorState compact />) : state.empty}
+        {verdict === "error"
+          ? (state.error ?? <ErrorState error={state.failure} compact />)
+          : state.empty}
       </div>
     );
   }

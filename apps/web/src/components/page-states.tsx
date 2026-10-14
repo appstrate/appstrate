@@ -154,6 +154,31 @@ export function EmptyState({
 }
 
 /**
+ * A search or filter that matched nothing: the sentence, and the way back to
+ * the whole list when the caller can reset its filters.
+ */
+export function NoMatchState({
+  message,
+  onReset,
+  compact = true,
+}: {
+  message: string;
+  onReset?: () => void;
+  compact?: boolean;
+}) {
+  const { t } = useTranslation("common");
+  return (
+    <EmptyState message={message} icon={SearchX} compact={compact}>
+      {onReset && (
+        <Button variant="outline" size="sm" onClick={onReset}>
+          {t("toolbar.clearAll")}
+        </Button>
+      )}
+    </EmptyState>
+  );
+}
+
+/**
  * The creation button of an empty collection, in the treatment every addition has
  * (a white outline button with a `+`). It does exactly what the page's Actions menu
  * entry does, so the caller hands it the same label and the same handler, and

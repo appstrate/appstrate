@@ -53,7 +53,7 @@ import { RoleCatalogState } from "../../components/role-catalog-state";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { SpaceRoleSelect } from "../../components/space-role-select";
 import { ViewAsDialog } from "../../components/view-as-dialog";
-import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
+import { EmptyState, EmptyStateAction } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
 import { spaceMemberLabel, useSpaceMemberColumns } from "./space-member-columns";
 import { memberLabel } from "../../lib/billing-managers";
@@ -243,8 +243,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
           rows={members ?? []}
           rowKey={(member) => member.userId}
           isLoading={isLoading}
-          isError={Boolean(error)}
-          error={<ErrorState error={error} compact />}
+          failure={error}
           empty={
             <EmptyState
               message={t("spaceMembers.empty")}

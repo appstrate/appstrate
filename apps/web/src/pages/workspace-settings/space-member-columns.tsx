@@ -15,9 +15,10 @@
  */
 import { useTranslation } from "react-i18next";
 import { RotateCcw, Trash2 } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../../components/data-table";
 import { TableRowActions } from "../../components/table-row-actions";
+import { rowActionsColumn } from "../../components/row-actions-column";
+import { CellEmpty, CellText } from "../../components/table-cells";
 import { SpaceRoleSelect } from "../../components/space-role-select";
 import { roleI18nKey } from "../../hooks/use-permissions";
 import { spaceRoleLabel, type useSpaceRoleOptions } from "../../hooks/use-roles";
@@ -66,9 +67,9 @@ export function useSpaceMemberColumns({
       header: t("spaceMembers.colMember"),
       width: "minmax(100px,1.4fr)",
       cell: (member) => (
-        <span className="block truncate text-sm font-medium" title={spaceMemberLabel(member)}>
+        <CellText strong title={spaceMemberLabel(member)}>
           {spaceMemberLabel(member)}
-        </span>
+        </CellText>
       ),
     },
     {
@@ -76,25 +77,15 @@ export function useSpaceMemberColumns({
       header: t("orgSettings.emailColumn"),
       width: "minmax(100px,1.3fr)",
       tier: 2,
-      cell: (member) => (
-        <span
-          className="text-muted-foreground block truncate text-xs"
-          title={member.email ?? undefined}
-        >
-          {member.email ?? "—"}
-        </span>
-      ),
+      cell: (member) =>
+        member.email ? <CellText title={member.email}>{member.email}</CellText> : <CellEmpty />,
     },
     {
       id: "source",
       header: t("spaceMembers.colSource"),
       width: "110px",
       tier: 2,
-      cell: (member) => (
-        <span className="text-muted-foreground block truncate text-xs">
-          {t(`spaceMembers.source.${member.source}`)}
-        </span>
-      ),
+      cell: (member) => <CellText>{t(`spaceMembers.source.${member.source}`)}</CellText>,
     },
     {
       id: "role",
@@ -115,35 +106,28 @@ export function useSpaceMemberColumns({
             onValueChange={(value) => onChangeRole(member, value)}
           />
         ) : (
-          <span className="text-muted-foreground block truncate text-xs" title={fixedRole(member)}>
-            {fixedRole(member)}
-          </span>
+          <CellText title={fixedRole(member)}>{fixedRole(member)}</CellText>
         ),
     },
-    {
-      id: "actions",
-      header: "",
-      width: "48px",
-      align: "end",
-      cell: (member) => {
-        const kind = removal(member);
-        if (!kind) return null;
-        return (
-          <TableRowActions
-            menuLabel={t("spaceMembers.moreActions", { name: spaceMemberLabel(member) })}
-            isPending={isRemoving}
-          >
-            <DropdownMenuItem
-              onSelect={() => onRemove(member)}
-              disabled={removeDisabled}
-              className={kind === "remove" ? "text-destructive focus:text-destructive" : undefined}
-            >
-              {kind === "reset" ? <RotateCcw /> : <Trash2 />}
-              {t(kind === "reset" ? "spaceMembers.resetRole" : "spaceMembers.removeAccess")}
-            </DropdownMenuItem>
-          </TableRowActions>
-        );
-      },
-    },
+    rowActionsColumn((member: SpaceMemberObject) => {
+      const kind = removal(member);
+      if (!kind) return null;
+      return (
+        <TableRowActions
+          menuLabel={t("spaceMembers.moreActions", { name: spaceMemberLabel(member) })}
+          isPending={isRemoving}
+          actions={[
+            {
+              id: kind,
+              label: t(kind === "reset" ? "spaceMembers.resetRole" : "spaceMembers.removeAccess"),
+              icon: kind === "reset" ? RotateCcw : Trash2,
+              onSelect: () => onRemove(member),
+              disabled: removeDisabled,
+              destructive: kind === "remove",
+            },
+          ]}
+        />
+      );
+    }),
   ];
 }

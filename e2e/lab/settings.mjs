@@ -82,7 +82,7 @@ async function assertDesktopNavigationState(page, expectedHref) {
   for (const scope of ["organization", "workspace"]) {
     const section = page.locator(`[data-settings-scope="${scope}"]`);
     assert.equal(await section.locator("[data-settings-scope-title] svg").count(), 0);
-    const selector = section.locator("[data-settings-context-selector]");
+    const selector = section.locator('[role="combobox"]');
     assertClose(await selector.evaluate((node) => node.getBoundingClientRect().height), 36);
     assert.equal(
       await selector.evaluate((node) => getComputedStyle(node).backgroundColor),
@@ -269,7 +269,7 @@ await withPage(async (page) => {
     assert.equal(await section.locator("[data-settings-scope-title] svg").count(), 0);
     assertClose(
       await section
-        .locator("[data-settings-context-selector]")
+        .locator('[role="combobox"]')
         .evaluate((node) => node.getBoundingClientRect().height),
       44,
     );

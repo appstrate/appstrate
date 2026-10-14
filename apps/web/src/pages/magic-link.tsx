@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Mail } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { AuthLayout } from "../components/auth-layout";
 import { AuthSuccessState } from "../components/auth-success-state";
 import { useAuth } from "../hooks/use-auth";
@@ -59,10 +59,8 @@ export function MagicLinkPage() {
           <p className="text-muted-foreground text-center text-sm">{t("magicLink.description")}</p>
         </div>
         <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-sm flex-col gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="email">{t("login.email")}</Label>
+          <FormItem id="email" label={t("login.email")}>
             <Input
-              id="email"
               type="email"
               placeholder="email@example.com"
               autoComplete="email"
@@ -70,11 +68,9 @@ export function MagicLinkPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-          </div>
-          {linkFailed && !error && (
-            <p className="text-destructive text-sm">{t("magicLink.linkInvalid")}</p>
-          )}
-          {error && <p className="text-destructive text-sm">{error}</p>}
+          </FormItem>
+          {linkFailed && !error && <FieldError>{t("magicLink.linkInvalid")}</FieldError>}
+          <FieldError>{error}</FieldError>
           <Button type="submit" className="w-full" disabled={state === "submitting"}>
             {state === "submitting" ? t("loading") : t("magicLink.submit")}
           </Button>

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useTranslation } from "react-i18next";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
-import { Button } from "@appstrate/ui/components/button";
+import { CopyBlock } from "./copy-block";
 
 interface Props {
   /** The secret value to reveal and copy. */
@@ -17,23 +15,10 @@ interface Props {
  * mount this component when they intend to reveal the value.
  */
 export function RevealedSecret({ secret, warning }: Props) {
-  const { t } = useTranslation(["common"]);
-  const { copied, copy } = useCopyToClipboard();
-
   return (
     <>
-      <p className="text-warning bg-warning/10 rounded-md px-3 py-2 text-sm">{warning}</p>
-      <div className="border-border bg-muted/50 mt-3 flex items-center gap-2 rounded-md border px-3 py-2">
-        <code className="text-foreground flex-1 font-mono text-xs break-all">{secret}</code>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-primary shrink-0 text-xs hover:underline"
-          onClick={() => copy(secret)}
-        >
-          {copied ? t("common:btn.copied") : t("common:btn.copy")}
-        </Button>
-      </div>
+      <p className="text-warning bg-warning/10 mb-3 rounded-md px-3 py-2 text-sm">{warning}</p>
+      <CopyBlock value={secret} />
     </>
   );
 }

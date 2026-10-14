@@ -14,6 +14,8 @@ import { ListToolbar } from "../list-toolbar";
 import { EmptyState } from "../page-states";
 import { Modal } from "../modal";
 import { useModalParam } from "../../hooks/use-modal-param";
+import { CellEmpty } from "../table-cells";
+import { rowActionsColumn } from "../row-actions-column";
 import { matchesSearch } from "../../lib/strings";
 
 export interface PackageTool {
@@ -148,11 +150,14 @@ export function PackageToolCatalog({
             id: "description",
             header: t("packageTools.description"),
             width: "minmax(220px,2fr)" as const,
-            cell: (tool: PackageTool) => (
-              <span className="text-muted-foreground text-sm break-words">
-                {tool.description || "–"}
-              </span>
-            ),
+            cell: (tool: PackageTool) =>
+              tool.description ? (
+                <span className="text-muted-foreground text-sm break-words">
+                  {tool.description}
+                </span>
+              ) : (
+                <CellEmpty />
+              ),
           },
         ]
       : [
@@ -218,18 +223,7 @@ export function PackageToolCatalog({
           },
         ]
       : []),
-    ...(rowActions
-      ? [
-          {
-            id: "actions",
-            header: "",
-            width: "48px" as const,
-            align: "end" as const,
-            control: true,
-            cell: (tool: PackageTool) => rowActions(tool),
-          },
-        ]
-      : []),
+    ...(rowActions ? [rowActionsColumn(rowActions)] : []),
   ];
 
   return (

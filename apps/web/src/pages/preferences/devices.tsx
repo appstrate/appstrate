@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { ErrorState, EmptyState } from "../../components/page-states";
+import { EmptyState } from "../../components/page-states";
 import { ItemList } from "../../components/item-list";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CliSessionCard } from "../../components/cli-session-card";
@@ -70,8 +70,7 @@ export function PreferencesDevicesPage() {
         items={sessions}
         itemKey={(s) => s.familyId}
         isLoading={isLoading}
-        isError={Boolean(error)}
-        error={<ErrorState error={error} compact />}
+        failure={error}
         empty={
           <EmptyState
             icon={Laptop}

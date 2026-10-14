@@ -9,14 +9,8 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
-import { Label } from "@appstrate/ui/components/label";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import { Modal } from "./modal";
 import { Spinner } from "./spinner";
 import { ErrorState, LoadingState } from "./page-states";
@@ -166,7 +160,7 @@ function ChoiceDialog({
               : undefined
           }
         />
-        {refusal && <div className="text-destructive text-sm">{refusal}</div>}
+        {refusal && <FieldError>{refusal}</FieldError>}
         {failed && (
           <div className="text-destructive space-y-1 text-sm">
             <p>{t("models.choice.failed", { ids: failed.ids.join(", ") })}</p>
@@ -274,21 +268,16 @@ export function PersonalModelsModal({
       onClose={onClose}
       onAdvanced={onAdvanced}
       header={
-        <div className="space-y-2">
-          <Label htmlFor="personal-models-service">{t("models.form.provider")}</Label>
-          <Select value={provider.providerId} onValueChange={onChangeService}>
-            <SelectTrigger id="personal-models-service">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {services.map((service) => (
-                <SelectItem key={service.providerId} value={service.providerId}>
-                  {service.displayName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <FormItem id="personal-models-service" label={t("models.form.provider")}>
+          <OptionSelect
+            value={provider.providerId}
+            onValueChange={onChangeService}
+            options={services.map((service) => ({
+              value: service.providerId,
+              label: service.displayName,
+            }))}
+          />
+        </FormItem>
       }
     />
   );

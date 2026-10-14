@@ -9,7 +9,7 @@ import { useMemo } from "react";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Boxes, LibraryBig, Plus, SearchX } from "lucide-react";
+import { Boxes, LibraryBig, Plus } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
 import { CollectionTabs } from "../components/collection-tabs";
@@ -17,7 +17,7 @@ import { CardGrid } from "../components/card-grid";
 import { DataTable } from "../components/data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
-import { ErrorState, EmptyState, EmptyStateAction } from "../components/page-states";
+import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
 import { IntegrationIcon } from "../components/integration-icon";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
@@ -124,16 +124,16 @@ export function IntegrationsPage() {
     execution === "local" ? column.id !== "protocol" : column.id !== "server",
   );
   const columns = visibleColumns(allColumns, visibility.hidden);
-  const empty = (
+  const empty = filtering ? (
+    <NoMatchState message={t("integrations.empty.filtered")} />
+  ) : (
     <EmptyState
-      icon={filtering ? SearchX : Boxes}
+      icon={Boxes}
       compact
-      message={filtering ? t("integrations.empty.filtered") : t("integrations.empty.space")}
-      hint={filtering ? undefined : <SpaceLibraryHint type="integration" />}
+      message={t("integrations.empty.space")}
+      hint={<SpaceLibraryHint type="integration" />}
     >
-      {!filtering && canCreate && (
-        <EmptyStateAction label={t("integrations.create")} onClick={creation.open} />
-      )}
+      {canCreate && <EmptyStateAction label={t("integrations.create")} onClick={creation.open} />}
     </EmptyState>
   );
 
@@ -229,8 +229,7 @@ export function IntegrationsPage() {
           rowHref={(integration) => `/integrations/${integration.id}`}
           rowLabel={(integration) => integration.name}
           isLoading={isLoading}
-          isError={Boolean(error)}
-          error={<ErrorState error={error} compact />}
+          failure={error}
           empty={empty}
         />
       ) : (
@@ -241,8 +240,7 @@ export function IntegrationsPage() {
             <IntegrationCard integration={integration} orgName={orgName} />
           )}
           isLoading={isLoading}
-          isError={Boolean(error)}
-          error={<ErrorState error={error} compact />}
+          failure={error}
           empty={empty}
         />
       )}

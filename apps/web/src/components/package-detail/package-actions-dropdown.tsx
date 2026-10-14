@@ -353,17 +353,14 @@ export function PackageActionsDropdown({
                   <DropdownMenuItem
                     onSelect={onDeleteRuns}
                     disabled={runningRuns > 0}
-                    className="text-destructive focus:text-destructive"
+                    variant="destructive"
                   >
                     <Trash2 size={14} />
                     {t("detail.clearRuns")}
                   </DropdownMenuItem>
                 )}
                 {showDeleteMemories && (
-                  <DropdownMenuItem
-                    onSelect={onDeleteMemories}
-                    className="text-destructive focus:text-destructive"
-                  >
+                  <DropdownMenuItem onSelect={onDeleteMemories} variant="destructive">
                     <Trash2 size={14} />
                     {t("detail.clearMemories")}
                   </DropdownMenuItem>
@@ -373,7 +370,7 @@ export function PackageActionsDropdown({
                   <DropdownMenuItem
                     onSelect={onDeleteAgent}
                     disabled={runningRuns > 0}
-                    className="text-destructive focus:text-destructive"
+                    variant="destructive"
                   >
                     <Trash2 size={14} />
                     {t("btn.delete")}
@@ -402,10 +399,7 @@ export function PackageActionsDropdown({
                 <DropdownMenuSeparator />
                 {placementItems}
                 {showDelete && canDeletePackage && onDeletePackage && (
-                  <DropdownMenuItem
-                    onSelect={onDeletePackage}
-                    className="text-destructive focus:text-destructive"
-                  >
+                  <DropdownMenuItem onSelect={onDeletePackage} variant="destructive">
                     <Trash2 size={14} />
                     {t("btn.delete")}
                   </DropdownMenuItem>

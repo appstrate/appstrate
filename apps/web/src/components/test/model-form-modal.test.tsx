@@ -265,8 +265,8 @@ describe("ModelFormBody — editing a custom endpoint", () => {
   it("locks the base URL, which belongs to the selected key", () => {
     // Editing it here would save a 200 that changes nothing: the URL rides on
     // the credential (`baseUrlOverride`), not on the model row.
-    const input = html.slice(html.indexOf('id="mdl-baseUrl"'));
-    expect(input.slice(0, input.indexOf(">"))).toContain("disabled");
+    const at = html.indexOf('id="mdl-baseUrl"');
+    expect(html.slice(html.lastIndexOf("<input", at), html.indexOf(">", at))).toContain("disabled");
     expect(html).toContain(settingsFr["models.form.baseUrlPinnedHint"]);
   });
 

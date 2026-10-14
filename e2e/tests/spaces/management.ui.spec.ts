@@ -51,7 +51,7 @@ test.describe("Space management in UI", () => {
     const customPage = await context.newPage();
     const agents = new AgentsPage(customPage);
     await agents.goto();
-    await expect(customPage.getByRole("heading", { level: 2 }).first()).toBeVisible({
+    await expect(customPage.getByRole("heading", { level: 1 }).first()).toBeVisible({
       timeout: 10_000,
     });
     await agents.expectAgentNotVisible(agentName);
