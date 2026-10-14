@@ -6,10 +6,8 @@ dialog or a setting. When you need something it does not cover, build it from
 the closest pattern here, then add one line for it below: a pattern that lives
 only in code is a pattern the next agent will reinvent.
 
-This file is the catalogue. Why each decision was taken lives in
-`docs/redesign-2026.md` (the redesign's journal); never duplicate a rule there
-and here. Paths below are relative to `apps/web/src/` unless they start with
-`packages/` or `e2e/`.
+This file is the catalogue. Paths below are relative to `apps/web/src/` unless
+they start with `packages/` or `e2e/`.
 
 ## 1. Foundations
 

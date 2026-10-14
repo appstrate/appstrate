@@ -89,7 +89,7 @@
    `duration-fast` and `ease-surface` then emit `var(--…)`, so the scale is
    tuned here and in devtools, in one place. tw-animate-css reads the same
    `--tw-duration` / `--tw-ease` the utilities set, so `animate-in` follows.
-   Rule of use (docs/redesign-2026.md, "Motion"): a surface opens on `base`
+   Rule of use (apps/web/DESIGN_SYSTEM.md, "Motion"): a surface opens on `base`
    and closes on `fast`, a sheet opens on `slow`; anything that moves uses
    `ease-surface`; hover and state feedback keep Tailwind's default
    transition (150ms, ease-in-out), which is `fast` already. */
@@ -101,14 +101,14 @@
 }
 
 :root {
-  /* Palette from the UX/UI redesign (satellites/redesign-2026/styles.css),
-     converted hex → oklch. Two systematic shifts against the stock shadcn
-     neutrals it replaces: every grey now carries a slight violet cast (hue
-     ~286 instead of chroma 0), and the brand blue is the design's #2F6FED
-     rather than the shadcn default. The redesign's own names map onto the
-     shadcn semantics, they are not the same words: its `--accent` is the
-     BRAND blue and lands on `--primary`, while shadcn's `--accent` is the
-     subtle hover surface and takes the redesign's `--bg-alt`. */
+  /* Palette from the UX/UI redesign, converted hex → oklch. Two systematic
+     shifts against the stock shadcn neutrals it replaces: every grey now
+     carries a slight violet cast (hue ~286 instead of chroma 0), and the
+     brand blue is the design's #2F6FED rather than the shadcn default. The
+     redesign's own names map onto the shadcn semantics, they are not the
+     same words: its `--accent` is the BRAND blue and lands on `--primary`,
+     while shadcn's `--accent` is the subtle hover surface and takes the
+     redesign's `--bg-alt`. */
   --background: oklch(1 0 0); /* #FFFFFF */
   --foreground: oklch(0.21 0.006 285.9); /* #18181B */
   --card: oklch(1 0 0);
