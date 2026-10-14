@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Operators
+
+- **Runner daemon variables go in a systemd drop-in** (#1943). beta.67 said to
+  add `EGRESS_ALLOW_INTERNAL_HOSTS` to `/etc/appstrate-runner/env`, which
+  `appstrate runner install` re-renders: move that line, and any other one added
+  by hand, to `systemctl edit appstrate-runner` (`[Service]`, `Environment=`),
+  which survives a re-install. Install warns naming each key it drops and keeps
+  the previous file as `/etc/appstrate-runner/env.previous`
+  (`docs/architecture/FIRECRACKER.md` → Env vars).
+
 ## [1.0.0-beta.67] - 2026-10-14
 
 ### Operators
