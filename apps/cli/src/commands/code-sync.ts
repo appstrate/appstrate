@@ -369,13 +369,9 @@ async function resolveAll(
   // One queue for both kinds, so the cap holds across them. `null` = nothing to sync.
   type Resolved =
     { kind: "skill"; value: ResolvedSkill } | { kind: "agent"; value: AgentLaunchView } | null;
-  interface Job {
-    packageId: string;
-    kind: PlannedEntry["kind"];
-    source: SkillSource;
-    /** Agents only. */
-    space?: Space;
-  }
+  type Job =
+    | { kind: "skill"; packageId: string; source: SkillSource }
+    | { kind: "agent"; packageId: string; source: SkillSource; space: Space };
   const jobs: Job[] = [
     ...[...origins.keys()]
       .sort()
@@ -389,7 +385,7 @@ async function resolveAll(
     })),
   ];
   const resolve = async (job: Job): Promise<Resolved> => {
-    if (!job.space) {
+    if (job.kind === "skill") {
       const origin = origins.get(job.packageId);
       const value = await resolveSkill(profileName, job.packageId, job.source, origin);
       return value && { kind: "skill", value };
@@ -409,16 +405,20 @@ async function resolveAll(
   const views: AgentLaunchView[] = [];
   const unresolved: Catalogue["unresolved"] = new Map();
   for (const entry of resolutions) {
-    const { packageId, kind, space } = entry.job;
-    const label = space ? agentLabel(packageId, space.name) : packageId;
+    const { job } = entry;
+    const { packageId } = job;
+    const label = job.kind === "agent" ? agentLabel(packageId, job.space.name) : packageId;
     if ("error" in entry) {
       if (fixOf(entry.error)) throw entry.error;
       // A refused draft is refused again next run: it goes, like a failed render.
-      if (!isDraftRefusal(entry.error))
-        unresolved.set(claimKey({ packageId, spaceId: space?.id }), kind);
+      if (!isDraftRefusal(entry.error)) {
+        const claimant =
+          job.kind === "agent" ? { packageId, spaceId: job.space.id } : { packageId };
+        unresolved.set(claimKey(claimant), job.kind);
+      }
       report.skill(`Skipped ${label}: ${formatError(entry.error)}`);
     } else if (!entry.resolved) {
-      const what = entry.job.source === "draft" ? "draft" : "published version";
+      const what = job.source === "draft" ? "draft" : "published version";
       report.note(`Skipped ${label}: no ${what} available.`);
     } else if (entry.resolved.kind === "skill") {
       skills.push(entry.resolved.value);
