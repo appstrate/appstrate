@@ -206,11 +206,11 @@ billing/audit; the module-facing service accessor (`listLlmUsage`, exposed as
 The model is resolved first, by the cascade, which is actor-free. Who pays then
 follows from the model alone (`loadModel`, `services/org-models.ts`):
 
-1. a built-in model: the platform key (`billed_to: system`);
+1. a built-in model (`binding: system`): the platform key (`billed_to: system`);
 2. a model bound to an organization credential (`binding: org`): that credential,
    whoever calls (`billed_to: org`);
 3. a model with no organization credential (`credential_id` NULL, `binding:
-member`, "each member uses their own credential"): the payer's own credential.
+user`, "each member uses their own credential"): the payer's own credential.
    The applicable ones are of the model's catalog family with the model in their
    provider's offer, subscriptions first, then the oldest
    (`services/model-providers/credential-chain.ts`); none applies while the
@@ -258,7 +258,8 @@ An alias is always bound (a model alias needs an organization credential), so it
 never takes a personal credential. `GET /api/models` reads step 3 for the caller:
 `billed_to` is `system` for a built-in model, `org` for a bound model, `user` for
 an unbound model one of the caller's credentials serves, `null` otherwise;
-`binding` tells `org`, `member` (unbound) and `managed` (an alias) apart.
+`binding` names whose credential serves the model in the same words: `system`
+(built-in), `org` (bound), `user` (unbound) and `managed` (an alias).
 `needs_reconnection` on an unbound model is true when nothing of the caller's
 serves it and one of their credentials for it is dead.
 

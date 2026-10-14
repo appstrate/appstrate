@@ -161,7 +161,7 @@ export function ModelsList({
                       {/* A managed (aliased) row hides its binding, so it names no credential. */}
                       {m.binding === "managed" ? (
                         <span className="text-muted-foreground">—</span>
-                      ) : m.binding === "member" ? (
+                      ) : m.binding === "user" ? (
                         <span className="text-muted-foreground">
                           {t("models.credentialEachMember")}
                         </span>

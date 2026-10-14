@@ -179,8 +179,8 @@ function ModelForm({
     selectedProvider.personal_allowed &&
     !model?.aliased &&
     source !== "discover";
-  // A member-served row (`binding: "member"`) is the saved form of the same choice.
-  const [eachMember, setEachMember] = useState(() => !!model && model.binding === "member");
+  // A member-served row (`binding: "user"`) is the saved form of the same choice.
+  const [eachMember, setEachMember] = useState(() => !!model && model.binding === "user");
   const unbound = eachMemberOffered && eachMember;
 
   /** Step 1 answered: an endpoint that parses, and something that serves it. */

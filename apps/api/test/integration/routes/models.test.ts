@@ -156,9 +156,9 @@ describe("Models API", () => {
         const byId = new Map(body.data.map((m) => [m.id, m]));
         expect(byId.get("sys-model-list-test")).toMatchObject({
           billed_to: "system",
-          binding: "org",
+          binding: "system",
         });
-        expect(byId.get(unbound!.id)).toMatchObject({ binding: "member" });
+        expect(byId.get(unbound!.id)).toMatchObject({ binding: "user" });
         expect(byId.get(bound.id)).toMatchObject({ binding: "org" });
       } finally {
         initSystemModelProviderKeys();

@@ -1746,7 +1746,7 @@ export interface paths {
         };
         /**
          * List the connections the caller can use for an integration
-         * @description Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_spaces`. Rows on this list carry `allowed_actions`.
+         * @description Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Oldest first. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_spaces`. Rows on this list carry `allowed_actions`.
          */
         get: operations["listIntegrationConnections"];
         put?: never;
@@ -6294,13 +6294,13 @@ export interface components {
             iconUrl: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
-            /** @description The bound organization credential; `null` when `binding` is `member` or `managed`. `null` for managed models — binding not exposed. */
+            /** @description The credential serving the model: the organization credential when `binding` is `org`, the platform's key when it is `system`. `null` when `binding` is `user`, and for managed models — binding not exposed. */
             credentialId: string | null;
             /**
-             * @description How the model is served. `org` — bound to one credential (an organization credential, or the platform key for a built-in model). `member` — unbound: each member serves it with their own credential for `providerId`. `managed` — an alias; its binding is not exposed.
+             * @description Whose credential serves the model, in the vocabulary of `billed_to`. `system` — a built-in model, served by the platform's key. `org` — bound to an organization credential. `user` — unbound: each member serves it with their own credential for `providerId`. `managed` — an alias; its binding is not exposed.
              * @enum {string}
              */
-            binding: "org" | "member" | "managed";
+            binding: "system" | "org" | "user" | "managed";
             /**
              * @description Who pays for a call to this model, for the caller. `system` — a built-in model, paid by the platform. `org` — bound to an organization credential: the organization pays whoever calls (a dead credential is `needs_reconnection`). `user` — unbound, and served by one of the caller's own credentials. `null` — unbound and nothing of the caller's serves it: a spend is refused (`409 model_credential_required`). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there.
              * @enum {string|null}
@@ -10122,6 +10122,18 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description The request carries the session cookie from an origin that is neither `APP_URL` nor in `TRUSTED_ORIGINS` (`code: INVALID_ORIGIN`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
             /** @description Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address). */
             429: {
                 headers: {
@@ -17485,8 +17497,8 @@ export interface operations {
                      *           "needs_reconnection": false,
                      *           "aliased": false,
                      *           "credentialId": "pk_abc123",
-                     *           "binding": "org",
-                     *           "billed_to": "org",
+                     *           "binding": "system",
+                     *           "billed_to": "system",
                      *           "contextWindow": 128000,
                      *           "maxTokens": 16384,
                      *           "reasoning": false,

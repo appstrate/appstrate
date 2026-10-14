@@ -7,7 +7,7 @@ import {
   runOriginValues,
   scheduleDisabledReasonValues,
 } from "@appstrate/db/schema";
-import { MODEL_PAYERS } from "@appstrate/core/model-payer";
+import { MODEL_BINDINGS, MODEL_CREDENTIAL_OWNERS, MODEL_PAYERS } from "@appstrate/core/model-payer";
 import { runStatusValues } from "@appstrate/core/run-status";
 import {
   RUN_AND_WAIT_RESUME_INSTRUCTION,
@@ -1948,7 +1948,7 @@ export const schemas = {
       needs_reconnection: { type: "boolean" },
       owner_type: {
         type: "string",
-        enum: ["org", "user"],
+        enum: [...MODEL_CREDENTIAL_OWNERS],
         description:
           "`user` for a personal credential, usable and editable by `owner_id` only; `org` for an organization or built-in credential.",
       },
@@ -2072,13 +2072,13 @@ export const schemas = {
       credentialId: {
         type: ["string", "null"],
         description:
-          "The bound organization credential; `null` when `binding` is `member` or `managed`. `null` for managed models — binding not exposed.",
+          "The credential serving the model: the organization credential when `binding` is `org`, the platform's key when it is `system`. `null` when `binding` is `user`, and for managed models — binding not exposed.",
       },
       binding: {
         type: "string",
-        enum: ["org", "member", "managed"],
+        enum: [...MODEL_BINDINGS],
         description:
-          "How the model is served. `org` — bound to one credential (an organization credential, or the platform key for a built-in model). `member` — unbound: each member serves it with their own credential for `providerId`. `managed` — an alias; its binding is not exposed.",
+          "Whose credential serves the model, in the vocabulary of `billed_to`. `system` — a built-in model, served by the platform's key. `org` — bound to an organization credential. `user` — unbound: each member serves it with their own credential for `providerId`. `managed` — an alias; its binding is not exposed.",
       },
       billed_to: {
         type: ["string", "null"],
