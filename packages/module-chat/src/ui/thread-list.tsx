@@ -10,9 +10,10 @@
  * Both pieces are mounted by the HOST SHELL, not by `ChatPage`: the list is the
  * chat's navigation (it sits in the shell sidebar, where Studio's nav sits) and
  * the title is where-you-are (it sits in the shell breadcrumb). They read the
- * same two contexts `ChatPage` publishes — the host puts those up once, around
- * the whole shell — and the same React Query key as the thread, so one request
- * feeds all of it.
+ * same two contexts `ChatPage` publishes, so the host renders both below its own
+ * `ChatHeadersProvider` / `SelectConversationProvider` — the title is portalled
+ * into the breadcrumb from there — and they share the thread's React Query key,
+ * so one request feeds all of it.
  *
  * The list renders into the host's sidebar (a `SidebarProvider` must be above
  * it): it IS the chat's navigation, so it uses the same rows, groups and active

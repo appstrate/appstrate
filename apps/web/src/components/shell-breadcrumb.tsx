@@ -1,14 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /** The header trail: the open overlay's, else the current page's (see `breadcrumb-store`). */
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
+import { createStore } from "zustand/vanilla";
 import { useShallow } from "zustand/react/shallow";
 import { breadcrumbStore, visibleTrail } from "@/stores/breadcrumb-store";
 import { useCanReach } from "@/hooks/use-can-reach";
 import { useOverlayPath } from "@/lib/modal-route";
+
+/**
+ * The header's slot elements. The trail is drawn twice (the desktop row and the
+ * phone row, one of them hidden), so a slot entry has one element per drawing and
+ * `ShellTrailContent` fills each.
+ */
+const trailSlots = createStore<{ elements: HTMLElement[] }>(() => ({ elements: [] }));
+
+function registerTrailSlot(element: HTMLElement | null) {
+  if (!element) return;
+  trailSlots.setState((s) => ({ elements: [...s.elements, element] }));
+  return () => trailSlots.setState((s) => ({ elements: s.elements.filter((e) => e !== element) }));
+}
+
+/**
+ * What a page shows in its `slot` trail entry. It is rendered where the page
+ * renders it, so it reads the page's context, and portalled into the header.
+ */
+export function ShellTrailContent({ children }: { children: ReactNode }) {
+  const elements = useStore(trailSlots, (s) => s.elements);
+  return elements.map((element, i) => (
+    <Fragment key={i}>{createPortal(children, element)}</Fragment>
+  ));
+}
 
 function Separator() {
   return (
@@ -35,8 +61,8 @@ export function ShellBreadcrumb() {
       {entries.map((crumb, i) => (
         <Fragment key={i}>
           {i > 0 && <Separator />}
-          {crumb.node ? (
-            crumb.node
+          {crumb.slot ? (
+            <span ref={registerTrailSlot} className="flex min-w-0" />
           ) : crumb.href && canReach(crumb.href) ? (
             <Link
               to={crumb.href}
