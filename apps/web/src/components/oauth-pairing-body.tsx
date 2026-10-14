@@ -1,46 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pairing-token UI shared by the unified credential modal when the user
- * selects an OAuth model provider. Mints a one-shot pairing via
- * `POST /api/model-providers-oauth/pairing`, surfaces the `npx
- * @appstrate/connect-helper <token>` command, polls until the helper's
- * redeem produces a credential, then notifies the caller via `onConnected`. A
- * redeem the server refuses ends on the same "generate a new command" state
- * as an expired token.
- *
- * The pairing is registered in `pairingStore` on mint and is deliberately
- * NOT cancelled on unmount: closing this modal mid-flow (tab switch,
- * accidental dismiss) used to delete the pending token, so a connection
- * completed afterwards was silently dropped. `<PendingPairingsWatcher>`
- * now owns the global success side effects (toast + credential-list
- * invalidation) and polls the pairing to completion regardless of whether
- * this body is still mounted; abandoned tokens are reaped by their TTL.
- * Same for a provider switch (parent re-keys this body): the prior pairing
- * is left for the watcher/TTL rather than cancelled — the user only ran the
- * helper for whichever provider they actually copied the command for.
- *
- * Why an extracted body and not a standalone modal: the credential
- * surface has a single entry point now ("Add credential" → modal →
- * pick provider). The pairing flow renders inside that same shell;
- * keeping it self-contained lets the parent swap bodies without
- * re-mounting the Modal.
+ * Pairing-token UI the credential modal renders for an OAuth model provider. Closing the modal
+ * or switching provider cancels nothing: `<PendingPairingsWatcher>` polls the pairing to its end
+ * and owns the global side effects.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Copy, RefreshCw } from "lucide-react";
-import { toast } from "sonner";
 import { toastError } from "../lib/mutation-error";
-import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import {
   useCreateModelProviderPairing,
   useModelProviderPairingStatus,
 } from "../hooks/use-model-provider-pairing";
-import { addPendingPairing } from "../stores/pairing-store";
-import { getCurrentOrgId } from "../stores/org-store";
+import { useCurrentOrgId } from "../hooks/use-org";
+import { addPendingPairing, markPairingShown, resumablePairing } from "../stores/pairing-store";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { pairingRequestBody, type PairingTarget } from "../lib/oauth-pairing";
 
@@ -62,91 +39,74 @@ interface OAuthPairingBodyProps {
   onBusyChange?: (busy: boolean) => void;
 }
 
-export function OAuthPairingBody({
+export function OAuthPairingBody(props: OAuthPairingBodyProps) {
+  const orgId = useCurrentOrgId();
+  if (!orgId) return null;
+  return <PairingBody {...props} orgId={orgId} />;
+}
+
+function PairingBody({
   providerId,
   target,
   onConnected,
   onBusyChange,
-}: OAuthPairingBodyProps) {
+  orgId,
+}: OAuthPairingBodyProps & { orgId: string }) {
   const { t } = useTranslation(["settings", "common"]);
-  const qc = useQueryClient();
   const { copied, copy } = useCopyToClipboard();
-  const [pairing, setPairing] = useState<{ id: string; command: string } | null>(null);
+  const [pairing, setPairing] = useState(() => resumablePairing({ orgId, providerId, target }));
+  const pairingId = pairing?.id ?? null;
 
   const createPairing = useCreateModelProviderPairing();
-  const { data } = useModelProviderPairingStatus(pairing?.id ?? null);
-  const status = data?.status;
-  const connectedId = data?.credentialId;
+  const { state, credentialId } = useModelProviderPairingStatus(pairingId);
 
-  // Whether this pairing is registered with `<PendingPairingsWatcher>`
-  // (needs an org context at mint). When it is, the watcher owns the global
-  // success side effects; when it isn't, the watcher never polls it, so this
-  // body must fire them itself. `fired` guards single-shot completion.
-  const registeredRef = useRef(false);
   const firedRef = useRef(false);
 
-  // Mint as soon as the body mounts. The provider can change while open
-  // (parent re-keys this component) — that path drops + re-creates.
   useEffect(() => {
     if (pairing || createPairing.isPending) return;
     void generatePairing();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => (pairingId ? markPairingShown(pairingId) : undefined), [pairingId]);
+
   // Notify the parent for in-context behavior (auto-select the resulting
-  // credential, close the modal). The global success side effects — toast
-  // and credential/model-list invalidation — are normally owned by
-  // `<PendingPairingsWatcher>` so they fire even when this modal was already
-  // closed. If the pairing was NOT registered with the watcher (no org
-  // context at mint), the watcher never polls it, so own those side effects
-  // here instead. Deferred via queueMicrotask so the parent's
+  // credential, close the modal). Deferred via queueMicrotask so the parent's
   // setState-on-close doesn't tear into this effect.
   useEffect(() => {
-    if (status !== "connected" || !connectedId) return;
+    if (state !== "connected" || !credentialId) return;
     if (firedRef.current) return;
     firedRef.current = true;
-    if (!registeredRef.current) {
-      toast.success(t("credentials.oauth.callbackSuccess"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
-    }
-    if (onConnected) queueMicrotask(() => onConnected(connectedId));
+    if (onConnected) queueMicrotask(() => onConnected(credentialId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, connectedId]);
+  }, [state, credentialId]);
 
   // Report "busy" while a token is minted and its outcome awaited — hosts use it
   // to confirm before an accidental dismiss. Ref keeps the latest callback
   // without making it an effect dependency; reset to false on unmount.
   const onBusyChangeRef = useRef(onBusyChange);
   onBusyChangeRef.current = onBusyChange;
-  const busy = !!pairing && (!status || status === "pending");
+  const busy = !!pairing && state === "pending";
   useEffect(() => {
     onBusyChangeRef.current?.(busy);
   }, [busy]);
   useEffect(() => () => onBusyChangeRef.current?.(false), []);
 
   // A refused redeem ends like an expired token: the command is spent.
-  const isSpent = status === "expired" || status === "failed";
+  const isSpent = state === "expired" || state === "failed" || state === "lost";
   const command = pairing?.command ?? "";
 
   async function generatePairing() {
     firedRef.current = false;
-    registeredRef.current = false;
     try {
       const res = await createPairing.mutateAsync({
         body: pairingRequestBody({ providerId, ...target }),
       });
       setPairing({ id: res.id, command: res.command });
-      // Register so `<PendingPairingsWatcher>` can poll this to completion
-      // even if the modal is closed before the helper redeems the token.
-      // Only non-secret fields are stored — never the command/token. Without
-      // an org context the watcher can't scope the poll, so this body keeps
-      // ownership of the success side effects (see the connected effect).
-      const orgId = getCurrentOrgId();
-      if (orgId) {
-        addPendingPairing({ id: res.id, providerId, expiresAt: res.expiresAt, orgId });
-        registeredRef.current = true;
-      }
+      addPendingPairing(
+        { id: res.id, providerId, target, expiresAt: res.expiresAt, orgId },
+        res.command,
+      );
     } catch (err) {
       toastError(err);
     }
@@ -172,7 +132,7 @@ export function OAuthPairingBody({
         <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
           <p>
             {t(
-              status === "failed"
+              state === "failed"
                 ? "credentials.oauth.pairingFailed"
                 : "credentials.oauth.pairingExpired",
             )}

@@ -5,12 +5,6 @@
  * in-flight `npx @appstrate/connect-helper` connection survives the modal
  * being closed (tab switch, accidental dismiss) or even a full page reload.
  *
- * Only non-secret fields are stored: the pairing row id (`pair_...`), the
- * provider id, the TTL, and the org it was minted in. The bearer token —
- * the secret half of the command — is NEVER persisted; resuming the poll
- * needs only the id, and the helper already holds the token it needs to
- * complete the redeem.
- *
  * `<PendingPairingsWatcher>` reads this store to poll each pairing to
  * completion regardless of which modal (if any) is currently open. The
  * store is also synced across tabs via the `storage` event so a pairing
@@ -19,13 +13,19 @@
 
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
+import type { PairingTarget } from "../lib/oauth-pairing";
 
 export const STORAGE_KEY = "appstrate_pending_pairings";
+
+// Bounds the entries no poll ends; it does not complete a pairing. Sized past the server row's
+// lifetime (1 h grace + 15 min sweep), so a polled entry reaches its outcome first.
+export const UNPOLLED_RETENTION_MS = 2 * 60 * 60_000;
 
 export interface PendingPairing {
   /** Pairing row id (`pair_...`) — NOT the secret token. */
   id: string;
   providerId: string;
+  target: PairingTarget;
   /** ISO timestamp — when the pairing TTL elapses. */
   expiresAt: string;
   /** Org the pairing was minted in; the status route 404s cross-tenant. */
@@ -36,10 +36,18 @@ interface PairingState {
   pairings: PendingPairing[];
   add: (p: PendingPairing) => void;
   remove: (id: string) => void;
-  /** Drop pairings whose TTL has elapsed (keeps the poller list bounded). */
   prune: () => void;
+  clear: () => void;
   /** Re-read the persisted list (used by the cross-tab `storage` sync). */
   hydrate: () => void;
+}
+
+function isPairingTarget(t: unknown): t is PairingTarget {
+  if (!t || typeof t !== "object") return false;
+  const c = t as Record<string, unknown>;
+  return c.credentialId === undefined
+    ? c.ownerType === "org" || c.ownerType === "user"
+    : typeof c.credentialId === "string" && c.ownerType === undefined;
 }
 
 function isPendingPairing(p: unknown): p is PendingPairing {
@@ -48,9 +56,14 @@ function isPendingPairing(p: unknown): p is PendingPairing {
   return (
     typeof c.id === "string" &&
     typeof c.providerId === "string" &&
+    isPairingTarget(c.target) &&
     typeof c.expiresAt === "string" &&
     typeof c.orgId === "string"
   );
+}
+
+function isRetained(p: PendingPairing, now: number): boolean {
+  return new Date(p.expiresAt).getTime() + UNPOLLED_RETENTION_MS > now;
 }
 
 /**
@@ -68,7 +81,7 @@ function getStorage(): Storage | null {
   }
 }
 
-/** Read + validate + TTL-filter the persisted list. Exported for tests. */
+/** Read + validate + retention-filter the persisted list. Exported for tests. */
 export function readPersistedPairings(): PendingPairing[] {
   const storage = getStorage();
   if (!storage) return [];
@@ -78,9 +91,7 @@ export function readPersistedPairings(): PendingPairing[] {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     const now = Date.now();
-    return parsed.filter(
-      (p) => isPendingPairing(p) && new Date(p.expiresAt).getTime() > now,
-    ) as PendingPairing[];
+    return parsed.filter((p) => isPendingPairing(p) && isRetained(p, now)) as PendingPairing[];
   } catch {
     return [];
   }
@@ -116,11 +127,15 @@ export const pairingStore = createStore<PairingState>()((set) => ({
   prune: () =>
     set((s) => {
       const now = Date.now();
-      const next = s.pairings.filter((p) => new Date(p.expiresAt).getTime() > now);
+      const next = s.pairings.filter((p) => isRetained(p, now));
       if (next.length === s.pairings.length) return s;
       persist(next);
       return { pairings: next };
     }),
+  clear: () => {
+    persist([]);
+    set({ pairings: [] });
+  },
   hydrate: () => set({ pairings: readPersistedPairings() }),
 }));
 
@@ -138,11 +153,62 @@ export function usePendingPairings(): PendingPairing[] {
   return useStore(pairingStore, (s) => s.pairings);
 }
 
+// Each command carries its pairing's bearer token: memory only, never in storage (the poll
+// needs only the id, and the helper holds the token).
+const commands = new Map<string, string>();
+
+pairingStore.subscribe(({ pairings }) => {
+  for (const id of commands.keys()) {
+    if (!pairings.some((p) => p.id === id)) commands.delete(id);
+  }
+});
+
+const shown = new Set<string>();
+
 /** Non-hook accessors for use from event handlers / effects. */
-export function addPendingPairing(p: PendingPairing): void {
+export function addPendingPairing(p: PendingPairing, command: string): void {
+  commands.set(p.id, command);
   pairingStore.getState().add(p);
 }
 
 export function removePendingPairing(id: string): void {
   pairingStore.getState().remove(id);
+}
+
+export function clearPendingPairings(): void {
+  pairingStore.getState().clear();
+}
+
+// No margin is asked of the remaining TTL: the pairing shown may be the one whose command the
+// user is already running.
+export function resumablePairing(
+  match: Pick<PendingPairing, "orgId" | "providerId" | "target">,
+): { id: string; command: string } | null {
+  const now = Date.now();
+  let resumable: { id: string; command: string } | null = null;
+  for (const p of pairingStore.getState().pairings) {
+    const command = commands.get(p.id);
+    if (
+      command !== undefined &&
+      p.orgId === match.orgId &&
+      p.providerId === match.providerId &&
+      p.target.ownerType === match.target.ownerType &&
+      p.target.credentialId === match.target.credentialId &&
+      new Date(p.expiresAt).getTime() > now
+    ) {
+      resumable = { id: p.id, command };
+    }
+  }
+  return resumable;
+}
+
+export function markPairingShown(id: string): () => void {
+  shown.add(id);
+  return () => {
+    shown.delete(id);
+  };
+}
+
+export function isPairingShown(id: string): boolean {
+  return shown.has(id);
 }

@@ -8,7 +8,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { hasOrgSubscription, pairingRequestBody } from "../oauth-pairing.ts";
+import { ApiError } from "../../api/errors.ts";
+import { hasOrgSubscription, pairingPollState, pairingRequestBody } from "../oauth-pairing.ts";
 
 describe("pairingRequestBody", () => {
   it("pairs a new organization subscription", () => {
@@ -42,6 +43,39 @@ describe("pairingRequestBody", () => {
     pairingRequestBody({ providerId: "codex", ownerType: "user", credentialId: "cred_1" });
     // @ts-expect-error a creation states its owner
     pairingRequestBody({ providerId: "codex" });
+  });
+});
+
+describe("pairingPollState", () => {
+  const unavailable = new ApiError("bad_gateway", "Bad gateway", 502);
+
+  it("is pending until the server answers", () => {
+    expect(pairingPollState(undefined, null)).toBe("pending");
+  });
+
+  it("is the status the server states", () => {
+    for (const status of ["pending", "connected", "failed", "expired"] as const) {
+      expect(pairingPollState(status, null)).toBe(status);
+    }
+  });
+
+  // A deploy or a proxy answering 502 past the query's retry: the poll goes on.
+  it("stays pending through a transient error", () => {
+    expect(pairingPollState("pending", unavailable)).toBe("pending");
+    expect(pairingPollState(undefined, unavailable)).toBe("pending");
+    expect(pairingPollState("pending", new TypeError("Failed to fetch"))).toBe("pending");
+  });
+
+  it("keeps a terminal status through a transient error", () => {
+    expect(pairingPollState("connected", unavailable)).toBe("connected");
+  });
+
+  it("is lost once the server refuses to state one, even over a cached pending", () => {
+    for (const status of [401, 403, 404]) {
+      const refusal = new ApiError("refused", "refused", status);
+      expect(pairingPollState("pending", refusal)).toBe("lost");
+      expect(pairingPollState(undefined, refusal)).toBe("lost");
+    }
   });
 });
 
