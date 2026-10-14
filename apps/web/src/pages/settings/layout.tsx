@@ -75,11 +75,7 @@ function ScopeNavigation({
   onNavigate,
 }: ScopeNavigationProps) {
   return (
-    <RailGroup
-      data-settings-scope={section.scope}
-      title={label(section.labelKey)}
-      separated={section.scope === "workspace"}
-    >
+    <RailGroup title={label(section.labelKey)} separated={section.scope === "workspace"}>
       {contextSelector}
       <nav className="mt-1.5 flex flex-col gap-0.5" aria-label={label(section.labelKey)}>
         {section.items.map((item) => (
@@ -435,7 +431,6 @@ export function UnifiedSettingsLayout() {
         aria-hidden={mobileNavigationOpen || undefined}
         data-settings-table-surface="integrated"
         data-settings-content-scope={activeScope}
-        data-settings-content-key={contentKey}
         className="[&_[data-data-table-row]]:[grid-template-columns:var(--dt-cols-3)] [&_[data-data-table-scroll]_table]:min-w-(--dt-full-floor) [&_td[data-data-table-tier]]:flex [&_th[data-data-table-tier]]:block"
       >
         <SettingsPageActionTargetsProvider

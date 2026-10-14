@@ -254,8 +254,7 @@ Anthropic → », to Préférences › Mes clés). In a schedule every model a p
 subscription serves is greyed with « Une planification ne peut pas encore utiliser une clé perso »
 (the server refuses it: `model_scheduled`). The groups come from what `GET /api/models` already
 says for the caller (`binding`, `billed_to`, `credentialId`, `needs_reconnection`) plus their own
-credentials (`lib/model-picker.ts`); a new surface that picks a model uses this component, with
-its fixtures.
+credentials (`lib/model-picker.ts`); a new surface that picks a model uses this component.
 
 ## 6. Forms
 
@@ -634,8 +633,7 @@ its fixtures.
 - A row's controls (a connection's rename and share, a model credential's edit,
   test, delete and reconnect) follow the row's `allowed_actions`, which the API
   computes for the caller; never re-derive them from permissions and ownership
-  in the component. The lab fixtures carry the field, the lab handlers rewrite it
-  for the persona.
+  in the component.
 - A choice lists only what the caller may pick (an actor who can run agents, a
   connection the actor can reach).
 - Who reaches a route is declared once in `lib/route-access.ts` and enforced by
@@ -686,8 +684,7 @@ A surface served by an optional module reads its flag:
 `useAppConfig().features.<flag>` (`agentMap`, `chat`, `webhooks`, `oidc`,
 `billing`, `mcp`, `custom_roles`…). Without the module the entry leaves the
 screen (a settings section, a nav item, a tab); it never opens on a 404. A route
-that needs a module says so in `lib/route-access.ts` (`feature`). The lab turns
-every module on (`lab/install.ts`).
+that needs a module says so in `lib/route-access.ts` (`feature`).
 
 ## 15. Text
 
@@ -730,24 +727,10 @@ phone (`PanelDialog mobileAsSurface`) sits at `z-30`, above the `z-10` / `z-20`
 stretched links and action clusters of the cards under it. Tabs tighten to `px-2`
 below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
 
-## 18. The lab
-
-`apps/web/src/lab`: the app served from typed fixtures (`bun run dev:lab` in
-`apps/web`, `VITE_LAB=1`). A new screen ships with its fixtures (`fixtures.ts`,
-typed from the OpenAPI response) and handlers (`handlers.ts`), and a row in
-`e2e/lab/screens.mjs`, so it can be reviewed without an API. Its panel switches
-the scenario (nominal, empty, heavy, error) and the role (owner, admin, member,
-guest, plus the space preset). `e2e/lab/shots.mjs` captures every screen and
-fails on a missing fixture: compare before and after a change;
-`e2e/lab/detail-contract.mjs` freezes the agent and run detail geometry. The lab
-is not proof of behaviour: a change that touches what the API accepts is also run
-against a real instance.
-
 ## Checklist before handing UI work over
 
 - [ ] Uses the pattern of this file for each need; a new pattern added here.
 - [ ] Every role: same tabs, locked content explained, no 403 toast.
-- [ ] Light, dark, 1440 px and 390 px; nominal, empty, heavy and error in the lab.
+- [ ] Light, dark, 1440 px and 390 px; nominal, empty, heavy and error states.
 - [ ] fr and en, no literal string, no raw server text.
-- [ ] Lab fixtures updated; `bun test` and `bun run typecheck` in `apps/web`,
-      `bun run check` from the root.
+- [ ] `bun test` and `bun run typecheck` in `apps/web`, `bun run check` from the root.

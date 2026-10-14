@@ -7,14 +7,8 @@
   // runs under Bun/Node, but every `page.evaluate` / `addInitScript` callback is
   // serialised and executed inside the browser, where `window` & friends are real.
   "extends": "../tsconfig.base.json",
-  // `allowJs` because the lab drivers are plain `.mjs` (they run under `bun`
-  // directly, with no build step) and the `.test.ts` files import them. Without
-  // it every such import is an implicit `any`, which is exactly the kind of
-  // silent hole this config exists to close.
   "compilerOptions": {
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "allowJs": true,
-    "checkJs": false
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
-  "include": ["**/*.ts", "**/*.mjs"]
+  "include": ["**/*.ts"]
 }

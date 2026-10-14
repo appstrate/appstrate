@@ -284,14 +284,6 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
     keys: ["displayName"],
     reason: WIRE_DTO,
   },
-  // The lab serves the SAME wire DTOs the API does, so its fixtures spell the
-  // view-model keys the components read — the canonical form is what the
-  // OpenAPI types enforce on them.
-  {
-    path: "apps/web/src/lab/fixtures.ts",
-    keys: ["displayName", "iconUrl"],
-    reason: WIRE_DTO,
-  },
   { path: "apps/web/src/pages/package-list.tsx", keys: ["displayName"], reason: WIRE_DTO },
   { path: "apps/web/src/pages/item-tab.tsx", keys: ["displayName"], reason: WIRE_DTO },
   {

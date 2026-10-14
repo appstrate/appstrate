@@ -85,7 +85,7 @@ function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) {
-      if (name === "test" || name === "lab" || name === "node_modules") continue;
+      if (name === "test" || name === "node_modules") continue;
       walk(path, out);
     } else if (path.endsWith(".tsx")) {
       out.push(path);

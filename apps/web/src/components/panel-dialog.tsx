@@ -133,7 +133,6 @@ export function PanelDialog({
   if (mobileAsSurface && isMobile) {
     return (
       <section
-        data-settings-mobile-surface
         aria-label={title}
         className="bg-background fixed inset-x-0 top-24 bottom-0 z-30 flex min-w-0 flex-col overflow-hidden"
       >

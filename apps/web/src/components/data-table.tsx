@@ -584,14 +584,14 @@ export function DataTable<T>({
   // how a 500 could read as "no runs".
   if (verdict === "error" || verdict === "empty") {
     return (
-      <div data-data-table-frame className={frameClass}>
+      <div className={frameClass}>
         {verdict === "error" ? (state.error ?? <ErrorState compact />) : state.empty}
       </div>
     );
   }
 
   return (
-    <div ref={frameRef} data-data-table-frame className={frameClass}>
+    <div ref={frameRef} className={frameClass}>
       <ScrollArea data-data-table-scroll>
         <table
           ref={tableRef}

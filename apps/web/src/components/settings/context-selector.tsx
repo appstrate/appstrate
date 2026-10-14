@@ -41,7 +41,7 @@ export function ContextSelector({
 }) {
   return (
     <Select value={value} disabled={disabled} onValueChange={onValueChange}>
-      <SelectTrigger className={TRIGGER} aria-label={label} data-settings-context-selector>
+      <SelectTrigger className={TRIGGER} aria-label={label}>
         <SelectValue placeholder={label} />
       </SelectTrigger>
       <SelectContent>

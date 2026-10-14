@@ -448,38 +448,9 @@ export default tseslint.config(
     // this block covers it for `no-console`. The migration cost was 10
     // findings, all style, none a defect.
     files: ["apps/*/src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}", "runtime-pi/**/*.ts"],
-    // `apps/web/src/lab/**` joins the carve-outs: the lab's missing-fixture
-    // warning is its contract with whoever is looking at a screen ("no fixture
-    // for GET /api/… → 404"), and the panel is plain DOM outside the React
-    // tree. Neither ships in a production bundle — the `labMode()` Vite plugin
-    // is `apply: "serve"`.
-    ignores: [
-      "**/src/**/scripts/**",
-      "**/src/**/test/**",
-      "runtime-pi/**/test/**",
-      "apps/web/src/lab/**",
-    ],
+    ignores: ["**/src/**/scripts/**", "**/src/**/test/**", "runtime-pi/**/test/**"],
     rules: {
       "no-console": "error",
-    },
-  },
-  {
-    // Lab drivers (`e2e/lab/*.mjs`). They straddle two runtimes, exactly like
-    // `e2e/tsconfig.json` says of the `.ts` beside them: the script body runs
-    // under bun, but every `page.evaluate` / `addInitScript` callback is
-    // serialised and executed INSIDE the browser, where `document`, `window`
-    // and `getComputedStyle` are real. Without the browser globals, each of
-    // those callbacks reads as 80 `no-undef` findings over code that runs
-    // correctly.
-    //
-    // `console` is their output contract — they print measurements to the
-    // terminal — and `no-console` does not reach them anyway (it is scoped to
-    // `apps/*/src`), so nothing is relaxed here that was enforced before.
-    files: ["e2e/lab/**/*.mjs"],
-    languageOptions: {
-      // `Bun` because these run under `bun lab/<driver>.mjs` and reach for
-      // `Bun.write` / `Bun.file` to save their captures.
-      globals: { ...globals.node, ...globals.browser, Bun: "readonly" },
     },
   },
   {
