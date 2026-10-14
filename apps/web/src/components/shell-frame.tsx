@@ -11,7 +11,8 @@
  * both without anyone remembering to.
  */
 
-import type { ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { LibraryBig, Menu, PanelLeft, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -40,6 +41,31 @@ import {
   SidebarTrigger,
 } from "@appstrate/ui/components/sidebar";
 import { useSidebar } from "@appstrate/ui/components/sidebar-context";
+
+/**
+ * Where a page's own header controls land. The header belongs to the shell, and
+ * the shell stays mounted while pages come and go, so a page does not pass its
+ * controls down to the header: it portals them into this slot
+ * (`ShellHeaderActions`), and they leave with the page.
+ */
+const HeaderActionsSlot = createContext<HTMLElement | null>(null);
+const SetHeaderActionsSlot = createContext<((node: HTMLElement | null) => void) | null>(null);
+
+/** Raised once by the layout, around both the header and the page it frames. */
+export function ShellFrameProvider({ children }: { children: ReactNode }) {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  return (
+    <SetHeaderActionsSlot.Provider value={setSlot}>
+      <HeaderActionsSlot.Provider value={slot}>{children}</HeaderActionsSlot.Provider>
+    </SetHeaderActionsSlot.Provider>
+  );
+}
+
+/** A page's controls for the header's right end, left of the notification bell. */
+export function ShellHeaderActions({ children }: { children: ReactNode }) {
+  const slot = useContext(HeaderActionsSlot);
+  return slot ? createPortal(children, slot) : null;
+}
 
 export function ShellSidebar({
   children,
@@ -150,12 +176,8 @@ export function ShellSidebar({
   );
 }
 
-export function ShellHeader({
-  actions,
-}: {
-  /** Page-owned controls, left of the notification bell. */
-  actions?: ReactNode;
-}) {
+export function ShellHeader() {
+  const setActionsSlot = useContext(SetHeaderActionsSlot);
   const { isMobile, openMobile, state, setPeeking } = useSidebar();
   const { data: unreadCount } = useUnreadCount();
   const collapsed = !isMobile && state === "collapsed";
@@ -210,7 +232,7 @@ export function ShellHeader({
             new" — and because a header holding only a trail is a header holding
             nothing. */}
         <div className="flex shrink-0 items-center gap-1">
-          {actions}
+          <div ref={setActionsSlot} className="flex items-center gap-1 empty:hidden" />
           <NotificationBell />
         </div>
       </div>
