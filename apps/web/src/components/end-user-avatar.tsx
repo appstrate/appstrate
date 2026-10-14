@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { EndUserInfo } from "../hooks/use-end-users";
+import { initials } from "../lib/initials";
 
 // The person palette (`--avatar-*` in `styles.css`), spelled out whole for Tailwind.
 const COLORS = [
@@ -21,15 +22,6 @@ function hashCode(value: string): number {
     hash |= 0;
   }
   return Math.abs(hash);
-}
-
-function initials(name: string | null, email: string | null): string {
-  if (name) {
-    const parts = name.trim().split(/\s+/);
-    if (parts.length >= 2) return `${parts[0]![0]}${parts[1]![0]}`.toUpperCase();
-    return name.slice(0, 2).toUpperCase();
-  }
-  return email ? email.slice(0, 2).toUpperCase() : "?";
 }
 
 export function EndUserAvatar({ user }: { user: EndUserInfo }) {

@@ -133,7 +133,7 @@ export function ActorSelect({
     [endUsers],
   );
 
-  const selectedLabel = useActorName(value);
+  const selectedLabel = useActorName(value, endUsers);
 
   const select = (actor: ActorValue) => {
     onChange(actor);

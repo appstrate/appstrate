@@ -13,7 +13,7 @@
  * whole rule: nested scrolling is what makes these surfaces confusing, not
  * scrolling as such.
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
@@ -92,13 +92,14 @@ export function PanelDialog({ title, rail, contentHeader, children, onClose }: P
     pane.addEventListener("scroll", read, { passive: true });
     return () => pane.removeEventListener("scroll", read);
   }, [pane]);
-  const attach = (node: HTMLDivElement | null) => {
+  // Stable, so React calls it on mount and unmount only, not on every commit.
+  const attach = useCallback((node: HTMLDivElement | null) => {
     let scroller: HTMLElement | null = node?.parentElement ?? null;
     while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
       scroller = scroller.parentElement;
     }
     setPane(scroller);
-  };
+  }, []);
   const content = (
     <div className="w-full max-w-full min-w-0 p-6 pt-0" style={{ contain: "inline-size" }}>
       {/* Sticky, and inset the way the pane is: `-mx-6` cancels the pane's

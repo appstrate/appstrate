@@ -77,6 +77,15 @@ describe("filePreviewHref", () => {
       filePreviewHref({ pathname: "/documents", search: "?preview=doc_old", hash: "" }, "doc_new"),
     ).toBe("/documents?preview=doc_new");
   });
+
+  it("closes the preview with null, keeping the rest of the address", () => {
+    expect(
+      filePreviewHref(
+        { pathname: "/runs/r", search: "?preview=doc_1&foo=bar", hash: "#files" },
+        null,
+      ),
+    ).toBe("/runs/r?foo=bar#files");
+  });
 });
 
 describe("fileExpiryInfo", () => {

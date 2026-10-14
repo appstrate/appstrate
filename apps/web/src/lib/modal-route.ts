@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Routed modals: surfaces that overlay the current screen but keep a real URL.
- *
- * The alternative — a modal with no URL, the way Notion's settings work — costs
- * more than it looks. You cannot send someone a link to a settings page, the
- * back button does nothing, and support cannot say "open this". A path under
- * `OVERLAY_PREFIXES` gets both: it floats over the last page of the shell the
- * user was on, which `App` remembers, or over the dashboard when there is none
- * (a pasted link, a reload). Opening one is a plain navigation to its path.
+ * Routed modals: overlays that keep a real URL, so they can be linked and Back
+ * closes them. A path under `OVERLAY_PREFIXES` floats over the last shell page
+ * shown, or the dashboard when there is none (a pasted link, a reload).
  */
 import { createContext, useContext, useState } from "react";
 import { matchPath, useLocation, useNavigate, type Location } from "react-router-dom";

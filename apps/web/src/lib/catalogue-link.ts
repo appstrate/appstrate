@@ -1,24 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The catalogue's addresses: `/catalogue/:reading/:type`.
- *
- * "Parcourir le catalogue" opens on Découvrir, the reading that answers "what
- * else exists, and does my space run it" — which is what a page belonging to a
- * space asks. It does not narrow to that space: the reader's own space leads
- * every table and ticks every card. Given a package, it opens that package's
- * sheet: a notification about ONE share is answered on that package, not in a
- * list the reader has to search.
+ * The catalogue's addresses: `/catalogue/:reading/:type`. Links open on Découvrir,
+ * and given a package on that package's sheet.
  */
 
 import type { PackageType } from "@appstrate/core/validation";
 
 /**
- * The catalogue's READINGS of one set, the route's `:reading` segment:
- * `discover` browses every package in cards, `placed` manages what the reader's
- * spaces hold, space by space, and `shared` lists the shares waiting. Provenance
- * is a filter, not a reading: a reader wants to know what they already have
- * before knowing who made it.
+ * The route's `:reading` segment: `discover` browses every package, `placed` manages
+ * what the reader's spaces hold, `shared` lists the shares waiting.
  */
 const CATALOGUE_READINGS = ["placed", "discover", "shared"] as const;
 export type CatalogueReading = (typeof CATALOGUE_READINGS)[number];
@@ -27,11 +18,7 @@ export function isCatalogueReading(value: string): value is CatalogueReading {
   return (CATALOGUE_READINGS as readonly string[]).includes(value);
 }
 
-/**
- * The kinds, in the rail's order — the route's `:type` segment. Every reading
- * names one, `shared` included: it is the kind the rail returns to, so every
- * catalogue address has one shape.
- */
+/** The route's `:type` segment, in the rail's order. Every reading names one, `shared` included. */
 export const CATALOGUE_KINDS = [
   "agent",
   "skill",
