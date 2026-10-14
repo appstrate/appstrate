@@ -352,12 +352,16 @@ export function OrgCatalogueModal({
     onChange: list.setValues("state"),
   };
   const offered: CardItem[] = rows.map((item) => {
+    const look = agentLook.get(item.id);
     const row: CardItem = {
       id: item.id,
       displayName: item.name || item.id,
       description: item.description,
       type: active,
       source: item.source as CardItem["source"],
+      // What the table draws next to the name; the card draws its own tile.
+      ...(active === "agent" && { identity: { icon: look?.icon, color: look?.color } }),
+      ...(active === "integration" && { logo: integrationById.get(item.id)?.manifest.icon }),
     };
     if (view !== "cards") return row;
     // A card carries a footer it ALWAYS has: same line, same height. It says
@@ -367,7 +371,6 @@ export function OrgCatalogueModal({
     // other spaces?") is the matrix, one tab away.
     const placement = placementById.get(item.id);
     const activeHere = placement?.here === "active";
-    const look = agentLook.get(item.id);
     const icon =
       active === "agent" ? (
         <AgentIdentityTile
@@ -752,6 +755,7 @@ export function OrgCatalogueModal({
           isLoading={isLoading}
           error={error instanceof Error ? error : null}
           holds={active}
+          tableId={`catalogue-${active}`}
           entity={t(kind.titleKey)}
           emptyMessage={t(discovering ? "catalogue.emptyDiscover" : "catalogue.emptyPlaced")}
           emptyHint={t(discovering ? "catalogue.emptyDiscoverHint" : "catalogue.emptyPlacedHint")}

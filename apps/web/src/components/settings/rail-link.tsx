@@ -10,6 +10,10 @@ interface RailLinkItem {
   icon: LucideIcon;
 }
 
+/**
+ * A rail row. Its label wraps rather than truncates: a navigation entry cut to
+ * « Serveurs MCP loc… » no longer names where it leads.
+ */
 function railItemClass(active: boolean): string {
   return cn(
     "grid w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-center justify-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
@@ -45,7 +49,7 @@ export function RailLink({
   return (
     <Link to={item.to} aria-current={active ? "page" : undefined} className={railItemClass(active)}>
       <item.icon className="size-4 shrink-0" />
-      <span className="truncate">{label}</span>
+      <span className="leading-snug break-words">{label}</span>
       {locked && <Lock className="text-muted-foreground ml-auto size-3.5 shrink-0" aria-hidden />}
       {count !== undefined && <RailCount count={count} />}
     </Link>
@@ -74,7 +78,7 @@ export function RailButton({
       className={railItemClass(active)}
     >
       <Icon className="size-4 shrink-0" />
-      <span className="truncate">{label}</span>
+      <span className="leading-snug break-words">{label}</span>
       {count !== undefined && <RailCount count={count} />}
     </button>
   );

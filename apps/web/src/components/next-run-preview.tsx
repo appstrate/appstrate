@@ -10,6 +10,8 @@ interface NextRunPreviewProps {
   agentName?: string;
   schedule_name: string;
   next_run_at: string | Date;
+  /** The schedule's zone, named next to the time. */
+  timezone: string;
   className?: string;
 }
 
@@ -18,6 +20,7 @@ export function NextRunPreview({
   agentName,
   schedule_name,
   next_run_at,
+  timezone,
   className,
 }: NextRunPreviewProps) {
   const { t } = useTranslation(["agents"]);
@@ -36,7 +39,9 @@ export function NextRunPreview({
           <span className="max-w-[150px] truncate">{schedule_name}</span>
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <span className="text-muted-foreground text-xs">{formatDateField(next_run_at)}</span>
+          <span className="text-muted-foreground text-xs">
+            {formatDateField(next_run_at, "datetime", timezone)}
+          </span>
         </div>
       </div>
     </div>

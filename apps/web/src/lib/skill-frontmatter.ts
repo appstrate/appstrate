@@ -23,3 +23,18 @@ export function skillFrontmatterError(
     },
   };
 }
+
+/**
+ * The instructions of a SKILL.md, without the frontmatter that names it. Read
+ * as markdown, the block's closing `---` turns `name:`/`description:` into a
+ * heading. Delimited the way `parseSkillFrontmatter` reads it; an unclosed
+ * block is left as written.
+ */
+export function skillBody(content: string): string {
+  const normalized = content.replace(/\r\n?/g, "\n");
+  if (!normalized.startsWith("---")) return content;
+  const close = normalized.indexOf("\n---", 3);
+  if (close === -1) return content;
+  const lineEnd = normalized.indexOf("\n", close + 4);
+  return lineEnd === -1 ? "" : normalized.slice(lineEnd + 1);
+}

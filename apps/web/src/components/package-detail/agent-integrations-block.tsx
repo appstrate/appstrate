@@ -122,7 +122,7 @@ export function AgentIntegrationsBlock({
     {
       id: "integration",
       header: t("detail.connectionsTable.integration"),
-      width: "minmax(200px,1.2fr)",
+      width: "minmax(160px,1.2fr)",
       cell: ({ entry, displayName }) => (
         <IntegrationIdentityCell
           packageId={entry.id}
@@ -134,13 +134,13 @@ export function AgentIntegrationsBlock({
     {
       id: "access",
       header: t("detail.connectionsTable.access"),
-      width: "minmax(150px,0.8fr)",
+      width: "minmax(120px,0.8fr)",
       cell: ({ state }) => <IntegrationAccessCell state={state} />,
     },
     {
       id: "account",
       header: t("detail.connectionsTable.account"),
-      width: "minmax(260px,1.4fr)",
+      width: "minmax(200px,1.4fr)",
       // The connection picker.
       control: true,
       cell: ({ entry, state }) => (

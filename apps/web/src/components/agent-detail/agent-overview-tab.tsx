@@ -155,7 +155,7 @@ function OperationalSummary({
                       {t("schedule.paramNextRun")}
                     </p>
                     <p className="text-foreground mt-3 truncate text-sm">
-                      {formatDateField(nextSchedule.next_run_at, "datetime")}
+                      {formatDateField(nextSchedule.next_run_at, "datetime", nextSchedule.timezone)}
                     </p>
                   </div>
                   <ArrowRight className="text-muted-foreground/45 group-hover:text-primary group-focus-visible:text-primary absolute top-1/2 right-4 size-4 -translate-y-1/2 opacity-70 transition-all group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />

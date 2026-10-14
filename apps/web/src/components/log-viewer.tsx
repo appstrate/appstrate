@@ -25,7 +25,7 @@ import { DropdownMenuCheckboxItem, DropdownMenuItem } from "@appstrate/ui/compon
 import { PageActionsMenu } from "./page-actions-menu";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { cn } from "@appstrate/ui/cn";
-import { formatDuration } from "@appstrate/core/format";
+import { formatDuration } from "../lib/format-duration";
 import {
   formatTimestamp,
   journalLevel,

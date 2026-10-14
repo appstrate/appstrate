@@ -51,6 +51,11 @@ export interface PackageCollectionProps {
   error?: Error | null;
   /** What the list holds. Decides which columns can say anything at all. */
   holds: PackageType;
+  /**
+   * Which list this is, for the columns its reader hides and the widths they
+   * give: one per screen, so hiding a column on Agents leaves Skills alone.
+   */
+  tableId: string;
   /** What it holds, plural, for the search box: "Agents", "Compétences". */
   entity: string;
   emptyMessage: string;
@@ -112,6 +117,7 @@ export function PackageCollection({
   isLoading,
   error,
   holds,
+  tableId,
   entity,
   emptyMessage,
   emptyHint,
@@ -142,7 +148,7 @@ export function PackageCollection({
   const activities = activityFilter ? list.values("activity", PACKAGE_ACTIVITIES) : [];
   const baseColumns = usePackageColumns(holds).filter((c) => !dropColumns.includes(c.id));
   const searchPlaceholder = useSearchPlaceholder(entity);
-  const visibility = useColumnVisibility("packages");
+  const visibility = useColumnVisibility(tableId);
 
   const shown = narrowPackages(items ?? [], {
     query,
@@ -225,6 +231,7 @@ export function PackageCollection({
       {view === "table" ? (
         <PackagesTable
           items={shown}
+          tableId={tableId}
           rowAction={rowAction}
           columns={[
             ...leadingColumns,

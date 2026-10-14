@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { create } from "zustand";
-import { persistedScalar } from "./persisted-scalar-store";
+import { createKeyedLocalStore } from "./local-storage";
 
 export type ListView = "cards" | "table";
 
@@ -10,21 +9,17 @@ export type ListView = "cards" | "table";
  *
  * A preference, not a location, so it stays out of the URL: a link to a
  * filtered list should open on the reader's own habit rather than impose the
- * sender's. Same reasoning — and the same shape — as the sidebar's open state.
+ * sender's. Same reasoning as the sidebar's open state.
  *
- * One store per FAMILY of list rather than per screen: agents, skills and MCP
- * servers are the same catalogue rendered three times, and someone who wants
- * the table for one wants it for the others.
+ * One value per SCREEN, named by `list`: switching Skills to cards must not
+ * redraw Agents, Integrations or Runs, which the reader never touched.
  */
-function createListViewStore(storageKey: string) {
-  const parse = (raw: string | null): ListView => (raw === "cards" ? raw : "table");
-  return create(persistedScalar(storageKey, parse, "view", "setView"));
-}
+const listViews = createKeyedLocalStore<ListView>(
+  "appstrate-view-",
+  (value) => (value === "cards" ? "cards" : "table"),
+  "table",
+);
 
-export const usePackageViewStore = createListViewStore("appstrate-package-view");
-export const useIntegrationViewStore = createListViewStore("appstrate-integration-view");
-// Operational collections are separate reading tasks. They persist in the
-// same way, but changing Documents must not unexpectedly redraw Runs.
-export const useDocumentViewStore = createListViewStore("appstrate-document-view");
-export const useRunViewStore = createListViewStore("appstrate-run-view");
-export const useScheduleViewStore = createListViewStore("appstrate-schedule-view");
+export function useListView(list: string): [ListView, (view: ListView) => void] {
+  return listViews.useValue(list);
+}

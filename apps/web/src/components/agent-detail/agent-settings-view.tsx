@@ -254,6 +254,7 @@ export function AgentSettingsView({
     <EditorPlaceContext.Provider value={editorPlace}>
       <AgentDetailSplit
         data-agent-settings
+        phoneMenu={t("detail.tabSettings")}
         rail={
           <SectionRail
             label={t("detail.tabSettings")}

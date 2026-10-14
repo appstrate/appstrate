@@ -271,26 +271,34 @@ function stickStyle(stick: Stick): CSSProperties {
 /**
  * A held cell hides what scrolls under it, so it is opaque, as tall as the
  * row (the row's own padding given back) and above the raised controls (`z-10`)
- * of the cells that pass behind. `pointer-events-none`
+ * of the cells that pass behind. Its hover is the row's own colour on the same
+ * transition, or the held cells light up before the rest of the row and leave
+ * a seam where the two colours meet. `pointer-events-none`
  * on the cell and back on its content leaves the cell's empty part to the
  * row's own link underneath.
  */
 const HELD_BODY =
-  "sticky z-20 -my-2 self-stretch bg-(--dt-surface) py-2 pointer-events-none [&>*]:pointer-events-auto";
+  "sticky z-20 -my-2 self-stretch bg-(--dt-surface) py-2 transition-colors pointer-events-none [&>*]:pointer-events-auto";
 const HELD_HEAD = "sticky z-20 bg-(--dt-surface)";
-/** Held columns that would leave no room to scroll in are let go (`data-data-table-unheld`). */
-const HELD_RELEASED = "[[data-data-table-unheld]_&]:static";
+/**
+ * Held columns that would leave no room to scroll in are let go: the name first
+ * (`data-data-table-unheld`), the row's end only when it alone is too wide
+ * (`data-data-table-unheld-end`). The end carries the row's actions, so a
+ * phone keeps it in reach while the name scrolls away with the rest.
+ */
+const HELD_RELEASED_START = "[[data-data-table-unheld]_&]:static";
+const HELD_RELEASED_END = "[[data-data-table-unheld-end]_&]:static";
 const HELD_HOVER = "group-hover/row:bg-(--dt-surface-hover)";
 const HELD_START_EDGE =
-  "[[data-scrolled-start]_&]:shadow-[4px_0_6px_-4px_rgb(0_0_0/0.18),1px_0_0_var(--color-border)]";
+  "[[data-scrolled-start]:not([data-data-table-unheld])_&]:shadow-[4px_0_6px_-4px_rgb(0_0_0/0.18),1px_0_0_var(--color-border)]";
 const HELD_END_EDGE =
-  "[[data-scrolled-end]_&]:shadow-[-4px_0_6px_-4px_rgb(0_0_0/0.18),-1px_0_0_var(--color-border)]";
+  "[[data-scrolled-end]:not([data-data-table-unheld-end])_&]:shadow-[-4px_0_6px_-4px_rgb(0_0_0/0.18),-1px_0_0_var(--color-border)]";
 
 function heldClass(stick: Stick | undefined, body: boolean, hover: boolean): string | undefined {
   if (!stick) return undefined;
   return cn(
     body ? HELD_BODY : HELD_HEAD,
-    HELD_RELEASED,
+    stick.side === "end" ? HELD_RELEASED_END : HELD_RELEASED_START,
     body && hover && HELD_HOVER,
     stick.side === "end" ? HELD_END_EDGE : stick.last && HELD_START_EDGE,
   );
@@ -483,14 +491,15 @@ export function DataTable<T>({
     const update = () => {
       // Held columns that take most of the width leave a strip too narrow to
       // read (a name, a tick and a « … » on a phone or in a side panel):
-      // release them and let the whole table scroll.
-      const heldWidth = Array.from(
-        frame.querySelectorAll<HTMLElement>("thead [data-data-table-held]"),
-      ).reduce((sum, head) => sum + head.getBoundingClientRect().width, 0);
-      frame.toggleAttribute(
-        "data-data-table-unheld",
-        heldWidth > viewport.clientWidth * (1 - MIN_SCROLLING_SHARE),
-      );
+      // release the name and let it scroll, keep the row's end in reach.
+      const heldWidth = (side: Stick["side"]) =>
+        Array.from(
+          frame.querySelectorAll<HTMLElement>(`thead [data-data-table-held="${side}"]`),
+        ).reduce((sum, head) => sum + head.getBoundingClientRect().width, 0);
+      const room = viewport.clientWidth * (1 - MIN_SCROLLING_SHARE);
+      const end = heldWidth("end");
+      frame.toggleAttribute("data-data-table-unheld", heldWidth("start") + end > room);
+      frame.toggleAttribute("data-data-table-unheld-end", end > room);
       frame.toggleAttribute("data-scrolled-start", viewport.scrollLeft > 0);
       frame.toggleAttribute(
         "data-scrolled-end",
@@ -584,7 +593,7 @@ export function DataTable<T>({
                     key={col.id}
                     data-data-table-column={col.id}
                     data-data-table-tier={col.tier}
-                    data-data-table-held={stick ? "" : undefined}
+                    data-data-table-held={stick?.side}
                     style={stick && stickStyle(stick)}
                     className={cn(
                       "text-muted-foreground min-w-0 self-stretch text-[0.68rem] font-semibold tracking-[0.05em] uppercase",
@@ -674,7 +683,8 @@ export function DataTable<T>({
                       className={cn(
                         rowGrid,
                         "group/row border-border/60 relative min-h-12 border-b py-2 last:border-b-0",
-                        interactive && "hover:bg-muted/50 cursor-pointer transition-colors",
+                        interactive &&
+                          "cursor-pointer transition-colors hover:bg-(--dt-surface-hover)",
                       )}
                       onClick={interactive ? (e) => handOver(e, () => open(row, href)) : undefined}
                     >
