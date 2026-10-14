@@ -6346,6 +6346,23 @@ export interface components {
             role: "owner" | "admin" | "member" | "guest";
             /** Format: date-time */
             joinedAt: string;
+            /** @description The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them. */
+            spaces: components["schemas"]["OrgMemberSpace"][];
+        };
+        OrgMemberSpace: {
+            id: string;
+            name: string;
+            /**
+             * @description How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default.
+             * @enum {string}
+             */
+            source: "explicit" | "org_role" | "open_space";
+            role: {
+                /** @enum {string} */
+                kind: "preset" | "custom";
+                key: string;
+                name: string;
+            } | null;
         };
         OrgModel: {
             id: string;
@@ -19241,14 +19258,38 @@ export interface operations {
                      *           "displayName": "Alice",
                      *           "email": "alice@acme.com",
                      *           "role": "owner",
-                     *           "joinedAt": "2026-01-10T08:00:00Z"
+                     *           "joinedAt": "2026-01-10T08:00:00Z",
+                     *           "spaces": [
+                     *             {
+                     *               "id": "spc_default",
+                     *               "name": "Default",
+                     *               "source": "org_role",
+                     *               "role": {
+                     *                 "kind": "preset",
+                     *                 "key": "admin",
+                     *                 "name": "admin"
+                     *               }
+                     *             }
+                     *           ]
                      *         },
                      *         {
                      *           "userId": "usr_def456",
                      *           "displayName": "Bob",
                      *           "email": "bob@acme.com",
                      *           "role": "member",
-                     *           "joinedAt": "2026-01-12T10:00:00Z"
+                     *           "joinedAt": "2026-01-12T10:00:00Z",
+                     *           "spaces": [
+                     *             {
+                     *               "id": "spc_default",
+                     *               "name": "Default",
+                     *               "source": "open_space",
+                     *               "role": {
+                     *                 "kind": "preset",
+                     *                 "key": "operator",
+                     *                 "name": "operator"
+                     *               }
+                     *             }
+                     *           ]
                      *         }
                      *       ],
                      *       "invitations": []
@@ -19699,7 +19740,19 @@ export interface operations {
                      *       "displayName": "Bob",
                      *       "email": "bob@acme.com",
                      *       "role": "admin",
-                     *       "joinedAt": "2026-01-12T10:00:00Z"
+                     *       "joinedAt": "2026-01-12T10:00:00Z",
+                     *       "spaces": [
+                     *         {
+                     *           "id": "spc_default",
+                     *           "name": "Default",
+                     *           "source": "org_role",
+                     *           "role": {
+                     *             "kind": "preset",
+                     *             "key": "admin",
+                     *             "name": "admin"
+                     *           }
+                     *         }
+                     *       ]
                      *     }
                      */
                     "application/json": components["schemas"]["OrgMember"];

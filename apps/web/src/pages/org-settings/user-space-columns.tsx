@@ -14,36 +14,41 @@ import { CellText } from "../../components/table-cells";
 import { SpaceRoleSelect } from "../../components/space-role-select";
 import { roleI18nKey } from "../../hooks/use-permissions";
 import { spaceRoleLabel, type useSpaceRoleOptions } from "../../hooks/use-roles";
-import type { SpaceMembership } from "../../hooks/use-space-memberships";
+import type { OrgRole } from "@appstrate/shared-types";
+import type { components } from "../../api/client";
 
+type OrgMemberSpace = components["schemas"]["OrgMemberSpace"];
 type SpaceRoleOption = ReturnType<typeof useSpaceRoleOptions>["options"][number];
 
 export function useUserSpaceColumns({
+  orgRole,
   editable,
   roleValue,
   roleOptions,
   isChangingRole,
   onChangeRole,
 }: {
-  editable: (membership: SpaceMembership) => boolean;
-  roleValue: (membership: SpaceMembership) => string;
+  /** The person's org role: what a space reached through it reads as. */
+  orgRole: OrgRole;
+  editable: (space: OrgMemberSpace) => boolean;
+  roleValue: (space: OrgMemberSpace) => string;
   roleOptions: SpaceRoleOption[];
   isChangingRole: boolean;
-  onChangeRole: (membership: SpaceMembership, value: string) => void;
-}): DataColumn<SpaceMembership>[] {
+  onChangeRole: (space: OrgMemberSpace, value: string) => void;
+}): DataColumn<OrgMemberSpace>[] {
   const { t } = useTranslation(["settings", "common"]);
   /** What a role the caller cannot change reads as. */
-  const fixedRole = ({ member }: SpaceMembership) =>
-    member.source === "org_role"
-      ? t("spaceMembers.orgRoleOf", { role: t(roleI18nKey(member.org_role)) })
-      : (spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole"));
+  const fixedRole = (space: OrgMemberSpace) =>
+    space.source === "org_role"
+      ? t("spaceMembers.orgRoleOf", { role: t(roleI18nKey(orgRole)) })
+      : (spaceRoleLabel(space.role, t) ?? t("spaceMembers.noRole"));
 
   return [
     {
       id: "space",
       header: t("userDetail.colSpace"),
       width: "minmax(120px,1.4fr)",
-      cell: ({ space }) => (
+      cell: (space) => (
         <CellText strong title={space.name}>
           {space.name}
         </CellText>
@@ -54,27 +59,27 @@ export function useUserSpaceColumns({
       header: t("spaceMembers.colSource"),
       width: "110px",
       tier: 2,
-      cell: ({ member }) => <CellText>{t(`spaceMembers.source.${member.source}`)}</CellText>,
+      cell: (space) => <CellText>{t(`spaceMembers.source.${space.source}`)}</CellText>,
     },
     {
       id: "role",
       header: t("spaceMembers.colRole"),
       width: "minmax(120px,1fr)",
       control: true,
-      cell: (membership) =>
-        editable(membership) ? (
+      cell: (space) =>
+        editable(space) ? (
           <SpaceRoleSelect
-            value={roleValue(membership)}
+            value={roleValue(space)}
             options={roleOptions}
-            fallbackLabel={spaceRoleLabel(membership.member.role, t) ?? t("spaceMembers.noRole")}
+            fallbackLabel={spaceRoleLabel(space.role, t) ?? t("spaceMembers.noRole")}
             placeholder={t("spaceMembers.noRole")}
             className="h-7 w-full text-xs"
-            ariaLabel={t("spaceMembers.roleAriaLabel", { name: membership.space.name })}
+            ariaLabel={t("spaceMembers.roleAriaLabel", { name: space.name })}
             disabled={isChangingRole}
-            onValueChange={(value) => onChangeRole(membership, value)}
+            onValueChange={(value) => onChangeRole(space, value)}
           />
         ) : (
-          <CellText title={fixedRole(membership)}>{fixedRole(membership)}</CellText>
+          <CellText title={fixedRole(space)}>{fixedRole(space)}</CellText>
         ),
     },
   ];

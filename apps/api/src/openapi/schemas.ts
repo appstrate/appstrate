@@ -833,13 +833,42 @@ export const schemas = {
     type: "object",
     // `email`/`displayName` are best-effort joins (getOrgMembers emits
     // `?? undefined` when the user/profile row is missing) — NOT required.
-    required: ["userId", "role", "joinedAt"],
+    required: ["userId", "role", "joinedAt", "spaces"],
     properties: {
       userId: { type: "string" },
       displayName: { type: "string" },
       email: { type: "string" },
       role: { type: "string", enum: ORG_ROLES },
       joinedAt: { type: "string", format: "date-time" },
+      spaces: {
+        type: "array",
+        description:
+          "The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them.",
+        items: { $ref: "#/components/schemas/OrgMemberSpace" },
+      },
+    },
+  },
+  OrgMemberSpace: {
+    type: "object",
+    required: ["id", "name", "source", "role"],
+    properties: {
+      id: { type: "string" },
+      name: { type: "string" },
+      source: {
+        type: "string",
+        enum: ["explicit", "org_role", "open_space"],
+        description:
+          "How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
+      },
+      role: {
+        type: ["object", "null"],
+        required: ["kind", "key", "name"],
+        properties: {
+          kind: { type: "string", enum: ["preset", "custom"] },
+          key: { type: "string" },
+          name: { type: "string" },
+        },
+      },
     },
   },
   SpaceAssignment: {

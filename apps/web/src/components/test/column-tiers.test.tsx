@@ -140,6 +140,7 @@ const SETS = {
   userSpaces: () =>
     columnsFrom(() =>
       useUserSpaceColumns({
+        orgRole: "member",
         editable: () => true,
         roleValue: () => "preset:viewer",
         roleOptions: [],

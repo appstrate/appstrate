@@ -13071,14 +13071,38 @@
                       "displayName": "Alice",
                       "email": "alice@acme.com",
                       "role": "owner",
-                      "joinedAt": "2026-01-10T08:00:00Z"
+                      "joinedAt": "2026-01-10T08:00:00Z",
+                      "spaces": [
+                        {
+                          "id": "spc_default",
+                          "name": "Default",
+                          "source": "org_role",
+                          "role": {
+                            "kind": "preset",
+                            "key": "admin",
+                            "name": "admin"
+                          }
+                        }
+                      ]
                     },
                     {
                       "userId": "usr_def456",
                       "displayName": "Bob",
                       "email": "bob@acme.com",
                       "role": "member",
-                      "joinedAt": "2026-01-12T10:00:00Z"
+                      "joinedAt": "2026-01-12T10:00:00Z",
+                      "spaces": [
+                        {
+                          "id": "spc_default",
+                          "name": "Default",
+                          "source": "open_space",
+                          "role": {
+                            "kind": "preset",
+                            "key": "operator",
+                            "name": "operator"
+                          }
+                        }
+                      ]
                     }
                   ],
                   "invitations": []
@@ -13565,7 +13589,19 @@
                   "displayName": "Bob",
                   "email": "bob@acme.com",
                   "role": "admin",
-                  "joinedAt": "2026-01-12T10:00:00Z"
+                  "joinedAt": "2026-01-12T10:00:00Z",
+                  "spaces": [
+                    {
+                      "id": "spc_default",
+                      "name": "Default",
+                      "source": "org_role",
+                      "role": {
+                        "kind": "preset",
+                        "key": "admin",
+                        "name": "admin"
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -31602,7 +31638,7 @@
       },
       "OrgMember": {
         "type": "object",
-        "required": ["userId", "role", "joinedAt"],
+        "required": ["userId", "role", "joinedAt", "spaces"],
         "properties": {
           "userId": {
             "type": "string"
@@ -31620,6 +31656,46 @@
           "joinedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "spaces": {
+            "type": "array",
+            "description": "The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them.",
+            "items": {
+              "$ref": "#/components/schemas/OrgMemberSpace"
+            }
+          }
+        }
+      },
+      "OrgMemberSpace": {
+        "type": "object",
+        "required": ["id", "name", "source", "role"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["explicit", "org_role", "open_space"],
+            "description": "How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default."
+          },
+          "role": {
+            "type": ["object", "null"],
+            "required": ["kind", "key", "name"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["preset", "custom"]
+              },
+              "key": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
           }
         }
       },

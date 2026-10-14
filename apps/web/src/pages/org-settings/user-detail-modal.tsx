@@ -22,16 +22,15 @@ import { SettingRow } from "../../components/settings/setting-row";
 import { roleI18nKey } from "../../hooks/use-permissions";
 import { memberRoleValue, spaceRoleAssignment, useSpaceRoleOptions } from "../../hooks/use-roles";
 import { useAddSpaceMember, useUpdateSpaceMember } from "../../hooks/use-space-members";
-import type { SpaceMembership } from "../../hooks/use-space-memberships";
 import { formatDateField } from "../../lib/format-date";
 import { memberLabel } from "../../lib/members";
 import { useUserSpaceColumns } from "./user-space-columns";
 
 type OrgMember = components["schemas"]["OrgMember"];
+type OrgMemberSpace = components["schemas"]["OrgMemberSpace"];
 
 export function UserDetailModal({
   member,
-  memberships,
   showSpaces,
   assignableRoles,
   isChangingOrgRole,
@@ -39,7 +38,6 @@ export function UserDetailModal({
   onClose,
 }: {
   member: OrgMember;
-  memberships: SpaceMembership[];
   /** Only an owner or admin reads every space's member list. */
   showSpaces: boolean;
   assignableRoles: readonly OrgRole[];
@@ -53,25 +51,25 @@ export function UserDetailModal({
   const updateMember = useUpdateSpaceMember();
   const isChangingSpaceRole = addMember.isPending || updateMember.isPending;
 
-  const changeSpaceRole = (membership: SpaceMembership, value: string) => {
+  const changeSpaceRole = (space: OrgMemberSpace, value: string) => {
     const body = spaceRoleAssignment(value);
     const onSuccess = () =>
       toast.success(
         t("spaceMembers.roleUpdated", {
-          name: membership.space.name,
+          name: space.name,
           role: roleOptions.find((option) => option.value === value)?.label ?? value,
         }),
       );
-    if (membership.member.source === "explicit") {
+    if (space.source === "explicit") {
       updateMember.mutate(
-        { params: { path: { id: membership.space.id, userId: member.userId } }, body },
+        { params: { path: { id: space.id, userId: member.userId } }, body },
         { onSuccess },
       );
       return;
     }
     addMember.mutate(
       {
-        params: { path: { id: membership.space.id } },
+        params: { path: { id: space.id } },
         body: { userId: member.userId, ...body },
       },
       { onSuccess },
@@ -79,12 +77,12 @@ export function UserDetailModal({
   };
 
   const columns = useUserSpaceColumns({
+    orgRole: member.role,
     // Owners and admins reach every space through their org role, so there is
     // no seat to edit; everyone else's is the caller's to change, this caller
     // being an admin everywhere.
-    editable: (membership) => membership.member.source !== "org_role" && roleOptions.length > 0,
-    roleValue: (membership) =>
-      memberRoleValue(membership.member.role, roles) ?? `current:${membership.member.role?.key}`,
+    editable: (space) => space.source !== "org_role" && roleOptions.length > 0,
+    roleValue: (space) => memberRoleValue(space.role, roles) ?? `current:${space.role?.key}`,
     roleOptions,
     isChangingRole: isChangingSpaceRole,
     onChangeRole: changeSpaceRole,
@@ -139,8 +137,8 @@ export function UserDetailModal({
               tableId="user-spaces"
               label={t("userDetail.spacesSection")}
               columns={columns}
-              rows={memberships}
-              rowKey={(membership) => membership.space.id}
+              rows={member.spaces}
+              rowKey={(space) => space.id}
               isLoading={false}
               empty={
                 <EmptyState

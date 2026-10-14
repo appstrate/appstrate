@@ -70,8 +70,10 @@ function useInvalidateSpaces() {
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}"] });
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/roles"] });
-    // Visibility and the default role determine implicit member rows and roles.
+    // Visibility and the default role determine implicit member rows and roles,
+    // which each org member also carries.
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/members"] });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
   };
 }
 
@@ -102,6 +104,8 @@ export function useDeleteSpace() {
     meta: { errorHandledByCaller: true },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
+      // Each org member lists the spaces they reach.
+      void qc.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
       // The page still showing the deleted space would re-read it, a 404: stale only.
       for (const path of [
         "/api/spaces/{id}",

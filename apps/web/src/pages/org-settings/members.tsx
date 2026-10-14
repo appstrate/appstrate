@@ -8,7 +8,6 @@ import { $api, type components } from "../../api/client";
 import { useOrg, useOrgDetail } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
-import { useSpaceMembershipsByUser } from "../../hooks/use-space-memberships";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -96,10 +95,9 @@ export function OrgSettingsMembersPage() {
     changeRole(member.userId, newRole);
   };
 
-  // Which spaces a person reaches, and as what: one shared query set for the
-  // column and for the detail, so opening a person costs nothing more.
+  // Which spaces a person reaches, and as what, comes with the member itself:
+  // the column and the detail read the same rows.
   const seesEverySpace = hasFullOrgAccess(orgRole);
-  const { byUser: spacesByUser } = useSpaceMembershipsByUser(seesEverySpace);
 
   const memberColumns = useMemberColumns({
     assignableRoles: (member) =>
@@ -122,9 +120,7 @@ export function OrgSettingsMembersPage() {
     isRemoving: removeMemberMutation.isPending,
     onChangeRole: handleRoleChange,
     onRemove: handleRemove,
-    spaces: seesEverySpace
-      ? (member) => (spacesByUser.get(member.userId) ?? []).map(({ space }) => space.name)
-      : undefined,
+    spaces: seesEverySpace ? (member) => member.spaces.map((space) => space.name) : undefined,
   });
 
   const openedUser = memberParam.target;
@@ -182,7 +178,6 @@ export function OrgSettingsMembersPage() {
         <UserDetailModal
           key={openedUser.userId}
           member={openedUser}
-          memberships={spacesByUser.get(openedUser.userId) ?? []}
           showSpaces={seesEverySpace}
           assignableRoles={
             orgRole && canChangeRole

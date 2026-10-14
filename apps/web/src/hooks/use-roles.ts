@@ -46,6 +46,8 @@ export function useInvalidateRoles() {
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/roles"] });
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/members"] });
+    // Each org member carries the spaces they reach and their role there.
+    void qc.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
   };
 }
 
