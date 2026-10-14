@@ -518,11 +518,11 @@ describe("api_call — result", () => {
 
     expect(calls).toHaveLength(order.length);
     expect(result.isError).toBe(false);
-    const [ok, upstream401, callRunPermissionRequired, mustChoose, rateLimited] = entries(payload);
+    const [ok, upstream401, callPermissionRequired, mustChoose, rateLimited] = entries(payload);
     expect(ok).toMatchObject({ index: 0, status: 200, body: { ok: true } });
     expect(upstream401).toMatchObject({ index: 1, status: 401, body: { error: "invalid_token" } });
     expect(upstream401).not.toHaveProperty("error");
-    expect(callRunPermissionRequired).toEqual({
+    expect(callPermissionRequired).toEqual({
       index: 2,
       error: {
         status: 403,

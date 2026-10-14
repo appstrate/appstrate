@@ -28,8 +28,8 @@
  * Auth is a Bearer API key — cookie sessions are refused by design and the
  * route only accepts API keys / device-flow JWTs (the JWT door is covered in
  * `modules/oidc/test/integration/routes/credential-proxy-jwt.test.ts`). The
- * caller is an org member holding both proxy permissions through a custom space
- * role; a key's `scopes` narrow it, by default to `credential-proxy:call` alone, as
+ * caller is an org member holding `credential-proxy:call` and `call-own` through a
+ * custom space role; a key's `scopes` narrow it, by default to `credential-proxy:call` alone, as
  * the stored keys of the release in service carry it.
  */
 
@@ -197,8 +197,8 @@ async function orgDefault(ctx: TestContext, connectionIds: string[], enforce: bo
 const CALL = ["credential-proxy:call", "agents:run", "runs:read"];
 
 /**
- * A fresh org, as the member the proxy is called by: both permissions are theirs, as `admin` and
- * `builder` hold them, so a key may narrow to either.
+ * A fresh org, as the member the proxy is called by: `credential-proxy:call` and `call-own` are
+ * theirs, as `admin` and `builder` hold them, so a key may narrow to either.
  */
 async function proxyCallerContext(): Promise<TestContext> {
   return memberHolding(await createTestContext({ orgSlug: "cporg" }), [
@@ -572,7 +572,7 @@ describe("POST /api/credential-proxy/proxy — cookie-session rejection (ACCEPTE
   });
   afterEach(() => restoreFetch());
 
-  it("403s a cookie session even though its member holds both proxy permissions", async () => {
+  it("403s a cookie session even though its member holds credential-proxy:call and call-own", async () => {
     // The member's role grants both paths' permissions, so the route guard
     // passes and execution reaches the `ACCEPTED_AUTH_METHODS` gate. That gate
     // rejects `authMethod === "session"` — cookie sessions are refused because
@@ -2045,7 +2045,7 @@ describe("POST /api/credential-proxy/proxy — a remote run lends what it bound 
 
     /**
      * `member` launches the agent as a remote run with their own key, then calls the proxy. The key
-     * names both proxy permissions and carries those its creator's preset holds.
+     * names `credential-proxy:call` and `call-own` and carries those its creator's preset holds.
      */
     const launchAndProxy = async (member: TestContext) => {
       const key = await mintProxyKey(member, [...CALL, "credential-proxy:call-own"]);
