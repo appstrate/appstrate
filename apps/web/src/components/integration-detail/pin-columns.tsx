@@ -1,0 +1,86 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { useTranslation } from "react-i18next";
+import { Trash2 } from "lucide-react";
+import type { DataColumn } from "../data-table";
+import { rowActionsColumn } from "../row-actions-column";
+import { TableRowActions } from "../table-row-actions";
+import { CellText } from "../table-cells";
+import type { IntegrationConnection, IntegrationPin } from "@appstrate/shared-types";
+import { connectionOptionLabel } from "../../lib/connection-set";
+
+export function usePinColumns({
+  agentName,
+  pinnable,
+  connections,
+  isDeleting,
+  onDelete,
+}: {
+  agentName: (pin: IntegrationPin) => string;
+  /** The connections shared into this space: the ones a pin can name. */
+  pinnable: IntegrationConnection[];
+  /** Undefined while loading: an unknown connection is then not yet "unavailable". */
+  connections: IntegrationConnection[] | undefined;
+  isDeleting: boolean;
+  onDelete: (pin: IntegrationPin) => void;
+}): DataColumn<IntegrationPin>[] {
+  const { t } = useTranslation(["settings", "agents"]);
+
+  return [
+    {
+      id: "agent",
+      header: t("integration.admin.pinManagement.colAgent"),
+      width: "minmax(120px,1fr)",
+      cell: (pin) => (
+        <CellText strong title={agentName(pin)}>
+          {agentName(pin)}
+        </CellText>
+      ),
+    },
+    {
+      id: "connections",
+      header: t("integration.admin.pinManagement.colConnections"),
+      width: "minmax(140px,2fr)",
+      cell: (pin) => {
+        if (pin.connection_ids.length === 0) {
+          return <CellText>{t("agents:detail.integrationMemberPicker.none")}</CellText>;
+        }
+        return (
+          <CellText>
+            {pin.connection_ids.map((id, i) => {
+              const connection = pinnable.find((c) => c.id === id);
+              return (
+                <span key={id}>
+                  {i > 0 && " · "}
+                  {connection ? (
+                    connectionOptionLabel(connection)
+                  ) : connections === undefined ? null : (
+                    // No longer shared or deleted: every run of this agent is refused.
+                    <span className="text-warning">
+                      {t("integration.admin.unavailableConnection")}
+                    </span>
+                  )}
+                </span>
+              );
+            })}
+          </CellText>
+        );
+      },
+    },
+    rowActionsColumn((pin: IntegrationPin) => (
+      <TableRowActions
+        menuLabel={t("integration.admin.pinManagement.rowActions", { agent: agentName(pin) })}
+        isPending={isDeleting}
+        actions={[
+          {
+            id: "delete",
+            label: t("integration.admin.pinManagement.delete"),
+            icon: Trash2,
+            onSelect: () => onDelete(pin),
+            destructive: true,
+          },
+        ]}
+      />
+    )),
+  ];
+}

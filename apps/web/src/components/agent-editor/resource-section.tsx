@@ -580,7 +580,9 @@ function SelectedResources({
           compact
         >
           {canReadCatalog && (
-            <EmptyStateAction label={t("editor.resourceAdd")} onClick={() => picker.open()} />
+            <EmptyStateAction
+              action={{ label: t("editor.resourceAdd"), onSelect: () => picker.open() }}
+            />
           )}
         </EmptyState>
       ) : (

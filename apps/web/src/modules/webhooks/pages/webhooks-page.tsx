@@ -2,12 +2,11 @@
 
 import { useTranslation } from "react-i18next";
 import { Plus, Webhook } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useWebhooks } from "../hooks/use-webhooks";
 import { EmptyState, EmptyStateAction } from "@/components/page-states";
 import { DataTable } from "@/components/data-table";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
-import { PageActionsMenu } from "@/components/page-actions-menu";
+import type { PageAction } from "@/components/page-actions-menu";
 import { useWebhookColumns } from "../components/webhook-columns";
 import { useModalParam } from "@/hooks/use-modal-param";
 import { NEW_WEBHOOK_PARAM, WebhookCreateModal } from "../components/webhook-create-modal";
@@ -27,20 +26,17 @@ export function WebhooksPage() {
   const createLevels = (["space", "org"] as const).filter((level) =>
     can(`${webhookResource(level)}:write`),
   );
-  const canCreate = createLevels.length > 0;
+  const create: PageAction = {
+    id: "create",
+    icon: Plus,
+    label: t("settings:webhooks.createTitle"),
+    onSelect: () => newWebhook.open(),
+    hidden: createLevels.length === 0,
+  };
 
   return (
     <div>
-      {canCreate && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            <DropdownMenuItem data-page-action="create" onSelect={() => newWebhook.open()}>
-              <Plus />
-              {t("settings:webhooks.createTitle")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
+      <SettingsPageActions actions={[create]} />
 
       <DataTable
         tableId="webhooks"
@@ -54,17 +50,12 @@ export function WebhooksPage() {
         failure={error}
         empty={
           <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>
-            {canCreate && (
-              <EmptyStateAction
-                label={t("settings:webhooks.createTitle")}
-                onClick={() => newWebhook.open()}
-              />
-            )}
+            <EmptyStateAction action={create} />
           </EmptyState>
         }
       />
 
-      {canCreate && <WebhookCreateModal levels={createLevels} />}
+      {!create.hidden && <WebhookCreateModal levels={createLevels} />}
     </div>
   );
 }

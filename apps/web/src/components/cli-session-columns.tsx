@@ -3,32 +3,46 @@
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
-import type { DataColumn } from "../../components/data-table";
-import { CliSessionIcon } from "../../components/cli-session-icon";
-import { TableRowActions } from "../../components/table-row-actions";
-import { rowActionsColumn } from "../../components/row-actions-column";
-import { CellDate, CellEmpty, CellText } from "../../components/table-cells";
-import { deriveLabel, displayIp, type CliSessionDisplay } from "../../lib/cli-sessions";
+import type { DataColumn } from "./data-table";
+import { CliSessionIcon } from "./cli-session-icon";
+import { TableRowActions } from "./table-row-actions";
+import { rowActionsColumn } from "./row-actions-column";
+import { CellDate, CellEmpty, CellText } from "./table-cells";
+import { deriveLabel, displayIp, type CliSessionDisplay } from "../lib/cli-sessions";
 
-export interface AdminCliSession extends CliSessionDisplay {
-  userId: string;
-  userEmail: string | null;
-  userName: string | null;
+/** A CLI session row; the member fields come with the org-wide list only. */
+export interface CliSessionRow extends CliSessionDisplay {
+  userId?: string;
+  userEmail?: string | null;
+  userName?: string | null;
 }
 
-export function cliSessionUserLabel(session: AdminCliSession): string {
-  return session.userName || session.userEmail || session.userId;
+export function cliSessionUserLabel(session: CliSessionRow): string {
+  return session.userName || session.userEmail || session.userId || "";
 }
 
 export function useCliSessionColumns({
+  showMember = true,
   revokingFamilyId,
   onRevoke,
 }: {
+  /** The org-wide list names whose session it is; a member's own list does not. */
+  showMember?: boolean;
   revokingFamilyId: string | null;
   /** Absent without `cli-sessions:delete`: the row then has no menu. */
-  onRevoke?: (session: AdminCliSession) => void;
-}): DataColumn<AdminCliSession>[] {
+  onRevoke?: (session: CliSessionRow) => void;
+}): DataColumn<CliSessionRow>[] {
   const { t } = useTranslation(["settings", "common"]);
+
+  const memberColumn: DataColumn<CliSessionRow> = {
+    id: "member",
+    header: t("orgCliSessions.memberColumn"),
+    width: "minmax(60px,1fr)",
+    tier: 2,
+    cell: (session) => (
+      <CellText title={cliSessionUserLabel(session)}>{cliSessionUserLabel(session)}</CellText>
+    ),
+  };
 
   return [
     {
@@ -38,33 +52,17 @@ export function useCliSessionColumns({
       cell: (session) => (
         <div className="flex min-w-0 items-center gap-2">
           <CliSessionIcon userAgent={session.userAgent} />
-          <span className="block truncate text-sm font-medium" title={deriveLabel(session, t)}>
+          <span
+            className="block min-w-0 truncate text-sm font-medium"
+            title={deriveLabel(session, t)}
+          >
             {deriveLabel(session, t)}
           </span>
+          {session.current && <Badge variant="running">{t("orgCliSessions.current")}</Badge>}
         </div>
       ),
     },
-    {
-      id: "member",
-      header: t("orgCliSessions.memberColumn"),
-      width: "minmax(60px,1fr)",
-      tier: 2,
-      cell: (session) => (
-        <CellText title={cliSessionUserLabel(session)}>{cliSessionUserLabel(session)}</CellText>
-      ),
-    },
-    {
-      id: "status",
-      header: t("orgCliSessions.statusColumn"),
-      width: "minmax(60px,0.7fr)",
-      tier: 2,
-      cell: (session) =>
-        session.current ? (
-          <Badge variant="running">{t("orgCliSessions.current")}</Badge>
-        ) : (
-          <CellEmpty />
-        ),
-    },
+    ...(showMember ? [memberColumn] : []),
     {
       id: "userAgent",
       header: t("devices.userAgentLabel"),
@@ -92,25 +90,25 @@ export function useCliSessionColumns({
     {
       id: "created",
       header: t("devices.createdAtLabel"),
-      width: "100px",
+      width: "150px",
       align: "end",
       tier: 3,
-      cell: (session) => <CellDate value={session.createdAt} granularity="date" />,
+      cell: (session) => <CellDate value={session.createdAt} />,
     },
     {
       id: "lastUsed",
       header: t("devices.lastUsedLabel"),
-      width: "120px",
+      width: "150px",
       align: "end",
       tier: 2,
       cell: (session) =>
         session.lastUsedAt ? (
-          <CellDate value={session.lastUsedAt} granularity="date" />
+          <CellDate value={session.lastUsedAt} />
         ) : (
           <CellText>{t("devices.neverUsed")}</CellText>
         ),
     },
-    rowActionsColumn((session: AdminCliSession) => {
+    rowActionsColumn((session: CliSessionRow) => {
       const revoke = onRevoke;
       if (!revoke) return null;
       const isPending = revokingFamilyId === session.familyId;

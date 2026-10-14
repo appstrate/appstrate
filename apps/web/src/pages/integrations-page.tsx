@@ -99,7 +99,9 @@ export function IntegrationsPage() {
       message={t("integrations.empty.space")}
       hint={<SpaceLibraryHint type="integration" />}
     >
-      {canCreate && <EmptyStateAction label={t("integrations.create")} onClick={creation.open} />}
+      {canCreate && (
+        <EmptyStateAction action={{ label: t("integrations.create"), onSelect: creation.open }} />
+      )}
     </EmptyState>
   );
 

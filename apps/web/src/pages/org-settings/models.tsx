@@ -23,7 +23,6 @@ import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { cn } from "@appstrate/ui/cn";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
@@ -40,7 +39,6 @@ import {
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
 import { useOrgSettings } from "../../hooks/use-org-settings";
-import { NoAccessState } from "../../components/route-gate";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
@@ -56,7 +54,7 @@ import { PersonalModelsModal, ProviderModelsModal } from "../../components/model
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { SettingsGroup } from "../../components/settings/setting-row";
-import { PageActionsMenu } from "../../components/page-actions-menu";
+import type { PageAction } from "../../components/page-actions-menu";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
 import {
   isSystemModel,
@@ -137,8 +135,6 @@ export function OrgSettingsModelsPage() {
   // Known off: the table stays, greyed. Unknown (the setting did not load) is not off.
   const personalOff = orgSettings?.personal_model_credentials === false;
 
-  if (!can("models:read")) return <NoAccessState />;
-
   /** A key's menu, the organization's or a person's: the row offers what the server allows. */
   const keyDeeds = {
     onRename: async (pk: ModelProviderCredentialInfo, label: string) => {
@@ -150,43 +146,31 @@ export function OrgSettingsModelsPage() {
     onDelete: setConfirmDelete,
   };
 
+  const addCredential: PageAction = {
+    id: "create-credential",
+    icon: Plus,
+    label: t("credentials.add"),
+    onSelect: () => addProvider.open(),
+    hidden: !canWriteCredentials,
+  };
+  // The deed of the tab in view; a member who may write nothing has no menu.
+  const allowPersonalModels: PageAction = {
+    id: "open-personal-service",
+    icon: Plus,
+    label: t("providers.allowPersonalModels"),
+    onSelect: () => nextService && personalModels.open(nextService),
+    hidden: !canWriteModels || !nextService,
+  };
+
   const emptyOrg = {
     message: t("providers.empty"),
     hint: canWriteCredentials ? undefined : t("providers.emptyAskAdmin"),
-    action: canWriteCredentials ? (
-      <EmptyStateAction label={t("credentials.add")} onClick={() => addProvider.open()} />
-    ) : undefined,
+    action: <EmptyStateAction action={addCredential} />,
   };
 
   return (
     <>
-      {/* The deed of the tab in view; a member who may write nothing has no menu. */}
-      {tab === "org" && canWriteCredentials && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            <DropdownMenuItem
-              data-page-action="create-credential"
-              onSelect={() => addProvider.open()}
-            >
-              <Plus />
-              {t("credentials.add")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
-      {tab === "personal" && canWriteModels && nextService && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            <DropdownMenuItem
-              data-page-action="open-personal-service"
-              onSelect={() => personalModels.open(nextService)}
-            >
-              <Plus />
-              {t("providers.allowPersonalModels")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
+      <SettingsPageActions actions={[tab === "org" ? addCredential : allowPersonalModels]} />
 
       <div className="mb-6">
         <CollectionTabs

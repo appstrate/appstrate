@@ -8,7 +8,6 @@ import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Label } from "@appstrate/ui/components/label";
 import { Switch } from "@appstrate/ui/components/switch";
-import { formatBytes } from "../../lib/format-bytes";
 import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
@@ -18,7 +17,8 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { useCanCreateOrg } from "../../hooks/use-auth";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
-import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
+import { USAGE_WARN } from "../../lib/usage-severity";
+import { UsageBar } from "../../components/usage-bar";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { SaveFeedback } from "../../components/settings/save-feedback";
@@ -89,7 +89,12 @@ export function OrgSettingsGeneralPage() {
 
   // Single source of truth for the storage gauge (shared with billing +
   // files). `limitBytes` null = unlimited (per-org override ?? global quota).
-  const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
+  const {
+    storage,
+    limitBytes: storageLimit,
+    percent: storagePercent,
+    usageLabel,
+  } = useOrgStorage();
   // The heads-up banner fires at the shared WARN threshold — the same point the
   // bar turns yellow — so the user is warned well before uploads get rejected.
   const storageNearLimit = storagePercent !== null && storagePercent >= USAGE_WARN;
@@ -285,32 +290,13 @@ export function OrgSettingsGeneralPage() {
               <HardDrive size={18} className="text-muted-foreground shrink-0" />
               <div className="flex-1">
                 <h3 className="text-sm font-semibold">{t("orgStorage.title")}</h3>
-                <span className="text-muted-foreground text-sm">
-                  {storage.effective_limit_bytes === null
-                    ? t("orgStorage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
-                    : t("orgStorage.usedOfLimit", {
-                        used: formatBytes(storage.used_bytes),
-                        limit: formatBytes(storage.effective_limit_bytes),
-                      })}
-                </span>
+                <span className="text-muted-foreground text-sm">{usageLabel}</span>
               </div>
             </div>
 
             {storageLimit !== null && (
               <div className="mt-4">
-                <div
-                  className="bg-muted h-2 w-full overflow-hidden rounded-full"
-                  role="progressbar"
-                  aria-valuenow={storagePercent ?? 0}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label={t("orgStorage.title")}
-                >
-                  <div
-                    className={`h-full rounded-full transition-all ${getUsageBarColor(storagePercent ?? 0)}`}
-                    style={{ width: `${storagePercent ?? 0}%` }}
-                  />
-                </div>
+                <UsageBar percent={storagePercent ?? 0} label={t("orgStorage.title")} />
                 <div className="text-muted-foreground mt-1 text-right text-xs tabular-nums">
                   {t("orgStorage.percentUsed", { percent: storagePercent ?? 0 })}
                 </div>

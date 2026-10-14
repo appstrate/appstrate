@@ -141,7 +141,9 @@ export function SchemaFieldList({
 
       {fields.length === 0 ? (
         <EmptyState message={t("editor.fieldEmpty")} icon={Braces} compact>
-          <EmptyStateAction label={t("editor.fieldAdd")} onClick={() => adding.open()} />
+          <EmptyStateAction
+            action={{ label: t("editor.fieldAdd"), onSelect: () => adding.open() }}
+          />
         </EmptyState>
       ) : (
         <div className="border-border overflow-hidden rounded-lg border">

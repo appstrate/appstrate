@@ -179,7 +179,9 @@ function PackageIndexBody({
         emptyHint={<SpaceLibraryHint type={type} />}
         emptyIcon={PACKAGE_TYPE_ICON[type]}
         emptyAction={
-          canCreate ? <EmptyStateAction label={words.create} onClick={creation.open} /> : undefined
+          canCreate ? (
+            <EmptyStateAction action={{ label: words.create, onSelect: creation.open }} />
+          ) : undefined
         }
         list={list}
         view={view}

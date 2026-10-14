@@ -17,7 +17,7 @@
  * so there a row that exists is shown only to be deleted.
  */
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useModalParam } from "@/hooks/use-modal-param";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -79,19 +79,9 @@ function SmtpSection({ personal }: { personal: boolean }) {
   const upsert = useUpsertSmtpConfig();
   const del = useDeleteSmtpConfig();
   const test = useTestSmtp();
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const smtpTest = useModalParam("smtpTest");
-
+  const [form, setForm] = useSeededForm(config, isLoading, emptySmtp, fromSmtp);
   const initial = config ?? null;
-  const [form, setForm] = useState(() => emptySmtp());
-
-  // Re-seed form from loaded row on initial fetch.
-  const [seededFor, setSeededFor] = useState<string | null | "none">(null);
-  const seedKey = config ? config.updatedAt : "none";
-  if (!isLoading && seededFor !== seedKey) {
-    setForm(config ? fromSmtp(config) : emptySmtp());
-    setSeededFor(seedKey);
-  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -114,138 +104,112 @@ function SmtpSection({ personal }: { personal: boolean }) {
     );
   }
 
-  if (personal && !initial) return null;
-
   return (
-    <section className="space-y-4">
-      <header className="space-y-1">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Mail className="h-5 w-5" />
-          {t("settings:spaceAuth.smtpTitle")}
-          {initial ? (
-            <Badge variant="running">{t("settings:spaceAuth.configured")}</Badge>
-          ) : (
-            <Badge variant="secondary">{t("settings:spaceAuth.notConfigured")}</Badge>
-          )}
-        </h2>
-        <p className="text-muted-foreground text-sm">{t("settings:spaceAuth.smtpHint")}</p>
-      </header>
+    <>
+      <ProviderConfigSection
+        icon={<Mail className="h-5 w-5" />}
+        title={t("settings:spaceAuth.smtpTitle")}
+        hint={t("settings:spaceAuth.smtpHint")}
+        configured={!!initial}
+        personal={personal}
+        del={del}
+        deleteTitle={t("settings:spaceAuth.smtpDeleteTitle")}
+        deleteDescription={t("settings:spaceAuth.smtpDeleteConfirm")}
+        deletedMessage={t("settings:spaceAuth.smtpDeleted")}
+      >
+        {(deleteButton) => (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <FormItem id="smtp-host" label={requiredLabel(t("settings:spaceAuth.smtpHost"))}>
+                <Input
+                  value={form.host}
+                  onChange={(e) => setForm({ ...form, host: e.target.value })}
+                  placeholder="smtp.example.com"
+                  required
+                />
+              </FormItem>
+              <FormItem id="smtp-port" label={requiredLabel(t("settings:spaceAuth.smtpPort"))}>
+                <Input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={form.port}
+                  onChange={(e) => setForm({ ...form, port: e.target.value })}
+                  required
+                />
+              </FormItem>
+              <FormItem
+                id="smtp-username"
+                label={requiredLabel(t("settings:spaceAuth.smtpUsername"))}
+              >
+                <Input
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  required
+                />
+              </FormItem>
+              <FormItem
+                id="smtp-pass"
+                label={requiredLabel(t("settings:spaceAuth.smtpPass"))}
+                hint={initial ? t("settings:spaceAuth.smtpPassReuploadHint") : undefined}
+              >
+                <Input
+                  type="password"
+                  value={form.pass}
+                  onChange={(e) => setForm({ ...form, pass: e.target.value })}
+                  required
+                />
+              </FormItem>
+              <FormItem
+                id="smtp-from-address"
+                label={requiredLabel(t("settings:spaceAuth.smtpFromAddress"))}
+              >
+                <Input
+                  type="email"
+                  value={form.fromAddress}
+                  onChange={(e) => setForm({ ...form, fromAddress: e.target.value })}
+                  placeholder="noreply@tenant.com"
+                  required
+                />
+              </FormItem>
+              <FormItem id="smtp-from-name" label={t("settings:spaceAuth.smtpFromName")}>
+                <Input
+                  value={form.fromName}
+                  onChange={(e) => setForm({ ...form, fromName: e.target.value })}
+                  placeholder={t("settings:spaceAuth.smtpFromNamePlaceholder")}
+                />
+              </FormItem>
+              <FormItem id="smtp-secure-mode" label={t("settings:spaceAuth.smtpSecureMode")}>
+                <OptionSelect
+                  value={form.secureMode}
+                  onValueChange={(v) =>
+                    setForm({ ...form, secureMode: v as SmtpConfigView["secure_mode"] })
+                  }
+                  options={[
+                    { value: "auto", label: t("settings:spaceAuth.secureModeAuto") },
+                    { value: "tls", label: "TLS" },
+                    { value: "starttls", label: "STARTTLS" },
+                    { value: "none", label: t("settings:spaceAuth.secureModeNone") },
+                  ]}
+                />
+              </FormItem>
+            </div>
 
-      {personal ? (
-        <DeleteConfigButton disabled={del.isPending} onClick={() => setConfirmDelete(true)} />
-      ) : (
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <FormItem id="smtp-host" label={requiredLabel(t("settings:spaceAuth.smtpHost"))}>
-              <Input
-                value={form.host}
-                onChange={(e) => setForm({ ...form, host: e.target.value })}
-                placeholder="smtp.example.com"
-                required
-              />
-            </FormItem>
-            <FormItem id="smtp-port" label={requiredLabel(t("settings:spaceAuth.smtpPort"))}>
-              <Input
-                type="number"
-                min={1}
-                max={65535}
-                value={form.port}
-                onChange={(e) => setForm({ ...form, port: e.target.value })}
-                required
-              />
-            </FormItem>
-            <FormItem
-              id="smtp-username"
-              label={requiredLabel(t("settings:spaceAuth.smtpUsername"))}
-            >
-              <Input
-                value={form.username}
-                onChange={(e) => setForm({ ...form, username: e.target.value })}
-                required
-              />
-            </FormItem>
-            <FormItem
-              id="smtp-pass"
-              label={requiredLabel(t("settings:spaceAuth.smtpPass"))}
-              hint={initial ? t("settings:spaceAuth.smtpPassReuploadHint") : undefined}
-            >
-              <Input
-                type="password"
-                value={form.pass}
-                onChange={(e) => setForm({ ...form, pass: e.target.value })}
-                required
-              />
-            </FormItem>
-            <FormItem
-              id="smtp-from-address"
-              label={requiredLabel(t("settings:spaceAuth.smtpFromAddress"))}
-            >
-              <Input
-                type="email"
-                value={form.fromAddress}
-                onChange={(e) => setForm({ ...form, fromAddress: e.target.value })}
-                placeholder="noreply@tenant.com"
-                required
-              />
-            </FormItem>
-            <FormItem id="smtp-from-name" label={t("settings:spaceAuth.smtpFromName")}>
-              <Input
-                value={form.fromName}
-                onChange={(e) => setForm({ ...form, fromName: e.target.value })}
-                placeholder={t("settings:spaceAuth.smtpFromNamePlaceholder")}
-              />
-            </FormItem>
-            <FormItem id="smtp-secure-mode" label={t("settings:spaceAuth.smtpSecureMode")}>
-              <OptionSelect
-                value={form.secureMode}
-                onValueChange={(v) =>
-                  setForm({ ...form, secureMode: v as SmtpConfigView["secure_mode"] })
-                }
-                options={[
-                  { value: "auto", label: t("settings:spaceAuth.secureModeAuto") },
-                  { value: "tls", label: "TLS" },
-                  { value: "starttls", label: "STARTTLS" },
-                  { value: "none", label: t("settings:spaceAuth.secureModeNone") },
-                ]}
-              />
-            </FormItem>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" disabled={upsert.isPending}>
-              {upsert.isPending ? <Spinner /> : t("common:btn.save")}
-            </Button>
-            {initial && (
-              <>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" disabled={upsert.isPending}>
+                {upsert.isPending ? <Spinner /> : t("common:btn.save")}
+              </Button>
+              {initial && (
                 <Button type="button" variant="outline" onClick={() => smtpTest.open()}>
                   <Send className="h-4 w-4" />
                   {t("settings:spaceAuth.smtpTest")}
                 </Button>
-                <DeleteConfigButton
-                  disabled={del.isPending}
-                  onClick={() => setConfirmDelete(true)}
-                />
-              </>
-            )}
-          </div>
-        </form>
-      )}
-
-      <ConfirmModal
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        title={t("settings:spaceAuth.smtpDeleteTitle")}
-        description={t("settings:spaceAuth.smtpDeleteConfirm")}
-        isPending={del.isPending}
-        onConfirm={() =>
-          del.mutate(undefined, {
-            onSuccess: () => {
-              setConfirmDelete(false);
-              toast.success(t("settings:spaceAuth.smtpDeleted"));
-            },
-          })
-        }
-      />
+              )}
+              {deleteButton}
+            </div>
+          </form>
+        )}
+      </ProviderConfigSection>
 
       <SmtpTestModal
         open={!personal && !!initial && smtpTest.value !== null}
@@ -262,7 +226,7 @@ function SmtpSection({ personal }: { personal: boolean }) {
           })
         }
       />
-    </section>
+    </>
   );
 }
 
@@ -321,17 +285,11 @@ function SocialSection({
   personal: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: config } = useSocialProvider(provider);
+  const { data: config, isLoading } = useSocialProvider(provider);
   const upsert = useUpsertSocialProvider(provider);
   const del = useDeleteSocialProvider(provider);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [form, setForm] = useState(() => emptySocial());
-  const [seededFor, setSeededFor] = useState<string | "none" | null>(null);
-  const seedKey = config ? config.updatedAt : "none";
-  if (seededFor !== seedKey) {
-    setForm(config ? fromSocial(config) : emptySocial());
-    setSeededFor(seedKey);
-  }
+  const [form, setForm] = useSeededForm(config, isLoading, emptySocial, fromSocial);
+  const Icon = icon === "github" ? GitHubIcon : GoogleIcon;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -350,32 +308,19 @@ function SocialSection({
     );
   }
 
-  if (personal && !config) return null;
-
   return (
-    <section className="space-y-4">
-      <header className="space-y-1">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          {icon === "github" ? (
-            <GitHubIcon className="h-5 w-5" aria-hidden />
-          ) : (
-            <GoogleIcon className="h-5 w-5" aria-hidden />
-          )}
-          {title}
-          {config ? (
-            <Badge variant="running">{t("settings:spaceAuth.configured")}</Badge>
-          ) : (
-            <Badge variant="secondary">{t("settings:spaceAuth.notConfigured")}</Badge>
-          )}
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          {t("settings:spaceAuth.socialHint", { provider: title })}
-        </p>
-      </header>
-
-      {personal ? (
-        <DeleteConfigButton disabled={del.isPending} onClick={() => setConfirmDelete(true)} />
-      ) : (
+    <ProviderConfigSection
+      icon={<Icon className="h-5 w-5" aria-hidden />}
+      title={title}
+      hint={t("settings:spaceAuth.socialHint", { provider: title })}
+      configured={!!config}
+      personal={personal}
+      del={del}
+      deleteTitle={t("settings:spaceAuth.socialDeleteTitle")}
+      deleteDescription={t("settings:spaceAuth.socialDeleteConfirm", { provider: title })}
+      deletedMessage={t("settings:spaceAuth.socialDeleted")}
+    >
+      {(deleteButton) => (
         <form onSubmit={handleSubmit} className="space-y-4">
           <FormItem id={`${provider}-client-id`} label={requiredLabel("Client ID")}>
             <Input
@@ -412,24 +357,103 @@ function SocialSection({
             <Button type="submit" disabled={upsert.isPending}>
               {upsert.isPending ? <Spinner /> : t("common:btn.save")}
             </Button>
-            {config && (
-              <DeleteConfigButton disabled={del.isPending} onClick={() => setConfirmDelete(true)} />
-            )}
+            {deleteButton}
           </div>
         </form>
       )}
+    </ProviderConfigSection>
+  );
+}
+
+// ─── bits ────────────────────────────────────────────────────────────────────
+
+/**
+ * Re-seeds the form from the loaded row on first load and whenever the row's
+ * `updatedAt` changes; waits for the fetch so an empty form is never seeded
+ * over a row that is still loading.
+ */
+function useSeededForm<C extends { updatedAt: string }, F>(
+  config: C | null | undefined,
+  isLoading: boolean,
+  empty: () => F,
+  from: (c: C) => F,
+) {
+  const [form, setForm] = useState(empty);
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  const seedKey = config ? config.updatedAt : "none";
+  if (!isLoading && seededFor !== seedKey) {
+    setForm(config ? from(config) : empty());
+    setSeededFor(seedKey);
+  }
+  return [form, setForm] as const;
+}
+
+/**
+ * Shared skeleton of a per-space provider config: title, configured badge,
+ * hint, the form (hidden in a personal space, where an existing row is only
+ * deletable) and the delete confirmation. `children` receives the delete
+ * button, or null when there is no row to delete.
+ */
+function ProviderConfigSection({
+  icon,
+  title,
+  hint,
+  configured,
+  personal,
+  del,
+  deleteTitle,
+  deleteDescription,
+  deletedMessage,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  hint: string;
+  configured: boolean;
+  personal: boolean;
+  del: { isPending: boolean; mutate: (v: undefined, o: { onSuccess: () => void }) => void };
+  deleteTitle: string;
+  deleteDescription: string;
+  deletedMessage: string;
+  children: (deleteButton: ReactNode) => ReactNode;
+}) {
+  const { t } = useTranslation("settings");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  if (personal && !configured) return null;
+
+  const deleteButton = configured ? (
+    <DeleteConfigButton disabled={del.isPending} onClick={() => setConfirmDelete(true)} />
+  ) : null;
+
+  return (
+    <section className="space-y-4">
+      <header className="space-y-1">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          {icon}
+          {title}
+          {configured ? (
+            <Badge variant="running">{t("spaceAuth.configured")}</Badge>
+          ) : (
+            <Badge variant="secondary">{t("spaceAuth.notConfigured")}</Badge>
+          )}
+        </h2>
+        <p className="text-muted-foreground text-sm">{hint}</p>
+      </header>
+
+      {personal ? deleteButton : children(deleteButton)}
 
       <ConfirmModal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        title={t("settings:spaceAuth.socialDeleteTitle")}
-        description={t("settings:spaceAuth.socialDeleteConfirm", { provider: title })}
+        title={deleteTitle}
+        description={deleteDescription}
         isPending={del.isPending}
         onConfirm={() =>
           del.mutate(undefined, {
             onSuccess: () => {
               setConfirmDelete(false);
-              toast.success(t("settings:spaceAuth.socialDeleted"));
+              toast.success(deletedMessage);
             },
           })
         }
@@ -437,8 +461,6 @@ function SocialSection({
     </section>
   );
 }
-
-// ─── bits ────────────────────────────────────────────────────────────────────
 
 function DeleteConfigButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
   const { t } = useTranslation("common");

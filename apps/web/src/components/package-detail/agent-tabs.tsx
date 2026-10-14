@@ -111,8 +111,10 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
         <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
           {can("schedules:write") && (
             <EmptyStateAction
-              label={t("schedule.titleNew")}
-              onClick={() => newSchedule.open(packageId)}
+              action={{
+                label: t("schedule.titleNew"),
+                onSelect: () => newSchedule.open(packageId),
+              }}
             />
           )}
         </EmptyState>

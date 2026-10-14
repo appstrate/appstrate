@@ -3,11 +3,10 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Coins } from "lucide-react";
-import { cn } from "@appstrate/ui/cn";
 import { SidebarGroup } from "@appstrate/ui/components/sidebar";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useBilling } from "../hooks/use-billing";
-import { getUsageBarColor } from "../lib/usage-severity";
+import { UsageBar } from "./usage-bar";
 import { formatNumber } from "../lib/format-number";
 
 /** The organization's credit gauge, at the foot of the navigation. */
@@ -19,8 +18,6 @@ export function SidebarCredits() {
   const { data: billing } = useBilling({ enabled: shown });
 
   if (!billing) return null;
-
-  const percent = Math.min(billing.usage_percent, 100);
 
   return (
     <SidebarGroup className="mt-auto">
@@ -37,22 +34,11 @@ export function SidebarCredits() {
             {formatNumber(billing.credits_used)} / {formatNumber(billing.credit_quota)}
           </span>
         </div>
-        <div
-          className="bg-sidebar-border h-1.5 overflow-hidden rounded-full"
-          role="progressbar"
-          aria-valuenow={percent}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label={t("nav.credits")}
-        >
-          <div
-            className={cn(
-              "h-full rounded-full transition-all",
-              getUsageBarColor(billing.usage_percent),
-            )}
-            style={{ width: `${percent}%` }}
-          />
-        </div>
+        <UsageBar
+          percent={billing.usage_percent}
+          label={t("nav.credits")}
+          className="bg-sidebar-border h-1.5"
+        />
       </Link>
     </SidebarGroup>
   );

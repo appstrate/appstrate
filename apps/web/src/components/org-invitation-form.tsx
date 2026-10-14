@@ -8,6 +8,7 @@ import { z } from "zod";
 import { useTranslation } from "react-i18next";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { useQueryClient } from "@tanstack/react-query";
+import { ORG_ROLES } from "@appstrate/core/permissions";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError, FieldGroup, FormItem } from "@appstrate/ui/components/field";
@@ -23,9 +24,6 @@ import {
 import { SpaceAssignmentsField } from "./space-assignments-field";
 import { Spinner } from "./spinner";
 import { errorMessage } from "../lib/mutation-error";
-
-/** Widest reach first: admin, member, guest — the order every org-role list uses. */
-const ORG_ROLE_DISPLAY_ORDER: readonly AssignableOrgRole[] = ["admin", "member", "guest"];
 
 interface InviteFormValues {
   email: string;
@@ -164,8 +162,9 @@ export function OrgInvitationForm({
         <OrgRoleOptions
           idPrefix={fieldPrefix}
           disabled={isPending}
-          options={ORG_ROLE_DISPLAY_ORDER.filter(
-            (option) => !!invitation || allowGuest || option !== "guest",
+          options={ORG_ROLES.filter(
+            (option): option is AssignableOrgRole =>
+              option !== "owner" && (!!invitation || allowGuest || option !== "guest"),
           )}
           value={role}
           onValueChange={(value) => {

@@ -3,120 +3,26 @@
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Unplug, Pencil, Check, X } from "lucide-react";
+import { Unplug, Pencil, Trash2 } from "lucide-react";
+import { DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
 import { cn } from "@appstrate/ui/cn";
-import {
-  useMyConnections,
-  useConnectionDeleteImpact,
-  useDisconnectIntegrationConnection,
-  useRenameMeConnection,
-} from "../../hooks/use-me-connections";
+import { useMyConnections, useRenameMeConnection } from "../../hooks/use-me-connections";
 import { useConnectionShare } from "../../hooks/use-integrations";
 import { formatDateField } from "../../lib/format-date";
 import { EmptyState, ErrorState } from "../../components/page-states";
 import { ItemList } from "../../components/item-list";
 import { PackageIcon } from "../../components/package-icon";
-import { ConfirmModal } from "../../components/confirm-modal";
+import { InlineEditableLabel } from "../../components/inline-editable-label";
+import { TableRowActions } from "../../components/table-row-actions";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
-import { ConnectionTeardownSteps } from "../../components/integration-connect/connection-teardown-steps";
-import { ConnectionDeleteImpact } from "../../components/integration-connect/connection-delete-impact";
-import { isQueryInFlight } from "../../lib/query-state";
+import { ConnectionDeleteConfirm } from "../../components/integration-connect/connection-delete-confirm";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { useCanReach } from "../../hooks/use-can-reach";
-import { DisabledReasonTooltip } from "../../components/disabled-reason-tooltip";
 import { connectionLockHintKey } from "../../components/integration-connect/connection-ownership";
 import { usePermissions } from "../../hooks/use-permissions";
 import { ConnectionScopeBadge } from "../../components/integration-connect/connection-scope-badge";
 import { ConnectionShareEditor } from "../../components/integration-connect/connection-share-editor";
-
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
-
-function statusBadge(t: ReturnType<typeof useTranslation>["t"], conn: MeConnectionEntry) {
-  return conn.needs_reconnection ? (
-    <ConnectionStatusBadge tone="needsReconnection">
-      {t("connections.statusNeedsReconnection")}
-    </ConnectionStatusBadge>
-  ) : (
-    <ConnectionStatusBadge tone="connected">
-      {t("connections.statusConnected")}
-    </ConnectionStatusBadge>
-  );
-}
-
-// ─────────────────────────────────────────────
-// Inline label edit
-// ─────────────────────────────────────────────
-
-function LabelEditor({
-  current,
-  saving,
-  onSave,
-}: {
-  current: string;
-  saving: boolean;
-  /** Calls `onSuccess` once saved: a refused label (e.g. already taken) stays open to fix. */
-  onSave: (next: string, onSuccess: () => void) => void;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(current);
-
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          setValue(current);
-          setEditing(true);
-        }}
-        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs"
-        title={t("connections.editLabel")}
-      >
-        <span>{current}</span>
-        <Pencil className="h-3 w-3" />
-      </button>
-    );
-  }
-
-  const commit = () => {
-    const trimmed = value.trim();
-    if (trimmed.length === 0 || trimmed === current) setEditing(false);
-    else onSave(trimmed, () => setEditing(false));
-  };
-
-  return (
-    <div className="flex items-center gap-1">
-      <Input
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") setEditing(false);
-        }}
-        className="h-7 w-40 text-xs"
-        disabled={saving}
-        placeholder={t("connections.labelPlaceholder")}
-      />
-      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={commit} disabled={saving}>
-        <Check className="h-3 w-3" />
-      </Button>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="h-6 w-6"
-        onClick={() => setEditing(false)}
-        disabled={saving}
-      >
-        <X className="h-3 w-3" />
-      </Button>
-    </div>
-  );
-}
 
 // ─────────────────────────────────────────────
 // Connection row (integration connection)
@@ -124,25 +30,21 @@ function LabelEditor({
 
 function ConnectionRow({
   conn,
-  onDisconnect,
   onRename,
   onShare,
   onUnshare,
-  disconnecting,
-  renaming,
   sharing,
 }: {
   conn: MeConnectionEntry;
-  onDisconnect: () => void;
-  onRename: (label: string, onSuccess: () => void) => void;
+  onRename: (label: string) => Promise<unknown>;
   onShare: (spaceId: string) => void;
   onUnshare: (spaceId: string) => void;
-  disconnecting: boolean;
-  renaming: boolean;
   sharing: boolean;
 }) {
-  const { t } = useTranslation(["settings", "common"]);
+  const { t } = useTranslation(["settings", "common", "agents"]);
   const { can } = usePermissions();
+  const [renaming, setRenaming] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // A pin or default names it: delete answers 409 until removed there.
   const lockKey = connectionLockHintKey(conn.locked_by, can("integrations:configure"));
   const lockHint = lockKey ? t(lockKey) : null;
@@ -214,16 +116,24 @@ function ConnectionRow({
   }
 
   return (
-    <div className="border-border flex items-start justify-between gap-4 rounded-md border p-3">
+    <div
+      data-row
+      className="border-border flex items-start justify-between gap-4 rounded-md border p-3"
+    >
       <div className="flex flex-1 flex-col gap-2">
         {/* Header: label (editable for integration) + status */}
         <div className="flex flex-wrap items-center gap-2">
-          {canRename ? (
-            <LabelEditor current={conn.label} saving={renaming} onSave={onRename} />
-          ) : (
-            <span className="text-foreground text-sm font-medium">{conn.label}</span>
-          )}
-          {statusBadge(t, conn)}
+          <InlineEditableLabel
+            value={conn.label}
+            editable={canRename}
+            editing={renaming}
+            onEditingChange={setRenaming}
+            placeholder={t("connections.labelPlaceholder")}
+            onSave={async (label) => {
+              await onRename(label);
+            }}
+          />
+          <ConnectionStatusBadge needsReconnection={conn.needs_reconnection} />
           <ConnectionScopeBadge scope={conn.scope} />
         </div>
 
@@ -257,17 +167,40 @@ function ConnectionRow({
         </div>
       </div>
 
-      <DisabledReasonTooltip reason={lockHint}>
-        <Button
-          variant="destructive"
-          size="sm"
-          className="shrink-0"
-          onClick={onDisconnect}
-          disabled={disconnecting || !!lockHint}
-        >
-          {t("btn.disconnect")}
-        </Button>
-      </DisabledReasonTooltip>
+      <TableRowActions
+        menuLabel={t("integration.connection.moreActions", { name: conn.label })}
+        renaming={renaming}
+        actions={[
+          {
+            id: "rename",
+            label: t("btn.rename", { ns: "common" }),
+            icon: Pencil,
+            onSelect: () => setRenaming(true),
+            hidden: !canRename,
+          },
+          {
+            id: "delete",
+            label: t("integration.connection.delete"),
+            icon: Trash2,
+            onSelect: () => setConfirmDelete(true),
+            disabled: !!lockHint,
+            destructive: true,
+          },
+        ]}
+      >
+        {/* Said in the menu, where the dead item is: a disabled item takes no hover. */}
+        {lockHint && (
+          <DropdownMenuLabel className="text-muted-foreground max-w-64 text-xs font-normal">
+            {lockHint}
+          </DropdownMenuLabel>
+        )}
+      </TableRowActions>
+      <ConnectionDeleteConfirm
+        connectionId={conn.connection_id}
+        name={conn.label}
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }
@@ -335,20 +268,11 @@ export function PreferencesConnectionsPage() {
   const { data: groups, isLoading, isError } = useMyConnections();
   const canBrowseIntegrations = useCanReach()("/integrations");
 
-  const disconnectIntegration = useDisconnectIntegrationConnection();
   const renameIntegration = useRenameMeConnection();
   const shareIntegration = useConnectionShare("share");
   const unshareIntegration = useConnectionShare("unshare");
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [confirmState, setConfirmState] = useState<{
-    kind: "integration";
-    displayName: string;
-    identity: string | null;
-    connectionId: string;
-  } | null>(null);
-  const deleteImpact = useConnectionDeleteImpact(confirmState?.connectionId);
-
   const totalConnections = useMemo(
     () => (groups ?? []).reduce((s, g) => s + g.total_connections, 0),
     [groups],
@@ -420,22 +344,12 @@ export function PreferencesConnectionsPage() {
               renderRow={(conn) => (
                 <ConnectionRow
                   conn={conn}
-                  disconnecting={disconnectIntegration.isPending}
-                  renaming={renameIntegration.isPending}
                   sharing={shareIntegration.isPending || unshareIntegration.isPending}
-                  onDisconnect={() =>
-                    setConfirmState({
-                      kind: "integration",
-                      displayName: group.display_name,
-                      identity: conn.identity,
+                  onRename={(label) =>
+                    renameIntegration.mutateAsync({
                       connectionId: conn.connection_id,
+                      body: { label },
                     })
-                  }
-                  onRename={(label, onSuccess) =>
-                    renameIntegration.mutate(
-                      { connectionId: conn.connection_id, body: { label } },
-                      { onSuccess },
-                    )
                   }
                   onShare={(spaceId) =>
                     shareIntegration.mutate({ connectionId: conn.connection_id, spaceId })
@@ -449,35 +363,6 @@ export function PreferencesConnectionsPage() {
           );
         }}
       />
-
-      <ConfirmModal
-        open={!!confirmState}
-        onClose={() => setConfirmState(null)}
-        // The blast radius is `ConnectionDeleteImpact` below — the caller's own
-        // pins and schedules the delete rewrites, and the count of other people's
-        // schedules it disables. Same words as the integration page.
-        title={t("integration.connection.deleteTitle", {
-          name: confirmState?.identity ?? confirmState?.displayName ?? "",
-        })}
-        description={t("integration.connection.deleteConfirm")}
-        confirmLabel={t("btn.delete", { ns: "common" })}
-        isPending={disconnectIntegration.isPending}
-        confirmDisabled={isQueryInFlight(deleteImpact)}
-        onConfirm={() => {
-          if (!confirmState) return;
-          disconnectIntegration.mutate(
-            { params: { path: { connectionId: confirmState.connectionId } } },
-            { onSuccess: () => setConfirmState(null) },
-          );
-        }}
-      >
-        {confirmState && (
-          <>
-            <ConnectionDeleteImpact impact={deleteImpact} />
-            <ConnectionTeardownSteps connectionId={confirmState.connectionId} />
-          </>
-        )}
-      </ConfirmModal>
     </>
   );
 }

@@ -12,7 +12,6 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { formatBytes } from "../lib/format-bytes";
 import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useFiles, type FileDto } from "../hooks/use-files";
@@ -70,7 +69,7 @@ function DocumentsCollection({
   const canReach = useCanReach();
   const [view, setView] = useListView("documents");
   const searchPlaceholder = useSearchPlaceholder(t("page.title"));
-  const { storage, limitBytes: limit } = useOrgStorage();
+  const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
   const query = useDebouncedValue(search);
   const signature = `${effectivePurpose ?? ""}|${query}`;
 
@@ -112,18 +111,10 @@ function DocumentsCollection({
   const countLabel = hasMore
     ? t("page.countLoaded", { count: files.length })
     : t("page.count", { count: files.length });
-  const usageLabel = storage
-    ? limit === null
-      ? t("storage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
-      : t("storage.usedOfLimit", {
-          used: formatBytes(storage.used_bytes),
-          limit: formatBytes(limit),
-        })
-    : null;
   const overLimit = storage !== undefined && limit !== null && storage.used_bytes >= limit;
   const footerLabel = usageLabel ? (
     <>
-      {countLabel} <span aria-hidden>·</span> {usageLabel}
+      {countLabel} <span aria-hidden>·</span> {t("storage.usage", { usage: usageLabel })}
     </>
   ) : (
     countLabel

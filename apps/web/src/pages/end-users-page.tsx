@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import { Plus, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import {
   useDeleteEndUser,
   useEndUser,
@@ -24,7 +23,7 @@ import { DataTable } from "../components/data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { ListToolbar } from "../components/list-toolbar";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
-import { PageActionsMenu } from "../components/page-actions-menu";
+import type { PageAction } from "../components/page-actions-menu";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { endUserDisplayName, useEndUserColumns } from "./end-user-columns";
 
@@ -123,22 +122,21 @@ function EndUsersPageContent() {
   const visibility = useColumnVisibility("end-users");
   const columns = visibleColumns(allColumns, visibility.hidden);
 
+  const create: PageAction = {
+    id: "create",
+    icon: Plus,
+    label: t("spaces.newEndUser"),
+    onSelect: () => newEndUser.open(),
+    hidden: !canWrite,
+  };
+
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={Users} />;
 
   // Reading is the route's gate (`end-users:read`); creating and editing need
   // `end-users:write`, deleting `end-users:delete` (the row menu checks it).
   return (
     <div>
-      {canWrite && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            <DropdownMenuItem data-page-action="create" onSelect={() => newEndUser.open()}>
-              <Plus />
-              {t("spaces.newEndUser")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
+      <SettingsPageActions actions={[create]} />
 
       <ListToolbar
         search={{
@@ -174,12 +172,7 @@ function EndUsersPageContent() {
               icon={Users}
               compact
             >
-              {canWrite && (
-                <EmptyStateAction
-                  label={t("spaces.newEndUser")}
-                  onClick={() => newEndUser.open()}
-                />
-              )}
+              <EmptyStateAction action={create} />
             </EmptyState>
           )
         }

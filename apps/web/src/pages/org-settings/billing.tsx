@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, CreditCard } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
-import { formatBytes } from "../../lib/format-bytes";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
 import {
@@ -16,7 +15,7 @@ import {
   type CheckoutPlanId,
 } from "../../hooks/use-billing";
 import { useOrgStorage } from "../../hooks/use-org-storage";
-import { getUsageBarColor } from "../../lib/usage-severity";
+import { UsageBar } from "../../components/usage-bar";
 import { PlanGrid } from "../../components/plan-card";
 import { BillingManagersSection } from "../../components/billing-managers-section";
 import { BillingContactSection } from "../../components/billing-contact-section";
@@ -57,7 +56,12 @@ export function OrgSettingsBillingPage() {
   // Storage entitlement — core data (organizations.files_bytes_*), shown
   // next to the credit gauge because the plan drives the storage limit when
   // billing is on. Same source (useOrgStorage) as org-settings/general.
-  const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
+  const {
+    storage,
+    limitBytes: storageLimit,
+    percent: storagePercent,
+    usageLabel,
+  } = useOrgStorage();
 
   // The two admin sections below are MOUNTED on `billing:manage`, not merely
   // hidden by it, so their queries never fire for a caller the routes would 403.
@@ -168,19 +172,7 @@ export function OrgSettingsBillingPage() {
               </span>
             </span>
           </div>
-          <div
-            className="bg-muted h-2 overflow-hidden rounded-full"
-            role="progressbar"
-            aria-valuenow={Math.min(billing.usage_percent, 100)}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label={t("billing.usage")}
-          >
-            <div
-              className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usage_percent)}`}
-              style={{ width: `${Math.min(billing.usage_percent, 100)}%` }}
-            />
-          </div>
+          <UsageBar percent={billing.usage_percent} label={t("billing.usage")} />
         </div>
 
         {storage && (
@@ -188,35 +180,20 @@ export function OrgSettingsBillingPage() {
             <div className="mb-1 flex items-center justify-between text-sm">
               <span className="text-muted-foreground">{t("billing.storageUsage")}</span>
               <span className="font-medium">
-                {storageLimit === null
-                  ? t("orgStorage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
-                  : `${storagePercent}%`}
-                {storageLimit !== null && (
-                  <span className="text-muted-foreground ml-2 text-xs font-normal">
-                    (
-                    {t("orgStorage.usedOfLimit", {
-                      used: formatBytes(storage.used_bytes),
-                      limit: formatBytes(storageLimit),
-                    })}
-                    )
-                  </span>
+                {storageLimit === null ? (
+                  usageLabel
+                ) : (
+                  <>
+                    {storagePercent}%
+                    <span className="text-muted-foreground ml-2 text-xs font-normal">
+                      ({usageLabel})
+                    </span>
+                  </>
                 )}
               </span>
             </div>
             {storageLimit !== null && (
-              <div
-                className="bg-muted h-2 overflow-hidden rounded-full"
-                role="progressbar"
-                aria-valuenow={storagePercent ?? 0}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label={t("billing.storageUsage")}
-              >
-                <div
-                  className={`h-full rounded-full transition-all ${getUsageBarColor(storagePercent ?? 0)}`}
-                  style={{ width: `${storagePercent ?? 0}%` }}
-                />
-              </div>
+              <UsageBar percent={storagePercent ?? 0} label={t("billing.storageUsage")} />
             )}
           </div>
         )}

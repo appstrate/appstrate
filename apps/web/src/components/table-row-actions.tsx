@@ -65,7 +65,8 @@ export function TableRowActions({
    * True while the row's name is in inline edit, started from this menu's
    * « Rename ». The menu holds focus until it has finished closing, so a field
    * that focuses itself at once loses it again: when the menu is gone, focus goes
-   * to the row's text field (selected) instead of back to the « … ».
+   * to the row's text field (selected) instead of back to the « … ». The row is
+   * the menu's `<tr>`, or the element marked `data-row` in a list of cards.
    */
   renaming?: boolean;
   children?: ReactNode;
@@ -99,7 +100,7 @@ export function TableRowActions({
             onCloseAutoFocus={(event) => {
               if (!renaming) return;
               event.preventDefault();
-              const field = triggerRef.current?.closest("tr")?.querySelector("input");
+              const field = triggerRef.current?.closest("tr, [data-row]")?.querySelector("input");
               field?.focus();
               field?.select();
             }}

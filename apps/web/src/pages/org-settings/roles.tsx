@@ -8,7 +8,6 @@ import { Eye, Grid3x3, Plus, Rows3, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { FormItem } from "@appstrate/ui/components/field";
@@ -34,7 +33,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { DataTable } from "../../components/data-table";
 import { Modal } from "../../components/modal";
 import { FormModal } from "../../components/form-modal";
-import { PageActionsMenu } from "../../components/page-actions-menu";
+import type { PageAction } from "../../components/page-actions-menu";
 import { ScopeMultiSelect } from "../../components/scope-multi-select";
 import { SettingsGroup } from "../../components/settings/setting-row";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
@@ -156,6 +155,22 @@ export function OrgSettingsRolesPage() {
   const openRole = (role: RoleObject) => roleParam.open(role.key);
   const target = roleParam.target;
   const editable = !!target && target.kind === "custom" && canWrite;
+  const create: PageAction = {
+    id: "create",
+    icon: Plus,
+    testId: "create-role-button",
+    label: t("roles.create"),
+    onSelect: () => newRole.open(),
+    hidden: !deeds.includes("create"),
+  };
+  const viewAs: PageAction = {
+    id: "view-as",
+    icon: Eye,
+    testId: "view-as-button",
+    label: t("viewAs.trigger"),
+    onSelect: () => viewAsParam.open(),
+    hidden: !deeds.includes("view-as"),
+  };
   const tableState = {
     isLoading,
     failure: error,
@@ -163,32 +178,7 @@ export function OrgSettingsRolesPage() {
 
   return (
     <>
-      {deeds.length > 0 && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            {deeds.includes("create") && (
-              <DropdownMenuItem
-                data-page-action="create"
-                data-testid="create-role-button"
-                onSelect={() => newRole.open()}
-              >
-                <Plus />
-                {t("roles.create")}
-              </DropdownMenuItem>
-            )}
-            {deeds.includes("view-as") && (
-              <DropdownMenuItem
-                data-page-action="view-as"
-                data-testid="view-as-button"
-                onSelect={() => viewAsParam.open()}
-              >
-                <Eye />
-                {t("viewAs.trigger")}
-              </DropdownMenuItem>
-            )}
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
+      <SettingsPageActions actions={[create, viewAs]} />
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <CollectionTabs
@@ -253,12 +243,7 @@ export function OrgSettingsRolesPage() {
                       icon={ShieldCheck}
                       compact
                     >
-                      {deeds.includes("create") && (
-                        <EmptyStateAction
-                          label={t("roles.create")}
-                          onClick={() => newRole.open()}
-                        />
-                      )}
+                      <EmptyStateAction action={create} />
                     </EmptyState>
                   }
                 />

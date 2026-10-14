@@ -96,7 +96,9 @@ export function VersionHistory({
             compact
           >
             {onCreate && !search && !states.length && (
-              <EmptyStateAction label={t("version.createVersion")} onClick={onCreate} />
+              <EmptyStateAction
+                action={{ label: t("version.createVersion"), onSelect: onCreate }}
+              />
             )}
           </EmptyState>
         }

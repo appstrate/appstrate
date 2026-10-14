@@ -11,12 +11,12 @@ import { useStore } from "zustand";
 import { useQueryClient } from "@tanstack/react-query";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { AlertTriangle, Plus } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { ProvidersTable } from "../../components/providers-table";
-import { PageActionsMenu } from "../../components/page-actions-menu";
+import type { PageAction } from "../../components/page-actions-menu";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import {
   deduplicateLabel,
   useCreateModelProviderCredential,
@@ -116,6 +116,14 @@ export function PreferencesModelsPage() {
     );
   };
 
+  const addCredential: PageAction = {
+    id: "create-credential",
+    icon: Plus,
+    label: t("credentials.addPersonal"),
+    onSelect: openCreate,
+    hidden: !canAdd,
+  };
+
   return (
     <>
       {personalModelCredentialsDisabled && (
@@ -125,18 +133,9 @@ export function PreferencesModelsPage() {
         </Alert>
       )}
 
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <p className="text-muted-foreground text-sm">{t("modelCredentials.description")}</p>
-        {/* The same Actions menu as the organization's pages. */}
-        {canAdd && (
-          <PageActionsMenu>
-            <DropdownMenuItem data-page-action="create-credential" onSelect={openCreate}>
-              <Plus />
-              {t("credentials.addPersonal")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        )}
-      </div>
+      <SettingsPageActions actions={[addCredential]} />
+
+      <p className="text-muted-foreground mb-4 text-sm">{t("modelCredentials.description")}</p>
 
       <ProvidersTable
         label={t("preferences.tabModels")}
@@ -149,9 +148,7 @@ export function PreferencesModelsPage() {
         empty={{
           message: t("modelCredentials.empty"),
           hint: t("modelCredentials.emptyHint"),
-          action: canAdd ? (
-            <EmptyStateAction label={t("credentials.addPersonal")} onClick={openCreate} />
-          ) : undefined,
+          action: <EmptyStateAction action={addCredential} />,
         }}
         canWriteModels={false}
         onRename={renameCredential}

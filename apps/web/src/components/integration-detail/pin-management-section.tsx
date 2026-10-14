@@ -2,19 +2,14 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import { OptionSelect } from "@appstrate/ui/components/select";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@appstrate/ui/components/table";
 import { SettingsHeading } from "../settings/settings-heading";
+import { ConfirmModal } from "../confirm-modal";
+import { DataTable } from "../data-table";
+import type { IntegrationPin } from "@appstrate/shared-types";
+import { usePinColumns } from "./pin-columns";
 import {
   useIntegrationPins,
   useIntegrationConnections,
@@ -23,7 +18,7 @@ import {
   useUpsertIntegrationPin,
   useDeleteIntegrationPin,
 } from "../../hooks/use-integrations";
-import { connectionOptionLabel, type ConnectionSet } from "../../lib/connection-set";
+import type { ConnectionSet } from "../../lib/connection-set";
 import { ConnectionSetPicker } from "../integration-connect/connection-choice-menu";
 import { connectionSetOption } from "../integration-connect/connection-set-option";
 
@@ -34,18 +29,27 @@ import { connectionSetOption } from "../integration-connect/connection-set-optio
  */
 export function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings", "agents"]);
-  const { data: pins } = useIntegrationPins(packageId);
+  const { data: pins, isLoading: pinsLoading } = useIntegrationPins(packageId);
   const { data: connections } = useIntegrationConnections(packageId);
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
   const deletePin = useDeleteIntegrationPin();
 
   const [adding, setAdding] = useState(false);
+  const [toDelete, setToDelete] = useState<IntegrationPin | null>(null);
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_here);
 
   // Lookup helpers for the table
   const agentDisplayName = (id: string): string =>
     consumingAgents?.find((a) => a.agent_package_id === id)?.display_name ?? id;
+
+  const columns = usePinColumns({
+    agentName: (pin) => agentDisplayName(pin.agent_package_id),
+    pinnable: pinnableConnections,
+    connections,
+    isDeleting: deletePin.isPending,
+    onDelete: setToDelete,
+  });
 
   // Only include agents not already pinned.
   const alreadyPinnedAgentIds = new Set(
@@ -65,70 +69,21 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
         description={t("integration.admin.exceptions.help")}
       />
 
-      {/* Existing pins */}
-      {(pins ?? []).length > 0 ? (
-        <div className="mb-4 overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("integration.admin.pinManagement.colAgent")}</TableHead>
-                <TableHead>{t("integration.admin.pinManagement.colConnections")}</TableHead>
-                <TableHead className="w-12" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(pins ?? []).map((p) => (
-                <TableRow key={p.agent_package_id} data-testid={`pin-row-${p.agent_package_id}`}>
-                  <TableCell>{agentDisplayName(p.agent_package_id)}</TableCell>
-                  <TableCell>
-                    {p.connection_ids.length === 0 && (
-                      <span className="text-muted-foreground">
-                        {t("agents:detail.integrationMemberPicker.none")}
-                      </span>
-                    )}
-                    {p.connection_ids.map((id, i) => {
-                      const c = pinnableConnections.find((x) => x.id === id);
-                      return (
-                        <span key={id}>
-                          {i > 0 && " · "}
-                          {c ? (
-                            connectionOptionLabel(c)
-                          ) : connections === undefined ? null : (
-                            // No longer shared or deleted: every run of this agent is refused.
-                            <span className="text-warning">
-                              {t("integration.admin.unavailableConnection")}
-                            </span>
-                          )}
-                        </span>
-                      );
-                    })}
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-6 w-6"
-                      disabled={deletePin.isPending}
-                      onClick={() =>
-                        deletePin.mutate({
-                          params: { path: { packageId, agentPackageId: p.agent_package_id } },
-                        })
-                      }
-                      title={t("integration.admin.pinManagement.delete")}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <p className="text-muted-foreground mb-3 text-xs italic">
-          {t("integration.admin.pinManagement.empty")}
-        </p>
-      )}
+      <div className="mb-4">
+        <DataTable
+          tableId="integration-pins"
+          label={t("integration.admin.exceptions.title")}
+          columns={columns}
+          rows={pins ?? []}
+          rowKey={(pin) => pin.agent_package_id}
+          isLoading={pinsLoading}
+          empty={
+            <p className="text-muted-foreground px-3 py-3 text-xs italic">
+              {t("integration.admin.pinManagement.empty")}
+            </p>
+          }
+        />
+      </div>
 
       {/* Add new pin — "no connection" needs no shared connection. */}
       {pinnableAgents.length === 0 ? (
@@ -147,6 +102,24 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
           onDone={() => setAdding(false)}
         />
       )}
+
+      <ConfirmModal
+        open={toDelete !== null}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => {
+          if (!toDelete) return;
+          deletePin.mutate(
+            { params: { path: { packageId, agentPackageId: toDelete.agent_package_id } } },
+            { onSuccess: () => setToDelete(null) },
+          );
+        }}
+        title={t("integration.admin.pinManagement.delete")}
+        description={t("integration.admin.pinManagement.deleteConfirm", {
+          agent: toDelete ? agentDisplayName(toDelete.agent_package_id) : "",
+        })}
+        confirmLabel={t("btn.delete", { ns: "common" })}
+        isPending={deletePin.isPending}
+      />
     </div>
   );
 }

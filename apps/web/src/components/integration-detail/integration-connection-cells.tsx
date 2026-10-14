@@ -23,15 +23,13 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { Bot, Pencil, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
-import { ConfirmModal } from "../confirm-modal";
 import { InlineEditableLabel } from "../inline-editable-label";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
 import { ConnectionScopeBadge } from "../integration-connect/connection-scope-badge";
 import { ConnectionShareEditor } from "../integration-connect/connection-share-editor";
 import { ConnectionVariablesLine } from "../integration-connect/connection-variables-line";
 import { useHostedConnectPopup } from "../integration-connect/use-integration-oauth-popup";
-import { ConnectionDeleteImpact } from "../integration-connect/connection-delete-impact";
-import { ConnectionTeardownSteps } from "../integration-connect/connection-teardown-steps";
+import { ConnectionDeleteConfirm } from "../integration-connect/connection-delete-confirm";
 import { connectionLockHintKey } from "../integration-connect/connection-ownership";
 import {
   useRenameIntegrationConnection,
@@ -41,11 +39,6 @@ import {
   useAgentsConsumingIntegration,
   useIntegrationPins,
 } from "../../hooks/use-integrations";
-import {
-  useConnectionDeleteImpact,
-  useDisconnectIntegrationConnection,
-} from "../../hooks/use-me-connections";
-import { isQueryInFlight } from "../../lib/query-state";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentOrgId } from "../../hooks/use-org";
@@ -179,18 +172,9 @@ export function AccountCell({
 
 /** Connected, or needing a reconnection its owner alone can perform. */
 export function StatusCell({ connection }: { connection: IntegrationConnection }) {
-  const { t } = useTranslation("settings");
   return (
     <div className="flex min-w-0 items-center gap-2">
-      {connection.needs_reconnection ? (
-        <ConnectionStatusBadge tone="needsReconnection">
-          {t("integration.auth.needsReconnection")}
-        </ConnectionStatusBadge>
-      ) : (
-        <ConnectionStatusBadge tone="connected">
-          {t("integration.connection.statusConnected")}
-        </ConnectionStatusBadge>
-      )}
+      <ConnectionStatusBadge needsReconnection={connection.needs_reconnection} />
     </div>
   );
 }
@@ -279,10 +263,7 @@ export function ConnectionActionsCell({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const { openPopup, isPending: reconnecting } = useHostedConnectPopup();
-  const disconnect = useDisconnectIntegrationConnection();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  // Read only while the confirmation is open; the button waits for it.
-  const deleteImpact = useConnectionDeleteImpact(confirmDelete ? connection.id : undefined);
   const { canConnect, canRename, lockKey } = useRowGrants(connection, isAdmin);
   const { text: lockHint, agents: pinningAgents } = useLockText(
     connection,
@@ -301,7 +282,7 @@ export function ConnectionActionsCell({
     <>
       <TableRowActions
         menuLabel={t("integration.connection.moreActions", { name: connection.label })}
-        isPending={disconnect.isPending || reconnecting}
+        isPending={reconnecting}
         renaming={renaming}
         actions={[
           {
@@ -325,7 +306,7 @@ export function ConnectionActionsCell({
             label: t("integration.connection.delete"),
             icon: Trash2,
             onSelect: () => setConfirmDelete(true),
-            disabled: disconnect.isPending || !!lockHint,
+            disabled: !!lockHint,
             destructive: true,
             hidden: !isOwn,
             testId: `connection-delete-${connection.id}`,
@@ -359,28 +340,12 @@ export function ConnectionActionsCell({
           </DropdownMenuItem>
         )}
       </TableRowActions>
-      <ConfirmModal
+      <ConnectionDeleteConfirm
+        connectionId={connection.id}
+        name={connection.label}
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        title={t("integration.connection.deleteTitle", { name: connection.label })}
-        description={t("integration.connection.deleteConfirm")}
-        confirmLabel={t("btn.delete", { ns: "common" })}
-        isPending={disconnect.isPending}
-        confirmDisabled={isQueryInFlight(deleteImpact)}
-        onConfirm={() =>
-          disconnect.mutate(
-            { params: { path: { connectionId: connection.id } } },
-            { onSuccess: () => setConfirmDelete(false) },
-          )
-        }
-      >
-        {confirmDelete && (
-          <>
-            <ConnectionDeleteImpact impact={deleteImpact} />
-            <ConnectionTeardownSteps connectionId={connection.id} />
-          </>
-        )}
-      </ConfirmModal>
+      />
     </>
   );
 }

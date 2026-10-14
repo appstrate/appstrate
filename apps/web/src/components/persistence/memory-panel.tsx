@@ -2,18 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BrainCircuit, Copy, FileText, MoreHorizontal, Pin, Trash2 } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
+import { BrainCircuit } from "lucide-react";
 import type { PersistenceActorType } from "@appstrate/shared-types";
-import { EmptyState, ErrorState } from "../page-states";
-import { TextSkeleton } from "../loading-skeletons";
+import { EmptyState, NoMatchState } from "../page-states";
 import { ActorBadge } from "./actor-badge";
+import { useMemoryColumns, type MemoryCollectionItem } from "./memory-columns";
+import { DataTable } from "../data-table";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { Modal } from "../modal";
 import { ConfirmModal } from "../confirm-modal";
@@ -37,15 +31,6 @@ interface MemoryPanelProps {
   runId?: string;
   /** Optional entry filter used by overview deep links. */
   initialTypes?: Array<"pinned" | "archive">;
-}
-
-/**
- * A tier with nothing in it. Quiet on purpose: the panel already draws the
- * ringed empty state when BOTH tiers are empty, and two of those stacked on one
- * screen would read as two failures rather than as one calm answer.
- */
-function SectionEmpty({ message }: { message: string }) {
-  return <p className="text-muted-foreground/70 px-2 py-2 text-xs italic">{message}</p>;
 }
 
 /**
@@ -84,8 +69,7 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
   // Nothing in EITHER tier, and only once both requests have answered. The
   // counts alone are not enough: two queries that failed both count zero, and a
   // 500 on the endpoint must not draw "no memory yet". Failure and loading are
-  // answered per section by `ItemList`; this return says only that both tiers
-  // are empty.
+  // answered by the table; this return says only that both tiers are empty.
   if (!isLoading && !isError && pinnedCount + memoriesCount === 0) {
     return (
       <EmptyState
@@ -104,8 +88,7 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
         memories={memories ?? []}
         pinnedLoading={pinnedQ.isLoading}
         memoriesLoading={memoriesQ.isLoading}
-        pinnedError={pinnedQ.isError}
-        memoriesError={memoriesQ.isError}
+        failure={pinnedQ.error ?? memoriesQ.error}
         onDeletePinned={canDelete ? (id) => setToDelete({ kind: "pinned", id }) : undefined}
         onDeleteMemory={canDelete ? (id) => setToDelete({ kind: "memory", id }) : undefined}
         isDeleting={deletePinned.isPending || deleteMemory.isPending}
@@ -127,27 +110,14 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
   );
 }
 
-interface MemoryCollectionItem {
-  id: number;
-  kind: "pinned" | "archive";
-  key: string | null;
-  content: unknown;
-  actor_type: PersistenceActorType;
-  actor_id: string | null;
-  runId: string | null;
-  updatedAt: string | null;
-}
-
 const EMPTY_MEMORY_TYPES: Array<"pinned" | "archive"> = [];
-const CHECKPOINT_KEY = "checkpoint";
 
 function AgentMemoryCollection({
   pinned,
   memories,
   pinnedLoading,
   memoriesLoading,
-  pinnedError,
-  memoriesError,
+  failure,
   onDeletePinned,
   onDeleteMemory,
   isDeleting,
@@ -173,8 +143,7 @@ function AgentMemoryCollection({
   }>;
   pinnedLoading: boolean;
   memoriesLoading: boolean;
-  pinnedError: boolean;
-  memoriesError: boolean;
+  failure: unknown;
   onDeletePinned?: (id: number) => void;
   onDeleteMemory?: (id: number) => void;
   isDeleting: boolean;
@@ -251,26 +220,21 @@ function AgentMemoryCollection({
       : []),
   ];
   const canDelete = Boolean(onDeletePinned || onDeleteMemory);
-  const activeTable = (
-    <MemoryTableSection
-      title={t("agents:detail.tabMemory")}
-      items={filteredItems}
-      isLoading={pinnedLoading || memoriesLoading}
-      isError={pinnedError || memoriesError}
-      empty={t("agents:detail.memoryEmptyAll")}
-      onOpen={(item) => memoryParam.open(`${item.kind}:${item.id}`)}
-      onCopy={(item) => void copy(memoryText(item.content))}
-      onDelete={
-        canDelete
-          ? (item) => {
-              if (item.kind === "pinned") onDeletePinned?.(item.id);
-              else onDeleteMemory?.(item.id);
-            }
-          : undefined
-      }
-      isDeleting={isDeleting}
-    />
-  );
+  const columns = useMemoryColumns({
+    isDeleting,
+    onCopy: (item) => void copy(memoryText(item.content)),
+    onDelete: canDelete
+      ? (item) => {
+          if (item.kind === "pinned") onDeletePinned?.(item.id);
+          else onDeleteMemory?.(item.id);
+        }
+      : undefined,
+  });
+  const reset = () => {
+    setQuery("");
+    setTypes([]);
+    setScopes([]);
+  };
 
   const collection = (
     <section className={embedded ? "min-w-0" : "min-w-0 p-6"}>
@@ -282,15 +246,23 @@ function AgentMemoryCollection({
           placeholder: t("agents:detail.memorySearch"),
         }}
         filters={filters}
-        onReset={() => {
-          setTypes([]);
-          setScopes([]);
-        }}
+        onReset={reset}
       />
       {!embedded && (
         <p className="text-muted-foreground mb-2 text-xs">{t("agents:detail.memoryHelp")}</p>
       )}
-      <div>{activeTable}</div>
+      <DataTable
+        tableId="memory"
+        label={t("agents:detail.tabMemory")}
+        columns={columns}
+        rows={filteredItems}
+        rowKey={(item) => `${item.kind}:${item.id}`}
+        rowAction={(item) => memoryParam.open(`${item.kind}:${item.id}`)}
+        rowLabel={(item) => item.key ?? memoryText(item.content)}
+        isLoading={pinnedLoading || memoriesLoading}
+        failure={failure}
+        empty={<NoMatchState message={t("agents:list.noMatch")} onReset={reset} />}
+      />
     </section>
   );
 
@@ -330,155 +302,5 @@ function AgentMemoryCollection({
         )}
       </Modal>
     </>
-  );
-}
-
-function MemoryTableSection({
-  title,
-  items,
-  isLoading,
-  isError,
-  empty,
-  onOpen,
-  onCopy,
-  onDelete,
-  isDeleting,
-}: {
-  /** Accessible name of the table. */
-  title: string;
-  items: MemoryCollectionItem[];
-  isLoading: boolean;
-  isError: boolean;
-  empty: string;
-  onOpen: (item: MemoryCollectionItem) => void;
-  onCopy: (item: MemoryCollectionItem) => void;
-  onDelete?: (item: MemoryCollectionItem) => void;
-  isDeleting: boolean;
-}) {
-  const { t } = useTranslation(["agents", "common"]);
-  return (
-    <section>
-      {isLoading ? (
-        <TextSkeleton />
-      ) : isError ? (
-        <ErrorState compact />
-      ) : items.length === 0 ? (
-        <SectionEmpty message={empty} />
-      ) : (
-        <div role="table" aria-label={title}>
-          <div
-            role="row"
-            className="text-muted-foreground grid grid-cols-[7rem_minmax(0,1fr)_8rem_10rem_2.5rem] gap-3 border-y px-3 py-2 text-[11px] font-semibold tracking-wide uppercase"
-          >
-            <span role="columnheader">{t("agents:detail.memoryColumnType")}</span>
-            <span role="columnheader">{t("agents:detail.memoryColumnContent")}</span>
-            <span role="columnheader">{t("agents:detail.memoryColumnScope")}</span>
-            <span role="columnheader">{t("agents:detail.memoryColumnUpdated")}</span>
-            <span role="columnheader" className="text-right">
-              {t("agents:detail.memoryColumnActions")}
-            </span>
-          </div>
-          <div role="rowgroup" className="divide-y">
-            {items.map((item) => (
-              <MemoryCollectionRow
-                key={`${item.kind}:${item.id}`}
-                item={item}
-                onOpen={() => onOpen(item)}
-                onCopy={() => onCopy(item)}
-                onDelete={onDelete ? () => onDelete(item) : undefined}
-                isDeleting={isDeleting}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function MemoryCollectionRow({
-  item,
-  onOpen,
-  onCopy,
-  onDelete,
-  isDeleting,
-}: {
-  item: MemoryCollectionItem;
-  onOpen: () => void;
-  onCopy: () => void;
-  onDelete?: () => void;
-  isDeleting: boolean;
-}) {
-  const { t } = useTranslation(["agents", "common"]);
-  const content = memoryText(item.content);
-  return (
-    <div
-      role="row"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(event) => {
-        // Only the row's own focus: a key on its "…" menu belongs to the menu.
-        if (event.target !== event.currentTarget) return;
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpen();
-        }
-      }}
-      className="hover:bg-muted/35 focus-visible:ring-ring grid cursor-pointer grid-cols-[7rem_minmax(0,1fr)_8rem_10rem_2.5rem] items-center gap-3 px-3 py-3 outline-none focus-visible:ring-2"
-    >
-      <span role="cell" className="flex items-center gap-2 text-sm">
-        {item.kind === "pinned" ? (
-          <Pin className="text-primary size-3.5" aria-hidden />
-        ) : (
-          <FileText className="text-muted-foreground size-3.5" aria-hidden />
-        )}
-        {item.kind === "pinned"
-          ? t("agents:detail.memoryTypePinned")
-          : t("agents:detail.memoryTypeArchive")}
-      </span>
-      <span role="cell" className="min-w-0">
-        {item.key && <code className="mr-2 text-xs font-semibold">{item.key}</code>}
-        {item.key === CHECKPOINT_KEY && (
-          <span className="text-muted-foreground mr-2 text-[10px] tracking-wide uppercase">
-            {t("agents:detail.pinnedCheckpointHint")}
-          </span>
-        )}
-        <span className="text-muted-foreground block truncate text-sm" title={content}>
-          {content}
-        </span>
-      </span>
-      <span role="cell">
-        <ActorBadge actor_type={item.actor_type} actor_id={item.actor_id} />
-      </span>
-      <span role="cell" className="text-muted-foreground text-xs whitespace-nowrap">
-        {item.updatedAt ? formatDateField(item.updatedAt) : "—"}
-      </span>
-      <span role="cell" onClick={(event) => event.stopPropagation()}>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t("agents:detail.memoryRowActions")}
-              className="size-8"
-            >
-              <MoreHorizontal />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={onCopy}>
-              <Copy />
-              {t("common:btn.copy")}
-            </DropdownMenuItem>
-            {onDelete && (
-              <DropdownMenuItem disabled={isDeleting} variant="destructive" onSelect={onDelete}>
-                <Trash2 />
-                {t("common:btn.delete")}
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </span>
-    </div>
   );
 }

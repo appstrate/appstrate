@@ -6,9 +6,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { EmptyState } from "../../components/page-states";
-import { ItemList } from "../../components/item-list";
+import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { CliSessionCard } from "../../components/cli-session-card";
+import { useCliSessionColumns } from "../../components/cli-session-columns";
 import { $api } from "../../api/client";
 import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
 
@@ -43,6 +43,12 @@ export function PreferencesDevicesPage() {
   const [pendingRevoke, setPendingRevoke] = useState<CliSessionDisplay | null>(null);
   const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
 
+  const columns = useCliSessionColumns({
+    showMember: false,
+    revokingFamilyId: revokeOne.isPending ? (revokeOne.variables?.body.familyId ?? null) : null,
+    onRevoke: setPendingRevoke,
+  });
+
   const sessions = data ?? [];
 
   return (
@@ -66,9 +72,12 @@ export function PreferencesDevicesPage() {
         )}
       </div>
 
-      <ItemList
-        items={sessions}
-        itemKey={(s) => s.familyId}
+      <DataTable
+        tableId="cli-sessions-me"
+        columns={columns}
+        rows={sessions}
+        rowKey={(s) => s.familyId}
+        label={t("devices.title")}
         isLoading={isLoading}
         failure={error}
         empty={
@@ -78,15 +87,6 @@ export function PreferencesDevicesPage() {
             hint={t("devices.emptyDescription")}
           />
         }
-        renderItem={(s) => (
-          <CliSessionCard
-            session={s}
-            revokeDisabled={
-              revokeOne.isPending && revokeOne.variables?.body.familyId === s.familyId
-            }
-            onRevoke={() => setPendingRevoke(s)}
-          />
-        )}
       />
 
       <ConfirmModal

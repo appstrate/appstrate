@@ -8,7 +8,6 @@ import { AppWindow, Eye, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
@@ -37,8 +36,8 @@ import {
 } from "../../hooks/use-roles";
 import {
   useAddSpaceMember,
+  useAssignSpaceRole,
   useRemoveSpaceMember,
-  useUpdateSpaceMember,
   useSpaceMembers,
   type SpaceMemberObject,
 } from "../../hooks/use-space-members";
@@ -49,7 +48,7 @@ import { DataTable } from "../../components/data-table";
 import { InvitationsTable } from "../../components/invitations-table";
 import { Modal } from "../../components/modal";
 import { FormModal } from "../../components/form-modal";
-import { PageActionsMenu } from "../../components/page-actions-menu";
+import type { PageAction } from "../../components/page-actions-menu";
 import { RoleCatalogState } from "../../components/role-catalog-state";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { SpaceRoleSelect } from "../../components/space-role-select";
@@ -94,8 +93,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const viewAsParam = useModalParam("viewAs");
   const canPreview = useCanPreviewRole();
 
-  const addMember = useAddSpaceMember();
-  const updateMember = useUpdateSpaceMember();
+  const assignRole = useAssignSpaceRole(roleOptions);
   const removeMember = useRemoveSpaceMember();
 
   const canInvite = can("space-members:invite");
@@ -107,33 +105,6 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   // permission fetches the list (the server returns [] to anyone else anyway).
   const canSeeInvitations = can("members:invite");
   const { data: orgDetail } = useOrgDetail({ enabled: canSeeInvitations });
-
-  /**
-   * One control, two routes: an explicit row is PATCHed, an implicit member
-   * (open space) has no row yet, so picking a role CREATES one. `PATCH` 404s
-   * without a row, so the branch is the API's, not a nicety.
-   */
-  const changeRole = (member: SpaceMemberObject, value: string) => {
-    const body = spaceRoleAssignment(value);
-    const onSuccess = () =>
-      toast.success(
-        t("spaceMembers.roleUpdated", {
-          name: spaceMemberLabel(member),
-          role: roleOptions.find((option) => option.value === value)?.label ?? value,
-        }),
-      );
-    if (member.source === "explicit") {
-      updateMember.mutate(
-        { params: { path: { id: spaceId, userId: member.userId } }, body },
-        { onSuccess },
-      );
-      return;
-    }
-    addMember.mutate(
-      { params: { path: { id: spaceId } }, body: { userId: member.userId, ...body } },
-      { onSuccess },
-    );
-  };
 
   const remove = (member: SpaceMemberObject) => {
     removeMember.mutate(
@@ -164,10 +135,11 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
       member.source !== "org_role" &&
       rolesReady &&
       (member.source === "explicit" ? canChangeRole : canInvite),
-    roleValue: (member) => memberRoleValue(member.role, roles) ?? `current:${member.role?.key}`,
+    roles,
     roleOptions,
-    isChangingRole: updateMember.isPending || addMember.isPending,
-    onChangeRole: changeRole,
+    isChangingRole: assignRole.isPending,
+    onChangeRole: (member, value) =>
+      assignRole.assign({ spaceId, member, name: spaceMemberLabel(member) }, value),
     removal: (member) => spaceMemberRemoval(member, { canRemove, visibility: space?.visibility }),
     isRemoving: removeMember.isPending,
     removeDisabled: removeMember.isPending || !space || !!spaceError,
@@ -181,35 +153,26 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     memberToRemove?.org_role === "member" && space?.visibility === "open";
   const canManageRoles = canInvite || canChangeRole;
   const deeds = spaceMembersPageDeeds({ canInvite, canPreview });
+  const add: PageAction = {
+    id: "add",
+    icon: Plus,
+    testId: "add-space-member-button",
+    label: t("spaceMembers.add"),
+    onSelect: () => addParam.open(),
+    hidden: !deeds.includes("add"),
+  };
+  const viewAs: PageAction = {
+    id: "view-as",
+    icon: Eye,
+    testId: "view-as-space-button",
+    label: t("viewAs.trigger"),
+    onSelect: () => viewAsParam.open(),
+    hidden: !deeds.includes("view-as"),
+  };
 
   return (
     <>
-      {deeds.length > 0 && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            {deeds.includes("add") && (
-              <DropdownMenuItem
-                data-page-action="add"
-                data-testid="add-space-member-button"
-                onSelect={() => addParam.open()}
-              >
-                <Plus />
-                {t("spaceMembers.add")}
-              </DropdownMenuItem>
-            )}
-            {deeds.includes("view-as") && (
-              <DropdownMenuItem
-                data-page-action="view-as"
-                data-testid="view-as-space-button"
-                onSelect={() => viewAsParam.open()}
-              >
-                <Eye />
-                {t("viewAs.trigger")}
-              </DropdownMenuItem>
-            )}
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
+      <SettingsPageActions actions={[add, viewAs]} />
 
       <p className="text-muted-foreground mb-6 max-w-2xl text-sm leading-relaxed">
         {t("spaceMembers.accessHint")}
@@ -251,9 +214,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
               icon={Users}
               compact
             >
-              {deeds.includes("add") && (
-                <EmptyStateAction label={t("spaceMembers.add")} onClick={() => addParam.open()} />
-              )}
+              <EmptyStateAction action={add} />
             </EmptyState>
           }
         />

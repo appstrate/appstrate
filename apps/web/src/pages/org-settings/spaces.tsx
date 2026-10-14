@@ -19,7 +19,6 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AppWindow, Plus } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useConvertSpaceToTeam, useSpaces, useSweepPersonalSpace } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
 import { isSpaceEnterable, useSpaceSwitcher } from "../../hooks/use-current-space";
@@ -28,7 +27,7 @@ import { EmptyState, EmptyStateAction } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
-import { PageActionsMenu } from "../../components/page-actions-menu";
+import type { PageAction } from "../../components/page-actions-menu";
 import { useSpaceColumns } from "./space-columns";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SPACE_PARAM, SpaceCreateModal } from "../../components/space-create-modal";
@@ -84,22 +83,18 @@ export function OrgSettingsSpacesPage() {
   });
 
   // Reading is the route's gate (`spaces:read`); creating is its own permission.
+  const create: PageAction = {
+    id: "create",
+    icon: Plus,
+    testId: "create-space-button",
+    label: t("spaces.create"),
+    onSelect: () => newSpace.open(),
+    hidden: !can("spaces:write"),
+  };
+
   return (
     <>
-      {can("spaces:write") && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            <DropdownMenuItem
-              data-page-action="create"
-              data-testid="create-space-button"
-              onSelect={() => newSpace.open()}
-            >
-              <Plus />
-              {t("spaces.create")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
+      <SettingsPageActions actions={[create]} />
 
       <DataTable
         tableId="spaces"
@@ -114,9 +109,7 @@ export function OrgSettingsSpacesPage() {
         failure={error}
         empty={
           <EmptyState message={t("spaces.empty")} hint={t("spaces.emptyHint")} icon={AppWindow}>
-            {can("spaces:write") && (
-              <EmptyStateAction label={t("spaces.create")} onClick={() => newSpace.open()} />
-            )}
+            <EmptyStateAction action={create} />
           </EmptyState>
         }
       />

@@ -90,7 +90,9 @@ export function SchedulesListPage() {
       compact
     >
       {can("schedules:write") && (
-        <EmptyStateAction label={t("schedules.create")} onClick={() => newSchedule.open()} />
+        <EmptyStateAction
+          action={{ label: t("schedules.create"), onSelect: () => newSchedule.open() }}
+        />
       )}
     </EmptyState>
   );
