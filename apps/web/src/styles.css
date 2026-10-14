@@ -305,3 +305,13 @@
 .monaco-editor .overflow-guard {
   border-radius: 0.5rem;
 }
+
+/* Dialogs and sheets stack: settings and the catalogue are overlays, and their
+   pages open dialogs of their own. Each portal is a child of `body`, so a later
+   overlay is a sibling of the first one. Dimming twice turns the margin nearly
+   black and leaves the dialog underneath as a lighter, rounded block, so only
+   the first overlay dims. Unlayered on purpose: it must beat the overlay's
+   `bg-black/80` utility. */
+[data-slot="dialog-overlay"] ~ [data-slot="dialog-overlay"] {
+  background-color: transparent;
+}
