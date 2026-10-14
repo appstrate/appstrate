@@ -6,7 +6,8 @@
  * is opened.
  *
  * Header: type icon and kind, name, size, retention. Actions: copy (text kinds
- * only), download (when the caller may), full screen. The body is `FileViewer`,
+ * only), download (when the caller may), open in a new tab (when the server
+ * minted a preview URL), full screen. The body is `FileViewer`,
  * strict HTML sandbox included.
  *
  * Full screen is the browser's own (`requestFullscreen` on the frame), not a
@@ -20,6 +21,7 @@ import {
   CheckIcon,
   CopyIcon,
   DownloadIcon,
+  ExternalLinkIcon,
   Maximize2Icon,
   Minimize2Icon,
   XIcon,
@@ -79,6 +81,7 @@ export function FileArtifact({
   const name = fallbackName || file?.name || "";
   const canDownload = file?.capabilities.download === true;
   const canCopy = canDownload && file?.preview_kind === "text";
+  const previewUrl = file?.preview_url;
 
   return (
     <Artifact ref={frameRef} className={className}>
@@ -109,6 +112,15 @@ export function FileArtifact({
               icon={DownloadIcon}
               label={t("row.download")}
               onClick={() => void download(fileId, name)}
+            />
+          )}
+          {previewUrl && (
+            <ArtifactAction
+              icon={ExternalLinkIcon}
+              label={t("artifact.openInNewTab")}
+              // The preview route carries its own CSP `sandbox`, so the page stays
+              // opaque-origin at top level too; no opener, no Referer (signed URL).
+              onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
             />
           )}
           <ArtifactAction

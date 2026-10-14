@@ -38,7 +38,7 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -87,7 +87,7 @@ import {
   type CataloguePlacement,
   type PlacementState,
 } from "../lib/catalogue-placement";
-import { useModalParam } from "../hooks/use-modal-param";
+import { modalOpeningState, useModalParam, useModalTarget } from "../hooks/use-modal-param";
 import { useListParams } from "../lib/list-params";
 import {
   INTEGRATION_EXECUTIONS,
@@ -113,7 +113,7 @@ import {
   useCatalogueSelectColumn,
   type CatalogueRowState,
 } from "./catalogue-columns";
-import { RailButton } from "./settings/rail-link";
+import { RailLink } from "./settings/rail-link";
 import { RailGroup, RailHeader } from "./settings/rail-shell";
 import { SettingsHeading } from "./settings/settings-heading";
 import { Spinner } from "./spinner";
@@ -166,8 +166,13 @@ export function OrgCatalogueModal({
   // the state in each space, compared down a column — which only a table can
   // lay out. A toggle would offer each half the other's wrong shape.
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // The read has an address of its own: reload lands on it, Back leaves it.
-  const preview = useModalParam("package");
+  // A tick belongs to one list: another reading or kind starts with none.
+  const listKey = `${reading}/${active}`;
+  const [selectedIn, setSelectedIn] = useState(listKey);
+  if (selectedIn !== listKey) {
+    setSelectedIn(listKey);
+    setSelected(new Set());
+  }
   const qc = useQueryClient();
 
   const discovering = reading === "discover";
@@ -202,6 +207,7 @@ export function OrgCatalogueModal({
   const { data: reachable } = useSpaces();
   const grantById = new Map((reachable ?? []).map((space) => [space.id, space] as const));
   const navigate = useNavigate();
+  const location = useLocation();
 
   /**
    * One row's placement, for every kind but the integrations.
@@ -223,6 +229,12 @@ export function OrgCatalogueModal({
   // MCP) or local (an MCP server run in the sandbox).
   const [execution, setExecution] = useState<IntegrationExecution>("remote");
   const ofKind: LibraryPackageItem[] = library?.packages[active] ?? [];
+  // The read has an address of its own: reload lands on it, Back leaves it.
+  // Looked up in the whole kind, not the rows the filters leave: a link to a
+  // package (a share notification) opens its sheet whatever the list shows,
+  // the other execution's integrations included. An id the kind does not hold
+  // drops from the address.
+  const preview = useModalTarget("package", library ? ofKind : undefined);
   const placementById = new Map(ofKind.map((item) => [item.id, placementOf(item)] as const));
   const spaceNameOf = (id: string) => spaces.find((space) => space.id === id)?.name ?? id;
   // The two halves of the first axis: what is already placed in a space this
@@ -425,10 +437,7 @@ export function OrgCatalogueModal({
   const activatable = offered.filter(canActivate).map((item) => item.id);
   const allSelected = activatable.length > 0 && activatable.every((id) => selected.has(id));
   const picked = offered.filter((item) => selected.has(item.id));
-  // Looked up in the whole kind, not the rows the filters leave: a link to a
-  // package (a share notification) opens its sheet whatever the list shows,
-  // the other execution's integrations included.
-  const previewed = preview.value ? ofKind.find((item) => item.id === preview.value) : undefined;
+  const previewed = preview.target;
   const previewedItem: CardItem | undefined = previewed
     ? {
         id: previewed.id,
@@ -540,12 +549,6 @@ export function OrgCatalogueModal({
     onRevoke: revokeFrom,
   });
 
-  const show = (nextReading: CatalogueReading, nextType: PackageType) => {
-    setSelected(new Set());
-    // One navigation: the preview, if any, closes with the switch.
-    preview.leave(hrefOf(nextReading, nextType));
-  };
-
   /**
    * The two READINGS of one catalogue, in the bar's corner rather than the
    * rail's head.
@@ -567,12 +570,11 @@ export function OrgCatalogueModal({
       className="bg-sidebar-accent/40 flex h-8 shrink-0 gap-0.5 rounded-lg p-0.5"
     >
       {readings.map((option) => (
-        <button
+        <Link
           key={option.id}
-          type="button"
+          to={hrefOf(option.id, active)}
           role="tab"
           aria-selected={reading === option.id}
-          onClick={() => show(option.id, active)}
           className={cn(
             "focus-visible:ring-ring flex items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2",
             reading === option.id
@@ -581,18 +583,20 @@ export function OrgCatalogueModal({
           )}
         >
           {option.label}
-        </button>
+        </Link>
       ))}
     </div>
   );
   const kindRows = KINDS.map((entry) => (
-    <RailButton
+    <RailLink
       key={entry.type}
-      icon={entry.icon}
+      item={{
+        to: hrefOf(reading === "shared" ? "discover" : reading, entry.type),
+        icon: entry.icon,
+      }}
       label={t(entry.titleKey)}
       count={library?.packages[entry.type]?.length}
       active={reading !== "shared" && entry.type === active}
-      onClick={() => show(reading === "shared" ? "discover" : reading, entry.type)}
     />
   ));
   // Every share waiting, across kinds: the list a decision is taken from when
@@ -601,12 +605,11 @@ export function OrgCatalogueModal({
   const shares = pendingShares(Object.values(library?.packages ?? {}).flat());
   const showShared = shares.length > 0 || reading === "shared";
   const sharedRow = showShared ? (
-    <RailButton
-      icon={Inbox}
+    <RailLink
+      item={{ to: hrefOf("shared", active), icon: Inbox }}
       label={t("catalogue.shared.title")}
       count={shares.length}
       active={reading === "shared"}
-      onClick={() => show("shared", active)}
     />
   ) : null;
 
@@ -689,9 +692,14 @@ export function OrgCatalogueModal({
               true,
             )
           }
-          // The sheet belongs to the package's own kind, so it opens there;
-          // Back returns to that kind's list.
-          onOpen={(pkg) => navigate(catalogueHref(pkg.type, { packageId: pkg.id }))}
+          // The sheet belongs to the package's own kind, so it opens there,
+          // pushed as the sheet's own opening: Back and the sheet's « Retour »
+          // both go back over it, to this list.
+          onOpen={(pkg) =>
+            navigate(catalogueHref(pkg.type, { packageId: pkg.id }), {
+              state: modalOpeningState(location.state, "package"),
+            })
+          }
         />
       ) : previewed && previewedItem ? (
         <CataloguePreview

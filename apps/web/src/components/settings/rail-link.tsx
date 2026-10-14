@@ -20,23 +20,34 @@ function railItemClass(active: boolean): string {
 }
 
 /** Shared settings-style rail row for settings and embedded configuration. */
+function RailCount({ count }: { count: number }) {
+  return (
+    <span className="bg-muted text-muted-foreground inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums">
+      {count}
+    </span>
+  );
+}
+
 export function RailLink({
   item,
   label,
   active,
   locked = false,
+  count,
 }: {
   item: RailLinkItem;
   label: string;
   active: boolean;
   /** The entry stays, its content says what the role does not allow: a lock marks it. */
   locked?: boolean;
+  count?: number;
 }) {
   return (
     <Link to={item.to} aria-current={active ? "page" : undefined} className={railItemClass(active)}>
       <item.icon className="size-4 shrink-0" />
       <span className="truncate">{label}</span>
       {locked && <Lock className="text-muted-foreground ml-auto size-3.5 shrink-0" aria-hidden />}
+      {count !== undefined && <RailCount count={count} />}
     </Link>
   );
 }
@@ -64,11 +75,7 @@ export function RailButton({
     >
       <Icon className="size-4 shrink-0" />
       <span className="truncate">{label}</span>
-      {count !== undefined && (
-        <span className="bg-muted text-muted-foreground inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums">
-          {count}
-        </span>
-      )}
+      {count !== undefined && <RailCount count={count} />}
     </button>
   );
 }

@@ -39,6 +39,15 @@ function withOpener(state: unknown, name: string | undefined): unknown {
   return name === undefined ? rest : { ...rest, [OPENED_BY]: name };
 }
 
+/**
+ * The state of an entry that opens modal `name` on another address: pushed
+ * with it, the modal's close goes back over it, the way Back does, instead of
+ * replacing it with the address underneath.
+ */
+export function modalOpeningState(state: unknown, name: string): unknown {
+  return withOpener(state, name);
+}
+
 type ModalStep = { back: true } | { back: false; search: string; replace: boolean; state: unknown };
 
 /**

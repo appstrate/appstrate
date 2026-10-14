@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import type { Location } from "react-router-dom";
+import { UNSAFE_createBrowserHistory, type Location } from "react-router-dom";
 import {
+  backgroundOf,
+  historyIndexOf,
   isPage,
   modalReturnTarget,
   orgSwitchLanding,
   overlayCloseStep,
   pageLocation,
+  withBackground,
 } from "../modal-route";
 
 const at = (pathname: string, rest: Partial<Location> = {}): Location => ({
@@ -127,5 +130,95 @@ describe("organization switch", () => {
     expect(orgSwitchLanding("/chat/c_1")).toBe("/chat");
     expect(orgSwitchLanding("/chat")).toBe("/chat");
     expect(orgSwitchLanding("/chatroom")).toBe("/");
+  });
+});
+
+describe("the history index React Router keeps", () => {
+  /** The browser `window` the router's history drives, reduced to what it touches. */
+  function fakeWindow() {
+    const entries: { state: unknown; url: string }[] = [{ state: null, url: "/" }];
+    let at = 0;
+    const location = { origin: "http://app.test", pathname: "/", search: "", hash: "" };
+    const move = (url: string) => {
+      const parsed = new URL(url, location.origin);
+      location.pathname = parsed.pathname;
+      location.search = parsed.search;
+      location.hash = parsed.hash;
+    };
+    const history = {
+      get state() {
+        return entries[at]!.state;
+      },
+      get length() {
+        return entries.length;
+      },
+      pushState(state: unknown, _title: string, url: string) {
+        entries.splice(at + 1, entries.length, { state, url });
+        at += 1;
+        move(url);
+      },
+      replaceState(state: unknown, _title: string, url?: string) {
+        entries[at] = { state, url: url ?? entries[at]!.url };
+        if (url) move(url);
+      },
+      go() {},
+    };
+    return {
+      location: Object.assign(location, {
+        get href() {
+          return `${location.origin}${location.pathname}${location.search}${location.hash}`;
+        },
+      }),
+      history,
+      addEventListener() {},
+      removeEventListener() {},
+    } as unknown as Window;
+  }
+
+  // The overlay's close reads it: when this fails, React Router stopped
+  // numbering its entries in `idx`, and every close falls back to replacing.
+  it("numbers each entry of the browser history, in the entry's state", () => {
+    const window = fakeWindow();
+    const history = UNSAFE_createBrowserHistory({ window });
+    expect(historyIndexOf(window.history.state)).toBe(0);
+    history.push("/agents");
+    history.push("/catalogue/discover/agent");
+    expect(historyIndexOf(window.history.state)).toBe(2);
+    history.replace("/catalogue/discover/skill");
+    expect(historyIndexOf(window.history.state)).toBe(2);
+  });
+
+  it("reads no index from a state that has none", () => {
+    expect(historyIndexOf(null)).toBeNull();
+    expect(historyIndexOf({ idx: "2" })).toBeNull();
+    expect(historyIndexOf({ usr: null })).toBeNull();
+  });
+});
+
+describe("the background an overlay entry holds", () => {
+  const agents = at("/agents", { search: "?q=tri", hash: "#top", state: { tab: "mine" } });
+
+  it("survives a reload: the entry's state names the page and its history entry", () => {
+    // What a reload reads back is what the entry was given, cloned.
+    const state = structuredClone(
+      withBackground({ openedModal: "package" }, { location: agents, index: 3 }),
+    );
+    const held = backgroundOf(state);
+    expect(held).toEqual({ location: agents, index: 3 });
+    // The reloaded overlay floats over that page, and closing goes back to it.
+    expect(pageLocation(at("/catalogue/discover/agent"), held!.location)).toEqual(agents);
+    expect(overlayCloseStep(held!.index, 4)).toBe(-1);
+  });
+
+  it("keeps the rest of the entry's state", () => {
+    const state = withBackground({ openedModal: "package" }, { location: agents, index: null });
+    expect(state).toMatchObject({ openedModal: "package" });
+    expect(backgroundOf(state)?.index).toBeNull();
+  });
+
+  it("finds none in a state that holds none", () => {
+    expect(backgroundOf(null)).toBeNull();
+    expect(backgroundOf({ openedModal: "package" })).toBeNull();
+    expect(backgroundOf({ overlayBackground: { index: 1 } })).toBeNull();
   });
 });
