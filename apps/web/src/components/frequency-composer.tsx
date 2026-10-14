@@ -36,6 +36,7 @@ import {
   parseCron,
   toCron,
 } from "../lib/cron-frequency";
+import { describeFrequency, frequencyFormats } from "../lib/frequency-summary";
 import { TimezoneSelect } from "./timezone-select";
 import { TimeField } from "./time-field";
 
@@ -132,17 +133,6 @@ const DAY_BOUNDS: Bounds = { min: 1, max: 31 };
 function useFormats(timezone: string) {
   const { i18n } = useTranslation();
   const lang = i18n.language;
-  const time = (at: TimeOfDay) =>
-    new Intl.DateTimeFormat(lang, { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(
-      Date.UTC(2000, 0, 1, at.hour, at.minute),
-    );
-  // 7 January 2024 was a Sunday: cron weekday d is that date plus d days.
-  const weekday = (day: number, width: "long" | "short") =>
-    new Intl.DateTimeFormat(lang, { weekday: width, timeZone: "UTC" }).format(
-      Date.UTC(2024, 0, 7 + day),
-    );
-  const list = (items: string[]) =>
-    new Intl.ListFormat(lang, { style: "long", type: "conjunction" }).format(items);
   const fire = (date: Date) =>
     new Intl.DateTimeFormat(lang, {
       weekday: "short",
@@ -151,8 +141,9 @@ function useFormats(timezone: string) {
       hour: "numeric",
       minute: "2-digit",
       timeZone: timezone,
+      timeZoneName: "short",
     }).format(date);
-  return { time, weekday, list, fire };
+  return { ...frequencyFormats(lang), fire };
 }
 
 export function FrequencyComposer({
@@ -192,37 +183,12 @@ export function FrequencyComposer({
 
   const summary = (() => {
     if (outOfBounds) return t("schedule.frequency.outOfBounds", { ...outOfBounds });
-    switch (frequency.kind) {
-      case "minutes":
-        return t("schedule.frequency.summary.minutes", { count: frequency.every });
-      case "hours":
-        return t("schedule.frequency.summary.hours", {
-          count: frequency.every,
-          minute: String(frequency.minute).padStart(2, "0"),
-        });
-      case "daily":
-        return t("schedule.frequency.summary.daily", { time: format.time(frequency.at) });
-      case "weekly":
-        return frequency.days.length === 0
-          ? t("schedule.frequency.noDay")
-          : t("schedule.frequency.summary.weekly", {
-              days: format.list(
-                WEEK_ORDER.filter((d) => frequency.days.includes(d)).map((d) =>
-                  format.weekday(d, "long"),
-                ),
-              ),
-              time: format.time(frequency.at),
-            });
-      case "monthly":
-        return t(
-          frequency.day === 1
-            ? "schedule.frequency.summary.monthlyFirst"
-            : "schedule.frequency.summary.monthly",
-          { day: frequency.day, time: format.time(frequency.at) },
-        );
-      case "custom":
-        return fires ? t("schedule.frequency.summary.custom") : t("schedule.frequency.invalid");
-    }
+    if (frequency.kind === "weekly" && frequency.days.length === 0)
+      return t("schedule.frequency.noDay");
+    return (
+      describeFrequency(frequency) ??
+      (fires ? t("schedule.frequency.summary.custom") : t("schedule.frequency.invalid"))
+    );
   })();
 
   return (
