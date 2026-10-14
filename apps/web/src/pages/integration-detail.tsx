@@ -547,6 +547,8 @@ export function IntegrationDetailPage() {
   const isBuiltIn = source === "system";
   // Org-owned packages are editable regardless of scope name; only system packages are read-only.
   const isOwned = source === "local";
+  // The fork action's own verdict (`PackageActionsDropdown`), which also bounds `?fork`.
+  const canFork = can("integrations:write") && !isOwned;
   const setActivation = (next: boolean, onSuccess?: () => void) => {
     if (!currentSpaceId) return;
     setActive.mutate({ spaceId: currentSpaceId, packageId, active: next }, { onSuccess });
@@ -693,14 +695,16 @@ export function IntegrationDetailPage() {
         </TabsContent>
       </Tabs>
 
-      <ForkPackageModal
-        open={fork.value !== null}
-        onClose={fork.close}
-        onLeave={fork.leave}
-        packageId={packageId}
-        defaultName={name ?? ""}
-        type="integration"
-      />
+      {fork.value !== null && canFork && (
+        <ForkPackageModal
+          open
+          onClose={fork.close}
+          onLeave={fork.leave}
+          packageId={packageId}
+          defaultName={name ?? ""}
+          type="integration"
+        />
+      )}
 
       <ConfirmModal
         open={confirmDeactivate}

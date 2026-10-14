@@ -32,13 +32,18 @@ import { SettingsHeading } from "./settings/settings-heading";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import type { ListState } from "../lib/list-params";
-import { matchesSearch } from "../lib/strings";
+import { PACKAGE_ACTIVITIES, PACKAGE_ORIGINS, narrowPackages } from "../lib/package-collection";
 import type { CardItem } from "../pages/package-list";
 
-/** Stable empties: a fresh literal in a default would remount the table set. */
 const NO_COLUMNS: DataColumn<CardItem>[] = [];
 const NO_IDS: string[] = [];
 const NO_FILTERS: FilterSpec[] = [];
+
+export interface OriginLabels {
+  title: string;
+  local: string;
+  system: string;
+}
 
 export interface PackageCollectionProps {
   items: CardItem[] | undefined;
@@ -64,10 +69,10 @@ export interface PackageCollectionProps {
    */
   activityFilter?: boolean;
   /**
-   * Whether the bar offers the origin dimension. The catalogue turns it off
-   * where it draws the same distinction as tabs, so it is never asked twice.
+   * How this surface names the origin dimension and its two values. The
+   * catalogue says the organization's name where a page says "Personnalisé".
    */
-  originFilter?: boolean;
+  originLabels?: OriginLabels;
   /**
    * Dimensions the CALLER filters on. It has already narrowed `items`; the bar
    * only draws these, next to the ones this component owns.
@@ -116,7 +121,7 @@ export function PackageCollection({
   view,
   onViewChange,
   activityFilter = true,
-  originFilter = true,
+  originLabels,
   extraFilters = NO_FILTERS,
   cardRun = true,
   actions,
@@ -133,40 +138,30 @@ export function PackageCollection({
   // the box searches the whole list rather than the page on screen — which is
   // exactly why the run list, paginated server-side, has no box.
   const query = list.search;
-  const origins = list.values("origin", ["local", "system"] as const);
-  const activities = list.values("activity", ["active", "inactive"] as const);
+  const origins = list.values("origin", PACKAGE_ORIGINS);
+  const activities = activityFilter ? list.values("activity", PACKAGE_ACTIVITIES) : [];
   const baseColumns = usePackageColumns(holds).filter((c) => !dropColumns.includes(c.id));
   const searchPlaceholder = useSearchPlaceholder(entity);
   const visibility = useColumnVisibility("packages");
 
-  const shown = (items ?? []).filter((item) => {
-    // Name, description and keywords — everything a card puts on screen.
-    if (!matchesSearch(query, [item.displayName, item.description, item.keywords])) return false;
-    if (origins.length > 0 && !origins.includes(item.source ?? "local")) return false;
-    if (!activityFilter) return true;
-
-    const isActive = holds === "agent" ? Boolean(item.runningRuns) : Boolean(item.usedByAgents);
-    if (activities.includes("active") && !activities.includes("inactive") && !isActive)
-      return false;
-    if (activities.includes("inactive") && !activities.includes("active") && isActive) return false;
-    return true;
+  const shown = narrowPackages(items ?? [], {
+    query,
+    origins,
+    activities: activityFilter ? activities : undefined,
+    holds,
   });
 
   const filters: FilterSpec[] = [
-    ...(originFilter
-      ? [
-          {
-            id: "origin",
-            label: t("list.filter.origin"),
-            values: origins,
-            options: [
-              { value: "local", label: t("list.filter.local") },
-              { value: "system", label: t("list.filter.system") },
-            ],
-            onChange: list.setValues("origin"),
-          },
-        ]
-      : []),
+    {
+      id: "origin",
+      label: originLabels?.title ?? t("list.filter.origin"),
+      values: origins,
+      options: [
+        { value: "local", label: originLabels?.local ?? t("list.filter.local") },
+        { value: "system", label: originLabels?.system ?? t("list.filter.system") },
+      ],
+      onChange: list.setValues("origin"),
+    },
     ...(activityFilter
       ? [
           {

@@ -198,7 +198,7 @@ describe("closing a modal twice from one entry", () => {
 
   it("goes back once when an Apply renames the target and the old name then drops", async () => {
     const router = createMemoryRouter([{ path: "*" }], {
-      initialEntries: ["/agents", "/agents/@acme/a/edit"],
+      initialEntries: ["/agents", "/agents/@acme/a"],
       initialIndex: 1,
     });
     const opening = modalParamStep(router.state.location, "field-input", "old_key");
@@ -207,14 +207,14 @@ describe("closing a modal twice from one entry", () => {
       { pathname: router.state.location.pathname, search: opening.search },
       { replace: opening.replace, state: opening.state },
     );
-    expect(where(router)).toBe("/agents/@acme/a/edit?field-input=old_key");
+    expect(where(router)).toBe("/agents/@acme/a?field-input=old_key");
 
     // Apply closes, and the same render, still on `old_key`, finds no field by
     // that name and closes again.
     const guard = closeOncePerEntry();
     const rendered = router.state.location;
     await Promise.all([close(router, rendered, guard), close(router, rendered, guard)]);
-    expect(where(router)).toBe("/agents/@acme/a/edit");
+    expect(where(router)).toBe("/agents/@acme/a");
   });
 
   it("still closes from the next entry", () => {

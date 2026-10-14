@@ -122,7 +122,7 @@ export function ItemTab({
         title={title}
         breadcrumbs={[{ label: title }]}
       />
-      {importParam.value !== null && (
+      {importParam.value !== null && canImport && (
         <ImportModal onClose={importParam.close} onLeave={importParam.leave} />
       )}
       {creation.isOpen && (

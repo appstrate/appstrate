@@ -147,7 +147,7 @@ describe("routeVerdict", () => {
   });
 
   it("opens an ungated route to a caller holding nothing", () => {
-    const open: RoutePath[] = ["/", "/agents/:scope/:name/edit", "/preferences/general"];
+    const open: RoutePath[] = ["/", "/org-settings", "/preferences/general"];
     for (const path of open) expect(routeVerdict(path, none, {}, false)).toBe("granted");
   });
 });
@@ -196,7 +196,6 @@ describe("routeOf", () => {
   it("ranks a concrete URL the way the router does: static segments first", () => {
     expect(routeOf("/agents/new")).toBe("/agents/new");
     expect(routeOf("/agents/@acme/triage")).toBe("/agents/:scope/:name");
-    expect(routeOf("/agents/@acme/triage/edit")).toBe("/agents/:scope/:name/edit");
     expect(routeOf("/agents/@acme/triage/1.2.0")).toBe("/agents/:scope/:name/:version");
     expect(routeOf("/agents/@acme/triage/runs/run_1?tab=logs#x")).toBe(
       "/agents/:scope/:name/runs/:runId",

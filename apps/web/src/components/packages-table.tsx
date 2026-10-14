@@ -10,6 +10,8 @@ export function PackagesTable({
   items,
   columns,
   rowAction,
+  label,
+  surface,
   ...state
 }: {
   items: CardItem[];
@@ -21,6 +23,10 @@ export function PackagesTable({
    * not in. When set it replaces the row's link, never doubles it.
    */
   rowAction?: (item: CardItem) => void;
+  /** What the table lists, for assistive technology; a package list by default. */
+  label?: string;
+  /** `integrated` where the table already sits on a panel. */
+  surface?: "framed" | "integrated";
 } & CollectionState) {
   const { t } = useTranslation(["agents", "common"]);
 
@@ -30,7 +36,7 @@ export function PackagesTable({
   return (
     <DataTable
       tableId="packages"
-      label={t("list.tableLabel")}
+      label={label ?? t("list.tableLabel")}
       columns={columns}
       rows={items}
       rowKey={(item) => item.id}
@@ -38,6 +44,7 @@ export function PackagesTable({
       rowAction={rowAction}
       rowLabel={(item) => item.displayName}
       columnMode="scroll"
+      surface={surface}
       {...state}
     />
   );
