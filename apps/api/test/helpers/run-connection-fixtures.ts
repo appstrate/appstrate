@@ -172,13 +172,13 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
 
 /**
  * Add one connection on the integration's `primary` auth, owned by the ctx
- * user. `label` is NOT NULL and unique per owner, so it and
+ * user, or by `endUserId` when given. `label` is NOT NULL and unique per owner, so it and
  * `accountId` default here to generated names. Pass them when the test asserts on them.
  */
 export async function seedIntegrationConnection(
   ctx: TestContext,
   integrationId: string,
-  opts: { label?: string; accountId?: string } = {},
+  opts: { label?: string; accountId?: string; endUserId?: string } = {},
 ): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
@@ -188,8 +188,8 @@ export async function seedIntegrationConnection(
       accountId: opts.accountId ?? `acct-${crypto.randomUUID().slice(0, 8)}`,
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
-      userId: ctx.user.id,
-      endUserId: null,
+      userId: opts.endUserId ? null : ctx.user.id,
+      endUserId: opts.endUserId ?? null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),
       scopesGranted: [],
       label: opts.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
@@ -203,6 +203,7 @@ export async function seedDefaultOrgModel(ctx: TestContext): Promise<void> {
   const credentialId = await createApiKeyCredential({
     orgId: ctx.orgId,
     userId: ctx.user.id,
+    ownerUserId: null,
     label: "Connection fixture credential",
     providerId: "openai",
     apiKey: "sk-test-not-a-real-key",

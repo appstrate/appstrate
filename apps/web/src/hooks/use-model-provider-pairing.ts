@@ -4,15 +4,13 @@
  * React Query hooks for the front-end-initiated OAuth model-provider
  * pairing flow. The dashboard mints a pairing token, surfaces the
  * matching `npx @appstrate/connect-helper <token>` command to the user,
- * and polls the pairing's status until it flips from `pending` to
- * `consumed` (= the helper completed the OAuth dance and POSTed the
- * credentials back).
- *
- * The dashboard never cancels a pairing when its modal closes (that dropped
- * in-flight connections); abandoned tokens are reaped by their TTL (5 min).
+ * and polls the pairing until the server states the outcome of the helper's
+ * redeem: `connected` (the OAuth dance completed and the credential is stored),
+ * `failed` (the redeem was refused), or `expired`.
  */
 
 import { $api } from "../api/client";
+import { pairingPollState, type PairingPollState } from "../lib/oauth-pairing";
 import { usePermissions } from "./use-permissions";
 
 export function useCreateModelProviderPairing() {
@@ -22,41 +20,31 @@ export function useCreateModelProviderPairing() {
 }
 
 /**
- * Poll a pairing's status. `enabled` is the only way to start/stop the
- * polling — the hook itself is unconditionally registered so the
- * surrounding component re-renders deterministically.
- *
- * `refetchInterval` is set to 2.5s when polling; we stop polling as soon
- * as the status transitions to a terminal state (consumed / expired), or
- * the row is gone (404/410 once the TTL reaps it server-side) — otherwise
- * an expired pairing would spin the poll until the client-side prune drops
- * it from the store.
+ * Poll a pairing's status. `id: null` polls nothing.
  */
-export function useModelProviderPairingStatus(id: string | null, options: { enabled: boolean }) {
-  // Guarded like the credentials it mints; a role preview can drop it mid-poll.
+export function useModelProviderPairingStatus(id: string | null): {
+  state: PairingPollState;
+  credentialId: string | null;
+} {
+  // Guarded like the route: either permission that mints a pairing reads it. A
+  // role preview can drop both mid-poll.
   const { can } = usePermissions();
-  return $api.useQuery(
+  const mayRead =
+    can("model-provider-credentials:write") || can("model-provider-credentials:connect");
+  const { data, error } = $api.useQuery(
     "get",
     "/api/model-providers-oauth/pairing/{id}",
     { params: { path: { id: id ?? "" } } },
     {
-      enabled: options.enabled && !!id && can("model-provider-credentials:connect"),
-      refetchInterval: (q) => {
-        // Any errored request is terminal for the poll: the TTL reap surfaces
-        // as 404/410, but auth/permission/server failures (401/403/5xx, or a
-        // network error with no status) are equally non-recoverable here —
-        // keep spinning only while the request is succeeding and pending.
-        if (q.state.error) return false;
-        const data = q.state.data;
-        if (!data) return 2500;
-        if (data.status === "pending") return 2500;
-        return false;
-      },
-      // Pairing rows are short-lived ephemera — no point caching beyond the
-      // polling window. Always refetch on mount so closing+reopening the
-      // modal can't see a stale "consumed" hit from a prior session.
+      enabled: !!id && mayRead,
+      refetchInterval: (q) =>
+        pairingPollState(q.state.data?.status, q.state.error) === "pending" ? 2500 : false,
+      // The next tick is the retry: React Query's own would double each failed tick.
+      retry: false,
+      // A pairing's status means something only while observed: nothing is cached past that.
       staleTime: 0,
       gcTime: 0,
     },
   );
+  return { state: pairingPollState(data?.status, error), credentialId: data?.credentialId ?? null };
 }

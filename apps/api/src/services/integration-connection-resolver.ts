@@ -44,6 +44,7 @@ import {
 } from "@appstrate/core/dependencies";
 import {
   resolveEffectiveToolSelection,
+  resolveScopeToolSelection,
   expandScopesGranted,
   missingScopesForConnection,
   partitionScopesByAuthCatalog,
@@ -103,7 +104,10 @@ export interface IntegrationRequirement {
   manifest: IntegrationManifest;
   /** The EFFECTIVE selection (below) is non-empty or `"*"` — what the spawn resolver starts. */
   hasSelectedTools: boolean;
-  /** The agent's own tool selection; drives scope inference (`"*"` → the auth's default scopes). */
+  /**
+   * What scopes are inferred from: `"*"` (written or inherited) → the auth's `default_scopes`,
+   * else the agent's own array.
+   */
   agentTools: readonly string[] | "*";
   /** The agent's explicit oauth scopes — the only scope signal of an apiCall integration. */
   agentScopes: readonly string[];
@@ -156,6 +160,13 @@ interface ResolveConnectionsInput {
 
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
 
+/** Inert: nothing the spawn resolver would start, so no verdict is needed — unless required. */
+function isInert(req: IntegrationRequirement): boolean {
+  return (
+    !req.required && !req.hasSelectedTools && req.agentScopes.length === 0 && !req.hasMandatoryAuth
+  );
+}
+
 /** Walks the cascade (file header) per integration. */
 export function resolveConnections(input: ResolveConnectionsInput): ConnectionResolutionResult {
   const resolved: ResolvedConnectionMap = {};
@@ -178,15 +189,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   };
 
   for (const req of input.requirements) {
-    // Inert: nothing the spawn resolver would start, so no verdict is needed — unless required.
-    if (
-      !req.required &&
-      !req.hasSelectedTools &&
-      req.agentScopes.length === 0 &&
-      !req.hasMandatoryAuth &&
-      !input.includeInert
-    )
-      continue;
+    if (isInert(req) && !input.includeInert) continue;
     if (input.inactiveIntegrationIds?.has(req.integrationId)) {
       record(
         req.integrationId,
@@ -843,16 +846,34 @@ interface ResolveConnectionsForRunInput {
   manifestCache?: IntegrationManifestCache;
 }
 
+/** The requirement of each integration `agentManifest` declares whose manifest loads. */
+async function requirementsOf(
+  agentManifest: Record<string, unknown>,
+  manifestCache?: IntegrationManifestCache,
+): Promise<IntegrationRequirement[]> {
+  const requirements = await Promise.all(
+    parseManifestIntegrations(agentManifest).map((entry) => buildRequirement(entry, manifestCache)),
+  );
+  return requirements.filter((r): r is IntegrationRequirement => r !== null);
+}
+
+/**
+ * The integrations a run of `agentManifest` resolves a set for, whoever runs it and whatever the
+ * layers hold: those it declares whose manifest loads and that are not inert.
+ */
+export async function integrationsResolvedForRun(
+  agentManifest: Record<string, unknown>,
+  manifestCache?: IntegrationManifestCache,
+): Promise<string[]> {
+  const requirements = await requirementsOf(agentManifest, manifestCache);
+  return requirements.filter((req) => !isInert(req)).map((req) => req.integrationId);
+}
+
 export async function resolveConnectionsForRun(
   input: ResolveConnectionsForRunInput,
 ): Promise<ConnectionResolutionResult> {
-  const entries = parseManifestIntegrations(input.agentManifest);
-  if (entries.length === 0) return { resolved: {}, errors: [], warnings: [] };
-
-  const requirements = await Promise.all(
-    entries.map((entry) => buildRequirement(entry, input.manifestCache)),
-  );
-  const validReqs = requirements.filter((r): r is IntegrationRequirement => r !== null);
+  const validReqs = await requirementsOf(input.agentManifest, input.manifestCache);
+  if (validReqs.length === 0) return { resolved: {}, errors: [], warnings: [] };
 
   const { actorUserId, actorEndUserId } = actorIdentityOf(input.actor);
 
@@ -1027,7 +1048,6 @@ export function requirementOf(
   entry: ManifestIntegrationEntry,
   manifest: IntegrationManifest,
 ): IntegrationRequirement {
-  const wildcard = entry.tools === "*";
   // The spawn resolver's own selection rule, so every integration it spawns gets a verdict.
   const effectiveTools = resolveEffectiveToolSelection(entry.tools, manifest);
   const hasSelectedTools =
@@ -1038,9 +1058,9 @@ export function requirementOf(
     hasSelectedTools,
     hasMandatoryAuth: manifestHasRequiredAuth(manifest),
     required: entry.required === true,
-    // Scope inference stays on the agent's OWN selection: the inherited defaults would newly
-    // fail `insufficient_scopes` on connections that work.
-    agentTools: wildcard ? "*" : (entry.tools ?? []),
+    // Not the effective selection: tool names inherited from `default_tools` contribute no
+    // scope, as they would fail `insufficient_scopes` on connections that work.
+    agentTools: resolveScopeToolSelection(entry.tools, manifest),
     agentScopes: entry.scopes ?? [],
     ...(effectiveTools !== undefined ? { effectiveTools } : {}),
     ...(entry.auth_key !== undefined ? { requiredAuthKey: entry.auth_key } : {}),

@@ -1054,10 +1054,11 @@ export interface ModelProviderCredentialInfo {
    * Organization: `edit` / `delete` / `test` to holders of the org write / delete / read permission.
    * Personal: `edit` to its owner (connect or org write), `delete` to its owner (connect) or an org
    * delete holder; while the org allows personal model credentials, `test` to its owner (connect or
-   * org read) and `reconnect` to its owner (connect) on an OAuth credential needing reconnection.
+   * org read). OAuth: `reconnect` to whoever may `edit` it, a personal one only while the org allows
+   * personal model credentials.
    */
   allowed_actions: ModelProviderCredentialAction[];
-  /** Whether an organization model may be bound to this credential: `true` for an organization API key (not a subscription), `false` for a personal credential, an organization subscription or a built-in one. */
+  /** Whether an organization model may be bound to this credential: `true` for an organization one (API key or subscription), `false` for a personal or a built-in one. */
   bindable: boolean;
   created_by: string | null;
   createdAt: string;

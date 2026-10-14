@@ -397,7 +397,7 @@ describe("startReportSession — integration readiness", () => {
 });
 
 // `--connection` names a connection for the run the instance registers. Unregistered, the
-// run's credential-proxy calls bind the caller's own connection by default: refused instead.
+// run's credential-proxy calls are made outside a run, where nothing carries the pick: refused.
 describe("resolveReportSession — --connection needs a registered run", () => {
   const CONNECTION = { "@appstrate/clickup": ["11111111-1111-4111-8111-111111111111"] };
   const REFUSAL =

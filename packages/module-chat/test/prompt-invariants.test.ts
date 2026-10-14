@@ -170,6 +170,27 @@ describe("full persona invariants", () => {
     expect(FULL).toContain('"@appstrate/gmail": { "tools": ["api_call"], "required": true }');
   });
 
+  // #1923: a default can be an integration's whole surface, write tools included, and a run can
+  // call every tool it is given. Selecting is the rule; inheriting is for a task that needs it all.
+  it("tells an inline composer to select the tools the task needs, whatever the default's size", () => {
+    expect(FULL).toContain("list the exact tool names the task needs");
+    expect(FULL).toContain(
+      "omit the entry to inherit the integration's `default_tools` (shown per integration in your context) only when the task needs that whole default",
+    );
+    expect(FULL).toContain("never give it more than the task needs");
+    expect(REDUCED).not.toContain("list the exact tool names the task needs");
+  });
+
+  // `describe_operation` answers with the operation's definition; the integration comes from the call.
+  it("reads an integration's tool names with invoke_operation, naming the field that holds each", () => {
+    expect(FULL).toContain(
+      'read the integration with `invoke_operation` (`operation_id: "getIntegration"`, `GET /api/integrations/{packageId}`)',
+    );
+    expect(FULL).toContain(
+      "its `default_tools` holds the default's names, its `tool_catalog` every tool you may select",
+    );
+  });
+
   // #1830: a started run's `integration_not_active` warning is fixed per space, not by connecting.
   it("routes an `integration_not_active` warning to activation, never to connecting", () => {
     for (const persona of [FULL, REDUCED]) {

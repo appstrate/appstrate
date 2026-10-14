@@ -16,6 +16,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reads (`docs/ENV.md` § Unread keys). The SSH MCP server is ssh-mcp 1.0.3 (see
   Changed).
 
+- **Under `RUN_ADAPTER=firecracker`, set `EGRESS_ALLOW_INTERNAL_HOSTS` on the
+  runner host too** (#1925). Guest sidecars take the list from the
+  `appstrate-runner` daemon's own environment, not from the platform's, and the
+  daemon now refuses to start on a malformed list, where each run failed in the
+  guest before. Add the line to `/etc/appstrate-runner/env` and restart
+  `appstrate-runner`. `appstrate runner update` keeps it;
+  `appstrate runner install` re-renders the file and drops it.
+
+- **The schema catalog lists migration-installed triggers** (#1925). The
+  production comparison of the release runbook (`scripts/schema-catalog.sql`
+  run on production and piped to `diff` against
+  `packages/db/schema-catalog.txt`; `bun run verify:schema-catalog` is its CI
+  form) now covers `oauth_clients_level_immutable` (migration `0003`) and the
+  two `0091` triggers. A trigger missing, disabled or with a different body,
+  compared modulo whitespace, shows as drift on the first comparison.
+
+- **The unread-keys boot warning covers `GITHUB_*` and `RUNNER_*`** (#1925). A
+  misspelled `GITHUB_CLIENT_ID` or `RUNNER_IMAGE_*` is named, and so is a
+  `GITHUB_TOKEN` inherited from a shell: the line is a warning and changes
+  nothing else.
+
 - **Before the deploy, mark `required: true` on every agent integration a run
   cannot do without** (#1830). After it, a declared integration blocks a run
   only when the agent marks it `required` (below): an agent whose user has no
@@ -156,16 +177,18 @@ integration_connections WHERE shared_with_org;` tells whether the step
   from this release together. An image built from this tree pulls the new
   base on its own; a builder overriding `BUN_IMAGE` must point it at 1.4.2.
 
-- **Model credentials: `pg_dump` before the deploy, then script `0042` after
-  it** (#1875). Migration `0087` runs at boot (`model_provider_credentials.owner_user_id`,
+- **Model credentials: `pg_dump` before the deploy** (#1875). Migration `0087`
+  runs at boot (`model_provider_credentials.owner_user_id`,
   `org_models.provider_id` backfilled from each bound credential, a nullable
   `org_models.credential_id`, `uq_org_models_unbound`, `llm_usage.credential_id`);
-  rolling back past it means restoring the dump. Then, app up, run
-  `scripts/migration/0042-personal-model-subscriptions.ts` dry, read its report,
-  and run it with `--apply`: it makes existing subscriptions personal to their
-  creator and unbinds the models bound to them, and refuses an organization it
-  cannot migrate safely (`scripts/migration/README.md`). Production never
-  enables a subscription module, so its report should show none.
+  rolling back past it means restoring the dump. It leaves every stored
+  credential an organization credential (`owner_user_id` NULL), a subscription
+  included: each keeps serving the models bound to it. Migration `0095` adds
+  `model_provider_pairings.owner_user_id` and `failed_at`. Regenerate after the deploy any
+  subscription pairing minted before it (its command is valid 5 minutes): it
+  records no owner, which reads as the organization, so one an owner or admin
+  minted for a personal subscription would be redeemed as an organization
+  credential.
 
 - **After the deploy, run `scripts/migration/0043-promote-auto-clients-to-org.ts`,
   dry, then with `--apply`, once `0044` and `0041` are done** (#1910). It
@@ -197,7 +220,127 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   (#1929): the write of an enabled schedule is refused `409` until they do;
   see Changed.
 
+- **Run `scripts/migration/0046-split-credential-proxy-call-scope.ts --apply`
+  in the window** (#1894, #1957). `credential-proxy:call` is split into
+  `credential-proxy:call-run`, for a call made for a run, and
+  `credential-proxy:call-own`, for a call outside one; the pair is what
+  `credential-proxy:call` was. A stored permission the release does not know
+  is ignored, so in `api_keys.scopes` and `space_roles.permissions` the script
+  puts `credential-proxy:call-run` in place of the old name and appends
+  `credential-proxy:call-own`: existing API keys and custom roles keep both
+  paths, and what a call answers differently is under Changed. Run it dry
+  (`set -a && . ./.env && set +a && bun scripts/migration/0046-split-credential-proxy-call-scope.ts`),
+  then with `--apply`, after the migrate step and before the new release
+  serves requests; never on the running previous release, which ignores the
+  new names. A client that mints keys naming `credential-proxy:call` names
+  `credential-proxy:call-run` and `credential-proxy:call-own` instead (`400`
+  otherwise). Details: `scripts/migration/README.md`.
+
+  From the deploy on, a call to `/api/credential-proxy/proxy` without
+  `X-Run-Id` made in a personal space answers `403`: a personal space grants
+  `credential-proxy:call-own` to nobody, its owner included. Who holds each
+  permission and what a call outside a run reaches are in Changed.
+
+  Migration `0092` only creates `connection_calls`, the proxy's call journal
+  (see Added), and rewrites nothing.
+
+- **Before the deploy, run `scripts/migration/0035-verify-manifest-expressions.ts`
+  and read its `[default-tools]` lines** (#1923). It writes nothing. Each
+  `[default-tools]` advisory names a stored organization integration, draft
+  or published version, whose `default_tools` holds a tool its manifest does
+  not expose: one `hidden_tools` lists, a connect tool, the upload companion
+  of a hidden `api_call`, one outside the `tools_policy` a `remote`
+  integration declares, or, on a `source.kind: "none"` integration with no
+  `_meta` key outside `dev.appstrate/`, one outside the manifest's catalog. A
+  `remote` or `local` integration so listed keeps loading and running, and
+  its next write is refused until the entry is removed or, for a `remote`
+  one whose endpoint serves the tool, the tool is declared in `tools_policy`
+  (`"<tool>": {}`) (see Changed). A `none` one is a manifest the schema
+  already refuses on read, before this release as after it: nothing becomes
+  unreadable at the deploy. An advisory never changes the script's exit code.
+
 ### Changed
+
+- **BREAKING (API): the credential proxy has one permission per path,
+  `credential-proxy:call-run` and `credential-proxy:call-own`** (#1894,
+  #1957). `credential-proxy:call` no longer exists. A call made for a run
+  (`X-Run-Id`) requires `credential-proxy:call-run`, and reaches the
+  connections the run bound, a colleague's shared one included. A call
+  without `X-Run-Id` requires `credential-proxy:call-own`, a space-level
+  permission of its own. `admin` and `builder` hold both; `operator`,
+  `runner` and `viewer` hold neither; a custom role can list either, an API
+  key carries each from a creator who holds it, and a personal space grants
+  `credential-proxy:call-own` to nobody, its owner included. What a call
+  outside a run reaches depends on whether the caller also holds
+  `credential-proxy:call-run`:
+  - with both, the connections usable in the space, the caller's own and
+    those shared into it, through the resolver's cascade without pins: the
+    rows a run in the space binds for that caller, under the space's org
+    defaults, enforced and soft, a named `X-Connection-Id` being the
+    override. A shared connection is used when it is named or an org default
+    designates it, never by fallback: with nothing named and no org default,
+    the caller's single own connection is used, and several own, or none
+    while a shared one is usable, answer `409 must_choose_connection` listing
+    the candidates. An enforced org default binds its members: one is used,
+    several answer `409 must_choose_connection` until `X-Connection-Id` names
+    one of them, and a named connection outside it answers
+    `400 connection_not_in_org_default`, whatever it names. Where no enforced
+    default governs, a named `X-Connection-Id` that is not usable in the
+    space (another member's connection not shared into it, or an unknown id)
+    answers one and the same `404 credential_not_found`. These are the
+    answers a holder of `credential-proxy:call` gets from the release in
+    service, but for the `400`, whose problem carries no `param` and whose
+    detail names neither the connection nor the default's members;
+  - with `credential-proxy:call-own` alone, the caller's own connections
+    usable in the space and nothing else. No org default applies, a soft one
+    included, and an integration an enforced org default governs answers
+    `403 call_run_permission_required`, whatever is named. A named `X-Connection-Id` that is
+    not one of the caller's own (another member's connection, shared into
+    the space or not, or an unknown id) answers one and the same
+    `404 credential_not_found`. With nothing named: the caller's single own
+    connection, `404 credential_not_found` for none,
+    `409 must_choose_connection` for several, listing those and no one
+    else's.
+
+  The `403` of a caller that holds `credential-proxy:call-run` without
+  `credential-proxy:call-own` names the latter and the run path. The rule:
+  `docs/architecture/INTEGRATIONS_RUNTIME.md`, "AFPS Integrations — platform
+  credential proxy (`/api/credential-proxy/*`)".
+
+- **BREAKING (API): the credential proxy refuses an `X-Run-Id` naming a run
+  the platform executes** (#1894): `403`. Such a run reaches its connections
+  from inside its sandbox, through its sidecar. `X-Run-Id` names the caller's
+  own in-flight run that the caller executes itself, a remote run.
+
+- **BREAKING (MCP): the credential proxy is reached through `api_call`, not
+  `invoke_operation`** (#1894). The five `credentialProxy*` operations are
+  not in the operation catalog (`search_operations`, `describe_operation`,
+  `invoke_operation`); `list_connections` and `api_call` are the MCP path
+  (see Added).
+
+- **The credential proxy answers `500 session_store_unavailable` when the
+  upstream answered but its cookies could not be saved** (#1894), with
+  `Proxy-Status` error `proxy_internal_error`, and withholds the response.
+  The call took effect upstream, so a retry repeats it; the call journal
+  records that code.
+
+- **BREAKING (API): the credential proxy sends upstream no header describing
+  the platform's own inbound request.** One rule,
+  `isPlatformRequestHeader` (`@appstrate/connect/platform-request-headers`),
+  read by the credential proxy and by the LLM proxies' forwarding policy,
+  names them: the caller's platform credential (`Authorization`, `Cookie`),
+  its tenancy, run and role preview (`X-Org-Id`, `X-Space-Id`, `X-Run-Id`,
+  `X-View-As`), the platform's markers and versioning (`X-Appstrate-*`,
+  `Appstrate-*`), the network path an edge adds on the way in (`Forwarded`,
+  `Via`, `X-Forwarded-*`, the client-IP headers, `CDN-Loop`, Cloudflare's
+  `CF-*`) and the identity an auth proxy asserts (AWS ALB OIDC, Azure App
+  Service, Google IAP, oauth2-proxy). A Cloudflare Access service-token pair
+  (`CF-Access-Client-Id`, `CF-Access-Client-Secret`) is relayed: it is the
+  caller's credential for its upstream. A caller's own `Cookie` header does
+  not reach the upstream, the one an agent sets on an `api_call` of a remote
+  run included (the sidecar still sends it on a run the platform executes);
+  the cookies an upstream sets are kept and replayed from the server-side jar
+  of the `X-Session-Id` session.
 
 - **BREAKING (API): an undeclared override key has its own code, on both
   maps.** A key naming an id the agent does not declare answers
@@ -226,6 +369,23 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   and `runs_payer_iff_user_source`: `payer_user_id` is set iff the row's
   `credential_source` / `model_source` is `user`). Schema only; each constraint
   validates the existing rows as it is added. (#1925)
+- **The database holds the two rules that span a connection and its shares**
+  (migration `0091`, triggers `ics_share_invariants` on
+  `integration_connection_shares`, before insert or update, and
+  `ics_connection_keeps_shares` on `integration_connections`, before an update
+  of `space_id` or `user_id`): only a member's connection is shared, and a
+  space-scoped connection is shared into its own space only. A violation is a
+  `check_violation` (SQLSTATE `23514`) whose constraint is
+  `ics_end_user_not_shared` or `ics_space_shares_own`.
+  Schema only, no pre-flight: the triggers judge writes, not the existing
+  rows. `scripts/migration/0044-connection-shares.ts`, of the same release,
+  copies under `ics_share_invariants`, which locks each copied connection
+  `FOR SHARE` until the script commits; the CHECKs on the column it copies from
+  guarantee every copied row passes. Run it with the app stopped, as
+  `scripts/migration/README.md` orders, and include 0044 after `0091` in the
+  dump rehearsal. (#1925)
+- **The connection reuse hint says what it counts**: "N agents de ses espaces
+  déclarent l'intégration". (#1925)
 - **The starter agent's publication is audited**: a new organization's
   `hello-world` 1.0.0 writes a `package.version_created` line, actor `system`,
   in its default space. (#1914)
@@ -308,6 +468,77 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   (ActiveCampaign, Shopify, Firecrawl), else `Connexion N`; a
   `format: "password"` field is never used.
 
+- **Every system integration backed by an MCP server declares its
+  `default_tools`** (#1923). An agent that declares one of them and selects no
+  tool inherits that list, where its selection was empty: publish and import
+  refused it with `no_tools_selected`, and an inline or draft run aborted at
+  container boot once it bound a connection to the integration. github-mcp
+  and github-git have no mandatory auth, so a bare dependency on either was
+  inert and the run started without the integration: it now carries the
+  default (93 tools for github-mcp, 7 for github-git) and is resolved like any
+  selection, bound to a usable connection or reported in the launch's
+  `warnings`. The 14 that declared none move one patch version: browser-use
+  1.0.2, browserless 1.0.2, canva-mcp 1.0.3, clickup-mcp 1.2.4, coolify-mcp
+  1.0.2, expo-mcp 1.0.1, github-git 1.0.4, github-mcp 1.1.5, gitlab-mcp 1.0.1,
+  gmail-mcp 2.3.7, mcpemails 1.0.2, notion-mcp 1.0.3, ssh 1.0.3, twenty-mcp
+  1.0.2. Each list names its tools, never `"*"`, and is built as the
+  integration's exposed surface within the auth's default scopes: every tool
+  that is not hidden, less any whose `required_scopes` the auth's
+  `default_scopes` do not cover. So gmail-mcp, canva-mcp and mcpemails default
+  to the tools their default scopes (identity and read scopes) cover, fewer
+  than their catalog, and an agent that needs another selects it. The other
+  eleven default to their whole exposed surface, write tools included
+  (`ssh_exec`, `push`): narrowing one to what a task needs is the agent
+  author's selection. The platform supplies no fallback: an integration that
+  declares no `default_tools` still requires an explicit selection
+  (`docs/architecture/INTEGRATIONS_RUNTIME.md`, "Least-privilege selection").
+  An inherited `"*"` is the wildcard form for scopes, like a written one: the
+  auth's `default_scopes`, unioned with the agent's `scopes`.
+  The MCP server's instructions and the chat's tell the model to select only
+  the tools an agent needs and to inherit a default only when it needs all of
+  it; the chat's context lists a default of up to 12 tools by name and gives a
+  longer one as a count.
+
+- **BREAKING (API): a write of an integration manifest refuses a
+  `default_tools` entry the platform judges unexposed** (#1923). The
+  refusal is `400` `validation_failed` with one `errors[]` item per entry,
+  `{ field: "manifest.default_tools", code: "invalid_manifest" }`, whose
+  `message` names the tool (`findUnexposedDefaultTools`,
+  `@appstrate/core/integration`). What is refused depends on the source:
+  - every source, on create, draft save, file write, import (of a bundle, its
+    root package only), publish, restore and fork: a name `hidden_tools`
+    lists, the name of a connect tool, or the upload companion of a hidden
+    `api_call`;
+  - `source.kind: "none"`, by the manifest schema, so on read too: a name
+    outside the manifest's catalog (the tools `_meta["dev.appstrate/api"]`
+    supplies, plus any `tools_policy` key), when every `_meta` key of the
+    manifest is in the `dev.appstrate/` namespace (a manifest with no `_meta`
+    counts). This is the schema's existing refusal, with one exemption added:
+    a manifest carrying another vendor's `_meta` key is not judged on
+    membership;
+  - `local`, on create, draft save, import (of a bundle, its root package
+    only, before anything is written) and publish: a name outside the
+    `tools[]` of the referenced mcp-server, at the version a run would spawn
+    (on a bundle import, resolved over the versions the bundle carries and
+    the stored ones), and outside the integration's `api_call` tools. Any
+    save of the integration, even one that does not touch the manifest, is
+    judged against the mcp-server version a run would spawn at that moment.
+    When the mcp-server does not resolve, or declares no `tools[]`, nothing
+    more is judged;
+  - `remote` that declares a `tools_policy`, on the doors of the first item:
+    a name outside the manifest's catalog (the table's keys, plus the
+    `api_call` tools). The table already bounds what an agent can select by
+    name (`unknown_tool`), so a default cannot name a tool no agent could
+    pick. A `remote` source that declares no `tools_policy` is judged no
+    further: its catalog is the endpoint's, a name it does not serve selects
+    nothing at run time, and a run left with no callable tool still aborts.
+
+  A stored `remote` or `local` manifest that names a refused tool still loads;
+  its next write is refused. Remedies: remove the entry from `default_tools`;
+  for `local`, have the mcp-server declare the tool; for `remote`, declare it
+  in `tools_policy` (`{}` for one that needs no scope) when the endpoint
+  serves it.
+
 - **BREAKING (API): MCP refusals, space identity and per-space audience**
   (#1911).
   - A refused tool call is a tool result with `isError: true` and JSON text
@@ -361,8 +592,13 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     bound to one credential, `member` unbound (each member serves it), `managed`
     an alias. `credentialId` is `null` for `member` and `managed`.
   - Credential DTO: `allowed_actions` (`edit`, `delete`, `test`, `reconnect`),
-    `bindable`. `reconnect` is the pairing route's own rule: the holder's OAuth
-    credential, flagged or not; any other `credentialId` on a pairing is a 404. The registry gains `personal_allowed`.
+    `bindable`. `bindable` is true for an organization credential, API key or
+    subscription. `reconnect` is listed on an OAuth credential the caller may
+    edit, flagged or not: an organization one for a
+    `model-provider-credentials:write` holder, a personal one for its owner
+    holding `connect` or `write`, while the organization allows personal
+    credentials. A pairing naming a `credentialId` the caller may not reconnect
+    is a 404. The registry gains `personal_allowed`.
   - `model_source` takes `user` (a member's own credential), with `org` and
     `system` (`credential_source` is `MODEL_PAYERS`).
   - `personal_model_credentials` is always served in the organization settings.
@@ -372,7 +608,8 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     `model_credential_required` on a schedule write is judged on its effective
     model.
   - `llm_usage.payer_user_id` and `runs.payer_user_id` record the member whose
-    credential paid; a run's OAuth door compares against `runs.payer_user_id`.
+    credential paid; a run's OAuth door compares a personal credential's owner
+    against `runs.payer_user_id`.
 
 - **BREAKING (API): members bring their own model credentials for the models
   the organization leaves to them** (#1875). A model bound to an organization
@@ -383,8 +620,10 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   fixed endpoint), else refused with `409 model_credential_required`. Only a
   user principal pays (session, CLI, MCP instance token, chat loopback): an API
   key, a third-party OAuth token, an end user and a schedule never spend a
-  personal credential. The rules: `docs/architecture/MODEL_ALIASES.md`,
-  "Who pays".
+  personal credential. One ownership rule covers an API key and a subscription
+  (OAuth): `owner_user_id` NULL is an organization credential, bindable to a
+  model and serving every caller of it; set, it is that member's personal
+  credential. The rules: `docs/architecture/MODEL_ALIASES.md`, "Who pays".
   - Model DTO: `credentialId` is nullable, and `billed_to` (`user` | `org` |
     `null`, for the caller) is added. `POST /api/models` takes `providerId`, which a `null`
     `credentialId` requires; binding a personal credential is refused with
@@ -399,18 +638,40 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     organization credential, or a member's (break-glass), takes `delete`. An
     administrator sees no `oauth_email` on a member's subscription, and labels
     are deduplicated within their owner's scope.
+  - `POST /api/model-providers-oauth/pairing` takes
+    `{ providerId, owner_type? }` to create a subscription, with the same
+    `owner_type` (default `org`) under the same permissions:
+    `model-provider-credentials:write` for `org`, `connect` for `user`. It takes
+    `{ providerId, credentialId }` to reconnect one: the owner is the
+    credential's, and `owner_type` beside `credentialId` is a 400. The redeem
+    judges the pairing's minter again, under the membership lock and with their
+    current role, by the predicates of the mint: a minter demoted or removed in
+    between is refused.
+  - `GET /api/model-providers-oauth/pairing/{id}` answers one of four statuses:
+    `pending`, `connected`, `failed`, `expired`. `connected` replaces `consumed`
+    and always carries a `credentialId`; `failed` is a redeem that spent the
+    token and ended without a credential; a redeem in flight reads `pending`.
+  - The onboarding quick-connect pairs an organization subscription and seeds
+    the models bound to it; a failed seed is shown.
   - Org setting `personal_model_credentials` (default on). Off, personal
     credentials can be neither created, reconnected, probed nor spent, and a run
     pinned to one is refused at its next call.
   - A run's proxy calls on a member-paid model serve the personal credential
     frozen at launch; one deleted mid-run is never replaced by another payer's.
     The public LLM proxy never serves a subscription. The sidecar's token door
-    serves a subscription only to a run its owner launched without an API key.
+    serves an organization subscription to any run of the organization pinned
+    to it, and a personal one only to a run its owner pays.
   - Schedules spend organization credentials only: a member-paid model cannot be
     a schedule's `model_id_override` (`409 model_credential_required`), a model
     a schedule overrides with cannot be unbound (`409 model_scheduled`), and a
     schedule firing one through an agent's or the organization's default fails.
-  - A subscription is reconnected only by its holder, judged at redeem time.
+  - A subscription is reconnected by whoever may edit it: an organization one
+    by a `model-provider-credentials:write` holder, a personal one by its owner
+    holding `connect` or `write`, while the organization allows personal
+    credentials.
+  - A member who leaves the organization takes their personal credentials with
+    them. Organization credentials stay, a subscription that member connected
+    included.
   - `llm_usage.credential_id` (uuid, no foreign key) records the credential that
     served a call (NULL for a platform key or an alias).
   - `needs_reconnection` is read for the caller on an unbound model: true when
@@ -573,6 +834,14 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   disabled is not refused. The dashboard's schedule form names
   the caller's own default connection when it saves a schedule running as
   them.
+- **BREAKING (API): removing a pin or an org default answers `200` with the
+  number of schedules it disabled** (#1933).
+  `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`,
+  `DELETE /api/integrations/{packageId}/pins/{agentPackageId}` and
+  `DELETE /api/integrations/{packageId}/default` answer
+  `200 { "schedules_disabled_count": <integer> }` where they answered `204`.
+  The count is that of the schedules the removal disabled (see Fixed), 0 when
+  it disabled none, nothing to remove included.
 - **Google integrations request `userinfo.email` by default** (#1871):
   `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in
@@ -771,6 +1040,60 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   switched off, or no connection chosen and by whom.
 
 ### Added
+
+- **`GET /api/credential-proxy/connections`** (#1894, #1957): what a call
+  through the credential proxy outside a run would accept for the caller,
+  read with the rule the proxy applies. A holder of
+  `credential-proxy:call-own` alone gets their own connections; a caller who
+  also holds `credential-proxy:call-run` gets the connections usable in the
+  space, and under an enforced org default only its members. Per connection:
+  the `integration_package_id` and `connection_id` to send, its label,
+  `owned_by_actor` (`false` for another member's connection shared into the
+  space) and auth, `scopes_granted`, the auth's `authorized_uris`,
+  `allow_all_uris`, and the two flags a call would still be refused on,
+  `needs_reconnection` and `call_run_permission_required`. It decrypts nothing: an
+  `authorized_uris` entry templated on a credential field is given as the
+  manifest declares it (`{$credential.<field>}`), and a caller targets it by
+  writing `{{<field>}}` at that place in the target. Requires
+  `credential-proxy:call-own`.
+
+- **A journal of the credential proxy's calls** (#1894). Every call that may
+  have sent a connection's credential writes one row once its outcome is
+  known: who acted and through which API key, the connection and its owner,
+  the integration, the run it named, the method, the target's host, the
+  outcome, the duration and the `Request-Id`. The outcome is the
+  upstream's status for a response relayed, the proxy's own code for a
+  failure after dispatch, a buffered body that breaks off after its headers
+  included. A refusal decided before anything was sent writes none. Two
+  reads, newest first, paginated by the `Link` header:
+  - `GET /api/me/connections/{connectionId}/calls`: the connection's owner
+    reads every call made with it, whoever made it and from whichever space;
+  - `GET /api/integrations/calls`: a holder of `integrations:configure` reads
+    every call made in the space.
+
+  It covers the platform proxy only, keeps the target's host and not its
+  path, and nothing prunes it; its limits in full:
+  `docs/architecture/INTEGRATIONS_RUNTIME.md`, "AFPS Integrations — platform
+  credential proxy (`/api/credential-proxy/*`)". BREAKING: the audit action
+  `integration.connection.proxied`, which recorded the first use per session
+  of a connection the caller did not own, no longer exists; an alert or a
+  report that matches it reads the journal instead.
+
+- **MCP: `list_connections` and `api_call`** (#1894, #1957), declared to a
+  bearer caller holding `mcp:invoke` and `credential-proxy:call-own`.
+  `list_connections` is the listing above. `api_call` sends 1 to 50 requests
+  through the credential proxy in one call, each with typed arguments
+  (integration, method, target, headers, body, connection) in place of the
+  route's control headers, and returns one entry per request, in order: the
+  upstream's status, a few headers and a text body cut at
+  `max_response_bytes`, or the platform's refusal of that request, which does
+  not stop the others. One result carries a bounded total of body bytes. The
+  tool generates the proxy session and returns its `session_id`, to pass back
+  to keep the upstream's cookies. It names no run: its calls reach what a
+  call outside a run reaches for the caller (see Changed), a connection
+  another member shared included when the caller also holds
+  `credential-proxy:call-run`. Guide:
+  `docs/guides/connecting-mcp-clients.md`.
 
 - **Boot warning for environment keys this version does not read.** One `warn`
   line lists each set key whose namespace is one the platform reads and that no
@@ -971,6 +1294,59 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Fixed
 
+- **A subscription pairing's redeem is audited.**
+  `oauth_model_provider.imported` and `oauth_model_provider.reconnected` were
+  dropped: the redeem route carries no organization context. They are recorded
+  with the pairing's organization, and its minter as actor.
+- **A fire refused over the schedule's own connection choice disables the
+  schedule** (#1954). It recorded a failed run and stayed armed, failing at
+  every tick, on the verdicts the schedule write refuses
+  (`must_choose_connection`, `override_connection_unavailable`,
+  `override_outranked`, and `auth_serves_no_selected_tool` or
+  `required_integration_unbound` decided by its own `connection_overrides`).
+  A fire whose refusal carries any of them disables the schedule, removes its
+  job and records one failed run naming those verdicts
+  (`Schedule disabled: …`). `disabled_reason` is the new
+  `connection_choice_invalid` (migration `0094`, no operator step). The
+  schedule stays disabled until it is re-enabled, which goes through the
+  schedule write rule, even when the cause is reverted elsewhere (the
+  connection shared again, the pin removed, the extra connection deleted).
+  The disable applies only to the row the fire read: a schedule written while
+  its fire ran is left as written, with a failed run and no disable, and the
+  next tick judges it; the invalid-actor disable follows the same rule. Every
+  other refusal (not connected, needs reconnection, an inactive integration,
+  a pin naming an unavailable connection) records a failed run and leaves the
+  schedule armed, as before.
+- **Removing the pin or org default that named a schedule's connection set
+  disables the schedule** (#1933). It stayed armed: its next fire failed at
+  every tick (`must_choose_connection`), bound the actor's one own connection
+  (another account) or ran without the integration. The removal disables, in
+  its transaction, every enabled schedule whose fired version uses the
+  integration (declared, not inert) and whose set nothing names afterwards (no
+  `connection_overrides` key, admin pin, pin of its actor or org default),
+  however many connections its actor holds. `disabled_reason` is the new
+  `connection_set_unnamed` (migration `0093`, no operator step); the audit
+  entry lists `disabledScheduleIds` and the route answers the count (see
+  Changed). A connection delete that empties a member pin disables the same
+  schedules with `connection_deleted`, counted per `pins[]` item by
+  `delete-impact` (`schedules_disabled_count`). Re-enabling goes through the
+  schedule write rule. The dashboard says how many schedules each removal
+  disables. Not re-judged: a schedule whose fired version does not resolve, a
+  layer added above its set, a new version declaring an integration no layer
+  names.
+- **`integration.connection.scope_widened` is recorded once, by the write that
+  moved the row.** A reconnect completing while a client promotion widened the
+  same row recorded it twice. (#1925)
+- **MCP: a `run_and_wait` refusal carries a code true of every argument it
+  lists**, and `space_id: null` is a `missing_argument`. The
+  `/oauth2/authorize` gate attempts no write when the space's resource row
+  exists. (#1925)
+- **An `Idempotency-Key` sent to the credential proxy reaches the upstream.**
+  On `/api/credential-proxy/proxy` the header is the upstream's
+  (Stripe's, for one): it is relayed with the caller's other headers,
+  whatever the verb, where a mutating call carrying one was refused
+  `400 idempotency_not_supported`. The platform de-duplicates nothing on it.
+
 - **A session is refused for a user with no user row.** The session hook throws
   instead of creating a session without a realm.
 - **The Pi resource loader guard throws when Pi no longer exposes
@@ -1131,6 +1507,31 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Security
 
+- **Connecting reads the integration's published version, not its draft**
+  (#1947). Every connect flow (OAuth kickoff and callback, the hosted form,
+  the fields and login flows) took the `auth` declaration from the draft, so
+  an edit nobody had published changed where an authorization code, a PKCE
+  verifier and the OAuth client secret were sent. The connect flows, the
+  auths `GET /api/integrations/{id}` lists as connectable and the
+  registration of OAuth clients now read the `latest` published version, as
+  the credential proxy does; the draft serves only while the integration has
+  no published version. An auth the draft adds is listed and connectable
+  once a version declaring it is published.
+
+- **BREAKING (API): a schedule running as an end user takes the authority to
+  borrow one** (#1947). `schedules:write` alone let a member (the `builder`
+  preset, a custom role) name any end user of the space as `actor`, and each
+  fire then ran with that end user's own connections. Naming an end user
+  other than the caller, and any `PATCH` or `DELETE` of a schedule whose
+  stored actor is an end user, now answers `403 forbidden` (`param: actor` on
+  the naming) unless the caller is an API key, which already borrows an end
+  user with `Appstrate-User`, or holds `api-keys:create` in the space and
+  could mint one. The `builder` preset holds no `api-keys:*`. The rule for
+  another member is unchanged (org owner or admin only). Existing schedules
+  keep firing; a builder who created one for an end user no longer edits or
+  deletes it. The dashboard's actor picker lists end users to holders of
+  `api-keys:create` only.
+
 - **BREAKING: an `api_call` encodes each `{{field}}` for the place it takes**
   (#1915), on the three paths (platform credential proxy, sidecar, CLI), through
   one request preparation shared with `connect.login`. A credential value was
@@ -1224,6 +1625,53 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   re-consents what the connection holds plus the auth's `default_scopes`. It
   used to request the current agent's scopes, which then reached every agent
   bound to the connection.
+
+- **Only a platform-realm account joins an organization or reads it over a
+  cookie** (#1949). An `end_user:<space>` account holding an address could
+  accept an invitation sent to that address, be auto-joined by an org-level
+  OAuth client, open the realtime streams' cookie branch once a member, and
+  reach the OAuth client administration, which the realm guard exempted with
+  every `/api/oauth/` path. The membership door (`provisionMember`) answers
+  `403 not_a_platform_account`, the stream branch `401`, and the guard `403` on
+  `/api/oauth/clients*` and `/api/oauth/scopes`; the hosted OIDC pages are
+  public paths and unchanged. A social sign-in callback neither signs in nor
+  links an identity to an account outside its transaction's realm.
+
+- **An agent's tool call cannot name a login input's placeholder** (#1949).
+  While a `connect.tool` login runs, the runner's proxy substitutes `{{key}}`
+  with the login secret in every request the runner sends to the auth's
+  authorized URIs, a parallel tool call's included. The sidecar refuses a call
+  whose arguments name a `{{key}}` of the connection's login inputs, at any
+  time in the run. On such a connection an argument that legitimately
+  contains that text (a mail-merge `{{email}}`) is refused too.
+
+- **Under `RUN_ADAPTER=firecracker`, a `delivery.files` credential belongs to
+  its runner** (#1949). The sidecar wrote it on its own uid with the
+  manifest's mode: `0600` locked the runner out (the SSH integration did not
+  start), `0644` opened it to the agent sharing the guest. The file is written
+  owner-only and the guest's exec wrapper gives it to the runner's uid
+  (`--own`). The fix is in the guest rootfs: it ships with this release's
+  Firecracker artifacts.
+
+- **Hardening** (#1949).
+  - **BREAKING (OIDC): `GET /api/oauth/logout` redirects only to a
+    `postLogoutRedirectUris` entry of an enabled client.** A `redirect_uris`
+    entry is no longer accepted as a fallback, and a client that registered
+    itself (DCR, CIMD) is never redirected to. Before the deploy, list the
+    clients whose logout relied on the fallback
+    (`SELECT client_id, name FROM oauth_clients WHERE post_logout_redirect_uris IS NULL OR post_logout_redirect_uris = '{}'`,
+    column names as in `packages/db/src/schema/oidc.ts`) and register their
+    post-logout URI; until then their logout lands on `/`.
+  - The magic-link confirmation page names no account: it knew the address
+    only from the link's query string.
+  - A remote MCP credential that is not an HTTP header value is refused
+    without quoting it in the boot report.
+  - An integration manifest is refused on write when an `authorized_uris`
+    entry of an auth that injects a credential is plain `http://`, unless its
+    host is listed in `EGRESS_ALLOW_INTERNAL_HOSTS`. Published versions still
+    load.
+  - The transparent egress plane refuses a plain-HTTP request naming two
+    hosts (a repeated `Host`, an absolute-form target for another one).
 
 ## [1.0.0-beta.66] - 2026-10-08
 

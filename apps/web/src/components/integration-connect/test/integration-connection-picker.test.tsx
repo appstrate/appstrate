@@ -431,6 +431,7 @@ function PickerProbe({
   version,
   manifest = MANIFEST,
   authStatuses = NO_STATUSES,
+  agentTools,
   agentScopes,
   openPopup,
   onPicker,
@@ -439,6 +440,7 @@ function PickerProbe({
   version?: string;
   manifest?: IntegrationManifestView;
   authStatuses?: IntegrationAuthStatus[];
+  agentTools?: string[] | "*";
   agentScopes?: string[];
   openPopup?: ConnectionPickerDeps["openPopup"];
   onPicker: (picker: ConnectionPicker | null) => void;
@@ -450,7 +452,7 @@ function PickerProbe({
         agentPackageId: AGENT,
         manifest,
         authStatuses,
-        agentTools: undefined,
+        agentTools,
         agentScopes,
         persistence,
         version,
@@ -1235,7 +1237,13 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
 
   function pickerOver(
     candidates: Candidate[],
-    opts: { canAdd?: boolean; agentScopes?: string[]; openPopup?: OpenPopup } = {},
+    opts: {
+      canAdd?: boolean;
+      manifest?: IntegrationManifestView;
+      agentTools?: string[] | "*";
+      agentScopes?: string[];
+      openPopup?: OpenPopup;
+    } = {},
   ): ConnectionPicker {
     const qc = new QueryClient();
     qc.setQueryData(
@@ -1246,8 +1254,9 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     render(
       <PickerProbe
         persistence={{ mode: "pin" }}
-        manifest={OAUTH}
+        manifest={opts.manifest ?? OAUTH}
         authStatuses={CONNECTABLE}
+        agentTools={opts.agentTools}
         agentScopes={opts.agentScopes}
         openPopup={opts.openPopup}
         onPicker={(p) => pickers.push(p)}
@@ -1397,6 +1406,42 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
         forceAccountSelect: true,
       },
     ]);
+  });
+
+  // A `"*"` asks for the auth's `default_scopes` whether the agent writes it or inherits it
+  // from the integration's `default_tools`; inherited tool names ask for nothing.
+  it('a new connection asks for the same scopes under an inherited `"*"` as under a written one', async () => {
+    const defaulting = (defaultTools: string[] | "*") =>
+      ({
+        ...OAUTH,
+        allow_undeclared_tools: true,
+        default_tools: defaultTools,
+        tools_policy: { send_mail: { required_scopes: { primary: ["send"] } } },
+      }) as unknown as IntegrationManifestView;
+    const asked = async (opts: Parameters<typeof pickerOver>[1]) => {
+      const opened: Array<Parameters<OpenPopup>[0]> = [];
+      const picker = pickerOver([], {
+        ...opts,
+        openPopup: async (input) => {
+          opened.push(input);
+          return false;
+        },
+      });
+      await picker.triggerConnect("primary");
+      return { scopes: opened[0]!.scopes, named: picker.connectsWithAgentScopes("primary") };
+    };
+
+    const wildcard = { scopes: ["read"], named: true };
+    expect(await asked({ agentTools: "*" })).toEqual(wildcard);
+    expect(await asked({ manifest: defaulting("*") })).toEqual(wildcard);
+    expect(await asked({ manifest: defaulting(["send_mail"]) })).toEqual({
+      scopes: undefined,
+      named: false,
+    });
+    expect(await asked({ manifest: defaulting("*"), agentTools: ["send_mail"] })).toEqual({
+      scopes: ["send"],
+      named: true,
+    });
   });
 
   it("shows each row's grant against the agent, and offers a connection with its scopes", () => {

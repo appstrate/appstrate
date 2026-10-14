@@ -18,12 +18,12 @@ import { cn } from "@appstrate/ui/cn";
 import { $api } from "../api/client";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useEndUsers } from "../hooks/use-end-users";
-import { useAuth } from "../hooks/use-auth";
+import { useScheduleCaller } from "../hooks/use-can-write-schedule";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRoles } from "../hooks/use-roles";
 import { useSpaceMembers } from "../hooks/use-space-members";
-import { mayGovernMemberSchedule } from "../lib/schedule-governance";
+import { mayGovernScheduleActor } from "../lib/schedule-governance";
 import type { ActorValue } from "../lib/schedule-payload";
 import { primaryLabel, useActorName } from "../hooks/use-actor-name";
 
@@ -74,12 +74,11 @@ export function ActorSelect({
     { enabled: !!orgId },
   );
   const members = useMemo(() => orgData?.members ?? [], [orgData]);
-  // Naming ANOTHER member is an org owner/admin act (`mayGovernMemberSchedule`); anyone else picks
-  // themselves, an end user, or the member the field started on — kept listed after picking
-  // someone else, so it can be put back. The server decides (403).
-  const { user } = useAuth();
-  const { orgRole, can } = usePermissions();
-  const callerId = user?.id;
+  // Naming ANOTHER identity takes authority over it (`mayGovernScheduleActor`); anyone else picks
+  // themselves or the actor the field started on — kept listed after picking someone else, so it
+  // can be put back. The server decides (403).
+  const caller = useScheduleCaller();
+  const { can } = usePermissions();
   // Only a member who reaches the space with a role holding `agents:run` can be an actor (the
   // server's `schedule_actor_invalid`). Without the two reads the list is not narrowed and the
   // server's refusal does the talking.
@@ -98,14 +97,18 @@ export function ActorSelect({
     );
   }, [spaceMembers, roles]);
   const [initialUserId] = useState(value?.userId);
+  const [initialEndUserId] = useState(value?.endUserId);
 
   const { data: endUserPage } = useEndUsers({
     limit: 50,
     search: debouncedQuery || undefined,
   });
   const endUsers = useMemo(
-    () => (includeEndUsers ? (endUserPage?.data ?? []) : []),
-    [includeEndUsers, endUserPage],
+    () =>
+      (includeEndUsers ? (endUserPage?.data ?? []) : []).filter(
+        (eu) => eu.id === initialEndUserId || mayGovernScheduleActor({ endUserId: eu.id }, caller),
+      ),
+    [includeEndUsers, endUserPage, initialEndUserId, caller],
   );
 
   const memberOptions = useMemo<Option[]>(() => {
@@ -114,7 +117,7 @@ export function ActorSelect({
       .filter(
         (m) =>
           m.userId === initialUserId ||
-          (mayGovernMemberSchedule(m.userId, { userId: callerId, orgRole }) &&
+          (mayGovernScheduleActor({ userId: m.userId }, caller) &&
             (mayRunIds === null || mayRunIds.has(m.userId))),
       )
       .filter(
@@ -128,7 +131,7 @@ export function ActorSelect({
         name: primaryLabel(m.displayName, m.email ?? null, m.userId),
         email: m.email ?? null,
       }));
-  }, [members, debouncedQuery, orgRole, callerId, initialUserId, mayRunIds]);
+  }, [members, debouncedQuery, caller, initialUserId, mayRunIds]);
 
   const endUserOptions = useMemo<Option[]>(
     () =>

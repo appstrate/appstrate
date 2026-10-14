@@ -52,7 +52,7 @@ import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
 import { deviceCode, oauthClient } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { loadClientSignupPolicy } from "../services/orgmember-mapping.ts";
-import { markClientSelfService } from "../services/oauth-admin.ts";
+import { isSelfServiceClient, markClientSelfService } from "../services/oauth-admin.ts";
 import {
   ensureProtectedResourcesMintable,
   isProtectedResourceUri,
@@ -611,27 +611,6 @@ async function enforceDeviceApproveRealm(ctx: {
     spaceId: metadata.referencedSpaceId ?? null,
     orgId: metadata.referencedOrgId ?? null,
   });
-}
-
-/**
- * Whether `clientId` registered itself (DCR / CIMD) — the `self_service` column
- * `markClientSelfService` stamps.
- *
- * Such a client mints instance tokens carrying the connecting user's full
- * authority, so the only safe audience is a single protected resource (a per-org
- * MCP endpoint) whose own resource-server check and the outbound confinement in
- * `protected-resources.ts` jointly cage it; the `/oauth2/token` guard enforces
- * that at mint time. A missing row reads as not self-service, so
- * operator-provisioned clients (the dashboard SPA / CLI) keep targeting the
- * platform audience under the other gates.
- */
-async function isSelfServiceClient(clientId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ selfService: oauthClient.selfService })
-    .from(oauthClient)
-    .where(eq(oauthClient.clientId, clientId))
-    .limit(1);
-  return row?.selfService === true;
 }
 
 /**

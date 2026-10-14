@@ -44,6 +44,7 @@ import type { ConnectionDeleteImpact } from "../../../src/services/me-connection
 import {
   auditEvents,
   integrationConnections,
+  integrationOrgDefaults,
   integrationPins,
   schedules,
 } from "@appstrate/db/schema";
@@ -55,6 +56,7 @@ import {
 } from "../../helpers/integration-manifests.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { seedShares } from "../../helpers/connection-shares.ts";
+import { publishAndInstall } from "../../helpers/schedule-fixtures.ts";
 
 const app = getTestApp();
 
@@ -314,7 +316,7 @@ describe("/api/me/integration-pins", () => {
       const second = await seedConnectionFor(ctx.user.id);
       expect((await putPin([first])).status).toBe(200);
       expect((await putPin([second])).status).toBe(200);
-      expect((await deletePin()).status).toBe(204);
+      expect((await deletePin()).status).toBe(200);
 
       const resourceId = `${INTEGRATION}#${AGENT}`;
       expect(await pinAudits("integration.member_pin.upserted")).toEqual([
@@ -373,13 +375,14 @@ describe("/api/me/integration-pins", () => {
   // ─── DELETE ───────────────────────────────────────────
 
   describe("DELETE /integration-pins", () => {
-    it("204 deletes the caller's pin", async () => {
+    it("200 deletes the caller's pin", async () => {
       const connectionId = await seedConnectionFor(ctx.user.id);
       expect((await putPin([connectionId])).status).toBe(200);
 
       const res = await deletePin();
 
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ schedules_disabled_count: 0 });
 
       // Subsequent GET returns empty list.
       const list = await app.request(
@@ -535,7 +538,7 @@ describe("/api/me/integration-pins", () => {
       expect((await putPin([connectionId])).status).toBe(200);
       const headers = await keyHeaders(["integrations:connect"]);
       const res = await app.request(deletePath, { method: "DELETE", headers });
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
       expect(await pinnedConnections()).toEqual([]);
     });
 
@@ -543,7 +546,7 @@ describe("/api/me/integration-pins", () => {
       const connectionId = await seedConnectionFor(ctx.user.id);
       expect((await putPin([connectionId])).status).toBe(200);
       const res = await app.request(deletePath, { method: "DELETE", headers: authHeaders(ctx) });
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
       expect(await pinnedConnections()).toEqual([]);
     });
 
@@ -654,12 +657,14 @@ describe("/api/me/integration-pins", () => {
             agent_display_name: "Pin Test Agent",
             integration_package_id: INTEGRATION,
             connection_count: 2,
+            schedules_disabled_count: 0,
           },
           {
             agent_package_id: OTHER_AGENT,
             agent_display_name: "Other",
             integration_package_id: INTEGRATION,
             connection_count: 1,
+            schedules_disabled_count: 0,
           },
         ],
         schedules: [
@@ -750,6 +755,8 @@ describe("/api/me/integration-pins", () => {
           agent_package_id: before.agent,
           integration_package_id: before.integration,
           connection_count: before.connectionIds.length,
+          // Every schedule here names its own set: a dropped pin leaves none unnamed.
+          schedules_disabled_count: 0,
         }));
       // The preview lists the owner's schedules and counts the others'.
       const rewrittenSchedules = schedulesBefore.flatMap((before) => {
@@ -821,6 +828,42 @@ describe("/api/me/integration-pins", () => {
         connectionOverrides: { [INTEGRATION]: [web!], "@pinorg/other-svc": [] },
         enabled: true,
       });
+    });
+
+    it("counts, per pin the delete drops, the caller's schedules it leaves unnamed", async () => {
+      await publishAndInstall({
+        id: AGENT,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+      });
+      const gone = await seedConnectionFor(ctx.user.id);
+      const kept = await seedConnectionFor(ctx.user.id, { shared: true });
+      const unnamed = { packageId: AGENT, orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+      await seedSchedule({ ...unnamed, userId: ctx.user.id, enabled: true });
+      // Not counted: its own set names another connection, it is paused, it is a colleague's.
+      await scheduleFor([kept], { userId: ctx.user.id });
+      await seedSchedule({ ...unnamed, userId: ctx.user.id, enabled: false });
+      const colleague = await createTestUser();
+      await addOrgMember(ctx.orgId, colleague.id);
+      await seedSchedule({ ...unnamed, userId: colleague.id, enabled: true });
+      const counts = async () =>
+        (await impactOf(gone)).pins.map((p) => [p.connection_count, p.schedules_disabled_count]);
+
+      await pinSet([gone]);
+      expect(await counts()).toEqual([[1, 1]]);
+
+      // A soft org default below the pin still names the set once the pin is gone.
+      const [orgDefault] = await db
+        .insert(integrationOrgDefaults)
+        .values({ spaceId: ctx.defaultSpaceId, integrationId: INTEGRATION, connectionIds: [kept] })
+        .returning({ id: integrationOrgDefaults.id });
+      expect(await counts()).toEqual([[1, 0]]);
+      await db.delete(integrationOrgDefaults).where(eq(integrationOrgDefaults.id, orgDefault!.id));
+
+      // A pin that only shrinks stays a name.
+      await pinSet([gone, kept]);
+      expect(await counts()).toEqual([[2, 0]]);
     });
 
     // Only an explicit write pins to none: a set the delete empties drops its pin, and a pin to

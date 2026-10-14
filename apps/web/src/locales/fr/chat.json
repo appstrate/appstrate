@@ -101,7 +101,7 @@
   "turn.error.contactAdmin": "Contactez un administrateur de l'organisation.",
   "turn.error.manageBilling": "Gérer la facturation",
   "turn.error.manageModels": "Gérer les modèles",
-  "turn.error.needsReconnection": "Votre abonnement pour le modèle sélectionné a expiré ou a été révoqué. Reconnectez-le dans Mes clés de modèles, puis réessayez.",
+  "turn.error.needsReconnection": "L'abonnement qui sert le modèle sélectionné a expiré ou a été révoqué. Reconnectez-le, puis réessayez.",
   "turn.error.orgDeleting": "Cette organisation est en cours de suppression.",
   "turn.error.requestId": "Identifiant de requête : {{id}}",
   "turn.retry": "Réessayer",
@@ -181,5 +181,7 @@
   "conversation.notFound.hint": "Elle n'existe pas ou plus, ou elle appartient à un autre compte ou à un autre espace.",
   "conversation.loading": "Chargement…",
   "threads.empty": "Envoyez un message ! Votre historique de conversations apparaîtra ici.",
-  "threads.emptyReadOnly": "Vous n’avez aucune conversation à relire."
+  "threads.emptyReadOnly": "Vous n’avez aucune conversation à relire.",
+  "turn.error.needsReconnectionOwn": "L'abonnement qui sert le modèle sélectionné a expiré ou a été révoqué. Si c'est le vôtre, reconnectez-le dans vos préférences, puis réessayez ; sinon, demandez à un administrateur de l'organisation de le reconnecter.",
+  "turn.error.needsReconnectionMember": "L'abonnement qui sert le modèle sélectionné a expiré ou a été révoqué. Demandez à un administrateur de l'organisation de le reconnecter."
 }

@@ -3,7 +3,8 @@
 /**
  * « Ajouter une clé org », for the organization: a key, then the models it makes available. Nothing
  * is written until the second step's button: one click creates the provider and its models.
- * « Back » returns to the first step with what was typed.
+ * « Back » returns to the first step with what was typed. A subscription is paired instead: the
+ * helper creates it, the flow closes, and its row chooses its models like any organization key.
  */
 
 import { useState } from "react";
@@ -37,7 +38,6 @@ export function ProviderAddFlow({
       onClose={onClose}
       credential={null}
       isPending={false}
-      apiKeyOnly
       initial={typed}
       submitLabel={t("credentials.form.next")}
       onSubmit={(data) => {

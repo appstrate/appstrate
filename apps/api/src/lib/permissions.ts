@@ -172,9 +172,9 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     // Files: read only — deleting is preset admin or the creator (per-file capability check).
     "files:read",
     // Schedules: read only. Even with `schedules:write`/`schedules:delete` (builder, custom
-    // roles) a caller writes schedules running as themselves or an end user; a schedule running as
-    // another member lends that member's connections to its runs, so naming such an actor and any
-    // write to such a schedule is an org owner/admin act (`mayGovernMemberSchedule` in
+    // roles) a caller writes schedules running as themselves; a schedule running as another
+    // identity lends that identity's connections to its runs, so naming such an actor and any
+    // write to such a schedule take authority over it (`mayGovernScheduleActor` in
     // routes/schedules.ts).
     "schedules:read",
     "persistence:read",
@@ -332,11 +332,12 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "end-users:read",
   "end-users:write",
   "end-users:delete",
-  // Credential proxy — BYOI ("Bring Your Own Instance") for remote
-  // AFPS runs. High-value scope: one compromised API key can reach every
-  // provider in the space. A key minted with `scopes` omitted or empty carries it
-  // when its creator holds it; a non-empty `scopes` mints a narrower key.
-  "credential-proxy:call",
+  // Credential proxy for a run (`X-Run-Id`) — BYOI ("Bring Your Own Instance")
+  // for remote AFPS runs. A key minted with `scopes` omitted or empty carries
+  // it when its creator holds it; a non-empty `scopes` mints a narrower key.
+  "credential-proxy:call-run",
+  // Credential proxy outside a run, under the same `scopes` rule.
+  "credential-proxy:call-own",
   // LLM proxy — server-side LLM model injection for remote-backed
   // `appstrate run` and headless CI (GitHub Action). Scopes metered
   // per-call in `llm_usage` (source='proxy'). A key minted with `scopes` omitted or

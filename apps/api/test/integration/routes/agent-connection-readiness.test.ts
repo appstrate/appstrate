@@ -34,6 +34,7 @@ import { integrationConnections, integrationPins, packages } from "@appstrate/db
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
+  remoteIntegrationManifest,
   httpHeaderDelivery,
   twoAuthApiIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
@@ -101,7 +102,12 @@ interface ReadinessResolution {
   source: string | null;
   error_code: string | null;
   resolved_connection_ids: string[];
-  candidates: Array<{ id: string; label?: string; scope_fit?: string }>;
+  candidates: Array<{
+    id: string;
+    label?: string;
+    scope_fit?: string;
+    missing_scopes?: string[];
+  }>;
 }
 interface ReadinessBody {
   blocks_run: boolean;
@@ -110,6 +116,8 @@ interface ReadinessBody {
     code: string;
     connection_id?: string;
     required_auth_key?: string;
+    missing_scopes?: string[];
+    required_scopes?: string[];
   }>;
   integrations: Array<{
     integration_package_id: string;
@@ -128,7 +136,6 @@ interface DiagnosticsBody {
   diagnostics: Array<{
     code: string;
     severity: "blocking" | "warning";
-    target: { node: string | null; item: string | null };
     correction: { destination: string; section: string | null };
     recoverable_on_launch: boolean;
   }>;
@@ -269,7 +276,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     });
   });
 
-  it("routes a recoverable connection blocker to the toolbox and connections settings", async () => {
+  it("routes a recoverable connection blocker to the connections settings", async () => {
     await seedAgentWith(buildAgentManifest([INTEGRATION], true, true));
     await seedIntegration(false);
     await configureUsableModel();
@@ -283,7 +290,6 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(body.diagnostics[0]).toMatchObject({
       code: "not_connected",
       severity: "blocking",
-      target: { node: "toolbox", item: INTEGRATION },
       correction: { destination: "configuration", section: "connections" },
       recoverable_on_launch: true,
     });
@@ -703,5 +709,161 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
     expect(item.candidate_connections!.map((c) => c.id)).toEqual(
       resolution.candidates.map((c) => c.id),
     );
+  });
+});
+
+// An agent that writes no `tools` inherits the integration's `default_tools`. An inherited `"*"`
+// is the wildcard form for scopes, as a written one is: the auth's `default_scopes` are
+// required. Inherited tool NAMES contribute no scope.
+describe("connection-readiness — scopes of an inherited tool selection", () => {
+  const WILD = "@rdyorg/wild";
+
+  /** `search` requires `search.read` on an auth whose `default_scopes` is `base`. */
+  function wildManifest(defaultTools?: string[] | "*"): Record<string, unknown> {
+    return {
+      ...remoteIntegrationManifest({
+        name: WILD,
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorizationEndpoint: "https://provider.example.com/authorize",
+            tokenEndpoint: "https://provider.example.com/token",
+            defaultScopes: ["base"],
+            scopeCatalog: [
+              { value: "base", label: "Base" },
+              { value: "search.read", label: "Search" },
+              { value: "extra", label: "Extra" },
+            ],
+          },
+        },
+        tools_policy: { search: { required_scopes: { primary: ["search.read"] } } },
+      }),
+      allow_undeclared_tools: true,
+      ...(defaultTools !== undefined ? { default_tools: defaultTools } : {}),
+    };
+  }
+
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "rdyorg" });
+  });
+
+  /**
+   * What readiness, its picker candidate and the launch say of the caller's own connection
+   * granted nothing, for an agent configuring the integration with `config` (none when omitted).
+   */
+  async function verdictOf(opts: {
+    defaultTools?: string[] | "*";
+    config?: { tools?: string[] | "*"; scopes?: string[] };
+  }) {
+    const manifest = wildManifest(opts.defaultTools);
+    await seedPackage({
+      id: WILD,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      draftManifest: manifest,
+    });
+    // Published so the run's version freeze judges the manifest readiness does.
+    await seedPackageVersion({ packageId: WILD, version: "1.0.0", manifest });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, WILD);
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: {
+        ...buildAgentManifest([WILD], false),
+        ...(opts.config ? { integrations_configuration: { [WILD]: opts.config } } : {}),
+      },
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await db.insert(integrationConnections).values({
+      integrationId: WILD,
+      authKey: "primary",
+      accountId: "acct-wild",
+      label: "Sans scope",
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      endUserId: null,
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "live" } }),
+      scopesGranted: [],
+    });
+
+    const readiness = await app.request(`/api/agents/${AGENT}/connection-readiness`, {
+      method: "GET",
+      headers: authHeaders(ctx),
+    });
+    expect(readiness.status).toBe(200);
+    const body = (await readiness.json()) as ReadinessBody;
+    const err = body.errors.find((e) => e.field === `integrations.${WILD}`);
+    const { resolution } = body.integrations.find((i) => i.integration_package_id === WILD)!;
+    const launch = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    return {
+      blocksRun: body.blocks_run,
+      code: err?.code ?? null,
+      missing: err?.missing_scopes ?? [],
+      required: err?.required_scopes ?? [],
+      candidate: resolution.candidates.map((c) => [c.scope_fit, c.missing_scopes]),
+      // The connection gate's 409, else the next gate's refusal (no model is seeded).
+      launch: ((await launch.json()) as { code?: string }).code,
+    };
+  }
+
+  const requiresDefaultScopes = {
+    blocksRun: true,
+    code: "insufficient_scopes",
+    missing: ["base"],
+    required: ["base"],
+    candidate: [["missing", ["base"]]],
+    launch: "missing_integration_connection",
+  };
+
+  it('a written `"*"` requires the auth\'s `default_scopes`', async () => {
+    expect(await verdictOf({ config: { tools: "*" } })).toEqual(requiresDefaultScopes);
+  });
+
+  it('an inherited `"*"` requires them too: same readiness, same candidate, same 409', async () => {
+    expect(await verdictOf({ defaultTools: "*" })).toEqual(requiresDefaultScopes);
+  });
+
+  it("an inherited array requires no scope: the connection binds and the launch clears the gate", async () => {
+    expect(await verdictOf({ defaultTools: ["search"] })).toEqual({
+      blocksRun: false,
+      code: null,
+      missing: [],
+      required: [],
+      candidate: [["exact", []]],
+      launch: "model_not_configured",
+    });
+  });
+
+  it("an inherited array adds nothing to the agent's explicit scopes", async () => {
+    expect(await verdictOf({ defaultTools: ["search"], config: { scopes: ["extra"] } })).toEqual({
+      blocksRun: true,
+      code: "insufficient_scopes",
+      missing: ["extra"],
+      required: ["extra"],
+      candidate: [["missing", ["extra"]]],
+      launch: "missing_integration_connection",
+    });
+  });
+
+  it("a written array requires its tools' scopes, whatever the integration defaults to", async () => {
+    expect(await verdictOf({ defaultTools: "*", config: { tools: ["search"] } })).toEqual({
+      blocksRun: true,
+      code: "insufficient_scopes",
+      missing: ["search.read"],
+      required: ["search.read"],
+      candidate: [["missing", ["search.read"]]],
+      launch: "missing_integration_connection",
+    });
   });
 });

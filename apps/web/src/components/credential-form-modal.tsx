@@ -81,13 +81,11 @@ interface CredentialFormModalProps {
   credential: ModelProviderCredentialInfo | null;
   isPending: boolean;
   onSubmit: (data: CredentialFormData) => void;
-  /** The caller's own credential: the picker offers only what a member may own. */
-  personal?: boolean;
   /**
-   * The organization's providers are API keys: a subscription is always personal, so the
-   * picker leaves it out and says where to connect it.
+   * The caller's own credential: the picker offers only what a member may own. Otherwise the
+   * credential is the organization's, a key or a subscription.
    */
-  apiKeyOnly?: boolean;
+  personal?: boolean;
   /** With `personal`: only these providers, the ones whose key would serve a model the org opened. */
   onlyProviders?: ReadonlySet<string>;
   /** The key being added comes back here from the next step with what was typed. */
@@ -135,7 +133,6 @@ function CredentialFormBody({
   onSubmit,
   onClose,
   personal,
-  apiKeyOnly,
   onlyProviders,
   initial,
   submitLabel,
@@ -145,7 +142,6 @@ function CredentialFormBody({
   onSubmit: (data: CredentialFormData) => void;
   onClose: () => void;
   personal: boolean;
-  apiKeyOnly: boolean;
   onlyProviders?: ReadonlySet<string>;
   initial?: CredentialFormData;
   submitLabel?: string;
@@ -163,9 +159,7 @@ function CredentialFormBody({
               onlyProviders.has(p.providerId) ||
               p.providerId === credential?.providerId),
         )
-      : apiKeyOnly && !credential
-        ? registry.filter((p) => p.authMode !== "oauth2")
-        : registry,
+      : registry,
   );
 
   const [selectedId, setSelectedId] = useState<string>(() => {
@@ -325,9 +319,14 @@ function CredentialFormBody({
     </div>
   );
 
-  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds back). An
-  // existing row only gets here to be reconnected; its name is changed in the table.
+  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds back). A new
+  // subscription is owned as the form says (the caller's own, or the organization's); an existing
+  // row is re-paired only when it is flagged and the server allows the caller to reconnect it. Its
+  // name is changed in the table.
   if (isOAuthSelected && selectedOption?.providerId) {
+    const showPairing = credential
+      ? !!credential.needs_reconnection && credential.allowed_actions.includes("reconnect")
+      : true;
     return (
       <>
         <Modal open onClose={oauthDismiss.requestClose} title={title}>
@@ -356,13 +355,19 @@ function CredentialFormBody({
                 </Select>
               </div>
             )}
-            <OAuthPairingBody
-              key={selectedOption.providerId}
-              providerId={selectedOption.providerId}
-              credentialId={credential?.id}
-              onConnected={() => onClose()}
-              onBusyChange={oauthDismiss.onBusyChange}
-            />
+            {showPairing && (
+              <OAuthPairingBody
+                key={selectedOption.providerId}
+                providerId={selectedOption.providerId}
+                target={
+                  credential
+                    ? { credentialId: credential.id }
+                    : { ownerType: personal ? "user" : "org" }
+                }
+                onConnected={() => onClose()}
+                onBusyChange={oauthDismiss.onBusyChange}
+              />
+            )}
           </div>
         </Modal>
         {oauthDismiss.confirmDialog}
@@ -425,7 +430,8 @@ function CredentialFormBody({
               />
             </SelectContent>
           </Select>
-          {apiKeyOnly && !isEditing && (
+          {/* The organization's form: a member's own subscription is connected elsewhere. */}
+          {!personal && !isEditing && (
             <p className="text-muted-foreground text-sm">
               {t("credentials.form.subscriptionNote")}{" "}
               <PreferencesModelsLink>
@@ -516,7 +522,6 @@ export function CredentialFormModal({
   isPending,
   onSubmit,
   personal = false,
-  apiKeyOnly = false,
   onlyProviders,
   initial,
   submitLabel,
@@ -533,7 +538,6 @@ export function CredentialFormModal({
       onSubmit={onSubmit}
       onClose={onClose}
       personal={personal}
-      apiKeyOnly={apiKeyOnly}
       onlyProviders={onlyProviders}
       initial={initial}
       submitLabel={submitLabel}

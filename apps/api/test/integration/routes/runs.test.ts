@@ -249,6 +249,7 @@ describe("Runs API", () => {
       const credentialId = await createApiKeyCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
+        ownerUserId: null,
         label: "Blank OpenAI",
         providerId: "openai",
         apiKey: "",
@@ -322,6 +323,7 @@ describe("Runs API", () => {
       const credentialId = await createApiKeyCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
+        ownerUserId: null,
         label: `${label} credential`,
         providerId: "openai",
         apiKey: "sk-test-not-a-real-key",

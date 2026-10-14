@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { presetPermissions } from "../../../src/lib/permissions.ts";
 import {
   resolveSpaceRole,
   spacePermissions,
@@ -39,7 +40,21 @@ describe("resolveSpaceRole on a personal space", () => {
       expect(resolveSpaceRole(orgRole, personal, null, OWNER)).toEqual({
         kind: "preset",
         preset: "admin",
+        personalOwner: true,
       });
+    }
+  });
+
+  it("grants its owner everything `admin` holds but credential-proxy:call-own", () => {
+    // Nobody but its owner sees what is called from a personal space (RBAC spec §3.6).
+    const admin = presetPermissions("admin");
+    for (const orgRole of ["owner", "member"] as const) {
+      const owned = spacePermissions(resolveSpaceRole(orgRole, personal, null, OWNER));
+      expect(
+        [...admin].filter((permission) => !owned.has(permission)),
+        orgRole,
+      ).toEqual(["credential-proxy:call-own"]);
+      expect([...owned].filter((permission) => !admin.has(permission))).toEqual([]);
     }
   });
 
@@ -50,6 +65,7 @@ describe("resolveSpaceRole on a personal space", () => {
     expect(resolveSpaceRole("guest", personal, null, OWNER)).toEqual({
       kind: "preset",
       preset: "operator",
+      personalOwner: true,
     });
   });
 

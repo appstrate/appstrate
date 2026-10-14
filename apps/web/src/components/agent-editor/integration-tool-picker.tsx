@@ -36,6 +36,7 @@ import {
   expandScopesGranted,
   getApiCallConfigs,
   readDefaultTools,
+  resolveScopeToolSelection,
 } from "@appstrate/core/integration";
 import {
   isApiCallToolSelectionEnabled,
@@ -226,21 +227,23 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   const selectsNothing = !wildcardSelected && arrayTools.length === 0;
 
   // Inferred OAuth scopes — what run resolution checks the connection's
-  // grant against. Contributes the union of
-  // selected tools' requiredScopes only (`undefined`/`[]` selection
-  // contributes nothing). Map keeps attribution for "required by: …".
+  // grant against: the union of the `required_scopes` of the tools the agent
+  // ITSELF selects (`resolveScopeToolSelection`, the server's rule). Tools
+  // inherited from `default_tools` show as checked above and contribute no
+  // scope, as `[]` does. Map keeps attribution for "required by: …".
   // Policy lookup goes through the resolved catalog: a tool without
   // policy contributes nothing (expected — most discoverable tools have
   // no scope requirements).
   //
-  // Wildcard path (`tools: "*"`) skips per-tool inference entirely — the
-  // server-side resolver uses the auth's `default_scopes` instead, which
-  // is shown to the user via a dedicated notice rather than the attribution
-  // map.
+  // Wildcard path (`tools: "*"`, written or inherited) skips per-tool
+  // inference entirely — the server-side resolver uses the auth's
+  // `default_scopes` instead, which is shown to the user via a dedicated
+  // notice rather than the attribution map.
   const catalogByName = new Map(fullCatalog.map((t) => [t.name, t]));
   const inferredScopes = new Map<string, string[]>();
-  if (!wildcardSelected) {
-    for (const toolName of arrayTools) {
+  const scopeTools = resolveScopeToolSelection(entry.tools, detail.manifest);
+  if (scopeTools !== "*") {
+    for (const toolName of scopeTools) {
       const meta = catalogByName.get(toolName);
       for (const scope of Object.values(meta?.policy?.required_scopes ?? {}).flat()) {
         const existing = inferredScopes.get(scope) ?? [];

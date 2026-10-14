@@ -27,6 +27,7 @@ import { describe, it, expect } from "bun:test";
 import {
   proxyRequirement,
   rankByLeastPrivilege,
+  requirementOf,
   resolveConnections as resolveConnectionsPure,
   servingCandidates,
   translateResolutionError,
@@ -1396,6 +1397,100 @@ describe("resolveConnections — insufficient scopes on resolved connection", ()
     const err = result.errors[0]!;
     expect(err.code).toBe("insufficient_scopes");
     expect(err.ownedByActor).toBe(false);
+  });
+});
+
+// `"*"` is the wildcard form for scopes whether the agent writes it or inherits it from
+// `default_tools`; inherited tool NAMES contribute no scope.
+describe("requirementOf — the selection scopes are inferred from", () => {
+  /** `t1` requires `repo` on an auth whose `default_scopes` is `base`. */
+  function manifestWith(defaultTools?: string[] | "*"): IntegrationManifest {
+    return {
+      type: "integration",
+      schema_version: "0.1",
+      name: INTEG,
+      version: "1.0.0",
+      display_name: "Test",
+      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      allow_undeclared_tools: true,
+      ...(defaultTools !== undefined ? { default_tools: defaultTools } : {}),
+      auths: {
+        oauth: {
+          type: "oauth2",
+          authorization_endpoint: "https://idp/auth",
+          token_endpoint: "https://idp/token",
+          default_scopes: ["base"],
+          scope_catalog: [
+            { value: "base", label: "Base" },
+            { value: "repo", label: "Repo" },
+            { value: "extra", label: "Extra" },
+          ],
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.access_token}",
+            },
+          },
+        },
+      },
+      tools_policy: { t1: { required_scopes: { oauth: ["repo"] } } },
+    } as unknown as IntegrationManifest;
+  }
+
+  /** The verdict on the actor's own connection granted nothing: its scope gap, or `"bound"`. */
+  function verdictOf(
+    manifest: IntegrationManifest,
+    config: { tools?: string[] | "*"; scopes?: string[] } = {},
+  ) {
+    const c = conn({ scopesGranted: [] });
+    const result = resolveConnections({
+      requirements: [requirementOf({ id: INTEG, version: "^1.0.0", ...config }, manifest)],
+      accessibleConnections: [c],
+      pins: [],
+    });
+    const err = result.errors[0];
+    if (!err) {
+      expect(result.resolved[INTEG]?.map((r) => r.connectionId)).toEqual([c.id]);
+      return "bound";
+    }
+    return { code: err.code, missing: err.missingScopes, required: err.requiredScopes };
+  }
+
+  const defaultScopes = {
+    code: "insufficient_scopes" as const,
+    missing: ["base"],
+    required: ["base"],
+  };
+
+  it('a written `"*"` requires the auth\'s `default_scopes`', () => {
+    expect(verdictOf(manifestWith(), { tools: "*" })).toEqual(defaultScopes);
+  });
+
+  it('an inherited `"*"` requires them too, as the written form does', () => {
+    expect(verdictOf(manifestWith("*"))).toEqual(defaultScopes);
+    expect(verdictOf(manifestWith("*"), { scopes: ["extra"] })).toEqual({
+      code: "insufficient_scopes",
+      missing: ["base", "extra"],
+      required: ["base", "extra"],
+    });
+  });
+
+  it("an inherited array requires nothing beyond the agent's explicit scopes", () => {
+    expect(verdictOf(manifestWith(["t1"]))).toBe("bound");
+    expect(verdictOf(manifestWith(["t1"]), { scopes: ["extra"] })).toEqual({
+      code: "insufficient_scopes",
+      missing: ["extra"],
+      required: ["extra"],
+    });
+  });
+
+  it("a written array requires its tools' scopes, whatever the integration defaults to", () => {
+    const repo = { code: "insufficient_scopes" as const, missing: ["repo"], required: ["repo"] };
+    expect(verdictOf(manifestWith(), { tools: ["t1"] })).toEqual(repo);
+    expect(verdictOf(manifestWith("*"), { tools: ["t1"] })).toEqual(repo);
   });
 });
 

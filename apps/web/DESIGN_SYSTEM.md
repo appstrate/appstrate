@@ -335,8 +335,9 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   provider, never a model. **Vocabulary, everywhere (`apps/web`, `packages/ui`,
   `packages/module-chat`, fr and en):** a **Fournisseur** (Provider) is the company that runs the
   model (Anthropic, Mistral, OpenAI); never « Service », and never a key. A **Clé** (Key) is a
-  caller's connection to a provider: **Clé org** (org key), **Clé perso** (personal key),
-  **Abonnement perso** (personal subscription); « fournisseur » never names a key. Plus
+  caller's connection to a provider: **Clé org** (org key, an API key or a subscription paired
+  for the organization), **Clé perso** (personal key), **Abonnement perso** (personal
+  subscription); « fournisseur » never names a key. Plus
   **Système** (the instance). Say « Mes clés », « Ajouter une clé org », « Autoriser des modèles
   avec une clé perso », never « Mes fournisseurs », « Ajouter un fournisseur », « identifiant ».
   Keep « fournisseur » where it means the company (« Ce fournisseur ne propose pas ce modèle »). The tabs are `CollectionTabs`, kept in the URL
@@ -344,7 +345,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   (no Actions menu, no click on a row). Each tab places its own deed in the page's Actions menu.
   - **« Clés org »** (`components/providers-table.tsx`, columns in
     `pages/org-settings/provider-columns.tsx`, rows from `lib/model-providers.ts`): one row per
-    organization key, then the instance's row, named « Système » (its Fournisseur says « Livrés avec
+    organization key (an organization subscription included), then the instance's row, named « Système » (its Fournisseur says « Livrés avec
     l'instance »). Columns: Nom (no badge beside it), Fournisseur, Modèles (the models
     this key makes usable, a short list, the default one marked with a small star, « Aucun »
     otherwise), État, « … ». An organization key serves the models bound to it (`credentialId`);

@@ -254,18 +254,50 @@ describe("turnErrorState", () => {
     );
   });
 
-  it("links whoever may connect a personal credential to a revoked subscription, and tells anyone else to ask an administrator", () => {
-    // A subscription is its holder's own, so the fix is their Preferences page,
-    // gated by the connect permission alone, never an organization screen.
+  describe("a revoked subscription, the organization's or the caller's own", () => {
+    // The refusal does not say whose subscription died.
     const reconnect = failed(problem({ status: 409, code: "needs_reconnection" }));
-    expect(turnErrorState(reconnect, t, manager, true)).toEqual(
-      refused("turn.error.needsReconnection", PERSONAL_MODELS),
-    );
-    // Billing rights do not reconnect a subscription: no link to a page that
-    // refuses them, and the sentence says to ask someone who can.
-    expect(turnErrorState(reconnect, t, (p) => p === "billing:manage", true)).toEqual(
-      refused("turn.error.needsReconnection turn.error.contactAdmin"),
-    );
+    const connectOnly = (p: string) => p === "model-provider-credentials:connect";
+
+    it("links whoever manages the organization's credentials to its models page, which lists both", () => {
+      expect(turnErrorState(reconnect, t, modelAdmin, true)).toEqual(
+        refused("turn.error.needsReconnection", MODELS),
+      );
+      // The policy gates personal credentials only: it does not withdraw this link.
+      expect(turnErrorState(reconnect, t, modelAdmin, false)).toEqual(
+        refused("turn.error.needsReconnection", MODELS),
+      );
+      expect(turnErrorState(reconnect, t, modelAdmin, undefined)).toEqual(
+        refused("turn.error.needsReconnection", MODELS),
+      );
+    });
+
+    it("links a member to their own credentials, and says an organization one is an administrator's to reconnect", () => {
+      expect(turnErrorState(reconnect, t, connectOnly, true)).toEqual(
+        refused("turn.error.needsReconnectionOwn", PERSONAL_MODELS),
+      );
+      // Editing credentials without reaching the organization page falls back the same way.
+      expect(
+        turnErrorState(reconnect, t, (p) => credentialsOnly(p) || connectOnly(p), true),
+      ).toEqual(refused("turn.error.needsReconnectionOwn", PERSONAL_MODELS));
+    });
+
+    it("sends a member to an administrator where no personal credential can serve", () => {
+      // Personal credentials refused: the dead subscription is not one the member can fix.
+      expect(turnErrorState(reconnect, t, connectOnly, false)).toEqual(
+        refused("turn.error.needsReconnectionMember"),
+      );
+      // Billing rights reconnect nothing.
+      expect(turnErrorState(reconnect, t, (p) => p === "billing:manage", true)).toEqual(
+        refused("turn.error.needsReconnectionMember"),
+      );
+    });
+
+    it("claims no link while the policy is unknown", () => {
+      expect(turnErrorState(reconnect, t, connectOnly, undefined)).toEqual(
+        refused("turn.error.needsReconnectionOwn"),
+      );
+    });
   });
 
   it("names an organization being deleted, with no retry", () => {

@@ -26,7 +26,6 @@ export async function readReconnectTarget(input: {
     .select({
       id: integrationConnections.id,
       spaceId: integrationConnections.spaceId,
-      label: integrationConnections.label,
       scopesGranted: integrationConnections.scopesGranted,
     })
     .from(integrationConnections)

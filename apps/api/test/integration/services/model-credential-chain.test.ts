@@ -296,22 +296,45 @@ describe("model resolution — a member's own credential serves an unbound model
     expect((thrown as ApiError).code).toBe("personal_credential_not_bindable");
   });
 
-  it("refuses an organization subscription as a model's binding", async () => {
+  it("binds a model to an organization subscription, which then serves every caller", async () => {
+    const bob = await memberContext(ctx, "member");
     const subscription = await seedOrgModelProviderOAuth({
       orgId: ctx.orgId,
       providerId: TEST_OAUTH_PROVIDER_ID,
       label: "Org subscription",
+      accessToken: "org-subscription-token",
     });
 
-    let thrown: unknown;
-    try {
-      await createOrgModel(ctx.orgId, "Subscription", TEST_OAUTH_MODEL_ID, ctx.user.id, {
+    const id = await createOrgModel(ctx.orgId, "Subscription", TEST_OAUTH_MODEL_ID, ctx.user.id, {
+      credentialId: subscription.id,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+    });
+
+    // A member, and a call with no payer (schedule, API key), spend the organization's.
+    for (const payer of [bob.user.id, null]) {
+      expect(await loadModel(ctx.orgId, id, payer)).toMatchObject({
+        credentialSource: "org",
         credentialId: subscription.id,
-        providerId: TEST_OAUTH_PROVIDER_ID,
+        apiKey: "org-subscription-token",
       });
-    } catch (err) {
-      thrown = err;
     }
+  });
+
+  it("refuses a member's personal subscription as a model's binding", async () => {
+    const mine = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Alice's subscription",
+      ownerUserId: ctx.user.id,
+    });
+
+    const thrown = await createOrgModel(
+      ctx.orgId,
+      "Subscription",
+      TEST_OAUTH_MODEL_ID,
+      ctx.user.id,
+      { credentialId: mine.id, providerId: TEST_OAUTH_PROVIDER_ID },
+    ).catch((err: unknown) => err);
     expect(thrown).toBeInstanceOf(ApiError);
     expect((thrown as ApiError).status).toBe(400);
     expect((thrown as ApiError).code).toBe("personal_credential_not_bindable");

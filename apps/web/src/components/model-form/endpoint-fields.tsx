@@ -3,7 +3,8 @@
 /**
  * How a form reaches its provider: API type and base URL where
  * `baseUrlOverridable`, then a key to type or pick — or, for a subscription
- * (`oauth2`), only the "each member" choice. Shared by the model form and the
+ * (`oauth2`), one to pick among those the organization connected. Either
+ * arrangement may also offer "each member". Shared by the model form and the
  * credential form.
  */
 
@@ -49,6 +50,49 @@ export interface EachMemberChoice {
   onClear: () => void;
 }
 
+/**
+ * The saved credentials a form may bind, then "each member" where offered.
+ * Nothing renders with neither.
+ */
+function CredentialPicker({
+  existingKeys,
+  eachMember,
+  placeholder,
+  className,
+}: {
+  existingKeys?: ExistingKeys;
+  eachMember?: { onSelect: () => void };
+  placeholder: string;
+  className: string;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  const pickable = existingKeys?.items ?? [];
+  if (pickable.length === 0 && !eachMember) return null;
+
+  return (
+    <Select
+      value=""
+      onValueChange={(value) =>
+        value === EACH_MEMBER_ITEM ? eachMember?.onSelect() : existingKeys?.onSelect(value)
+      }
+    >
+      <SelectTrigger className={className}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {pickable.map((k) => (
+          <SelectItem key={k.id} value={k.id}>
+            {k.label}
+          </SelectItem>
+        ))}
+        {eachMember && (
+          <SelectItem value={EACH_MEMBER_ITEM}>{t("models.form.eachMember")}</SelectItem>
+        )}
+      </SelectContent>
+    </Select>
+  );
+}
+
 /** "Type a new key, or pick one you already saved." Label and hint belong to the host. */
 function ApiKeyRow({
   id,
@@ -64,7 +108,6 @@ function ApiKeyRow({
   eachMember?: { onSelect: () => void };
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const pickable = existingKeys?.items ?? [];
 
   return (
     <div className="flex gap-2">
@@ -76,61 +119,17 @@ function ApiKeyRow({
         className={cn("min-w-0 flex-1", invalid && "border-destructive")}
         aria-invalid={invalid ? true : undefined}
       />
-      {(pickable.length > 0 || eachMember) && (
-        <Select
-          value=""
-          onValueChange={(value) =>
-            value === EACH_MEMBER_ITEM ? eachMember?.onSelect() : existingKeys?.onSelect(value)
-          }
-        >
-          <SelectTrigger className="w-40 shrink-0">
-            <SelectValue
-              placeholder={
-                pickable.length > 0
-                  ? t("models.form.useExistingKey")
-                  : t("models.form.chooseIdentity")
-              }
-            />
-          </SelectTrigger>
-          <SelectContent>
-            {pickable.map((k) => (
-              <SelectItem key={k.id} value={k.id}>
-                {k.label}
-              </SelectItem>
-            ))}
-            {eachMember && (
-              <SelectItem value={EACH_MEMBER_ITEM}>{t("models.form.eachMember")}</SelectItem>
-            )}
-          </SelectContent>
-        </Select>
-      )}
+      <CredentialPicker
+        existingKeys={existingKeys}
+        eachMember={eachMember}
+        placeholder={
+          existingKeys?.items.length
+            ? t("models.form.useExistingKey")
+            : t("models.form.chooseIdentity")
+        }
+        className="w-40 shrink-0"
+      />
     </div>
-  );
-}
-
-/**
- * A subscription is personal, so a model on one has a single choice: each
- * member serves it. Without that choice there is nothing to pick.
- */
-function EachMemberRow({
-  invalid,
-  eachMember,
-}: {
-  invalid: boolean;
-  eachMember?: { onSelect: () => void };
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  if (!eachMember) return null;
-
-  return (
-    <Select value="" onValueChange={() => eachMember.onSelect()}>
-      <SelectTrigger className={cn("w-full", invalid && "border-destructive")}>
-        <SelectValue placeholder={t("models.form.chooseIdentity")} />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={EACH_MEMBER_ITEM}>{t("models.form.eachMember")}</SelectItem>
-      </SelectContent>
-    </Select>
   );
 }
 
@@ -299,7 +298,13 @@ export function EndpointFields({
         ) : selectedKey && existingKeys ? (
           <CredentialChip label={selectedKey.label} onClear={existingKeys.onClear} />
         ) : isOauth ? (
-          <EachMemberRow invalid={!!apiKeyError} eachMember={eachMember} />
+          // A subscription is paired from the credentials page, never typed here.
+          <CredentialPicker
+            existingKeys={existingKeys}
+            eachMember={eachMember}
+            placeholder={t("models.form.chooseIdentity")}
+            className={cn("w-full", apiKeyError && "border-destructive")}
+          />
         ) : (
           <ApiKeyRow
             id={`${idPrefix}-apiKey`}

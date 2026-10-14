@@ -187,8 +187,8 @@ function ConnectionRow({
         : t("connections.sharedSpacesNone"),
   });
 
-  // Reuse hint — the agents of its spaces that use it, killing the "do I need one
-  // connection per agent?" confusion.
+  // Reuse hint — the agents of its spaces that declare the integration, killing the
+  // "do I need one connection per agent?" confusion.
   if (typeof conn.reused_by_agents === "number") {
     rows.push({
       label: t("connections.reusedByLabel"),

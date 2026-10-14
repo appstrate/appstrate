@@ -8,8 +8,19 @@ name: Preview Images
 # Opt-in per PR: add the `preview` label. A labeled PR re-publishes on every
 # push. `workflow_dispatch` builds any ref on demand. amd64 only (the staging
 # server is x86_64). See docs/deployment/PREVIEW_DEPLOY.md.
+#
+# A push to `main` publishes the same stack under `main` and then calls the
+# staging deploy hook. See docs/deployment/STAGING.md.
+#
+# A tag is never moved one image at a time. Each image is pushed under
+# `<tag>-<sha>` only, and `promote` points `<tag>` at all 8 once the last one is
+# up: the platform, `PI_IMAGE` and `SIDECAR_IMAGE` are one version contract
+# (AGENTS.md), and a tag half-moved by a failed or superseded build is a trio
+# that disagrees.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       ref:
@@ -20,8 +31,10 @@ on:
     types: [labeled, synchronize]
 
 concurrency:
-  # One in-flight build per PR / dispatch ref — a new push cancels the stale one.
-  group: preview-${{ github.event.pull_request.number || github.event.inputs.ref }}
+  # One in-flight build per PR / dispatch ref / branch — a new push cancels the
+  # stale one. On `main` that is what keeps staging on the newest commit: a
+  # merge landing mid-build supersedes the run it interrupts, deploy included.
+  group: preview-${{ github.event.pull_request.number || github.event.inputs.ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
@@ -34,10 +47,11 @@ env:
 
 jobs:
   # Gate on the `preview` label (pull_request) and resolve the tag + the ref
-  # to check out. Skipping here keeps every unlabeled push a zero-cost no-op.
+  # to check out. Skipping here keeps every unlabeled PR push a zero-cost no-op.
   resolve:
     runs-on: ubuntu-latest
     if: >-
+      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'preview'))
@@ -61,6 +75,10 @@ jobs:
             # Build the PR's HEAD, not the synthetic merge commit.
             echo "checkout_ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
             echo "is_pr=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "checkout_ref=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "is_pr=false" >> "$GITHUB_OUTPUT"
           else
             # Slugify for a valid, readable Docker tag.
             SLUG="$(echo "$REF" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9._-]#-#g' | cut -c1-100)"
@@ -111,6 +129,12 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.checkout_ref }}
 
+      # The commit actually built. `github.sha` is not it for a PR (the
+      # synthetic merge commit) nor for a dispatch (the default branch's HEAD).
+      - name: Resolve built commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -135,21 +159,110 @@ jobs:
           # platform compares the two `org.opencontainers.image.revision` labels
           # and warns on a pair built from different commits (#1200); unstamped
           # preview images read `unknown` on both sides and disable that check
-          # silently. Images declaring no such ARG ignore them.
+          # silently. APP_VERSION + GIT_SHA are the platform image's own stamp,
+          # what `/health` and the SPA footer report. Images declaring no such
+          # ARG ignore them.
           build-args: |
             BUILD_VERSION=${{ needs.resolve.outputs.tag }}
-            BUILD_REVISION=${{ github.sha }}
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}-${{ github.sha }}
+            BUILD_REVISION=${{ steps.commit.outputs.sha }}
+            APP_VERSION=${{ needs.resolve.outputs.tag }}
+            GIT_SHA=${{ steps.commit.outputs.sha }}
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Point `<tag>` at the 8 images this run built. A registry-side retag: no
+  # layer is pulled or pushed. The image list is read off the build matrix above
+  # rather than restated.
+  promote:
+    needs: [resolve, build-and-push]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/workflows
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Move the tag
+        env:
+          OWNER: ${{ github.repository_owner }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          yq '.jobs.build-and-push.strategy.matrix.include[].name' .github/workflows/preview.yml |
+            while read -r name; do
+              docker buildx imagetools create \
+                --tag "ghcr.io/$OWNER/$name:$TAG" \
+                "ghcr.io/$OWNER/$name:$TAG-${{ github.sha }}"
+            done
+
+  # Continuous deployment of `main` to staging: call the deploy hook, then read
+  # the commit back off the running platform. The hook is whatever the hosting
+  # platform exposes to redeploy a stack that tracks the `main` tag; this job
+  # knows its URL and its bearer token, and nothing else about it.
+  #
+  # The `staging` environment holds both and is restricted to the `main` branch,
+  # so a PR editing this file cannot read the token.
+  deploy-staging:
+    needs: promote
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    permissions: {}
+    env:
+      # The two origins are secrets so that Actions masks them: this
+      # repository's logs are public, and a curl error names its host.
+      DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+      DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
+      STAGING_URL: ${{ secrets.STAGING_URL }}
+    steps:
+      - name: Call the deploy hook
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOOK_URL:?}" "${DEPLOY_HOOK_TOKEN:?}"
+          curl --fail-with-body --silent --show-error --request POST "$DEPLOY_HOOK_URL" \
+            --header "Authorization: Bearer $DEPLOY_HOOK_TOKEN" \
+            --output /dev/null
+
+      # The hook answering is the platform accepting a deployment, not the
+      # deployment succeeding. A stack whose migrations fail never starts the
+      # new build, so the commit never shows up here and the job fails.
+      - name: Verify the running commit
+        env:
+          EXPECTED: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          : "${STAGING_URL:?}"
+          for _ in $(seq 1 120); do
+            # --fail: a 503 body carries the version too, while the platform is
+            # still starting or unhealthy.
+            RUNNING="$(curl --fail --silent --max-time 10 "$STAGING_URL/health" | jq -r '.version.commit // empty' || true)"
+            if [ -n "$RUNNING" ] && [ "${EXPECTED#"$RUNNING"}" != "$EXPECTED" ]; then
+              echo "Staging runs $RUNNING"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Staging reports commit '${RUNNING:-none}' after 20 minutes, expected ${EXPECTED}"
+          exit 1
 
   # Sticky PR comment with the tag + the one-liner to deploy on Coolify. Runs
   # only for PR events (a dispatch has no PR to comment on) and only after the
   # images are actually pushed.
   comment:
-    needs: [resolve, build-and-push]
+    needs: [resolve, promote]
     if: needs.resolve.outputs.is_pr == 'true'
     runs-on: ubuntu-latest
     steps:

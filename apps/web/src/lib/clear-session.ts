@@ -2,6 +2,7 @@
 
 import { authStore } from "../stores/auth-store";
 import { orgStore } from "../stores/org-store";
+import { clearPendingPairings } from "../stores/pairing-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs } from "../stores/view-as-store";
 import { queryClient } from "./query-client";
@@ -17,6 +18,7 @@ export function clearSession(): void {
   queryClient.clear();
   orgStore.getState().setId(null);
   spaceStore.getState().setId(null);
+  clearPendingPairings();
   // Here rather than at the sign-out button: the OIDC branch navigates away
   // first, and a session lost mid-flight never passes through a button.
   exitViewAs();

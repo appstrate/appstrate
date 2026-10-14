@@ -15,7 +15,10 @@ import { isModelSelectable } from "../lib/model-selectability";
 import { ModelSelect } from "./model-select";
 import { useProxies } from "../hooks/use-proxies";
 import { useIntegrationDetail } from "../hooks/use-integrations";
-import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
+import {
+  connectableAuthKeysForAgent,
+  resolveEffectiveToolSelection,
+} from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import type { ConnectionSet } from "../lib/connection-set";
 import { inheritedEntry } from "../lib/run-launch";
@@ -404,11 +407,13 @@ function IntegrationOverrideRow({
   const displayName = detail?.manifest.display_name ?? integration.id;
 
   // Gate the row on whether the agent can connect this integration at all
-  // (declared auth the actor can start a flow on, given its tool selection).
+  // (declared auth the actor can start a flow on, given its EFFECTIVE tool
+  // selection: an agent writing no `tools` inherits `default_tools`).
   // Mirrors the run-time `integration_not_active`/no-auth gates so neither
   // form offers an override for an unconnectable integration.
   if (!detail) return null;
-  if (connectableAuthKeysForAgent(detail.manifest, integration.tools).length === 0) return null;
+  const effectiveTools = resolveEffectiveToolSelection(integration.tools, detail.manifest);
+  if (connectableAuthKeysForAgent(detail.manifest, effectiveTools).length === 0) return null;
 
   return (
     <div className="space-y-1.5" data-testid={`conn-override-row-${integration.id}`}>

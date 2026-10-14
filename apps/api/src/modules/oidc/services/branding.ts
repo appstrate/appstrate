@@ -24,7 +24,8 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { db } from "@appstrate/db/client";
-import { oauthClient, spaces } from "@appstrate/db/schema";
+import { spaces } from "@appstrate/db/schema";
+import { isSelfServiceClient } from "./oauth-admin.ts";
 import { logger } from "../../../lib/logger.ts";
 import { scopedWhere } from "../../../lib/db-helpers.ts";
 
@@ -156,12 +157,7 @@ export async function resolveBrandingForClient(client: {
     // the platform's, it would brand the login page and the sender of the
     // account emails with whatever it claims to be. Only an operator-declared
     // client (`OIDC_INSTANCE_CLIENTS`) names the brand.
-    const [row] = await db
-      .select({ selfService: oauthClient.selfService })
-      .from(oauthClient)
-      .where(eq(oauthClient.clientId, client.clientId))
-      .limit(1);
-    if (row?.selfService) return { ...PLATFORM_DEFAULT_BRANDING };
+    if (await isSelfServiceClient(client.clientId)) return { ...PLATFORM_DEFAULT_BRANDING };
     return {
       ...PLATFORM_DEFAULT_BRANDING,
       name: client.name ?? PLATFORM_DEFAULT_BRANDING.name,

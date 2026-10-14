@@ -9,7 +9,8 @@
  * The ~250 platform operations are surfaced through three progressive-disclosure
  * tools (`search_operations`, `describe_operation`, `invoke_operation`) rather
  * than one tool per endpoint, keeping the client tool budget tiny. Run launch
- * and waiting use the dedicated `run_and_wait` shortcut. Tool calls dispatch
+ * and waiting use the dedicated `run_and_wait` shortcut, and the credential
+ * proxy the dedicated `list_connections` / `api_call` pair. Tool calls dispatch
  * in-process through the platform app, reusing the auth pipeline and RBAC — an
  * MCP caller can do exactly what the same credential could do over REST.
  *

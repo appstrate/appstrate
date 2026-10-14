@@ -66,6 +66,7 @@ import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-cl
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
+import { isBearerOnlyCaller } from "../../lib/bearer-only.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { enterSpaceById } from "../../middleware/space-context.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
@@ -294,9 +295,9 @@ ${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server
 - A refused call is a tool result with \`isError: true\` and \`{ code, error, … }\`. \`missing_argument\`, \`unknown_argument\`, \`invalid_argument\`, \`unknown_operation\`, \`unknown_space\` and \`space_mismatch\` mean fix the call (\`arguments\` names the faulty ones, \`accepted\` lists what is valid) and retry. \`not_granted\` (a permission, or a file you may see but not download) is final: report it. An operation the route answered with an HTTP error is not a refusal: it comes back as \`{ status, body }\` with \`isError: true\`; read \`body\` to decide — except a \`403\` your permissions explain, which is a \`not_granted\` refusal.
 ${heavyListBullet}${concurrencyBullet}${
     authors
-      ? `- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). A declared integration whose selection resolves to NOTHING is rejected at publish and at import (\`no_tools_selected\` on \`integrations_configuration.<id>.tools\`) and aborts the run at container boot — so never leave an integration declared with an empty effective selection: either select at least one tool, or remove it from \`dependencies.integrations\`. A declared integration is optional unless \`integrations_configuration[id].required\` is \`true\`: without a usable connection an optional one is reported in the run's \`warnings\` and the run starts anyway; a required one refuses the launch. Mark \`required\` only what the agent cannot work without.${
+      ? `- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). List only the tools the agent needs; omit \`tools\` only when it needs the whole default, which can hold write tools. A declared integration whose selection resolves to NOTHING is rejected at publish and at import (\`no_tools_selected\` on \`integrations_configuration.<id>.tools\`) and aborts the run at container boot — so never leave an integration declared with an empty effective selection: either select at least one tool, or remove it from \`dependencies.integrations\`. A declared integration is optional unless \`integrations_configuration[id].required\` is \`true\`: without a usable connection an optional one is reported in the run's \`warnings\` and the run starts anyway; a required one refuses the launch. Mark \`required\` only what the agent cannot work without.${
           granted("getIntegration")
-            ? " An integration's `default_tools` and full `tool_catalog` are on its detail operation (`GET /api/integrations/{packageId}`); read it before selecting tools so you pick real tool names and know what the default already covers."
+            ? " An integration's `default_tools` and full `tool_catalog` are on its detail operation (`GET /api/integrations/{packageId}`); read it before selecting tools so you pick real tool names and know what the default grants."
             : ""
         }
 `
@@ -337,7 +338,20 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
     authors: any("authors"),
     listsFiles: any("listsFiles"),
     importsPackages: any("importsPackages"),
+    proxies: any("proxies"),
   };
+}
+
+/**
+ * Whether the credential proxy accepts the credential this request carries.
+ * The proxy is bearer-only (`isBearerOnlyCaller`) and its tools re-enter it
+ * with that same credential, so a cookie session or the chat's loopback bearer
+ * is offered neither of them.
+ */
+function proxyAcceptsCredential(c: Context<AppEnv>): boolean {
+  return isBearerOnlyCaller(c.get("authMethod"), {
+    firstPartyLoopback: c.get("firstPartyLoopback"),
+  });
 }
 
 /**
@@ -502,9 +516,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // (initialize, tools/list) enters any reachable one to pass the guard.
     const ceiling = c.get("scopeCeiling");
     const actor = getActor(c);
+    const proxied = proxyAcceptsCredential(c);
     const reachable = (await listReachableSpaces(c, orgId)).map((space) => ({
       ...space,
-      surface: deriveMcpSurface(space.permissions, ceiling, actor),
+      surface: deriveMcpSurface(space.permissions, ceiling, actor, proxied),
     }));
     const requested = await requestedSpaceId(post?.payload, orgId);
     const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
@@ -519,7 +534,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       ...chosen,
       role: toSpaceRoleWire(c.get("spaceRole")!)!.name,
       permissions,
-      surface: deriveMcpSurface(permissions, ceiling, actor),
+      surface: deriveMcpSurface(permissions, ceiling, actor, proxied),
     };
     c.set("mcpOrgSpaces", {
       reachable: reachable.map((s) => (s.id === current.id ? current : s)),
@@ -649,7 +664,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)
-      : deriveMcpSurface(permissions, ceiling, actor);
+      : deriveMcpSurface(permissions, ceiling, actor, proxyAcceptsCredential(c));
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed

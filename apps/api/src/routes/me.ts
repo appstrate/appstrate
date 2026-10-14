@@ -34,6 +34,7 @@
  *   - DELETE /connections/:connectionId/shares/:spaceId — withdraw it from a space
  *   - DELETE /connections/:connectionId — destructive global credential delete
  *   - GET    /connections/:connectionId/delete-impact — the caller's pins/schedules it rewrites
+ *   - GET    /connections/:connectionId/calls — the credential proxy's calls made with it
  *   - GET    /integration-pins          — member-self pins for an agent
  *   - PUT    /integration-pins/:agentPackageId/integrations/:integrationPackageId — upsert a member-self pin
  *   - DELETE /integration-pins/:agentPackageId/integrations/:integrationPackageId — clear it
@@ -62,6 +63,7 @@ import { callerPermissions } from "../lib/permissions.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import { requireCeiling } from "../middleware/require-permission.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import {
   upsertMemberPin,
@@ -85,6 +87,7 @@ import {
   updateConnectionSchema,
   type ConnectionEdit,
 } from "./integrations.ts";
+import { serveOwnConnectionCalls } from "./connection-calls-handler.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
@@ -219,6 +222,18 @@ router.get(
 );
 
 /**
+ * `GET /api/me/connections/:connectionId/calls` — the credential proxy's journal for a connection
+ * the caller owns: every call made with it, whoever made it. 404 for a non-UUID, unknown or
+ * not-owned id, or a connection outside a bound credential's org (and space).
+ */
+router.get(
+  "/connections/:connectionId/calls",
+  rateLimit(60),
+  requireCeiling("integrations", "read"),
+  serveOwnConnectionCalls,
+);
+
+/**
  * `/api/me/integration-pins` — member-self pin CRUD.
  *
  * When an agent has >1 candidate connection on a declared integration, the member's pick is
@@ -311,16 +326,23 @@ router.delete(
     const agentPackageId = c.req.param("agentPackageId")!;
     const integrationPackageId = c.req.param("integrationPackageId")!;
     const scope = getSpaceScope(c);
-    const { previous } = await deletePin(scope, agentPackageId, integrationPackageId, userId);
+    const { previous, disabledScheduleIds } = await deletePin(
+      scope,
+      agentPackageId,
+      integrationPackageId,
+      userId,
+    );
+    await removeScheduleJobs(disabledScheduleIds);
     if (previous) {
       await recordAuditFromContext(c, {
         action: "integration.member_pin.deleted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
         before: pinAudit(previous),
+        ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
       });
     }
-    return c.body(null, 204);
+    return c.json({ schedules_disabled_count: disabledScheduleIds.length });
   },
 );
 

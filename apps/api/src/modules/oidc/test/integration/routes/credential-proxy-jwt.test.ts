@@ -17,22 +17,43 @@
  *   3. Garbage bearer values fall all the way through to the final
  *      `Invalid or missing session` 401, not silently to 500.
  *
- * We don't drive the request all the way to an upstream provider — that
- * is covered by `credential-proxy-injection.test.ts`. Here we only care
- * that the auth gate lets the right principals in, and that the session
- * binding is keyed on the namespaced `user:<id>` principal (not the raw
- * user id, so an API key and a JWT for the same underlying id cannot
- * share a cookie jar).
+ *   4. The access rule is the API-key door's (`credential-proxy.test.ts`):
+ *      `credential-proxy:call-run` for a run the caller executes,
+ *      `credential-proxy:call-own` outside one, on the caller's own connections, and with
+ *      both on those shared into the space. The owner of a personal space, which no API key
+ *      enters, has no path outside a run there.
+ *
+ * Injection itself is covered by `credential-proxy-injection.test.ts`. Here we
+ * only care that the auth gate lets the right principals in, on the right
+ * path, and that the session binding is keyed on the namespaced `user:<id>`
+ * principal (not the raw user id, so an API key and a JWT for the same
+ * underlying id cannot share a cookie jar).
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { user as userTable, session as sessionTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
-import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
+import {
+  createTestContext,
+  memberContext,
+  memberHolding,
+  type TestContext,
+} from "../../../../../../test/helpers/auth.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
+import { seedPackage, seedRun, seedSpace } from "../../../../../../test/helpers/seed.ts";
+import { expectProblem } from "../../../../../../test/helpers/assertions.ts";
+import { seedShares } from "../../../../../../test/helpers/connection-shares.ts";
+import {
+  seedProxyConnection,
+  seedProxyIntegration,
+} from "../../../../../../test/helpers/credential-proxy-fixtures.ts";
+import {
+  httpHeaderDelivery,
+  localIntegrationManifest,
+} from "../../../../../../test/helpers/integration-manifests.ts";
 import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { ensureCliClient } from "../../../services/ensure-cli-client.ts";
@@ -49,27 +70,16 @@ interface Principal {
   accessToken: string;
 }
 
-/**
- * Create a user, own-role org + default app, and mint a device-flow
- * JWT for that user. Returns everything a request needs to hit
- * `/api/credential-proxy/proxy`.
- */
-async function createJwtPrincipal(): Promise<Principal> {
-  const testUser = await createTestUser();
-
+/** Mint a device-flow JWT (`oauth2-instance`) for `ctx.user`: the interactive CLI's login. */
+async function mintCliToken(ctx: TestContext): Promise<string> {
   // Platform realm is the default for BA's `databaseHooks.user.create.before`
   // but we assert it explicitly to match the cli-token-flow pattern — the
   // device-flow plugin refuses users in non-platform realms.
-  await db.update(userTable).set({ realm: "platform" }).where(eq(userTable.id, testUser.id));
+  await db.update(userTable).set({ realm: "platform" }).where(eq(userTable.id, ctx.user.id));
   await db
     .update(sessionTable)
     .set({ realm: "platform" })
-    .where(eq(sessionTable.userId, testUser.id));
-
-  // Org + owner membership + default space via the shared
-  // helper — owners inherit `credential-proxy:call` from the role-grant
-  // matrix.
-  const { org, defaultSpaceId } = await createTestOrg(testUser.id);
+    .where(eq(sessionTable.userId, ctx.user.id));
 
   // Device-flow dance — code, approve, exchange.
   const codeRes = await app.request("/api/auth/device/code", {
@@ -85,11 +95,11 @@ async function createJwtPrincipal(): Promise<Principal> {
 
   // BA 1.7: claim the code (GET /device) before approving.
   await app.request(`/api/auth/device?user_code=${encodeURIComponent(code.user_code)}`, {
-    headers: { Cookie: testUser.cookie },
+    headers: { Cookie: ctx.cookie },
   });
   const approveRes = await app.request("/api/auth/device/approve", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: testUser.cookie },
+    headers: { "Content-Type": "application/json", Cookie: ctx.cookie },
     body: JSON.stringify({ userCode: code.user_code }),
   });
   expect(approveRes.status).toBe(200);
@@ -109,14 +119,23 @@ async function createJwtPrincipal(): Promise<Principal> {
     }),
   });
   expect(tokenRes.status).toBe(200);
-  const tokens = (await tokenRes.json()) as { access_token: string };
+  return ((await tokenRes.json()) as { access_token: string }).access_token;
+}
 
+/**
+ * Create a user, own-role org + default space, and mint a device-flow
+ * JWT for that user. Returns everything a request needs to hit
+ * `/api/credential-proxy/proxy`. The owner is preset `admin` in the space,
+ * which holds both `credential-proxy:call-run` and `credential-proxy:call-own`.
+ */
+async function createJwtPrincipal(): Promise<Principal> {
+  const ctx = await createTestContext();
   return {
-    userId: testUser.id,
-    cookie: testUser.cookie,
-    orgId: org.id,
-    spaceId: defaultSpaceId,
-    accessToken: tokens.access_token,
+    userId: ctx.user.id,
+    cookie: ctx.cookie,
+    orgId: ctx.orgId,
+    spaceId: ctx.defaultSpaceId,
+    accessToken: await mintCliToken(ctx),
   };
 }
 
@@ -223,5 +242,162 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
     const cache = await getCache();
     const bound = await cache.get(`cp:session:${sessionId}`);
     expect(bound).toBe(`user:${p.userId}`);
+  });
+});
+
+describe("POST /api/credential-proxy/proxy — one permission per path, through a JWT", () => {
+  const INTEGRATION_ID = "@jwtorg/svc";
+  const AGENT_ID = "@jwtorg/agent";
+  const realFetch: typeof fetch = globalThis.fetch;
+  let owner: TestContext;
+  let shared: string;
+  let upstreamAuth: string[];
+  let tokens: Map<string, string>;
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    resetOidcGuardsLimiters();
+    overrideJwks(null);
+    await ensureCliClient();
+    tokens = new Map();
+    owner = await createTestContext({ orgSlug: "jwtorg" });
+    await seedProxyIntegration(
+      owner,
+      localIntegrationManifest({
+        name: INTEGRATION_ID,
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://1.1.1.1/**"],
+            delivery: httpHeaderDelivery({
+              name: "Authorization",
+              prefix: "Bearer ",
+              field: "api_key",
+            }),
+          },
+        },
+      }),
+    );
+    await seedPackage({ id: AGENT_ID, orgId: owner.orgId, type: "agent", source: "local" });
+    // The team's connection: a colleague's, shared into the space.
+    const colleague = await memberContext(owner, "member", "builder");
+    shared = await seedProxyConnection(
+      colleague,
+      INTEGRATION_ID,
+      "api",
+      { api_key: "team" },
+      "team",
+    );
+    await seedShares(shared, [owner.defaultSpaceId]);
+    upstreamAuth = [];
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  /** Stub the integration's upstream only: the token dance above stays on the real fetch. */
+  function mockUpstream(): void {
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (!url.startsWith("https://1.1.1.1/")) return realFetch(input, init);
+      upstreamAuth.push(new Headers(init?.headers).get("authorization") ?? "");
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+  }
+
+  /** A call by `caller` with their CLI token, minted once per test. */
+  async function call(caller: TestContext, extra: Record<string, string> = {}): Promise<Response> {
+    const accessToken = tokens.get(caller.user.id) ?? (await mintCliToken(caller));
+    tokens.set(caller.user.id, accessToken);
+    mockUpstream();
+    return app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "X-Org-Id": owner.orgId,
+        "X-Space-Id": owner.defaultSpaceId,
+        "X-Integration-Id": INTEGRATION_ID,
+        "X-Target": "https://1.1.1.1/v1/items",
+        "X-Session-Id": crypto.randomUUID(),
+        ...extra,
+      },
+    });
+  }
+
+  /** An in-flight remote run of `launcher` that bound the team's shared connection. */
+  async function remoteRunOf(launcher: TestContext): Promise<string> {
+    const run = await seedRun({
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      packageId: AGENT_ID,
+      userId: launcher.user.id,
+      status: "running",
+      runOrigin: "remote",
+      resolvedConnections: {
+        [INTEGRATION_ID]: [
+          {
+            connectionId: shared,
+            source: "org_default_enforced",
+            label: "team",
+            accountId: "team",
+          },
+        ],
+      },
+    });
+    return run.id;
+  }
+
+  it("credential-proxy:call-run alone: refused outside a run, the shared connection reached through a remote run of the caller's", async () => {
+    const callRunOnly = await memberHolding(owner, ["credential-proxy:call-run"]);
+    const body = await expectProblem(await call(callRunOnly), 403, { code: "forbidden" });
+    expect(body.detail).toContain("credential-proxy:call-own");
+    expect(upstreamAuth).toEqual([]);
+
+    const res = await call(callRunOnly, { "X-Run-Id": await remoteRunOf(callRunOnly) });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(upstreamAuth).toEqual(["Bearer team"]);
+  });
+
+  it("credential-proxy:call-own alone: the caller's own connections only", async () => {
+    const member = await memberHolding(owner, ["credential-proxy:call-own"]);
+    const refused = await call(member, { "X-Connection-Id": shared });
+    const body = await expectProblem(refused, 404, { code: "credential_not_found" });
+    expect(body.detail).toContain("also holds credential-proxy:call-run");
+    expect(upstreamAuth).toEqual([]);
+
+    const mine = await seedProxyConnection(
+      member,
+      INTEGRATION_ID,
+      "api",
+      { api_key: "mine" },
+      "mine",
+    );
+    expect((await call(member)).status).toBe(200);
+    expect((await call(member, { "X-Connection-Id": mine })).status).toBe(200);
+    expect(upstreamAuth).toEqual(["Bearer mine", "Bearer mine"]);
+  });
+
+  it("both, as the owner holds them: the shared connection once named, never by the fallback", async () => {
+    await expectProblem(await call(owner), 409, { code: "must_choose_connection" });
+    expect(upstreamAuth).toEqual([]);
+
+    expect((await call(owner, { "X-Connection-Id": shared })).status).toBe(200);
+    expect(upstreamAuth).toEqual(["Bearer team"]);
+  });
+
+  it("the owner of a personal space has no path outside a run there: 403 naming credential-proxy:call-own", async () => {
+    const personal = await seedSpace({
+      orgId: owner.orgId,
+      name: "Perso",
+      ownerUserId: owner.user.id,
+      visibility: "private",
+    });
+    const there = { "X-Space-Id": personal.id };
+    const body = await expectProblem(await call(owner, there), 403, { code: "forbidden" });
+    expect(body.detail).toContain("credential-proxy:call-own");
+    // The control: the run path is open there, so an unknown run is a 404, not this 403.
+    await expectProblem(await call(owner, { ...there, "X-Run-Id": "run_doesnotexist0000" }), 404);
+    expect(upstreamAuth).toEqual([]);
   });
 });

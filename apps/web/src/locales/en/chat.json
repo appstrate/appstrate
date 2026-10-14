@@ -101,7 +101,7 @@
   "turn.error.contactAdmin": "Contact an organization administrator.",
   "turn.error.manageBilling": "Manage billing",
   "turn.error.manageModels": "Manage models",
-  "turn.error.needsReconnection": "Your subscription for the selected model expired or was revoked. Reconnect it under My model keys, then try again.",
+  "turn.error.needsReconnection": "The subscription serving the selected model expired or was revoked. Reconnect it, then try again.",
   "turn.error.orgDeleting": "This organization is being deleted.",
   "turn.error.requestId": "Request ID: {{id}}",
   "turn.retry": "Retry",
@@ -181,5 +181,7 @@
   "conversation.notFound.hint": "It does not exist or no longer exists, or it belongs to another account or another space.",
   "conversation.loading": "Loading…",
   "threads.empty": "Send a message! Your conversation history will show up here.",
-  "threads.emptyReadOnly": "You have no conversation to reread."
+  "threads.emptyReadOnly": "You have no conversation to reread.",
+  "turn.error.needsReconnectionOwn": "The subscription serving the selected model expired or was revoked. If it is yours, reconnect it in your preferences, then try again; otherwise, ask an organization administrator to reconnect it.",
+  "turn.error.needsReconnectionMember": "The subscription serving the selected model expired or was revoked. Ask an organization administrator to reconnect it."
 }

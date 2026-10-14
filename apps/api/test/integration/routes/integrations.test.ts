@@ -24,6 +24,7 @@ import {
 import { seedPackage, seedSpace, seedUnreachableSpace } from "../../helpers/seed.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
+import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
 import { asc, eq, and } from "drizzle-orm";
 import {
   auditEvents,
@@ -350,6 +351,29 @@ describe("GET /api/integrations/:packageId", () => {
         { name: "delete", origin: "manifest", exposure: "hidden", hidden_reason: "manifest" },
       ],
     });
+  });
+
+  it("builds a local integration's tool catalog from its mcp-server's tools", async () => {
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    await seedPackage({
+      id: "@myorg/gmail-server",
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      source: "local",
+      draftManifest: {
+        ...mcpServerManifest({ name: "@myorg/gmail-server", version: "0.1.0" }),
+        tools: [{ name: "search", description: "Search threads" }, { name: "send" }],
+      },
+    });
+    const res = await app.request("/api/integrations/@myorg/gmail", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { tool_catalog: unknown[] };
+    expect(body.tool_catalog).toEqual([
+      { name: "search", description: "Search threads" },
+      { name: "send" },
+    ]);
   });
 
   it("flags has_system_client when a shared platform client serves the oauth2 auth", async () => {
@@ -1726,7 +1750,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
       });
     expect((await write("PUT", { connection_ids: [a] })).status).toBe(200);
     expect((await write("PUT", { connection_ids: [b], enforce: true })).status).toBe(200);
-    expect((await write("DELETE")).status).toBe(204);
+    expect((await write("DELETE")).status).toBe(200);
 
     const rows = await db
       .select({ action: auditEvents.action, before: auditEvents.before, after: auditEvents.after })
@@ -1769,15 +1793,22 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ connection_ids: [connId] }),
     });
-    const del = await app.request("/api/integrations/@myorg/gmail/default", {
-      method: "DELETE",
-      headers: authHeaders(ctx),
-    });
-    expect(del.status).toBe(204);
+    const del = () =>
+      app.request("/api/integrations/@myorg/gmail/default", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+    const removed = await del();
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toEqual({ schedules_disabled_count: 0 });
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
     expect(get.status).toBe(204);
+    // Idempotent: nothing left to remove answers the same.
+    const again = await del();
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ schedules_disabled_count: 0 });
   });
 
   it("forbids a non-admin member from setting the default (403)", async () => {

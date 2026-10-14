@@ -157,6 +157,35 @@ describe("personal model credentials — instance token", () => {
     expect(data.find((m) => m.label === "Shared GPT")?.billed_to).toBe("user");
   });
 
+  it("pairs a subscription under the session's rule: a member's token mints a personal one only", async () => {
+    const mint = (ownerType: "org" | "user") =>
+      app.request("/api/model-providers-oauth/pairing", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ providerId: "test-oauth", owner_type: ownerType }),
+      });
+    expect((await mint("org")).status).toBe(403);
+    expect((await mint("user")).status).toBe(200);
+  });
+
+  it("pairs an organization subscription with an admin's token", async () => {
+    const admin = await createTestUser();
+    await addOrgMember(orgId, admin.id, "admin");
+    const { ensureInstanceClient } = await import("../../../services/oauth-admin.ts");
+    const clientId = await ensureInstanceClient("http://localhost:3000");
+
+    const res = await app.request("/api/model-providers-oauth/pairing", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${await mintInstanceToken(admin.id, clientId)}`,
+        "X-Org-Id": orgId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ providerId: "test-oauth", owner_type: "org" }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+  });
+
   it("launches a run on the member's own credential", async () => {
     const res = await app.request("/api/runs/inline", {
       method: "POST",

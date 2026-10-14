@@ -308,8 +308,9 @@ export const modelProviderCredentials = pgTable(
     // did refresh last fail" is ever needed, build the reader first — a column
     // with no reader is not telemetry, it is write amplification.
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
-    // NULL = organization credential. Set = personal credential of that user: usable only by
-    // them, on their own runs, and deleted with their account.
+    // NULL = organization credential: bindable to a model, serves every caller. Set = personal
+    // credential of that user: usable only by them, on their own runs, and deleted with their
+    // account. The rule is the same for an API key and for a subscription (OAuth).
     ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -334,6 +335,11 @@ export const modelProviderCredentials = pgTable(
  * button with the `npx @appstrate/connect-helper <token>` loopback OAuth
  * helper running on the user's machine.
  *
+ * Redeem authenticates with the token alone and has no principal: before it
+ * writes, it judges the minter (`user_id`) again on their current role. A new
+ * credential takes the owner recorded at mint (`owner_user_id`); a reconnect
+ * keeps the owner of the credential it updates.
+ *
  * Lifecycle:
  *   1. Dashboard POST /api/model-providers-oauth/pairing → row INSERTed,
  *      plaintext token returned to the browser ONCE (never re-served).
@@ -347,7 +353,9 @@ export const modelProviderCredentials = pgTable(
  *      and returns the row only if it was previously unconsumed and
  *      unexpired — guaranteeing single-use semantics under concurrent
  *      retries.
- *   4. A background worker DELETEs rows past `expires_at + 1h` so the
+ *   4. The redeem then links the credential it wrote (`credential_id`) or,
+ *      when it ends without one, records `failed_at`.
+ *   5. A background worker DELETEs rows past `expires_at + 1h` so the
  *      table never grows unboundedly. Consumed rows are kept for the
  *      grace window so audit/UI status reads can still reflect them.
  *
@@ -369,6 +377,16 @@ export const modelProviderPairings = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    /**
+     * Owner chosen at mint, with the meaning of
+     * `model_provider_credentials.owner_user_id`: NULL = an organization
+     * credential, set = that member's personal one. A new credential is
+     * written with it. On a reconnect it is the target credential's owner as
+     * read at mint, and redeem does not read it: it judges the credential row
+     * as it is then. `user_id` is the member who minted the pairing, whichever
+     * owner applies.
+     */
+    ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
     /** Provider id from the OAuth model provider registry. */
     providerId: text("provider_id").notNull(),
     /**
@@ -379,8 +397,10 @@ export const modelProviderPairings = pgTable(
      */
     reconnectCredentialId: uuid("reconnect_credential_id"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    /** When the helper successfully POSTed credentials. NULL means still pending. */
+    /** When the token was redeemed, whether or not the redeem produced a credential. NULL = never redeemed. */
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    /** When a redeem that consumed the token ended without a credential. */
+    failedAt: timestamp("failed_at", { withTimezone: true }),
     // NOTE — there is deliberately no `consumed_from_ip` here. There was one,
     // written by `consumePairing` (`services/model-providers/pairings.ts`) and
     // read by nothing: no route, no DTO, no OpenAPI field, no module consumer.
@@ -458,8 +478,9 @@ export const orgModels = pgTable(
     /**
      * Strict FK to `model_provider_credentials.id`. ON DELETE RESTRICT —
      * deleting a credential while any model still references it is rejected
-     * at the DB level so the API can surface a clear error. NULL: each member
-     * brings their own personal credential for `providerId`.
+     * at the DB level so the API can surface a clear error. The bound credential
+     * is an organization one (`owner_user_id IS NULL`), API key or subscription.
+     * NULL: each member brings their own personal credential for `providerId`.
      */
     credentialId: uuid("credential_id").references(() => modelProviderCredentials.id, {
       onDelete: "restrict",

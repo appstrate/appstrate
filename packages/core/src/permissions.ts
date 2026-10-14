@@ -113,7 +113,9 @@ export interface CoreResources {
   "api-keys": "read" | "create" | "revoke";
   spaces: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
-  "credential-proxy": "call";
+  // `/api/credential-proxy/proxy`: `call-run` for a run (`X-Run-Id`), reaching the
+  // connections that run bound; `call-own` outside a run: own ones, or with `call-run` usable ones.
+  "credential-proxy": "call-run" | "call-own";
   "llm-proxy": "call";
   // AFPS integrations (marketplace UI).
   // Read = browse catalog + view the actor's connection inventory.
@@ -283,7 +285,7 @@ export const CORE_RESOURCE_ACTIONS = {
   "api-keys": ["read", "create", "revoke"],
   spaces: ["read", "write", "delete"],
   "end-users": ["read", "write", "delete"],
-  "credential-proxy": ["call"],
+  "credential-proxy": ["call-run", "call-own"],
   "llm-proxy": ["call"],
   integrations: [
     "read",

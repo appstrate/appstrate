@@ -20,7 +20,7 @@
  *      bypasses the JWT identity hook when present — exact path used by
  *      `@appstrate/connect-helper` when the upstream provider returns the
  *      identity in the OAuth response body)
- *   5. GET  /pairing/:id        → consumed + credentialId populated
+ *   5. GET  /pairing/:id        → connected + credentialId populated
  *   6. GET  /model-provider-credentials → new row carries
  *                                 `authMode:"oauth2"`, `source:"custom"`,
  *                                 `providerId:"<provider>"`,
@@ -64,7 +64,7 @@ interface PairingMintResponse {
 
 interface PairingStatusResponse {
   id: string;
-  status: "pending" | "consumed" | "expired";
+  status: "pending" | "connected" | "failed" | "expired";
   consumed_at: string | null;
   expiresAt: string;
   credentialId: string | null;
@@ -161,13 +161,13 @@ for (const provider of PROVIDER_CASES) {
       expect(imported.available_model_ids.length).toBeGreaterThan(0);
 
       try {
-        // 5. Status flips to `consumed` and the credential id is linked back.
-        const consumedRes = await apiClient.get(`/model-providers-oauth/pairing/${mint.id}`);
-        expect(consumedRes.status()).toBe(200);
-        const consumed = (await consumedRes.json()) as PairingStatusResponse;
-        expect(consumed.status).toBe("consumed");
-        expect(consumed.consumed_at).not.toBeNull();
-        expect(consumed.credentialId).toBe(imported.credentialId);
+        // 5. Status flips to `connected` and the credential id is linked back.
+        const connectedRes = await apiClient.get(`/model-providers-oauth/pairing/${mint.id}`);
+        expect(connectedRes.status()).toBe(200);
+        const connected = (await connectedRes.json()) as PairingStatusResponse;
+        expect(connected.status).toBe("connected");
+        expect(connected.consumed_at).not.toBeNull();
+        expect(connected.credentialId).toBe(imported.credentialId);
 
         // 6. The credential surfaces in the org-wide list with the OAuth-extended
         //    shape the UI reads to render the badge.

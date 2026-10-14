@@ -20,6 +20,34 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 
 ### Added
 
+- `findCleartextInjectedCredentials(manifest, isTrustedHost?)`
+  (`./integration`): the `http://` `authorized_uris` entries of the auths
+  that inject a credential over HTTP, as write-path issues. `isTrustedHost`
+  exempts a host the operator designated as internal.
+- **`findUnexposedDefaultTools(manifest, mcpServerTools?)`**
+  (`@appstrate/core/integration`): the write-path rule listing a manifest's
+  `default_tools` entries the platform can prove unexposed, each once. On
+  every source, a name `hidden_tools` lists, a `connect.tool` references, or
+  the upload companion of a hidden `api_call`. Beyond that, a name outside the
+  canonical catalog (`resolveIntegrationToolCatalog`) where it is known: a
+  `none` source carrying no `_meta` key, at any depth, outside the
+  `dev.appstrate/` namespace, a `local` source when `mcpServerTools` (the
+  referenced mcp-server's `tools[]`) is passed, and a `remote` source that
+  declares a `tools_policy`, which bounds the default as it bounds an agent's
+  explicit selection. `integrationManifestSchema` applies the rule to `none`
+  alone. (#1923)
+- **`resolveScopeToolSelection(agentSelection, manifest)`**
+  (`@appstrate/core/integration`): the tool selection an agent's OAuth scopes
+  are inferred from, to pass as `agentTools` to `requiredScopesForAgent` and
+  `missingScopesForConnection`. `"*"` when the effective selection
+  (`resolveEffectiveToolSelection`) is the wildcard, written or inherited from
+  `default_tools`; else the agent's own array, `[]` when it wrote none. Tool
+  names inherited from `default_tools` contribute no scope. (#1923)
+- **`credential-proxy:call-own`** (`@appstrate/core/permissions`): the action
+  gating a call to `/api/credential-proxy/proxy` outside a run: on the
+  caller's own connections, and with `credential-proxy:call-run` as well on
+  those usable in the space, shared ones included. `CorePermission` and
+  `SpaceLevelPermission` gain the string. (#1894, #1957)
 - **`resolveIntegrationToolSurface`**, **`IntegrationToolInspection`** and
   **`IntegrationToolInspectionEntry`** (`@appstrate/core/integration`): the
   catalog `resolveIntegrationToolCatalog` returns, plus an explanatory
@@ -143,6 +171,14 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 
 ### Changed
 
+- **BREAKING: `credential-proxy:call` is the pair `credential-proxy:call-run`
+  and `credential-proxy:call-own`** (`@appstrate/core/permissions`):
+  `CoreResources["credential-proxy"]` is `"call-run" | "call-own"` and
+  `CORE_RESOURCE_ACTIONS["credential-proxy"]` is `["call-run", "call-own"]`.
+  `call-run` gates a call to `/api/credential-proxy/proxy` for a run
+  (`X-Run-Id`); a guard or a role naming `credential-proxy:call` no longer
+  type-checks. (#1894, #1957)
+
 - **BREAKING: `ConnectionCandidate`** (`@appstrate/core/integration`) requires
   `scopesGranted` and `missingScopes`, and a
   `ResolutionFieldError.candidate_connections` item
@@ -244,6 +280,10 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   still going. (#1844, #1851)
 - **The wait poll sends the remaining seconds and the server clamps them**
   (`@appstrate/core/run-and-wait-client`). (#1851)
+- **`launchRunAndWait` (`@appstrate/core/run-and-wait-client`)**: a refusal's
+  code holds for every argument it lists. When `scope` and `name` are one
+  absent and the other unusable, the refusal lists the absent one alone as
+  `missing_argument` (it used to list both as `invalid_argument`). (#1925)
 
 ## [15.0.0] — 2026-10-08
 

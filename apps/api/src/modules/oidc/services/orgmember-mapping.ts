@@ -145,7 +145,16 @@ export async function resolveOrCreateOrgMembership(
     // SSO-provisioned member is not the one population without one. `created`
     // is its ON CONFLICT DO NOTHING `RETURNING` — the loser of the concurrent-
     // login race gets `false` and re-reads through step 1.
-    const { created } = await provisionMember(tx, orgId, authUser.id, policy.signupRole);
+    // The door admits platform accounts only: to an `end_user:<space>` account holding the
+    // address, this client's signup is closed.
+    const { created } = await provisionMember(tx, orgId, authUser.id, policy.signupRole).catch(
+      (error: unknown) => {
+        if (error instanceof ApiError && error.code === "not_a_platform_account") {
+          throw new OrgSignupClosedError(authUser.id, orgId, authUser.email);
+        }
+        throw error;
+      },
+    );
     if (!created) return null;
     const assignments = policy.signupSpaceAssignments ?? [];
     try {

@@ -238,7 +238,6 @@ export function OrgSettingsModelsPage() {
         onClose={editKey.close}
         credential={editKey.target ?? null}
         isPending={updateCredential.isPending}
-        apiKeyOnly
         onSubmit={(data) => {
           const target = editKey.target;
           if (!target) return;

@@ -284,6 +284,56 @@ describe("a click on a row", () => {
   });
 });
 
+describe("an organization subscription", () => {
+  const ORG_SUBSCRIPTION = credential({
+    id: "cred_org_sub",
+    label: "Abonnement équipe",
+    providerId: "claude-code",
+    authMode: "oauth2",
+    oauth_email: "team@example.com",
+    needs_reconnection: true,
+    allowed_actions: ["reconnect"],
+  });
+  const menu = `aria-label="${settingsFr["providers.moreActions"].replace("{{name}}", ORG_SUBSCRIPTION.label)}"`;
+
+  it("is an organization key: it serves the models bound to it, not the ones left to members", () => {
+    const [row] = providerRows(
+      [
+        model({ id: "mdl_bound", label: "Claude lié", credentialId: ORG_SUBSCRIPTION.id }),
+        model({ id: "mdl_m", label: "Claude pour tous", credentialId: null, binding: "member" }),
+      ],
+      [ORG_SUBSCRIPTION],
+      SERVICES,
+      "usr_me",
+    );
+    expect(row?.kind).toBe("org-key");
+    expect(row?.models.map((m) => m.id)).toEqual(["mdl_bound"]);
+  });
+
+  it("offers the reconnect where the server lists it, with the row unavailable", () => {
+    const row = rowOf(providersTable([], [ORG_SUBSCRIPTION]), ORG_SUBSCRIPTION.label);
+    expect(row).toContain(menu);
+    expect(row).toContain(settingsFr["models.credentialUnavailable"]);
+  });
+
+  it("withholds it from a reader the server does not allow, with the state still shown", () => {
+    const row = rowOf(
+      providersTable([], [{ ...ORG_SUBSCRIPTION, allowed_actions: [] }]),
+      ORG_SUBSCRIPTION.label,
+    );
+    expect(row).not.toContain(menu);
+    expect(row).toContain(settingsFr["models.credentialUnavailable"]);
+  });
+
+  it("offers no reconnect while it is healthy", () => {
+    const row = rowOf(
+      providersTable([], [{ ...ORG_SUBSCRIPTION, needs_reconnection: false }]),
+      ORG_SUBSCRIPTION.label,
+    );
+    expect(row).not.toContain(menu);
+  });
+});
+
 describe("the personal keys table", () => {
   const personalHtml = (
     models: OrgModelInfo[],

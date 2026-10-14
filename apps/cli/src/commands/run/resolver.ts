@@ -10,14 +10,14 @@
  *   - `remote` — default. Delegates every `api_call` through the pinned
  *     Appstrate instance's `/api/credential-proxy/proxy` endpoint, with
  *     the integration id as the `X-Integration-Id` scope marker. Credentials
- *     stay server-side; the CLI sends only scope markers. Accepts either:
- *       * an `apst_…` API key (headless CI / GitHub Action) with the
- *         `credential-proxy:call` scope, or
- *       * a device-flow JWT access token from `appstrate login`
- *         (interactive CLI) whose user role grants the same permission.
- *     Either way the credential flows as a single `Authorization:
- *     Bearer <token>` header — see `apps/cli/src/commands/run.ts` for
- *     the resolution priority.
+ *     stay server-side; the CLI sends only scope markers. The bearer is
+ *     either an `apst_…` API key (headless CI / GitHub Action) or a
+ *     device-flow JWT access token from `appstrate login` (interactive
+ *     CLI), sent as a single `Authorization: Bearer <token>` header — see
+ *     `apps/cli/src/commands/run.ts` for the resolution priority. It must
+ *     grant `credential-proxy:call-run` when `extraHeaders` names a registered
+ *     run (`X-Run-Id`), `credential-proxy:call-own` otherwise: the call then
+ *     names no connection: the caller's own, or with both the org default first.
  *
  *   - `local`  — reads a local JSON creds file (integration-keyed) for
  *     offline runs. Credentials are plaintext on disk; the CLI never
@@ -60,8 +60,9 @@ export interface RemoteResolverInputs {
   orgId?: string;
   endUserId?: string;
   /**
-   * Extra headers attached to every credential-proxy call (e.g.
-   * `X-Run-Id` when `--report` is active). Forwarded verbatim by
+   * Extra headers attached to every credential-proxy call. `X-Run-Id`, set
+   * when the run is registered (`--report`), makes each a call made for that
+   * run; absent, each is made outside a run. Forwarded verbatim by
    * {@link RemoteAppstrateIntegrationResolver}.
    */
   extraHeaders?: Record<string, string>;

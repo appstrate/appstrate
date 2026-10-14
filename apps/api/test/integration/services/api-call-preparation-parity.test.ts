@@ -123,6 +123,7 @@ describe("api_call — one prepared request on the three paths", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId: PACKAGE_ID,
       method: "POST",
       target: call.target,

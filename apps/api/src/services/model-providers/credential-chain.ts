@@ -16,7 +16,10 @@ function familyOf(providerId: string): string {
   return getModelProvider(providerId)?.catalogProviderId ?? providerId;
 }
 
-/** A subscription (oauth2) credential: always personal, never served by the LLM proxy. */
+/**
+ * A subscription (oauth2) credential: never served by the LLM proxy, and first in
+ * a member's personal chain.
+ */
 function isSubscription(providerId: string): boolean {
   return getModelProvider(providerId)?.authMode === "oauth2";
 }
@@ -111,12 +114,9 @@ export function providerAllowsPersonalCredentials(
 }
 
 /**
- * An organization model may be bound to this credential: an organization API key,
- * never a member's own or a subscription.
+ * An organization model may be bound to this credential: an organization one
+ * (API key or subscription), never a member's own.
  */
-export function isBindableCredential(c: {
-  ownerUserId: string | null;
-  providerId: string;
-}): boolean {
-  return c.ownerUserId === null && !isSubscription(c.providerId);
+export function isBindableCredential(c: { ownerUserId: string | null }): boolean {
+  return c.ownerUserId === null;
 }

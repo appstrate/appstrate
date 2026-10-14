@@ -13,7 +13,8 @@
 import { describe, it, expect, beforeEach, afterEach, setSystemTime } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
+import { proxyCall, ProxyCallError } from "../../../src/services/credential-proxy/core.ts";
+import type { CookieJarStore } from "../../../src/infra/cookie-jar/interface.ts";
 import { LocalCookieJarStore } from "../../../src/infra/cookie-jar/local-cookie-jar.ts";
 import {
   localIntegrationManifest,
@@ -122,18 +123,20 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     target: string,
     fetchImpl: typeof fetch,
     connectionId?: string,
+    store: CookieJarStore = jar,
   ) =>
     proxyCall({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       ...(connectionId ? { connectionId } : {}),
       integrationId: packageId,
       method: "POST",
       target,
       headers: {},
       body: "order_id=0",
-      cookieJar: jar,
+      cookieJar: store,
       jarSessionId: SESSION_ID,
       cookieJarTtlSeconds: 600,
       fetch: fetchImpl,
@@ -455,5 +458,53 @@ describe("proxyCall — session cookie jar (#1613)", () => {
 
     expect(upstream.seen[1]?.get("authorization")).toBe("Bearer tok");
     expect(cookiePairs(upstream.seen[1]?.get("cookie"))).toEqual(["sid=abc"]);
+  });
+
+  describe("a store that fails to save", () => {
+    /** Reads like the real store, refuses every write: the fault lands after the upstream call. */
+    const unwritable = (): CookieJarStore => ({
+      get: (sessionId, connectionId) => jar.get(sessionId, connectionId),
+      set: () => Promise.reject(new Error("store down: PHPSESSID=new")),
+      shutdown: () => Promise.resolve(),
+    });
+
+    it("is the proxy's own error naming the connection once the upstream answered", async () => {
+      const packageId = "@cpcookieorg/shop";
+      const connectionId = await cookieCredential(packageId);
+      const upstream = scriptedUpstream([["PHPSESSID=new; Path=/"]]);
+
+      const err = await call(
+        packageId,
+        "https://1.1.1.1/cart",
+        upstream.fetchImpl,
+        undefined,
+        unwritable(),
+      ).catch((thrown: unknown) => thrown);
+
+      expect(upstream.seen).toHaveLength(1);
+      expect(err).toBeInstanceOf(ProxyCallError);
+      expect(err).toMatchObject({ code: "session_store_unavailable", connectionId });
+      expect((err as Error).message).not.toContain("PHPSESSID");
+      expect((err as Error).cause).toBeUndefined();
+    });
+
+    it("leaves the call's own error in flight when the call failed too", async () => {
+      const packageId = "@cpcookieorg/shop";
+      const connectionId = await cookieCredential(packageId);
+      const upstream = recordingUpstream(() =>
+        redirect("https://8.8.8.8/elsewhere", "PHPSESSID=new; Path=/"),
+      );
+
+      const err = await call(
+        packageId,
+        "https://1.1.1.1/cart/add",
+        upstream.fetchImpl,
+        undefined,
+        unwritable(),
+      ).catch((thrown: unknown) => thrown);
+
+      expect(err).toBeInstanceOf(ProxyCallError);
+      expect(err).toMatchObject({ code: "unauthorized_target", connectionId });
+    });
   });
 });

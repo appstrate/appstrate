@@ -4,6 +4,8 @@ The compose that runs `app.appstrate.com`. **No product code lives here**: `dock
 
 The billing module is `packages/module-ee`, and it ships inside `ghcr.io/appstrate/appstrate` itself, inert until `MODULES` names it. One image, one tag, nothing to build — which is why the deployment is one file in the monorepo rather than a repository of its own.
 
+Staging deploys this same file, from `main`, on every merge: `docs/deployment/STAGING.md`.
+
 ## Layout
 
 |                      |                                                             |
@@ -47,8 +49,6 @@ Facts worth writing down, because each one is easy to break:
 - **A bare name in an `environment:` block is materialised as the empty string.** Coolify rewrites `- FOO` into `FOO: ''` in the compose it generates, so "unset, let the schema default apply" is a state that file cannot express. `verify:compose-defaults` (class 5) refuses one, and `env_file` is what delivers the operator's variables instead.
 
 - **`MODULES` is required, not defaulted.** `docker-compose.yml` reads it as `${MODULES:?}`: a raw `docker compose` refuses to start without it, and Coolify documents that form as flagging the variable and blocking the deploy until a value is entered. There is no fallback list, and the code default names no billing module. Set it on the resource with `@appstrate/module-ee` included; its Stripe keys are then required (`.env.example` lists them).
-
-- **`MODULES` must never name a subscription module on this deployment.** `@appstrate/module-claude-code` and `@appstrate/module-codex` are never enabled in production; see `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`. Re-read the value before every release.
 
 - **Check what Coolify actually ran, not this file.** Coolify rewrites the compose before running it, so after a deploy read `/data/coolify/applications/<uuid>/docker-compose.yaml` on the server: `MODULES` must appear there with the resource's value, `@appstrate/module-ee` included.
 

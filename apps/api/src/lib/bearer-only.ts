@@ -46,18 +46,29 @@ interface BearerCallerCapabilities {
 }
 
 /**
- * Throw `forbidden(...)` unless the caller is an accepted bearer strategy. Pass
- * `caps.firstPartyLoopback` (from `c.get("firstPartyLoopback")`) so a declared
- * first-party loopback strategy is accepted without enumerating its id here.
- * `surfaceName` is the human-readable surface noun used in the error message.
+ * Whether the caller passes the bearer-only rule: an accepted bearer strategy, or a declared
+ * first-party loopback one. Pass `caps.firstPartyLoopback` (from `c.get("firstPartyLoopback")`)
+ * so such a strategy is accepted without enumerating its id here.
+ */
+export function isBearerOnlyCaller(
+  authMethod: string | undefined,
+  caps: BearerCallerCapabilities = {},
+): boolean {
+  return (
+    caps.firstPartyLoopback === true || (!!authMethod && ACCEPTED_AUTH_METHODS.has(authMethod))
+  );
+}
+
+/**
+ * Throw `forbidden(...)` unless {@link isBearerOnlyCaller} holds. `surfaceName` is the
+ * human-readable surface noun used in the error message.
  */
 export function assertBearerOnly(
   authMethod: string | undefined,
   surfaceName: string,
   caps: BearerCallerCapabilities = {},
 ): void {
-  if (caps.firstPartyLoopback) return;
-  if (!authMethod || !ACCEPTED_AUTH_METHODS.has(authMethod)) {
+  if (!isBearerOnlyCaller(authMethod, caps)) {
     throw forbidden(
       `${surfaceName} does not accept auth method "${authMethod}" (cookie sessions and unknown strategies rejected)`,
     );

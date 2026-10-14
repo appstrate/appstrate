@@ -1,5 +1,5 @@
 {
-  "id": "b7311ff1-b052-4fbc-8594-9d0d7d362e0b",
+  "id": "40afff98-a6a6-4d84-a2ad-2cfd238f265a",
   "prevId": "f7556afa-06cd-4fc6-88cd-c353f98fb92c",
   "version": "7",
   "dialect": "postgresql",
@@ -1577,12 +1577,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "logo": {
-          "name": "logo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {

@@ -25,7 +25,8 @@
  * one exception is a module whose requirements the current tier cannot meet.
  */
 import { resolve, join, relative } from "path";
-import { existsSync } from "fs";
+import { existsSync, mkdtempSync } from "fs";
+import { tmpdir } from "os";
 import type { AppstrateModule } from "@appstrate/core/module";
 import {
   TEST_DB_NAME,
@@ -39,7 +40,7 @@ import {
   skipsInTier,
   type DiscoveredModule,
 } from "./modules.ts";
-import { makeTempDir, sweepOrphanedTempDirs } from "./temp-dirs.ts";
+import { ownTmpdir } from "./temp-dirs.ts";
 import rootPackage from "../../package.json";
 
 // ─── Bun version ────────────────────────────────────────────
@@ -53,6 +54,12 @@ if (!Bun.semver.satisfies(Bun.version, rootPackage.engines.bun)) {
       `(${rootPackage.engines.bun}). Run \`bun upgrade\`.`,
   );
 }
+
+// ─── Scratch directory ──────────────────────────────────────
+// Every tier: `os.tmpdir()` resolves inside a directory this process owns, so
+// what a test leaves there goes with the process. A child spawned through
+// `Bun.spawn` without an explicit `env` keeps the tmpdir bun started with.
+const removeTmpdir = ownTmpdir();
 
 // ─── Tier selection ─────────────────────────────────────────
 // tier0 (TEST_TIER=0): fast in-memory dev mode — PGlite (throwaway temp dir),
@@ -132,9 +139,8 @@ if (TIER0) {
   delete process.env.S3_PUBLIC_ENDPOINT;
   delete process.env.AWS_ACCESS_KEY_ID;
   delete process.env.AWS_SECRET_ACCESS_KEY;
-  sweepOrphanedTempDirs();
-  process.env.PGLITE_DATA_DIR = makeTempDir("pglite");
-  process.env.FS_STORAGE_PATH = makeTempDir("storage");
+  process.env.PGLITE_DATA_DIR = mkdtempSync(join(tmpdir(), "pglite-"));
+  process.env.FS_STORAGE_PATH = mkdtempSync(join(tmpdir(), "storage-"));
 } else {
   // tier3: real external services from docker-compose.test.yml.
   process.env.DATABASE_URL = TEST_DATABASE_URL;
@@ -483,8 +489,10 @@ setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
 // and its built-in rule caps `/sign-in*` and `/sign-up*` at 3 per 10 s per
 // address — one address, shared by every test. Dropping the buckets after each
 // test is what lets a file sign a user in without budgeting for its neighbours.
-const { afterEach } = await import("bun:test");
+const { afterEach, afterAll } = await import("bun:test");
 afterEach(async () => {
   setPermissionDenialHandler(null);
   await resetBetterAuthRateLimitBuckets();
 });
+// Registered last: `afterAll` hooks run in order, and PGlite is closed by then.
+afterAll(removeTmpdir);

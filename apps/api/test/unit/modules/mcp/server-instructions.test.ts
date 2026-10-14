@@ -350,6 +350,14 @@ describe("MCP server instructions — agent authoring", () => {
     expect(without).not.toContain("building or configuring an agent");
   });
 
+  // A default can hold write tools: an external client gets the narrowing rule from this text alone.
+  it("tells an author to select the tools the agent needs rather than inherit the default", () => {
+    const withWrite = instructionsFor(new Set(["mcp:read", "mcp:invoke", "agents:write"]), true);
+    expect(withWrite).toContain(
+      "List only the tools the agent needs; omit `tools` only when it needs the whole default",
+    );
+  });
+
   it("teaches `required` alongside the tool selection", () => {
     const withWrite = instructionsFor(new Set(["mcp:read", "mcp:invoke", "agents:write"]), true);
     expect(withWrite).toContain("`integrations_configuration[id].required`");

@@ -2,9 +2,10 @@
 
 /**
  * Onboarding-only quick-connect cards for OAuth model providers.
- * One click opens the pairing dialog; on success the helper seeds the
- * org's `org_models` with the registry's featured models so the user
- * can hit "Continue" without touching the manual form.
+ * One click opens the pairing dialog for an organization subscription; on
+ * success the helper seeds the org's `org_models` with the registry's featured
+ * models, bound to it, so the user can hit "Continue" without touching the
+ * manual form.
  *
  * The list is module-driven: every OAuth provider the platform loaded
  * (`useProvidersRegistry()` filtered by `authMode === "oauth2"`) gets a
@@ -35,6 +36,7 @@ import {
 } from "../hooks/use-model-provider-credentials";
 import { useAutoSeedFeaturedModels } from "../hooks/use-auto-seed-models";
 import { quickConnectProviders } from "../lib/provider-registry-helpers";
+import { hasOrgSubscription } from "../lib/oauth-pairing";
 
 /**
  * The registry's own `description` is English text written by the module. The
@@ -152,6 +154,7 @@ function QuickConnectCard({
         >
           <OAuthPairingBody
             providerId={entry.providerId}
+            target={{ ownerType: "org" }}
             onConnected={(newId) => {
               onCloseDialog();
               void handleConnected(newId);
@@ -178,10 +181,9 @@ export function OnboardingQuickConnect() {
     (entry) => entry.providerId,
   );
 
-  const isConnected = (providerId: string) =>
-    credentialsQuery.data?.some(
-      (k) => k.authMode === "oauth2" && k.providerId === providerId && !k.needs_reconnection,
-    ) ?? false;
+  // Only an organization subscription can serve the models the onboarding seeds: a member's
+  // own one does not make the card connected.
+  const isConnected = (providerId: string) => hasOrgSubscription(credentialsQuery.data, providerId);
 
   // A link to a pairing for a provider that is already connected has nothing
   // to pair: the modal closes. Judged ONCE, when the modal opens and the

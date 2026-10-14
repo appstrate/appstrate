@@ -4,7 +4,8 @@
  * The delete confirmation says which of the caller's agents and schedules lose
  * the connection, and what each keeps: fewer connections, or none (back to the
  * usual resolution) — or, for an enabled schedule left with none, that it is
- * disabled — and how many schedules of other people it disables, unnamed. Until the
+ * disabled — how many of the caller's schedules a dropped selection disables,
+ * and how many schedules of other people it disables, unnamed. Until the
  * impact arrives it says it is checking; a failed check says so.
  */
 
@@ -50,12 +51,14 @@ describe("ConnectionDeleteImpact", () => {
           agent_display_name: "Ops multi",
           integration_package_id: "@acme/ssh",
           connection_count: 3,
+          schedules_disabled_count: 0,
         },
         {
           agent_package_id: "@acme/audit",
           agent_display_name: "Audit",
           integration_package_id: "@acme/ssh",
           connection_count: 1,
+          schedules_disabled_count: 0,
         },
       ],
       schedules: [],
@@ -66,6 +69,30 @@ describe("ConnectionDeleteImpact", () => {
     expect(html).toContain(i18n.t("settings:connections.impact.shrinks", { count: 2, from: 3 }));
     expect(html).toContain("Audit");
     expect(html).toContain(i18n.t("settings:connections.impact.agentResets"));
+    expect(html).not.toContain(
+      i18n.t("settings:connections.impact.disablesSchedules", { count: 1 }),
+    );
+  });
+
+  it("says how many of the caller's schedules a dropped selection disables", () => {
+    const pin = (agent: string, schedulesDisabledCount: number) => ({
+      agent_package_id: `@acme/${agent}`,
+      agent_display_name: agent,
+      integration_package_id: "@acme/ssh",
+      connection_count: 1,
+      schedules_disabled_count: schedulesDisabledCount,
+    });
+    const html = renderWith({
+      pins: [pin("audit", 1), pin("ops", 2)],
+      schedules: [],
+      other_schedules_disabled_count: 0,
+    });
+    const resets = i18n.t("settings:connections.impact.agentResets");
+    for (const count of [1, 2]) {
+      expect(html).toContain(
+        `${resets}. ${i18n.t("settings:connections.impact.disablesSchedules", { count })}`,
+      );
+    }
   });
 
   it("names each schedule and what its override becomes", () => {

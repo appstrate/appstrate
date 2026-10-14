@@ -270,9 +270,21 @@ function refuseArguments(
   return { ok: false, step: { payload, isError: true } };
 }
 
-/** `missing_argument` when the argument is absent, `invalid_argument` when present but unusable. */
-function absentOrInvalid(value: unknown): RunAndWaitArgumentCode {
-  return value === undefined || value === null ? "missing_argument" : "invalid_argument";
+/**
+ * The refusal of `names`, each absent (`undefined` or `null`) or present but
+ * unusable. Its code holds for every argument it lists: the absent ones as
+ * `missing_argument` when there are any, otherwise all of them as
+ * `invalid_argument`.
+ */
+function refuseUnusable(
+  args: Record<string, unknown>,
+  names: readonly string[],
+  error: string,
+): RunAndWaitFailureResult {
+  const absent = names.filter((name) => args[name] === undefined || args[name] === null);
+  return absent.length > 0
+    ? refuseArguments("missing_argument", error, absent)
+    : refuseArguments("invalid_argument", error, names);
 }
 
 /**
@@ -621,13 +633,10 @@ export async function launchRunAndWait(
     const scope = asString(args.scope);
     const name = asString(args.name);
     if (!scope || !name) {
-      const faulty = [...(scope ? [] : ["scope"]), ...(name ? [] : ["name"])];
-      return refuseArguments(
-        faulty.every((k) => absentOrInvalid(args[k]) === "missing_argument")
-          ? "missing_argument"
-          : "invalid_argument",
+      return refuseUnusable(
+        args,
+        [...(scope ? [] : ["scope"]), ...(name ? [] : ["name"])],
         "`scope` and `name` are required for kind:'agent'.",
-        faulty,
       );
     }
     const qs = new URLSearchParams();
@@ -652,11 +661,7 @@ export async function launchRunAndWait(
   } else if (kind === "inline") {
     const manifest = asRecordOrUndefined(args.manifest);
     if (!manifest) {
-      return refuseArguments(
-        absentOrInvalid(args.manifest),
-        "`manifest` is required for kind:'inline'.",
-        ["manifest"],
-      );
+      return refuseUnusable(args, ["manifest"], "`manifest` is required for kind:'inline'.");
     }
     // Reject a missing top-level prompt before hitting the route: the route's
     // field error alone doesn't tell the model WHERE the prompt goes, and the
@@ -665,14 +670,14 @@ export async function launchRunAndWait(
     const prompt = asString(args.prompt);
     if (!prompt) {
       const nested = typeof manifest.prompt === "string";
-      return refuseArguments(
-        absentOrInvalid(args.prompt),
+      return refuseUnusable(
+        args,
+        ["prompt"],
         nested
           ? "`prompt` was found inside `manifest`. It must be a TOP-LEVEL argument of " +
               "run_and_wait, alongside `manifest` — move it out of the manifest and retry."
           : "`prompt` is required for kind:'inline'. Pass it as a top-level argument " +
               "alongside `manifest` (not inside it).",
-        ["prompt"],
       );
     }
     const selected = manifest.runtime_tools;
@@ -696,9 +701,7 @@ export async function launchRunAndWait(
     // only one — nothing is canonicalized here.
     if (contextFiles) launchBody.context_files = contextFiles;
   } else {
-    return refuseArguments(absentOrInvalid(args.kind), "`kind` must be 'agent' or 'inline'.", [
-      "kind",
-    ]);
+    return refuseUnusable(args, ["kind"], "`kind` must be 'agent' or 'inline'.");
   }
 
   // Both run bodies carry the same field, so one forward covers both kinds.

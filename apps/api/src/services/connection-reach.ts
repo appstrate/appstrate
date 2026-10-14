@@ -94,6 +94,14 @@ export function usableInSpace(spaceId: string, actor: Actor): SQL {
   return and(connectionInSpace(spaceId), or(sharedInto(spaceId), ownUsableIn(spaceId, actor)))!;
 }
 
+/**
+ * The rows of {@link usableInSpace} the actor owns: what a run of theirs could bind there, minus
+ * the colleagues' shared rows. An own row a block keeps out is back in once shared into the space.
+ */
+export function ownUsableInSpace(spaceId: string, actor: Actor): SQL {
+  return and(usableInSpace(spaceId, actor), actorFilter(actor, c))!;
+}
+
 /** The order candidates of equal standing keep, wherever the usable rows are listed. */
 export const OLDEST_FIRST = [asc(c.createdAt), asc(c.id)] as const;
 
