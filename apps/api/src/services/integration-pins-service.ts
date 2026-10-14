@@ -53,7 +53,7 @@ import {
   connectionReach,
   connectionViewOf,
   loadConnectionShares,
-  loadUsableConnections,
+  listReachableConnections,
 } from "./integration-connections.ts";
 import { sharedInSpace, usableInSpace } from "./connection-reach.ts";
 import {
@@ -470,7 +470,7 @@ export async function listMemberPinsForAgent(
  * (space, integration), oldest first. Used by the UI picker:
  * own + shared, with caller-facing labels.
  *
- * The same rows ({@link loadUsableConnections}) as `listIntegrationConnections` on the
+ * The same rows ({@link listReachableConnections} under `usable`) as `listIntegrationConnections` on the
  * settings surface; only the projected DTO differs (this one carries
  * `owner_name` and the split owner ids the picker keys on, the other the
  * full connection summary).
@@ -480,7 +480,11 @@ export async function listAccessibleConnections(
   integrationId: string,
   principal: ConnectionPrincipal,
 ): Promise<AccessibleIntegrationConnection[]> {
-  const rows = await loadUsableConnections(scope.spaceId, principal.actor, [integrationId]);
+  const rows = await listReachableConnections(
+    { spaceId: scope.spaceId, actor: principal.actor },
+    "usable",
+    [integrationId],
+  );
   const ownerName = await resolveConnectionOwnerNames(rows);
   const shares = await loadConnectionShares(
     db,

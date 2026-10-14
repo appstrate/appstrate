@@ -48,21 +48,15 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   (`resolveEffectiveToolSelection`) is the wildcard, written or inherited from
   `default_tools`; else the agent's own array, `[]` when it wrote none. Tool
   names inherited from `default_tools` contribute no scope. (#1923)
-- **`credential-proxy:call-own`** and **`PROXY_CALL_PERMISSIONS`**
-  (`@appstrate/core/permissions`): `call-own` gates a call to
+- **`credential-proxy:call-own`** (`@appstrate/core/permissions`): `call-own` gates a call to
   `/api/credential-proxy/proxy` outside a run on the caller's own connections
   only; `credential-proxy:call` is unchanged and implies it.
   `CoreResources["credential-proxy"]` is `"call" | "call-own"`, and
-  `CorePermission` and `SpaceLevelPermission` gain the string.
-  `PROXY_CALL_PERMISSIONS` (`["credential-proxy:call-own",
-"credential-proxy:call"]`) is the implication tuple `withImpliedPermissions`
-  reads, `call` implying `call-own`. (#1894, #1963)
+  `CorePermission` and `SpaceLevelPermission` gain the string. (#1894, #1963)
 - **`withImpliedPermissions(held)`** (`@appstrate/core/permissions`): `held`
   plus every permission a held one implies. The implications are
-  `RUNS_READ_PERMISSIONS` and `PROXY_CALL_PERMISSIONS`, the last element of
-  each tuple implying the others (`runs:read-all` ⇒ `runs:read`,
-  `credential-proxy:call` ⇒ `credential-proxy:call-own`); other strings pass
-  through. (#1963)
+  `runs:read-all` ⇒ `runs:read` and `credential-proxy:call` ⇒
+  `credential-proxy:call-own`; other strings pass through. (#1963)
 - **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
   (`@appstrate/core/integration`): every code an `errors[]` item of the
   connection-readiness read carries, the resolver's error codes plus

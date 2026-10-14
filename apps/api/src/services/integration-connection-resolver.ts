@@ -77,7 +77,7 @@ import {
   listOrgDefaultsForResolver,
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
-import { listActiveIntegrationIds, loadUsableConnections } from "./integration-connections.ts";
+import { listActiveIntegrationIds, listReachableConnections } from "./integration-connections.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -874,7 +874,11 @@ export async function resolveConnectionsForRun(
 
   const integrationIds = validReqs.map((r) => r.integrationId);
   const [accessibleConnections, pins, orgDefaults, activeIds] = await Promise.all([
-    loadUsableConnections(input.scope.spaceId, input.actor, integrationIds),
+    listReachableConnections(
+      { spaceId: input.scope.spaceId, actor: input.actor },
+      "usable",
+      integrationIds,
+    ),
     loadPins(input.scope.spaceId, input.packageId, integrationIds, actorUserId),
     listOrgDefaultsForResolver(input.scope.spaceId),
     listActiveIntegrationIds(integrationIds, input.scope.spaceId),

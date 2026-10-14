@@ -475,7 +475,7 @@ export async function selectAccessibleConnection(
     } else if (bound.length === 0) {
       return null;
     }
-    rows = await listReachableConnections(context, "usable", packageId);
+    rows = await listReachableConnections(context, "usable", [packageId]);
     if (!named) {
       const ids = new Set(bound.map((m) => m.connectionId));
       throw mustChoose(
@@ -496,7 +496,7 @@ export async function selectAccessibleConnection(
           `platform executes.`,
       );
     }
-    rows = await listReachableConnections(context, reach, packageId);
+    rows = await listReachableConnections(context, reach, [packageId]);
   }
 
   const { resolved, errors } = resolveConnections({
@@ -534,32 +534,22 @@ export async function selectAccessibleConnection(
 }
 
 /**
- * The {@link usableInSpace} rows of `integrationIds`, {@link OLDEST_FIRST}: what the actor may bind
- * in `spaceId`.
+ * The rows the actor reaches in `spaceId`, {@link OLDEST_FIRST}: under `usable` what it may bind
+ * there ({@link usableInSpace}), under `own` its own ({@link ownUsableInSpace}); of
+ * `integrationIds` when given, of every integration otherwise.
  */
-export async function loadUsableConnections(
-  spaceId: string,
-  actor: Actor,
-  integrationIds: string[],
-): Promise<SelectableRow[]> {
-  if (integrationIds.length === 0) return [];
-  return loadSelectableRows(
-    and(
-      inArray(integrationConnections.integrationId, integrationIds),
-      usableInSpace(spaceId, actor),
-    ),
-  );
-}
-
-export function listReachableConnections(
+export async function listReachableConnections(
   context: { spaceId: string; actor: Actor },
   reach: ProxyReach,
-  packageId?: string,
-) {
+  integrationIds?: string[],
+): Promise<SelectableRow[]> {
+  if (integrationIds?.length === 0) return [];
   const inReach = reach === "own" ? ownUsableInSpace : usableInSpace;
   return loadSelectableRows(
     and(
-      packageId === undefined ? undefined : eq(integrationConnections.integrationId, packageId),
+      integrationIds === undefined
+        ? undefined
+        : inArray(integrationConnections.integrationId, integrationIds),
       inReach(context.spaceId, context.actor),
     ),
   );
@@ -3375,7 +3365,7 @@ export async function saveIntegrationConnection(
 }
 
 /**
- * The resolver's set ({@link loadUsableConnections}), each row projected for `caller`
+ * The resolver's set ({@link listReachableConnections} under `usable`), each row projected for `caller`
  * ({@link connectionViewOf}), with the actions it holds and, for its owner, the spaces it may share
  * it into under its org role `orgRole` here (`null`: none). `locked_by`: what a 409 would refuse —
  * an own row's delete (a lock anywhere), another's withdrawal from this space.
@@ -3388,7 +3378,9 @@ export async function listIntegrationConnections(
 ): Promise<IntegrationConnectionSummary[]> {
   await assertSpaceInScope(scope);
   const actor = caller.principal.actor;
-  const rows = await loadUsableConnections(scope.spaceId, actor, [packageId]);
+  const rows = await listReachableConnections({ spaceId: scope.spaceId, actor }, "usable", [
+    packageId,
+  ]);
   const ownerName = await resolveConnectionOwnerNames(rows);
   const own = rows.filter((row) => actorOwns(actor, row)).map((row) => row.id);
   const others = rows.filter((row) => !actorOwns(actor, row)).map((row) => row.id);

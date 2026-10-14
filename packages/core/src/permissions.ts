@@ -171,7 +171,7 @@ export function canReadRuns(has: (permission: CorePermission) => boolean): boole
 }
 
 /** `credential-proxy:call` implies `credential-proxy:call-own` ({@link withImpliedPermissions}). */
-export const PROXY_CALL_PERMISSIONS = [
+const PROXY_CALL_PERMISSIONS = [
   "credential-proxy:call-own",
   "credential-proxy:call",
 ] as const satisfies readonly CorePermission[];
