@@ -63,15 +63,32 @@ them for.
 ## Release beta.67 — order of operations
 
 The order only; each step's detail, counts and rollback are in its `Detail` section below and in
-the root `CHANGELOG.md` (Operators). The release image carries `scripts/migration/`: a `.ts` script
-runs from it as `docker compose run --rm --no-deps appstrate bun scripts/migration/<script>.ts`,
-which is the dry run, `--apply` appended to commit. On an embedded database (no `DATABASE_URL`), a
-script runs from the platform's directory with the database named,
-`PGLITE_DATA_DIR=./data/pglite bun scripts/migration/<script>.ts` (the `.env`'s value if it sets
-one), the platform stopped: PGlite opens in one process at a time. With neither variable set a
-window script refuses to run rather than open the default directory. The platform applies the
-migrations itself there: start it once, stop it (it stops itself while `0044` is pending), then
-run steps 3 to 6.
+the root `CHANGELOG.md` (Operators). A database created before the `0000_init.sql` squash must
+have run `0018` first: drizzle `0096` drops `org_models_credential_id_model_provider_credentials_id_fk`
+by that name, which `0018` gave the constraint, and the migrate fails without it.
+
+Where each command runs:
+
+- **`examples/self-hosting/`** (compose): the release image carries `scripts/migration/`, so the
+  migrate service is `docker compose run --rm migrate` and a `.ts` script is
+  `docker compose run --rm --no-deps appstrate bun scripts/migration/<script>.ts` — the dry run,
+  `--apply` appended to commit.
+- **`deploy/`** (Coolify): never a bare `docker compose` from a checkout of `deploy/`. Its
+  `name: appstrate-prod` is inert under Coolify, which names the project after the resource UUID,
+  so a bare run creates an empty `appstrate-prod_pgdata`, migrates that, reports success, and the
+  scripts never touch the real database. Run the release image against the resource's own
+  database container instead (found by the labels `com.docker.compose.project=<resource-uuid>`
+  and `com.docker.compose.service=appstrate-postgres`), sharing its network namespace
+  (`docker run --rm --network container:<postgres container> -e DATABASE_URL=… ghcr.io/appstrate/appstrate:<version> bun packages/db/src/migrate.ts`,
+  then `bun scripts/migration/<script>.ts` the same way); the release runbook holds the exact
+  form.
+- **Embedded database** (tier 0, no `DATABASE_URL`): from the platform's directory, with the
+  database named, `PGLITE_DATA_DIR=./data/pglite bun scripts/migration/<script>.ts` (the `.env`'s
+  value if it sets one), the platform stopped: PGlite opens in one process at a time. With neither
+  variable set, `0040` and the window scripts refuse to run rather than open the default
+  directory. The platform applies the migrations itself there: start it once, stop it (it stops
+  itself while `0044` is pending), run steps 3 to 6, start it, then `0040` with the platform
+  stopped again.
 
 **Before the deploy, on the running release (read-only):**
 
@@ -84,8 +101,7 @@ run steps 3 to 6.
 
 1. Stop the app, so the scheduler fires nothing, and `pg_dump` the platform database (`0086`,
    `0087` and `0089` are one-way).
-2. Run the migrate service alone (`docker compose run --rm appstrate-migrate` with `deploy/`,
-   `migrate` with `examples/self-hosting/`): it applies the pending drizzle migrations, `0084` to
+2. Run the migrations alone (above, per deployment): it applies the pending drizzle migrations, `0084` to
    `0096`. `0096` only adds constraints, each validated: a row breaking one fails the migrate (root
    `CHANGELOG.md`, Changed).
 3. `0044` dry run, then `--apply`: `shared_space_ids` copied into `integration_connection_shares`.
@@ -1220,9 +1236,9 @@ existing share. So `0044` runs between the migration and the app's start, and th
 boot while a connection still holds an entry in `shared_space_ids` (`assertConnectionSharesCopied`,
 `apps/api/src/lib/boot.ts`). `pg_dump` taken BEFORE the deploy, the app stopped, in this order:
 
-1. Run the migrate service alone — `docker compose run --rm appstrate-migrate` in production
-   (`bun run db:migrate` locally) — it applies `0089` and the release's other drizzle migrations;
-   the app stays stopped.
+1. Run the migrations alone — per deployment, as "Release beta.67" above says (`bun run db:migrate`
+   on a local PostgreSQL) — it applies `0089` and the release's other drizzle migrations; the app
+   stays stopped.
 2. `0044 --apply` — app still stopped. It locks the target spaces `FOR KEY SHARE` in id order,
    copies each `(id, unnest(shared_space_ids))` into the table in the connection's org
    (`ON CONFLICT DO NOTHING`), skipping and printing a target space that no longer exists or

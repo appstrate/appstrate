@@ -312,8 +312,12 @@ This upgrade runs four data tasks between the migrations and the start, with
 the app stopped so the scheduler fires nothing until the last one has run. The
 platform refuses to boot while a connection is still shared the old way, until
 `0044-connection-shares.ts --apply` has run: before it, every shared connection
-is invisible to the spaces it is shared with. Each script without `--apply` is a dry run that commits nothing; read its
-output before applying, and stop at the first one that exits non-zero.
+is invisible to the spaces it is shared with. Each script without `--apply` is
+a dry run that commits nothing; read its output before applying, and stop at
+the first one that exits non-zero. A database created before the migrations
+were squashed into `0000_init.sql` (#481) must have run
+`scripts/migration/0018-prod-schema-realign.sql` first: one of this release's
+migrations drops a constraint by the name that script gives it.
 
 ```bash
 # Back up, then stop the platform (the database keeps running)
@@ -353,7 +357,8 @@ from its directory and with it stopped (the embedded database opens in one
 process at a time), run the same four scripts in the same order, each as
 `PGLITE_DATA_DIR=./data/pglite bun scripts/migration/<script>.ts`, then with
 `--apply` (use the `PGLITE_DATA_DIR` of your `.env` if it sets one), and start
-it again.
+it again. `0040-token-usage-shape.ts` runs the same way, once, with the platform
+stopped again: `--apply` only if its dry run lists a run.
 
 `0045` lists the schedules it could not settle (`no pin: name the set`): each is
 disabled at its next fire, until its member names the connection set on it and

@@ -17,7 +17,7 @@
  * them, as a live access loss does. Each share added is audited `integration.connection.share_added`
  * (`reason: migrated`), each withdrawal `share_removed` (`reason: access_lost`), both by the
  * `system` actor. The target spaces are locked `FOR KEY SHARE` in id order before any connection
- * row, the order a space delete takes. Run after the migrate service (`appstrate-migrate`) has
+ * row, the order a space delete takes. Run after the migrations (the migrate service) have
  * applied `0089` and BEFORE the app starts, `pg_dump` first: an app serving `0089` before it runs
  * sees no existing share, and the platform refuses to boot until it has.
  * Targets `DATABASE_URL`, or an embedded database named by `PGLITE_DATA_DIR` (the platform stopped:

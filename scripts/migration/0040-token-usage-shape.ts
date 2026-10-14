@@ -7,12 +7,15 @@
  *   DATABASE_URL=<platform> bun scripts/migration/0040-token-usage-shape.ts [--apply]
  *
  * A run's `token_usage` is published as the strict `TokenUsage` component, and the run read paths
- * return the column verbatim. A row `parseTokenUsage` keeps only in part is listed and, with
+ * project the column through the rule. A row `parseTokenUsage` keeps only in part is listed and, with
  * `--apply`, rewritten to what it keeps: undeclared keys and malformed `tiers` bands dropped, the
  * counters untouched. A row malformed as a whole (not an object, or a counter that is not a
  * non-negative integer — a fraction the earlier rule accepted included) is listed and left as it
  * is, for an operator to decide. A row written after the scan is left alone: the update matches the
  * value read. Dry run by default (rolled back). Exit 1 while a malformed row remains, in both modes.
+ * One pass after the deploy. Targets `DATABASE_URL`, or an embedded database named by
+ * `PGLITE_DATA_DIR` (the platform stopped: PGlite opens in one process); with neither set it exits 2,
+ * rather than open `./data/pglite`.
  */
 
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
@@ -84,9 +87,12 @@ export async function runTokenUsageShape(options: {
 if (import.meta.main) {
   const apply = process.argv.includes("--apply");
   const out = (line: string) => process.stdout.write(`${line}\n`);
-  // An empty DATABASE_URL makes `@appstrate/db/client` open ./data/pglite instead.
-  if (!process.env.DATABASE_URL) {
-    out("DATABASE_URL is required — the platform database to rewrite");
+  // With neither set, `@appstrate/db/client` would open the default ./data/pglite.
+  if (!process.env.DATABASE_URL && !process.env.PGLITE_DATA_DIR) {
+    out(
+      "neither DATABASE_URL nor PGLITE_DATA_DIR is set — refusing the default ./data/pglite; " +
+        "load the .env, or name an embedded database with PGLITE_DATA_DIR",
+    );
     process.exit(2);
   }
   const { closeDb } = await import("@appstrate/db/client");

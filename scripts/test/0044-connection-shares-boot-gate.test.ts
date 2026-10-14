@@ -27,7 +27,16 @@ import { createTestContext, type TestContext } from "../../apps/api/test/helpers
 import { seedPackage } from "../../apps/api/test/helpers/seed.ts";
 
 const INTEGRATION = "@gate0044/svc";
-const SCRIPT = new URL("../migration/0044-connection-shares.ts", import.meta.url).pathname;
+const script = (name: string) => new URL(`../migration/${name}.ts`, import.meta.url).pathname;
+const SCRIPT = script("0044-connection-shares");
+/** The scripts an operator runs around the beta.67 window, each refusing an unnamed database. */
+const WINDOW_SCRIPTS = [
+  "0040-token-usage-shape",
+  "0041-widen-connections-to-org-scope",
+  "0043-promote-auto-clients-to-org",
+  "0044-connection-shares",
+  "0045-pin-connection-made-in-space",
+];
 const COMMAND = /bun scripts\/migration\/0044-connection-shares\.ts --apply/;
 
 let ctx: TestContext;
@@ -122,7 +131,7 @@ describe("assertConnectionSharesCopied — live database", () => {
 
   // The suite's own database must be an embedded one to be copied into a directory of its own.
   it.skipIf(getPGliteClient() === null)(
-    "on an embedded database, the command the refusal names lifts it through the script's entry point",
+    "on an embedded database, the command the refusal names lifts it through the script's entry point, and 0040 runs there",
     async () => {
       await seedConnection([ctx.defaultSpaceId]);
       const dataDir = tempDir("pglite-0044-");
@@ -141,11 +150,13 @@ describe("assertConnectionSharesCopied — live database", () => {
           ([k]) => k !== "DATABASE_URL" && k !== "PGLITE_DATA_DIR",
         ),
       );
-      const implicit = Bun.spawnSync(["bun", SCRIPT, "--apply"], { cwd, env });
-      expect(implicit.exitCode).toBe(1);
-      expect(implicit.stdout.toString()).toContain(
-        "neither DATABASE_URL nor PGLITE_DATA_DIR is set",
-      );
+      for (const name of WINDOW_SCRIPTS) {
+        const implicit = Bun.spawnSync(["bun", script(name), "--apply"], { cwd, env });
+        expect(implicit.exitCode).not.toBe(0);
+        expect(implicit.stdout.toString()).toContain(
+          "neither DATABASE_URL nor PGLITE_DATA_DIR is set",
+        );
+      }
 
       const named = Bun.spawnSync(["bun", SCRIPT, "--apply"], {
         cwd,
@@ -153,6 +164,12 @@ describe("assertConnectionSharesCopied — live database", () => {
       });
       expect(named.stdout.toString()).toContain("0044: APPLIED — committed.");
       expect(named.exitCode).toBe(0);
+      const usage = Bun.spawnSync(["bun", script("0040-token-usage-shape")], {
+        cwd,
+        env: { ...env, PGLITE_DATA_DIR: dataDir },
+      });
+      expect(usage.stdout.toString()).toContain("0040: DRY RUN");
+      expect(usage.exitCode).toBe(0);
 
       const migrated = new PGlite(dataDir);
       try {

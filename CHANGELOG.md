@@ -87,7 +87,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   counter is changed. A run whose usage is malformed as a whole (not an
   object, or a counter that is not a non-negative integer, e.g. a fraction)
   is listed `MALFORMED` and left as is, and the script exits 1 until an
-  operator decides what each such row becomes.
+  operator decides what each such row becomes. On an embedded database (no
+  `DATABASE_URL`), name it:
+  `PGLITE_DATA_DIR=./data/pglite bun scripts/migration/0040-token-usage-shape.ts`,
+  the platform stopped.
 
 - **A connection whose OAuth client registration is broken
   (`invalid_client` / `unauthorized_client`) is never flagged for
@@ -120,8 +123,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   deploy, `SELECT count(*) FROM
 integration_connections WHERE shared_with_org;` tells whether the step
   applies; a non-zero result makes it required. The order, app stopped and
-  `pg_dump` taken: the migrate service (`appstrate-migrate` in `deploy/`,
-  `migrate` in `examples/self-hosting/`) run alone (applies `0089`), then
+  `pg_dump` taken: the migrate service (`docker compose run --rm migrate`
+  with `examples/self-hosting/`; with `deploy/` under Coolify, the release
+  image run against the resource's database container — see
+  `scripts/migration/README.md`, never a bare `docker compose` from a checkout
+  of `deploy/`) run alone (applies `0089`), then
   0044's dry run
   (`set -a && . ./.env && set +a && bun scripts/migration/0044-connection-shares.ts`),
   which writes nothing and lists the shares it will insert and the target
@@ -237,10 +243,36 @@ pin` or `no pin: name the set`: the latter's next fire answers
 - **Migration `0092` only creates `connection_calls`, the proxy's call
   journal** (see Added), and rewrites nothing.
 
+- **Before the deploy, list the custom space roles that manage `operator`
+  members** (#1963). The `operator` preset gains `credential-proxy:call-own`
+  (see Changed), and a caller grants, re-roles or removes only a member whose
+  role they hold in full, so a custom role that invites, re-roles or removes
+  members, or writes space settings, without any `credential-proxy:*` grant
+  can no longer do so for an `operator`. Read-only:
+
+  ```sql
+  SELECT r.org_id, r.id, r.key, r.name, count(m.user_id) AS holders
+  FROM space_roles r
+  LEFT JOIN space_members m ON m.custom_role_id = r.id
+  WHERE r.permissions && ARRAY['space-members:invite', 'space-members:remove',
+                               'space-members:change-role', 'space-settings:write']
+    AND NOT EXISTS (
+      SELECT 1 FROM unnest(r.permissions) AS p WHERE p LIKE 'credential-proxy:%'
+    )
+  GROUP BY r.org_id, r.id, r.key, r.name
+  ORDER BY r.org_id, r.key;
+  ```
+
+  Add `credential-proxy:call-own` to a listed role that should keep that
+  authority (the roles editor, or `PATCH /api/roles/{id}`).
+
 - **The image ships `scripts/migration/`** (#1963): run a data task from it
   with
   `docker compose run --rm --no-deps appstrate bun scripts/migration/<script>.ts`
-  (dry run; `--apply` to commit). beta.67's window:
+  with `examples/self-hosting/` (dry run; `--apply` to commit); with `deploy/`
+  under Coolify, run the release image against the resource's database
+  container as `scripts/migration/README.md` shows, never a bare
+  `docker compose` from a checkout of `deploy/`. beta.67's window:
   `scripts/migration/README.md`, "Release beta.67", and
   `examples/self-hosting/README.md`, "Upgrading to 1.0.0-beta.67".
 
@@ -277,7 +309,15 @@ pin` or `no pin: name the set`: the latter's next fire answers
   `credential-proxy:call-own` (and so the MCP tools `list_connections` and
   `api_call`), `runner` and `viewer` neither; a custom role can list either,
   an API key carries each from a creator who holds it, and the owner of a
-  personal space holds their preset there in full. The run path requires
+  personal space holds their preset there in full. Handing out the `operator`
+  preset now asks for one of the two as well, since a caller only grants or
+  manages a role whose permissions they hold: inviting an `operator`, moving a
+  member to or from it, removing one, making `operator` a space's
+  `default_role` (or opening a space whose default it is), and previewing it
+  through `X-View-As` answer `403` naming `credential-proxy:call-own` to a
+  caller holding neither. Owners, admins and the `admin` preset hold both; a
+  custom role that governs members without a `credential-proxy:*` grant is
+  the one affected (see Operators). The run path requires
   `credential-proxy:call` (`403` naming it). What a call outside a run
   reaches:
   - with `credential-proxy:call`, the connections usable in the space, the
@@ -408,11 +448,16 @@ pin` or `no pin: name the set`: the latter's next fire answers
   bound to a credential, and a bound model's `provider_id` must be its
   credential's: the single-column foreign key on `credential_id` becomes
   `org_models_credential_provider_fk` on `(credential_id, provider_id)`,
-  `ON DELETE RESTRICT` kept, `ON UPDATE CASCADE`. A subscription pairing is
+  still `ON DELETE RESTRICT`. A subscription pairing is
   owned by the organization or by the member who minted it, and a redeem ends
   with a credential or a failure, never both, a failure only on a consumed
   token. Every constraint is added validated: a row that breaks one fails the
-  migration instead of being excused. No data is rewritten.
+  migration instead of being excused. No data is rewritten. A database created before the
+  migrations were squashed into `0000_init.sql` (#481) must have run
+  `scripts/migration/0018-prod-schema-realign.sql` before this release:
+  migration `0096` drops
+  `org_models_credential_id_model_provider_credentials_id_fk` by the name
+  `0018` gives it.
 - **The connection reuse hint says what it counts**: "N agents de ses espaces
   déclarent l'intégration". (#1925)
 - **The starter agent's publication is audited**: a new organization's
