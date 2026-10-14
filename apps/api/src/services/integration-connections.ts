@@ -535,24 +535,20 @@ export async function selectAccessibleConnection(
 
 /**
  * The {@link usableInSpace} rows of `integrationIds`, {@link OLDEST_FIRST}: what the actor may bind
- * in `spaceId`, the one listing the resolver, the picker and the settings list each project.
+ * in `spaceId`.
  */
 export async function loadUsableConnections(
   spaceId: string,
   actor: Actor,
   integrationIds: string[],
-): Promise<(typeof integrationConnections.$inferSelect)[]> {
+): Promise<SelectableRow[]> {
   if (integrationIds.length === 0) return [];
-  return db
-    .select()
-    .from(integrationConnections)
-    .where(
-      and(
-        inArray(integrationConnections.integrationId, integrationIds),
-        usableInSpace(spaceId, actor),
-      ),
-    )
-    .orderBy(...OLDEST_FIRST);
+  return loadSelectableRows(
+    and(
+      inArray(integrationConnections.integrationId, integrationIds),
+      usableInSpace(spaceId, actor),
+    ),
+  );
 }
 
 export function listReachableConnections(
