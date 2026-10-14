@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { AgentListItem, EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
-import { AgentIdentityTile } from "./agent-identity";
+import { PackageIcon } from "./package-icon";
 import { Badge } from "./status-badge";
 import { RunProvenanceBadges } from "./run-cells";
 import { RunDuration } from "./run-duration";
@@ -35,11 +35,11 @@ export function RunRow({
   const { t } = useTranslation("agents");
   const content = (
     <>
-      <AgentIdentityTile
-        agentId={run.packageId ?? run.agent_name ?? run.id}
+      <PackageIcon
+        type="agent"
         icon={agent?.icon}
         color={agent?.color}
-        className="size-8"
+        className="size-8 rounded-lg"
       />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">

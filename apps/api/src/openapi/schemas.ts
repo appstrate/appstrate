@@ -122,7 +122,8 @@ export const ORG_LOGO_PROPERTY = {
 const AGENT_IDENTITY_PROPERTIES = {
   icon: {
     type: "string",
-    description: "AFPS manifest icon used for the Agent identity tile.",
+    description:
+      "The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none.",
   },
   color: {
     type: "string",
@@ -243,7 +244,7 @@ const ORG_PACKAGE_ITEM_SCHEMA = {
     icon: {
       type: ["string", "null"],
       description:
-        "The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone.",
+        "The manifest's `icon`: an Iconify id (`<prefix>:<name>`, e.g. `logos:slack-icon`, `lucide:bot`) or an image URL, `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone.",
     },
     keywords: {
       type: "array",

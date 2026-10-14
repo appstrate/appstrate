@@ -24,10 +24,12 @@ they start with `packages/` or `e2e/`.
 - **Surfaces**: the page is `bg-canvas` (off-white), cards and dialogs are
   `bg-card` / `bg-background`. A field is white on the canvas and grey inside a
   dialog: `Input` does it by itself, never override its background.
-- **Icons**: `lucide-react`, `size-4` in rows and buttons. An integration's logo
-  is an image URL or an iconify id: always render it with `IntegrationIcon`
-  (`components/integration-icon.tsx`, sizes `sm` / `md`, skeleton while loading,
-  puzzle placeholder on failure), never as an `<img src>`.
+- **Icons**: `lucide-react`, `size-4` in rows and buttons. A package's manifest
+  `icon` follows one grammar for every type (`@appstrate/core/manifest-icon`):
+  an Iconify id (`logos:slack-icon`; an agent's is `lucide:<name>`, drawn from
+  the bundle) or an image URL. Always render it with `PackageIcon`
+  (`components/package-icon.tsx`, sizes `sm` / `md`, skeleton while loading,
+  placeholder on failure), never as an `<img src>`.
 - **Numbers that change in place** (durations, costs, counts, timers) use
   `tabular-nums`.
 - **Spinner and loading**: `Spinner` (`components/spinner.tsx`) for work in
@@ -75,8 +77,7 @@ they start with `packages/` or `e2e/`.
 Top to bottom, every detail page (agent, run, schedule, integration, skill):
 
 1. **`PageHeader`** (`components/page-header.tsx`): title with its identity tile
-   in `icon` (`AgentIdentityTile` for an agent, `IntegrationIcon` for an
-   integration), a one-line summary and the object's id as `children`, and in
+   in `icon` (`PackageIcon`), a one-line summary and the object's id as `children`, and in
    `actions` the status and version badges (`components/status-badge.tsx`, see
    section 8) then the **Actions** menu. `variant="collection"` is for level-one
    list pages only. One primary button at most (Lancer, Relancer, Annuler) next
@@ -502,8 +503,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   with `font-mono`; an agent whose working copy differs from its last published
   version (or has none) wears « Brouillon » in its place, and only then; a
   disabled reason hangs on `DisabledReasonTooltip`.
-- **Identity**: `AgentIdentityTile` (`components/agent-identity.tsx`),
-  `IntegrationIcon`, `OrganizationAvatar`, `EndUserAvatar`, `ActorLabel` (the
+- **Identity**: `PackageIcon` (`components/package-icon.tsx`), `OrganizationAvatar`, `EndUserAvatar`, `ActorLabel` (the
   member or end-user a schedule runs as). An end-user's initials sit in one of
   eight person colours hashed from their id (`--avatar-1..8` in `styles.css`),
   never a raw Tailwind colour.

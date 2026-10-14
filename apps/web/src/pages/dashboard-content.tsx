@@ -17,7 +17,7 @@ import {
   CarouselPrevious,
 } from "@appstrate/ui/components/carousel";
 import { useCarousel } from "@appstrate/ui/components/carousel-context";
-import { AgentIdentityTile } from "../components/agent-identity";
+import { PackageIcon } from "../components/package-icon";
 import { EmptyState } from "../components/page-states";
 import { Modal } from "../components/modal";
 import { useModalParam } from "../hooks/use-modal-param";
@@ -285,11 +285,11 @@ function DashboardScheduleRow({
       to={scheduleDetailPath(schedule.id)}
       className="hover:bg-muted/40 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors first:rounded-t-xl last:rounded-b-xl"
     >
-      <AgentIdentityTile
-        agentId={schedule.packageId}
+      <PackageIcon
+        type="agent"
         icon={agent?.icon}
         color={agent?.color}
-        className="size-9"
+        className="size-9 rounded-lg"
       />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{scheduleLabel(schedule, t)}</p>

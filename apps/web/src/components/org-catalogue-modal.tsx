@@ -364,7 +364,6 @@ export function OrgCatalogueModal({
     const icon = (
       <PackageIcon
         type={active}
-        id={item.id}
         icon={active === "agent" ? look?.icon : integrationById.get(item.id)?.manifest.icon}
         color={look?.color}
       />

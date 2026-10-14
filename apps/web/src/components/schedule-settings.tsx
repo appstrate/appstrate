@@ -31,7 +31,7 @@ import { ActorSelect } from "./actor-select";
 import { useActorName } from "../hooks/use-actor-name";
 import { PackageVersionSelect } from "./package-version-select";
 import { RunOverridesPanel } from "./run-overrides-panel";
-import { AgentIdentityTile } from "./agent-identity";
+import { PackageIcon } from "./package-icon";
 import { AgentIntegrationsBlock } from "./package-detail/agent-integrations-block";
 import { InputFieldRow } from "./settings/input-field-row";
 import { SaveFeedback } from "./settings/save-feedback";
@@ -445,8 +445,8 @@ function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save
           to={`/agents/${schedule.packageId}`}
           className="border-border bg-muted/20 hover:bg-muted/40 flex w-full items-center gap-3 rounded-lg border p-3 transition-colors"
         >
-          <AgentIdentityTile
-            agentId={schedule.packageId}
+          <PackageIcon
+            type="agent"
             icon={agent?.icon}
             color={agent?.color}
             className="size-11 rounded-xl"

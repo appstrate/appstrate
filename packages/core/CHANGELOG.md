@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`readAgentAppearance(manifest)`** (`@appstrate/core/validation`): an
   agent's identity tile, `{ icon?, color? }` — the manifest `icon` and the
   `color` under `_meta[AGENT_UI_META_KEY]`, each only when it is a string.
+- **`@appstrate/core/manifest-icon`**: the grammar of a manifest `icon` —
+  **`parseManifestIcon(value)`** reads it as a `ManifestIcon` (`lucide` name,
+  other Iconify id, or image URL), `null` when no surface can draw it;
+  **`LUCIDE_ICON_PREFIX`** is `"lucide:"`, the prefix of an agent's icon.
 - **`ORG_LOGO_EMOJI_PREFIX`**, **`ORG_LOGO_IMAGE_PREFIX`** and
   **`ORG_LOGO_MAX_BYTES`** (`@appstrate/core/validation`): the organization
   logo's wire form — `emoji:<grapheme>` or `image:<version>`, the bytes of the

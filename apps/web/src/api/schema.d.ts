@@ -5485,7 +5485,7 @@ export interface components {
         };
         AgentDetail: {
             id: string;
-            /** @description AFPS manifest icon used for the Agent identity tile. */
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none. */
             icon?: string;
             /** @description Presentation token from `_meta["dev.appstrate/ui"].color`. */
             color?: string;
@@ -5587,7 +5587,7 @@ export interface components {
         };
         AgentListItem: {
             id: string;
-            /** @description AFPS manifest icon used for the Agent identity tile. */
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none. */
             icon?: string;
             /** @description Presentation token from `_meta["dev.appstrate/ui"].color`. */
             color?: string;
@@ -6079,7 +6079,7 @@ export interface components {
             orgId?: string | null;
             name: string;
             description: string | null;
-            /** @description The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`, e.g. `logos:slack-icon`, `lucide:bot`) or an image URL, `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
             icon: string | null;
             /** @description The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description. */
             keywords: string[];
@@ -6404,7 +6404,7 @@ export interface components {
             orgId?: string | null;
             name: string;
             description: string | null;
-            /** @description The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`, e.g. `logos:slack-icon`, `lucide:bot`) or an image URL, `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
             icon: string | null;
             /** @description The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description. */
             keywords: string[];

@@ -59,9 +59,7 @@ export function SharedHeader({
       ? t("detail.breadcrumb")
       : t(`packages.type.${detail.type}s`, { ns: "settings" });
 
-  const iconNode = (
-    <PackageIcon type={detail.type} id={detail.id} icon={detail.icon} color={detail.color} />
-  );
+  const iconNode = <PackageIcon type={detail.type} icon={detail.icon} color={detail.color} />;
 
   return (
     <>
