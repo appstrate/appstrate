@@ -223,6 +223,19 @@ describe("realtime SSE routes (integration)", () => {
       expect(res.status).toBe(401);
     });
 
+    it("refuses a non-UUID orgId exactly as an unknown one (#1969)", async () => {
+      const stream = (orgId: string) =>
+        app.request(`/api/realtime/runs/${run.id}?orgId=${orgId}&spaceId=${ctx.defaultSpaceId}`, {
+          headers: { Cookie: ctx.cookie, Accept: "text/event-stream" },
+        });
+      const unknown = await stream(crypto.randomUUID());
+      const malformed = await stream("not-a-uuid");
+      expect(unknown.status).toBe(401);
+      expect(malformed.status).toBe(401);
+      const detail = async (res: Response) => ((await res.json()) as { detail: string }).detail;
+      expect(await detail(malformed)).toBe(await detail(unknown));
+    });
+
     it("returns 401 without spaceId query param", async () => {
       const res = await app.request(`/api/realtime/runs/${run.id}?orgId=${ctx.orgId}`, {
         headers: { Cookie: ctx.cookie },

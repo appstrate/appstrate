@@ -39,7 +39,7 @@ import {
   asc,
 } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
-import { scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
+import { isUuid, scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
 import { countInProgressRuns, orgRunConcurrencyLockKey } from "./state/runs.ts";
 import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
@@ -317,6 +317,9 @@ export async function getOrgMembers(orgId: string) {
  * own write.
  */
 export async function getOrgMember(orgId: string, userId: string, tx: DbOrTx = db) {
+  // Doors pass caller-supplied ids: a non-UUID is never a member row, and
+  // comparing it to the uuid column raises 22P02, a 500 instead of "not a member".
+  if (!isUuid(orgId)) return null;
   const [row] = await tx
     .select()
     .from(organizationMembers)
