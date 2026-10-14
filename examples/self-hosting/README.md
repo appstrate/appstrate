@@ -394,7 +394,7 @@ See `.env.example` for all available environment variables. Key settings:
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO admin credentials                                                                                                                          |
 | `APP_URL`                                 | Public URL (for OAuth callbacks, email links)                                                                                                    |
 | `USERCONTENT_URL`                         | Optional — separate origin for agent-HTML previews (recommended in production; must be a different host than `APP_URL` or boot fails; see below) |
-| `TRUSTED_ORIGINS`                         | Extra browser origins trusted with credentials, for CORS and Better Auth (comma-separated); unset trusts none. `APP_URL` needs no entry          |
+| `TRUSTED_ORIGINS`                         | Origins trusted beyond `APP_URL`'s own (comma-separated): CORS with credentials, Better Auth, the post-login redirect allowlist. Unset adds none |
 | `SYSTEM_PROVIDER_KEYS`                    | Pre-configured LLM provider credentials (JSON array)                                                                                             |
 | `LOG_LEVEL`                               | Logging verbosity: `debug`, `info`, `warn`, `error`                                                                                              |
 | `RUN_ADAPTER`                             | Agent execution backend: `docker` (default) or `firecracker` (microVMs)                                                                          |
@@ -486,7 +486,7 @@ install dir itself, so use it only when you intend a full wipe.
 
 - Place a reverse proxy (nginx, Caddy, Traefik) in front of Appstrate for TLS termination
 - Set `APP_URL` to your public HTTPS URL
-- Leave `TRUSTED_ORIGINS` unset unless another browser origin calls the API with cookies: `APP_URL`'s own origin needs no entry
+- Leave `TRUSTED_ORIGINS` unset unless another browser origin calls the API with cookies or receives the post-login redirect: it adds origins to CORS, Better Auth and that redirect allowlist beyond `APP_URL`'s own, which needs no entry
 - Set `TRUST_PROXY` to the number of proxy hops in front of Appstrate (`1` for the single reverse proxy above) so the per-IP rate limiters and the audit trail read `X-Forwarded-For`. Not optional: behind an HTTPS `APP_URL` the image refuses to boot on `TRUST_PROXY=false`
 
 The `appstrate install` CLI wires `APP_URL` and `TRUST_PROXY` for you when you pass the public URL

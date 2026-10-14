@@ -87,10 +87,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   counter is changed. A run whose usage is malformed as a whole (not an
   object, or a counter that is not a non-negative integer, e.g. a fraction)
   is listed `MALFORMED` and left as is, and the script exits 1 until an
-  operator decides what each such row becomes. On an embedded database (no
-  `DATABASE_URL`), name it:
-  `PGLITE_DATA_DIR=./data/pglite bun scripts/migration/0040-token-usage-shape.ts`,
-  the platform stopped.
+  operator decides what each such row becomes. Where to run it, an embedded
+  database included: "The image ships `scripts/migration/`" below.
 
 - **A connection whose OAuth client registration is broken
   (`invalid_client` / `unauthorized_client`) is never flagged for
@@ -118,29 +116,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `integration_connection_shares` and copies nothing into it: an app serving
   `0089` before 0044 has run sees no share, and every connection shared into
   another space, including those `0086` folded from `shared_with_org`, would be
-  visible only to its owner. The release refuses to boot while a connection
-  still holds an entry in `shared_space_ids`, naming the command. Before the
-  deploy, `SELECT count(*) FROM
+  visible only to its owner; the release refuses to boot while shares wait
+  for it (see Changed). Before the deploy, `SELECT count(*) FROM
 integration_connections WHERE shared_with_org;` tells whether the step
   applies; a non-zero result makes it required. The order, app stopped and
-  `pg_dump` taken: the migrate service (`docker compose run --rm migrate`
-  with `examples/self-hosting/`; with `deploy/` under Coolify, the release
-  image run against the resource's database container — see
-  `scripts/migration/README.md`, never a bare `docker compose` from a checkout
-  of `deploy/`) run alone (applies `0089`), then
-  0044's dry run
+  `pg_dump` taken: the migrate service run alone (applies `0089`; where each
+  command runs: "The image ships `scripts/migration/`" below), then 0044's dry
+  run
   (`set -a && . ./.env && set +a && bun scripts/migration/0044-connection-shares.ts`),
   which writes nothing and lists the shares it will insert and the target
   spaces it will skip (deleted, or owned by another organization), then the
   same with `--apply`, then start the app. It runs in one transaction, empties
   `shared_space_ids` once copied, and audits each share it adds
   (`share_added`, `reason: migrated`, `system` actor): a second `--apply`
-  inserts nothing, so a share withdrawn since stays withdrawn. On an embedded
-  database (no `DATABASE_URL`), name it:
-  `PGLITE_DATA_DIR=./data/pglite bun scripts/migration/<script>.ts`, the
-  platform stopped; the window scripts refuse to run with neither variable
-  set. The `shared_space_ids` column and its two CHECKs are dropped in
-  beta.68.
+  inserts nothing, so a share withdrawn since stays withdrawn. The
+  `shared_space_ids` column and its two CHECKs are dropped in beta.68.
 
 - **`pg_dump` the platform database BEFORE deploying, then in the deploy
   window, after `0044` and with the app still stopped, run
@@ -266,18 +256,23 @@ pin` or `no pin: name the set`: the latter's next fire answers
   Add `credential-proxy:call-own` to a listed role that should keep that
   authority (the roles editor, or `PATCH /api/roles/{id}`).
 
-- **The image ships `scripts/migration/`** (#1963): run a data task from it
-  with
+- **The image ships `scripts/migration/`** (#1963). With
+  `examples/self-hosting/`, the migrate service is
+  `docker compose run --rm migrate` and a data task
   `docker compose run --rm --no-deps appstrate bun scripts/migration/<script>.ts`
-  with `examples/self-hosting/` (dry run; `--apply` to commit); with `deploy/`
+  (dry run; `--apply` to commit). With `deploy/`
   under Coolify, run the release image against the resource's database
-  container as `scripts/migration/README.md` shows, never a bare
-  `docker compose` from a checkout of `deploy/`. beta.67's window:
+  container with the application's environment, not `DATABASE_URL` alone, as
+  `scripts/migration/README.md` shows; never a bare `docker compose` from a
+  checkout of `deploy/`. On an embedded database (no `DATABASE_URL`), name it:
+  `PGLITE_DATA_DIR=./data/pglite bun scripts/migration/<script>.ts`, the
+  platform stopped; `0040` and the window scripts refuse to run with neither
+  variable set. beta.67's window:
   `scripts/migration/README.md`, "Release beta.67", and
   `examples/self-hosting/README.md`, "Upgrading to 1.0.0-beta.67".
 
-- **Set `TRUSTED_ORIGINS` if a browser reaches the platform from an origin
-  other than `APP_URL`** (#1963): unset, it trusts no extra origin, where it
+- **Set `TRUSTED_ORIGINS` if a browser reaches the platform from, or a
+  sign-in redirects to, an origin other than `APP_URL`** (#1963): unset, it trusts no extra origin, where it
   trusted `http://localhost:3000` and `http://localhost:5173`; see Security.
 
 - **Before the deploy, run `scripts/migration/0035-verify-manifest-expressions.ts`
@@ -302,8 +297,8 @@ pin` or `no pin: name the set`: the latter's next fire answers
   `credential-proxy:call` keeps its name and its reach: for a run
   (`X-Run-Id`), the connections the run bound, a colleague's shared one
   included; outside a run, the connections usable in the space.
-  `credential-proxy:call` implies `credential-proxy:call-own`: every route a
-  call outside a run opens accepts either, so an API key or a role storing
+  The proxy's routes guard on `credential-proxy:call-own` alone, and
+  `credential-proxy:call` implies it, so an API key or a role storing
   `credential-proxy:call` alone keeps every path, and nothing is rewritten.
   `admin` and `builder` hold both, `operator` holds
   `credential-proxy:call-own` (and so the MCP tools `list_connections` and
@@ -436,15 +431,12 @@ pin` or `no pin: name the set`: the latter's next fire answers
   `scripts/migration/0044-connection-shares.ts` command for its database:
   until that script copies them, those shares are invisible and each schedule
   naming one would be disabled at its next fire. A local database migrated
-  past `0089` that still holds shares refuses too: run the script against it.
-  On an embedded database (no `DATABASE_URL`), name it:
-  `PGLITE_DATA_DIR=./data/pglite bun scripts/migration/<script>.ts`, the
-  platform stopped; the window scripts refuse to run with neither variable
-  set.
+  past `0089` that still holds shares refuses too: run the script against it
+  (where: Operators, "The image ships `scripts/migration/`").
 - **The database states invariants the writers already held** (#1963,
   migration `0096`). `connection_calls` accepts `user` / `end_user` only in
-  `actor_type` and `owner_type` (NULL kept for a connection gone at call time)
-  and indexes `created_at` for a sweep by age. An `org_models` alias must be
+  `actor_type` and `owner_type` (NULL kept for a connection gone at call
+  time). An `org_models` alias must be
   bound to a credential, and a bound model's `provider_id` must be its
   credential's: the single-column foreign key on `credential_id` becomes
   `org_models_credential_provider_fk` on `(credential_id, provider_id)`,
@@ -1133,7 +1125,7 @@ pin` or `no pin: name the set`: the latter's next fire answers
   `authorized_uris` entry templated on a credential field is given as the
   manifest declares it (`{$credential.<field>}`), and a caller targets it by
   writing `{{<field>}}` at that place in the target. Requires
-  `credential-proxy:call` or `credential-proxy:call-own`.
+  `credential-proxy:call-own`, which `credential-proxy:call` implies.
 
 - **A journal of the credential proxy's calls** (#1894). Every call that may
   have sent a connection's credential writes one row once its outcome is
@@ -1158,8 +1150,8 @@ pin` or `no pin: name the set`: the latter's next fire answers
   report that matches it reads the journal instead.
 
 - **MCP: `list_connections` and `api_call`** (#1894, #1957), declared to a
-  bearer caller holding `mcp:invoke` and `credential-proxy:call` or
-  `credential-proxy:call-own`.
+  bearer caller holding `mcp:invoke` and `credential-proxy:call-own` (which
+  `credential-proxy:call` implies).
   `list_connections` is the listing above. `api_call` sends 1 to 50 requests
   through the credential proxy in one call, each with typed arguments
   (integration, method, target, headers, body, connection) in place of the
@@ -1382,12 +1374,12 @@ pin` or `no pin: name the set`: the latter's next fire answers
   line is gone. The boot report fetch retried a timed-out request as a
   transient race, so a hung boot failed the run after about 180 s instead of
   the documented 60 s: it has one 120 s deadline for every attempt together,
-  retries only a request that failed at the connection (refused or reset),
-  and takes an HTTP error as final. The agent container starts its heartbeat
+  retries any failed request other than the deadline's own abort, and takes
+  an HTTP error or an unreadable body as final. The agent container starts its heartbeat
   as soon as its sink is built, before its first event, so workspace
   provisioning, the MCP connect and the boot report wait are covered and the
   stall watchdog no longer reaps a run waiting on a slow integration boot as
-  "Runner stopped reporting". Ships in the same release as #1936.
+  "Runner stopped reporting".
 - **An integration's connection list keeps its order** (#1963).
   `GET /api/integrations/{packageId}/connections` returned its rows in
   physical storage order, so renaming or refreshing a connection moved it in
@@ -1634,9 +1626,11 @@ pin` or `no pin: name the set`: the latter's next fire answers
   schema default was `http://localhost:3000,http://localhost:5173`, and the
   self-hosting composes pass `${TRUSTED_ORIGINS:-}` (empty, which counts as
   unset), so every install that never set it trusted those localhost origins
-  with credentials in CORS and Better Auth. The app's own origin (`APP_URL`)
-  keeps working without an entry: same-origin calls need no CORS grant and
-  Better Auth always trusts its `baseURL`. An install that relied on the
+  in its three uses: CORS with credentials, Better Auth's trusted origins and
+  the SPA's post-login `?redirect=` allowlist. Each takes the app's own origin
+  (`APP_URL`) without an entry: same-origin calls need no CORS grant, Better
+  Auth always trusts its `baseURL`, and the allowlist the SPA reads holds
+  `APP_URL` ahead of `TRUSTED_ORIGINS`. An install that relied on the
   implicit localhost origins (for example, a Vite dev server on `:5173`)
   sets `TRUSTED_ORIGINS` explicitly (see Operators). `appstrate install` no
   longer writes `TRUSTED_ORIGINS=<APP_URL>` into a new `.env`, which was

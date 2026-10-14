@@ -4,12 +4,11 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { SIDECAR_AUTH_HEADER, type IntegrationBootReport } from "@appstrate/core/sidecar-types";
 
 /**
- * The one deadline on the boot report, every attempt included: one wave of
- * `INTEGRATION_BOOT_CONCURRENCY` connections costs at worst a docker exec
- * (60 s) plus an MCP connect (30 s), and 16 connections measured ~30 s in
- * production even booted one at a time. A report still missing by then means
- * an integration boot genuinely hung, which fails the run as "did not start
- * as declared", not as a transient blip.
+ * The one deadline on the boot report, every attempt included. It covers one
+ * wave of the sidecar's `INTEGRATION_BOOT_CONCURRENCY` connections at their
+ * timeouts' worst — a docker exec (60 s) plus an MCP connect (30 s) — with
+ * headroom. A slower boot is treated as hung, which fails the run as "did not
+ * start as declared", not as a transient blip.
  */
 const BOOT_REPORT_DEADLINE_MS = 120_000;
 const RETRY_DELAY_CAP_MS = 2_000;
@@ -27,8 +26,9 @@ const RETRY_DELAY_CAP_MS = 2_000;
  * Any fetch rejection other than the deadline abort is retried until the
  * deadline — a refused connection, or a reset after the request was sent,
  * which is harmless to repeat because the GET is idempotent. The deadline
- * abort, an HTTP error and an unreadable body are final. We do NOT swallow a definitive failure: the run must abort when
- * integration health can't be confirmed (the platform contract — an
+ * abort, an HTTP error and an unreadable body are final. We do NOT swallow a
+ * definitive failure: the run must abort when integration health can't be
+ * confirmed (the platform contract — an
  * integration that didn't launch as declared fails the run, every tier).
  *
  * Authenticated like every other sidecar call, with the run's

@@ -465,9 +465,11 @@ export const envSchema = z
         }
         return url.origin;
       }),
-    // Origins trusted with credentials beyond `APP_URL` (CORS + Better Auth).
-    // Unset or empty trusts none: same-origin calls need no CORS grant, and
-    // Better Auth always trusts its own `baseURL`.
+    // Origins trusted beyond `APP_URL`'s own, for three uses: CORS with
+    // credentials, Better Auth's trusted origins, and the SPA's post-login
+    // `?redirect=` allowlist. Unset or empty adds none: same-origin calls need
+    // no CORS grant, Better Auth always trusts its own `baseURL`, and the
+    // redirect allowlist always holds `APP_URL`.
     TRUSTED_ORIGINS: z
       .string()
       .default("")
