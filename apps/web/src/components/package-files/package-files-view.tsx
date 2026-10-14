@@ -748,7 +748,8 @@ export function PackageFilesView({
               {t("editor.discardChanges")}
             </Button>
             <Button type="button" disabled={busy} onClick={() => void saveEdits().catch(() => {})}>
-              {busy ? <Spinner /> : t("btn.save", { ns: "common" })}
+              {busy && <Spinner />}
+              {t("btn.save", { ns: "common" })}
             </Button>
           </div>
         </div>
