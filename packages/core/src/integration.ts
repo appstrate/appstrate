@@ -1039,7 +1039,6 @@ export function resolveIntegrationToolSurface(input: ResolveIntegrationToolCatal
   const entries: IntegrationToolInspectionEntry[] = [];
   const explicitHidden = new Set(integration.hidden_tools ?? []);
   const connectionTools = new Set(getConnectToolNames(integration));
-  const syntheticCanonicalNames = new Set(syntheticApiEntries.map((entry) => entry.name));
   const hiddenReason = (name: string): IntegrationToolInspectionEntry["hidden_reason"] =>
     explicitHidden.has(name) ? "manifest" : connectionTools.has(name) ? "connection" : "dependency";
   for (const entry of base) {
@@ -1056,7 +1055,7 @@ export function resolveIntegrationToolSurface(input: ResolveIntegrationToolCatal
     if (!isHidden) out.push(resolved);
     entries.push({
       ...resolved,
-      origin: syntheticCanonicalNames.has(entry.name)
+      origin: syntheticApiNames.has(entry.name)
         ? "appstrate"
         : mcpServerTools !== undefined
           ? "mcp_package"
@@ -1746,6 +1745,27 @@ export const CONNECTION_RESOLUTION_ERROR_CODES = [
 
 /** Error codes the resolver emits per integration. */
 export type ConnectionResolutionErrorCode = (typeof CONNECTION_RESOLUTION_ERROR_CODES)[number];
+
+/**
+ * Where each resolver code is cleared: `connection` — a connection, the set binding one (pick,
+ * pin, default, override) or the integration's activation; `agent` — the agent's own
+ * integration configuration (its `auth_key` or tool selection), which no connection clears.
+ * Exhaustive, so a new code must be classified.
+ */
+export const CONNECTION_RESOLUTION_ERROR_REMEDY = {
+  not_connected: "connection",
+  needs_reconnection: "connection",
+  pinned_connection_unavailable: "connection",
+  override_connection_unavailable: "connection",
+  override_outranked: "connection",
+  must_choose_connection: "connection",
+  insufficient_scopes: "connection",
+  auth_key_mismatch: "connection",
+  auth_serves_no_selected_tool: "connection",
+  auth_key_serves_no_selected_tool: "agent",
+  required_integration_unbound: "connection",
+  integration_not_active: "connection",
+} as const satisfies Record<ConnectionResolutionErrorCode, "connection" | "agent">;
 
 export const INTEGRATION_MANIFEST_FAILURE_CODES = [
   "integration_not_found",

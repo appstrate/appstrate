@@ -1754,13 +1754,10 @@ export async function getPackageRunActivity(
   options: {
     /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
     visibility?: SQL;
-    now?: Date;
   } = {},
 ): Promise<PackageRunActivity> {
   const windowDays = 30;
-  const windowStart = new Date(
-    (options.now ?? new Date()).getTime() - windowDays * 24 * 60 * 60 * 1000,
-  );
+  const windowStart = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
