@@ -1,0 +1,29 @@
+name: Setup minisign
+description: >
+  Put a pinned minisign on PATH, from the author's static Linux x86_64 release
+  verified by SHA-256 — not apt: an `apt-get update` against a slow or broken
+  mirror has outlasted a release job's timeout (v1.0.0-beta.65). The one copy
+  of the pin, shared by every release-time workflow (release.yml sign-cli,
+  publish-installer.yml).
+
+runs:
+  using: composite
+  steps:
+    - name: Install minisign
+      shell: bash
+      # The digest is of the tarball whose upstream minisign signature verifies
+      # under the author's key (RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3).
+      # Bumping the version means re-verifying that signature and replacing the
+      # digest in the same commit.
+      env:
+        MINISIGN_VERSION: "0.12"
+        MINISIGN_SHA256: "9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73"
+      run: |
+        set -euo pipefail
+        archive="$RUNNER_TEMP/minisign.tar.gz"
+        curl -fsSL --retry 3 --max-time 60 -o "$archive" \
+          "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz"
+        echo "${MINISIGN_SHA256}  $archive" | sha256sum --check --strict
+        mkdir -p "$RUNNER_TEMP/minisign"
+        tar -xzf "$archive" -C "$RUNNER_TEMP/minisign" --strip-components=2 minisign-linux/x86_64/minisign
+        echo "$RUNNER_TEMP/minisign" >> "$GITHUB_PATH"
