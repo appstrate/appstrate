@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import type { PackageType } from "@appstrate/core/validation";
 import { bumpVersion, planPublishVersion, type VersionBump } from "@appstrate/core/semver";
@@ -107,13 +107,22 @@ export function CreateVersionModal({
         <div className="space-y-2">
           {latestVersion && (
             <Label className="block text-sm">
-              {t("version.latestPublished")}: <strong>{latestVersion}</strong>
+              <Trans
+                t={t}
+                i18nKey="version.latestPublished"
+                values={{ version: latestVersion }}
+                components={{ b: <strong /> }}
+              />
             </Label>
           )}
           {!needsBump && (
             <Label className="block text-sm">
-              {t("version.activeVersionLabel")}:{" "}
-              <strong>{activeVersion ?? t("version.noVersion")}</strong>
+              <Trans
+                t={t}
+                i18nKey="version.activeVersionLabel"
+                values={{ version: activeVersion ?? t("version.noVersion") }}
+                components={{ b: <strong /> }}
+              />
             </Label>
           )}
         </div>

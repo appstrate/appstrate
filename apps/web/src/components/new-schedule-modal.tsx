@@ -374,7 +374,9 @@ export function ScheduleFieldsReady({
         />
       )}
       <p className="text-muted-foreground text-xs">{t("schedule.newHint")}</p>
-      <div className="flex justify-end gap-2">
+      {/* Held at the bottom of the scrolling dialog: on a laptop the form is
+          taller than the window, and Créer should not wait below the fold. */}
+      <div className="bg-background border-border sticky -bottom-6 z-10 -mx-6 -mb-6 flex justify-end gap-2 border-t px-6 py-4">
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>

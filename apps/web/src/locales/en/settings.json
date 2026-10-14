@@ -870,6 +870,8 @@
   "webhooks.payloadModeLabel": "Payload mode",
   "webhooks.payloadModeFull": "Full (includes result)",
   "webhooks.payloadModeSummary": "Summary (ID and status only)",
+  "webhooks.payloadShortFull": "Full",
+  "webhooks.payloadShortSummary": "Summary",
   "webhooks.secretWarning": "This secret will not be shown again. Copy it now.",
   "webhooks.rotateSecret": "Rotate secret",
   "webhooks.rotateConfirm": "The old secret will remain valid for 24h. Continue?",
