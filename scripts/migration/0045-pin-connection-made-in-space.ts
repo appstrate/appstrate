@@ -13,8 +13,9 @@
  *
  * Rule and schedule listing: scripts/migration/README.md, Detail (script `0045`).
  *
- * Run after `0041 --apply` and `0043 --apply`, app up, `pg_dump` first; it refuses to run while
- * `0041` or `0043` has work left. Refuses an empty `DATABASE_URL`
+ * Run after `0041 --apply` and `0043 --apply`, in the same window, the app stopped until this has
+ * run (a schedule fire answering `must_choose_connection` before its pins exist disables the
+ * schedule), `pg_dump` first; it refuses to run while `0041` or `0043` has work left. Refuses an empty `DATABASE_URL`
  * (the client would open `./data/pglite`). One transaction per organization; dry run by default
  * (each rolled back), `--apply` commits each. With `--apply`, the pins left to write must be 0,
  * else it exits 1. Idempotent: a second run finds nothing to pin.

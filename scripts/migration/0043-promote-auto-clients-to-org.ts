@@ -20,10 +20,12 @@
  * `integration.connection.scope_widened` audit row in the space it left; end users' rows stay in
  * their space.
  *
- * Run after the deploy, app up, `pg_dump` first, after `0044` and `0041`. Refuses an empty
- * `DATABASE_URL` (the client would open `./data/pglite`). One transaction per organization; dry run
- * by default (each rolled back), `--apply` commits each. With `--apply`, the space-tier auto clients
- * left must be 0, else it exits 1. Idempotent: a second run finds nothing to promote.
+ * Run in the deploy window after `0044` and `0041`, the app stopped until `0045` has run (a schedule
+ * fire answering `must_choose_connection` in between disables its schedule), `pg_dump` first.
+ * Refuses an empty `DATABASE_URL` (the client would open `./data/pglite`). One transaction per
+ * organization; dry run by default (each rolled back), `--apply` commits each. With `--apply`, the
+ * space-tier auto clients left must be 0, else it exits 1. Idempotent: a second run finds nothing
+ * to promote.
  */
 
 import { parseArgs } from "node:util";

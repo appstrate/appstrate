@@ -122,6 +122,10 @@ export async function bootCritical(): Promise<void> {
   // Detection only; the fold is an operator task, see the function's doc comment.
   await assertSelfServiceFoldApplied();
 
+  // Refuse to boot while connection shares still sit in `shared_space_ids`, where nothing reads
+  // them. Detection only; the copy is an operator task, see the function's doc comment.
+  await assertConnectionSharesCopied();
+
   await assertKeyringCoversCiphertexts();
 
   // Bootstrap-token reconciliation. If the env still carries an
@@ -639,6 +643,55 @@ async function unfoldedSelfServiceClientCount(): Promise<number> {
         AND metadata IS NOT NULL
         AND pg_input_is_valid(metadata, 'jsonb')
         AND metadata::jsonb ->> 'selfService' = 'true'
+    `),
+  );
+  return row?.pending ?? 0;
+}
+
+/**
+ * Refuse to boot while a connection's shares are still in `integration_connections.shared_space_ids`
+ * — i.e. while `scripts/migration/0044-connection-shares.ts` has not been run on this database.
+ *
+ * Drizzle `0089` creates `integration_connection_shares` empty and leaves the column standing,
+ * read by `0044` only. Every share lives in the table, so until `0044` copies the column into it
+ * every existing share is invisible: the members of the target space no longer reach the
+ * connection, and a schedule naming it is disabled at its next fire, for good.
+ *
+ * Refusing rather than warning, for the reason {@link assertOAuthResourceColumnsPresent} does.
+ *
+ * The predicate is EXACTLY the `WHERE` with which `0044` empties the column, so the script always
+ * clears it: a target space it skips (deleted, or of another organization) is emptied all the same.
+ * A fresh install never writes the column, and a database `0044` has run on holds it empty.
+ *
+ * §4: delete this and its tests in the release that drops `shared_space_ids`.
+ *
+ * `pendingCopies` is injected for tests — production reads the live database.
+ */
+export async function assertConnectionSharesCopied(
+  pendingCopies: () => Promise<number> = uncopiedShareConnectionCount,
+): Promise<void> {
+  const pending = await pendingCopies();
+  if (pending === 0) return;
+
+  throw new Error(
+    `Connection shares not copied: ${pending} connection(s) still hold space ids in ` +
+      "integration_connections.shared_space_ids, so migration 0089 has been applied and " +
+      "scripts/migration/0044-connection-shares.ts has not. Until it runs, every one of those " +
+      "shares is invisible: the spaces they reach lose the connection, and each schedule naming " +
+      "one is disabled at its next fire. Refusing to boot: run " +
+      "`bun scripts/migration/0044-connection-shares.ts` (dry run), then " +
+      "`bun scripts/migration/0044-connection-shares.ts --apply` against this database, then " +
+      "restart.",
+  );
+}
+
+async function uncopiedShareConnectionCount(): Promise<number> {
+  const { sql: rawSql } = await import("drizzle-orm");
+  const [row] = toRows<{ pending: number }>(
+    await db.execute(rawSql`
+      SELECT count(*)::int AS pending
+      FROM integration_connections
+      WHERE cardinality(shared_space_ids) > 0
     `),
   );
   return row?.pending ?? 0;

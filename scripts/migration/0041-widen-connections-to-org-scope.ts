@@ -8,9 +8,11 @@
  *     bun scripts/migration/0041-widen-connections-to-org-scope.ts [--apply]
  *
  * Drizzle `0086` left every row space-scoped; this widens the user-owned rows not minted by a space
- * client (`widenConnectionsToOrgScope`). Run after the deploy, `pg_dump` first. Refuses an empty
- * `DATABASE_URL` (the client would open `./data/pglite`). One transaction per organization, so the
- * label locks stay bounded; dry run by default (each rolled back), `--apply` commits each. Idempotent.
+ * client (`widenConnectionsToOrgScope`). Run in the deploy window, after the migrate service and
+ * `0044`, the app stopped until `0045` has run: a schedule fire answering `must_choose_connection`
+ * in between disables its schedule. `pg_dump` first. Refuses an empty `DATABASE_URL` (the client
+ * would open `./data/pglite`). One transaction per organization, so the label locks stay bounded;
+ * dry run by default (each rolled back), `--apply` commits each. Idempotent.
  */
 
 import { parseArgs } from "node:util";

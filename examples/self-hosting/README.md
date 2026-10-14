@@ -302,7 +302,54 @@ docker compose pull
 docker compose up -d
 ```
 
-Migrations run automatically on startup via the `appstrate-migrate` service.
+Migrations run automatically on startup via the `migrate` service. Some
+releases also need a data task from `scripts/migration/` (shipped in the image)
+between the migrations and the start; their release notes say so.
+
+### Upgrading to 1.0.0-beta.67 — the app must stay stopped
+
+This upgrade runs four data tasks between the migrations and the start, with
+the app stopped so the scheduler fires nothing until the last one has run. The
+platform refuses to boot until `0044-connection-shares.ts --apply` has run:
+before it, every shared connection is invisible to the spaces it is shared
+with. Each script without `--apply` is a dry run that commits nothing; read its
+output before applying, and stop at the first one that exits non-zero.
+
+```bash
+# Back up, then stop the platform (the database keeps running)
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d appstrate -Fc' > pre-beta67.dump
+docker compose stop appstrate
+
+# Point the stack at 1.0.0-beta.67 (APPSTRATE_VERSION in .env), then
+docker compose pull
+docker compose run --rm migrate
+
+# Dry run, then --apply, in this order
+docker compose run --rm --no-deps appstrate bun scripts/migration/0044-connection-shares.ts
+docker compose run --rm --no-deps appstrate bun scripts/migration/0044-connection-shares.ts --apply
+docker compose run --rm --no-deps appstrate bun scripts/migration/0041-widen-connections-to-org-scope.ts
+docker compose run --rm --no-deps appstrate bun scripts/migration/0041-widen-connections-to-org-scope.ts --apply
+docker compose run --rm --no-deps appstrate bun scripts/migration/0043-promote-auto-clients-to-org.ts
+docker compose run --rm --no-deps appstrate bun scripts/migration/0043-promote-auto-clients-to-org.ts --apply
+docker compose run --rm --no-deps appstrate bun scripts/migration/0045-pin-connection-made-in-space.ts
+docker compose run --rm --no-deps appstrate bun scripts/migration/0045-pin-connection-made-in-space.ts --apply
+
+# Start
+docker compose up -d
+
+# Once, app up: --apply only if the dry run lists a run
+docker compose exec appstrate bun scripts/migration/0040-token-usage-shape.ts
+```
+
+Upgraded with the installer, which starts the stack? The app refuses to boot
+until `0044` has run and restarts on its own the moment it has, so run
+`docker compose stop appstrate` first, then the scripts from `0044` on (the
+migrations have already run).
+
+`0045` lists the schedules it could not settle (`no pin: name the set`): each is
+disabled at its next fire, until its member names the connection set on it and
+enables it again. A subscription pairing command minted before the upgrade has
+to be regenerated. Details: `scripts/migration/README.md`, "Release beta.67".
 
 ### Keeping `docker-compose.yml` in sync
 
@@ -333,7 +380,7 @@ See `.env.example` for all available environment variables. Key settings:
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO admin credentials                                                                                                                          |
 | `APP_URL`                                 | Public URL (for OAuth callbacks, email links)                                                                                                    |
 | `USERCONTENT_URL`                         | Optional — separate origin for agent-HTML previews (recommended in production; must be a different host than `APP_URL` or boot fails; see below) |
-| `TRUSTED_ORIGINS`                         | CORS origins (comma-separated)                                                                                                                   |
+| `TRUSTED_ORIGINS`                         | Extra browser origins trusted with credentials, for CORS and Better Auth (comma-separated); unset trusts none. `APP_URL` needs no entry          |
 | `SYSTEM_PROVIDER_KEYS`                    | Pre-configured LLM provider credentials (JSON array)                                                                                             |
 | `LOG_LEVEL`                               | Logging verbosity: `debug`, `info`, `warn`, `error`                                                                                              |
 | `RUN_ADAPTER`                             | Agent execution backend: `docker` (default) or `firecracker` (microVMs)                                                                          |
@@ -425,10 +472,10 @@ install dir itself, so use it only when you intend a full wipe.
 
 - Place a reverse proxy (nginx, Caddy, Traefik) in front of Appstrate for TLS termination
 - Set `APP_URL` to your public HTTPS URL
-- Set `TRUSTED_ORIGINS` to your public domain
+- Leave `TRUSTED_ORIGINS` unset unless another browser origin calls the API with cookies: `APP_URL`'s own origin needs no entry
 - Set `TRUST_PROXY` to the number of proxy hops in front of Appstrate (`1` for the single reverse proxy above) so the per-IP rate limiters and the audit trail read `X-Forwarded-For`. Not optional: behind an HTTPS `APP_URL` the image refuses to boot on `TRUST_PROXY=false`
 
-The `appstrate install` CLI wires all three for you when you pass the public URL
+The `appstrate install` CLI wires `APP_URL` and `TRUST_PROXY` for you when you pass the public URL
 (`--app-url https://appstrate.example.com`, or `APPSTRATE_APP_URL` for the
 `curl | bash` one-liner). The public URL is independent of `--port`: `--port`
 stays the host bind port your reverse proxy forwards to, while `--app-url` is

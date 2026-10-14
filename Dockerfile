@@ -151,6 +151,18 @@ RUN chown -R bun:bun /app/packages /app/apps/api/node_modules
 COPY --from=build /app/package.json ./
 COPY --from=build /app/system-packages ./system-packages
 
+# One-off data tasks (`scripts/migration/`), run from this image by an operator:
+# `docker compose run --rm --no-deps <app service> bun scripts/migration/<script>.ts`.
+# Their relative imports land in the apps/api and packages/* sources shipped
+# above (and `verify-system-models.ts`, the one outside the directory). Their bare
+# imports resolve upward from scripts/, and the filtered runtime install leaves
+# /app/node_modules holding only the store, so scripts/node_modules is a link to
+# apps/api's tree: the same packages the API itself loads, and nothing on the
+# API's own resolution path changes.
+COPY --from=build /app/scripts/migration ./scripts/migration
+COPY --from=build /app/scripts/verify-system-models.ts ./scripts/verify-system-models.ts
+RUN ln -s ../apps/api/node_modules scripts/node_modules
+
 # The image ships two licences: Apache-2.0 for the platform, and the commercial
 # one for packages/module-ee, which is shipped by the `packages/*` globs above.
 COPY --from=build /app/LICENSE /app/NOTICE ./

@@ -34,6 +34,8 @@ Coolify's `docker_compose_domains` maps **these** service names to `app.appstrat
 
 **A release is not always an image swap.** Migrations that cannot be replayed, one-off data scripts, and environment variables that must land at a particular moment are all real. The runbook is the authority; this file is not a substitute for it.
 
+**A redeploy migrates and starts in one step**, so it cannot carry a release that runs data scripts between the two — `1.0.0-beta.67` is one, and its build refuses to boot until `scripts/migration/0044-connection-shares.ts --apply` has run. For such a release, stop the application container, run the migrations and the scripts from the new image (it ships `scripts/migration/`) against the database, then set the version and redeploy: the migrate service then finds nothing pending. The order is in `scripts/migration/README.md`, "Release beta.67".
+
 ## Production
 
 Deployed by Coolify as a single `dockercompose` application resource. Its UUID is not written here on purpose: the UUID names the volumes, and a stale one in a document is worse than none — read it off the resource.
