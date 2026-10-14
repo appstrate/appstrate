@@ -9,6 +9,7 @@ import {
   getRunFull,
   deletePackageRuns,
   listPackageRuns,
+  getPackageRunActivity,
   listGlobalRuns,
   listRunLogs,
   RUN_LOG_LEVELS,
@@ -489,6 +490,23 @@ export function createRunsRouter() {
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
   });
+
+  // GET /api/agents/:scope/:name/run-activity — one 30-day aggregate for the
+  // operational overview. This remains a separate read from the paginated run
+  // list so the browser never has to download every page to compute a rate.
+  router.get(
+    `/agents/${SCOPED_PACKAGE_ROUTE}/run-activity`,
+    requireRunsRead,
+    requireAgent(),
+    async (c) => {
+      const agent = c.get("package");
+      return c.json(
+        await getPackageRunActivity(getSpaceScope(c), agent.id, {
+          visibility: runVisibilityFilter(c),
+        }),
+      );
+    },
+  );
 
   // GET /api/runs — global paginated run list across the space.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all

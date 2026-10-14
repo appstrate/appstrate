@@ -193,6 +193,13 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.auth.type.", // components/integration-connect/connection-picker-menu.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
+  "integration.inventory.basis.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.exposure.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.filter.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.origin.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.originDetail.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.reason.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.rules.", // components/package-detail/package-tool-catalog.tsx
   "integration.structure.concept.", // components/package-detail/integration-structure.tsx
   "integration.structure.empty.", // components/package-detail/integration-structure.tsx
   "integration.structure.type.", // components/package-detail/integration-structure.tsx

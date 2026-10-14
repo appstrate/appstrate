@@ -18,8 +18,14 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { activatePackage } from "../../../src/services/space-packages.ts";
+import {
+  seedAgent,
+  seedOrgModel,
+  seedOrgModelProviderKey,
+  seedPackage,
+  seedPackageVersion,
+} from "../../helpers/seed.ts";
+import { activatePackage, updateSpacePackage } from "../../../src/services/space-packages.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { eq } from "drizzle-orm";
 import { readdirSync, readFileSync } from "node:fs";
@@ -122,6 +128,17 @@ interface ReadinessBody {
   }>;
 }
 
+interface DiagnosticsBody {
+  status: "healthy" | "warning" | "blocking";
+  blocking_count: number;
+  warning_count: number;
+  diagnostics: Array<{
+    code: string;
+    severity: "blocking" | "warning";
+    correction: { destination: string; section: string | null };
+  }>;
+}
+
 describe("GET /api/agents/:scope/:name/connection-readiness", () => {
   let ctx: TestContext;
 
@@ -151,6 +168,18 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       draftManifest: buildIntegrationManifest(INTEGRATION, required),
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+  }
+
+  async function configureUsableModel() {
+    const credential = await seedOrgModelProviderKey({ orgId: ctx.orgId });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: credential.id,
+      enabled: true,
+    });
+    await updateSpacePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT, {
+      modelId: model.id,
+    });
   }
 
   async function seedConnection() {
@@ -191,6 +220,13 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     });
   }
 
+  function getDiagnostics() {
+    return app.request(`/api/agents/${AGENT}/diagnostics`, {
+      method: "GET",
+      headers: authHeaders(ctx),
+    });
+  }
+
   function postRun() {
     return app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
@@ -220,6 +256,38 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
 
     // Parity: the run gate rejects with 409.
     expect((await postRun()).status).toBe(409);
+  });
+
+  it("returns an explicit healthy diagnostics result", async () => {
+    await seedAgentWith(buildAgentManifest([], false));
+    await configureUsableModel();
+
+    const res = await getDiagnostics();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiagnosticsBody;
+    expect(body).toMatchObject({
+      status: "healthy",
+      blocking_count: 0,
+      warning_count: 0,
+      diagnostics: [],
+    });
+  });
+
+  it("routes a recoverable connection blocker to the connections settings", async () => {
+    await seedAgentWith(buildAgentManifest([INTEGRATION], true, true));
+    await seedIntegration(false);
+    await configureUsableModel();
+
+    const res = await getDiagnostics();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiagnosticsBody;
+    expect(body.status).toBe("blocking");
+    expect(body.blocking_count).toBe(1);
+    expect(body.diagnostics[0]).toMatchObject({
+      code: "not_connected",
+      severity: "blocking",
+      correction: { destination: "configuration", section: "connections" },
+    });
   });
 
   // Absence degrades: no error, no block, and the entry reads as unbound.

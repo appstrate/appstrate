@@ -1,7 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { latestMemoryDate } from "../agent-overview";
+import { latestMemoryDate, runSuccessRate } from "../agent-overview";
+
+describe("runSuccessRate", () => {
+  it("is null before any run has finished", () => {
+    expect(runSuccessRate({ success: 0, failed: 0, timeout: 0 })).toBeNull();
+  });
+
+  it("counts timeouts as failures", () => {
+    expect(runSuccessRate({ success: 3, failed: 0, timeout: 1 })).toBe(0.75);
+    expect(runSuccessRate({ success: 1, failed: 1, timeout: 2 })).toBe(0.25);
+  });
+});
 
 describe("latestMemoryDate", () => {
   it("is undefined with nothing written", () => {

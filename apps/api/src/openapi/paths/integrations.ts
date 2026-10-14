@@ -575,6 +575,7 @@ const integrationDetailSchema = {
     "manifest",
     "auths",
     "tool_catalog",
+    "tool_catalog_inspection",
     "allow_undeclared_tools",
     "active",
     "block_user_connections",
@@ -588,6 +589,28 @@ const integrationDetailSchema = {
     // `hidden_tools` and auto-hidden connect.tool primitives. Falls back
     // to `manifest.tools_policy` keys when the mcp-server is absent.
     tool_catalog: { type: "array", items: toolCatalogEntrySchema },
+    tool_catalog_inspection: {
+      type: "object",
+      description:
+        "Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory.",
+      required: ["basis", "entries"],
+      properties: {
+        basis: { type: "string", enum: ["mcp_package", "manifest", "platform"] },
+        entries: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["name", "origin", "exposure"],
+            properties: {
+              ...toolCatalogEntrySchema.properties,
+              origin: { type: "string", enum: ["mcp_package", "manifest", "appstrate"] },
+              exposure: { type: "string", enum: ["available", "hidden", "not_in_catalog"] },
+              hidden_reason: { type: "string", enum: ["manifest", "connection", "dependency"] },
+            },
+          },
+        },
+      },
+    },
     // AFPS §4.4 — the tool(s) an agent inherits when it declares this
     // integration without an `integrations_configuration.<id>.tools`
     // selection. Pairs with `tool_catalog` so a builder sees what is on by

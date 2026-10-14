@@ -1185,6 +1185,70 @@
         }
       }
     },
+    "/api/agents/{scope}/{name}/diagnostics": {
+      "get": {
+        "operationId": "getAgentDiagnostics",
+        "tags": ["Agents"],
+        "summary": "Get shared diagnostics for an agent",
+        "description": "Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview and the launch header. Diagnostics are ordered with blockers first and carry their correction destinations. Connection verdicts are included only for a caller holding `integrations:read`, and schedule warnings only for one holding `schedules:read`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Agent definition to inspect: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitted inspects what the agent detail page renders — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft when nothing is published. `draft` named explicitly requires that write authority. Ignored for system agents."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent diagnostics, including an explicit healthy empty state",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentDiagnostics"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden",
+            "description": "Insufficient permissions — including `draft_not_writable` when `version=draft` is named by a caller who cannot WRITE the package."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/VersionArtifactUnavailable"
+          }
+        }
+      }
+    },
     "/api/agents/{scope}/{name}/persistence": {
       "get": {
         "operationId": "listAgentPersistence",
@@ -2318,6 +2382,92 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/agents/{scope}/{name}/run-activity": {
+      "get": {
+        "operationId": "getAgentRunActivity",
+        "tags": ["Runs"],
+        "summary": "Get recent run activity for an agent",
+        "description": "Return one tenant-scoped aggregate for the last 30 days. The success rate is intentionally derived by clients from success / (success + failed + timeout); cancelled, pending, and running runs are excluded from that denominator.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Thirty-day run activity aggregate",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "window_days": {
+                      "type": "integer",
+                      "enum": [30]
+                    },
+                    "window_start": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "success": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "failed": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "timeout": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "window_days",
+                    "window_start",
+                    "total",
+                    "success",
+                    "failed",
+                    "timeout"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -5850,6 +6000,7 @@
                     "manifest",
                     "auths",
                     "tool_catalog",
+                    "tool_catalog_inspection",
                     "allow_undeclared_tools",
                     "active",
                     "block_user_connections",
@@ -6086,6 +6237,58 @@
                                     "type": "string"
                                   }
                                 }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "tool_catalog_inspection": {
+                      "type": "object",
+                      "description": "Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory.",
+                      "required": ["basis", "entries"],
+                      "properties": {
+                        "basis": {
+                          "type": "string",
+                          "enum": ["mcp_package", "manifest", "platform"]
+                        },
+                        "entries": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": ["name", "origin", "exposure"],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "policy": {
+                                "type": "object",
+                                "properties": {
+                                  "required_scopes": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "origin": {
+                                "type": "string",
+                                "enum": ["mcp_package", "manifest", "appstrate"]
+                              },
+                              "exposure": {
+                                "type": "string",
+                                "enum": ["available", "hidden", "not_in_catalog"]
+                              },
+                              "hidden_reason": {
+                                "type": "string",
+                                "enum": ["manifest", "connection", "dependency"]
                               }
                             }
                           }
@@ -8571,6 +8774,7 @@
                     "manifest",
                     "auths",
                     "tool_catalog",
+                    "tool_catalog_inspection",
                     "allow_undeclared_tools",
                     "active",
                     "block_user_connections",
@@ -8807,6 +9011,58 @@
                                     "type": "string"
                                   }
                                 }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "tool_catalog_inspection": {
+                      "type": "object",
+                      "description": "Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory.",
+                      "required": ["basis", "entries"],
+                      "properties": {
+                        "basis": {
+                          "type": "string",
+                          "enum": ["mcp_package", "manifest", "platform"]
+                        },
+                        "entries": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": ["name", "origin", "exposure"],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "policy": {
+                                "type": "object",
+                                "properties": {
+                                  "required_scopes": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "origin": {
+                                "type": "string",
+                                "enum": ["mcp_package", "manifest", "appstrate"]
+                              },
+                              "exposure": {
+                                "type": "string",
+                                "enum": ["available", "hidden", "not_in_catalog"]
+                              },
+                              "hidden_reason": {
+                                "type": "string",
+                                "enum": ["manifest", "connection", "dependency"]
                               }
                             }
                           }
@@ -33614,6 +33870,70 @@
                 },
                 "resolution": {
                   "$ref": "#/components/schemas/IntegrationAgentResolution"
+                }
+              }
+            }
+          }
+        }
+      },
+      "AgentDiagnostics": {
+        "type": "object",
+        "description": "Shared, ordered diagnostics for one agent installation and definition. An empty diagnostics array with status healthy is a successful result.",
+        "required": ["status", "blocking_count", "warning_count", "diagnostics"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["healthy", "warning", "blocking"]
+          },
+          "blocking_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "warning_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["code", "severity", "title", "explanation", "field", "correction"],
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": ["blocking", "warning"]
+                },
+                "title": {
+                  "type": "string"
+                },
+                "explanation": {
+                  "type": "string"
+                },
+                "field": {
+                  "type": "string"
+                },
+                "correction": {
+                  "type": "object",
+                  "required": ["destination", "section", "params"],
+                  "properties": {
+                    "destination": {
+                      "type": "string",
+                      "enum": ["bundle", "configuration", "schedule"]
+                    },
+                    "section": {
+                      "type": ["string", "null"]
+                    },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "The values the diagnostic names, keyed so a client can word it by `code`: `integration`, `skill`, `model`, `default_model`, `scheduleId`, `schedule`, `schedule_version`, `inspected_version` — each only where it applies."
+                    }
+                  }
                 }
               }
             }
