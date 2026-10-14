@@ -21,6 +21,7 @@ import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
 import { Switch } from "@appstrate/ui/components/switch";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { useModalParam } from "../../hooks/use-modal-param";
@@ -104,22 +105,25 @@ export function IntegrationToolsSection({
         rowActions={
           policies
             ? (tool) => (
-                <TableRowActions menuLabel={t("editor.rowActions", { name: tool.name })}>
-                  <DropdownMenuItem onSelect={() => policyModal.open(tool.name)}>
-                    <Pencil />
-                    {t("integrationEditor.toolsPolicy.editScopes")}
-                  </DropdownMenuItem>
-                  {policies.some((policy) => policy.name === tool.name) && (
-                    <DropdownMenuItem
-                      onSelect={() =>
-                        commit(policies.filter((policy) => policy.name !== tool.name))
-                      }
-                    >
-                      <Trash2 />
-                      {t("integrationEditor.toolsPolicy.remove")}
-                    </DropdownMenuItem>
-                  )}
-                </TableRowActions>
+                <TableRowActions
+                  menuLabel={t("editor.rowActions", { name: tool.name })}
+                  actions={[
+                    {
+                      id: "edit",
+                      label: t("integrationEditor.toolsPolicy.editScopes"),
+                      icon: Pencil,
+                      onSelect: () => policyModal.open(tool.name),
+                    },
+                    {
+                      id: "remove",
+                      label: t("integrationEditor.toolsPolicy.remove"),
+                      icon: Trash2,
+                      onSelect: () =>
+                        commit(policies.filter((policy) => policy.name !== tool.name)),
+                      hidden: !policies.some((policy) => policy.name === tool.name),
+                    },
+                  ]}
+                />
               )
             : undefined
         }
@@ -183,17 +187,18 @@ function ToolPolicyForm({
   return (
     <div className="space-y-5">
       {isNew && (
-        <div className="space-y-1.5">
-          <Label htmlFor="tool-policy-name">{t("integrationEditor.toolsPolicy.toolName")}</Label>
+        <FormItem
+          id="tool-policy-name"
+          label={t("integrationEditor.toolsPolicy.toolName")}
+          error={policy.name ? nameError : undefined}
+        >
           <Input
-            id="tool-policy-name"
             value={policy.name}
             onChange={(event) => setPolicy((prev) => ({ ...prev, name: event.target.value }))}
             placeholder="list_issues"
             className="font-mono"
           />
-          {policy.name && nameError && <p className="text-destructive text-xs">{nameError}</p>}
-        </div>
+        </FormItem>
       )}
       <RequiredScopesField
         authKeys={authKeys}

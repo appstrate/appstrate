@@ -74,7 +74,7 @@ export function CatalogueMenuItems({
           {deeds.revokeFrom.map((spaceId) => (
             <DropdownMenuItem
               key={spaceId}
-              className="text-destructive focus:text-destructive"
+              variant="destructive"
               onSelect={() => onRevoke(item, spaceId)}
             >
               <X />

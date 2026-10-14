@@ -466,11 +466,7 @@ function MemoryCollectionRow({
               {t("common:btn.copy")}
             </DropdownMenuItem>
             {onDelete && (
-              <DropdownMenuItem
-                disabled={isDeleting}
-                className="text-destructive focus:text-destructive"
-                onSelect={onDelete}
-              >
+              <DropdownMenuItem disabled={isDeleting} variant="destructive" onSelect={onDelete}>
                 <Trash2 />
                 {t("common:btn.delete")}
               </DropdownMenuItem>

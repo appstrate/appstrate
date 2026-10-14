@@ -14,6 +14,7 @@ import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError } from "@appstrate/ui/components/field";
 import { Spinner } from "./spinner";
 import { Label } from "@appstrate/ui/components/label";
 import { type OrgModelInfo } from "../hooks/use-models";
@@ -424,10 +425,9 @@ function ModelForm({
     return key ? t(key, { provider: selectedProvider?.displayName }) : undefined;
   };
 
-  const modelIdError =
-    showError("modelId") && errors.modelId?.message ? (
-      <div className="text-destructive text-sm">{errors.modelId.message}</div>
-    ) : null;
+  const modelIdError = (
+    <FieldError>{showError("modelId") ? errors.modelId?.message : undefined}</FieldError>
+  );
 
   const manualToggle = (next: "list" | "manual") => (
     <Button type="button" variant="outline" onClick={() => switchMode(next)}>
@@ -500,9 +500,9 @@ function ModelForm({
             />
             {modelIdError}
             {failedModelIds.length > 0 && (
-              <div className="text-destructive text-sm">
+              <FieldError>
                 {t("models.form.addFailed", { ids: failedModelIds.join(", ") })}
-              </div>
+              </FieldError>
             )}
             {duplicateModelIds.length > 0 && (
               <div className="text-muted-foreground text-sm">

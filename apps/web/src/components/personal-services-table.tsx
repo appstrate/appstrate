@@ -8,7 +8,7 @@
 import { useTranslation } from "react-i18next";
 import { KeyRound } from "lucide-react";
 import { DataTable } from "./data-table";
-import { EmptyState, ErrorState } from "./page-states";
+import { EmptyState } from "./page-states";
 import { usePersonalServiceColumns } from "./personal-service-columns";
 import type { PersonalServiceRow } from "../lib/model-providers";
 
@@ -39,8 +39,7 @@ export function PersonalServicesTable({
       rowActionable={() => canWriteModels}
       rowLabel={(row) => row.service.displayName}
       isLoading={isLoading}
-      isError={Boolean(error)}
-      error={<ErrorState error={error} compact />}
+      failure={error}
       empty={<EmptyState message={t("providers.personalEmpty")} icon={KeyRound} compact />}
     />
   );

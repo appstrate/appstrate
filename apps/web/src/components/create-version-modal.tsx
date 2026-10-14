@@ -6,6 +6,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { bumpVersion, planPublishVersion, type VersionBump } from "@appstrate/core/semver";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
@@ -154,9 +155,7 @@ export function CreateVersionModal({
         {!activeVersion && (
           <p className="text-warning text-sm">{t("version.noVersionInManifest")}</p>
         )}
-        {errors.root?.message && (
-          <div className="text-destructive text-sm">{errors.root.message}</div>
-        )}
+        {errors.root?.message && <FieldError>{errors.root.message}</FieldError>}
       </div>
     </Modal>
   );

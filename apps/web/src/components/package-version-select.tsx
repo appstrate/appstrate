@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import { usePackageVersions } from "../hooks/use-packages";
 import type { PackageType } from "@appstrate/shared-types";
 
@@ -47,26 +41,14 @@ export function PackageVersionSelect({
   disabled?: boolean;
 }) {
   const { data: versions } = usePackageVersions(type, packageId);
+  const options = [
+    ...leadingOptions,
+    ...(versions
+      ?.filter((v) => !v.yanked)
+      .map((v) => ({ value: v.version, label: `v${v.version}` })) ?? []),
+  ];
   return (
-    <Select value={value} onValueChange={onChange} disabled={disabled}>
-      <SelectTrigger>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {leadingOptions.map((opt) => (
-          <SelectItem key={opt.value} value={opt.value}>
-            {opt.label}
-          </SelectItem>
-        ))}
-        {versions
-          ?.filter((v) => !v.yanked)
-          .map((v) => (
-            <SelectItem key={v.version} value={v.version}>
-              v{v.version}
-            </SelectItem>
-          ))}
-      </SelectContent>
-    </Select>
+    <OptionSelect value={value} onValueChange={onChange} disabled={disabled} options={options} />
   );
 }
 

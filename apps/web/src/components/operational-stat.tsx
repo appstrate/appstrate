@@ -34,7 +34,7 @@ export function OperationalStat({
       <dd
         className={cn(
           "mt-1 w-full",
-          size === "md" ? "text-xl font-semibold tabular-nums" : "text-sm font-medium",
+          size === "md" ? "text-xl font-semibold tabular-nums" : "truncate text-sm",
         )}
       >
         {value}

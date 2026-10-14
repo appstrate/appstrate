@@ -2,13 +2,13 @@
 
 import { useTranslation } from "react-i18next";
 import { Pencil, Trash2 } from "lucide-react";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../components/data-table";
 import { usePermissions } from "../hooks/use-permissions";
+import { rowActionsColumn } from "../components/row-actions-column";
 import { TableRowActions } from "../components/table-row-actions";
+import { CellDate, CellText } from "../components/table-cells";
 import { EndUserAvatar } from "../components/end-user-avatar";
 import type { EndUserInfo } from "../hooks/use-end-users";
-import { formatDateField } from "../lib/format-date";
 
 export function endUserDisplayName(user: EndUserInfo, anonymousLabel: string): string {
   return user.name || user.email || user.externalId || anonymousLabel;
@@ -50,20 +50,14 @@ export function useEndUserColumns({
       header: t("spaces.endUserEmail"),
       width: "minmax(100px,1.2fr)",
       tier: 2,
-      cell: (user) => (
-        <span className="text-muted-foreground block truncate text-xs">{user.email ?? ""}</span>
-      ),
+      cell: (user) => <CellText>{user.email ?? ""}</CellText>,
     },
     {
       id: "externalId",
       header: t("spaces.endUserExternalId"),
       width: "minmax(80px,1fr)",
       tier: 2,
-      cell: (user) => (
-        <span className="text-muted-foreground block truncate font-mono text-xs">
-          {user.externalId ?? ""}
-        </span>
-      ),
+      cell: (user) => <CellText mono>{user.externalId ?? ""}</CellText>,
     },
     {
       id: "createdAt",
@@ -71,46 +65,36 @@ export function useEndUserColumns({
       width: "104px",
       tier: 2,
       align: "end",
-      cell: (user) => (
-        <span className="text-muted-foreground text-xs">
-          {formatDateField(user.createdAt, "date")}
-        </span>
-      ),
+      cell: (user) => <CellDate value={user.createdAt} granularity="date" />,
     },
   ];
   if (!canEdit && !canDelete) return columns;
   return [
     ...columns,
-    {
-      id: "actions",
-      header: "",
-      width: "80px",
-      align: "end",
-      cell: (user) => (
-        <TableRowActions
-          menuLabel={t("spaces.moreEndUserActions", {
-            name: endUserDisplayName(user, t("spaces.anonymousUser")),
-          })}
-          isPending={deletingUserId === user.id}
-        >
-          {canEdit && (
-            <DropdownMenuItem onSelect={() => onEdit(user)}>
-              <Pencil />
-              {t("common:btn.edit")}
-            </DropdownMenuItem>
-          )}
-          {canEdit && canDelete && <DropdownMenuSeparator />}
-          {canDelete && (
-            <DropdownMenuItem
-              onSelect={() => onDelete(user)}
-              className="text-destructive focus:text-destructive"
-            >
-              <Trash2 />
-              {t("common:btn.delete")}
-            </DropdownMenuItem>
-          )}
-        </TableRowActions>
-      ),
-    },
+    rowActionsColumn((user) => (
+      <TableRowActions
+        menuLabel={t("spaces.moreEndUserActions", {
+          name: endUserDisplayName(user, t("spaces.anonymousUser")),
+        })}
+        isPending={deletingUserId === user.id}
+        actions={[
+          {
+            id: "edit",
+            label: t("common:btn.edit"),
+            icon: Pencil,
+            onSelect: () => onEdit(user),
+            hidden: !canEdit,
+          },
+          {
+            id: "delete",
+            label: t("common:btn.delete"),
+            icon: Trash2,
+            onSelect: () => onDelete(user),
+            destructive: true,
+            hidden: !canDelete,
+          },
+        ]}
+      />
+    )),
   ];
 }

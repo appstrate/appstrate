@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError } from "@appstrate/ui/components/field";
 import { ApiError, client, type paths } from "../api/client";
 import { useAuth } from "../hooks/use-auth";
 import { useHostedAuthRedirect, isHostedAuthEnabled } from "../hooks/use-hosted-auth-redirect";
@@ -218,7 +219,7 @@ export function InviteAcceptPage() {
       <AuthLayout>
         <div className="flex flex-col gap-6">
           {inviteBanner}
-          {serverError && <p className="text-destructive text-sm">{serverError}</p>}
+          <FieldError>{serverError}</FieldError>
           <Button className="w-full" onClick={handleAcceptAuthenticated} disabled={accepting}>
             {accepting ? <Spinner /> : t("invite.joinOrg", { org: info.org_name })}
           </Button>
@@ -294,9 +295,9 @@ export function InviteAcceptPage() {
       <div className="flex flex-col gap-6">
         {inviteBanner}
         {verificationLinkFailed && (
-          <p className="text-destructive text-sm">{t("preferences.verificationLinkExpired")}</p>
+          <FieldError>{t("preferences.verificationLinkExpired")}</FieldError>
         )}
-        {serverError && <p className="text-destructive text-sm">{serverError}</p>}
+        <FieldError>{serverError}</FieldError>
         {mode === "register" ? (
           <RegisterForm
             fixedEmail={info.email}

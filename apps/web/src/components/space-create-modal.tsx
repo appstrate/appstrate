@@ -2,12 +2,11 @@
 
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
-import { cn } from "@appstrate/ui/cn";
 import { Modal } from "./modal";
 import { useModalParam } from "../hooks/use-modal-param";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { useCreateSpace } from "../hooks/use-spaces";
 import { errorMessage } from "../lib/mutation-error";
@@ -71,24 +70,21 @@ function SpaceCreateForm({ onClose }: { onClose: () => void }) {
       }
     >
       <form id="create-space-form" onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="space-create-name">{t("spaces.nameLabel")}</Label>
+        <FormItem
+          id="space-create-name"
+          label={t("spaces.nameLabel")}
+          error={showError("name") ? errors.name?.message : undefined}
+        >
           <Input
-            id="space-create-name"
             type="text"
             placeholder={t("spaces.namePlaceholder")}
             autoFocus
-            aria-invalid={showError("name") ? true : undefined}
-            className={cn(showError("name") && "border-destructive")}
             {...register("name", {
               required: t("validation.required", { ns: "common" }),
             })}
           />
-          {showError("name") && (
-            <div className="text-destructive text-sm">{errors.name?.message}</div>
-          )}
-        </div>
-        {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
+        </FormItem>
+        <FieldError>{errors.root?.message}</FieldError>
       </form>
     </Modal>
   );

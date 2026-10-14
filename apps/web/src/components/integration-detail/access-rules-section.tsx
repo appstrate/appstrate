@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import { SettingsHeading } from "../settings/settings-heading";
 import { SaveFeedback } from "../settings/save-feedback";
 import { useUpdateIntegrationSettings } from "../../hooks/use-integrations";
@@ -59,7 +53,7 @@ function BlockUserConnectionsToggle({
         <p id="account-creation-label" className="mb-3 text-sm font-medium">
           {t("integration.admin.creation.title")}
         </p>
-        <Select
+        <OptionSelect
           value={blocked ? "admins" : "members"}
           disabled={updateSettings.isPending}
           onValueChange={(value) =>
@@ -68,21 +62,13 @@ function BlockUserConnectionsToggle({
               body: { block_user_connections: value === "admins" },
             })
           }
-        >
-          <SelectTrigger
-            aria-labelledby="account-creation-label"
-            data-testid="block-user-connections-toggle"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(["admins", "members"] as const).map((value) => (
-              <SelectItem key={value} value={value}>
-                {t(`integration.admin.creation.${value}`)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          aria-labelledby="account-creation-label"
+          data-testid="block-user-connections-toggle"
+          options={(["admins", "members"] as const).map((value) => ({
+            value,
+            label: t(`integration.admin.creation.${value}`),
+          }))}
+        />
         <div className="mt-1.5">
           <SaveFeedback
             pending={updateSettings.isPending}

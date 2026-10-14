@@ -16,12 +16,15 @@ export function CopyButton({
   variant = "icon",
   className,
   label,
+  "aria-label": ariaLabel,
   ...source
 }: {
   variant?: "icon" | "text";
   className?: string;
   /** Overrides « Copier » (the icon button's accessible name, the text button's word). */
   label?: string;
+  /** What a screen reader hears when the word alone does not say what is copied. */
+  "aria-label"?: string;
 } & ({ value: string; getValue?: never } | { value?: never; getValue: () => string })) {
   const { t } = useTranslation("common");
   const { copied, copy } = useCopyToClipboard();
@@ -30,7 +33,14 @@ export function CopyButton({
 
   if (variant === "text") {
     return (
-      <Button type="button" variant="outline" size="sm" className={className} onClick={onClick}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className={className}
+        aria-label={ariaLabel}
+        onClick={onClick}
+      >
         {copied ? <Check className="text-success" /> : <Copy />}
         {copied ? t("btn.copied") : name}
       </Button>
@@ -42,7 +52,7 @@ export function CopyButton({
       variant="ghost"
       size="icon"
       className={cn("text-muted-foreground hover:text-foreground h-7 w-7", className)}
-      aria-label={name}
+      aria-label={ariaLabel ?? name}
       title={name}
       onClick={onClick}
     >

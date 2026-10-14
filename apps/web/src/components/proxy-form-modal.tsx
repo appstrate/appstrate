@@ -2,12 +2,11 @@
 
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
-import { cn } from "@appstrate/ui/cn";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
+import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import type { OrgProxyInfo } from "../hooks/use-proxies";
 
 interface ProxyFormModalProps {
@@ -71,31 +70,29 @@ function ProxyFormBody({
       }
     >
       <form id="proxy-form" onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="px-label">{t("proxies.modal.label")}</Label>
+        <FormItem
+          id="px-label"
+          label={t("proxies.modal.label")}
+          error={showError("label") ? errors.label?.message : undefined}
+        >
           <Input
-            id="px-label"
             type="text"
             placeholder={t("proxies.modal.labelPlaceholder")}
             autoFocus
-            aria-invalid={showError("label") ? true : undefined}
-            className={cn(showError("label") && "border-destructive")}
             {...register("label", {
               required: t("validation.required", { ns: "common" }),
             })}
           />
-          {showError("label") && (
-            <div className="text-destructive text-sm">{errors.label?.message}</div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="px-url">{t("proxies.modal.url")}</Label>
+        </FormItem>
+        <FormItem
+          id="px-url"
+          label={t("proxies.modal.url")}
+          hint={proxy ? t("proxies.modal.urlHint") : undefined}
+          error={showError("url") ? errors.url?.message : undefined}
+        >
           <Input
-            id="px-url"
             type="text"
             placeholder={t("proxies.modal.urlPlaceholder")}
-            aria-invalid={showError("url") ? true : undefined}
-            className={cn(showError("url") && "border-destructive")}
             {...register("url", {
               validate: (v) => {
                 if (!proxy && !v.trim()) return t("validation.required", { ns: "common" });
@@ -103,13 +100,7 @@ function ProxyFormBody({
               },
             })}
           />
-          {proxy && (
-            <div className="text-muted-foreground text-sm">{t("proxies.modal.urlHint")}</div>
-          )}
-          {showError("url") && (
-            <div className="text-destructive text-sm">{errors.url?.message}</div>
-          )}
-        </div>
+        </FormItem>
       </form>
     </Modal>
   );

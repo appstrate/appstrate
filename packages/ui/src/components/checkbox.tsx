@@ -25,14 +25,15 @@ const Checkbox = React.forwardRef<
 Checkbox.displayName = CheckboxPrimitive.Root.displayName;
 
 /**
- * A checkbox with its label and an optional line under it. The label is the
- * hit area, so the whole sentence toggles the box.
+ * A checkbox with its label and an optional line under it. Both lines sit in
+ * the `<label>`, so the whole text toggles the box.
  */
 function CheckboxField({
   id,
   label,
   description,
   className,
+  disabled,
   ...props
 }: Omit<React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>, "id"> & {
   id: string;
@@ -41,16 +42,17 @@ function CheckboxField({
 }) {
   return (
     <div className={cn("flex items-start gap-2", className)}>
-      <Checkbox id={id} className="mt-0.5" {...props} />
-      <div className="grid gap-1 leading-none">
-        <label
-          htmlFor={id}
-          className="text-sm font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-        >
-          {label}
-        </label>
-        {description && <p className="text-muted-foreground text-xs">{description}</p>}
-      </div>
+      <Checkbox id={id} className="mt-0.5" disabled={disabled} {...props} />
+      <label
+        htmlFor={id}
+        className={cn(
+          "grid gap-1 leading-none",
+          disabled ? "cursor-not-allowed opacity-70" : "cursor-pointer",
+        )}
+      >
+        <span className="text-sm font-medium">{label}</span>
+        {description && <span className="text-muted-foreground text-xs">{description}</span>}
+      </label>
     </div>
   );
 }

@@ -52,12 +52,15 @@ export function CellEmpty() {
 export function CellDate({
   value,
   granularity = "datetime",
+  timeZone,
 }: {
   value: string | Date | number | null | undefined;
   granularity?: "date" | "datetime";
+  /** The zone the date is named in (a schedule's own), the reader's when unset. */
+  timeZone?: string | null;
 }) {
   if (value === null || value === undefined) return <CellEmpty />;
-  return <CellText>{formatDateField(value, granularity)}</CellText>;
+  return <CellText>{formatDateField(value, granularity, timeZone)}</CellText>;
 }
 
 /** Names joined on one line, the whole list on hover; the dash when there is none. */

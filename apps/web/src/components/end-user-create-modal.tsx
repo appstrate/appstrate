@@ -5,8 +5,8 @@ import { useTranslation } from "react-i18next";
 import { useForm } from "react-hook-form";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { useCreateEndUser } from "../hooks/use-end-users";
 import { errorMessage } from "../lib/mutation-error";
@@ -74,36 +74,22 @@ export function EndUserCreateModal({ onClose }: Props) {
       }
     >
       <form id="create-end-user-form" onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="eu-name">{t("spaces.endUserName")}</Label>
+        <FormItem id="eu-name" label={t("spaces.endUserName")}>
           <Input
-            id="eu-name"
             type="text"
             placeholder={t("spaces.endUserNamePlaceholder")}
             autoFocus
             {...register("name")}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="eu-email">{t("spaces.endUserEmail")}</Label>
-          <Input
-            id="eu-email"
-            type="email"
-            placeholder="alice@example.com"
-            {...register("email")}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="eu-external-id">{t("spaces.endUserExternalId")}</Label>
-          <Input
-            id="eu-external-id"
-            type="text"
-            placeholder="my_user_123"
-            {...register("externalId")}
-          />
-        </div>
+        </FormItem>
+        <FormItem id="eu-email" label={t("spaces.endUserEmail")}>
+          <Input type="email" placeholder="alice@example.com" {...register("email")} />
+        </FormItem>
+        <FormItem id="eu-external-id" label={t("spaces.endUserExternalId")}>
+          <Input type="text" placeholder="my_user_123" {...register("externalId")} />
+        </FormItem>
         <EndUserMetadataEditor entries={metadata} onChange={setMetadata} />
-        {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
+        {errors.root?.message && <FieldError>{errors.root.message}</FieldError>}
       </form>
     </Modal>
   );

@@ -10,9 +10,8 @@ import { Controller, useForm, useWatch } from "react-hook-form";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
-import { Field, FieldGroup } from "@appstrate/ui/components/field";
+import { FieldError, FieldGroup, FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import { $api, type components } from "../api/client";
 import { OrgRoleOptions } from "./org-role-options";
 import {
@@ -148,19 +147,17 @@ export function OrgInvitationForm({
       className="flex flex-col gap-4"
     >
       <FieldGroup>
-        <Field data-invalid={!!form.formState.errors.email}>
-          <Label htmlFor={`${fieldPrefix}-email`}>{t("orgSettings.inviteEmailAriaLabel")}</Label>
+        <FormItem
+          id={`${fieldPrefix}-email`}
+          label={t("orgSettings.inviteEmailAriaLabel")}
+          error={form.formState.errors.email?.message}
+        >
           <Input
-            id={`${fieldPrefix}-email`}
             type="email"
             readOnly={!!invitation}
             autoComplete="email"
             placeholder="email@example.com"
             disabled={isPending}
-            aria-invalid={!!form.formState.errors.email}
-            aria-describedby={
-              form.formState.errors.email ? `${fieldPrefix}-email-error` : undefined
-            }
             {...form.register("email", {
               required: t("common:validation.required"),
               setValueAs: (value: string) => value.trim(),
@@ -168,12 +165,7 @@ export function OrgInvitationForm({
                 z.email().safeParse(value).success || t("common:validation.emailFormat"),
             })}
           />
-          {form.formState.errors.email && (
-            <p id={`${fieldPrefix}-email-error`} role="alert" className="text-destructive text-sm">
-              {form.formState.errors.email.message}
-            </p>
-          )}
-        </Field>
+        </FormItem>
         <OrgRoleOptions
           idPrefix={fieldPrefix}
           disabled={isPending}
@@ -231,18 +223,12 @@ export function OrgInvitationForm({
               )}
             />
             {role !== "admin" && fieldState.error && (
-              <p role="alert" className="text-destructive text-sm">
-                {fieldState.error.message}
-              </p>
+              <FieldError>{fieldState.error.message}</FieldError>
             )}
           </div>
         )}
       />
-      {form.formState.errors.root && (
-        <p role="alert" className="text-destructive text-sm">
-          {form.formState.errors.root.message}
-        </p>
-      )}
+      <FieldError>{form.formState.errors.root?.message}</FieldError>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         {onCancel && (
           <Button type="button" variant="outline" onClick={onCancel} disabled={isPending}>

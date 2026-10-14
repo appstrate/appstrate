@@ -6,8 +6,8 @@ import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
@@ -116,23 +116,20 @@ export function RegisterForm({
       {header === null && switchAuthSlot && <div className="text-center">{switchAuthSlot}</div>}
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
         <div className="flex flex-col gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="displayName">{t("login.name")}</Label>
+          <FormItem
+            id="displayName"
+            label={t("login.name")}
+            error={showError("displayName") ? errors.displayName?.message : undefined}
+          >
             <Input
-              id="displayName"
               type="text"
               placeholder={t("login.namePlaceholder")}
               autoComplete="name"
-              aria-invalid={showError("displayName") ? true : undefined}
-              className={cn(showError("displayName") && "border-destructive")}
               {...register("displayName", {
                 required: t("validation.required", { ns: "common" }),
               })}
             />
-            {showError("displayName") && (
-              <div className="text-destructive text-sm">{errors.displayName?.message}</div>
-            )}
-          </div>
+          </FormItem>
           <EmailField
             register={register}
             name="email"
@@ -149,7 +146,7 @@ export function RegisterForm({
             error={errors.password?.message}
             autoComplete="new-password"
           />
-          {errors.root && <p className="text-destructive text-sm">{errors.root.message}</p>}
+          <FieldError>{errors.root?.message}</FieldError>
         </div>
         <Button size="lg" className="w-full" type="submit" disabled={isSubmitting}>
           {isSubmitting ? t("loading") : t("login.signup")}

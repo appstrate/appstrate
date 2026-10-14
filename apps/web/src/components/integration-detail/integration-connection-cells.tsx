@@ -22,11 +22,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { Bot, Pencil, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
-import {
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@appstrate/ui/components/dropdown-menu";
+import { DropdownMenuItem, DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { ConfirmModal } from "../confirm-modal";
 import { InlineEditableLabel } from "../inline-editable-label";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
@@ -297,79 +293,72 @@ export function ConnectionActionsCell({
   const canReach = useCanReach();
   const location = useLocation();
   // Deleting and reconnecting are the owner's; renaming is also a governor's.
-  if (!isOwn && !canRename) return <span className="text-muted-foreground text-xs">—</span>;
   const canReconnect =
     isOwn && connection.needs_reconnection && canConnect && canRenew && authType === "oauth2";
   // An admin pin or the space default names the row: deleting it is refused
   // until it is removed from there.
   return (
     <>
-      <div className="relative z-10 flex items-center justify-end gap-1">
-        <TableRowActions
-          menuLabel={t("integration.connection.moreActions", { name: connection.label })}
-          isPending={disconnect.isPending || reconnecting}
-          renaming={renaming}
-        >
-          {canRename && (
-            <DropdownMenuItem
-              onSelect={onRename}
-              data-testid={`connection-rename-${connection.id}`}
-            >
-              <Pencil />
-              {t("btn.rename", { ns: "common" })}
-            </DropdownMenuItem>
-          )}
-          {canReconnect && (
-            <DropdownMenuItem
-              onSelect={() => void openPopup({ packageId, authKey, connectionId: connection.id })}
-              data-testid={`connection-reconnect-${connection.id}`}
-            >
-              <RefreshCw />
-              {t("detail.integrationReconnect", { ns: "agents" })}
-            </DropdownMenuItem>
-          )}
-          {isOwn && (
-            <>
-              {(canRename || canReconnect) && <DropdownMenuSeparator />}
-              <DropdownMenuItem
-                onSelect={() => setConfirmDelete(true)}
-                disabled={disconnect.isPending || !!lockHint}
-                className="text-destructive focus:text-destructive"
-                data-testid={`connection-delete-${connection.id}`}
-              >
-                <Trash2 />
-                {t("integration.connection.delete")}
-              </DropdownMenuItem>
-            </>
-          )}
-          {/* Said in the menu, where the dead item is: a disabled item takes no hover. */}
-          {isOwn && lockHint && (
-            <DropdownMenuLabel className="text-muted-foreground max-w-64 text-xs font-normal">
-              {lockHint}
-            </DropdownMenuLabel>
-          )}
-          {/* Each agent holding it, one click away for whoever may open it. */}
-          {(isOwn ? pinningAgents : [])
-            .filter((agent) => canReach(packageDetailPath("agent", agent.id)))
-            .map((agent) => (
-              <DropdownMenuItem key={agent.id} asChild>
-                <Link to={packageDetailPath("agent", agent.id)}>
-                  <Bot />
-                  {agent.name}
-                </Link>
-              </DropdownMenuItem>
-            ))}
-          {/* And the way to unlock it, one click away, for whoever may. */}
-          {isOwn && lockHint && isAdmin && (
-            <DropdownMenuItem asChild>
-              <Link to={integrationSettingsHref(location.pathname, "access")}>
-                <ShieldCheck />
-                {t("integration.connection.lock.openAccessRules")}
+      <TableRowActions
+        menuLabel={t("integration.connection.moreActions", { name: connection.label })}
+        isPending={disconnect.isPending || reconnecting}
+        renaming={renaming}
+        actions={[
+          {
+            id: "rename",
+            label: t("btn.rename", { ns: "common" }),
+            icon: Pencil,
+            onSelect: onRename,
+            hidden: !canRename,
+            testId: `connection-rename-${connection.id}`,
+          },
+          {
+            id: "reconnect",
+            label: t("detail.integrationReconnect", { ns: "agents" }),
+            icon: RefreshCw,
+            onSelect: () => void openPopup({ packageId, authKey, connectionId: connection.id }),
+            hidden: !canReconnect,
+            testId: `connection-reconnect-${connection.id}`,
+          },
+          {
+            id: "delete",
+            label: t("integration.connection.delete"),
+            icon: Trash2,
+            onSelect: () => setConfirmDelete(true),
+            disabled: disconnect.isPending || !!lockHint,
+            destructive: true,
+            hidden: !isOwn,
+            testId: `connection-delete-${connection.id}`,
+          },
+        ]}
+      >
+        {/* Said in the menu, where the dead item is: a disabled item takes no hover. */}
+        {isOwn && lockHint && (
+          <DropdownMenuLabel className="text-muted-foreground max-w-64 text-xs font-normal">
+            {lockHint}
+          </DropdownMenuLabel>
+        )}
+        {/* Each agent holding it, one click away for whoever may open it. */}
+        {(isOwn ? pinningAgents : [])
+          .filter((agent) => canReach(packageDetailPath("agent", agent.id)))
+          .map((agent) => (
+            <DropdownMenuItem key={agent.id} asChild>
+              <Link to={packageDetailPath("agent", agent.id)}>
+                <Bot />
+                {agent.name}
               </Link>
             </DropdownMenuItem>
-          )}
-        </TableRowActions>
-      </div>
+          ))}
+        {/* And the way to unlock it, one click away, for whoever may. */}
+        {isOwn && lockHint && isAdmin && (
+          <DropdownMenuItem asChild>
+            <Link to={integrationSettingsHref(location.pathname, "access")}>
+              <ShieldCheck />
+              {t("integration.connection.lock.openAccessRules")}
+            </Link>
+          </DropdownMenuItem>
+        )}
+      </TableRowActions>
       <ConfirmModal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}

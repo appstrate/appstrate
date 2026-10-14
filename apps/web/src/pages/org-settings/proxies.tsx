@@ -21,7 +21,7 @@ import { useConnectionTest } from "../../hooks/use-connection-test";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
+import { EmptyState, EmptyStateAction } from "../../components/page-states";
 import { NoAccessState } from "../../components/route-gate";
 import { useProxyColumns } from "./proxy-columns";
 
@@ -95,8 +95,7 @@ export function OrgSettingsProxiesPage() {
         rowActionable={(p) => p.source !== "built-in"}
         rowLabel={(p) => t("proxies.editNamed", { name: p.label })}
         isLoading={isLoading}
-        isError={Boolean(error)}
-        error={<ErrorState error={error} compact />}
+        failure={error}
         empty={
           <EmptyState message={t("proxies.empty")} icon={Globe} compact>
             {canWrite && <EmptyStateAction label={t("proxies.add")} onClick={onCreate} />}

@@ -5,7 +5,7 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { LoadingState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { $api } from "../../api/client";
@@ -71,8 +71,7 @@ export function OrgSettingsCliSessionsPage() {
         rowKey={(session) => session.familyId}
         label={t("orgCliSessions.tableLabel")}
         isLoading={isLoading}
-        isError={Boolean(error)}
-        error={<ErrorState error={error} compact />}
+        failure={error}
         empty={
           <EmptyState
             icon={Laptop}

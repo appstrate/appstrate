@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Label } from "@appstrate/ui/components/label";
+import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import { Textarea } from "@appstrate/ui/components/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
 
 type FormFieldType =
   | "text"
@@ -55,30 +49,23 @@ export function FormField({
   disabled,
   min,
 }: FormFieldProps) {
-  const describedBy = description ? `hint-${id}` : undefined;
-
   const renderInput = () => {
     if (enumValues) {
       return (
-        <Select value={value} onValueChange={onChange}>
-          <SelectTrigger id={id} aria-describedby={describedBy}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {enumValues.map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {enumLabel ? enumLabel(opt) : opt}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <OptionSelect
+          value={value}
+          onValueChange={onChange}
+          options={enumValues.map((opt) => ({
+            value: opt,
+            label: enumLabel ? enumLabel(opt) : opt,
+          }))}
+        />
       );
     }
 
     if (type === "textarea") {
       return (
         <Textarea
-          id={id}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
@@ -86,7 +73,6 @@ export function FormField({
           disabled={disabled}
           required={required}
           rows={4}
-          aria-describedby={describedBy}
         />
       );
     }
@@ -94,14 +80,12 @@ export function FormField({
     if (type === "color") {
       return (
         <Input
-          id={id}
           type="color"
           value={value || "#000000"}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
           disabled={disabled}
           required={required}
-          aria-describedby={describedBy}
           className="h-10 w-20 cursor-pointer p-1"
         />
       );
@@ -109,7 +93,6 @@ export function FormField({
 
     return (
       <Input
-        id={id}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -118,23 +101,13 @@ export function FormField({
         disabled={disabled}
         required={required}
         min={min}
-        aria-describedby={describedBy}
       />
     );
   };
 
   return (
-    <div className="space-y-2">
-      <Label htmlFor={id}>
-        {label}
-        {required ? " *" : ""}
-      </Label>
+    <FormItem id={id} label={required ? `${label} *` : label} hint={description}>
       {renderInput()}
-      {description && (
-        <p id={describedBy} className="text-muted-foreground text-sm">
-          {description}
-        </p>
-      )}
-    </div>
+    </FormItem>
   );
 }

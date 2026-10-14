@@ -144,7 +144,7 @@ describe("ConnectionShareEditor — the owner's org-scoped row", () => {
 describe("ConnectionShareEditor — the owner's space-scoped row", () => {
   const space: Partial<Props> = { scope: "space", rowSpaceId: HERE };
   const toggle = (checked: boolean) => (p: Record<string, unknown>) =>
-    (p.onChange as (e: unknown) => void)({ target: { checked } });
+    (p.onCheckedChange as (value: boolean) => void)(checked);
 
   it("offers one toggle, for its own space only", () => {
     const html = render(<ConnectionShareEditor {...base} {...space} />);

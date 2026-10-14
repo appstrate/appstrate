@@ -24,16 +24,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
-import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
+import { Field, FieldDescription, FieldGroup, FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import { Modal } from "./modal";
 import { ActorSelect } from "./actor-select";
 import { AgentInputForm } from "./agent-input-form";
@@ -120,21 +114,16 @@ function NewScheduleForm({
 
   return (
     <div className="space-y-5">
-      <Field>
-        <Label htmlFor="new-schedule-agent">{t("schedule.agent")}</Label>
-        <Select value={agentId ?? ""} onValueChange={setPicked}>
-          <SelectTrigger id="new-schedule-agent">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(agents ?? []).map((agent) => (
-              <SelectItem key={agent.id} value={agent.id}>
-                {agent.display_name ?? agent.id}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Field>
+      <FormItem id="new-schedule-agent" label={t("schedule.agent")}>
+        <OptionSelect
+          value={agentId ?? ""}
+          onValueChange={setPicked}
+          options={(agents ?? []).map((agent) => ({
+            value: agent.id,
+            label: agent.display_name ?? agent.id,
+          }))}
+        />
+      </FormItem>
       {agentId ? (
         // A new agent, a new form: its inputs and connections are another agent's.
         <ScheduleFields
@@ -289,15 +278,13 @@ export function ScheduleFieldsReady({
       }}
     >
       <FieldGroup className="gap-5">
-        <Field>
-          <Label htmlFor="new-schedule-name">{t("schedule.name")}</Label>
+        <FormItem id="new-schedule-name" label={t("schedule.name")}>
           <Input
-            id="new-schedule-name"
             value={name}
             placeholder={t("schedule.namePlaceholder")}
             onChange={(e) => setName(e.target.value)}
           />
-        </Field>
+        </FormItem>
       </FieldGroup>
       <FrequencyComposer
         cron={DEFAULT_CRON}

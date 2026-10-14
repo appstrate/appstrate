@@ -2,8 +2,6 @@
 
 import { useTranslation } from "react-i18next";
 import { Download, ExternalLink, Eye, Pin, Trash2 } from "lucide-react";
-import { Link } from "react-router-dom";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { FileDto } from "../hooks/use-files";
 import { fileRunHref } from "../lib/files";
 import { TableRowActions } from "./table-row-actions";
@@ -32,58 +30,49 @@ export function DocumentRowActions({
 }) {
   const { t } = useTranslation(["files", "common"]);
   const runHref = showRunLink ? fileRunHref(doc) : undefined;
-  const canPreview = Boolean(onPreview) && doc.capabilities.preview;
-  const canKeep = doc.capabilities.keep && Boolean(doc.expiresAt);
-  const hasNonDestructive = canPreview || doc.capabilities.download || Boolean(runHref) || canKeep;
-  const hasMenu = hasNonDestructive || doc.capabilities.delete;
 
   return (
     <TableRowActions
-      menuLabel={hasMenu ? t("row.moreActions", { name: doc.name }) : undefined}
+      menuLabel={t("row.moreActions", { name: doc.name })}
       isPending={isPending}
-    >
-      {hasMenu ? (
-        <>
-          {canPreview && (
-            <DropdownMenuItem onSelect={() => onPreview?.(doc)}>
-              <Eye />
-              {t("row.preview")}
-            </DropdownMenuItem>
-          )}
-          {doc.capabilities.download && (
-            <DropdownMenuItem onSelect={() => onDownload(doc)}>
-              <Download />
-              {t("row.download")}
-            </DropdownMenuItem>
-          )}
-          {runHref && (
-            <DropdownMenuItem asChild>
-              <Link to={runHref}>
-                <ExternalLink />
-                {t("row.openRun")}
-              </Link>
-            </DropdownMenuItem>
-          )}
-          {canKeep && (
-            <DropdownMenuItem onSelect={() => onKeep(doc)}>
-              <Pin />
-              {t("row.keep")}
-            </DropdownMenuItem>
-          )}
-          {doc.capabilities.delete && (
-            <>
-              {hasNonDestructive && <DropdownMenuSeparator />}
-              <DropdownMenuItem
-                onSelect={() => onDelete(doc)}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 />
-                {t("row.delete")}
-              </DropdownMenuItem>
-            </>
-          )}
-        </>
-      ) : undefined}
-    </TableRowActions>
+      actions={[
+        {
+          id: "preview",
+          label: t("row.preview"),
+          icon: Eye,
+          onSelect: () => onPreview?.(doc),
+          hidden: !(Boolean(onPreview) && doc.capabilities.preview),
+        },
+        {
+          id: "download",
+          label: t("row.download"),
+          icon: Download,
+          onSelect: () => onDownload(doc),
+          hidden: !doc.capabilities.download,
+        },
+        {
+          id: "run",
+          label: t("row.openRun"),
+          icon: ExternalLink,
+          href: runHref,
+          hidden: !runHref,
+        },
+        {
+          id: "keep",
+          label: t("row.keep"),
+          icon: Pin,
+          onSelect: () => onKeep(doc),
+          hidden: !(doc.capabilities.keep && Boolean(doc.expiresAt)),
+        },
+        {
+          id: "delete",
+          label: t("row.delete"),
+          icon: Trash2,
+          onSelect: () => onDelete(doc),
+          destructive: true,
+          hidden: !doc.capabilities.delete,
+        },
+      ]}
+    />
   );
 }

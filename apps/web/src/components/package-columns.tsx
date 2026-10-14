@@ -23,6 +23,9 @@ import { RunAgentButton } from "./run-agent-button";
 import { AgentIdentityTile } from "./agent-identity";
 import { IntegrationIcon } from "./integration-icon";
 import { useCatalogueOriginColumn } from "./catalogue-columns";
+import { CountBadge } from "./count-badge";
+import { rowActionsColumn } from "./row-actions-column";
+import { CellEmpty, CellText } from "./table-cells";
 import { useOrg } from "../hooks/use-org";
 import type { CardItem } from "../pages/package-list";
 
@@ -59,17 +62,15 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
           <div className="flex min-w-0 flex-col">
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate font-medium">{item.displayName}</span>
-              {!!item.unreadCount && item.unreadCount > 0 && (
-                <span className="bg-destructive text-destructive-foreground relative z-10 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-                  {item.unreadCount > 99 ? "99+" : item.unreadCount}
-                </span>
-              )}
+              <CountBadge
+                count={item.unreadCount ?? 0}
+                label={t("dashboard.unreadRuns", { count: item.unreadCount ?? 0 })}
+                className="relative z-10 shrink-0"
+              />
             </span>
             {/* One line, where the card gives two: at this density a description
                 is there to tell two neighbours apart, not to be read. */}
-            {item.description && (
-              <span className="text-muted-foreground truncate text-xs">{item.description}</span>
-            )}
+            {item.description && <CellText>{item.description}</CellText>}
           </div>
         </div>
       ),
@@ -86,12 +87,8 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
             ? t("list.usedByAgents", { count: item.usedByAgents })
             : null;
         const labels = [...(item.keywords ?? []), ...(used ? [used] : [])];
-        if (labels.length === 0) return <span className="text-muted-foreground/50">—</span>;
-        return (
-          <span className="text-muted-foreground truncate text-xs" title={labels.join(", ")}>
-            {labels.join(" · ")}
-          </span>
-        );
+        if (labels.length === 0) return <CellEmpty />;
+        return <CellText title={labels.join(", ")}>{labels.join(" · ")}</CellText>;
       },
     },
     {
@@ -107,28 +104,23 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
         item.type === "agent" && !!item.runningRuns && item.runningRuns > 0 ? (
           <Badge status="running" compact />
         ) : (
-          <span className="text-muted-foreground/50">—</span>
+          <CellEmpty />
         ),
     },
-    {
-      id: "actions",
-      header: "",
-      width: "48px",
-      align: "end",
-      cell: (item) =>
-        item.type === "agent" ? (
-          // Raised above the row's link overlay, or the row would swallow the
-          // click and open the agent instead of running it.
-          <span className="relative z-10">
-            <RunAgentButton
-              packageId={item.id}
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground hover:text-primary size-7"
-            />
-          </span>
-        ) : null,
-    },
+    rowActionsColumn((item) =>
+      item.type === "agent" ? (
+        // Raised above the row's link overlay, or the row would swallow the
+        // click and open the agent instead of running it.
+        <span className="relative z-10">
+          <RunAgentButton
+            packageId={item.id}
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground hover:text-primary size-7"
+          />
+        </span>
+      ) : null,
+    ),
   ];
 
   return runnable ? columns : columns.filter((c) => c.id !== "state" && c.id !== "actions");

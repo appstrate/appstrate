@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError } from "@appstrate/ui/components/field";
 import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
@@ -135,7 +136,7 @@ export function LoginForm({
               )
             }
           />
-          {errors.root && <p className="text-destructive text-sm">{errors.root.message}</p>}
+          {errors.root && <FieldError>{errors.root.message}</FieldError>}
         </div>
         <Button size="lg" className="w-full" type="submit" disabled={isSubmitting}>
           {isSubmitting ? t("loading") : t("login.login")}

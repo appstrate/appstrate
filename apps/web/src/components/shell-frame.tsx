@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { NavUser } from "@/components/nav-user";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { NotificationBell } from "@/components/notification-bell";
+import { CountBadge } from "@/components/count-badge";
 import { useUnreadCount } from "@/hooks/use-notifications";
 import { ProductTabs } from "@/components/product-tabs";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
@@ -114,12 +115,11 @@ export function ShellSidebar({
                 team is visible only to whoever thinks to go and look. */}
             {pendingShares.count > 0 && (
               <SidebarMenuBadge>
-                <span
-                  className="bg-primary text-primary-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium"
-                  aria-label={t("catalogue.pendingOffers", { count: pendingShares.count })}
-                >
-                  {pendingShares.count > 99 ? "99+" : pendingShares.count}
-                </span>
+                <CountBadge
+                  count={pendingShares.count}
+                  label={t("catalogue.pendingOffers", { count: pendingShares.count })}
+                  tone="primary"
+                />
               </SidebarMenuBadge>
             )}
           </SidebarMenuItem>

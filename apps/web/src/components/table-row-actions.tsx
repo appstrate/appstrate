@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, type ReactNode } from "react";
+import { Children, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { MoreHorizontal, type LucideIcon } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
@@ -12,59 +12,29 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
+import { orderRowActions, type RowAction } from "../lib/row-action-order";
 import { Spinner } from "./spinner";
 
-/** One deed of a row's « … » menu. */
-export interface RowAction {
-  id: string;
-  label: string;
-  icon: LucideIcon;
-  /** A deed that acts here; mutually exclusive with `href`. */
-  onSelect?: () => void;
-  /** A deed that goes somewhere. */
-  href?: string;
-  disabled?: boolean;
-  /** Destroys or revokes: drawn last, behind a separator, in the destructive tone. */
-  destructive?: boolean;
-  /** Left out of the menu (the caller's permission or state says no). */
-  hidden?: boolean;
-  testId?: string;
-}
+export type { RowAction };
 
-/**
- * The menu's items in the order the rule above sets: the caller's order, then
- * the destructive deeds behind one separator.
- */
-function RowActionItems({ actions }: { actions: RowAction[] }) {
-  const plain = actions.filter((action) => !action.destructive);
-  const destructive = actions.filter((action) => action.destructive);
-  const item = (action: RowAction) => {
-    const Icon = action.icon;
-    const body = (
-      <>
-        <Icon />
-        {action.label}
-      </>
-    );
-    return (
-      <DropdownMenuItem
-        key={action.id}
-        variant={action.destructive ? "destructive" : "default"}
-        disabled={action.disabled}
-        onSelect={action.onSelect}
-        asChild={action.href !== undefined}
-        {...(action.testId ? { "data-testid": action.testId } : {})}
-      >
-        {action.href !== undefined ? <Link to={action.href}>{body}</Link> : body}
-      </DropdownMenuItem>
-    );
-  };
-  return (
+function RowActionItem({ action }: { action: RowAction }) {
+  const Icon = action.icon;
+  const body = (
     <>
-      {plain.map(item)}
-      {plain.length > 0 && destructive.length > 0 && <DropdownMenuSeparator />}
-      {destructive.map(item)}
+      <Icon />
+      {action.label}
     </>
+  );
+  return (
+    <DropdownMenuItem
+      variant={action.destructive ? "destructive" : "default"}
+      disabled={action.disabled}
+      onSelect={action.onSelect}
+      asChild={action.href !== undefined}
+      {...(action.testId ? { "data-testid": action.testId } : {})}
+    >
+      {action.href !== undefined ? <Link to={action.href}>{body}</Link> : body}
+    </DropdownMenuItem>
   );
 }
 
@@ -76,9 +46,10 @@ function RowActionItems({ actions }: { actions: RowAction[] }) {
  * the detail through `rowHref`) is the table's, not this component's.
  * Callers own the menu items because permissions and pending states belong to
  * the resource, not to the table primitive: they pass `actions` (ordered and
- * separated here) or, for a menu `actions` cannot say (sub-menus, a rich item),
- * their own `children`. A row with nothing to offer renders no menu at all (no
- * `menuLabel`, or no visible action and no children).
+ * separated here) and, for what `actions` cannot say (sub-menus, a hint, a rich
+ * item), their own `children`, drawn after the plain deeds and before the
+ * destructive ones. A row with nothing to offer renders no menu at all (no
+ * `menuLabel`, or no visible action and no rendered child).
  */
 export function TableRowActions({
   menuLabel,
@@ -101,20 +72,13 @@ export function TableRowActions({
 }) {
   const { t } = useTranslation("common");
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const visible = actions?.filter((action) => !action.hidden) ?? [];
-  const items =
-    visible.length > 0 ? (
-      <>
-        <RowActionItems actions={visible} />
-        {children}
-      </>
-    ) : (
-      children
-    );
+  const { plain, destructive } = orderRowActions(actions ?? []);
+  const hasChildren = Children.toArray(children).length > 0;
+  const hasItems = plain.length > 0 || destructive.length > 0 || hasChildren;
   return (
     <div className="relative z-10 flex items-center justify-end gap-1">
       {isPending && <Spinner label={t("loading")} />}
-      {items && menuLabel && (
+      {hasItems && menuLabel && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -140,7 +104,16 @@ export function TableRowActions({
               field?.select();
             }}
           >
-            {items}
+            {plain.map((action) => (
+              <RowActionItem key={action.id} action={action} />
+            ))}
+            {children}
+            {(plain.length > 0 || hasChildren) && destructive.length > 0 && (
+              <DropdownMenuSeparator />
+            )}
+            {destructive.map((action) => (
+              <RowActionItem key={action.id} action={action} />
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
       )}

@@ -15,7 +15,7 @@ import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { DataTable } from "@/components/data-table";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
 import { PageActionsMenu } from "@/components/page-actions-menu";
-import { ErrorState, EmptyState, EmptyStateAction } from "@/components/page-states";
+import { EmptyState, EmptyStateAction } from "@/components/page-states";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useModalParam, useModalTarget } from "@/hooks/use-modal-param";
 import { useOAuthClients } from "../hooks/use-oauth-clients";
@@ -72,8 +72,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
           t("settings:oauthClients.editClient", { name: client.name ?? client.clientId })
         }
         isLoading={isLoading}
-        isError={Boolean(error)}
-        error={<ErrorState error={error} compact />}
+        failure={error}
         empty={
           <EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound}>
             {canWrite && (

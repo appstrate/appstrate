@@ -21,6 +21,7 @@ import type { DataColumn } from "./data-table";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { CountBadge } from "./count-badge";
 import { ActorLabel } from "./actor-label";
+import { CellDate, CellText } from "./table-cells";
 import { formatDateField } from "../lib/format-date";
 import { scheduleNextRunAt } from "../lib/schedule-options";
 import { describeSchedule } from "../lib/frequency-summary";
@@ -55,9 +56,7 @@ export function useScheduleColumns({
           {/* Which agent it fires: the whole point of a schedule, and the card
               only showed it inside the next-run strip, so a disabled schedule
               did not say it at all. */}
-          {showAgentName && (
-            <span className="text-muted-foreground truncate text-xs">{agentName(schedule)}</span>
-          )}
+          {showAgentName && <CellText>{agentName(schedule)}</CellText>}
         </div>
       ),
     },
@@ -98,17 +97,11 @@ export function useScheduleColumns({
       id: "next",
       header: t("schedules.column.next"),
       width: "minmax(110px,1fr)",
+      align: "end",
       tier: 3,
-      cell: (schedule) => {
-        const nextRunAt = scheduleNextRunAt(schedule);
-        return nextRunAt ? (
-          <span className="truncate text-xs">
-            {formatDateField(nextRunAt, "datetime", schedule.timezone)}
-          </span>
-        ) : (
-          <span className="text-muted-foreground/50">—</span>
-        );
-      },
+      cell: (schedule) => (
+        <CellDate value={scheduleNextRunAt(schedule)} timeZone={schedule.timezone} />
+      ),
     },
     {
       id: "last",

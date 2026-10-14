@@ -46,14 +46,8 @@ import {
   TableRow,
 } from "@appstrate/ui/components/table";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { FormItem } from "@appstrate/ui/components/field";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "../page-actions-menu";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
@@ -261,16 +255,24 @@ function FieldRow({
         {field.prop.description || "—"}
       </TableCell>
       <TableCell className="text-right">
-        <TableRowActions menuLabel={t("editor.fieldActions", { name: field.key })}>
-          <DropdownMenuItem onSelect={onEdit}>
-            <Pencil />
-            {t("btn.edit", { ns: "common" })}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onRemove} className="text-destructive focus:text-destructive">
-            <Trash2 />
-            {t("btn.delete", { ns: "common" })}
-          </DropdownMenuItem>
-        </TableRowActions>
+        <TableRowActions
+          menuLabel={t("editor.fieldActions", { name: field.key })}
+          actions={[
+            {
+              id: "edit",
+              label: t("btn.edit", { ns: "common" }),
+              icon: Pencil,
+              onSelect: onEdit,
+            },
+            {
+              id: "remove",
+              label: t("btn.delete", { ns: "common" }),
+              icon: Trash2,
+              onSelect: onRemove,
+              destructive: true,
+            },
+          ]}
+        />
       </TableCell>
     </TableRow>
   );
@@ -344,7 +346,8 @@ function FieldModal({
           </Row>
           <Row label={t("editor.fieldTypeLabel")}>
             {(id) => (
-              <Select
+              <OptionSelect
+                id={id}
                 value={isFile ? "file" : type}
                 onValueChange={(v) => {
                   if (v === "file") {
@@ -354,21 +357,13 @@ function FieldModal({
                   const next = TYPE_OPTIONS.find((o) => o === v);
                   if (next && (isFile || next !== type)) setProp(changeType(prop, next));
                 }}
-              >
-                <SelectTrigger id={id}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TYPE_OPTIONS.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
-                    </SelectItem>
-                  ))}
-                  {mode === "input" && (
-                    <SelectItem value="file">{t("editor.fieldTypeFile")}</SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
+                options={[
+                  ...TYPE_OPTIONS.map((option) => ({ value: option, label: option })),
+                  ...(mode === "input"
+                    ? [{ value: "file", label: t("editor.fieldTypeFile") }]
+                    : []),
+                ]}
+              />
             )}
           </Row>
         </div>
@@ -508,23 +503,17 @@ function FieldModal({
                       <>
                         <Row label={t("editor.fieldFormat")}>
                           {(id) => (
-                            <Select
+                            <OptionSelect
+                              id={id}
                               value={prop.format || "__none"}
                               onValueChange={(v) =>
                                 setProp(setKeyword(prop, "format", v === "__none" ? undefined : v))
                               }
-                            >
-                              <SelectTrigger id={id}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {STRING_FORMATS.map((format) => (
-                                  <SelectItem key={format || "__none"} value={format || "__none"}>
-                                    {format || "—"}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              options={STRING_FORMATS.map((format) => ({
+                                value: format || "__none",
+                                label: format || "—",
+                              }))}
+                            />
                           )}
                         </Row>
                         <Row label={t("editor.fieldMinLength")}>
@@ -614,14 +603,12 @@ function Row({
   label: string;
   error?: string | null;
   /** Renders the control, given the id its label names. */
-  children: (id: string) => React.ReactNode;
+  children: (id: string) => React.ReactElement;
 }) {
   const id = useId();
   return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
+    <FormItem id={id} label={label} error={error ?? undefined}>
       {children(id)}
-      {error && <p className="text-destructive text-xs">{error}</p>}
-    </div>
+    </FormItem>
   );
 }

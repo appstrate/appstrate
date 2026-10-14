@@ -8,6 +8,7 @@ import { Modal } from "@/components/modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { Spinner } from "@/components/spinner";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleEvent } from "../hooks/use-webhooks";
@@ -130,10 +131,13 @@ function WebhookCreateForm({
       }
     >
       <form id="create-webhook-form" onSubmit={onSubmit} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="webhook-url">{t("settings:webhooks.urlLabel")}</Label>
+        <FormItem
+          id="webhook-url"
+          label={t("settings:webhooks.urlLabel")}
+          hint={errors.url ? undefined : t("settings:webhooks.urlHint")}
+          error={errors.url ? t("settings:webhooks.urlHint") : undefined}
+        >
           <Input
-            id="webhook-url"
             type="url"
             {...register("url", {
               required: true,
@@ -142,12 +146,7 @@ function WebhookCreateForm({
             placeholder={t("settings:webhooks.urlPlaceholder")}
             autoFocus
           />
-          {errors.url ? (
-            <p className="text-destructive text-xs">{t("settings:webhooks.urlHint")}</p>
-          ) : (
-            <p className="text-muted-foreground text-xs">{t("settings:webhooks.urlHint")}</p>
-          )}
-        </div>
+        </FormItem>
 
         {/* Never create an organization-wide webhook without saying so. */}
         {levels.length === 1 && level === "org" && (
@@ -181,7 +180,7 @@ function WebhookCreateForm({
           idPrefix="create-"
         />
 
-        {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
+        <FieldError>{errors.root?.message}</FieldError>
       </form>
     </Modal>
   );

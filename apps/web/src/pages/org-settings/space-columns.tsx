@@ -17,10 +17,11 @@
 import { useTranslation } from "react-i18next";
 import { FolderInput, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { components } from "../../api/client";
 import type { DataColumn } from "../../components/data-table";
 import { TableRowActions } from "../../components/table-row-actions";
+import { rowActionsColumn } from "../../components/row-actions-column";
+import { CellText } from "../../components/table-cells";
 import { formatDateField } from "../../lib/format-date";
 import { spaceLabel } from "../../lib/space-label";
 import { isSpaceEnterable } from "../../hooks/use-current-space";
@@ -57,15 +58,15 @@ export function useSpaceColumns({
       header: t("spaces.nameLabel"),
       width: "minmax(160px,1.6fr)",
       cell: (space) => (
-        <span
-          className="block truncate text-sm font-medium"
+        <CellText
+          strong
           // A `closed` space is listed so the caller knows it exists, not so they
           // can be dropped into it (pinning one 403s every space-scoped request,
           // same rule as the org switcher): its row is static and says why.
           title={isSpaceEnterable(space) ? spaceLabel(space, t) : t("spaces.requestAccess")}
         >
           {spaceLabel(space, t)}
-        </span>
+        </CellText>
       ),
     },
     {
@@ -106,41 +107,35 @@ export function useSpaceColumns({
         </span>
       ),
     },
-    {
-      id: "actions",
-      header: "",
-      width: "48px",
-      align: "end",
-      cell: (space) => {
-        // An orphan cannot be entered — its owner is gone — so it offers the
-        // two acts that resolve it. Every other row has no menu: a click on it
-        // opens its settings, which is its one deed.
-        const orphaned = Boolean(space.orphaned_at);
-        if (orphaned && (onConvert || onSweep)) {
-          return (
-            <TableRowActions menuLabel={t("spaces.rowActions", { name: spaceLabel(space, t) })}>
-              {onConvert && (
-                <DropdownMenuItem disabled={actionsBusy} onSelect={() => onConvert(space.id)}>
-                  <FolderInput />
-                  {t("spaces.personal.convert")}
-                </DropdownMenuItem>
-              )}
-              {onConvert && onSweep && <DropdownMenuSeparator />}
-              {onSweep && (
-                <DropdownMenuItem
-                  className="text-destructive focus:text-destructive"
-                  disabled={actionsBusy}
-                  onSelect={() => onSweep(space.id)}
-                >
-                  <Trash2 />
-                  {t("spaces.personal.sweep")}
-                </DropdownMenuItem>
-              )}
-            </TableRowActions>
-          );
-        }
-        return null;
-      },
-    },
+    rowActionsColumn((space: SpaceRow) => {
+      // An orphan cannot be entered — its owner is gone — so it offers the
+      // two acts that resolve it. Every other row has no menu: a click on it
+      // opens its settings, which is its one deed.
+      const orphaned = Boolean(space.orphaned_at);
+      return (
+        <TableRowActions
+          menuLabel={t("spaces.rowActions", { name: spaceLabel(space, t) })}
+          actions={[
+            {
+              id: "convert",
+              label: t("spaces.personal.convert"),
+              icon: FolderInput,
+              onSelect: () => onConvert?.(space.id),
+              disabled: actionsBusy,
+              hidden: !orphaned || !onConvert,
+            },
+            {
+              id: "sweep",
+              label: t("spaces.personal.sweep"),
+              icon: Trash2,
+              onSelect: () => onSweep?.(space.id),
+              disabled: actionsBusy,
+              destructive: true,
+              hidden: !orphaned || !onSweep,
+            },
+          ]}
+        />
+      );
+    }),
   ];
 }

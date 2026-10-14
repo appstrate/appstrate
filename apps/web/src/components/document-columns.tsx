@@ -4,10 +4,11 @@ import { useTranslation } from "react-i18next";
 import { formatBytes } from "../lib/format-bytes";
 import type { FileDto } from "../hooks/use-files";
 import { mimeKind } from "../lib/files";
-import { formatDateField } from "../lib/format-date";
 import type { DataColumn } from "./data-table";
 import { DocumentRowActions } from "./document-row-actions";
 import { ExpiryBadge } from "./file-tile";
+import { rowActionsColumn } from "./row-actions-column";
+import { CellDate, CellText } from "./table-cells";
 
 export function useDocumentColumns({
   pendingKeepId,
@@ -40,22 +41,14 @@ export function useDocumentColumns({
       header: t("column.purpose"),
       width: "104px",
       tier: 2,
-      cell: (doc) => (
-        <span className="text-muted-foreground truncate text-xs">
-          {t(`purpose.${doc.purpose}`)}
-        </span>
-      ),
+      cell: (doc) => <CellText>{t(`purpose.${doc.purpose}`)}</CellText>,
     },
     {
       id: "type",
       header: t("column.type"),
       width: "92px",
       tier: 2,
-      cell: (doc) => (
-        <span className="text-muted-foreground relative z-10 truncate text-xs" title={doc.mime}>
-          {t(`type.${mimeKind(doc.mime)}`)}
-        </span>
-      ),
+      cell: (doc) => <CellText title={doc.mime}>{t(`type.${mimeKind(doc.mime)}`)}</CellText>,
     },
     {
       id: "size",
@@ -72,11 +65,8 @@ export function useDocumentColumns({
       header: t("column.created"),
       width: "112px",
       tier: 3,
-      cell: (doc) => (
-        <span className="text-muted-foreground text-xs">
-          {formatDateField(doc.createdAt, "datetime")}
-        </span>
-      ),
+      align: "end",
+      cell: (doc) => <CellDate value={doc.createdAt} granularity="datetime" />,
     },
     {
       id: "retention",
@@ -93,21 +83,15 @@ export function useDocumentColumns({
         </span>
       ),
     },
-    {
-      id: "actions",
-      header: "",
-      width: "80px",
-      align: "end",
-      cell: (doc) => (
-        <DocumentRowActions
-          doc={doc}
-          isPending={pendingKeepId === doc.id}
-          showRunLink={showRunLink}
-          onDownload={onDownload}
-          onKeep={onKeep}
-          onDelete={onDelete}
-        />
-      ),
-    },
+    rowActionsColumn((doc) => (
+      <DocumentRowActions
+        doc={doc}
+        isPending={pendingKeepId === doc.id}
+        showRunLink={showRunLink}
+        onDownload={onDownload}
+        onKeep={onKeep}
+        onDelete={onDelete}
+      />
+    )),
   ];
 }

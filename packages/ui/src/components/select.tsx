@@ -157,5 +157,4 @@ export {
   SelectTrigger,
   SelectContent,
   SelectItem,
-  type SelectOption,
 };

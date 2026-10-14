@@ -27,11 +27,11 @@ import { useState } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
-import { cn } from "@appstrate/ui/cn";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { TestResultSpan } from "./test-result-span";
+import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -215,8 +215,8 @@ function CredentialFormBody({
           setTestResult({
             ok: false,
             latency: 0,
-            error: "NETWORK_ERROR",
-            message: "Request failed",
+            error: "INTERNAL_ERROR",
+            message: t("test.failed", { ns: "common" }),
           }),
       },
     );
@@ -285,23 +285,42 @@ function CredentialFormBody({
       ? t("credentials.form.reconnectTitle", { label: credential.label })
       : t("credentials.form.editTitle", { label: credential.label });
 
+  const providerPicker = (
+    <Select value={pickerValue} onValueChange={handleProviderChange} disabled={isEditing}>
+      <SelectTrigger id="pk-provider">
+        <SelectValue placeholder={t("models.form.providerPlaceholder")} />
+      </SelectTrigger>
+      <SelectContent>
+        <ProviderPickerGroups
+          items={pickerRows}
+          featuredLabel={t("models.form.providerGroupFeatured")}
+          otherLabel={t("models.form.providerGroupOther")}
+          renderItem={(row) =>
+            row.kind === "customEndpoint" ? (
+              <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} />
+            ) : (
+              <PickerOptionItem key={row.entry.id} option={row.entry} t={t} />
+            )
+          }
+        />
+      </SelectContent>
+    </Select>
+  );
+
   const labelField = (
-    <div className="space-y-2">
-      <Label htmlFor="pk-label">{t("credentials.form.label")}</Label>
+    <FormItem
+      id="pk-label"
+      label={t("credentials.form.label")}
+      error={showError("label") ? errors.label?.message : undefined}
+    >
       <Input
-        id="pk-label"
         type="text"
         {...register("label", {
           validate: (v) => (!v.trim() ? t("validation.required", { ns: "common" }) : undefined),
         })}
         placeholder={t("credentials.form.labelPlaceholder")}
-        aria-invalid={showError("label") ? true : undefined}
-        className={cn(showError("label") && "border-destructive")}
       />
-      {showError("label") && errors.label?.message && (
-        <div className="text-destructive text-sm">{errors.label.message}</div>
-      )}
-    </div>
+    </FormItem>
   );
 
   // OAuth-selected: the pairing body owns the connection (the helper POSTs creds back). A new
@@ -319,25 +338,7 @@ function CredentialFormBody({
             {!isEditing && (
               <div className="space-y-2">
                 <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
-                <Select value={pickerValue} onValueChange={handleProviderChange}>
-                  <SelectTrigger id="pk-provider">
-                    <SelectValue placeholder={t("models.form.providerPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <ProviderPickerGroups
-                      items={pickerRows}
-                      featuredLabel={t("models.form.providerGroupFeatured")}
-                      otherLabel={t("models.form.providerGroupOther")}
-                      renderItem={(row) =>
-                        row.kind === "customEndpoint" ? (
-                          <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} />
-                        ) : (
-                          <PickerOptionItem key={row.entry.id} option={row.entry} t={t} />
-                        )
-                      }
-                    />
-                  </SelectContent>
-                </Select>
+                {providerPicker}
               </div>
             )}
             {showPairing && (
@@ -396,25 +397,7 @@ function CredentialFormBody({
       <form id="pk-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
-          <Select value={pickerValue} onValueChange={handleProviderChange} disabled={isEditing}>
-            <SelectTrigger id="pk-provider">
-              <SelectValue placeholder={t("models.form.providerPlaceholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              <ProviderPickerGroups
-                items={pickerRows}
-                featuredLabel={t("models.form.providerGroupFeatured")}
-                otherLabel={t("models.form.providerGroupOther")}
-                renderItem={(row) =>
-                  row.kind === "customEndpoint" ? (
-                    <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} />
-                  ) : (
-                    <PickerOptionItem key={row.entry.id} option={row.entry} t={t} />
-                  )
-                }
-              />
-            </SelectContent>
-          </Select>
+          {providerPicker}
           {/* The organization's form: a member's own subscription is connected elsewhere. */}
           {!personal && !isEditing && (
             <p className="text-muted-foreground text-sm">
@@ -448,25 +431,18 @@ function CredentialFormBody({
           />
         ) : (
           !!selectedProvider && (
-            <div className="space-y-2">
-              <Label htmlFor="pk-apiKey">{t("credentials.form.apiKey")}</Label>
+            <FormItem
+              id="pk-apiKey"
+              label={t("credentials.form.apiKey")}
+              hint={credential ? t("credentials.form.apiKeyHint") : undefined}
+              error={showError("apiKey") ? errors.apiKey?.message : undefined}
+            >
               <Input
-                id="pk-apiKey"
                 type="password"
                 {...register("apiKey", { validate: apiKeyValidate })}
                 placeholder={t("credentials.form.apiKeyPlaceholder")}
-                aria-invalid={showError("apiKey") ? true : undefined}
-                className={cn(showError("apiKey") && "border-destructive")}
               />
-              {credential && (
-                <div className="text-muted-foreground text-sm">
-                  {t("credentials.form.apiKeyHint")}
-                </div>
-              )}
-              {showError("apiKey") && errors.apiKey?.message && (
-                <div className="text-destructive text-sm">{errors.apiKey.message}</div>
-              )}
-            </div>
+            </FormItem>
           )
         )}
       </form>
