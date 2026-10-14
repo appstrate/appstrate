@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.67] - 2026-10-14
+
 ### Operators
 
 - **Before the deploy, check `EGRESS_ALLOW_INTERNAL_HOSTS`.** A malformed entry
