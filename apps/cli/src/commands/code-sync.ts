@@ -369,16 +369,21 @@ async function resolveAll(
   // One queue for both kinds, so the cap holds across them. `null` = nothing to sync.
   type Resolved =
     { kind: "skill"; value: ResolvedSkill } | { kind: "agent"; value: AgentLaunchView } | null;
+  /** `key`: the job's {@link claimKey}, the identity its outcome is recorded under. */
   type Job =
-    | { kind: "skill"; packageId: string; source: SkillSource }
-    | { kind: "agent"; packageId: string; source: SkillSource; space: Space };
+    | { kind: "skill"; packageId: string; key: string; source: SkillSource }
+    | { kind: "agent"; packageId: string; key: string; source: SkillSource; space: Space };
   const jobs: Job[] = [
-    ...[...origins.keys()]
-      .sort()
-      .map((packageId) => ({ packageId, kind: "skill" as const, source })),
+    ...[...origins.keys()].sort().map((packageId) => ({
+      packageId,
+      key: claimKey({ packageId }),
+      kind: "skill" as const,
+      source,
+    })),
     // A system agent has no draft: `?version=draft` is refused to everyone.
     ...agents.map(({ packageId, system, space }) => ({
       packageId,
+      key: claimKey({ packageId, spaceId: space.id }),
       kind: "agent" as const,
       source: system ? ("published" as const) : source,
       space,
@@ -411,11 +416,7 @@ async function resolveAll(
     if ("error" in entry) {
       if (fixOf(entry.error)) throw entry.error;
       // A refused draft is refused again next run: it goes, like a failed render.
-      if (!isDraftRefusal(entry.error)) {
-        const claimant =
-          job.kind === "agent" ? { packageId, spaceId: job.space.id } : { packageId };
-        unresolved.set(claimKey(claimant), job.kind);
-      }
+      if (!isDraftRefusal(entry.error)) unresolved.set(job.key, job.kind);
       report.skill(`Skipped ${label}: ${formatError(entry.error)}`);
     } else if (!entry.resolved) {
       const what = job.source === "draft" ? "draft" : "published version";

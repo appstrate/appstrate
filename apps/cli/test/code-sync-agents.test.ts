@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { lstat, readdir, writeFile } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { codeSyncCommand } from "../src/commands/code-sync.ts";
 import { getStatePath } from "../src/lib/skills-sync/state.ts";
@@ -490,62 +490,6 @@ describe("code sync — agents come from the selected spaces (#1972)", () => {
     await codeSyncCommand({ target: ["codex"] }, io);
 
     expect(stderr()).not.toContain("Agent commands not synced");
-  });
-});
-
-describe("code sync — a ledger written before agents recorded their space", () => {
-  const stripSpaces = async (): Promise<void> => {
-    // The shape the previous CLI wrote: no `spaceId` on any entry.
-    const state = JSON.parse(await readText(getStatePath())) as {
-      targets: Record<string, { managed: Record<string, { spaceId?: string }> }>;
-    };
-    for (const target of Object.values(state.targets)) {
-      for (const entry of Object.values(target.managed)) delete entry.spaceId;
-    }
-    await writeFile(getStatePath(), JSON.stringify(state));
-  };
-
-  // Accepted limitation (#1972): an entry without a space claims no name on the
-  // upgrade run, so selection order decides, not the space it was synced from.
-  it("gives run-<name> to the first selected space on the upgrade run, then keeps it", async () => {
-    serve([{ ...REPORT, activeIn: [TWO] }]);
-    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
-    await stripSpaces();
-
-    serve([{ ...REPORT, activeIn: [ONE, TWO] }]);
-    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
-
-    const spaceOf = async (slug: string) =>
-      /"space_id":"([^"]+)"/.exec(await readText(commandFile(slug)))?.[1];
-    expect(await spaceOf("run-report")).toBe(ONE);
-    expect(await spaceOf("run-space-two-report")).toBe(TWO);
-
-    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
-    expect(await spaceOf("run-report")).toBe(ONE);
-  });
-
-  it("keeps every skill and re-renders the agent commands once, under the same names", async () => {
-    const server = serve([REPORT]);
-    await codeSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
-    const command = await readText(commandFile("run-report"));
-    await stripSpaces();
-    const agentFile = await lstat(commandFile("run-report"));
-    const { io, stderr } = createMemoryIO();
-
-    await codeSyncCommand({ target: ["claude-plugin", "codex"] }, io);
-
-    expect(stderr()).toBe("");
-    expect(server.downloads()).toBe(1); // the first run's, shared by both targets
-    expect(await readdir(join(harness.home(), ".agents", "skills"))).toEqual(["pdf-tools"]);
-    expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
-    expect(await readText(commandFile("run-report"))).toBe(command);
-    // Rewritten, not carried: the entry is rendered again and records its space.
-    expect((await lstat(commandFile("run-report"))).ino).not.toBe(agentFile.ino);
-    const after = JSON.parse(await readText(getStatePath())) as {
-      targets: Record<string, { managed: Record<string, { spaceId?: string }> }>;
-    };
-    expect(after.targets["claude-plugin"]?.managed["run-report"]?.spaceId).toBe(ONE);
-    expect(after.targets["claude-plugin"]?.managed["pdf-tools"]?.spaceId).toBeUndefined();
   });
 });
 

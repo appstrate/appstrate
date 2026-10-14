@@ -464,7 +464,7 @@ It contains no tokens. The setup plugin has no MCP configuration. In Claude Code
 
 **MCP reaches every space.** The organization's URL is not pinned to a space: it reaches every space you hold a role in, as the claude.ai connector does, and each tool call that acts in a space names it (`space_id`). An agent command names its own space. A free-form request has no implicit space: Claude takes `space_id` from what you asked, or asks you which space when several could serve; `appstrate space list` shows them. `--space`, `syncSpaces` and the CLI's pinned space change nothing here.
 
-**Upgrading or switching organizations.** The first sync after this CLI upgrade changes the plugin's content hash even if the skills are unchanged. A plugin synced by a CLI that pinned its MCP server to a space (`/s/<space>` in the URL) gets the organization's URL instead, and Claude Code keys an MCP login on the URL: expect one more `/mcp` login. Switching instance or organization also rewrites the connection; switching space does not. To apply it immediately:
+**Upgrading or switching organizations.** The first sync after this CLI upgrade changes the plugin's content hash even if the skills are unchanged. Switching instance or organization also rewrites the connection; switching space does not. To apply it immediately:
 
 ```sh
 appstrate org switch <id-or-slug>        # when changing organizations
