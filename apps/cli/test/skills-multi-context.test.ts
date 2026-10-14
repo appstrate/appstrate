@@ -176,7 +176,7 @@ describe("multi-space skill distribution regressions", () => {
       "Library-only draft reference",
     );
     const mcp = JSON.parse(await readFile(join(pluginRoot(), ".mcp.json"), "utf8"));
-    expect(mcp.mcpServers.appstrate.url).toEndWith("/s/spc_active");
+    expect(mcp.mcpServers.appstrate.url).toEndWith("/api/mcp/o/org_1");
     expect((await getProfile("default"))?.spaceId).toBe("spc_active");
   });
 
@@ -291,21 +291,19 @@ describe("multi-space skill distribution — access decides the sources", () => 
     expect(stderr()).not.toMatch(/not accessible/);
   });
 
-  it("warns when the pinned space died, and still syncs the spaces that live", async () => {
-    // The pin no longer supplies any skill, so nothing else in the run would
-    // notice it broke — but it is still what `.mcp.json` sends.
+  it("syncs the spaces that live when the pinned space died, without a word about the pin", async () => {
     installSpaces(TWO_SPACES, BOTH, { reachable: ["spc_library"] });
     const { io, stderr } = createMemoryIO();
 
     await codeSyncCommand({ target: ["claude-plugin"] }, io);
 
-    expect(stderr()).toContain('Pinned space "spc_active" is not accessible');
+    expect(stderr()).not.toMatch(/pinned/i);
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
       "library-only",
       "shared",
     ]);
     const mcp = JSON.parse(await readFile(join(pluginRoot(), ".mcp.json"), "utf8"));
-    expect(mcp.mcpServers.appstrate.url).toEndWith("/s/spc_active");
+    expect(mcp.mcpServers.appstrate.url).toEndWith("/api/mcp/o/org_1");
   });
 
   // A space the org lists so a member can ASK to join it (`closed`,
@@ -366,7 +364,9 @@ describe("multi-space skill distribution — access decides the sources", () => 
     ).rejects.toBeInstanceOf(CommandExit);
 
     // Distinct from "no space matches": the id IS listed, it just cannot be used.
-    expect(stderr()).toContain("cannot supply skills: you are not a member of it");
+    expect(stderr()).toContain(
+      "cannot supply skills or agent commands: you are not a member of it",
+    );
     expect(stderr()).not.toMatch(/No space matches/);
     expect(stdout()).toBe("");
     expect(await snapshot(pluginRoot())).toEqual(before);
@@ -384,16 +384,14 @@ describe("multi-space skill distribution — access decides the sources", () => 
     expect(stderr()).toContain('Space "Closed" (spc_closed) cannot supply skills');
   });
 
-  it("warns about the pinned space when it is listed but not joined", async () => {
-    // The MCP header carries the pin, and the server refuses it for a space
-    // with no membership exactly as it does for one that is not listed at all.
+  it("drops a pinned space that is listed but not joined, like any other", async () => {
     installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_active"] });
     const { io, stderr } = createMemoryIO();
 
     await codeSyncCommand({ target: ["claude-plugin"] }, io);
 
-    expect(stderr()).toContain('Pinned space "spc_active" is not accessible');
-    // The pin supplies nothing any more; the spaces this member did join do.
+    expect(stderr()).not.toMatch(/pinned/i);
+    // The pin supplies nothing; the spaces this member did join do.
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
       "closed",
       "library-only",
