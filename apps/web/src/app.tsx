@@ -17,6 +17,14 @@ import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
 import { OverlayExitProvider, OverlayProvider, useOverlayState } from "./lib/modal-route";
+import {
+  catalogueChunk,
+  orgSettingsGeneralChunk,
+  preferencesGeneralChunk,
+  settingsLayoutChunk,
+  workspaceSettingsGeneralChunk,
+} from "./lib/overlay-chunks";
+import { chunkComponent } from "./lib/lazy-chunk";
 import { OverlayUnavailable } from "./components/overlay-unavailable";
 import { ShellFrameProvider, ShellHeader } from "./components/shell-frame";
 import { LoadingState } from "./components/page-states";
@@ -122,24 +130,13 @@ const OnboardingDoneStep = lazy(() =>
 const OnboardingWaitingStep = lazy(() =>
   import("./pages/onboarding/waiting-step").then((m) => ({ default: m.OnboardingWaitingStep })),
 );
-const UnifiedSettingsLayout = lazy(() =>
-  import("./pages/settings/layout").then((m) => ({
-    default: m.UnifiedSettingsLayout,
-  })),
-);
-const CataloguePage = lazy(() =>
-  import("./pages/catalogue").then((m) => ({ default: m.CataloguePage })),
-);
-const CatalogueIndexRedirect = lazy(() =>
-  import("./pages/catalogue").then((m) => ({ default: m.CatalogueIndexRedirect })),
-);
-const SettingsIndexRedirect = lazy(() =>
-  import("./pages/settings/layout").then((m) => ({
-    default: m.SettingsIndexRedirect,
-  })),
-);
-const OrgSettingsGeneralPage = lazy(() =>
-  import("./pages/org-settings/general").then((m) => ({ default: m.OrgSettingsGeneralPage })),
+const UnifiedSettingsLayout = chunkComponent(settingsLayoutChunk, (m) => m.UnifiedSettingsLayout);
+const CataloguePage = chunkComponent(catalogueChunk, (m) => m.CataloguePage);
+const CatalogueIndexRedirect = chunkComponent(catalogueChunk, (m) => m.CatalogueIndexRedirect);
+const SettingsIndexRedirect = chunkComponent(settingsLayoutChunk, (m) => m.SettingsIndexRedirect);
+const OrgSettingsGeneralPage = chunkComponent(
+  orgSettingsGeneralChunk,
+  (m) => m.OrgSettingsGeneralPage,
 );
 const OrgSettingsMembersPage = lazy(() =>
   import("./pages/org-settings/members").then((m) => ({ default: m.OrgSettingsMembersPage })),
@@ -174,10 +171,9 @@ const OrgSettingsSpacesPage = lazy(() =>
     default: m.OrgSettingsSpacesPage,
   })),
 );
-const WorkspaceSettingsGeneralPage = lazy(() =>
-  import("./pages/workspace-settings/general").then((m) => ({
-    default: m.WorkspaceSettingsGeneralPage,
-  })),
+const WorkspaceSettingsGeneralPage = chunkComponent(
+  workspaceSettingsGeneralChunk,
+  (m) => m.WorkspaceSettingsGeneralPage,
 );
 const WorkspaceSettingsMembersPage = lazy(() =>
   import("./pages/workspace-settings/members").then((m) => ({
@@ -192,8 +188,9 @@ const WorkspaceSettingsOAuthPage = lazy(() =>
     default: m.WorkspaceSettingsOAuthPage,
   })),
 );
-const PreferencesGeneralPage = lazy(() =>
-  import("./pages/preferences/general").then((m) => ({ default: m.PreferencesGeneralPage })),
+const PreferencesGeneralPage = chunkComponent(
+  preferencesGeneralChunk,
+  (m) => m.PreferencesGeneralPage,
 );
 const PreferencesAppearancePage = lazy(() =>
   import("./pages/preferences/appearance").then((m) => ({ default: m.PreferencesAppearancePage })),
