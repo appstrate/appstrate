@@ -18,7 +18,7 @@ await i18nReady;
 await i18n.changeLanguage("fr");
 
 const BOUND = { id: "mdl_1", credentialId: "cred_org", binding: "org" } as OrgModelInfo;
-const LEFT_TO_MEMBERS = { id: "mdl_m", credentialId: null, binding: "member" } as OrgModelInfo;
+const LEFT_TO_MEMBERS = { id: "mdl_m", credentialId: null, binding: "user" } as OrgModelInfo;
 
 describe("SavedModelActions", () => {
   it("tests the model, and deletes it when the caller may", () => {

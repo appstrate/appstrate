@@ -8,7 +8,7 @@
  *
  * - an **organization key** serves the models bound to it (`credentialId`);
  * - a **personal key** or **personal subscription** serves the models left unbound
- *   (`binding: "member"`) that its holder can use with it;
+ *   (`binding: "user"`) that its holder can use with it;
  * - the **instance** serves the models it ships (built-in, or managed aliases).
  *
  * A key the caller cannot read (a role with `models:read` alone gets no credential row) still
@@ -56,7 +56,7 @@ export function isSystemModel(m: OrgModelInfo): boolean {
 
 /** The models an organization leaves to each person's own key or subscription. */
 export function memberModels(models: readonly OrgModelInfo[]): OrgModelInfo[] {
-  return models.filter((m) => m.binding === "member" && !isSystemModel(m));
+  return models.filter((m) => m.binding === "user" && !isSystemModel(m));
 }
 
 /**
@@ -188,7 +188,7 @@ export function providerRows(
 
 /**
  * Whether the organization may leave a service's models to each person's own key or subscription
- * (`binding: "member"`): the service is open to personal keys, and its listing needs no key to ask
+ * (`binding: "user"`): the service is open to personal keys, and its listing needs no key to ask
  * with, which a model left to everyone has none of. The model form's « Clé perso » and the
  * personal keys' « Choose the models » both read it.
  */

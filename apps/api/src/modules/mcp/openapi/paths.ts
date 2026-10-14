@@ -84,13 +84,14 @@ const MCP_TOOLS_DESCRIPTION =
   "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
   "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +
   "(whatever guards the `listFiles` operation's own route), `import_package_file`, and " +
-  "`list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own`, on a " +
+  "`list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own` or " +
+  "`credential-proxy:call`, on a " +
   "bearer credential the credential proxy accepts) — are " +
   "declared only to a caller whose grants make them usable, so `tools/list` differs by " +
   "role. Together they let an MCP client discover and call platform API operations, " +
   "launch and wait for agent runs, and call third-party APIs through the caller's own " +
-  "connections (and those shared into the space, for a caller who also holds " +
-  "`credential-proxy:call-run`), with the caller's own credentials. `api_call` is the only " +
+  "connections (and those shared into the space, for a caller holding " +
+  "`credential-proxy:call`), with the caller's own credentials. `api_call` is the only " +
   "MCP path to the " +
   "credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves.";
 

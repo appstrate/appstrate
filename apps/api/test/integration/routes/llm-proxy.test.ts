@@ -99,11 +99,13 @@ async function buildHarness(overrides?: {
   upstreamKey?: string;
   scopes?: string[];
   aliased?: boolean;
+  providerId?: string;
 }): Promise<Harness> {
   const ctx = await createTestContext({ orgSlug: "llmproxyorg" });
   const providerKey = await seedOrgModelProviderKey({
     orgId: ctx.orgId,
     label: "Upstream",
+    providerId: overrides?.providerId,
     apiShape: overrides?.apiShape ?? "openai-completions",
     baseUrl: overrides?.baseUrl ?? "https://api.openai.test/v1",
     apiKey: overrides?.upstreamKey ?? "sk-upstream-42",
@@ -335,12 +337,9 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
   });
 
   it("surfaces 409 model_provider_unregistered for a preset whose provider is not registered", async () => {
-    const h = await buildHarness();
-    // The preset's provider is its own `org_models.provider_id`, not its credential's.
-    await db
-      .update(orgModels)
-      .set({ providerId: "@gone/provider" })
-      .where(eq(orgModels.id, h.presetId));
+    // A provider module dropped from MODULES leaves the credential, and the preset bound to it,
+    // naming a provider this instance does not register.
+    const h = await buildHarness({ providerId: "@gone/provider" });
     let upstreamCalled = false;
     mockUpstream(async () => {
       upstreamCalled = true;

@@ -1752,78 +1752,20 @@ interface MountMcpOptions {
   /**
    * Lazy provider for additional MCP tool definitions to merge alongside
    * the first-party sidecar tools (run_history, recall_memory).
-   * Called on EVERY `/mcp` request so the sidecar's HTTP surface comes up
-   * before integration MCP servers finish their initial handshake. The
-   * integration runtime wires `McpHost.buildTools` here:
-   * tools registered after the sidecar started serving become visible on
-   * the next `tools/list` without restarting anything. First-party
-   * names take precedence.
+   * Called on EVERY `/mcp` request, and `/mcp` never waits for the
+   * integration boot: the integration runtime wires `McpHost.buildTools`
+   * here, so tools registered after the sidecar started serving become
+   * visible on the next `tools/list` without restarting anything. The agent
+   * lists its tools only after `GET /integrations/boot-report`, which does
+   * wait for the boot. First-party names take precedence.
    */
   additionalToolsProvider?: () => AppstrateToolDefinition[];
-  /**
-   * Promise that resolves once the integration runtime has finished its
-   * initial bootstrap pass. The first `/mcp` request awaits it (capped
-   * at INTEGRATION_BOOT_WAIT_MS) so the agent's initial `tools/list`
-   * sees all declared integration tools, even though the sidecar's HTTP
-   * listener came up first. Subsequent requests skip the wait (the
-   * promise is already resolved).
-   */
-  integrationBootPromise?: Promise<void>;
 }
-
-/**
- * Cap on how long the first `/mcp` request waits for integrations to
- * register their tools before responding. Tuned for the MITM path
- * on Docker Desktop / macOS: per-connection spawn pays for `docker
- * create` + `docker cp bundle` + `docker cp ca.pem` (MITM) +
- * `docker start` + Python/Node runner cold-start + MCP handshake, each
- * `docker exec` round-trip costing 1–2 s on the LinuxKit VM. Linux hosts
- * see <2 s end-to-end; the ceiling exists to bound pathological cases,
- * not the happy path. Mirrors the agent-side MCP connect deadline so a
- * truly hung integration boot surfaces as the agent's own handshake
- * timeout rather than as an empty toolset (the failure mode that hides
- * the bug — the LLM cheerfully tells the user the integration is not
- * connected instead of erroring out).
- */
-const INTEGRATION_BOOT_WAIT_MS = 30_000;
 
 export function mountMcp(app: Hono, options: MountMcpOptions): void {
   const { firstParty } = buildSidecarTools(options);
   const firstPartyNames = new Set(firstParty.map((t) => t.descriptor.name));
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
-  // Cache the await so only the first `/mcp` request pays the wait —
-  // every subsequent request sees an already-resolved promise. The
-  // timeout side of the race logs when it fires so a slow boot doesn't
-  // silently degrade the agent's toolset (see comment on
-  // INTEGRATION_BOOT_WAIT_MS).
-  let bootReady = options.integrationBootPromise;
-  if (bootReady) {
-    let deadline: ReturnType<typeof setTimeout> | undefined;
-    bootReady = Promise.race([
-      bootReady.then(() => {
-        // Disarm the deadline: a boot that finished in time must not log
-        // "exceeded" 30 s later on every run that outlives it.
-        clearTimeout(deadline);
-        bootReady = undefined; // resolved — skip the race on later requests
-      }),
-      new Promise<void>((resolve) => {
-        const t = setTimeout(() => {
-          // Best-effort log; tools/list still responds with whatever
-          // integrations DID register before the deadline. Operators
-          // diagnosing "agent doesn't see my integration" should look
-          // for this line.
-          logger.warn(
-            "integration boot wait exceeded; tools/list will respond without late integrations",
-            { waitMs: INTEGRATION_BOOT_WAIT_MS },
-          );
-          resolve();
-        }, INTEGRATION_BOOT_WAIT_MS);
-        t.unref?.();
-        deadline = t;
-      }),
-    ]);
-  }
-
   app.all("/mcp", async (c) => {
     // Host header validation (DNS-rebinding defence). Done here, not by
     // the SDK, so we accept dynamic-port Host values like
@@ -1886,11 +1828,6 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
       if (method === "POST") post = parseMcpPost(bodyBytes);
     }
 
-    // Wait for the integration runtime to finish its first bootstrap
-    // pass (max INTEGRATION_BOOT_WAIT_MS = 30s). The wait is amortised: only the first `/mcp`
-    // request pays it; once the promise resolves we drop the reference
-    // so subsequent requests skip the await entirely.
-    if (bootReady) await bootReady;
     // Resolve tools per-request so integrations that finish booting AFTER
     // the sidecar's HTTP listener is up still surface on the next call.
     // The generic `api_call` (+ optional

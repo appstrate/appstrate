@@ -18,10 +18,10 @@
  *      `Invalid or missing session` 401, not silently to 500.
  *
  *   4. The access rule is the API-key door's (`credential-proxy.test.ts`):
- *      `credential-proxy:call-run` for a run the caller executes,
- *      `credential-proxy:call-own` outside one, on the caller's own connections, and with
- *      both on those shared into the space. The owner of a personal space, which no API key
- *      enters, has no path outside a run there.
+ *      `credential-proxy:call` for a run the caller executes, and outside one on the
+ *      connections usable in the space, shared ones included; `credential-proxy:call-own`
+ *      outside a run on the caller's own connections only. The owner of a personal space,
+ *      which no API key enters, holds both there.
  *
  * Injection itself is covered by `credential-proxy-injection.test.ts`. Here we
  * only care that the auth gate lets the right principals in, on the right
@@ -43,7 +43,12 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
-import { seedPackage, seedRun, seedSpace } from "../../../../../../test/helpers/seed.ts";
+import {
+  seedPackage,
+  seedPackageShare,
+  seedRun,
+  seedSpace,
+} from "../../../../../../test/helpers/seed.ts";
 import { expectProblem } from "../../../../../../test/helpers/assertions.ts";
 import { seedShares } from "../../../../../../test/helpers/connection-shares.ts";
 import {
@@ -57,7 +62,7 @@ import {
 import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { ensureCliClient } from "../../../services/ensure-cli-client.ts";
-import { deviceCode } from "@appstrate/db/schema";
+import { deviceCode, spacePackages } from "@appstrate/db/schema";
 import { overrideJwks } from "../../../services/enduser-token.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -126,7 +131,7 @@ async function mintCliToken(ctx: TestContext): Promise<string> {
  * Create a user, own-role org + default space, and mint a device-flow
  * JWT for that user. Returns everything a request needs to hit
  * `/api/credential-proxy/proxy`. The owner is preset `admin` in the space,
- * which holds both `credential-proxy:call-run` and `credential-proxy:call-own`.
+ * which holds both `credential-proxy:call` and `credential-proxy:call-own`.
  */
 async function createJwtPrincipal(): Promise<Principal> {
   const ctx = await createTestContext();
@@ -245,7 +250,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
   });
 });
 
-describe("POST /api/credential-proxy/proxy — one permission per path, through a JWT", () => {
+describe("POST /api/credential-proxy/proxy — the permission of each path, through a JWT", () => {
   const INTEGRATION_ID = "@jwtorg/svc";
   const AGENT_ID = "@jwtorg/agent";
   const realFetch: typeof fetch = globalThis.fetch;
@@ -348,22 +353,25 @@ describe("POST /api/credential-proxy/proxy — one permission per path, through 
     return run.id;
   }
 
-  it("credential-proxy:call-run alone: refused outside a run, the shared connection reached through a remote run of the caller's", async () => {
-    const callRunOnly = await memberHolding(owner, ["credential-proxy:call-run"]);
-    const body = await expectProblem(await call(callRunOnly), 403, { code: "forbidden" });
-    expect(body.detail).toContain("credential-proxy:call-own");
-    expect(upstreamAuth).toEqual([]);
+  it("credential-proxy:call alone: the shared connection outside a run, and through a remote run of the caller's", async () => {
+    // A role naming `call` and not `call-own`, which it implies.
+    const callOnly = await memberHolding(owner, ["credential-proxy:call"]);
+    const outside = await call(callOnly, { "X-Connection-Id": shared });
+    expect(outside.status, await outside.clone().text()).toBe(200);
 
-    const res = await call(callRunOnly, { "X-Run-Id": await remoteRunOf(callRunOnly) });
+    const res = await call(callOnly, { "X-Run-Id": await remoteRunOf(callOnly) });
     expect(res.status, await res.clone().text()).toBe(200);
-    expect(upstreamAuth).toEqual(["Bearer team"]);
+    expect(upstreamAuth).toEqual(["Bearer team", "Bearer team"]);
   });
 
-  it("credential-proxy:call-own alone: the caller's own connections only", async () => {
+  it("credential-proxy:call-own alone: the caller's own connections only, never the run path", async () => {
     const member = await memberHolding(owner, ["credential-proxy:call-own"]);
     const refused = await call(member, { "X-Connection-Id": shared });
     const body = await expectProblem(refused, 404, { code: "credential_not_found" });
-    expect(body.detail).toContain("also holds credential-proxy:call-run");
+    expect(body.detail).toContain("holding credential-proxy:call,");
+    const viaRun = await call(member, { "X-Run-Id": await remoteRunOf(member) });
+    const runRefusal = await expectProblem(viaRun, 403, { code: "forbidden" });
+    expect(runRefusal.detail).toContain("credential-proxy:call required");
     expect(upstreamAuth).toEqual([]);
 
     const mine = await seedProxyConnection(
@@ -386,18 +394,24 @@ describe("POST /api/credential-proxy/proxy — one permission per path, through 
     expect(upstreamAuth).toEqual(["Bearer team"]);
   });
 
-  it("the owner of a personal space has no path outside a run there: 403 naming credential-proxy:call-own", async () => {
+  it("the owner of a personal space calls outside a run there, on their own connection", async () => {
     const personal = await seedSpace({
       orgId: owner.orgId,
       name: "Perso",
       ownerUserId: owner.user.id,
       visibility: "private",
     });
-    const there = { "X-Space-Id": personal.id };
-    const body = await expectProblem(await call(owner, there), 403, { code: "forbidden" });
-    expect(body.detail).toContain("credential-proxy:call-own");
-    // The control: the run path is open there, so an unknown run is a 404, not this 403.
-    await expectProblem(await call(owner, { ...there, "X-Run-Id": "run_doesnotexist0000" }), 404);
-    expect(upstreamAuth).toEqual([]);
+    await seedPackageShare(personal.id, INTEGRATION_ID);
+    await db.insert(spacePackages).values({ spaceId: personal.id, packageId: INTEGRATION_ID });
+    await seedProxyConnection(
+      { ...owner, defaultSpaceId: personal.id },
+      INTEGRATION_ID,
+      "api",
+      { api_key: "perso" },
+      "perso",
+    );
+    const res = await call(owner, { "X-Space-Id": personal.id });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(upstreamAuth).toEqual(["Bearer perso"]);
   });
 });

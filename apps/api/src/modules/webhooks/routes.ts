@@ -175,11 +175,10 @@ export function createWebhooksRouter() {
   // (`/api/oauth/clients`, `/api/end-users`, `/api/runs/remote`) and as
   // `middleware/idempotency.ts` states: "Authorization belongs before this
   // middleware". A cached replay returns the stored response WITHOUT reaching
-  // the handler, and the cache key is `idem:{orgId}:{spaceId}:{key}` — it
-  // carries no caller identity. With the check only inside the handler, any
-  // member of the same org and space who replayed the creating request's
-  // `Idempotency-Key` with the same body was handed the response, and this
-  // route's response is the one that carries the webhook SECRET.
+  // the handler. The cache key is `idem:{orgId}:{spaceId}:{principal}:{key}`, so
+  // another caller is never replayed this response; the coarse grant still
+  // belongs before `idempotency()` because a principal's own replay must not
+  // outlive its permission — and this route's response carries the webhook SECRET.
   //
   // The per-`level` verdict stays in the handler: it reads the BODY's space,
   // which no middleware has parsed yet.

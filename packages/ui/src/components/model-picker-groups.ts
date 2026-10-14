@@ -8,9 +8,9 @@
  * here, so the same model reads the same way everywhere.
  *
  * `GET /api/models` already says, FOR THE CALLER, how each model is served:
- *  - `billed_to: "system"`: the instance's own key (a built-in model);
+ *  - `binding: "system"` / `billed_to: "system"`: the instance's own key (a built-in model);
  *  - `binding: "org"` / `billed_to: "org"`: bound to one organization credential;
- *  - `binding: "member"`: unbound, each person serves it with a credential of their own. Then
+ *  - `binding: "user"`: unbound, each person serves it with a credential of their own. Then
  *    `billed_to: "user"` says one of the caller's serves it, `null` says none does.
  * The groups are that, plus the caller's own credentials to NAME the group (« Ma clé perso »).
  */
@@ -25,7 +25,7 @@ export interface PickerModel {
   modelId: string | null;
   providerId?: string | null;
   provider_name?: string | null;
-  binding?: "org" | "member" | "managed";
+  binding?: "system" | "org" | "user" | "managed";
   credentialId?: string | null;
   billed_to?: PickerPayer;
   enabled?: boolean;
@@ -122,7 +122,7 @@ function place(model: PickerModel, context: PickerContext): Placement {
     };
   }
 
-  if (model.binding === "member") {
+  if (model.binding === "user") {
     const notSchedulable = context.scheduled === true;
     if (model.billed_to === "user") {
       const serving = servingCredential(model, own);

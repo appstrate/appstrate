@@ -695,6 +695,8 @@ constraint cli_refresh_tokens cli_refresh_tokens_parent_id_fkey FOREIGN KEY (par
 constraint cli_refresh_tokens cli_refresh_tokens_pkey PRIMARY KEY (id)
 constraint cli_refresh_tokens cli_refresh_tokens_token_hash_unique UNIQUE (token_hash)
 constraint cli_refresh_tokens cli_refresh_tokens_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint connection_calls connection_calls_actor_type_valid CHECK ((actor_type = ANY (ARRAY['user'::text, 'end_user'::text])))
+constraint connection_calls connection_calls_owner_type_valid CHECK (((owner_type IS NULL) OR (owner_type = ANY (ARRAY['user'::text, 'end_user'::text]))))
 constraint connection_calls connection_calls_pkey PRIMARY KEY (id)
 constraint device_codes device_codes_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint device_codes device_codes_device_code_unique UNIQUE (device_code)
@@ -773,7 +775,10 @@ constraint model_provider_credentials model_provider_credentials_org_id_organiza
 constraint model_provider_credentials model_provider_credentials_owner_user_id_user_id_fk FOREIGN KEY (owner_user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint model_provider_credentials model_provider_credentials_pkey PRIMARY KEY (id)
 constraint model_provider_pairings model_provider_pairings_credential_id_fk FOREIGN KEY (credential_id) REFERENCES model_provider_credentials(id) ON DELETE SET NULL
+constraint model_provider_pairings model_provider_pairings_failed_consumed CHECK (((failed_at IS NULL) OR (consumed_at IS NOT NULL)))
 constraint model_provider_pairings model_provider_pairings_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint model_provider_pairings model_provider_pairings_outcome_single CHECK ((NOT ((credential_id IS NOT NULL) AND (failed_at IS NOT NULL))))
+constraint model_provider_pairings model_provider_pairings_owner_is_minter CHECK (((owner_user_id IS NULL) OR (owner_user_id = user_id)))
 constraint model_provider_pairings model_provider_pairings_owner_user_id_user_id_fk FOREIGN KEY (owner_user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint model_provider_pairings model_provider_pairings_pkey PRIMARY KEY (id)
 constraint model_provider_pairings model_provider_pairings_token_hash_unique UNIQUE (token_hash)
@@ -822,8 +827,9 @@ constraint org_invitations org_invitations_token_unique UNIQUE (token)
 constraint org_members org_members_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_members org_members_org_id_user_id_pk PRIMARY KEY (org_id, user_id)
 constraint org_members org_members_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint org_models org_models_alias_bound CHECK (((NOT aliased) OR (credential_id IS NOT NULL)))
 constraint org_models org_models_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
-constraint org_models org_models_credential_id_model_provider_credentials_id_fk FOREIGN KEY (credential_id) REFERENCES model_provider_credentials(id) ON DELETE RESTRICT
+constraint org_models org_models_credential_provider_fk FOREIGN KEY (credential_id, provider_id) REFERENCES model_provider_credentials(id, provider_id) ON DELETE RESTRICT
 constraint org_models org_models_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_models org_models_pkey PRIMARY KEY (id)
 constraint org_models org_models_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
@@ -1171,6 +1177,7 @@ index CREATE UNIQUE INDEX uq_files_run_output_dedup ON public.files USING btree 
 index CREATE UNIQUE INDEX uq_integration_conn_id_org_id ON public.integration_connections USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_llm_usage_proxy_request_id ON public.llm_usage USING btree (request_id) WHERE ((source = 'proxy'::llm_usage_source) AND (request_id IS NOT NULL))
 index CREATE UNIQUE INDEX uq_llm_usage_runner_run_id ON public.llm_usage USING btree (run_id) WHERE ((source = 'runner'::llm_usage_source) AND (run_id IS NOT NULL))
+index CREATE UNIQUE INDEX uq_model_provider_credentials_id_provider_id ON public.model_provider_credentials USING btree (id, provider_id)
 index CREATE UNIQUE INDEX uq_notifications_run_recipient_type ON public.notifications USING btree (run_id, recipient_type, recipient_id, type) WHERE (run_id IS NOT NULL)
 index CREATE UNIQUE INDEX uq_oauth_client_resources_pair ON public.oauth_client_resources USING btree (client_id, resource_id)
 index CREATE UNIQUE INDEX uq_org_invitations_pending ON public.org_invitations USING btree (org_id, email) WHERE (status = 'pending'::invitation_status)

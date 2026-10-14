@@ -163,9 +163,11 @@ describe("Idempotency-Key marker survives route() composition", () => {
 
     const parent = new Hono<AppEnv>();
     parent.onError(errorHandler);
-    // `idempotency()` scopes its cache key to the org; give it one.
+    // `idempotency()` scopes its cache key to the org and the caller; give it both.
     parent.use("*", async (c, next) => {
       c.set("orgId", ORG_ID);
+      c.set("user", { id: "u1", email: "t@t.com", name: "T" });
+      c.set("authMethod", "session");
       return next();
     });
     parent.use("*", idempotencyGuard());

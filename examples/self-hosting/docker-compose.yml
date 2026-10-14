@@ -253,10 +253,6 @@ services:
       # RUN_ADAPTER: code default is `process` for OSS dev — a
       # containerized self-host must run agents in Docker.
       - RUN_ADAPTER=${RUN_ADAPTER:-docker}
-      # TRUSTED_ORIGINS: code default allows dev localhost ports.
-      # Prod self-host correctly defaults to empty — operator opts in
-      # to their public domain explicitly.
-      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
       # ── Sidecar capacity caps (operator-tunable passthrough) ─────
       # `pickOperatorSidecarEnv` (packages/runner-pi) forwards these
       # from the platform's `process.env` into spawned sidecar and
@@ -275,6 +271,7 @@ services:
       # Defaults live in `packages/env/src/index.ts`. Unset host env
       # falls back to the Zod schema's single source of truth.
       - APP_URL
+      - TRUSTED_ORIGINS
       # Hop count of the reverse proxy chain in front of this container. With
       # an HTTPS APP_URL the schema refuses to boot on "false".
       - TRUST_PROXY

@@ -60,6 +60,7 @@ import {
   getModuleRoleScopes,
   getModulePresetScopes,
   getModuleApiKeyScopes,
+  withImpliedPermissions,
 } from "@appstrate/core/permissions";
 
 // ---------------------------------------------------------------------------
@@ -182,6 +183,9 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     "integrations:read",
     "integrations:connect",
     "integrations:disconnect",
+    // Call the credential proxy outside a run, on own connections only. A shared connection and
+    // the run path are `credential-proxy:call` (admin, builder).
+    "credential-proxy:call-own",
     "end-users:read",
     "end-users:write",
   ]);
@@ -332,11 +336,12 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "end-users:read",
   "end-users:write",
   "end-users:delete",
-  // Credential proxy for a run (`X-Run-Id`) — BYOI ("Bring Your Own Instance")
-  // for remote AFPS runs. A key minted with `scopes` omitted or empty carries
-  // it when its creator holds it; a non-empty `scopes` mints a narrower key.
-  "credential-proxy:call-run",
-  // Credential proxy outside a run, under the same `scopes` rule.
+  // Credential proxy: outside a run on the connections usable in the space, and for a run
+  // (`X-Run-Id`) — BYOI ("Bring Your Own Instance") for remote AFPS runs. A key minted with
+  // `scopes` omitted or empty carries it when its creator holds it; a non-empty `scopes` mints a
+  // narrower key.
+  "credential-proxy:call",
+  // Credential proxy outside a run on own connections only, under the same `scopes` rule.
   "credential-proxy:call-own",
   // LLM proxy — server-side LLM model injection for remote-backed
   // `appstrate run` and headless CI (GitHub Action). Scopes metered
@@ -508,10 +513,25 @@ export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
 }
 
 /**
+ * A credential's scope ceiling as the request context holds it: its scope list
+ * closed under the core implications (`withImpliedPermissions`), so a key
+ * scoped `runs:read-all` reaches what `runs:read` gates. Every writer of
+ * `scopeCeiling` builds it here, and every reader (`effectivePermissions`,
+ * `ceilingAllows`, the MCP catalog) takes it as it is.
+ */
+export function toScopeCeiling(scopes: Iterable<string>): ReadonlySet<string> {
+  return withImpliedPermissions(scopes);
+}
+
+/**
  * Effective permissions for one request: org-level set ∪ space-level set
  * (empty outside a space context), intersected with the credential ceiling.
- * `scopeCeiling` is the API-key scope list or the OIDC scope claim; a cookie
- * session has none.
+ * `scopeCeiling` is the API-key scope list or the OIDC scope claim, built by
+ * {@link toScopeCeiling}; a cookie session has none. The grant side is closed
+ * under the same implications before the two meet: a role naming
+ * `credential-proxy:call` under a key scoped `credential-proxy:call-own`
+ * holds `call-own`, and a key scoped to the wider grant admits the narrower
+ * one the role holds.
  */
 export function effectivePermissions(input: {
   orgPermissions: ReadonlySet<string>;
@@ -519,14 +539,10 @@ export function effectivePermissions(input: {
   scopeCeiling?: ReadonlySet<string>;
 }): Set<Permission> {
   const { orgPermissions: org, spacePermissions, scopeCeiling } = input;
+  const granted = withImpliedPermissions([...org, ...(spacePermissions ?? [])]);
   const effective = new Set<Permission>();
-  for (const perm of org) {
+  for (const perm of granted) {
     if (!scopeCeiling || scopeCeiling.has(perm)) effective.add(perm as Permission);
-  }
-  if (spacePermissions) {
-    for (const perm of spacePermissions) {
-      if (!scopeCeiling || scopeCeiling.has(perm)) effective.add(perm as Permission);
-    }
   }
   return effective;
 }

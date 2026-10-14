@@ -79,7 +79,9 @@ export default defineConfig({
     env: {
       PORT: String(E2E_PORT),
       APP_URL: E2E_BASE_URL,
-      TRUSTED_ORIGINS: `${E2E_BASE_URL},http://localhost:5173`,
+      // Empty, not absent: Bun's `.env` load never overrides a set var, so a
+      // developer `.env` cannot add an origin. APP_URL alone carries sign-up.
+      TRUSTED_ORIGINS: "",
       // tests/models/custom-model.ui.spec.ts points the platform at a mock
       // OpenAI-compatible endpoint on 127.0.0.1; the SSRF guard blocks
       // loopback unless the operator trusts it explicitly.

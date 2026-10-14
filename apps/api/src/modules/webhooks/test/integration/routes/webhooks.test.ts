@@ -380,11 +380,11 @@ describe("Webhooks API", () => {
   });
 
   describe("the idempotency cache is not a way past the permission", () => {
-    // The cache key is `idem:{orgId}:{spaceId}:{key}` — it carries no caller
-    // identity — and a cached replay returns the stored response WITHOUT
-    // reaching the handler. So whatever proves the grant has to run BEFORE
-    // `idempotency()`, which is what every other mount does. This route's
-    // response is the one that carries the webhook SECRET.
+    // The cache key is `idem:{orgId}:{spaceId}:{principal}:{key}`, so another
+    // caller is never replayed this response; the coarse grant still belongs
+    // before `idempotency()` because a principal's own replay must not outlive
+    // its permission. A cached replay returns the stored response WITHOUT
+    // reaching the handler, and this route's response carries the webhook SECRET.
     it("403s a member replaying the creator's key, instead of handing back the secret", async () => {
       const key = "11111111-2222-3333-4444-555555555555";
       const body = JSON.stringify(webhookPayload());

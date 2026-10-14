@@ -129,7 +129,7 @@ const MEMBER_A = model({
   id: "mdl_m",
   label: "Claude A (perso)",
   credentialId: null,
-  binding: "member",
+  binding: "user",
 });
 const MEMBER_MISTRAL = model({
   id: "mdl_mm",
@@ -137,7 +137,7 @@ const MEMBER_MISTRAL = model({
   providerId: "mistral",
   modelId: "mistral-medium",
   credentialId: null,
-  binding: "member",
+  binding: "user",
 });
 const SYSTEM = model({
   id: "mdl_s",
@@ -212,7 +212,7 @@ describe("personalServiceRows", () => {
       providerId: "mistral",
       modelId: "mistral-medium",
       credentialId: null,
-      binding: "member",
+      binding: "user",
       enabled: false,
     }),
   ];

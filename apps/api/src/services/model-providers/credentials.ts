@@ -24,6 +24,7 @@ import { eq, gt, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, user } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
+import { MODEL_CREDENTIAL_OWNERS } from "@appstrate/core/model-payer";
 import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { ApiError, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
@@ -124,7 +125,7 @@ export const MANAGE_CREDENTIALS = [
  * `owner_type` of the two creation doors (API key, subscription pairing): `org`
  * (default) is an organization credential, `user` the caller's personal one.
  */
-export const credentialOwnerTypeSchema = z.enum(["org", "user"]).default("org");
+export const credentialOwnerTypeSchema = z.enum(MODEL_CREDENTIAL_OWNERS).default("org");
 
 /**
  * The owner a creation door writes for `ownerType`, once {@link mayCreateCredential}

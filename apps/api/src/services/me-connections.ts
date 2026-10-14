@@ -52,7 +52,7 @@ import { pinLayer, schedulesLeftUnnamedWithout } from "./schedules-named-by-laye
 import {
   connectionActions,
   meConnectionAuthorityFilter,
-  usableInSpace,
+  ownUsableInSpace,
   type ConnectionCaller,
 } from "./connection-reach.ts";
 import { shareableSpaces } from "./connection-shares.ts";
@@ -89,7 +89,7 @@ const declaredIntegrationIds = sql<string[]>`ARRAY(
 
 /**
  * For each of the user's rows, the spaces they run agents in (`agents:run`) where the row is
- * {@link usableInSpace}: one listing per org, one query per space, never one per connection.
+ * {@link ownUsableInSpace}: one listing per org, one query per space, never one per connection.
  */
 async function spacesServedToOwner(
   actor: Actor,
@@ -110,7 +110,7 @@ async function spacesServedToOwner(
       const usable = await db
         .select({ id: integrationConnections.id })
         .from(integrationConnections)
-        .where(and(usableInSpace(space.id, actor), actorFilter(actor, integrationConnections)));
+        .where(ownUsableInSpace(space.id, actor));
       if (usable.length > 0) orgOfSpace.set(space.id, space.orgId);
       for (const { id } of usable) {
         byConnection.set(id, [...(byConnection.get(id) ?? []), space.id]);

@@ -161,7 +161,7 @@ describe("the providers table", () => {
     [
       model({ id: "mdl_a", label: "Claude Sonnet", is_default: true }),
       model({ id: "mdl_b", label: "Claude Opus" }),
-      model({ id: "mdl_m", label: "Claude pour tous", credentialId: null, binding: "member" }),
+      model({ id: "mdl_m", label: "Claude pour tous", credentialId: null, binding: "user" }),
       model({
         id: "mdl_s",
         label: "Modèle système",
@@ -276,7 +276,7 @@ describe("an organization subscription", () => {
     const [row] = providerRows(
       [
         model({ id: "mdl_bound", label: "Claude lié", credentialId: ORG_SUBSCRIPTION.id }),
-        model({ id: "mdl_m", label: "Claude pour tous", credentialId: null, binding: "member" }),
+        model({ id: "mdl_m", label: "Claude pour tous", credentialId: null, binding: "user" }),
       ],
       [ORG_SUBSCRIPTION],
       SERVICES,
@@ -330,7 +330,7 @@ describe("the personal keys table", () => {
     id: "mdl_m",
     label: "Claude pour tous",
     credentialId: null,
-    binding: "member",
+    binding: "user",
   });
   const html = personalHtml([MEMBER_MODEL], [MY_KEY, BOB_SUBSCRIPTION]);
 

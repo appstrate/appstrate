@@ -36,7 +36,7 @@ const REQUIREMENTS: [string, string[]][] = [
   ["integrations:uninstall", ["integrations:read"]],
   // A resource with no read action, and a string nobody declared.
   ["space-settings:write", []],
-  ["credential-proxy:call-run", []],
+  ["credential-proxy:call", []],
   ["credential-proxy:call-own", []],
   ["nope:write", []],
 ];

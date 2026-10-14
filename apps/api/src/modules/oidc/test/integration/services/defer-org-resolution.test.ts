@@ -227,5 +227,7 @@ describe("deferOrgResolution in auth pipeline", () => {
     // No org context on instance resolution
     expect(resolution!.orgId).toBeUndefined();
     expect(resolution!.orgRole).toBeUndefined();
+    // The issuing client (`azp`) — what keeps two clients of one user two idempotency callers.
+    expect(resolution!.extra?.clientId).toBe(instanceClientId);
   });
 });

@@ -1161,8 +1161,7 @@ async function runRunnerEgressVm(
         line.includes("mitm") ||
         line.includes("MITM") ||
         line.includes("Integration") ||
-        line.includes("integration runtime") ||
-        line.includes("boot wait")
+        line.includes("integration runtime")
       ) {
         console.log(line);
       }

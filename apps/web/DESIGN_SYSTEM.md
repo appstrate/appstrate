@@ -371,7 +371,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     the same write as in General), then one row per PROVIDER open to personal keys
     (`personalServiceRows`: a provider with a model left to personal keys, or one somebody
     connected a key for). Columns: Fournisseur, Modèles (the ones usable with a personal key of that
-    provider, `binding: "member"`), Clés connectées (who plugged a personal key or subscription in,
+    provider, `binding: "user"`), Clés connectées (who plugged a personal key or subscription in,
     « Alice Martin (vous), Bob » or « Aucune », read off the credentials the server shows the
     caller), État, « … ». The providers listed are `personalModelServices`
     (`allowsMemberModels`: open to personal keys, `personal_allowed`, and with a listing that needs

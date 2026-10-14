@@ -1,5 +1,5 @@
 {
-  "id": "a458b802-1274-4d03-8dec-cd40ff8befc6",
+  "id": "cf1be950-e10d-4d86-9313-74fb007902f0",
   "prevId": "c7887c7d-fb60-415c-b2f9-a180b284a753",
   "version": "7",
   "dialect": "postgresql",
@@ -718,6 +718,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "uq_model_provider_credentials_id_provider_id": {
+          "name": "uq_model_provider_credentials_id_provider_id",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -897,7 +918,20 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "model_provider_pairings_owner_is_minter": {
+          "name": "model_provider_pairings_owner_is_minter",
+          "value": "owner_user_id IS NULL OR owner_user_id = user_id"
+        },
+        "model_provider_pairings_outcome_single": {
+          "name": "model_provider_pairings_outcome_single",
+          "value": "NOT (credential_id IS NOT NULL AND failed_at IS NOT NULL)"
+        },
+        "model_provider_pairings_failed_consumed": {
+          "name": "model_provider_pairings_failed_consumed",
+          "value": "failed_at IS NULL OR consumed_at IS NOT NULL"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.org_invitations": {
@@ -1282,15 +1316,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "org_models_credential_id_model_provider_credentials_id_fk": {
-          "name": "org_models_credential_id_model_provider_credentials_id_fk",
-          "tableFrom": "org_models",
-          "tableTo": "model_provider_credentials",
-          "columnsFrom": ["credential_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
         "org_models_created_by_user_id_fk": {
           "name": "org_models_created_by_user_id_fk",
           "tableFrom": "org_models",
@@ -1298,6 +1323,15 @@
           "columnsFrom": ["created_by"],
           "columnsTo": ["id"],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "org_models_credential_provider_fk": {
+          "name": "org_models_credential_provider_fk",
+          "tableFrom": "org_models",
+          "tableTo": "model_provider_credentials",
+          "columnsFrom": ["credential_id", "provider_id"],
+          "columnsTo": ["id", "provider_id"],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -1308,6 +1342,10 @@
         "org_models_source_valid": {
           "name": "org_models_source_valid",
           "value": "source IN ('built-in', 'custom')"
+        },
+        "org_models_alias_bound": {
+          "name": "org_models_alias_bound",
+          "value": "NOT aliased OR credential_id IS NOT NULL"
         }
       },
       "isRLSEnabled": false
@@ -1540,12 +1578,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "logo": {
-          "name": "logo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "org_settings": {
           "name": "org_settings",
@@ -7311,7 +7343,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "connection_calls_actor_type_valid": {
+          "name": "connection_calls_actor_type_valid",
+          "value": "actor_type IN ('user', 'end_user')"
+        },
+        "connection_calls_owner_type_valid": {
+          "name": "connection_calls_owner_type_valid",
+          "value": "owner_type IS NULL OR owner_type IN ('user', 'end_user')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.webhook_deliveries": {

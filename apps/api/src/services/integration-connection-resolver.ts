@@ -27,7 +27,7 @@
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, integrationPins, spaces } from "@appstrate/db/schema";
+import { integrationPins, spaces } from "@appstrate/db/schema";
 import type {
   IntegrationConnectionRow as ConnectionRow,
   IntegrationPinRow as PinRow,
@@ -66,7 +66,7 @@ import {
 import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
 import { actorFromIds, actorOwns, type Actor } from "../lib/actor.ts";
 import { CONNECTION_LABEL_MAX } from "../lib/connection-label.ts";
-import { OLDEST_FIRST, usableInSpace, userConnectionsBlocked } from "./connection-reach.ts";
+import { userConnectionsBlocked } from "./connection-reach.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import {
@@ -77,7 +77,7 @@ import {
   listOrgDefaultsForResolver,
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
-import { listActiveIntegrationIds } from "./integration-connections.ts";
+import { listActiveIntegrationIds, listReachableConnections } from "./integration-connections.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -874,7 +874,11 @@ export async function resolveConnectionsForRun(
 
   const integrationIds = validReqs.map((r) => r.integrationId);
   const [accessibleConnections, pins, orgDefaults, activeIds] = await Promise.all([
-    loadAccessibleConnections(input.actor, input.scope.spaceId, integrationIds),
+    listReachableConnections(
+      { spaceId: input.scope.spaceId, actor: input.actor },
+      "usable",
+      integrationIds,
+    ),
     loadPins(input.scope.spaceId, input.packageId, integrationIds, actorUserId),
     listOrgDefaultsForResolver(input.scope.spaceId),
     listActiveIntegrationIds(integrationIds, input.scope.spaceId),
@@ -1060,24 +1064,6 @@ export function requirementOf(
     ...(effectiveTools !== undefined ? { effectiveTools } : {}),
     ...(entry.auth_key !== undefined ? { requiredAuthKey: entry.auth_key } : {}),
   };
-}
-
-async function loadAccessibleConnections(
-  actor: Actor,
-  spaceId: string,
-  integrationIds: string[],
-): Promise<ConnectionRow[]> {
-  if (integrationIds.length === 0) return [];
-  return db
-    .select()
-    .from(integrationConnections)
-    .where(
-      and(
-        inArray(integrationConnections.integrationId, integrationIds),
-        usableInSpace(spaceId, actor),
-      ),
-    )
-    .orderBy(...OLDEST_FIRST);
 }
 
 async function loadPins(

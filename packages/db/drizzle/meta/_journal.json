@@ -677,8 +677,15 @@
     {
       "idx": 96,
       "version": "7",
-      "when": 1791965444323,
-      "tag": "0096_org_logo",
+      "when": 1791914848339,
+      "tag": "0096_connection_calls_and_model_invariants",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1791978176918,
+      "tag": "0097_org_logo",
       "breakpoints": true
     }
   ]

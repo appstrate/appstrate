@@ -113,9 +113,9 @@ export interface CoreResources {
   "api-keys": "read" | "create" | "revoke";
   spaces: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
-  // `/api/credential-proxy/proxy`: `call-run` for a run (`X-Run-Id`), reaching the
-  // connections that run bound; `call-own` outside a run: own ones, or with `call-run` usable ones.
-  "credential-proxy": "call-run" | "call-own";
+  // `/api/credential-proxy/proxy`: `call` outside a run reaches the connections usable in the
+  // space, and for a run (`X-Run-Id`) the ones it bound; `call-own` outside a run, own ones only.
+  "credential-proxy": "call" | "call-own";
   "llm-proxy": "call";
   // AFPS integrations (marketplace UI).
   // Read = browse catalog + view the actor's connection inventory.
@@ -168,6 +168,38 @@ export const RUNS_READ_PERMISSIONS = [
 
 export function canReadRuns(has: (permission: CorePermission) => boolean): boolean {
   return RUNS_READ_PERMISSIONS.some((permission) => has(permission));
+}
+
+/** `credential-proxy:call` implies `credential-proxy:call-own` ({@link withImpliedPermissions}). */
+const PROXY_CALL_PERMISSIONS = [
+  "credential-proxy:call-own",
+  "credential-proxy:call",
+] as const satisfies readonly CorePermission[];
+
+/**
+ * The implications between core permissions, one tuple each: the LAST element is the wider grant
+ * and implies every element before it.
+ */
+const IMPLICATION_TUPLES: readonly (readonly CorePermission[])[] = [
+  RUNS_READ_PERMISSIONS,
+  PROXY_CALL_PERMISSIONS,
+];
+
+const IMPLIED_BY: ReadonlyMap<string, readonly CorePermission[]> = new Map(
+  IMPLICATION_TUPLES.map((tuple) => [tuple[tuple.length - 1]!, tuple.slice(0, -1)]),
+);
+
+/**
+ * `held` plus every permission a held one implies ({@link IMPLICATION_TUPLES}); other strings
+ * pass through. For a set compared literally against another one — a ceiling, a delegation — so
+ * that a holder of `runs:read-all` holds `runs:read` there too.
+ */
+export function withImpliedPermissions(held: Iterable<string>): Set<string> {
+  const closed = new Set<string>(held);
+  for (const permission of closed) {
+    for (const implied of IMPLIED_BY.get(permission) ?? []) closed.add(implied);
+  }
+  return closed;
 }
 
 /**
@@ -285,7 +317,7 @@ export const CORE_RESOURCE_ACTIONS = {
   "api-keys": ["read", "create", "revoke"],
   spaces: ["read", "write", "delete"],
   "end-users": ["read", "write", "delete"],
-  "credential-proxy": ["call-run", "call-own"],
+  "credential-proxy": ["call", "call-own"],
   "llm-proxy": ["call"],
   integrations: [
     "read",

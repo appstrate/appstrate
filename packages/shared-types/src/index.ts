@@ -49,7 +49,7 @@ export type { PackageType };
 
 export type { RunArtifactsSummary } from "@appstrate/db/schema";
 import type { RunArtifactsSummary, ScheduleDisabledReason } from "@appstrate/db/schema";
-import type { ModelPayer } from "@appstrate/core/model-payer";
+import type { ModelBinding, ModelCredentialOwner, ModelPayer } from "@appstrate/core/model-payer";
 
 /**
  * Stripe-canonical list envelope for HTTP list responses.
@@ -990,17 +990,18 @@ export interface OrgModelInfo extends ModelMetadata {
   iconUrl: string | null;
   source: "built-in" | "custom";
   /**
-   * The bound organization credential; `null` when {@link binding} is `member`
-   * or `managed`.
+   * The credential serving the model: the organization credential when
+   * {@link binding} is `org`, the platform's key when it is `system`; `null`
+   * when it is `user` or `managed`.
    */
   credentialId: string | null;
   /**
-   * How the model is served: `org` — bound to one credential (an organization
-   * credential, or the platform key for a built-in model); `member` — unbound,
-   * each member serves it with their own credential for {@link providerId};
-   * `managed` — an alias, whose binding is not exposed.
+   * Whose credential serves the model: `system` — a built-in model, served by
+   * the platform's key; `org` — bound to an organization credential; `user` —
+   * unbound, each member serves it with their own credential for
+   * {@link providerId}; `managed` — an alias, whose binding is not exposed.
    */
-  binding: "org" | "member" | "managed";
+  binding: ModelBinding;
   /**
    * Who pays for a call to this model, as seen by the caller: `system` for a
    * built-in model, `org` when an organization credential serves it, `user` when
@@ -1044,7 +1045,7 @@ export interface ModelProviderCredentialInfo {
   /** True when the credential is dead (an OAuth `invalid_grant`, or undecryptable). */
   needs_reconnection?: boolean;
   /** `user` for a personal credential (usable and editable by {@link owner_id} only); `org` for an organization or built-in one. */
-  owner_type: "org" | "user";
+  owner_type: ModelCredentialOwner;
   /** The owning member's user id for a personal credential; `null` for `org`. */
   owner_id: string | null;
   /** Display name of {@link owner_id}; `null` for `org`. */

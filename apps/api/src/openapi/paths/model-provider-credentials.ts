@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MODEL_CREDENTIAL_OWNERS } from "@appstrate/core/model-payer";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
@@ -259,7 +260,7 @@ export const modelProviderCredentialsPaths = {
                 },
                 owner_type: {
                   type: "string",
-                  enum: ["org", "user"],
+                  enum: [...MODEL_CREDENTIAL_OWNERS],
                   default: "org",
                   description:
                     "`org` (default) creates an organization credential; `user` creates a personal credential owned by the caller.",

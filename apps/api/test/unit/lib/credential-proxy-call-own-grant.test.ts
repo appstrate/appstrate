@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `credential-proxy:call-own`, the call outside a run, is held by the presets that hold
- * `credential-proxy:call-run`: `admin` and `builder`, which author the agents a run executes.
+ * `credential-proxy:call` (the space's usable connections, and the run path) is held by `admin`
+ * and `builder`, which author the agents a run executes; `credential-proxy:call-own` (own
+ * connections, outside a run) by those and `operator`. `runner` and `viewer` hold neither.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -12,9 +13,12 @@ import { presetPermissions, type Permission } from "../../../src/lib/permissions
 const holders = (permission: Permission) =>
   SPACE_ROLE_PRESETS.filter((preset) => presetPermissions(preset).has(permission));
 
-describe("credential-proxy:call-own", () => {
-  it("is held by `admin` and `builder`, the presets holding credential-proxy:call-run", () => {
-    expect(holders("credential-proxy:call-own")).toEqual(["admin", "builder"]);
-    expect(holders("credential-proxy:call-run")).toEqual(["admin", "builder"]);
+describe("credential proxy grants", () => {
+  it("credential-proxy:call is held by `admin` and `builder`", () => {
+    expect(holders("credential-proxy:call")).toEqual(["admin", "builder"]);
+  });
+
+  it("credential-proxy:call-own is held by `admin`, `builder` and `operator`", () => {
+    expect(holders("credential-proxy:call-own")).toEqual(["admin", "builder", "operator"]);
   });
 });

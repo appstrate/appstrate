@@ -48,7 +48,7 @@ const LEFT_TO_MEMBERS = {
   providerId: "codex",
   modelId: "gpt-5-codex",
   credentialId: null,
-  binding: "member",
+  binding: "user",
   source: "custom",
   enabled: true,
   is_default: false,

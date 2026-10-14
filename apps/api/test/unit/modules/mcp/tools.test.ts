@@ -18,6 +18,7 @@ import {
 import type { Dispatch } from "../../../../src/modules/mcp/tools.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { AFPS_SCHEMA_VERSION, validateManifest } from "@appstrate/core/validation";
+import { withImpliedPermissions } from "@appstrate/core/permissions";
 import { orgPermissions, presetPermissions } from "../../../../src/lib/permissions.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { noExtra, parseResult, toolsFor } from "./helpers.ts";
@@ -104,13 +105,17 @@ describe("mcp catalog", () => {
     expect(calls).toHaveLength(0);
     // The listing stays an operation: `deriveMcpSurface` reads its guard to declare the tools.
     expect(operationIdGranted("listCredentialProxyConnections", new Set(), undefined)).toBe(false);
-    expect(
-      operationIdGranted(
-        "listCredentialProxyConnections",
-        new Set(["credential-proxy:call-own"]),
-        undefined,
-      ),
-    ).toBe(true);
+    // `credential-proxy:call` implies `call-own`: the closed set of either grants the listing.
+    for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
+      expect(
+        operationIdGranted(
+          "listCredentialProxyConnections",
+          withImpliedPermissions([permission]),
+          undefined,
+        ),
+        permission,
+      ).toBe(true);
+    }
   });
 });
 

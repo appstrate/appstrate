@@ -23,6 +23,11 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 - **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,
   the `_meta` key holding an agent's presentation (`color`), next to
   `AGENT_RESOURCES_META_KEY`.
+- **`MODEL_BINDINGS`** / **`ModelBinding`** and **`MODEL_CREDENTIAL_OWNERS`** /
+  **`ModelCredentialOwner`** (`@appstrate/core/model-payer`): whose credential
+  serves a listed model, `system` | `org` | `user` | `managed` (`MODEL_PAYERS`
+  plus `managed`, an alias), and who owns a stored model credential, `org` |
+  `user`, a subset of `ModelPayer`.
 - `findCleartextInjectedCredentials(manifest, isTrustedHost?)`
   (`./integration`): the `http://` `authorized_uris` entries of the auths
   that inject a credential over HTTP, as write-path issues. `isTrustedHost`
@@ -46,11 +51,15 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   (`resolveEffectiveToolSelection`) is the wildcard, written or inherited from
   `default_tools`; else the agent's own array, `[]` when it wrote none. Tool
   names inherited from `default_tools` contribute no scope. (#1923)
-- **`credential-proxy:call-own`** (`@appstrate/core/permissions`): the action
-  gating a call to `/api/credential-proxy/proxy` outside a run: on the
-  caller's own connections, and with `credential-proxy:call-run` as well on
-  those usable in the space, shared ones included. `CorePermission` and
-  `SpaceLevelPermission` gain the string. (#1894, #1957)
+- **`credential-proxy:call-own`** (`@appstrate/core/permissions`): `call-own` gates a call to
+  `/api/credential-proxy/proxy` outside a run on the caller's own connections
+  only; `credential-proxy:call` is unchanged and implies it.
+  `CoreResources["credential-proxy"]` is `"call" | "call-own"`, and
+  `CorePermission` and `SpaceLevelPermission` gain the string. (#1894, #1963)
+- **`withImpliedPermissions(held)`** (`@appstrate/core/permissions`): `held`
+  plus every permission a held one implies. The implications are
+  `runs:read-all` ⇒ `runs:read` and `credential-proxy:call` ⇒
+  `credential-proxy:call-own`; other strings pass through. (#1963)
 - **`resolveIntegrationToolSurface`**, **`IntegrationToolInspection`** and
   **`IntegrationToolInspectionEntry`** (`@appstrate/core/integration`): the
   catalog `resolveIntegrationToolCatalog` returns, plus an explanatory
@@ -88,9 +97,6 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   (`@appstrate/core/connect-handshake`): the scopes a connect flow requested
   that the consent left out, on a successful completion. (#1913)
 
-- **`AuthResolution.scopeCeiling`** (`@appstrate/core/module`): the scope
-  ceiling a `deferOrgResolution` strategy without `orgRole` declares, applied
-  over the org role resolved later. Absent, the caller is uncapped. (#1911)
 - **`code`** and **`arguments`** on every `launchRunAndWait` refusal decided
   before dispatch (`@appstrate/core/run-and-wait-client`): the payload is
   `{ code, error, arguments }`, `code` being a **`RunAndWaitArgumentCode`**
@@ -174,13 +180,20 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 
 ### Changed
 
-- **BREAKING: `credential-proxy:call` is the pair `credential-proxy:call-run`
-  and `credential-proxy:call-own`** (`@appstrate/core/permissions`):
-  `CoreResources["credential-proxy"]` is `"call-run" | "call-own"` and
-  `CORE_RESOURCE_ACTIONS["credential-proxy"]` is `["call-run", "call-own"]`.
-  `call-run` gates a call to `/api/credential-proxy/proxy` for a run
-  (`X-Run-Id`); a guard or a role naming `credential-proxy:call` no longer
-  type-checks. (#1894, #1957)
+- **BREAKING: `AuthResolution`** (`@appstrate/core/module`) is a union of an
+  inline resolution and a deferred one (`deferOrgResolution: true`), each
+  declaring its ceiling in one place, where 15.0.0 accepted any mix. Inline,
+  `permissions` is the ceiling over `orgRole` (or the whole grant without one),
+  and `scopeCeiling` is absent. Deferred, there is no `orgRole`, `permissions`
+  is empty, and the new **`scopeCeiling`** is the ceiling over the org role
+  resolved later (absent, the caller is uncapped). A strategy that sets
+  `orgRole` or a non-empty `permissions` on a deferred resolution, or
+  `scopeCeiling` on an inline one, fails to compile, and the pipeline answers
+  one the compiler never saw with a 500. `deferOrgResolution` is `true`,
+  `false` or absent: a non-literal `boolean` no longer type-checks. A deferred
+  resolution that carried `orgRole` with `permissions` as its ceiling declares
+  that list as `scopeCeiling` instead; the `X-Org-Id` middleware already
+  replaced the role. (#1911, #1963)
 
 - **BREAKING: `ConnectionCandidate`** (`@appstrate/core/integration`) requires
   `scopesGranted` and `missingScopes`, and a

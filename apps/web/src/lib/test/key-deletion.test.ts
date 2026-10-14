@@ -59,7 +59,7 @@ describe("keyDeletionPrompt", () => {
   it("says a member's personal key is theirs, and lets it go", () => {
     const prompt = keyDeletionPrompt(
       { id: "cred_bob", label: "Clé de Bob", owner_type: "user" },
-      [model("Claude", { credentialId: null, binding: "member" })],
+      [model("Claude", { credentialId: null, binding: "user" })],
       i18n.t,
     );
     expect(prompt).toEqual({

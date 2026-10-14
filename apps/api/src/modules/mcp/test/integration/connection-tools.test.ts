@@ -5,16 +5,16 @@
  * credential-proxy routes behind them and a real minted MCP instance token (DCR client,
  * authorization-code flow, `aud` = the organization's MCP resource):
  *
- *   - who is offered the two tools: a space admin and a custom role holding
- *     `credential-proxy:call-own`, never an operator, the owner of a personal space, a
- *     credential whose scopes omit it, or a cookie session or the chat's loopback bearer, which
- *     the bearer-only proxy refuses;
+ *   - who is offered the two tools: a space admin, an operator, the owner of a personal space
+ *     and a credential holding `credential-proxy:call` or `credential-proxy:call-own`, never a
+ *     runner, a credential whose scopes omit both, or a cookie session or the chat's loopback
+ *     bearer, which the bearer-only proxy refuses;
  *   - `api_call` makes one proxy call per request and relays what each came back with: the
  *     upstream's answer, cut and filtered, or the proxy's own refusal. A connection another
- *     member shared is reached once named by a holder of `credential-proxy:call-run` as well,
- *     never with `credential-proxy:call-own` alone;
+ *     member shared is reached once named by a holder of `credential-proxy:call`, never with
+ *     `credential-proxy:call-own` alone;
  *   - `list_connections` and the catalog's listing operation serve the same rows: the caller's
- *     own, and for a holder of both permissions those shared into the space.
+ *     own, and for a holder of `credential-proxy:call` those shared into the space.
  *
  * The upstream is a stub of the global `fetch` the proxy calls, as in
  * `test/integration/routes/credential-proxy.test.ts`, which covers the proxy's access rule and
@@ -267,18 +267,21 @@ describe("mcp connection tools", () => {
   const upstreamAuth = () => upstreamCalls.map((call) => call.headers.get("authorization"));
 
   describe("who is offered the tools", () => {
-    it("declares both to a space admin, neither to an operator", async () => {
-      const admin = await toolNames(await instanceCaller(owner));
-      expect(admin).toContain("list_connections");
-      expect(admin).toContain("api_call");
+    it("declares both to a space admin and an operator, neither to a runner", async () => {
+      for (const preset of ["admin", "operator"] as const) {
+        const caller = preset === "admin" ? owner : await memberContext(owner, "member", preset);
+        const names = await toolNames(await instanceCaller(caller));
+        expect(names, preset).toContain("list_connections");
+        expect(names, preset).toContain("api_call");
+      }
 
-      const operator = await toolNames(
-        await instanceCaller(await memberContext(owner, "member", "operator")),
+      const runner = await toolNames(
+        await instanceCaller(await memberContext(owner, "member", "runner")),
       );
-      expect(operator).not.toContain("list_connections");
-      expect(operator).not.toContain("api_call");
-      // The control: an operator runs agents, which is not what declares the tools.
-      expect(operator).toContain("run_and_wait");
+      expect(runner).not.toContain("list_connections");
+      expect(runner).not.toContain("api_call");
+      // The control: a runner runs agents, which is not what declares the tools.
+      expect(runner).toContain("run_and_wait");
     });
 
     it("declares both to a custom role holding `credential-proxy:call-own`", async () => {
@@ -289,7 +292,7 @@ describe("mcp connection tools", () => {
       expect(names).toContain("api_call");
     });
 
-    it("declares neither to the owner of a personal space, whose `admin` there omits it", async () => {
+    it("declares both to the owner of a personal space, preset `admin` there", async () => {
       const personal = await seedSpace({
         orgId: owner.orgId,
         name: "Perso",
@@ -300,30 +303,28 @@ describe("mcp connection tools", () => {
         path: spacePath(owner, personal.id),
         headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
       });
-      expect(names).not.toContain("list_connections");
-      expect(names).not.toContain("api_call");
-      // The control: the rest of `admin` holds there.
+      expect(names).toContain("list_connections");
+      expect(names).toContain("api_call");
       expect(names).toContain("run_and_wait");
     });
 
-    it("declares neither to a credential whose scopes omit `credential-proxy:call-own`", async () => {
+    it("declares both to a credential holding either proxy permission, neither to one omitting both", async () => {
       // Same creator, a space admin: only the key's own ceiling differs.
       const without = await toolNames(
-        await keyCaller(owner, [
-          "mcp:read",
-          "mcp:invoke",
-          "credential-proxy:call-run",
-          "agents:run",
-          "runs:read",
-        ]),
+        await keyCaller(owner, ["mcp:read", "mcp:invoke", "agents:run", "runs:read"]),
       );
       expect(without).not.toContain("list_connections");
       expect(without).not.toContain("api_call");
       expect(without).toContain("run_and_wait");
 
-      const withIt = await toolNames(await keyCaller(owner, CALL_OWN_ROLE));
-      expect(withIt).toContain("list_connections");
-      expect(withIt).toContain("api_call");
+      // A key scoped `credential-proxy:call` alone, which implies `call-own`.
+      for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
+        const withIt = await toolNames(
+          await keyCaller(owner, ["mcp:read", "mcp:invoke", permission]),
+        );
+        expect(withIt, permission).toContain("list_connections");
+        expect(withIt, permission).toContain("api_call");
+      }
     });
 
     it("declares neither over a cookie session, which the proxy refuses", async () => {
@@ -345,7 +346,7 @@ describe("mcp connection tools", () => {
         name: owner.user.name,
         orgId: owner.orgId,
         orgRole: "owner",
-        permissions: [...CALL_OWN_ROLE, "credential-proxy:call-run", "agents:run", "runs:read"],
+        permissions: [...CALL_OWN_ROLE, "credential-proxy:call", "agents:run", "runs:read"],
       });
       const names = await toolNames({
         path: spacePath(owner),
@@ -360,7 +361,8 @@ describe("mcp connection tools", () => {
     it("declares them per space on the organization's endpoint", async () => {
       const member = await memberHolding(owner, CALL_OWN_ROLE);
       const other = await seedSpace({ orgId: owner.orgId, name: "Atelier", visibility: "closed" });
-      await seedSpaceMember({ spaceId: other.id, userId: member.user.id, presetRole: "operator" });
+      // `runner` there: no proxy permission.
+      await seedSpaceMember({ spaceId: other.id, userId: member.user.id, presetRole: "runner" });
       await connect(member, "mine");
       const caller: Caller = {
         path: `/api/mcp/o/${owner.orgId}`,
@@ -502,7 +504,7 @@ describe("mcp connection tools", () => {
       const unnamed = get("/contacts");
       const named = get("/contacts", { connection_id: shared });
 
-      // The admin holds `credential-proxy:call-run` as well: the fallback binds no share.
+      // The admin holds `credential-proxy:call`: the fallback binds no share.
       const fallback = await callTool(caller, "api_call", { requests: [unnamed] });
       expect(entries(fallback.data)[0]!.error).toMatchObject({
         status: 409,
@@ -521,7 +523,7 @@ describe("mcp connection tools", () => {
       expect(upstreamCalls).toHaveLength(1);
     });
 
-    it("serves the listing operation the same rows as list_connections: shared ones for both permissions only", async () => {
+    it("serves the listing operation the same rows as list_connections: shared ones for credential-proxy:call only", async () => {
       /** `[connection_id, owned_by_actor]` of each row, read at both doors. */
       const listedBy = async (asCaller: Caller) => {
         const listed = await callTool(asCaller, "list_connections");

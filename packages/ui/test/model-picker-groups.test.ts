@@ -48,14 +48,19 @@ const mistral = model({
 });
 const claude = model({
   id: "claude-sonnet",
-  binding: "member",
+  binding: "user",
   credentialId: null,
   billed_to: "user",
   provider_name: "Anthropic",
   providerId: "anthropic",
 });
 const claudeUnserved = { ...claude, billed_to: null as null };
-const builtIn = model({ id: "sys-1", billed_to: "system", provider_name: "OpenAI" });
+const builtIn = model({
+  id: "sys-1",
+  binding: "system",
+  billed_to: "system",
+  provider_name: "OpenAI",
+});
 
 describe("groupModelsForPicker", () => {
   it("groups by who pays, org first, then the person's own, then the system", () => {
