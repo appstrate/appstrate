@@ -381,13 +381,19 @@ function buildListConnectionsTool(ctx: ConnectionToolContext): AppstrateToolDefi
   const descriptor: Tool = {
     name: "list_connections",
     description:
-      "List what api_call reaches in this space outside a run: your OWN connections, each with " +
-      "the `integration_package_id` and `connection_id` to pass, the `authorized_uris` a target must " +
-      "match (unless `allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy " +
-      "alone resolves, see api_call's `target`), its `scopes_granted`, and what such a call " +
-      "would still refuse: `needs_reconnection`, and `run_required` (an enforced organization " +
-      "default governs the integration). A connection another member shared is never listed: " +
-      "it and a `run_required` integration are reached through " +
+      "List what api_call accepts from you in this space: your own connections and, when you " +
+      "also hold `credential-proxy:call-run`, those other members shared into it " +
+      "(`owned_by_actor: false`). Each has the `integration_package_id` and `connection_id` to " +
+      "pass, the `authorized_uris` a target must match (unless `allow_all_uris`; an entry may " +
+      "hold a `{$credential.<field>}` the proxy alone resolves, see api_call's `target`), its " +
+      "`scopes_granted`, and what such a call would still refuse: `needs_reconnection`, and " +
+      "`call_run_permission_required` (an enforced organization default governs the integration and you hold " +
+      "no `credential-proxy:call-run`). Both flags describe a call passing that `connection_id`; " +
+      "with none passed and `credential-proxy:call-run` held, an organization default applies " +
+      "first. A connection you do not own is used when you pass its `connection_id` or an " +
+      "organization default designates it. With " +
+      "`credential-proxy:call-own` alone, a connection another member shared and a " +
+      "`call_run_permission_required` integration are reached through " +
       (ctx.runs ? "a run (run_and_wait)." : "an agent run only."),
     annotations: {
       title: "List callable connections",
@@ -431,13 +437,14 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
     name: "api_call",
     description:
       "Call third-party APIs with a connection's credential injected by the platform, never " +
-      "shown to you: one request or a batch. Outside a run it reaches your OWN connections " +
-      "only; call list_connections first for the ids, each connection's `authorized_uris`, and " +
-      "the integrations that need a run. Call directly for deterministic or bulk reads and " +
+      "shown to you: one request or a batch. It reaches the connections list_connections " +
+      "lists; call that first for the ids, each connection's `authorized_uris`, and the " +
+      "integrations that need a run. Call directly for deterministic or bulk reads and " +
       "writes" +
       (ctx.runs
         ? "; delegate to run_and_wait instead when the task needs judgement, several dependent " +
-          "steps, a connection another member shared, or an agent's configured tools. "
+          "steps, an agent's configured tools, or, holding `credential-proxy:call-own` alone, a " +
+          "connection another member shared. "
         : ". ") +
       "Requests run concurrently, not in order, and each counts against the proxy's rate " +
       "limit. Returns `{ session_id, results }`, one entry per " +
@@ -445,9 +452,10 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
       "status (a 401 there is the upstream refusing the connection), with `headers` and a text " +
       "`body`, cut at `max_response_bytes` (`truncated: true`); a non-text body is replaced by " +
       "its size. An entry with `error` `{ status, code, detail }` is the platform's refusal and " +
-      "does not stop the other requests: `run_required`, `credential_not_found`, " +
+      "does not stop the other requests: `call_run_permission_required`, `credential_not_found`, " +
       "`must_choose_connection` (retry with one `errors[0].candidate_connections[].id` as " +
-      "`connection_id`), `needs_reconnection`, `unauthorized_target`, `rate_limited`. A " +
+      "`connection_id`), `connection_not_in_org_default`, `pinned_connection_unavailable`, " +
+      "`needs_reconnection`, `unauthorized_target`, `rate_limited`. A " +
       "`detail` naming `X-Connection-Id` means `connection_id`.",
     annotations: {
       title: "Call an API through a connection",

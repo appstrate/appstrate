@@ -197,6 +197,7 @@ describe("credential-proxy integration-resolver", () => {
       spaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       actor: { type: "user" as const, id: actorId },
+      reach: "own" as const,
     };
   }
 
@@ -741,6 +742,7 @@ describe("credential-proxy integration-resolver", () => {
       const context = {
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user" as const, id: ctx.user.id },
+        reach: "own" as const,
       };
       const manifest = gmailManifest(token.url) as unknown as IntegrationManifest;
       const primary = manifest.auths!.primary!;
@@ -834,7 +836,13 @@ describe("credential-proxy integration-resolver", () => {
         actor,
       });
 
-      const underRun = await resolveIntegrationProxyCredentials({ ...input(), run: run1 });
+      const underRun = await resolveIntegrationProxyCredentials({
+        integrationId: INTEGRATION_ID,
+        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        actor,
+        run: run1,
+      });
       expect(underRun.declaredUris).toEqual(["https://api.example.com/*"]);
       const withoutRun = await resolveIntegrationProxyCredentials(input());
       expect(withoutRun.declaredUris).toEqual(["https://later.example.com/**"]);

@@ -159,6 +159,7 @@ describe("org-scope connections across spaces", () => {
       await selectAccessibleConnection(INTEGRATION, integrationManifest, named, {
         spaceId,
         actor: me,
+        reach: "own",
       })
     )?.id ?? null;
 

@@ -150,15 +150,10 @@ const ADMIN_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = SPACE_LEVEL_
 /** Families a `builder` authors and operates with, but does not govern. */
 const BUILDER_EXCLUDED_PREFIXES = ["space-settings:", "space-members:", "api-keys:"] as const;
 
-/**
- * `builder`: author and operate — admin minus the governance surfaces and
- * `credential-proxy:call-own`, which `admin` alone holds among the presets.
- */
+/** `builder`: author and operate — admin minus the governance surfaces. */
 const BUILDER_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = new Set<SpaceLevelPermission>(
   [...ADMIN_PRESET_PERMISSIONS].filter(
-    (p) =>
-      p !== "credential-proxy:call-own" &&
-      !BUILDER_EXCLUDED_PREFIXES.some((prefix) => p.startsWith(prefix)),
+    (p) => !BUILDER_EXCLUDED_PREFIXES.some((prefix) => p.startsWith(prefix)),
   ),
 );
 

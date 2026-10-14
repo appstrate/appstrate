@@ -129,6 +129,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       ...(connectionId ? { connectionId } : {}),
       integrationId: packageId,
       method: "POST",

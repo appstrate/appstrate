@@ -64,7 +64,7 @@ export const openApiInfo = {
     {
       name: "Credential Proxy",
       description:
-        "Server-side credential injection outside the sandbox: a remote run's calls, and calls on the caller's own connections outside a run",
+        "Server-side credential injection outside the sandbox: a remote run's calls, and calls outside a run",
     },
     {
       name: "LLM Proxy",

@@ -80,10 +80,10 @@ the root `CHANGELOG.md` (Operators).
 2. Run the migrate service alone (`docker compose run --rm appstrate-migrate`): it applies the
    pending drizzle migrations, `0088`, `0089` and `0090` among them. The app stays stopped.
 3. `0044` dry run, then `--apply`: `shared_space_ids` copied into `integration_connection_shares`.
-4. `0046` dry run, then `--apply`: `credential-proxy:call` renamed `credential-proxy:call-run` in
-   `api_keys.scopes` and `space_roles.permissions`. The app is still stopped: the release ignores
-   the old name and the release before it ignores the new one, so `--apply` never runs on the
-   running previous release, and the app does not start before it.
+4. `0046` dry run, then `--apply`: `credential-proxy:call` replaced by `credential-proxy:call-run`
+   and `credential-proxy:call-own` in `api_keys.scopes` and `space_roles.permissions`. The app is
+   still stopped: the release ignores the old name and the release before it ignores the new ones,
+   so `--apply` never runs on the running previous release, and the app does not start before it.
 5. Start the app. A subscription pairing minted before the deploy is regenerated after it (its
    command is valid 5 minutes): it records no owner, and drizzle `0095` reads no owner as the
    organization.
@@ -1263,16 +1263,18 @@ dry run; `--apply` commits. It refuses an empty `DATABASE_URL`.
 
 Rollback: see the table above.
 
-## Detail — `credential-proxy:call` renamed `credential-proxy:call-run` where it is stored (script `0046`)
+## Detail — `credential-proxy:call` replaced by `credential-proxy:call-run` and `credential-proxy:call-own` where it is stored (script `0046`)
 
-**Not a runbook.** The credential proxy takes one permission per path (#1894): a call made for a
-run (`X-Run-Id`) requires `credential-proxy:call-run`, a call outside a run
-`credential-proxy:call-own`. A stored permission string the platform does not know grants nothing,
-so `0046` rewrites every stored `credential-proxy:call`, in the two columns that store permission
-strings: `api_keys.scopes` and `space_roles.permissions`. In each row holding the old name, that
-element becomes `credential-proxy:call-run` where it stands (`array_replace`: the order and every
-other element kept). Revoked and expired keys are rewritten like the others.
-`credential-proxy:call-own` is stored nowhere before this release and is not touched. The OIDC
+**Not a runbook.** The credential proxy takes one permission per path (#1894, #1957): a call made
+for a run (`X-Run-Id`) requires `credential-proxy:call-run`, a call outside a run
+`credential-proxy:call-own`, and the two together are what `credential-proxy:call` was. A stored
+permission string the platform does not know grants nothing, so `0046` rewrites every stored
+`credential-proxy:call`, in the two columns that store permission strings: `api_keys.scopes` and
+`space_roles.permissions`. In each row holding the old name, `credential-proxy:call-run` takes its place,
+`credential-proxy:call-own` is appended and every other element is kept, so an existing API key or
+custom role keeps both paths.
+Revoked and expired keys are rewritten like the others. `credential-proxy:call-own` is stored
+nowhere before this release, so until the release serves a request the rows holding it are the rows rewritten. The OIDC
 scope columns (`oauth_clients`, the tokens, the consents) are left alone: the OIDC vocabulary does
 not list the permission. Audit payloads are history and stay as written.
 
@@ -1288,8 +1290,8 @@ SELECT (SELECT count(*) FROM api_keys
 Measured on the production database on 2026-10-13: 20 `api_keys` rows (of 49) and 0 `space_roles`
 rows.
 
-The release carrying the rename ignores the old name, and the release before it ignores the new
-one. So `0046 --apply` runs in the window, after the migrate service and before the app starts:
+The release carrying the two names ignores the old one, and the release before it ignores the new
+ones. So `0046 --apply` runs in the window, after the migrate service and before the app starts:
 on the running previous release it takes the permission away from every key and role it rewrites,
 and a release serving before it serves them without it. On the running previous release, the
 pre-flight or the dry run only.
@@ -1297,16 +1299,20 @@ pre-flight or the dry run only.
 It prints the database it is connected to, then per column the count of rows holding the old name
 and each row's id (a role's with its `org_id` and `key`), never a key hash. One transaction,
 `pg_dump` first:
-`set -a && . ./.env && set +a && bun scripts/migration/0046-rename-credential-proxy-call-scope.ts`
+`set -a && . ./.env && set +a && bun scripts/migration/0046-split-credential-proxy-call-scope.ts`
 is the dry run (rolled back); `--apply` commits. It refuses an empty `DATABASE_URL`. A second run
 finds nothing to rewrite.
 
 It does not reach a client that mints keys: one naming `credential-proxy:call` in `scopes` gets a
-400 from this release and sends `credential-proxy:call-run`.
+400 from this release and names `credential-proxy:call-run` and `credential-proxy:call-own`.
 
-Rollback, before the previous release serves again: the inverse rename on both columns —
-`UPDATE api_keys SET scopes = array_replace(scopes, 'credential-proxy:call-run', 'credential-proxy:call') WHERE 'credential-proxy:call-run' = ANY(scopes)`,
-and the same on `space_roles.permissions` — or the window's `pg_dump`.
+Rollback: the window's `pg_dump`. Only before the release serves a request, the inverse statements
+are exact as well:
+`UPDATE api_keys SET scopes = array_remove(array_replace(scopes, 'credential-proxy:call-run', 'credential-proxy:call'), 'credential-proxy:call-own') WHERE 'credential-proxy:call-run' = ANY(scopes)`
+and
+`UPDATE space_roles SET permissions = array_remove(array_replace(permissions, 'credential-proxy:call-run', 'credential-proxy:call'), 'credential-proxy:call-own') WHERE 'credential-proxy:call-run' = ANY(permissions)`.
+Once the release serves, a key it mints with `credential-proxy:call-run` alone would come out of
+them holding `credential-proxy:call`, the whole proxy for the previous release.
 
 ## Log
 
@@ -1355,4 +1361,4 @@ and the same on `space_roles.permissions` — or the window's `pg_dump`.
 | 0043 | not applied         | space-tier auto-provisioned (DCR/CIMD) OAuth clients moved to their org tier: per (integration, auth, issuer) the client of either tier with the most connections, a tie going to the org tier, is the winner; the others are merged into it and a space-tier winner promoted (connections re-pointed and flagged `needs_reconnection`, client deleted) and the key's user-owned rows widened to org scope, each audited `scope_widened` by the `system` actor (#1910) — **run after the deploy carrying drizzle `0089`, app up, after `0044` and `0041`**; `.ts`, dry run by default, `--apply` to commit                                                                                   | per organization (one transaction each, rolled back on a dry run) the promoted, merged, re-pointed and widened counts; on `--apply`, the space-tier auto clients left, which must be 0 (exit 1 otherwise); idempotent, a second run finds nothing to promote                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 0044 | not applied         | `integration_connections.shared_space_ids` copied into `integration_connection_shares` (`ON CONFLICT DO NOTHING`, each audited `share_added` with `reason: migrated`) and emptied, a missing or other-organization target space skipped and printed, then the shares whose owner no longer reaches their space withdrawn as a live access loss does (#1910) — **run after the migrate service (`appstrate-migrate`) applies drizzle `0089` and BEFORE the app starts**: an app serving `0089` before it runs sees no existing share; `.ts`, dry run by default, `--apply` to commit                                                                                                          | rows copied, targets skipped (each printed), columns emptied, shares withdrawn and schedules disabled, in one transaction rolled back on a dry run; a second `--apply` inserts nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 0045 | not applied         | member pins naming the connection a member of the organization made in a space, where they own several connections usable there, exactly one made there and none of the others shared into it: one per agent whose last run by them there recording the integration bound exactly that connection by `fallback_auto` after the others were created, no org default on the integration, no pin of theirs or admin pin on the agent (#1929); each audited `integration.member_pin.upserted` by the `system` actor — **run after `0041` and `0043`, app up**; `.ts`, dry run by default, `--apply` to commit                                                                                    | UNMEASURED — the state it repairs exists only after `0041 --apply`, which no reachable database has run. Refuses to run while `0041` or `0043` has work left; prints the pins to write and the schedules with no pin, then per organization (one transaction each, rolled back on a dry run) each pin and, listed and not written, each enabled schedule naming no set for an integration its member owns several usable connections of: `binds through the pin` or `no pin: name the set`; on `--apply`, the pins left to write, which must be 0 (exit 1 otherwise); idempotent                                                                                                                             |
-| 0046 | not applied         | `credential-proxy:call` → `credential-proxy:call-run` in `api_keys.scopes` and `space_roles.permissions`: the element renamed where it stands (#1894) — **run inside the deploy window, after the migrate service and BEFORE the app starts; never `--apply` on the running previous release**; `.ts`, dry run by default, `--apply` to commit                                                                                                                                                                                                                                                                                                                                               | 20 `api_keys` / 0 `space_roles` counted on production read-only 2026-10-13, NOT rehearsed against a restored dump — prints per column the count and each row id, then the rows left holding the old name, which must be 0; idempotent, a second run rewrites nothing                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 0046 | not applied         | `credential-proxy:call` → `credential-proxy:call-run` and `credential-proxy:call-own` in `api_keys.scopes` and `space_roles.permissions`: `call-run` takes the old name's place and `call-own` is appended (#1894, #1957) — **run inside the deploy window, after the migrate service and BEFORE the app starts; never `--apply` on the running previous release**; `.ts`, dry run by default, `--apply` to commit                                                                                                                                                                                                                                                                           | 20 `api_keys` / 0 `space_roles` counted on production read-only 2026-10-13, NOT rehearsed against a restored dump — prints per column the count and each row id; idempotent, a second run rewrites nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |

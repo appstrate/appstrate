@@ -17,8 +17,8 @@
  *   - several own connections and no `X-Connection-Id` → 409 must_choose_connection
  *   - one permission per path: `credential-proxy:call-run` with `X-Run-Id` (the caller's own
  *     in-flight run, executed by the caller), `credential-proxy:call-own` without
- *   - `X-Run-Id` confines the call to the run's bound connections; without it
- *     only the caller's own connections are reachable
+ *   - `X-Run-Id` confines the call to the run's bound connections; without it the caller's
+ *     own connections are reachable, and with both permissions those usable in the space
  *   - `GET /api/credential-proxy/connections` lists what a call without a run reaches
  *   - upstream `Set-Cookie` never relayed; the server-side jar keeps continuity
  *   - the call journal: a row per call that may have sent the credential (the
@@ -27,9 +27,9 @@
  *
  * Auth is a Bearer API key — cookie sessions are refused by design and the
  * route only accepts API keys / device-flow JWTs (the JWT door is covered in
- * `modules/oidc/test/integration/routes/credential-proxy-jwt.test.ts`). Of
- * the space presets only `admin` grants `credential-proxy:call-own`; the caller
- * here is an org member holding it through a custom space role.
+ * `modules/oidc/test/integration/routes/credential-proxy-jwt.test.ts`). The
+ * caller is an org member holding both proxy permissions through a custom space
+ * role; a key's `scopes` narrow it to one of them.
  */
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
@@ -199,6 +199,9 @@ const BOTH_PATHS = [
   "agents:run",
   "runs:read",
 ];
+
+/** The run path alone. */
+const RUN_PATH = ["credential-proxy:call-run", "agents:run", "runs:read"];
 
 /** A fresh org, as the member the proxy is called by: both paths are open to them. */
 async function proxyCallerContext(): Promise<TestContext> {
@@ -1211,7 +1214,7 @@ describe("POST /api/credential-proxy/proxy — one permission per path", () => {
   });
 });
 
-describe("POST /api/credential-proxy/proxy — outside a run, the caller's own connections only", () => {
+describe("POST /api/credential-proxy/proxy — outside a run with credential-proxy:call-own alone, the caller's own connections only", () => {
   let ctx: TestContext;
   let colleague: TestContext;
   let apiKey: string;
@@ -1275,7 +1278,7 @@ describe("POST /api/credential-proxy/proxy — outside a run, the caller's own c
   it("nothing named, no own connection: 404 credential_not_found, a colleague's shared one never picked", async () => {
     await seedGmailConnection(colleague, "theirs-shared", { shared: true });
     const body = await expectProblem(await call(), 404, { code: "credential_not_found" });
-    expect(body.detail).toContain("through a run (X-Run-Id)");
+    expect(body.detail).toContain("also holds credential-proxy:call-run");
     expect(upstreamAuth).toEqual([]);
   });
 
@@ -1310,13 +1313,13 @@ describe("POST /api/credential-proxy/proxy — outside a run, the caller's own c
       expect(new Set(bodies).size).toBe(1);
       const problem = JSON.parse(bodies[0]!) as { code: string; detail: string };
       expect(problem.code).toBe("credential_not_found");
-      expect(problem.detail).toContain("through a run (X-Run-Id)");
+      expect(problem.detail).toContain("also holds credential-proxy:call-run");
       expect(bodies[0]).not.toContain("theirs-");
       expect(upstreamAuth).toEqual([]);
     });
   }
 
-  it("an enforced org default: 403 run_required whatever is named, its members never listed", async () => {
+  it("an enforced org default: 403 call_run_permission_required whatever is named, its members never listed", async () => {
     const own = await seedGmailConnection(ctx, "own-1");
     const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
     await orgDefault(ctx, [shared], true);
@@ -1325,9 +1328,9 @@ describe("POST /api/credential-proxy/proxy — outside a run, the caller's own c
     for (const id of named) {
       const res = await call(id ? { "X-Connection-Id": id } : {});
       const text = await res.clone().text();
-      await expectProblem(res, 403, { code: "run_required" });
+      await expectProblem(res, 403, { code: "call_run_permission_required" });
       expect(res.headers.get("proxy-status")).toBe("appstrate; error=http_request_denied");
-      expect(text).toContain("X-Run-Id");
+      expect(text).toContain("also holds credential-proxy:call-run");
       expect(text).not.toContain(shared);
       expect(text).not.toContain("theirs-shared");
     }
@@ -1389,13 +1392,371 @@ describe("POST /api/credential-proxy/proxy — outside a run, the caller's own c
     expect(await listed({ "Appstrate-User": endUser.id })).toEqual([]);
     expect(upstreamAuth).toEqual([]);
   });
+});
 
-  it("a soft org default is ignored: the own connection is bound, never the default's", async () => {
-    await seedGmailConnection(ctx, "own-1");
+describe("POST /api/credential-proxy/proxy — outside a run, both proxy permissions reach the connections usable in the space", () => {
+  let ctx: TestContext;
+  let colleague: TestContext;
+  let keys: Record<Caller, string>;
+  let upstreamAuth: string[];
+
+  type Caller = "both" | "call-own alone";
+  type Connection = "own" | "own2" | "shared" | "shared2" | "private";
+  const LABELS: Record<Connection, string> = {
+    own: "own-1",
+    own2: "own-2",
+    shared: "theirs-shared",
+    shared2: "theirs-shared-2",
+    private: "theirs-private",
+  };
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    ctx = await proxyCallerContext();
+    colleague = await memberContext(ctx, "member");
+    keys = {
+      // Exactly the two permissions: no `agents:run`, so this caller can launch no run.
+      both: await mintProxyKey(ctx, ["credential-proxy:call-own", "credential-proxy:call-run"]),
+      "call-own alone": await mintProxyKey(ctx, ["credential-proxy:call-own"]),
+    };
+    await seedProxyIntegration(ctx, gmailManifest());
+    upstreamAuth = [];
+    mockUpstream(async (_input, init) => {
+      upstreamAuth.push(new Headers(init?.headers).get("authorization") ?? "");
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+  });
+  afterEach(() => restoreFetch());
+
+  /**
+   * The colleague's connections, `shared` (two unless stated) into the space and one not, and
+   * `owned` of the caller's.
+   */
+  async function seedConnections(
+    owned: 0 | 1 | 2 = 1,
+    shared: 1 | 2 = 2,
+  ): Promise<Record<Connection, string>> {
+    return {
+      own: owned > 0 ? await seedGmailConnection(ctx, LABELS.own) : crypto.randomUUID(),
+      own2: owned > 1 ? await seedGmailConnection(ctx, LABELS.own2) : crypto.randomUUID(),
+      shared: await seedGmailConnection(colleague, LABELS.shared, { shared: true }),
+      shared2:
+        shared > 1
+          ? await seedGmailConnection(colleague, LABELS.shared2, { shared: true })
+          : crypto.randomUUID(),
+      private: await seedGmailConnection(colleague, LABELS.private),
+    };
+  }
+
+  function call(caller: Caller, connectionId?: string, extra: Record<string, string> = {}) {
+    return app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${keys[caller]}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "X-Integration-Id": INTEGRATION_ID,
+        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "X-Session-Id": uuidV4(),
+        ...(connectionId ? { "X-Connection-Id": connectionId } : {}),
+        ...extra,
+      },
+    });
+  }
+
+  async function flagNeedsReconnection(connectionId: string) {
+    await db
+      .update(integrationConnections)
+      .set({ needsReconnection: true })
+      .where(eq(integrationConnections.id, connectionId));
+  }
+
+  /** What a call answers: the connection it used, or the platform's refusal. */
+  type Answer =
+    | { uses: Connection }
+    | { status: number; code: string; param?: string; reason?: string; candidates?: Connection[] };
+
+  // `call-own alone` is listed where no test of the describe above pins its answer.
+  const ROWS: {
+    situation: string;
+    /** The caller's own connections; one unless stated. */
+    owned?: 0 | 2;
+    /** A single connection is shared into the space, where the fallback could bind it. */
+    oneShared?: true;
+    orgDefault?: { members: Connection[]; enforce: boolean };
+    named?: Connection;
+    answers: Partial<Record<Caller, Answer>>;
+  }[] = [
+    {
+      situation: "one own connection, none named",
+      answers: { both: { uses: "own" }, "call-own alone": { uses: "own" } },
+    },
+    {
+      situation: "a connection shared into the space, named",
+      named: "shared",
+      answers: { both: { uses: "shared" } },
+    },
+    {
+      situation: "no own connection, a shared one named",
+      owned: 0,
+      named: "shared",
+      answers: { both: { uses: "shared" } },
+    },
+    {
+      situation: "no own connection, a single shared one, none named",
+      owned: 0,
+      oneShared: true,
+      answers: {
+        both: {
+          status: 409,
+          code: "must_choose_connection",
+          reason: "Only connections shared by other members exist",
+          candidates: ["shared"],
+        },
+      },
+    },
+    {
+      situation: "several own connections, none named",
+      owned: 2,
+      answers: {
+        both: {
+          status: 409,
+          code: "must_choose_connection",
+          reason: "No single connection applies",
+          candidates: ["own", "own2", "shared", "shared2"],
+        },
+      },
+    },
+    {
+      situation: "a colleague's connection not shared into the space, named",
+      named: "private",
+      answers: { both: { status: 404, code: "credential_not_found" } },
+    },
+    {
+      situation: "an enforced default of one member, none named",
+      orgDefault: { members: ["shared"], enforce: true },
+      answers: { both: { uses: "shared" } },
+    },
+    {
+      situation: "an enforced default, an own connection outside it named",
+      orgDefault: { members: ["shared"], enforce: true },
+      named: "own",
+      answers: {
+        both: { status: 400, code: "connection_not_in_org_default", param: "X-Connection-Id" },
+      },
+    },
+    {
+      situation: "an enforced default of several members, none named",
+      orgDefault: { members: ["shared", "shared2"], enforce: true },
+      answers: {
+        both: { status: 409, code: "must_choose_connection", candidates: ["shared", "shared2"] },
+      },
+    },
+    {
+      situation: "an enforced default of several members, one of them named",
+      orgDefault: { members: ["shared", "shared2"], enforce: true },
+      named: "shared2",
+      answers: { both: { uses: "shared2" } },
+    },
+    {
+      situation: "an enforced default with a member not shared into the space, none named",
+      orgDefault: { members: ["shared", "private"], enforce: true },
+      answers: { both: { status: 409, code: "pinned_connection_unavailable" } },
+    },
+    {
+      situation: "an enforced default with a member not shared into the space, another named",
+      orgDefault: { members: ["shared", "private"], enforce: true },
+      named: "shared",
+      answers: { both: { uses: "shared" } },
+    },
+    {
+      situation: "a soft default, none named",
+      orgDefault: { members: ["shared"], enforce: false },
+      answers: { both: { uses: "shared" }, "call-own alone": { uses: "own" } },
+    },
+    {
+      situation: "a soft default of several members, none named",
+      orgDefault: { members: ["shared", "shared2"], enforce: false },
+      answers: {
+        both: { status: 409, code: "must_choose_connection", candidates: ["shared", "shared2"] },
+      },
+    },
+    {
+      situation: "a soft default, an own connection named",
+      orgDefault: { members: ["shared"], enforce: false },
+      named: "own",
+      answers: { both: { uses: "own" } },
+    },
+    {
+      situation: "an org default naming a connection not shared into the space, none named",
+      orgDefault: { members: ["private"], enforce: false },
+      answers: { both: { status: 409, code: "pinned_connection_unavailable" } },
+    },
+  ];
+
+  for (const row of ROWS) {
+    for (const [caller, answer] of Object.entries(row.answers) as [Caller, Answer][]) {
+      const outcome =
+        "uses" in answer ? `200 with ${answer.uses}` : `${answer.status} ${answer.code}`;
+      it(`${caller} — ${row.situation}: ${outcome}`, async () => {
+        const ids = await seedConnections(row.owned, row.oneShared ? 1 : 2);
+        if (row.orgDefault) {
+          await orgDefault(
+            ctx,
+            row.orgDefault.members.map((member) => ids[member]),
+            row.orgDefault.enforce,
+          );
+        }
+
+        const res = await call(caller, row.named && ids[row.named]);
+
+        if ("uses" in answer) {
+          expect(res.status, await res.clone().text()).toBe(200);
+          expect(upstreamAuth).toEqual([`Bearer tok-${LABELS[answer.uses]}`]);
+          return;
+        }
+        const body = await expectProblem(res, answer.status, answer);
+        expect(upstreamAuth).toEqual([]);
+        if (answer.reason) expect(body.detail).toContain(answer.reason);
+        if (answer.candidates) {
+          const [item] = body.errors as { candidate_connections: { id: string }[] }[];
+          expect(item!.candidate_connections.map((c) => c.id).sort()).toEqual(
+            answer.candidates.map((candidate) => ids[candidate]).sort(),
+          );
+        }
+      });
+    }
+  }
+
+  it("journals a shared connection's call with its owner, apart from the caller", async () => {
+    const ids = await seedConnections();
+    expect((await call("both", ids.shared)).status).toBe(200);
+
+    await drainAudits(5_000);
+    const rows = await db.select().from(connectionCalls);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      connectionId: ids.shared,
+      runId: null,
+      ownerType: "user",
+      ownerId: colleague.user.id,
+      actorType: "user",
+      actorId: ctx.user.id,
+      outcome: "200",
+    });
+  });
+
+  // `Appstrate-User` on an API key: the actor is the end-user, with the key's permissions.
+  it("an end-user under a key holding both permissions reaches a member's shared connection, never the creator's unshared one", async () => {
+    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const asEndUser = { "Appstrate-User": endUser.id };
     const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
-    await orgDefault(ctx, [shared], false);
-    expect((await call()).status).toBe(200);
-    expect(upstreamAuth).toEqual(["Bearer tok-own-1"]);
+    const creators = await seedGmailConnection(ctx, "creator-own");
+
+    expect((await call("both", shared, asEndUser)).status).toBe(200);
+    await expectProblem(await call("both", creators, asEndUser), 404, {
+      code: "credential_not_found",
+    });
+    expect(upstreamAuth).toEqual(["Bearer tok-theirs-shared"]);
+
+    await drainAudits(5_000);
+    const rows = await db.select().from(connectionCalls);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      connectionId: shared,
+      actorType: "end_user",
+      actorId: endUser.id,
+      ownerType: "user",
+      ownerId: colleague.user.id,
+    });
+  });
+
+  it("no candidate at all: 404 credential_not_found in the wording of the usable reach, named or not", async () => {
+    await seedGmailConnection(colleague, LABELS.private);
+
+    const none = await expectProblem(await call("both"), 404, { code: "credential_not_found" });
+    expect(none.detail).toBe(
+      `No connection of integration '${INTEGRATION_ID}' is usable in this space`,
+    );
+    const named = await expectProblem(await call("both", crypto.randomUUID()), 404, {
+      code: "credential_not_found",
+    });
+    expect(named.detail).toBe(
+      `X-Connection-Id names no connection of integration '${INTEGRATION_ID}' usable in this space`,
+    );
+    expect(upstreamAuth).toEqual([]);
+  });
+
+  it("a shared connection that needs reconnecting, named: 409 needs_reconnection", async () => {
+    const ids = await seedConnections();
+    await flagNeedsReconnection(ids.shared);
+
+    const body = await expectProblem(await call("both", ids.shared), 409, {
+      code: "needs_reconnection",
+    });
+    expect((body.errors as { connection_id: string }[])[0]!.connection_id).toBe(ids.shared);
+    expect(upstreamAuth).toEqual([]);
+  });
+
+  for (const enforce of [true, false]) {
+    it(`${enforce ? "an enforced" : "a soft"} default with a member that needs reconnecting: 409 needs_reconnection when none is named, another member named is served`, async () => {
+      const ids = await seedConnections();
+      await orgDefault(ctx, [ids.shared, ids.shared2], enforce);
+      await flagNeedsReconnection(ids.shared2);
+
+      const body = await expectProblem(await call("both"), 409, { code: "needs_reconnection" });
+      expect((body.errors as { connection_id: string }[])[0]!.connection_id).toBe(ids.shared2);
+      expect(upstreamAuth).toEqual([]);
+
+      expect((await call("both", ids.shared)).status).toBe(200);
+      expect(upstreamAuth).toEqual([`Bearer tok-${LABELS.shared}`]);
+    });
+  }
+
+  /** The problem bodies of `call("both", id)` for each id, without the members naming the request. */
+  async function refusals(connectionIds: string[]): Promise<string[]> {
+    const bodies = [];
+    for (const id of connectionIds) {
+      const {
+        request_id: _requestId,
+        instance: _instance,
+        ...problem
+      } = (await (await call("both", id)).json()) as Record<string, unknown>;
+      bodies.push(JSON.stringify(problem));
+    }
+    return bodies;
+  }
+
+  it("answers a connection out of reach as an unknown id, byte for byte, under an enforced default too", async () => {
+    const ids = await seedConnections();
+    const outOfReach = [ids.private, crypto.randomUUID()];
+
+    const notFound = await refusals(outOfReach);
+    expect(new Set(notFound).size).toBe(1);
+    expect(JSON.parse(notFound[0]!)).toMatchObject({ status: 404, code: "credential_not_found" });
+
+    await orgDefault(ctx, [ids.shared], true);
+    const outsideDefault = await refusals([ids.own, ...outOfReach]);
+    expect(new Set(outsideDefault).size).toBe(1);
+    expect(JSON.parse(outsideDefault[0]!)).toMatchObject({
+      status: 400,
+      code: "connection_not_in_org_default",
+      param: "X-Connection-Id",
+    });
+    for (const body of [...notFound, ...outsideDefault]) expect(body).not.toContain("theirs-");
+    expect(upstreamAuth).toEqual([]);
+  });
+
+  it("an enforced default's member the caller cannot reach, named: 404 credential_not_found, the body of an unknown id where no default governs", async () => {
+    const ids = await seedConnections();
+    const [unknown] = await refusals([crypto.randomUUID()]);
+    await orgDefault(ctx, [ids.shared, ids.private], true);
+
+    const [member] = await refusals([ids.private]);
+    expect(member).toBe(unknown!);
+    expect(JSON.parse(member!)).toMatchObject({ status: 404, code: "credential_not_found" });
+    expect(upstreamAuth).toEqual([]);
   });
 });
 
@@ -1471,7 +1832,8 @@ describe("GET /api/credential-proxy/connections", () => {
       authorized_uris: ["https://gmail.googleapis.com/**"],
       allow_all_uris: false,
       needs_reconnection: needsReconnection,
-      run_required: false,
+      owned_by_actor: true,
+      call_run_permission_required: false,
     });
     const byId = (a: { connection_id: string }, b: { connection_id: string }) =>
       a.connection_id.localeCompare(b.connection_id);
@@ -1555,15 +1917,50 @@ describe("GET /api/credential-proxy/connections", () => {
     for (const secret of secrets) expect(text).not.toContain(secret);
   });
 
-  it("flags run_required under an enforced org default", async () => {
+  /** Each listed row as `[connection_id, owned_by_actor, call_run_permission_required]`, sorted by id. */
+  async function listedFor(scopes: string[]): Promise<[string, boolean, boolean][]> {
+    const res = await list(scopes);
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        connection_id: string;
+        owned_by_actor: boolean;
+        call_run_permission_required: boolean;
+      }[];
+    };
+    return body.data
+      .map((c): [string, boolean, boolean] => [
+        c.connection_id,
+        c.owned_by_actor,
+        c.call_run_permission_required,
+      ])
+      .sort(([a], [b]) => a.localeCompare(b));
+  }
+  const sorted = (rows: [string, boolean, boolean][]) =>
+    [...rows].sort(([a], [b]) => a.localeCompare(b));
+
+  it("lists what a call would accept: own alone, or with both permissions the shared rows too, an enforced default's members only", async () => {
     const own = await seedGmailConnection(ctx, "own-1");
     const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
-    await orgDefault(ctx, [shared], true);
+    const shared2 = await seedGmailConnection(colleague, "theirs-shared-2", { shared: true });
+    await seedGmailConnection(colleague, "theirs-private");
+    const ownAlone = ["credential-proxy:call-own"];
 
-    const body = (await (await list()).json()) as {
-      data: { connection_id: string; run_required: boolean }[];
-    };
-    expect(body.data.map((c) => [c.connection_id, c.run_required])).toEqual([[own, true]]);
+    const usable = sorted([
+      [own, true, false],
+      [shared, false, false],
+      [shared2, false, false],
+    ]);
+
+    expect(await listedFor(ownAlone)).toEqual([[own, true, false]]);
+    expect(await listedFor(BOTH_PATHS)).toEqual(usable);
+
+    // Soft: every row stays nameable. Enforced: naming a row outside the default is a 400.
+    await orgDefault(ctx, [shared], false);
+    expect(await listedFor(BOTH_PATHS)).toEqual(usable);
+    await db.update(integrationOrgDefaults).set({ enforce: true });
+    expect(await listedFor(BOTH_PATHS)).toEqual([[shared, false, false]]);
+    expect(await listedFor(ownAlone)).toEqual([[own, true, true]]);
   });
 });
 
@@ -1644,7 +2041,7 @@ describe("POST /api/credential-proxy/proxy — a remote run lends what it bound 
     /** `member` launches the agent as a remote run with their own key, then calls the proxy. */
     const launchAndProxy = async (member: TestContext) => {
       const headers = {
-        Authorization: `Bearer ${await mintProxyKey(member)}`,
+        Authorization: `Bearer ${await mintProxyKey(member, RUN_PATH)}`,
         "X-Org-Id": owner.orgId,
         "X-Space-Id": spaceId,
       };
@@ -1673,8 +2070,8 @@ describe("POST /api/credential-proxy/proxy — a remote run lends what it bound 
       return { viaRun: await proxy({ "X-Run-Id": runId }), outsideRun: await proxy({}) };
     };
 
-    // `builder` holds `credential-proxy:call-run` and no `credential-proxy:call-own`: the run lends
-    // the shared connection, and outside it the same caller reaches nothing.
+    // A builder's key carrying `credential-proxy:call-run` and no `credential-proxy:call-own`: the
+    // run lends the shared connection, and outside it the same key reaches nothing.
     const builder = await launchAndProxy(await memberContext(owner, "member", "builder"));
     expect(builder.viaRun.status, await builder.viaRun.clone().text()).toBe(200);
     expect(upstreamAuth).toEqual(["Bearer team-token"]);

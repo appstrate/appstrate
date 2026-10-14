@@ -114,7 +114,7 @@ export interface CoreResources {
   spaces: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
   // `/api/credential-proxy/proxy`: `call-run` for a run (`X-Run-Id`), reaching the
-  // connections that run bound; `call-own` outside a run, on the caller's own.
+  // connections that run bound; `call-own` outside a run: own ones, or with `call-run` usable ones.
   "credential-proxy": "call-run" | "call-own";
   "llm-proxy": "call";
   // AFPS integrations (marketplace UI).

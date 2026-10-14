@@ -112,6 +112,7 @@ describe("proxyCall — credential-exfiltration guard", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId: PACKAGE_ID,
       method: extra.body ? "POST" : "GET",
       target,

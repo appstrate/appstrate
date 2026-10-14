@@ -6,8 +6,6 @@
  * Within that reach, an actor uses their own rows and the rows shared into the space;
  * `block_user_connections` restricts their own rows to the shared ones and those made in the space
  * (`coalesce(space_id, origin_space_id)`: they passed its creation gate, or predate the block).
- * A colleague's shared row is lent to a run: a credential-proxy call naming none reaches, of the
- * rows usable in the space, those the actor owns ({@link ownUsableInSpace}).
  *
  * Every predicate is over the unaliased `integration_connections` table.
  */

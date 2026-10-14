@@ -275,9 +275,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const reportSession = await resolveReportSession(opts, bundle, bundleSource, resolverInputs);
 
   // ─── 3b. Build the integration api_call resolver ──────────────────
-  // A registered run's credential-proxy calls carry its X-Run-Id: made for the
-  // run, they reach the connections it bound. With no run registered they are
-  // made outside a run, on the caller's own connections.
   // Serverless `apiCall` integrations (the unified integration
   // surface) get credential-injected HTTP calls; the resolver yields one
   // `{ns}__api_call` tool per integration.
@@ -1015,7 +1012,7 @@ function safeParseJson(raw: string, source: string): Record<string, unknown> {
  * The run registered on the instance, or null for a console-only run: reporting off, or a
  * failed registration `--report-fallback console` degrades. `--connection` is refused on a
  * console-only run, with the failure when there was one: its credential-proxy calls are made
- * outside a run, where nothing carries the pick and only the caller's own connections answer.
+ * outside a run, where nothing carries the pick.
  */
 async function resolveReportSession(
   opts: RunCommandOptions,

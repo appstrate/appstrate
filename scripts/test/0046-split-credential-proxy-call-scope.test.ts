@@ -2,40 +2,40 @@
 
 /**
  * Migration `0046` against the test database: an API key and a custom space role holding
- * `credential-proxy:call` hold `credential-proxy:call-run` in its place after `--apply`, the order
- * and every other element kept; a row holding both names loses the old one; a row holding the new
- * name, `credential-proxy:call-own` or neither is left as it is; a dry run writes nothing; a second
+ * `credential-proxy:call` hold `credential-proxy:call-run` in its place and
+ * `credential-proxy:call-own` at the end after `--apply`, the order and every other element kept;
+ * a row holding a new name or neither is left as it is; a dry run writes nothing; a second
  * `--apply` rewrites nothing.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { db } from "@appstrate/db/client";
 import { apiKeys, spaceRoles } from "@appstrate/db/schema";
-import { runRenameCredentialProxyCallScope } from "../migration/0046-rename-credential-proxy-call-scope.ts";
+import { runSplitCredentialProxyCallScope } from "../migration/0046-split-credential-proxy-call-scope.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../apps/api/test/helpers/auth.ts";
 import { seedApiKey, seedSpaceRole } from "../../apps/api/test/helpers/seed.ts";
 
 const OLD = "credential-proxy:call";
-const NEW = "credential-proxy:call-run";
+const RUN = "credential-proxy:call-run";
 const OWN = "credential-proxy:call-own";
 
 /** What each fixture row stores, by its name, and what `--apply` leaves in it. */
 const BEFORE: Record<string, string[]> = {
   old: ["agents:run", OLD, "runs:read"],
-  new: ["agents:run", NEW],
+  run: ["agents:run", RUN],
   own: [OWN, "agents:run"],
   none: [],
 };
 const AFTER: Record<string, string[]> = {
   ...BEFORE,
-  old: ["agents:run", NEW, "runs:read"],
+  old: ["agents:run", RUN, "runs:read", OWN],
 };
 
 let ctx: TestContext;
 const lines: string[] = [];
 const run = (apply: boolean) =>
-  runRenameCredentialProxyCallScope({ apply, out: (line) => lines.push(line) });
+  runSplitCredentialProxyCallScope({ apply, out: (line) => lines.push(line) });
 
 /** Every key's scopes and every role's permissions, by fixture name. */
 async function stored() {
@@ -48,14 +48,14 @@ async function stored() {
   return { keys: byName(keys), roles: byName(roles) };
 }
 
-describe("0046 — credential-proxy:call renamed credential-proxy:call-run where it is stored", () => {
+describe("0046 — a stored credential-proxy:call becomes credential-proxy:call-run and call-own", () => {
   beforeEach(async () => {
     await truncateAll();
     lines.length = 0;
     ctx = await createTestContext({ orgSlug: "mig0046" });
   });
 
-  it("a dry run writes nothing; --apply renames in the rows holding the old name; a second --apply rewrites 0", async () => {
+  it("a dry run writes nothing; --apply rewrites the rows holding the old name; a second --apply rewrites 0", async () => {
     const keys: Record<string, Awaited<ReturnType<typeof seedApiKey>>> = {};
     const roles: Record<string, Awaited<ReturnType<typeof seedSpaceRole>>> = {};
     for (const [name, held] of Object.entries(BEFORE)) {
