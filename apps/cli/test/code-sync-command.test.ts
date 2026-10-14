@@ -399,16 +399,16 @@ describe("code sync — shared targets", () => {
 });
 
 describe("code sync — guards and dry run", () => {
-  it("exits 1 with a remedy when no space is pinned", async () => {
+  it("syncs with no space pinned: the organization is the whole connection", async () => {
+    createSkillServer(ONE_SKILL).install();
     await seedLoggedInProfile("default", { orgId: "org_1" });
-    const { io, stderr } = createMemoryIO();
+    const { io, stdout, stderr } = createMemoryIO();
 
-    await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      CommandExit,
-    );
-    expect(stderr()).toBe(
-      "No space pinned. Run: appstrate space switch <space-id> --profile default\n",
-    );
+    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
+
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(stderr()).toBe("");
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
   });
 
   it("exits 1 with a remedy when the profile is not configured", async () => {
@@ -1202,16 +1202,6 @@ describe("code sync — fresh install", () => {
     expect(out.hookSpecificOutput.additionalContext).toContain("--instance <url>");
   });
 
-  it("names the missing space pin in the setup skill", async () => {
-    await seedLoggedInProfile("default", { orgId: "org_1" });
-    const { io } = createMemoryIO();
-
-    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
-
-    expect(await readText(setupSkill())).toContain("appstrate space switch <space-id>");
-    expect(await readText(setupSkill())).not.toContain("--instance");
-  });
-
   it("offers a TTY-free org pick, never a login flag, when no organization is pinned", async () => {
     await seedLoggedInProfile("default", {});
 
@@ -1430,24 +1420,6 @@ describe("code sync — session notice", () => {
     expect(out.hookSpecificOutput.additionalContext).toContain("`<placeholder>`");
   });
 
-  it("tells the next session about a pin missing in a run without --print-path", async () => {
-    createSkillServer(ONE_SKILL).install();
-    await syncPlugin();
-    await seedLoggedInProfile("default", { orgId: "org_1" });
-    const { io, stderr } = createMemoryIO();
-
-    await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      CommandExit,
-    );
-
-    expect(stderr()).toBe(
-      "No space pinned. Run: appstrate space switch <space-id> --profile default\n",
-    );
-    expect((await hookOutput()).systemMessage).toContain(
-      "`appstrate space switch <space-id> --profile default`",
-    );
-  });
-
   it("still resets to the setup plugin when logout cannot write the notice", async () => {
     createSkillServer(ONE_SKILL).install();
     await syncPlugin();
@@ -1512,40 +1484,17 @@ describe("code sync — session notice", () => {
     expect(await snapshot(pluginRoot())).toEqual(before);
   });
 
-  it("warns about a pinned space this profile cannot use, although the sync succeeds", async () => {
+  it("ignores a pinned space this profile cannot use: code sync never reads the pin", async () => {
     createSkillServer(ONE_SKILL, [{ id: "spc_2", name: "Space Two", isDefault: true }]).install();
-    const { io, stdout } = createMemoryIO();
+    await writeNotice(older);
+    const { io, stdout, stderr } = createMemoryIO();
 
     await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(stderr()).toBe("");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
-    const out = await hookOutput();
-    expect(out.systemMessage).toContain('Pinned space "spc_1" is not accessible');
-    // `space switch` opens a picker without a ref, and Claude's shell has no TTY.
-    expect(out.systemMessage).toContain("`appstrate space switch <space-id> --profile default`");
-  });
-
-  it("drops the pin warning when the same run then fails on a transient error", async () => {
-    createSkillServer(ONE_SKILL, [{ id: "spc_2", name: "Space Two", isDefault: true }]).install();
-    const serve = globalThis.fetch;
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
-      new URL(String(input)).pathname === "/api/packages/skills"
-        ? new Response("unavailable", { status: 503 })
-        : serve(input, init)) as unknown as typeof fetch;
-    const { io, stdout, stderr } = createMemoryIO();
-
-    await expect(
-      codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(CommandExit);
-    expect(stdout()).toBe("");
-    expect(stderr()).toContain('Pinned space "spc_1" is not accessible');
     expect(await exists(getNoticePath())).toBe(false);
-
-    await writeNotice(older);
-    const before = await readText(getNoticePath());
-    await expect(syncPlugin()).rejects.toBeInstanceOf(CommandExit);
-    expect(await readText(getNoticePath())).toBe(before);
   });
 
   it("warns when the organization revoked this profile, while removing its skills", async () => {
@@ -1849,9 +1798,7 @@ describe("code sync — active context replacement", () => {
     expect(server.downloads()).toBe(0);
   });
 
-  it("rejects a pinned space changed while downloading and keeps the previous plugin", async () => {
-    // The pin is not part of the context, but the agent commands were already
-    // selected from it: swapping now would publish the previous space's agents.
+  it("lets a pinned space change while downloading: nothing in the plugin depends on it", async () => {
     const { updateProfile } = await import("../src/lib/config.ts");
     createSkillServer(ONE_SKILL).install();
     await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
@@ -1868,14 +1815,12 @@ describe("code sync — active context replacement", () => {
       }
       return passthrough(input, init);
     }) as unknown as typeof fetch;
-    const { io, stderr } = createMemoryIO();
+    const { io, stdout } = createMemoryIO();
 
-    await expect(
-      codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(CommandExit);
+    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
-    expect(stderr()).toContain("Active sync context changed");
-    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["notes", "pdf-tools"]);
     expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(previousMcp);
   });
 

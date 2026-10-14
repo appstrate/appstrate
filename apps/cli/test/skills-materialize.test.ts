@@ -335,6 +335,7 @@ function agentView(overrides: Partial<AgentLaunchView> = {}): AgentLaunchView {
   return {
     packageId: "@acme/weekly-report",
     spaceId: SPACE_ID,
+    spaceName: "Sales",
     version: "1.2.0",
     title: "Weekly report",
     description: "Summarize the week.",
@@ -419,7 +420,7 @@ describe("materializeAgent", () => {
   });
 
   it("writes only generator text and validated identifiers into the body", () => {
-    const { body } = renderAgent(agentView());
+    const { skillMd, body } = renderAgent(agentView());
     expect(body).toContain(`\`${pluginTool("run_and_wait")}\``);
     expect(body).toContain(`\`${CONTRACT_REF}\``);
     const skeleton = /```json\n([\s\S]*?)\n\s*```/.exec(body);
@@ -451,6 +452,8 @@ describe("materializeAgent", () => {
     expect(waitRule).toBeLessThan(body.indexOf("Anything else"));
     expect(body).not.toContain("Weekly report");
     expect(body).not.toContain("Summarize the week.");
+    // The space name only names a fallback slug; the id is what the calls carry.
+    expect(skillMd).not.toContain("Sales");
     expect(body).not.toContain("topic");
   });
 

@@ -12,7 +12,7 @@
  *   - `appstrate token`:   print access + refresh token metadata (debug).
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
  *   - `appstrate space`:   manage the pinned space (`X-Space-Id`).
- *   - `appstrate code`:    project the spaces' skills and the pinned space's agents into
+ *   - `appstrate code`:    project the spaces' skills and agents into
  *                           coding-agent tools (Claude Code plugin, `~/.claude/skills`, Codex).
  *   - `appstrate packages`: pull a package into a folder, compare it, push it to its draft,
  *                           publish it.
@@ -546,13 +546,13 @@ spaceGroup
 const codeGroup = program
   .command("code")
   .description(
-    "Coding-agent tools on this machine: project your spaces' skills and the pinned space's agents into Claude Code and Codex",
+    "Coding-agent tools on this machine: project your spaces' skills and agents into Claude Code and Codex",
   );
 
 codeGroup
   .command("sync")
   .description(
-    "Materialize the skills of every space this profile is a member of as Agent Skills directories, and the pinned space's agents as plugin commands. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+    "Materialize the skills of every space this profile is a member of as Agent Skills directories, and the agents active there as plugin commands. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
   )
   .option(
     "--target <target>",

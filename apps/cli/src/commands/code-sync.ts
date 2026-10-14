@@ -2,8 +2,8 @@
 
 /**
  * `appstrate code sync` — the skills of every space this profile is a member
- * of, as Agent Skills directories, plus one command per agent active in the
- * pinned space (plugin only), run by a *machine*: a marketplace `command`
+ * of, as Agent Skills directories, plus one command per agent active in those
+ * spaces (plugin only), run by a *machine*: a marketplace `command`
  * source re-runs it once per session in the background. So `--print-path` writes
  * exactly one stdout line and only on success, and a per-skill failure must
  * NOT fail the process — Claude Code discards a run that exits non-zero, which
@@ -35,6 +35,7 @@ import { withSyncLock } from "../lib/skills-sync/lock.ts";
 import { renderNotice, type NoticeKind } from "../lib/skills-sync/notice.ts";
 import {
   assignSlugs,
+  claimKey,
   diffTarget,
   fetchSkillFiles,
   isDraftRefusal,
@@ -42,6 +43,7 @@ import {
   listSyncableSkills,
   MAX_CONCURRENCY,
   ownedLedger,
+  plannedClaimant,
   resolveAgent,
   resolveSkill,
   targetCarries,
@@ -180,16 +182,11 @@ export async function codeSyncCommand(
     }
 
     const context = syncContext(profileName, profile!);
-    // The pin is checked here although it is NOT part of the context: it is
-    // what the agent commands were selected from at the start of the run, so a
-    // swap after it moved would commit the previous space's agents. The next
-    // run replaces them without treating anything as a switch.
     const validate = async (): Promise<void> => {
       const current = await resolveActiveProfile(opts.profile);
       if (
         !current.profile ||
         !sameContext(context, syncContext(current.profileName, current.profile)) ||
-        current.profile.spaceId !== profile!.spaceId ||
         JSON.stringify(current.profile.syncSpaces) !== JSON.stringify(profile!.syncSpaces)
       ) {
         throw new Error("Active sync context changed; run the same command again.");
@@ -296,11 +293,10 @@ async function updateNotice(notices: Notices, pluginOk: boolean, sink: LineSink)
   }
 }
 
-/** What still separates this profile from a syncable space, if anything. */
+/** What still separates this profile from a syncable organization, if anything. */
 function connectionGap(profileName: string, profile: Profile | undefined): Actionable | null {
   if (!profile) return profileMissing(profileName);
   if (!profile.orgId) return pinMissing("org", profileName);
-  if (!profile.spaceId) return pinMissing("space", profileName);
   return null;
 }
 
@@ -332,9 +328,9 @@ async function bootstrapPlugin(
 }
 
 /**
- * List the selected spaces' skills and the pinned space's agents, pin each to a
- * version, and assign directory names. A package with no published version is
- * a note, not a failure.
+ * List the selected spaces' skills and agents, pin each to a version, and
+ * assign directory names. A package with no published version is a note, not
+ * a failure.
  */
 async function resolveAll(
   profileName: string,
@@ -342,23 +338,34 @@ async function resolveAll(
   state: SyncState,
   targets: SyncTarget[],
   report: Report,
-  { skillSpaces: spaceIds, agentSpace }: SyncSources,
+  { skillSpaces: spaceIds, agentSpaces }: SyncSources,
   context: SyncContext,
 ): Promise<Catalogue> {
   // A package is an ORG row that `space_packages` attributes to zero or more
   // spaces, so the same skill is normally listed by several of them. It is
   // downloaded once, from the first space that listed it — and `spaceIds` order
   // decides which, so the listings run concurrently but merge in input order.
-  const listings = await mapWithConcurrency(spaceIds, MAX_CONCURRENCY, (spaceId) =>
-    listSyncableSkills(profileName, spaceId),
-  );
+  const [listings, agentListings] = await Promise.all([
+    mapWithConcurrency(spaceIds, MAX_CONCURRENCY, (spaceId) =>
+      listSyncableSkills(profileName, spaceId),
+    ),
+    mapWithConcurrency(agentSpaces, MAX_CONCURRENCY, (space) =>
+      listSyncableAgents(profileName, space.id),
+    ),
+  ]);
   const origins = new Map<string, string>();
   spaceIds.forEach((spaceId, index) => {
     for (const packageId of listings[index]!) {
       if (!origins.has(packageId)) origins.set(packageId, spaceId);
     }
   });
-  const agents = agentSpace ? await listSyncableAgents(profileName, agentSpace) : [];
+  // An agent, unlike a skill, is one command PER SPACE: each space has its own
+  // input layer. By package id like the skills, then in selection order — the
+  // order that decides a skill's origin — so a newcomer's slug never depends
+  // on the server's listing order. `sort` is stable.
+  const agents = agentSpaces
+    .flatMap((space, index) => agentListings[index]!.map((listed) => ({ ...listed, space })))
+    .sort((a, b) => (a.packageId < b.packageId ? -1 : a.packageId > b.packageId ? 1 : 0));
   // One queue for both kinds, so the cap holds across them. `null` = nothing to sync.
   type Resolved =
     { kind: "skill"; value: ResolvedSkill } | { kind: "agent"; value: AgentLaunchView } | null;
@@ -366,25 +373,28 @@ async function resolveAll(
     packageId: string;
     kind: PlannedEntry["kind"];
     source: SkillSource;
+    /** Agents only. */
+    space?: Space;
   }
   const jobs: Job[] = [
     ...[...origins.keys()]
       .sort()
       .map((packageId) => ({ packageId, kind: "skill" as const, source })),
     // A system agent has no draft: `?version=draft` is refused to everyone.
-    ...agents.map(({ packageId, system }) => ({
+    ...agents.map(({ packageId, system, space }) => ({
       packageId,
       kind: "agent" as const,
       source: system ? ("published" as const) : source,
+      space,
     })),
   ];
   const resolve = async (job: Job): Promise<Resolved> => {
-    if (job.kind === "skill") {
+    if (!job.space) {
       const origin = origins.get(job.packageId);
       const value = await resolveSkill(profileName, job.packageId, job.source, origin);
       return value && { kind: "skill", value };
     }
-    const value = await resolveAgent(profileName, job.packageId, job.source, agentSpace!);
+    const value = await resolveAgent(profileName, job.packageId, job.source, job.space);
     return value && { kind: "agent", value };
   };
   const resolutions = await mapWithConcurrency(jobs, MAX_CONCURRENCY, async (job) => {
@@ -399,15 +409,17 @@ async function resolveAll(
   const views: AgentLaunchView[] = [];
   const unresolved: Catalogue["unresolved"] = new Map();
   for (const entry of resolutions) {
-    const { packageId, kind } = entry.job;
+    const { packageId, kind, space } = entry.job;
+    const label = space ? agentLabel(packageId, space.name) : packageId;
     if ("error" in entry) {
       if (fixOf(entry.error)) throw entry.error;
       // A refused draft is refused again next run: it goes, like a failed render.
-      if (!isDraftRefusal(entry.error)) unresolved.set(packageId, kind);
-      report.skill(`Skipped ${packageId}: ${formatError(entry.error)}`);
+      if (!isDraftRefusal(entry.error))
+        unresolved.set(claimKey({ packageId, spaceId: space?.id }), kind);
+      report.skill(`Skipped ${label}: ${formatError(entry.error)}`);
     } else if (!entry.resolved) {
       const what = entry.job.source === "draft" ? "draft" : "published version";
-      report.note(`Skipped ${packageId}: no ${what} available.`);
+      report.note(`Skipped ${label}: no ${what} available.`);
     } else if (entry.resolved.kind === "skill") {
       skills.push(entry.resolved.value);
     } else {
@@ -415,23 +427,24 @@ async function resolveAll(
     }
   }
 
-  // Installed names of the packages still wanted; the first ledger in `SYNC_TARGETS` wins.
+  // Installed names of the claimants still wanted; the first ledger in `SYNC_TARGETS` wins.
   const wanted = new Set([
     ...unresolved.keys(),
-    ...[...skills, ...views].map((resolved) => resolved.packageId),
+    ...skills.map(({ packageId }) => claimKey({ packageId })),
+    ...views.map(claimKey),
   ]);
-  const incumbents = new Map<string, string>();
+  const incumbents = new Map<string, ManagedSkill>();
   for (const target of SYNC_TARGETS.filter((target) => targets.includes(target))) {
     const { managed } = ownedLedger(target, state, source, context);
-    for (const [slug, { packageId }] of Object.entries(managed)) {
-      if (wanted.has(packageId) && !incumbents.has(slug)) incumbents.set(slug, packageId);
+    for (const [slug, entry] of Object.entries(managed)) {
+      if (wanted.has(claimKey(entry)) && !incumbents.has(slug)) incumbents.set(slug, entry);
     }
   }
 
   const { planned, failed } = assignSlugs(skills, views, incumbents);
   // Not `unresolved`: the next run fails the same way, so an installed copy goes.
-  for (const { packageId, error } of failed) {
-    report.skill(`Skipped ${packageId}: ${formatError(error)}`);
+  for (const { view, error } of failed) {
+    report.skill(`Skipped ${agentLabel(view.packageId, view.spaceName)}: ${formatError(error)}`);
   }
   const bySlug = new Map<string, PlannedEntry>();
   for (const entry of planned) {
@@ -648,7 +661,12 @@ async function applySharedPlan(
 }
 
 function ledgerEntry(entry: PlannedEntry): ManagedSkill {
-  return { packageId: entry.packageId, version: entry.version, integrity: entry.integrity };
+  return { ...plannedClaimant(entry), version: entry.version, integrity: entry.integrity };
+}
+
+/** Which of an agent's commands: the same package can be active in several spaces. */
+function agentLabel(packageId: string, spaceName: string): string {
+  return `${packageId} in space "${spaceName}"`;
 }
 
 /** Versions come from the ledger (before) and the catalogue (after): the only place to read them. */
@@ -743,10 +761,14 @@ async function reachableSpaces(
 
 interface SyncSources {
   skillSpaces: string[];
-  agentSpace?: string;
+  /** In `skillSpaces` order. */
+  agentSpaces: Space[];
 }
 
-/** Agents come from the pinned space alone (D19), whatever selects the skill sources. */
+/**
+ * Agents come from the spaces that supply skills, each one kept only where the
+ * role can launch through the MCP server: one selection rule for both kinds.
+ */
 async function selectSources(
   profileName: string,
   profile: Profile,
@@ -768,29 +790,18 @@ async function selectSources(
       );
     // Otherwise the revocation stands on its own: no space supplies skills any
     // more, so the ordinary removal plan takes every one of them off the disk.
-    return { skillSpaces: [] };
-  }
-  // Skill sources do not depend on the pin, so a pin that died would sync
-  // clean and silently drop every agent command. Nothing else notices: say it
-  // here, where the space list is already in hand. Listed-but-not-joined
-  // supplies no agent either, so membership, not presence in the list, is the test.
-  const pinned = spaces.find((space) => space.id === profile.spaceId);
-  if (withAgents && profile.spaceId && (!pinned || pinned.access === "none")) {
-    report.note(
-      switchFix(
-        `Pinned space "${profile.spaceId}" is not accessible in the active organization — no agent command is synced from it`,
-        "space",
-        profileName,
-      ),
-    );
+    return { skillSpaces: [], agentSpaces: [] };
   }
   const skillSpaces = selectedSpaces(profileName, profile, spaces, explicit, report);
-  if (!withAgents || pinned?.access !== "member") return { skillSpaces };
-  if (suppliesAgents(pinned)) return { skillSpaces, agentSpace: pinned.id };
-  report.note(
-    `Agent commands not synced: your role in pinned space "${pinned.name}" cannot launch agents through the MCP server there (needs agents:run, runs:read and mcp:invoke).`,
-  );
-  return { skillSpaces };
+  if (!withAgents) return { skillSpaces, agentSpaces: [] };
+  const selected = skillSpaces.map((id) => spaces.find((space) => space.id === id)!);
+  const refused = selected.filter((space) => !suppliesAgents(space));
+  if (refused.length > 0) {
+    report.note(
+      `Agent commands not synced from ${refused.map((space) => `space "${space.name}"`).join(", ")}: your role there cannot launch agents through the MCP server (needs agents:run, runs:read and mcp:invoke).`,
+    );
+  }
+  return { skillSpaces, agentSpaces: selected.filter(suppliesAgents) };
 }
 
 /**

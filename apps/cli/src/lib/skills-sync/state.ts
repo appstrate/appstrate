@@ -24,6 +24,12 @@ export const STATE_VERSION = 1;
 
 export interface ManagedSkill {
   packageId: string;
+  /**
+   * An agent command's space: with `packageId`, its identity, since one agent
+   * active in two spaces is two commands. Absent on a skill, which is one
+   * artifact whichever space supplied it.
+   */
+  spaceId?: string;
   /** Resolved version label — semver for `published`, `"draft"` for `draft`. */
   version: string;
   /**
@@ -38,10 +44,9 @@ export interface ManagedSkill {
  * not accumulate installations, so every managed directory under a target was
  * written by this context.
  *
- * The pinned space is NOT part of it: it selects no skill (D14) and the
- * generated `.mcp.json` names the organization alone. It selects the agent
- * commands, which the ordinary plan replaces like any other entry. Switching
- * space installs the same skills, so it is not a different owner.
+ * No space is part of it: spaces select which skills and agent commands are
+ * installed, which the ordinary plan adds and removes like any other entry,
+ * and the generated `.mcp.json` names the organization alone.
  */
 export interface SyncContext {
   profileName: string;
@@ -131,6 +136,7 @@ function isManagedSkill(value: unknown): value is ManagedSkill {
   return (
     isRecord(value) &&
     isNonEmptyString(value.packageId) &&
+    (value.spaceId === undefined || isNonEmptyString(value.spaceId)) &&
     isNonEmptyString(value.version) &&
     isNonEmptyString(value.integrity)
   );

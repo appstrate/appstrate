@@ -291,15 +291,13 @@ describe("multi-space skill distribution — access decides the sources", () => 
     expect(stderr()).not.toMatch(/not accessible/);
   });
 
-  it("warns when the pinned space died, and still syncs the spaces that live", async () => {
-    // The pin no longer supplies any skill, so nothing else in the run would
-    // notice it broke — but it is still where the agent commands come from.
+  it("syncs the spaces that live when the pinned space died, without a word about the pin", async () => {
     installSpaces(TWO_SPACES, BOTH, { reachable: ["spc_library"] });
     const { io, stderr } = createMemoryIO();
 
     await codeSyncCommand({ target: ["claude-plugin"] }, io);
 
-    expect(stderr()).toContain('Pinned space "spc_active" is not accessible');
+    expect(stderr()).not.toMatch(/pinned/i);
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
       "library-only",
       "shared",
@@ -384,16 +382,14 @@ describe("multi-space skill distribution — access decides the sources", () => 
     expect(stderr()).toContain('Space "Closed" (spc_closed) cannot supply skills');
   });
 
-  it("warns about the pinned space when it is listed but not joined", async () => {
-    // A space with no membership supplies no agent, exactly as one that is
-    // not listed at all.
+  it("drops a pinned space that is listed but not joined, like any other", async () => {
     installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_active"] });
     const { io, stderr } = createMemoryIO();
 
     await codeSyncCommand({ target: ["claude-plugin"] }, io);
 
-    expect(stderr()).toContain('Pinned space "spc_active" is not accessible');
-    // The pin supplies nothing any more; the spaces this member did join do.
+    expect(stderr()).not.toMatch(/pinned/i);
+    // The pin supplies nothing; the spaces this member did join do.
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
       "closed",
       "library-only",

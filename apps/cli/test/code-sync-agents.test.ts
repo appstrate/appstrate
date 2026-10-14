@@ -6,13 +6,13 @@
  * Same harness as `code-sync-command.test.ts`: the command is called
  * directly with a per-test `createMemoryIO()` sink, throw-away config / data /
  * `HOME` directories, and the shared stub server serving skills AND agents.
- * What is asserted here is the wiring: which space the agents come from, which
+ * What is asserted here is the wiring: which spaces the agents come from, which
  * target receives them, when a command is rewritten, and what never reaches
  * the disk.
  */
 
 import { describe, it, expect } from "bun:test";
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { codeSyncCommand } from "../src/commands/code-sync.ts";
 import { getStatePath } from "../src/lib/skills-sync/state.ts";
@@ -29,14 +29,15 @@ import {
 import { exists, pluginRoot, readText, snapshot, useSyncHarness } from "./helpers/sync-harness.ts";
 
 // Platform-shaped: the command writes the space id, and refuses any other shape.
-const PINNED = "spc_00000000-0000-4000-8000-000000000001";
-const OTHER = "spc_00000000-0000-4000-8000-000000000002";
+const ONE = "spc_00000000-0000-4000-8000-000000000001";
+const TWO = "spc_00000000-0000-4000-8000-000000000002";
 const SPACES: SpaceFixture[] = [
-  { id: PINNED, name: "Space One", isDefault: true },
-  { id: OTHER, name: "Space Two" },
+  { id: ONE, name: "Space One", isDefault: true },
+  { id: TWO, name: "Space Two" },
 ];
 
-const harness = useSyncHarness("appstrate-cli-agents", PINNED);
+// The profile's pinned space is the REST default only: `code sync` never reads it.
+const harness = useSyncHarness("appstrate-cli-agents", ONE);
 const pluginSkills = (): string => join(pluginRoot(), "skills");
 const commandFile = (slug: string, file = "SKILL.md"): string => join(pluginSkills(), slug, file);
 
@@ -53,6 +54,7 @@ const REPORT: AgentFixture = {
     },
   },
   values: { account: "acct_1" },
+  activeIn: [ONE],
 };
 
 function serve(
@@ -87,7 +89,7 @@ describe("code sync — agent commands in the plugin", () => {
     ]);
     expect(await readText(commandFile("run-report"))).toContain("name: run-report");
     // The plugin's MCP URL reaches every space, so the launch names this one.
-    expect(await readText(commandFile("run-report"))).toContain(`"space_id":"${PINNED}"`);
+    expect(await readText(commandFile("run-report"))).toContain(`"space_id":"${ONE}"`);
     expect(await ledgerVersion("run-report")).toBe("1.0.0");
     expect(stderr()).toBe("");
   });
@@ -149,7 +151,7 @@ describe("code sync — agent commands in the plugin", () => {
     expect(await readText(commandFile("run-report", "input.json"))).not.toBe(before);
   });
 
-  it("removes an agent that is no longer active in the pinned space", async () => {
+  it("removes an agent that is no longer active in any selected space", async () => {
     serve([REPORT]);
     await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
@@ -216,7 +218,7 @@ describe("code sync — agent commands in the plugin", () => {
     serve([REPORT]);
     await codeSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
     // The plugin moves to the new login alone; codex still holds the old one.
-    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: PINNED, userId: "u_2" });
+    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: ONE, userId: "u_2" });
     await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     serve([{ ...REPORT, detailError: 500 }]);
@@ -233,51 +235,112 @@ describe("code sync — agent commands in the plugin", () => {
   });
 });
 
-describe("code sync — agents come from the pinned space only (D19)", () => {
-  const ELSEWHERE: AgentFixture = {
-    id: "@acme/triage",
-    description: "Triage.",
-    activeIn: [OTHER],
-  };
+describe("code sync — agents come from the selected spaces (#1972)", () => {
+  const TRIAGE: AgentFixture = { id: "@acme/triage", description: "Triage.", activeIn: [TWO] };
+  const spaceOf = async (slug: string): Promise<string | undefined> =>
+    /"space_id":"([^"]+)"/.exec(await readText(commandFile(slug)))?.[1];
 
-  it("replaces the agent set on a space switch and leaves the skills alone", async () => {
-    const server = serve([{ ...REPORT, activeIn: [PINNED] }, ELSEWHERE]);
-    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
-    expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
-    const skill = await readText(commandFile("pdf-tools"));
+  it("syncs the agents of every selected space, each launching in its own", async () => {
+    serve([REPORT, TRIAGE]);
 
-    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: OTHER });
     await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+
+    expect((await readdir(pluginSkills())).sort()).toEqual([
+      "pdf-tools",
+      "run-report",
+      "run-triage",
+    ]);
+    expect(await spaceOf("run-report")).toBe(ONE);
+    expect(await spaceOf("run-triage")).toBe(TWO);
+  });
+
+  it("installs one command per space for an agent active in two", async () => {
+    serve([{ ...REPORT, activeIn: [ONE, TWO] }]);
+    const { io, stderr } = createMemoryIO();
+
+    await codeSyncCommand({ target: ["claude-plugin"] }, io);
+
+    expect(await spaceOf("run-report")).toBe(ONE);
+    expect(await spaceOf("run-space-two-report")).toBe(TWO);
+    expect(stderr()).toContain(
+      'Renamed @acme/report to "run-space-two-report" — "run-report" is already taken.',
+    );
+  });
+
+  for (const [first, second, newcomer] of [
+    [ONE, TWO, "run-space-two-report"],
+    [TWO, ONE, "run-space-one-report"],
+  ] as const) {
+    it(`keeps run-<name> with its space when the agent is activated in another (${first === ONE ? "after" : "before"} it)`, async () => {
+      serve([{ ...REPORT, activeIn: [first] }]);
+      await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+      expect(await spaceOf("run-report")).toBe(first);
+
+      serve([{ ...REPORT, activeIn: [ONE, TWO] }]);
+      await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+
+      expect(await spaceOf("run-report")).toBe(first);
+      expect(await spaceOf(newcomer)).toBe(second);
+    });
+  }
+
+  it("narrows agents with --space exactly as it narrows skills", async () => {
+    serve([REPORT, TRIAGE]);
+
+    await codeSyncCommand({ target: ["claude-plugin"], space: [TWO] }, createMemoryIO().io);
 
     expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-triage"]);
-    expect(await readText(commandFile("pdf-tools"))).toBe(skill);
-    expect(server.downloads()).toBe(1);
   });
 
-  it("installs the pinned space's agents whatever --space selects for skills", async () => {
-    serve([{ ...REPORT, activeIn: [PINNED] }, ELSEWHERE]);
+  it("needs no pinned space", async () => {
+    serve([REPORT, TRIAGE]);
+    await seedLoggedInProfile("default", { orgId: "org_1" });
+    const { io, stdout } = createMemoryIO();
 
-    await codeSyncCommand({ target: ["claude-plugin"], space: [OTHER] }, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
-    expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect((await readdir(pluginSkills())).sort()).toEqual([
+      "pdf-tools",
+      "run-report",
+      "run-triage",
+    ]);
   });
 
-  const withRole = (permissions: string[]): SpaceFixture[] => [
-    {
-      id: PINNED,
-      name: "Space One",
-      isDefault: true,
-      permissions: [...permissions, "skills:read"],
-    },
+  it("keeps the other space's command when one space's read fails", async () => {
+    serve([{ ...REPORT, activeIn: [ONE, TWO] }]);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+    const second = await readText(commandFile("run-space-two-report"));
+
+    // Space One no longer offers it; Space Two's detail read fails transiently.
+    serve([{ ...REPORT, activeIn: [TWO] }]);
+    const serveRest = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+      new URL(String(input)).pathname.startsWith("/api/packages/agents/") &&
+      new Headers(init?.headers).get("X-Space-Id") === TWO
+        ? Response.json({ message: "Unavailable" }, { status: 500 })
+        : serveRest(input, init)) as typeof fetch;
+    const { io, stderr } = createMemoryIO();
+    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
+
+    expect(stderr()).toContain('Skipped @acme/report in space "Space Two"');
+    expect(await exists(commandFile("run-report"))).toBe(false);
+    expect(await readText(commandFile("run-space-two-report"))).toBe(second);
+  });
+
+  const withRoles = (one: string[], two: string[]): SpaceFixture[] => [
+    { id: ONE, name: "Space One", isDefault: true, permissions: [...one, "skills:read"] },
+    { id: TWO, name: "Space Two", permissions: [...two, "skills:read"] },
   ];
+  const RUNNER = ["agents:run", "runs:read", "mcp:invoke"];
 
   // The MCP server's own gate on `run_and_wait`: dispatch, launch AND read back.
   for (const [role, permissions] of [
-    ["a runner (no agents:read)", ["agents:run", "runs:read", "mcp:invoke"]],
+    ["a runner (no agents:read)", RUNNER],
     ["runs:read-all", ["agents:run", "runs:read-all", "mcp:invoke"]],
   ] as const) {
     it(`installs agent commands for ${role}`, async () => {
-      serve([REPORT], { spaces: withRole([...permissions]) });
+      serve([REPORT], { spaces: withRoles([...permissions], [...permissions]) });
       const { io, stderr } = createMemoryIO();
 
       await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
@@ -292,34 +355,71 @@ describe("code sync — agents come from the pinned space only (D19)", () => {
     ["no agents:run", ["agents:read", "runs:read", "mcp:invoke"]],
     ["no mcp:invoke", ["agents:run", "runs:read"]],
   ] as const) {
-    it(`syncs no agent, with one note naming the space, for a role with ${role}`, async () => {
-      const server = serve([REPORT], { spaces: withRole([...permissions]) });
+    it(`syncs no agent from a space where the role has ${role}, and says so once`, async () => {
+      serve([REPORT, TRIAGE], { spaces: withRoles([...permissions], RUNNER) });
       const { io, stderr } = createMemoryIO();
 
       await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
-      expect(await readdir(pluginSkills())).toEqual(["pdf-tools"]);
+      expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-triage"]);
       expect(occurrences(stderr(), "Agent commands not synced")).toBe(1);
-      expect(stderr()).toContain('pinned space "Space One"');
+      expect(stderr()).toContain('Agent commands not synced from space "Space One"');
       expect(stderr()).toContain("needs agents:run, runs:read and mcp:invoke");
-      expect(server.agentReads()).toBe(0);
     });
   }
 
-  it("says nothing more than the dead-pin warning when the pin itself is gone", async () => {
-    serve([REPORT], {
-      spaces: [
-        { id: PINNED, name: "Space One", isDefault: true, access: "none" },
-        { id: OTHER, name: "Space Two" },
-      ],
-    });
+  it("names every space it skips in one note, and lists no agent there", async () => {
+    const server = serve([REPORT, TRIAGE], { spaces: withRoles([], []) });
     const { io, stderr } = createMemoryIO();
 
     await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
-    expect(stderr()).toContain(`Pinned space "${PINNED}" is not accessible`);
-    expect(stderr()).not.toContain("Agent commands not synced");
     expect(await readdir(pluginSkills())).toEqual(["pdf-tools"]);
+    expect(occurrences(stderr(), "Agent commands not synced")).toBe(1);
+    expect(stderr()).toContain('from space "Space One", space "Space Two":');
+    expect(server.agentReads()).toBe(0);
+  });
+
+  it("says nothing about agents to a target that carries none", async () => {
+    serve([REPORT], { spaces: withRoles([], []) });
+    const { io, stderr } = createMemoryIO();
+
+    await codeSyncCommand({ target: ["codex"] }, io);
+
+    expect(stderr()).not.toContain("Agent commands not synced");
+  });
+});
+
+describe("code sync — a ledger written before agents recorded their space", () => {
+  it("keeps every skill and re-renders the agent commands once, under the same names", async () => {
+    const server = serve([REPORT]);
+    await codeSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+    const command = await readText(commandFile("run-report"));
+    // The shape the previous CLI wrote: no `spaceId` on any entry.
+    const state = JSON.parse(await readText(getStatePath())) as {
+      targets: Record<string, { managed: Record<string, { spaceId?: string }> }>;
+    };
+    for (const target of Object.values(state.targets)) {
+      for (const entry of Object.values(target.managed)) delete entry.spaceId;
+    }
+    await writeFile(getStatePath(), JSON.stringify(state));
+    const agentFile = await lstat(commandFile("run-report"));
+    const { io, stderr } = createMemoryIO();
+
+    await codeSyncCommand({ target: ["claude-plugin", "codex"] }, io);
+
+    expect(stderr()).toBe("");
+    expect(server.downloads()).toBe(1); // the first run's, shared by both targets
+    expect(await readdir(join(harness.home(), ".agents", "skills"))).toEqual(["pdf-tools"]);
+    expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
+    expect(await readText(commandFile("run-report"))).toBe(command);
+    // Rewritten, not carried: the entry is rendered again and records its space.
+    expect((await lstat(commandFile("run-report"))).ino).not.toBe(agentFile.ino);
+    const after = JSON.parse(await readText(getStatePath())) as {
+      targets: Record<string, { managed: Record<string, { spaceId?: string }> }>;
+    };
+    expect(after.targets["claude-plugin"]?.managed["run-report"]?.spaceId).toBe(ONE);
+    expect(after.targets["claude-plugin"]?.managed["pdf-tools"]?.spaceId).toBeUndefined();
   });
 });
 
@@ -339,7 +439,7 @@ describe("code sync — agents under --source draft", () => {
     expect(await ledgerVersion("run-report")).toBe("draft");
 
     // A refusal is authority, not chance: it must not hold the old context forever.
-    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: PINNED, userId: "u_2" });
+    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: ONE, userId: "u_2" });
     serve([{ ...REPORT, draft: { notWritable: true } }]);
     const { io, stdout, stderr } = createMemoryIO();
     await codeSyncCommand({ target: ["claude-plugin"], source: "draft", printPath: true }, io);
@@ -359,7 +459,9 @@ describe("code sync — agents under --source draft", () => {
 
     await codeSyncCommand({ target: ["claude-plugin"], source: "draft", printPath: true }, io);
 
-    expect(stderr()).toContain("Skipped @appstrate/assistant: no published version available.");
+    expect(stderr()).toContain(
+      'Skipped @appstrate/assistant in space "Space One": no published version available.',
+    );
   });
 });
 

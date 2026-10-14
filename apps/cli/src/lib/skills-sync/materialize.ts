@@ -74,10 +74,27 @@ export function agentSlug(packageNameSegment: string): string {
  */
 export function collisionSlug(packageId: string, taken: ReadonlySet<string>, prefix = ""): string {
   const withoutAt = packageId.replace(/^@/, "").replace("/", "-");
-  const base = toSlug(`${prefix}${withoutAt}`, SKILL_NAME_MAX_LENGTH).replace(/-+$/, "");
+  return freeSlug(`${prefix}${withoutAt}`, taken, packageId);
+}
+
+/** `run-<space>-<name>`, then the same counter: one agent claimed from a second space. */
+export function spaceCollisionSlug(
+  packageNameSegment: string,
+  spaceName: string,
+  taken: ReadonlySet<string>,
+): string {
+  return freeSlug(
+    `${AGENT_SLUG_PREFIX}${spaceName}-${packageNameSegment}`,
+    taken,
+    `${spaceName}/${packageNameSegment}`,
+  );
+}
+
+function freeSlug(raw: string, taken: ReadonlySet<string>, source: string): string {
+  const base = toSlug(raw, SKILL_NAME_MAX_LENGTH).replace(/-+$/, "");
   if (!isValidSkillName(base)) {
     throw new SkillMaterializeError(
-      `Cannot derive a collision-free skill directory name from "${packageId}"`,
+      `Cannot derive a collision-free skill directory name from "${source}"`,
       "Agent Skills names are 1-64 characters of [a-z0-9-].",
     );
   }
@@ -186,6 +203,8 @@ export interface AgentLaunchView {
   packageId: string;
   /** Named by every call the command makes: the plugin's MCP URL reaches every space. */
   spaceId: string;
+  /** Slug fallback only (`run-<space>-<name>`): never written into the command. */
+  spaceName: string;
   /** Semver, or `draft`. */
   version: string;
   /** The human name of the command, already resolved. */
