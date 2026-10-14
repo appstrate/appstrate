@@ -8,9 +8,20 @@
  * Back after a close does not reopen it; a modal the address opened (a pasted
  * link, a reload) has no entry of its own to go back over, so its close
  * replaces. The hash rides along: it holds the tab the modal was opened from.
+ *
+ * Going back is a popstate, which lands after every navigation made in the
+ * same tick: a modal whose act takes the user elsewhere (the copy a fork made)
+ * leaves for it (`leave`) instead of closing and then navigating.
  */
 import { useCallback, useEffect } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  resolvePath,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+  type Path,
+  type To,
+} from "react-router-dom";
 
 /** History state key naming the modal whose opening pushed the entry. */
 const OPENED_BY = "openedModal";
@@ -62,6 +73,50 @@ export function modalParamStep(
   };
 }
 
+function withoutParam(search: string, name: string): string {
+  const params = new URLSearchParams(search);
+  params.delete(name);
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+interface ModalNavigation {
+  to: Path;
+  replace: boolean;
+  state: unknown;
+}
+
+/**
+ * The navigations that leave modal `name` for `to`, carrying `state`. The
+ * destination takes the modal's entry, so Back from it lands on the page under
+ * the modal, closed. A modal the address opened has no such page behind it:
+ * its entry is closed in place and the destination pushed over it. When the
+ * modal is not open, the destination replaces the current entry. The
+ * destination never carries the modal's parameter.
+ */
+export function modalLeaveSteps(
+  current: { pathname: string; search: string; hash: string; state: unknown },
+  name: string,
+  to: Path,
+  state?: unknown,
+): ModalNavigation[] {
+  const destination = { to: { ...to, search: withoutParam(to.search, name) }, state };
+  const open = new URLSearchParams(current.search).has(name);
+  if (!open || openedBy(current.state) === name) return [{ ...destination, replace: true }];
+  return [
+    {
+      to: {
+        pathname: current.pathname,
+        search: withoutParam(current.search, name),
+        hash: current.hash,
+      },
+      replace: true,
+      state: current.state,
+    },
+    { ...destination, replace: false },
+  ];
+}
+
 export function useModalParam(name: string) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -86,12 +141,21 @@ export function useModalParam(name: string) {
   );
   const open = useCallback((value = "1", closing?: string) => set(value, closing), [set]);
   const close = useCallback(() => set(null), [set]);
+  const leave = useCallback(
+    (to: To, state?: unknown) => {
+      const steps = modalLeaveSteps(location, name, resolvePath(to, location.pathname), state);
+      for (const step of steps) navigate(step.to, { replace: step.replace, state: step.state });
+    },
+    [location, name, navigate],
+  );
   return {
     /** The parameter's value, or `null` when the modal is closed. */
     value: params.get(name),
     /** `closing` names the modal this one replaces. */
     open,
     close,
+    /** Closes the modal by going to `to`, where its act took the user. */
+    leave,
   };
 }
 

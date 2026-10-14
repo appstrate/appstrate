@@ -727,6 +727,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           <ForkPackageModal
             open
             onClose={fork.close}
+            onLeave={fork.leave}
             packageId={packageId}
             defaultName={name ?? ""}
             type={type}

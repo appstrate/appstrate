@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { Layers, LibraryBig, Plus, type LucideIcon, Upload } from "lucide-react";
@@ -120,7 +120,6 @@ export function PackageList() {
   const { data: unreadCounts } = useUnreadCountsByAgent();
   const { can } = usePermissions();
   const importParam = useModalParam("import");
-  const navigate = useNavigate();
 
   const creation = useCreationHandoff("agent", can("agents:write"));
   const canActivate = can(spacePackagePermission("agent", "activate"));
@@ -184,12 +183,14 @@ export function PackageList() {
           ) : undefined
         }
       />
-      {importParam.value !== null && <ImportModal onClose={importParam.close} />}
+      {importParam.value !== null && (
+        <ImportModal onClose={importParam.close} onLeave={importParam.leave} />
+      )}
       {creation.isOpen && (
         <CreationHandoffModal
           resource="agent"
           onClose={creation.close}
-          onManual={() => navigate("/agents/new")}
+          onManual={() => creation.leave("/agents/new")}
           onChat={creation.openChat}
         />
       )}

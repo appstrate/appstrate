@@ -142,13 +142,14 @@ interface Closure {
 export function OrgCatalogueModal({
   reading,
   type: active,
-  onSelect,
+  hrefOf,
   onClose,
 }: {
   /** Both from the URL, so a link opens exactly one view. */
   reading: CatalogueReading;
   type: PackageType;
-  onSelect: (reading: CatalogueReading, type: PackageType) => void;
+  /** The address of another reading or kind of the catalogue. */
+  hrefOf: (reading: CatalogueReading, type: PackageType) => string;
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
@@ -555,9 +556,8 @@ export function OrgCatalogueModal({
 
   const show = (nextReading: CatalogueReading, nextType: PackageType) => {
     setSelected(new Set());
-    list.reset();
-    preview.close();
-    onSelect(nextReading, nextType);
+    // One navigation: the preview, if any, closes with the switch.
+    preview.leave(hrefOf(nextReading, nextType));
   };
 
   /**

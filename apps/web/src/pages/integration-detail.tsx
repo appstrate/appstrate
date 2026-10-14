@@ -696,6 +696,7 @@ export function IntegrationDetailPage() {
       <ForkPackageModal
         open={fork.value !== null}
         onClose={fork.close}
+        onLeave={fork.leave}
         packageId={packageId}
         defaultName={name ?? ""}
         type="integration"

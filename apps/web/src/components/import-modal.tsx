@@ -8,24 +8,32 @@ import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { useImportPackage, useImportFromGithub } from "../hooks/use-mutations";
 import { ApiError } from "../api/errors";
+import { packageDetailPath } from "../lib/package-paths";
 import { errorMessage, onMutationError } from "../lib/mutation-error";
 
-interface ImportModalProps {
-  onClose: () => void;
-  /**
-   * Stay where you are and hand the result back, instead of opening the
-   * imported package. For an import made from inside another form — the
-   * integration editor importing its local server — navigating would throw
-   * away the form.
-   */
-  onImported?: (result: { packageId: string; type: string }) => void;
-}
+type ImportModalProps = { onClose: () => void } & (
+  | {
+      /** Leaves the modal for the imported package's page. */
+      onLeave: (to: string) => void;
+      onImported?: never;
+    }
+  | {
+      /**
+       * Stay where you are and hand the result back, instead of opening the
+       * imported package. For an import made from inside another form — the
+       * integration editor importing its local server — navigating would throw
+       * away the form.
+       */
+      onImported: (result: { packageId: string; type: string }) => void;
+      onLeave?: never;
+    }
+);
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
 type FormData = { file: File | null; githubUrl: string };
 
-export function ImportModal({ onClose, onImported }: ImportModalProps) {
+export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) {
   const { t } = useTranslation(["agents", "common"]);
   const [dragOver, setDragOver] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState<{
@@ -33,7 +41,7 @@ export function ImportModal({ onClose, onImported }: ImportModalProps) {
   } | null>(null);
   const [confirmIntegrity, setConfirmIntegrity] = useState<{ version: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const importPackage = useImportPackage({ navigateOnSuccess: !onImported });
+  const importPackage = useImportPackage();
   const importGithub = useImportFromGithub();
 
   const {
@@ -109,10 +117,7 @@ export function ImportModal({ onClose, onImported }: ImportModalProps) {
       importPackage.mutate(
         { file: file, force },
         {
-          onSuccess: (result) => {
-            onImported?.(result);
-            resetAndClose();
-          },
+          onSuccess: finish,
           onError: (err) => {
             if (err instanceof ApiError && err.code === "draft_overwrite") {
               setConfirmOverwrite({
@@ -133,9 +138,7 @@ export function ImportModal({ onClose, onImported }: ImportModalProps) {
       );
     } else if (hasUrl) {
       importGithub.mutate(githubUrl.trim(), {
-        onSuccess: () => {
-          resetAndClose();
-        },
+        onSuccess: finish,
         onError: (err) => {
           setError("root", { message: errorMessage(err) });
         },
@@ -143,11 +146,26 @@ export function ImportModal({ onClose, onImported }: ImportModalProps) {
     }
   };
 
-  const resetAndClose = () => {
+  const resetForm = () => {
     reset({ file: null, githubUrl: "" });
     setConfirmOverwrite(null);
     setConfirmIntegrity(null);
+  };
+
+  const resetAndClose = () => {
+    resetForm();
     onClose();
+  };
+
+  /** A finished import opens the package, or hands it back to the form it was made from. */
+  const finish = (result: { packageId: string; type: string }) => {
+    resetForm();
+    if (onImported) {
+      onImported(result);
+      onClose();
+    } else {
+      onLeave(packageDetailPath(result.type, result.packageId));
+    }
   };
 
   const handleClose = () => {

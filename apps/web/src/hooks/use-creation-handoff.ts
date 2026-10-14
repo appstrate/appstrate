@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useNavigate } from "react-router-dom";
 import { chatDraftNavigationState, type CreationResource } from "../lib/creation-handoff";
 import { useModalParam } from "./use-modal-param";
 
 export function useCreationHandoff(resource: CreationResource, canCreate: boolean) {
-  const navigate = useNavigate();
   const param = useModalParam("create");
 
   const open = () => {
@@ -14,8 +12,15 @@ export function useCreationHandoff(resource: CreationResource, canCreate: boolea
 
   const openChat = (prompt: string) => {
     if (!canCreate) return;
-    navigate("/chat", { state: chatDraftNavigationState(prompt) });
+    param.leave("/chat", chatDraftNavigationState(prompt));
   };
 
-  return { isOpen: canCreate && param.value === resource, open, close: param.close, openChat };
+  return {
+    isOpen: canCreate && param.value === resource,
+    open,
+    close: param.close,
+    /** Leaves the chooser for the manual creation page. */
+    leave: param.leave,
+    openChat,
+  };
 }

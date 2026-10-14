@@ -14,7 +14,6 @@
  */
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
@@ -80,7 +79,6 @@ const DEFAULT_TIMEZONE = "UTC";
 /** Mounted once in the shell: the modal answers the parameter on any page. */
 export function NewScheduleModalHost() {
   const { t } = useTranslation(["agents"]);
-  const navigate = useNavigate();
   const { can } = usePermissions();
   const param = useModalParam(NEW_SCHEDULE_PARAM);
   if (!param.value || !can("schedules:write")) return null;
@@ -94,7 +92,7 @@ export function NewScheduleModalHost() {
       <NewScheduleForm
         initialAgentId={param.value === "1" ? undefined : param.value}
         onCancel={param.close}
-        onCreated={(schedule) => navigate(scheduleDetailPath(schedule.id))}
+        onCreated={(schedule) => param.leave(scheduleDetailPath(schedule.id))}
       />
     </Modal>
   );

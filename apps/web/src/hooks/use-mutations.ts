@@ -9,7 +9,7 @@ import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateLibraries } from "./use-library";
-import { packageDetailPath, runDetailPath, splitPackageRef } from "../lib/package-paths";
+import { runDetailPath, splitPackageRef } from "../lib/package-paths";
 import i18n from "../i18n";
 import {
   packageKeys,
@@ -173,11 +173,8 @@ export function useRunLauncher(packageId: string) {
 
 export type RunLauncher = ReturnType<typeof useRunLauncher>;
 
-export function useImportPackage({
-  navigateOnSuccess = true,
-}: { navigateOnSuccess?: boolean } = {}) {
+export function useImportPackage() {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   return useMutation({
     meta: { errorHandledByCaller: true },
     mutationFn: async ({
@@ -217,8 +214,8 @@ export function useImportPackage({
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
-      // An import REPLACES the draft artifact, and this mutation navigates
-      // straight to the detail page — without this the explorer renders the
+      // An import REPLACES the draft artifact, and the import modal opens the
+      // detail page straight away — without this the explorer renders the
       // pre-import index and the pre-import `inline` bodies until the query
       // goes stale.
       invalidatePackageFiles(qc);
@@ -233,16 +230,12 @@ export function useImportPackage({
       // The library lists servers for the integration editor's picker, which
       // imports in place and must see the new one.
       void invalidateLibraries(qc);
-      if (navigateOnSuccess) {
-        navigate(packageDetailPath(data.type, data.packageId));
-      }
     },
   });
 }
 
 export function useImportFromGithub() {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   return useMutation({
     meta: { errorHandledByCaller: true },
     mutationFn: async (url: string) => {
@@ -255,7 +248,6 @@ export function useImportFromGithub() {
       // Same reason as `useImportPackage`: the draft artifact was replaced.
       invalidatePackageFiles(qc);
       if (data.type === "integration") void invalidateIntegrationQueries(qc);
-      navigate(packageDetailPath(data.type, data.packageId));
     },
   });
 }

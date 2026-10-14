@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import { SLUG_REGEX } from "@appstrate/core/naming";
@@ -19,6 +18,8 @@ import { errorMessage } from "../lib/mutation-error";
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** Leaves the modal for the copy's page. */
+  onLeave: (to: string) => void;
   packageId: string;
   defaultName: string;
   type: string;
@@ -26,9 +27,8 @@ interface Props {
 
 type FormData = { name: string };
 
-export function ForkPackageModal({ open, onClose, packageId, defaultName, type }: Props) {
+export function ForkPackageModal({ open, onClose, onLeave, packageId, defaultName, type }: Props) {
   const { t } = useTranslation(["agents", "common"]);
-  const navigate = useNavigate();
   const { currentOrg } = useOrg();
   const forkMutation = useForkPackage();
 
@@ -52,9 +52,13 @@ export function ForkPackageModal({ open, onClose, packageId, defaultName, type }
   const name = useWatch({ control, name: "name" });
   const isValid = name.length > 0 && SLUG_REGEX.test(name);
 
-  const handleClose = () => {
+  const resetForm = () => {
     reset({ name: defaultName });
     forkMutation.reset();
+  };
+
+  const handleClose = () => {
+    resetForm();
     onClose();
   };
 
@@ -65,8 +69,8 @@ export function ForkPackageModal({ open, onClose, packageId, defaultName, type }
       { packageId, name: data.name },
       {
         onSuccess: (result) => {
-          handleClose();
-          navigate(packageDetailPath(type, result.id));
+          resetForm();
+          onLeave(packageDetailPath(type, result.id));
         },
         onError: (err) => {
           const code = err instanceof ApiError ? err.code : "";

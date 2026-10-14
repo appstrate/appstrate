@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { LibraryBig, Plug, Plus, Upload, Wrench } from "lucide-react";
@@ -55,7 +55,6 @@ export function ItemTab({
   const { data: rawItems, isLoading } = usePackageList(type);
   const { can } = usePermissions();
   const importParam = useModalParam("import");
-  const navigate = useNavigate();
   // Creating is a write on the package type, as its route is.
   const canCreate = can(packagePermission(type, "write"));
   // Import is type-agnostic: any package write opens it, the door re-checks the type.
@@ -123,7 +122,9 @@ export function ItemTab({
         title={title}
         breadcrumbs={[{ label: title }]}
       />
-      {importParam.value !== null && <ImportModal onClose={importParam.close} />}
+      {importParam.value !== null && (
+        <ImportModal onClose={importParam.close} onLeave={importParam.leave} />
+      )}
       {creation.isOpen && (
         <CreationHandoffModal
           resource={type}
@@ -134,7 +135,7 @@ export function ItemTab({
               importParam.open("1", "create");
               return;
             }
-            navigate(packageNewPath(type));
+            creation.leave(packageNewPath(type));
           }}
           onChat={creation.openChat}
         />

@@ -8,7 +8,7 @@
 import { useMemo } from "react";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Boxes, LibraryBig, Plus, SearchX } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
@@ -83,7 +83,6 @@ export function IntegrationsPage() {
   const { can } = usePermissions();
   const orgName = useOrg().currentOrg?.name ?? "";
   const { data, isLoading, error } = useAllIntegrations();
-  const navigate = useNavigate();
   const list = useListParams(["origin", "protocol"]);
   const view = useIntegrationViewStore((state) => state.view);
   const setView = useIntegrationViewStore((state) => state.setView);
@@ -257,7 +256,7 @@ export function IntegrationsPage() {
         <CreationHandoffModal
           resource="integration"
           onClose={creation.close}
-          onManual={() => navigate("/integrations/new")}
+          onManual={() => creation.leave("/integrations/new")}
           onChat={creation.openChat}
         />
       )}

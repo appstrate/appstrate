@@ -13,7 +13,7 @@
  * activate nothing still reads what each space holds, and every control inside
  * is graded by what they may do.
  */
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
 import { OrgCatalogueModal } from "../components/org-catalogue-modal";
@@ -33,7 +33,6 @@ export function CataloguePage() {
   // reader who manages several spaces.
   const { reading = "discover", type = CATALOGUE_KINDS[0] } = useParams();
   const location = useLocation();
-  const navigate = useNavigate();
   const close = useCloseOverlay();
   const { t } = useTranslation("common");
   useOverlayBreadcrumb([{ label: t("nav.catalogue") }]);
@@ -45,16 +44,14 @@ export function CataloguePage() {
     <OrgCatalogueModal
       reading={reading}
       type={type}
-      onSelect={(nextReading: CatalogueReading, nextType: PackageType) => {
+      hrefOf={(nextReading: CatalogueReading, nextType: PackageType) => {
         // The state filter speaks each reading's own words (here / elsewhere
         // against active / inactive), so it does not survive a change of
         // reading; the rest of the query does.
         const query = new URLSearchParams(location.search);
         if (nextReading !== reading) query.delete("state");
         const search = query.toString();
-        navigate(`/catalogue/${nextReading}/${nextType}${search ? `?${search}` : ""}`, {
-          replace: true,
-        });
+        return `/catalogue/${nextReading}/${nextType}${search ? `?${search}` : ""}`;
       }}
       onClose={close}
     />
