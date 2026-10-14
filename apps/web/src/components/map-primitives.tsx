@@ -64,12 +64,12 @@ function ConceptTitle({
   cardKey: string;
   children: React.ReactNode;
 }) {
-  const { t } = useTranslation(["agents", "agent-map"]);
+  const { t } = useTranslation(["agents", "agent-map", "common"]);
   const param = useModalParam("mapConcept");
   const title =
     typeof concept === "string" ? t(`agent-map:concept.${concept}.title`) : concept.title;
   const body = typeof concept === "string" ? t(`agent-map:concept.${concept}.body`) : concept.body;
-  const explanation = t("agent-map:explain", { concept: title });
+  const explanation = t("common:map.explain", { concept: title });
   return (
     <>
       <Tooltip>
@@ -149,7 +149,7 @@ export function MapCard({
   emptyLabel?: string;
   emptyAction?: { label: string; onClick: () => void } | undefined;
 }) {
-  const { t } = useTranslation(["agent-map"]);
+  const { t } = useTranslation(["common"]);
   // A card is named in the URL by what it already has that is stable: its relation id
   // (both maps give one to the cards that have rows) or, on the agent map, its concept.
   // Never its position. The explanation and the full list open at `?mapConcept=` and
@@ -169,7 +169,7 @@ export function MapCard({
   return (
     <>
       <div
-        className={`agent-map-card border-border bg-card flex flex-col rounded-lg border shadow-sm transition-shadow ${relationActive ? "ring-primary ring-2 ring-offset-2" : ""} ${horizontal ? "w-[1130px]" : wide ? "h-[248px] w-[280px]" : "h-[206px] w-[210px]"}`}
+        className={`map-card border-border bg-card flex flex-col rounded-lg border shadow-sm transition-shadow ${relationActive ? "ring-primary ring-2 ring-offset-2" : ""} ${horizontal ? "w-[1130px]" : wide ? "h-[248px] w-[280px]" : "h-[206px] w-[210px]"}`}
         onMouseEnter={() => relationId && onRelationActive?.(relationId)}
         onMouseLeave={(event) => {
           if (relationId && !event.currentTarget.contains(document.activeElement)) {
@@ -257,7 +257,7 @@ export function MapCard({
             onClick={() => listParam.open(cardKey)}
             className="border-border text-muted-foreground hover:bg-muted/60 hover:text-foreground nodrag nopan flex w-full items-center justify-between border-t px-3 py-2 text-left text-[11px] font-medium transition-colors"
           >
-            {t("agent-map:viewMore", { count: rows.length - previewLimit })}
+            {t("common:map.viewMore", { count: rows.length - previewLimit })}
             <ChevronRight className="size-3.5" />
           </button>
         )}

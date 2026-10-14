@@ -23,7 +23,7 @@ function FitOnCanvasResize() {
 }
 
 export function MapControls({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
-  const { t } = useTranslation("agent-map");
+  const { t } = useTranslation("common");
   return (
     <>
       <Controls position="top-right" showInteractive={false} style={{ top: 34 }} />
@@ -35,14 +35,14 @@ export function MapControls({ expanded, onToggle }: { expanded: boolean; onToggl
                 type="button"
                 className="react-flow__controls-button"
                 onClick={onToggle}
-                aria-label={expanded ? t("agent-map:collapse") : t("agent-map:expand")}
+                aria-label={expanded ? t("map.collapse") : t("map.expand")}
               >
                 {expanded ? <Minimize2 /> : <Maximize2 />}
               </button>
             </TooltipTrigger>
           </div>
           <TooltipContent side="left">
-            {expanded ? t("agent-map:collapse") : t("agent-map:expand")}
+            {expanded ? t("map.collapse") : t("map.expand")}
           </TooltipContent>
         </Tooltip>
       </Panel>

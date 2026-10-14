@@ -432,5 +432,10 @@
   "switcher.spaceOnRequest": "Sur demande",
   "apiError.missing_model": "Aucun modèle utilisable n’est configuré pour cet agent ou cette organisation.",
   "apiError.schedule_version_differs": "Une planification de cet agent est épinglée sur une autre version que celle affichée.",
-  "apiError.pinned_model_unavailable": "Le modèle réglé n’est plus accessible : le modèle par défaut sera utilisé à la place."
+  "apiError.pinned_model_unavailable": "Le modèle réglé n’est plus accessible : le modèle par défaut sera utilisé à la place.",
+  "map.explain": "À propos de « {{concept}} »",
+  "map.viewMore_one": "Voir {{count}} autre",
+  "map.viewMore_other": "Voir {{count}} autres",
+  "map.expand": "Plein écran",
+  "map.collapse": "Réduire"
 }

@@ -629,7 +629,7 @@ export function AgentMapView({
           rather than a viewport subtraction because the page header varies (readiness alerts
           appear and disappear) and overshooting pushes the canvas below the fold. */}
       <section
-        className={`border-border bg-muted/20 [&_.selected_.agent-map-card]:ring-primary flex flex-col overflow-hidden rounded-lg border [&_.selected_.agent-map-card]:ring-2 [&_.selected_.agent-map-card]:ring-offset-2 ${
+        className={`border-border bg-muted/20 [&_.selected_.map-card]:ring-primary flex flex-col overflow-hidden rounded-lg border [&_.selected_.map-card]:ring-2 [&_.selected_.map-card]:ring-offset-2 ${
           expanded ? "min-h-0 flex-1" : "h-[60vh] min-h-[420px]"
         }`}
       >

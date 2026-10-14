@@ -596,7 +596,7 @@ export function IntegrationMap({
   const canvas = (
     // React Flow gives edge labels pointer-events: all independently of the path.
     // They must not steal the pointer from the node that reveals them on hover.
-    <div className="bg-muted/20 [&_.selected_.agent-map-card]:ring-primary h-full min-h-0 overflow-hidden rounded-lg border [&_.react-flow__edge-textwrapper]:pointer-events-none [&_.selected_.agent-map-card]:ring-2 [&_.selected_.agent-map-card]:ring-offset-2">
+    <div className="bg-muted/20 [&_.selected_.map-card]:ring-primary h-full min-h-0 overflow-hidden rounded-lg border [&_.react-flow__edge-textwrapper]:pointer-events-none [&_.selected_.map-card]:ring-2 [&_.selected_.map-card]:ring-offset-2">
       <ReactFlow
         nodes={nodes}
         onNodesChange={onNodesChange}
