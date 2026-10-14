@@ -12,13 +12,7 @@
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AppWindow } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import type { OrgRole } from "@appstrate/shared-types";
 import type { components } from "../../api/client";
 import { DataTable } from "../../components/data-table";
@@ -121,22 +115,17 @@ export function UserDetailModal({
         >
           {(labelId) =>
             assignableRoles.length > 0 ? (
-              <Select
+              <OptionSelect
                 value={member.role}
                 onValueChange={(value) => onChangeOrgRole(value as OrgRole)}
                 disabled={isChangingOrgRole}
-              >
-                <SelectTrigger aria-labelledby={labelId} className="w-56">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {assignableRoles.map((role) => (
-                    <SelectItem key={role} value={role}>
-                      {t(roleI18nKey(role))}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                aria-labelledby={labelId}
+                className="w-56"
+                options={assignableRoles.map((role) => ({
+                  value: role,
+                  label: t(roleI18nKey(role)),
+                }))}
+              />
             ) : (
               <span className="text-sm">{t(roleI18nKey(member.role))}</span>
             )

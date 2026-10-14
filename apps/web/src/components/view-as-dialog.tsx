@@ -6,15 +6,9 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
-import { Field, FieldGroup } from "@appstrate/ui/components/field";
+import { Field, FieldGroup, FormItem } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect, SelectItem } from "@appstrate/ui/components/select";
 import { Modal } from "./modal";
 import { OrgRoleOptions } from "./org-role-options";
 import { RoleCatalogState } from "./role-catalog-state";
@@ -190,45 +184,31 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
         />
 
         <FieldGroup>
-          <Field>
-            <Label htmlFor="view-as-space">{t("viewAs.spaceLabel")}</Label>
-            <Select
+          <FormItem id="view-as-space" label={t("viewAs.spaceLabel")}>
+            <OptionSelect
               value={selectedSpaceId}
               onValueChange={(value) => {
                 setPickedSpaceId(value);
                 setPickedRole(null);
               }}
-            >
-              <SelectTrigger id="view-as-space" className={CHOSEN_VALUE}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={VIEW_AS_NO_SPACE}>{t("viewAs.noSpace")}</SelectItem>
-                {(spaces ?? []).map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+              className={CHOSEN_VALUE}
+              leading={<SelectItem value={VIEW_AS_NO_SPACE}>{t("viewAs.noSpace")}</SelectItem>}
+              options={(spaces ?? []).map((s) => ({ value: s.id, label: s.name }))}
+            />
+          </FormItem>
 
           {inSpace && (
             <Field>
               <Label htmlFor="view-as-space-role">{t("viewAs.spaceRoleLabel")}</Label>
               {catalogUsable ? (
-                <Select value={roleValue || undefined} onValueChange={setPickedRole}>
-                  <SelectTrigger id="view-as-space-role" className={CHOSEN_VALUE}>
-                    <SelectValue placeholder={t("viewAs.spaceRolePlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {options.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <OptionSelect
+                  id="view-as-space-role"
+                  value={roleValue || undefined}
+                  onValueChange={setPickedRole}
+                  className={CHOSEN_VALUE}
+                  placeholder={t("viewAs.spaceRolePlaceholder")}
+                  options={options}
+                />
               ) : (
                 <RoleCatalogState
                   isLoading={rolesLoading}

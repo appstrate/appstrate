@@ -6,10 +6,9 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../../hooks/use-app-form";
-import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { $api, ApiError } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { useAuth, useCanCreateOrg } from "../../hooks/use-auth";
@@ -133,10 +132,12 @@ export function OnboardingCreateStep() {
     >
       <form onSubmit={handleSubmit(onSubmit)}>
         <div className="flex flex-col gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="org-name">{t("createOrg.name")}</Label>
+          <FormItem
+            id="org-name"
+            label={t("createOrg.name")}
+            error={showError("name") ? errors.name?.message : undefined}
+          >
             <Input
-              id="org-name"
               type="text"
               {...register("name", {
                 validate: (v) => {
@@ -150,20 +151,18 @@ export function OnboardingCreateStep() {
               placeholder={t("createOrg.namePlaceholder")}
               autoFocus
               autoComplete="organization"
-              aria-invalid={showError("name") ? true : undefined}
-              className={cn(showError("name") && "border-destructive")}
             />
-            {showError("name") && (
-              <div className="text-destructive text-sm">{errors.name?.message}</div>
-            )}
-          </div>
+          </FormItem>
 
           <div className="grid gap-2">
             {slugOpen ? (
-              <>
-                <Label htmlFor="org-slug">{t("createOrg.slug")}</Label>
+              <FormItem
+                id="org-slug"
+                label={t("createOrg.slug")}
+                hint={t("createOrg.slugHint")}
+                error={showError("slug") ? errors.slug?.message : undefined}
+              >
                 <Input
-                  id="org-slug"
                   type="text"
                   {...register("slug", {
                     validate: (v) => {
@@ -182,14 +181,8 @@ export function OnboardingCreateStep() {
                   })}
                   placeholder={t("createOrg.slugPlaceholder")}
                   autoFocus
-                  aria-invalid={showError("slug") ? true : undefined}
-                  className={cn(showError("slug") && "border-destructive")}
                 />
-                <div className="text-muted-foreground text-sm">{t("createOrg.slugHint")}</div>
-                {showError("slug") && (
-                  <div className="text-destructive text-sm">{errors.slug?.message}</div>
-                )}
-              </>
+              </FormItem>
             ) : (
               <div className="text-muted-foreground flex items-center gap-2 text-sm">
                 <span>
@@ -209,7 +202,7 @@ export function OnboardingCreateStep() {
             )}
           </div>
 
-          {errors.root && <p className="text-destructive text-sm">{errors.root.message}</p>}
+          {errors.root && <FieldError>{errors.root.message}</FieldError>}
         </div>
       </form>
     </OnboardingLayout>

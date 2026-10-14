@@ -42,6 +42,8 @@ import { resolveProviderEntry } from "../lib/provider-registry-helpers";
 import { rowStates, type ProviderKind, type ProviderRow } from "../lib/model-providers";
 import { TestResultSpan } from "./test-result-span";
 import { TableRowActions } from "./table-row-actions";
+import { rowActionsColumn } from "./row-actions-column";
+import { CellText } from "./table-cells";
 import { InlineEditableLabel } from "./inline-editable-label";
 import { ModelsCell } from "./provider-models-cell";
 import { RowStateCell } from "./row-state-cell";
@@ -152,33 +154,17 @@ export function useProviderColumns({
                   onSave={(next) => onRename(pk, next)}
                 />
               ) : (
-                <span className="block truncate text-sm font-medium" title={label}>
+                <CellText strong title={label}>
                   {label}
-                </span>
+                </CellText>
               )}
               {/* Mes clés holds keys and subscriptions together: the kind reads under the name,
                   where no width tier can hide it. */}
-              {showType && (
-                <span className="text-muted-foreground block truncate text-xs">
-                  {typeText(row.kind)}
-                </span>
-              )}
+              {showType && <CellText>{typeText(row.kind)}</CellText>}
               {pk?.owner_type === "user" && pk.owner_id !== userId && pk.owner_name && (
-                <span
-                  className="text-muted-foreground block truncate text-xs"
-                  title={pk.owner_name}
-                >
-                  {pk.owner_name}
-                </span>
+                <CellText title={pk.owner_name}>{pk.owner_name}</CellText>
               )}
-              {pk?.oauth_email && (
-                <span
-                  className="text-muted-foreground block truncate text-xs"
-                  title={pk.oauth_email}
-                >
-                  {pk.oauth_email}
-                </span>
-              )}
+              {pk?.oauth_email && <CellText title={pk.oauth_email}>{pk.oauth_email}</CellText>}
               {result && (
                 <div className="relative z-10">
                   <TestResultSpan
@@ -245,164 +231,152 @@ export function useProviderColumns({
         />
       ),
     },
-    {
-      id: "actions",
-      header: "",
-      width: "64px",
-      align: "end",
-      cell: (row) => {
-        const pk = row.credential;
-        const isTesting = testingIds.has(row.id);
-        if (row.kind === "system") {
-          const choices = canWriteModels ? row.models.filter((m) => !m.is_default) : [];
-          // An alias has no test: its result would describe the backing it hides.
-          const testable = canWriteModels ? row.models.filter((m) => !m.aliased) : [];
-          // An alias the organization added is its own row: it is deleted by id.
-          const deletable = onDeleteModel ? row.models.filter((m) => m.source !== "built-in") : [];
-          if (choices.length + testable.length + deletable.length === 0) return null;
-          return (
-            <TableRowActions
-              menuLabel={t("providers.moreActions", { name: t("providers.type.system") })}
-              isPending={testable.some((m) => modelTest.testingIds.has(m.id))}
-            >
-              {choices.length > 0 && (
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <CheckCircle2 />
-                    {t("providers.chooseDefault")}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {choices.map((m) => (
-                      <DropdownMenuItem
-                        key={m.id}
-                        onSelect={() => onSetDefault?.(m)}
-                        // The server refuses a dead credential and a switched-off alias; it
-                        // resolves a switched-off built-in model.
-                        disabled={m.needs_reconnection || (m.source !== "built-in" && !m.enabled)}
-                        data-testid={`set-default-model-${m.id}`}
-                      >
-                        {m.label}
-                        {!m.enabled && (
-                          <span className="text-muted-foreground ml-auto text-xs">
-                            {t("providers.state.disabled")}
-                          </span>
-                        )}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              )}
-              {testable.length > 0 && (
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <FlaskConical />
-                    {t("models.test")}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {testable.map((m) => (
-                      <DropdownMenuItem
-                        key={m.id}
-                        onSelect={() => void modelTest.handleTest(m.id)}
-                        disabled={modelTest.testingIds.has(m.id)}
-                      >
-                        {m.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              )}
-              {deletable.length > 0 && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger className="text-destructive focus:text-destructive">
-                      <Trash2 />
-                      {t("btn.delete", { ns: "common" })}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent>
-                      {deletable.map((m) => (
-                        <DropdownMenuItem
-                          key={m.id}
-                          onSelect={() => onDeleteModel?.(m)}
-                          data-testid={`delete-model-${m.id}`}
-                        >
-                          {m.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                </>
-              )}
-            </TableRowActions>
-          );
-        }
-        if (!pk) return null;
-        const canRename = allowed(pk, "edit");
-        const canChangeKey = canRename && pk.authMode !== "oauth2";
-        const canReconnect =
-          allowed(pk, "reconnect") && pk.needs_reconnection === true && !!pk.providerId;
-        const canChoose = row.kind === "org-key" && canWriteModels;
-        if (
-          !canRename &&
-          !canChoose &&
-          !canReconnect &&
-          !allowed(pk, "test") &&
-          !allowed(pk, "delete")
-        ) {
-          return null;
-        }
+    rowActionsColumn((row) => {
+      const pk = row.credential;
+      const isTesting = testingIds.has(row.id);
+      if (row.kind === "system") {
+        const choices = canWriteModels ? row.models.filter((m) => !m.is_default) : [];
+        // An alias has no test: its result would describe the backing it hides.
+        const testable = canWriteModels ? row.models.filter((m) => !m.aliased) : [];
+        // An alias the organization added is its own row: it is deleted by id.
+        const deletable = onDeleteModel ? row.models.filter((m) => m.source !== "built-in") : [];
+        if (choices.length + testable.length + deletable.length === 0) return null;
         return (
           <TableRowActions
-            menuLabel={t("providers.moreActions", { name: pk.label })}
-            isPending={isTesting}
-            renaming={renamingId === pk.id}
+            menuLabel={t("providers.moreActions", { name: t("providers.type.system") })}
+            isPending={testable.some((m) => modelTest.testingIds.has(m.id))}
           >
-            {canRename && (
-              <DropdownMenuItem onSelect={() => onRenamingChange(pk.id)}>
-                <Pencil />
-                {t("btn.rename", { ns: "common" })}
-              </DropdownMenuItem>
+            {choices.length > 0 && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <CheckCircle2 />
+                  {t("providers.chooseDefault")}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  {choices.map((m) => (
+                    <DropdownMenuItem
+                      key={m.id}
+                      onSelect={() => onSetDefault?.(m)}
+                      // The server refuses a dead credential and a switched-off alias; it
+                      // resolves a switched-off built-in model.
+                      disabled={m.needs_reconnection || (m.source !== "built-in" && !m.enabled)}
+                      data-testid={`set-default-model-${m.id}`}
+                    >
+                      {m.label}
+                      {!m.enabled && (
+                        <span className="text-muted-foreground ml-auto text-xs">
+                          {t("providers.state.disabled")}
+                        </span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
             )}
-            {canChoose && (
-              <DropdownMenuItem onSelect={() => onChooseModels?.(pk)}>
-                <ListChecks />
-                {t("providers.chooseModels")}
-              </DropdownMenuItem>
+            {testable.length > 0 && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <FlaskConical />
+                  {t("models.test")}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  {testable.map((m) => (
+                    <DropdownMenuItem
+                      key={m.id}
+                      onSelect={() => void modelTest.handleTest(m.id)}
+                      disabled={modelTest.testingIds.has(m.id)}
+                    >
+                      {m.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
             )}
-            {canChangeKey && (
-              <DropdownMenuItem onSelect={() => onChangeKey(pk)}>
-                <KeyRound />
-                {t("credentials.edit")}
-              </DropdownMenuItem>
-            )}
-            {canReconnect && (
-              <DropdownMenuItem onSelect={() => onReconnect(pk)}>
-                <RefreshCw />
-                {t("credentials.oauth.reconnect")}
-              </DropdownMenuItem>
-            )}
-            {allowed(pk, "test") && (
-              <DropdownMenuItem onSelect={() => onTest(pk.id)} disabled={isTesting}>
-                <FlaskConical />
-                {t("credentials.test")}
-              </DropdownMenuItem>
-            )}
-            {allowed(pk, "delete") && (
+            {deletable.length > 0 && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={() => onDelete(pk)}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 />
-                  {t("credentials.delete")}
-                </DropdownMenuItem>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="text-destructive focus:text-destructive">
+                    <Trash2 />
+                    {t("btn.delete", { ns: "common" })}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {deletable.map((m) => (
+                      <DropdownMenuItem
+                        key={m.id}
+                        onSelect={() => onDeleteModel?.(m)}
+                        data-testid={`delete-model-${m.id}`}
+                      >
+                        {m.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
               </>
             )}
           </TableRowActions>
         );
-      },
-    },
+      }
+      if (!pk) return null;
+      const canRename = allowed(pk, "edit");
+      const canChangeKey = canRename && pk.authMode !== "oauth2";
+      const canReconnect =
+        allowed(pk, "reconnect") && pk.needs_reconnection === true && !!pk.providerId;
+      const canChoose = row.kind === "org-key" && canWriteModels;
+      return (
+        <TableRowActions
+          menuLabel={t("providers.moreActions", { name: pk.label })}
+          isPending={isTesting}
+          renaming={renamingId === pk.id}
+          actions={[
+            {
+              id: "rename",
+              label: t("btn.rename", { ns: "common" }),
+              icon: Pencil,
+              onSelect: () => onRenamingChange(pk.id),
+              hidden: !canRename,
+            },
+            {
+              id: "choose-models",
+              label: t("providers.chooseModels"),
+              icon: ListChecks,
+              onSelect: () => onChooseModels?.(pk),
+              hidden: !canChoose,
+            },
+            {
+              id: "change-key",
+              label: t("credentials.edit"),
+              icon: KeyRound,
+              onSelect: () => onChangeKey(pk),
+              hidden: !canChangeKey,
+            },
+            {
+              id: "reconnect",
+              label: t("credentials.oauth.reconnect"),
+              icon: RefreshCw,
+              onSelect: () => onReconnect(pk),
+              hidden: !canReconnect,
+            },
+            {
+              id: "test",
+              label: t("credentials.test"),
+              icon: FlaskConical,
+              onSelect: () => onTest(pk.id),
+              disabled: isTesting,
+              hidden: !allowed(pk, "test"),
+            },
+            {
+              id: "delete",
+              label: t("credentials.delete"),
+              icon: Trash2,
+              onSelect: () => onDelete(pk),
+              destructive: true,
+              hidden: !allowed(pk, "delete"),
+            },
+          ]}
+        />
+      );
+    }),
   ];
   return columns;
 }

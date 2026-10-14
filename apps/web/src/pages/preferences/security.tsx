@@ -9,8 +9,7 @@ import { Mail } from "lucide-react";
 import { useAppForm } from "../../hooks/use-app-form";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
-import { cn } from "@appstrate/ui/cn";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { useAuth } from "../../hooks/use-auth";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { client } from "../../api/client";
@@ -238,23 +237,24 @@ function PasswordChangeForm() {
   return (
     <div className="border-border bg-card mb-4 rounded-lg border p-5">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
-        <div className="space-y-2">
-          <Label>{t("preferences.currentPassword")}</Label>
+        <FormItem
+          id="current-password"
+          label={t("preferences.currentPassword")}
+          error={showError("currentPassword") ? errors.currentPassword?.message : undefined}
+        >
           <Input
             type="password"
             {...register("currentPassword", {
               required: t("validation.required", { ns: "common" }),
             })}
             autoComplete="current-password"
-            aria-invalid={showError("currentPassword") ? true : undefined}
-            className={cn(showError("currentPassword") && "border-destructive")}
           />
-          {showError("currentPassword") && (
-            <div className="text-destructive text-sm">{errors.currentPassword?.message}</div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label>{t("preferences.newPassword")}</Label>
+        </FormItem>
+        <FormItem
+          id="new-password"
+          label={t("preferences.newPassword")}
+          error={showError("newPassword") ? errors.newPassword?.message : undefined}
+        >
           <Input
             type="password"
             {...register("newPassword", {
@@ -267,15 +267,13 @@ function PasswordChangeForm() {
             })}
             minLength={MIN_PASSWORD_LENGTH}
             autoComplete="new-password"
-            aria-invalid={showError("newPassword") ? true : undefined}
-            className={cn(showError("newPassword") && "border-destructive")}
           />
-          {showError("newPassword") && (
-            <div className="text-destructive text-sm">{errors.newPassword?.message}</div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label>{t("preferences.confirmPassword")}</Label>
+        </FormItem>
+        <FormItem
+          id="confirm-password"
+          label={t("preferences.confirmPassword")}
+          error={showError("confirmPassword") ? errors.confirmPassword?.message : undefined}
+        >
           <Input
             type="password"
             {...register("confirmPassword", {
@@ -284,14 +282,9 @@ function PasswordChangeForm() {
                 v === newPasswordValue || t("validation.passwordMismatch", { ns: "common" }),
             })}
             autoComplete="new-password"
-            aria-invalid={showError("confirmPassword") ? true : undefined}
-            className={cn(showError("confirmPassword") && "border-destructive")}
           />
-          {showError("confirmPassword") && (
-            <div className="text-destructive text-sm">{errors.confirmPassword?.message}</div>
-          )}
-        </div>
-        {errors.root && <div className="text-destructive text-sm">{errors.root.message}</div>}
+        </FormItem>
+        {errors.root && <FieldError>{errors.root.message}</FieldError>}
         {success && <div className="text-success text-sm">{success}</div>}
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
@@ -364,8 +357,11 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
         {t("preferences.setPasswordDescription")}
       </p>
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
-        <div className="space-y-2">
-          <Label>{t("preferences.newPassword")}</Label>
+        <FormItem
+          id="new-password"
+          label={t("preferences.newPassword")}
+          error={showError("newPassword") ? errors.newPassword?.message : undefined}
+        >
           <Input
             type="password"
             {...register("newPassword", {
@@ -378,15 +374,13 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
             })}
             minLength={MIN_PASSWORD_LENGTH}
             autoComplete="new-password"
-            aria-invalid={showError("newPassword") ? true : undefined}
-            className={cn(showError("newPassword") && "border-destructive")}
           />
-          {showError("newPassword") && (
-            <div className="text-destructive text-sm">{errors.newPassword?.message}</div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label>{t("preferences.confirmPassword")}</Label>
+        </FormItem>
+        <FormItem
+          id="confirm-password"
+          label={t("preferences.confirmPassword")}
+          error={showError("confirmPassword") ? errors.confirmPassword?.message : undefined}
+        >
           <Input
             type="password"
             {...register("confirmPassword", {
@@ -395,14 +389,9 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
                 v === newPasswordValue || t("validation.passwordMismatch", { ns: "common" }),
             })}
             autoComplete="new-password"
-            aria-invalid={showError("confirmPassword") ? true : undefined}
-            className={cn(showError("confirmPassword") && "border-destructive")}
           />
-          {showError("confirmPassword") && (
-            <div className="text-destructive text-sm">{errors.confirmPassword?.message}</div>
-          )}
-        </div>
-        {errors.root && <div className="text-destructive text-sm">{errors.root.message}</div>}
+        </FormItem>
+        {errors.root && <FieldError>{errors.root.message}</FieldError>}
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? t("preferences.settingPassword") : t("preferences.setPassword")}
         </Button>

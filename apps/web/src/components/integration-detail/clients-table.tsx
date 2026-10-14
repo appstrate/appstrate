@@ -7,6 +7,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { FieldError } from "@appstrate/ui/components/field";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,7 +19,7 @@ import { CallbackUrlHint } from "../package-detail/callback-url-hint";
 import { ConfirmModal } from "../confirm-modal";
 import { Modal } from "../modal";
 import { DataTable } from "../data-table";
-import { EmptyState, ErrorState } from "../page-states";
+import { EmptyState } from "../page-states";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { clientDeeds, clientLevelKey, useIntegrationClientColumns } from "./integration-columns";
@@ -185,12 +186,9 @@ function OAuthClientModal({
             data-testid={`oauth-clientsecret-${authKey}`}
           />
           {secretMissing && (secretTouched || attempted) && (
-            <p
-              className="text-destructive text-sm"
-              data-testid={`oauth-clientsecret-error-${authKey}`}
-            >
+            <FieldError data-testid={`oauth-clientsecret-error-${authKey}`}>
               {t("integration.oauthClient.clientSecretRequired")}
-            </p>
+            </FieldError>
           )}
         </div>
         <div className="space-y-1 sm:col-span-2">
@@ -441,10 +439,7 @@ export function ClientsTable({
         rows={rows}
         rowKey={(row) => row.client.client_ref}
         isLoading={spaceClients.isLoading}
-        isError={spaceClients.isError}
-        // The reason, not just the fact: without it `DataTable` falls back on
-        // its default message.
-        error={<ErrorState error={spaceClients.error} compact />}
+        failure={spaceClients.error}
         // On an auto-provisioned auth the reason the list is empty IS the state, so
         // it is the empty state's hint rather than a second sentence above a
         // table saying the same thing in other words.

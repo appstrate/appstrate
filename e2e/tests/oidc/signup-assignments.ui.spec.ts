@@ -1,8 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createSpace } from "../../helpers/seed.ts";
 import { openRowMenuItem } from "../../helpers/table.ts";
+
+const GUEST = /^(Invité|Guest)$/;
+const GUEST_TEXT = /Invité|Guest/;
+const ADMIN = /^(Administrateur|Admin)$/;
+
+/** The signup role is a design-system select: open it, then pick the option. */
+async function pickSignupRole(page: Page, scope: Locator, role: RegExp) {
+  await scope.locator("#oauth-client-signup-role").click();
+  await page.getByRole("option", { name: role }).click();
+}
 
 test("OAuth signup assignments survive create, edit, and temporary role changes", async ({
   authedPage: page,
@@ -25,7 +36,7 @@ test("OAuth signup assignments survive create, edit, and temporary role changes"
   await dialog
     .getByPlaceholder("https://example.com/oauth/callback")
     .fill("https://example.com/callback");
-  await dialog.locator("#oauth-client-signup-role").selectOption("guest");
+  await pickSignupRole(page, dialog, GUEST);
   await dialog
     .getByRole("combobox", {
       name: /Sélectionner un espace|Select a space/i,
@@ -56,19 +67,19 @@ test("OAuth signup assignments survive create, edit, and temporary role changes"
   const editDialog = page
     .getByRole("dialog")
     .filter({ has: page.locator("#oauth-client-signup-role") });
-  await expect(editDialog.locator("#oauth-client-signup-role")).toHaveValue("guest");
+  await expect(editDialog.locator("#oauth-client-signup-role")).toContainText(GUEST_TEXT);
   await expect(editDialog.getByRole("combobox", { name: new RegExp(space.name) })).toContainText(
     /Lecteur|Viewer/,
   );
-  await editDialog.locator("#oauth-client-signup-role").selectOption("admin");
+  await pickSignupRole(page, editDialog, ADMIN);
   const allSpaces = editDialog.getByRole("textbox", { name: /^Espaces$|^Spaces$/ });
   await expect(allSpaces).toBeDisabled();
   await expect(allSpaces).toHaveValue(/Tous les espaces.*tous les droits|All spaces.*full access/i);
-  await editDialog.locator("#oauth-client-signup-role").selectOption("guest");
+  await pickSignupRole(page, editDialog, GUEST);
   await expect(editDialog.getByRole("combobox", { name: new RegExp(space.name) })).toContainText(
     /Lecteur|Viewer/,
   );
-  await editDialog.locator("#oauth-client-signup-role").selectOption("admin");
+  await pickSignupRole(page, editDialog, ADMIN);
   const savedResponse = page.waitForResponse(
     (response) =>
       response.request().method() === "PATCH" &&

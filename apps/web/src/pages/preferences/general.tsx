@@ -13,6 +13,7 @@ import { SettingsGroup, SettingRow } from "../../components/settings/setting-row
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { Input } from "@appstrate/ui/components/input";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError } from "@appstrate/ui/components/field";
 import { toast } from "sonner";
 import { toastError } from "../../lib/mutation-error";
 
@@ -112,11 +113,7 @@ export function EmailChangeField({
           {t("preferences.changeEmail")}
         </Button>
       </form>
-      {invalid && (
-        <p role="alert" className="text-destructive text-xs">
-          {t("common:validation.emailFormat")}
-        </p>
-      )}
+      {invalid && <FieldError>{t("common:validation.emailFormat")}</FieldError>}
     </div>
   );
 }

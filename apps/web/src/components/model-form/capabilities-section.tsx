@@ -10,6 +10,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import type { UseFormRegisterReturn } from "react-hook-form";
@@ -61,14 +62,12 @@ export function CapabilitiesSection({
               {t("models.form.capabilitiesLimits")}
             </Label>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="mdl-ctx">{t("models.form.contextWindow")}</Label>
-                <Input id="mdl-ctx" type="number" {...contextWindowProps} placeholder="128000" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mdl-maxtok">{t("models.form.maxTokens")}</Label>
-                <Input id="mdl-maxtok" type="number" {...maxTokensProps} placeholder="16384" />
-              </div>
+              <FormItem id="mdl-ctx" label={t("models.form.contextWindow")}>
+                <Input type="number" {...contextWindowProps} placeholder="128000" />
+              </FormItem>
+              <FormItem id="mdl-maxtok" label={t("models.form.maxTokens")}>
+                <Input type="number" {...maxTokensProps} placeholder="16384" />
+              </FormItem>
             </div>
           </div>
 

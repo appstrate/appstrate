@@ -695,7 +695,7 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
 ## 13. Chat
 
 The chat is `@appstrate/module-chat` (UI in `packages/module-chat/src/ui/`, built
-on assistant-ui) inside the shared shell (`modules/chat/chat-shell.tsx`). It
+on assistant-ui) inside the shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
 import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`),
 reasoning a collapsible group (`reasoning.tsx`), a run started from the chat a

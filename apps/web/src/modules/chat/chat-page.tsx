@@ -5,19 +5,21 @@
 // the shell imports the module, and it injects everything the module needs:
 // scoping headers, navigation, the file services (preview, authenticated
 // download, authenticated image preview, staged upload) and the translator.
-// Lazy-loaded behind `features.chat`, together with the shell it mounts
-// (`chat-shell.tsx`, the only other importer of the module's UI — it mounts the
-// two pieces that belong to the shell rather than to the thread).
+// Lazy-loaded behind `features.chat`. The shell around it is the app's layout,
+// shared with Studio and kept mounted across a product switch; the chat's own
+// part of it, the conversation list, is `chat-sidebar.tsx` (the only other
+// importer of the module's UI).
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { useTranslation } from "react-i18next";
-import { ChatPage, type OpenFile } from "@appstrate/module-chat/ui";
+import {
+  ChatHeadersProvider,
+  ChatPage,
+  SelectConversationProvider,
+  type OpenFile,
+} from "@appstrate/module-chat/ui";
 import { bindAgentAuthoringUser } from "@appstrate/module-chat/agent-authoring";
 import { useAuth } from "../../hooks/use-auth";
-import { buildScopingHeaders } from "../../lib/scoping-headers";
-import { useViewAsHeader } from "../../stores/view-as-store";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { formatBytes } from "../../lib/format-bytes";
 import { useUploadClient } from "../../hooks/use-upload";
@@ -26,7 +28,8 @@ import {
   conversationSidebarReducer,
 } from "./conversation-sidebar-state";
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
-import { ChatShell } from "./chat-shell";
+import { ShellHeaderActions } from "../../components/shell-frame";
+import { useChatGetHeaders, useChatTranslate } from "./use-chat-runtime";
 import { ChatAccessChip } from "./chat-access-chip";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -63,6 +66,14 @@ export function ChatModulePage() {
   // lazily on its first message (ChatGPT-style) without ever resurfacing the
   // previous one on a bare `/chat`.
   const location = useLocation();
+  // A conversation picked in the shell's list arrives as a URL change only (the
+  // list lives in the layout, above this page): reset the panel the same way
+  // the page's own selection does.
+  const [shownConversationId, setShownConversationId] = useState(conversationId);
+  if (shownConversationId !== conversationId) {
+    setShownConversationId(conversationId);
+    dispatchSidebar({ type: "conversation-change" });
+  }
   const initialComposerDraft = readChatComposerDraft(location.state);
   const onConversationChange = useCallback(
     (id: string | null) => {
@@ -71,14 +82,10 @@ export function ChatModulePage() {
     },
     [navigate],
   );
-  // Scoping headers + the active UI language, so the assistant replies in the
-  // language the user actually reads (the server defaults to fr without it).
-  // Reads `i18n.language` at call time — the transport invokes this per
-  // request, so a language switch applies to the next send.
-  //
   // The same namespace's `t` is injected into the module, so the shell AROUND
-  // those answers speaks the same language too — labels and aria-labels alike.
-  const { t, i18n } = useTranslation("chat");
+  // the answers speaks the same language too — labels and aria-labels alike.
+  const getHeaders = useChatGetHeaders();
+  const translate = useChatTranslate();
   const { can } = usePermissions();
   // Absent means allowed (the setting is opt-out): the chat only drops its
   // "add my credential" link once the organization has turned them off.
@@ -89,19 +96,6 @@ export function ChatModulePage() {
   const modelCredentials = useMemo(
     () => pickerCredentials(credentials ?? [], registry ?? [], userId ?? undefined),
     [credentials, registry, userId],
-  );
-  // Persona and space are threaded through so this callback's identity moves
-  // with either: the module's streams read their URL once, and would otherwise
-  // keep tailing under the replaced authority or miss a space resolved late.
-  const viewAs = useViewAsHeader();
-  const spaceId = useCurrentSpaceId();
-  const getHeaders = useCallback(
-    () => ({ ...buildScopingHeaders(viewAs, spaceId), "X-Chat-Locale": i18n.language }),
-    [i18n, viewAs, spaceId],
-  );
-  const translate = useCallback(
-    (key: string, params?: Record<string, string | number>) => t(key, params ?? {}),
-    [t],
   );
   // One presentation interface for both direct clicks and the automatic
   // presentation of a run's single produced file. There is intentionally no
@@ -139,41 +133,40 @@ export function ChatModulePage() {
   // the thread scrolls internally and the composer stays pinned at the bottom.
   // The context panel is a sibling of the thread, INSIDE the shell's content
   // area: it belongs to the conversation, and it overlays it on narrow screens.
+  // Its tabs sit in the shell's header, portaled there for the page's lifetime.
   return (
-    <ChatShell
-      getHeaders={getHeaders}
-      conversationId={conversationId ?? null}
-      onConversationChange={onConversationChange}
-      headerActions={<ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />}
-      t={translate}
-      can={can}
-    >
-      <div className="relative flex min-h-0 min-w-0 flex-1">
-        <div className="min-w-0 flex-1">
-          <ChatPage
-            getHeaders={getHeaders}
+    <ChatHeadersProvider value={getHeaders}>
+      <SelectConversationProvider value={onConversationChange}>
+        <ShellHeaderActions>
+          <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
+        </ShellHeaderActions>
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          <div className="min-w-0 flex-1">
+            <ChatPage
+              getHeaders={getHeaders}
+              conversationId={conversationId ?? null}
+              newChatKey={location.key}
+              initialComposerDraft={initialComposerDraft}
+              onConversationChange={onConversationChange}
+              onOpenFile={presentFile}
+              composerActions={COMPOSER_ACTIONS}
+              downloadFile={onDownloadFile}
+              useFileImageSrc={useFileImageSrc}
+              uploadFile={uploadFile}
+              t={translate}
+              can={can}
+              personalModelCredentials={orgSettings?.personal_model_credentials}
+              modelCredentials={modelCredentials}
+              formatBytes={formatBytes}
+            />
+          </div>
+          <ConversationSidebar
             conversationId={conversationId ?? null}
-            newChatKey={location.key}
-            initialComposerDraft={initialComposerDraft}
-            onConversationChange={onConversationChange}
-            onOpenFile={presentFile}
-            composerActions={COMPOSER_ACTIONS}
-            downloadFile={onDownloadFile}
-            useFileImageSrc={useFileImageSrc}
-            uploadFile={uploadFile}
-            t={translate}
-            can={can}
-            personalModelCredentials={orgSettings?.personal_model_credentials}
-            modelCredentials={modelCredentials}
-            formatBytes={formatBytes}
+            state={sidebarState}
+            dispatch={dispatchSidebar}
           />
         </div>
-        <ConversationSidebar
-          conversationId={conversationId ?? null}
-          state={sidebarState}
-          dispatch={dispatchSidebar}
-        />
-      </div>
-    </ChatShell>
+      </SelectConversationProvider>
+    </ChatHeadersProvider>
   );
 }

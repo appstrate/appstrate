@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { ShieldCheck, Wrench, Plug, Blocks } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { packageDetailPath, packageListPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
 import { PageHeader } from "../page-header";
-import { IntegrationIcon } from "../integration-icon";
-import { AgentIdentityTile } from "../agent-identity";
+import { PackageIcon } from "../package-icon";
 
 interface SharedHeaderDetail {
   id: string;
@@ -62,27 +61,9 @@ export function SharedHeader({
       ? t("detail.breadcrumb")
       : t(`packages.type.${detail.type}s`, { ns: "settings" });
 
-  const iconNode =
-    detail.type === "agent" ? (
-      <AgentIdentityTile
-        agentId={detail.id}
-        icon={detail.icon}
-        color={detail.color}
-        className="size-10 rounded-[10px]"
-      />
-    ) : detail.type === "integration" && detail.icon ? (
-      <IntegrationIcon src={detail.icon} />
-    ) : (
-      <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-[10px]">
-        {detail.type === "skill" ? (
-          <Wrench className="size-5" aria-hidden />
-        ) : detail.type === "mcp-server" ? (
-          <Plug className="size-5" aria-hidden />
-        ) : (
-          <Blocks className="size-5" aria-hidden />
-        )}
-      </span>
-    );
+  const iconNode = (
+    <PackageIcon type={detail.type} id={detail.id} icon={detail.icon} color={detail.color} />
+  );
 
   return (
     <>

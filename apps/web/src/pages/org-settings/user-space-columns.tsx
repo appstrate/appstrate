@@ -10,6 +10,7 @@
  */
 import { useTranslation } from "react-i18next";
 import type { DataColumn } from "../../components/data-table";
+import { CellText } from "../../components/table-cells";
 import { SpaceRoleSelect } from "../../components/space-role-select";
 import { roleI18nKey } from "../../hooks/use-permissions";
 import { spaceRoleLabel, type useSpaceRoleOptions } from "../../hooks/use-roles";
@@ -43,9 +44,9 @@ export function useUserSpaceColumns({
       header: t("userDetail.colSpace"),
       width: "minmax(120px,1.4fr)",
       cell: ({ space }) => (
-        <span className="block truncate text-sm font-medium" title={space.name}>
+        <CellText strong title={space.name}>
           {space.name}
-        </span>
+        </CellText>
       ),
     },
     {
@@ -53,11 +54,7 @@ export function useUserSpaceColumns({
       header: t("spaceMembers.colSource"),
       width: "110px",
       tier: 2,
-      cell: ({ member }) => (
-        <span className="text-muted-foreground block truncate text-xs">
-          {t(`spaceMembers.source.${member.source}`)}
-        </span>
-      ),
+      cell: ({ member }) => <CellText>{t(`spaceMembers.source.${member.source}`)}</CellText>,
     },
     {
       id: "role",
@@ -77,12 +74,7 @@ export function useUserSpaceColumns({
             onValueChange={(value) => onChangeRole(membership, value)}
           />
         ) : (
-          <span
-            className="text-muted-foreground block truncate text-xs"
-            title={fixedRole(membership)}
-          >
-            {fixedRole(membership)}
-          </span>
+          <CellText title={fixedRole(membership)}>{fixedRole(membership)}</CellText>
         ),
     },
   ];

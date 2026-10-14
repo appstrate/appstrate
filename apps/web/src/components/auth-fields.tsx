@@ -21,6 +21,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { FieldValues, Path, UseFormRegister } from "react-hook-form";
 import { cn } from "@appstrate/ui/cn";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
@@ -56,19 +57,13 @@ export function EmailField<T extends FieldValues>({
 }: EmailFieldProps<T>) {
   const { t } = useTranslation("common");
   return (
-    <div className="grid gap-2">
-      <Label htmlFor="email">{label}</Label>
+    <FormItem id="email" label={label} error={invalid ? error : undefined}>
       <Input
-        id="email"
         type="email"
         placeholder="email@example.com"
         autoComplete="email"
         readOnly={!!fixedValue}
-        aria-invalid={invalid ? true : undefined}
-        className={cn(
-          invalid && "border-destructive",
-          fixedValue && "cursor-not-allowed opacity-60",
-        )}
+        className={cn(fixedValue && "cursor-not-allowed opacity-60")}
         {...(fixedValue
           ? { value: fixedValue }
           : register(name, {
@@ -76,8 +71,7 @@ export function EmailField<T extends FieldValues>({
               pattern: { value: EMAIL_PATTERN, message: t("validation.emailFormat") },
             }))}
       />
-      {invalid && <div className="text-destructive text-sm">{error}</div>}
-    </div>
+    </FormItem>
   );
 }
 
@@ -95,6 +89,10 @@ interface PasswordFieldProps<T extends FieldValues> extends SharedFieldProps<T> 
   labelAction?: ReactNode;
 }
 
+/**
+ * Not a `FormItem`: the label row carries `labelAction` (a link), and a link
+ * inside the `<label>` would make the field's accessible name read the link too.
+ */
 export function PasswordField<T extends FieldValues>({
   register,
   name,
@@ -119,7 +117,6 @@ export function PasswordField<T extends FieldValues>({
         autoComplete={autoComplete}
         minLength={isNewPassword ? MIN_PASSWORD_LENGTH : undefined}
         aria-invalid={invalid ? true : undefined}
-        className={cn(invalid && "border-destructive")}
         {...register(name, {
           required: t("validation.required"),
           // Only on sign-UP. The minimum describes what may be CREATED, not
@@ -137,7 +134,7 @@ export function PasswordField<T extends FieldValues>({
             : {}),
         })}
       />
-      {invalid && <div className="text-destructive text-sm">{error}</div>}
+      <FieldError>{invalid ? error : undefined}</FieldError>
     </div>
   );
 }

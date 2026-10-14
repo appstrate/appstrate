@@ -18,7 +18,7 @@ import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
 import { OverlayExitProvider, OverlayProvider, useOverlayState } from "./lib/modal-route";
 import { OverlayUnavailable } from "./components/overlay-unavailable";
-import { ShellHeader } from "./components/shell-frame";
+import { ShellFrameProvider, ShellHeader } from "./components/shell-frame";
 import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 import { ViewAsBanner } from "./components/view-as-banner";
@@ -32,7 +32,7 @@ import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
-import { useSidebarStore } from "./stores/sidebar-store";
+import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
@@ -381,13 +381,9 @@ const PATHS = Object.keys(PAGES) as RoutePath[];
 
 /**
  * Routed modals mount in the overlay tree ONLY (the main tree renders the
- * background location, so a copy there could never match). The chat brings
- * its own shell.
+ * background location, so a copy there could never match).
  */
-const CHAT_PREFIX = "/chat";
-
-function mountOf(path: RoutePath): "main" | "chat" | "overlay" {
-  if (isUnder(path, CHAT_PREFIX)) return "chat";
+function mountOf(path: RoutePath): "main" | "overlay" {
   return isOverlayPath(path) ? "overlay" : "main";
 }
 
@@ -436,65 +432,73 @@ function BootScreen() {
   );
 }
 
-function MainLayout() {
-  const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebarStore();
-  const { pathname } = useLocation();
-  useSpaceResolver();
-
-  return (
-    <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
-      <AppSidebar />
-      {/* `bg-canvas` overrides SidebarInset's own `bg-background`: the content
-          column is page canvas (grey), not a component surface (white). */}
-      {/* The scroll lives HERE, not on an inner div: a scroll container inside
-          the inset would narrow the content by the scrollbar width while the
-          header above it kept the full width, and the profile would sit 15px
-          further right than the content it is supposed to line up with. */}
-      <SidebarInset className="bg-canvas h-svh overflow-y-auto">
-        <ShellHeader />
-        {/* Must stay visible on every route, including the settings layouts and
-            the permission-denied pages a persona is precisely there to provoke. */}
-        <ViewAsBanner />
-        {/* Opened by `?newSchedule=` from any page: the schedules list, an agent. */}
-        <NewScheduleModalHost />
-        {/* Full-bleed surfaces (anything that owns its own height) opt out
-            with `data-full-bleed` on their root. */}
-        <div className="max-w-page px-gutter mx-auto w-full pt-8 pb-18 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0">
-          {/* A page that crashes on render takes only itself down: the sidebar
-              and the header stay, and navigating away clears the error. */}
-          <ErrorBoundary resetKey={pathname}>
-            <Outlet />
-          </ErrorBoundary>
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
-  );
-}
-
-function GlobalRealtimeSync({ children }: { children: React.ReactNode }) {
-  useGlobalRunSync();
-  return <>{children}</>;
-}
-
 /**
- * The chat brings its OWN shell (`modules/chat/chat-shell.tsx`) — Studio's
- * navigation is not its navigation — so its routes sit beside MainLayout's
- * rather than inside them. They keep the realtime sync: a chat turn runs
- * agents, and their progress is pushed on the same stream.
+ * The ONE layout of both products. Studio and the chat are different products
+ * with different navigations, but they share a frame — sidebar, header,
+ * realtime stream, resolved space — and switching product must not tear that
+ * frame down: only the sidebar's navigation, the inset's sizing and the page
+ * change. A layout per product would remount all of it on every switch (the
+ * realtime stream reconnecting, the sidebar's queries re-reading, a lazy chat
+ * chunk blanking the whole screen while it loads).
  *
  * The space is resolved HERE, above the route gate: `RouteGate` waits on a
- * resolved space before it refuses, and every request the chat makes is scoped
- * by it.
+ * resolved space before it refuses, and every request a page makes is scoped by
+ * it. The realtime sync covers the chat too: a chat turn runs agents, and their
+ * progress is pushed on the same stream.
  */
-function ChatLayout() {
+function MainLayout() {
+  const studioSidebar = useSidebarStore();
+  const chatSidebar = useChatSidebarStore();
   const { pathname } = useLocation();
+  const product = isUnder(pathname, "/chat") ? "chat" : "studio";
+  // Each product remembers its own fold (`stores/sidebar-store.ts`).
+  const sidebar = product === "chat" ? chatSidebar : studioSidebar;
   useSpaceResolver();
+  useGlobalRunSync();
+
   return (
-    <GlobalRealtimeSync>
-      <ErrorBoundary resetKey={pathname}>
-        <Outlet />
-      </ErrorBoundary>
-    </GlobalRealtimeSync>
+    <ShellFrameProvider>
+      <SidebarProvider open={sidebar.open} onOpenChange={sidebar.setOpen}>
+        <AppSidebar product={product} />
+        {/* `bg-canvas` overrides SidebarInset's own `bg-background`: the content
+            column is page canvas (grey), not a component surface (white). */}
+        {/* Studio: the scroll lives HERE, not on an inner div: a scroll container
+            inside the inset would narrow the content by the scrollbar width
+            while the header above it kept the full width, and the profile would
+            sit 15px further right than the content it is supposed to line up
+            with. Chat: no page scroll — it owns its height, the thread scrolls
+            inside itself and the composer stays pinned. */}
+        <SidebarInset
+          className={
+            product === "chat"
+              ? "bg-canvas h-svh min-h-0 overflow-hidden"
+              : "bg-canvas h-svh overflow-y-auto"
+          }
+        >
+          <ShellHeader />
+          {/* Must stay visible on every route, including the settings layouts and
+              the permission-denied pages a persona is precisely there to provoke. */}
+          <ViewAsBanner />
+          {/* Opened by `?newSchedule=` from any page: the schedules list, an agent. */}
+          <NewScheduleModalHost />
+          {/* Full-bleed surfaces (anything that owns its own height) opt out
+              with `data-full-bleed` on their root. */}
+          <div
+            className={
+              product === "chat"
+                ? "flex min-h-0 min-w-0 flex-1"
+                : "max-w-page px-gutter mx-auto w-full pt-8 pb-18 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0"
+            }
+          >
+            {/* A page that crashes on render takes only itself down: the sidebar
+                and the header stay, and navigating away clears the error. */}
+            <ErrorBoundary resetKey={pathname}>
+              <Outlet />
+            </ErrorBoundary>
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+    </ShellFrameProvider>
   );
 }
 
@@ -845,15 +849,7 @@ export function App() {
                   </LazyRoute>
                 }
               />
-              {/* Beside MainLayout, not inside it: see `ChatLayout`. */}
-              <Route element={<ChatLayout />}>{flatPaths("chat").map(pageRoute)}</Route>
-              <Route
-                element={
-                  <GlobalRealtimeSync>
-                    <MainLayout />
-                  </GlobalRealtimeSync>
-                }
-              >
+              <Route element={<MainLayout />}>
                 {flatPaths("main").map(pageRoute)}
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

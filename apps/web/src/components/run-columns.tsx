@@ -28,7 +28,7 @@ import { Badge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { RunDuration } from "./run-duration";
 import { DocumentCounts, RunProvenanceBadges, RunResult } from "./run-cells";
-import { formatDateField } from "../lib/format-date";
+import { CellDate } from "./table-cells";
 
 /**
  * The column set, as a value the caller holds.
@@ -134,11 +134,7 @@ export function useRunColumns({
       width: "132px",
       align: "end",
       tier: 2,
-      cell: (run) => (
-        <span className="text-muted-foreground truncate text-xs">
-          {run.started_at ? formatDateField(run.started_at) : ""}
-        </span>
-      ),
+      cell: (run) => <CellDate value={run.started_at} />,
     },
   ];
 

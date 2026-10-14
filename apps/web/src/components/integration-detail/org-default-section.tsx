@@ -5,13 +5,7 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import { keepAvailable, unavailableConnectionIds } from "../../lib/connection-set";
 import {
   useIntegrationOrgDefault,
@@ -119,7 +113,7 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
             <p className="text-sm font-medium">{t("integration.admin.usage.title")}</p>
           </div>
 
-          <Select
+          <OptionSelect
             value={mode}
             disabled={isLoading || isError || pendingValue !== null}
             onValueChange={(value) => {
@@ -129,24 +123,14 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
               } else if (connectionIds.length > 0) void save(connectionIds, value === "forced");
               else setDraftMode(value);
             }}
-          >
-            <SelectTrigger aria-label={t("integration.admin.usage.title")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(["choice", "default", "forced"] as const).map((value) => (
-                <SelectItem
-                  key={value}
-                  value={value}
-                  disabled={
-                    value !== "choice" && (shared.length === 0 || (modeLocked && value !== mode))
-                  }
-                >
-                  {t(`integration.admin.usage.${value}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            aria-label={t("integration.admin.usage.title")}
+            options={(["choice", "default", "forced"] as const).map((value) => ({
+              value,
+              label: t(`integration.admin.usage.${value}`),
+              disabled:
+                value !== "choice" && (shared.length === 0 || (modeLocked && value !== mode)),
+            }))}
+          />
           <p className="text-muted-foreground mt-2 text-sm">
             {t(`integration.admin.usage.${mode}Help`)}
           </p>

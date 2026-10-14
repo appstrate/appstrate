@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Badge } from "./status-badge";
+import { CountBadge } from "./count-badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Sheet, SheetContent, SheetTrigger } from "@appstrate/ui/components/sheet";
@@ -229,11 +230,12 @@ export function NotificationBell() {
       aria-label={t("notifications.ariaLabel")}
     >
       <Bell size={18} />
-      {unread > 0 && (
-        <span className="bg-spark text-spark-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-          {unread > 99 ? "99+" : unread}
-        </span>
-      )}
+      <CountBadge
+        count={unread}
+        label={t("notifications.ariaLabel")}
+        tone="spark"
+        className="absolute -top-1 -right-1"
+      />
     </button>
   );
 

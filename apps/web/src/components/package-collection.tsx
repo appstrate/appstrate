@@ -16,9 +16,8 @@
  */
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { SearchX, type LucideIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
-import { Button } from "@appstrate/ui/components/button";
 import type { ListView } from "@/stores/list-view-store";
 import type { DataColumn } from "./data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";
@@ -27,7 +26,7 @@ import { PackageCard } from "./package-card";
 import { PackagesTable } from "./packages-table";
 import { usePackageColumns } from "./package-columns";
 import { ListFooter, ListToolbar, type FilterSpec } from "./list-toolbar";
-import { EmptyState, ErrorState } from "./page-states";
+import { EmptyState, NoMatchState } from "./page-states";
 import { SettingsHeading } from "./settings/settings-heading";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
@@ -202,11 +201,7 @@ export function PackageCollection({
   // the toolbar would cost an empty list its bar and make it re-offer the
   // page's own actions as unlabelled icons.
   const emptyBody = filtering ? (
-    <EmptyState message={t("list.noMatch")} icon={SearchX} compact>
-      <Button variant="outline" size="sm" onClick={list.reset}>
-        {t("toolbar.clearAll", { ns: "common" })}
-      </Button>
-    </EmptyState>
+    <NoMatchState message={t("list.noMatch")} onReset={list.reset} />
   ) : (
     <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon} compact>
       {emptyAction}
@@ -239,9 +234,8 @@ export function PackageCollection({
             ...trailingColumns,
           ]}
           isLoading={isLoading}
-          isError={Boolean(error)}
+          failure={error}
           empty={emptyBody}
-          error={<ErrorState error={error} compact />}
         />
       ) : cardSections && !isLoading && !error && shown.length > 0 ? (
         <div className="space-y-8 pt-2">
@@ -289,9 +283,8 @@ export function PackageCollection({
             />
           )}
           isLoading={isLoading}
-          isError={Boolean(error)}
+          failure={error}
           empty={emptyBody}
-          error={<ErrorState error={error} compact />}
         />
       )}
       {/* Under the body, like the runs page: what the collection amounts to,

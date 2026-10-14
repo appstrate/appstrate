@@ -9,12 +9,13 @@
 
 import { useTranslation } from "react-i18next";
 import { KeyRound, ListChecks } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "./data-table";
 import { getProviderIcon } from "./icons";
 import { ModelsCell } from "./provider-models-cell";
 import { RowStateCell } from "./row-state-cell";
+import { rowActionsColumn } from "./row-actions-column";
 import { TableRowActions } from "./table-row-actions";
+import { CellText } from "./table-cells";
 import { rowStates, type PersonalServiceRow } from "../lib/model-providers";
 
 interface PersonalServiceColumnsArgs {
@@ -43,9 +44,9 @@ export function usePersonalServiceColumns({
         return (
           <div className="flex min-w-0 items-center gap-2">
             <Icon className="text-muted-foreground size-4 shrink-0" />
-            <span className="block truncate text-sm font-medium" title={row.service.displayName}>
+            <CellText strong title={row.service.displayName}>
               {row.service.displayName}
-            </span>
+            </CellText>
           </div>
         );
       },
@@ -86,22 +87,19 @@ export function usePersonalServiceColumns({
         />
       ),
     },
-    {
-      id: "actions",
-      header: "",
-      width: "64px",
-      align: "end",
-      cell: (row) =>
-        canWriteModels ? (
-          <TableRowActions
-            menuLabel={t("providers.moreActions", { name: row.service.displayName })}
-          >
-            <DropdownMenuItem onSelect={() => onChooseModels(row)}>
-              <ListChecks />
-              {t("providers.chooseModels")}
-            </DropdownMenuItem>
-          </TableRowActions>
-        ) : null,
-    },
+    rowActionsColumn((row) => (
+      <TableRowActions
+        menuLabel={t("providers.moreActions", { name: row.service.displayName })}
+        actions={[
+          {
+            id: "choose-models",
+            label: t("providers.chooseModels"),
+            icon: ListChecks,
+            onSelect: () => onChooseModels(row),
+            hidden: !canWriteModels,
+          },
+        ]}
+      />
+    )),
   ];
 }

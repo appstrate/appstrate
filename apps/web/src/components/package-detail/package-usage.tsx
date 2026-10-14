@@ -45,7 +45,7 @@ export function PackageUsage({ agentIds }: { agentIds: string[] }) {
         )}
         surface="integrated"
         isLoading={isLoading}
-        isError={Boolean(error)}
+        failure={error}
         empty={<EmptyState message={t("packages.noAgents")} icon={Layers} compact />}
       />
     </>

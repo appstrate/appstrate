@@ -733,7 +733,6 @@
   "credentials.oauth.dismissConfirmConfirm": "Close",
   "credentials.oauth.copyCommand": "Copy the command",
   "credentials.oauth.copy": "Copy",
-  "credentials.oauth.copied": "Copied!",
   "credentials.oauth.generatingCommand": "Generating connection command…",
   "credentials.oauth.pairingExpired": "This command has expired (5 minutes). Generate a new one to continue.",
   "credentials.oauth.regenerateCommand": "Generate a new command",

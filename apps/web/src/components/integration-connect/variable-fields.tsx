@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useTranslation } from "react-i18next";
+import { FieldError } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import type { VariableField } from "./connection-variables-schema";
@@ -70,13 +71,9 @@ export function VariableFields({
               </p>
             )}
             {error && (
-              <p
-                id={`${id}-error`}
-                className="text-destructive text-xs"
-                data-testid={`variable-error-${field.name}`}
-              >
+              <FieldError id={`${id}-error`} data-testid={`variable-error-${field.name}`}>
                 {error}
-              </p>
+              </FieldError>
             )}
           </div>
         );

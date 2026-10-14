@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { ManifestFact, McpServerManifestDetails } from "../../lib/package-manifest";
 import { DetailSectionCard } from "../detail-section-card";
-import { FactGrid } from "./manifest-fact";
+import { ManifestFacts } from "./manifest-fact";
 import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 
 export function McpServerDetails({ details }: { details: McpServerManifestDetails }) {
@@ -39,7 +39,7 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
     <>
       {facts.length > 0 && (
         <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.server")}>
-          <FactGrid facts={facts} />
+          <ManifestFacts facts={facts} />
         </DetailSectionCard>
       )}
 

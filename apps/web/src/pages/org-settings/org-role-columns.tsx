@@ -10,9 +10,9 @@ import { useTranslation } from "react-i18next";
 import { Eye } from "lucide-react";
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
 import type { OrgRole } from "@appstrate/shared-types";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../../components/data-table";
 import { TableRowActions } from "../../components/table-row-actions";
+import { rowActionsColumn } from "../../components/row-actions-column";
 import { roleI18nKey } from "../../hooks/use-permissions";
 
 export const ORG_ROLES_ORDER: readonly OrgRole[] = ["owner", "admin", "member", "guest"];
@@ -61,20 +61,20 @@ export function useOrgRoleColumns({
         </span>
       ),
     },
-    {
-      id: "actions",
-      header: "",
-      width: "48px",
-      align: "end",
-      cell: (role) =>
-        onPreview && isPreviewable(role) ? (
-          <TableRowActions menuLabel={t("roles.moreActions", { name: t(roleI18nKey(role)) })}>
-            <DropdownMenuItem onSelect={() => onPreview(role)}>
-              <Eye />
-              {t("viewAs.rowAction")}
-            </DropdownMenuItem>
-          </TableRowActions>
-        ) : null,
-    },
+    rowActionsColumn((role: OrgRole) =>
+      onPreview && isPreviewable(role) ? (
+        <TableRowActions
+          menuLabel={t("roles.moreActions", { name: t(roleI18nKey(role)) })}
+          actions={[
+            {
+              id: "preview",
+              label: t("viewAs.rowAction"),
+              icon: Eye,
+              onSelect: () => onPreview(role),
+            },
+          ]}
+        />
+      ) : null,
+    ),
   ];
 }

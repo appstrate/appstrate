@@ -11,7 +11,8 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
 import { DetailSectionCard } from "../components/detail-section-card";
-import { FactGrid } from "../components/package-manifest/manifest-fact";
+import { Fact, FactGrid } from "../components/fact-grid";
+import { ManifestFacts } from "../components/package-manifest/manifest-fact";
 import { ListToolbar } from "../components/list-toolbar";
 import { useLocalListParams } from "../lib/list-params";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
@@ -210,58 +211,49 @@ function ScheduleParams({
         icon={CirclePlay}
         headerAction={open("execution")}
       >
-        <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
-          <div className="min-w-0">
-            <dt className="text-muted-foreground text-xs">{t("schedule.paramAgent")}</dt>
-            <dd className="mt-1 text-sm">
-              {canReach(agentPath) ? (
-                <Link className="text-primary hover:underline" to={agentPath}>
-                  {agentDisplayName}
-                </Link>
-              ) : (
-                agentDisplayName
-              )}
-            </dd>
-          </div>
-          <div className="min-w-0">
-            <dt className="text-muted-foreground text-xs">{t("schedule.paramActor")}</dt>
-            <dd className="mt-1 inline-flex flex-wrap items-center gap-1.5 text-sm break-words">
-              {schedule.actor_name ? (
-                <>
-                  <ActorLabel
-                    actor_type={schedule.actor_type}
-                    actor_name={schedule.actor_name}
-                    iconSize="size-3.5"
-                  />
-                  {schedule.actor_type && (
-                    <Badge variant="outline" className="px-1 py-0 text-[10px]">
-                      {t(
-                        schedule.actor_type === "end_user"
-                          ? "actorSelect.badgeEndUser"
-                          : "actorSelect.badgeMember",
-                      )}
-                    </Badge>
-                  )}
-                </>
-              ) : (
-                "–"
-              )}
-            </dd>
-          </div>
-          <div className="min-w-0">
-            <dt className="text-muted-foreground text-xs">{t("run.infoVersion")}</dt>
-            <dd className="mt-1 text-sm">
-              {schedule.version_override || t("schedule.inheritedVersion")}
-            </dd>
-          </div>
-        </dl>
+        <FactGrid columns={2}>
+          <Fact label={t("schedule.paramAgent")}>
+            {canReach(agentPath) ? (
+              <Link className="text-primary hover:underline" to={agentPath}>
+                {agentDisplayName}
+              </Link>
+            ) : (
+              agentDisplayName
+            )}
+          </Fact>
+          <Fact label={t("schedule.paramActor")}>
+            {schedule.actor_name ? (
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                <ActorLabel
+                  actor_type={schedule.actor_type}
+                  actor_name={schedule.actor_name}
+                  iconSize="size-3.5"
+                />
+                {schedule.actor_type && (
+                  <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                    {t(
+                      schedule.actor_type === "end_user"
+                        ? "actorSelect.badgeEndUser"
+                        : "actorSelect.badgeMember",
+                    )}
+                  </Badge>
+                )}
+              </span>
+            ) : (
+              "–"
+            )}
+          </Fact>
+          <Fact label={t("run.infoVersion")}>
+            {schedule.version_override || t("schedule.inheritedVersion")}
+          </Fact>
+        </FactGrid>
       </DetailSectionCard>
       <DetailSectionCard
         title={t("schedule.timing")}
         icon={CalendarClock}
         headerAction={open("recurrence")}
       >
-        <FactGrid
+        <ManifestFacts
           facts={[
             {
               labelKey: "schedule.settings.recurrence",

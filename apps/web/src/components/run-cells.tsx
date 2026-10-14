@@ -6,6 +6,7 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
 import { runErrorText, runErrorTone } from "../lib/run-error";
 import { MetaBadge } from "./status-badge";
+import { CellEmpty } from "./table-cells";
 import { summarizeRunOutput } from "../lib/run-output-summary";
 
 /** What a run ended with: its error, else a readable line of its output, else a dash. */
@@ -22,7 +23,7 @@ export function RunResult({ run }: { run: EnrichedRun }) {
     );
   }
   const summary = summarizeRunOutput(run.result);
-  if (!summary) return <span className="text-muted-foreground/50">—</span>;
+  if (!summary) return <CellEmpty />;
   const text =
     summary.kind === "text" ? summary.text : t("runs.resultFields", { count: summary.count });
   return (

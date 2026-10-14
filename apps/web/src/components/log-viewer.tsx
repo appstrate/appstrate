@@ -35,6 +35,7 @@ import {
 } from "./log-utils";
 import { ItemList } from "./item-list";
 import { EmptyState } from "./page-states";
+import { Fact, FactGrid } from "./fact-grid";
 import { Badge } from "./status-badge";
 import { formatDateField } from "../lib/format-date";
 import { historyRuns, recalledMemories } from "../lib/runtime-tool-results";
@@ -590,34 +591,26 @@ export function LogEntryInspector({
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-5 p-4">
-          <dl className="grid gap-3">
-            <InspectorFact label={t("log.filterType")} value={t(`log.type.${type}`)} />
+          <FactGrid columns={1}>
+            <Fact label={t("log.filterType")}>{t(`log.type.${type}`)}</Fact>
             {entry.createdAt && (
-              <InspectorFact
-                label={t("log.timestamp")}
-                value={formatTimestamp(entry.createdAt, i18n.language)}
-              />
+              <Fact label={t("log.timestamp")}>
+                {formatTimestamp(entry.createdAt, i18n.language)}
+              </Fact>
             )}
-            <InspectorFact
-              label={t("log.filterLevel")}
-              value={t(`log.level.${journalLevel(entry)}`)}
-            />
+            <Fact label={t("log.filterLevel")}>{t(`log.level.${journalLevel(entry)}`)}</Fact>
             {entry.kind === "tool" && (
               <>
-                <InspectorFact label={t("log.tool")} value={entry.tool} />
-                <InspectorFact
-                  label={t("log.status")}
-                  value={<ToolStatus status={entry.status} showLabel />}
-                />
+                <Fact label={t("log.tool")}>{entry.tool}</Fact>
+                <Fact label={t("log.status")}>
+                  <ToolStatus status={entry.status} showLabel />
+                </Fact>
                 {entry.durationMs !== undefined && (
-                  <InspectorFact
-                    label={t("run.infoDuration")}
-                    value={formatDuration(entry.durationMs)}
-                  />
+                  <Fact label={t("run.infoDuration")}>{formatDuration(entry.durationMs)}</Fact>
                 )}
               </>
             )}
-          </dl>
+          </FactGrid>
 
           {entry.kind === "tool" ? (
             <>
@@ -639,15 +632,6 @@ export function LogEntryInspector({
           )}
         </div>
       </ScrollArea>
-    </div>
-  );
-}
-
-function InspectorFact({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div>
-      <dt className="text-muted-foreground text-xs">{label}</dt>
-      <dd className="mt-1 text-sm">{value}</dd>
     </div>
   );
 }

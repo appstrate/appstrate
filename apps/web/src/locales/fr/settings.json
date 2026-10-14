@@ -733,7 +733,6 @@
   "credentials.oauth.dismissConfirmConfirm": "Fermer",
   "credentials.oauth.copyCommand": "Copier la commande",
   "credentials.oauth.copy": "Copier",
-  "credentials.oauth.copied": "Copié !",
   "credentials.oauth.generatingCommand": "Génération de la commande de connexion…",
   "credentials.oauth.pairingExpired": "Cette commande a expiré (5 minutes). Générez-en une nouvelle pour continuer.",
   "credentials.oauth.pairingFailed": "La connexion n'a pas abouti : le compte n'a pas été enregistré. Générez une nouvelle commande pour réessayer.",

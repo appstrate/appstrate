@@ -28,7 +28,7 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "border-input ring-offset-background text-foreground data-[placeholder]:text-muted-foreground focus:ring-ring flex h-9 w-full items-center justify-between rounded-md border bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-sm focus:ring-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+      "border-input ring-offset-background text-foreground data-[placeholder]:text-muted-foreground focus:ring-ring aria-invalid:border-destructive flex h-9 w-full items-center justify-between rounded-md border bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-sm focus:ring-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
       className,
     )}
     {...props}
@@ -93,4 +93,68 @@ const SelectItem = React.forwardRef<
 ));
 SelectItem.displayName = SelectPrimitive.Item.displayName;
 
-export { Select, SelectGroup, SelectLabel, SelectValue, SelectTrigger, SelectContent, SelectItem };
+interface SelectOption {
+  value: string;
+  label: React.ReactNode;
+  disabled?: boolean;
+}
+
+/**
+ * The plain select: one trigger, a flat list of options. A select with groups,
+ * separators or rich rows composes the primitives above instead.
+ */
+function OptionSelect({
+  id,
+  value,
+  onValueChange,
+  options,
+  placeholder,
+  disabled,
+  className,
+  contentClassName,
+  leading,
+  ...aria
+}: {
+  id?: string;
+  value: string | undefined;
+  onValueChange: (value: string) => void;
+  options: readonly SelectOption[];
+  placeholder?: string;
+  disabled?: boolean;
+  /** On the trigger. */
+  className?: string;
+  contentClassName?: string;
+  /** Items drawn above the options (a "none" choice, a kept unknown value). */
+  leading?: React.ReactNode;
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
+  "aria-invalid"?: boolean;
+  "aria-describedby"?: string;
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange} disabled={disabled}>
+      <SelectTrigger id={id} className={className} {...aria}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent className={contentClassName}>
+        {leading}
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+export {
+  OptionSelect,
+  Select,
+  SelectGroup,
+  SelectLabel,
+  SelectValue,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+};

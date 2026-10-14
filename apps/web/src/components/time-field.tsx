@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "@appstrate/ui/components/select";
 
 /**
  * A time of day (`"HH:mm"`), written in the clock of the APP's language, not of
@@ -50,47 +44,36 @@ export function TimeField({
 
   return (
     <div className="flex items-center gap-1.5" role="group">
-      <Select
+      <OptionSelect
+        id={id}
         value={String(hour12 ? hour % 12 : hour)}
         onValueChange={(v) => emit(hour12 ? (Number(v) % 12) + (pm ? 12 : 0) : Number(v), minute)}
-      >
-        <SelectTrigger id={id} className="w-[4.5rem]" aria-label={t("timeField.hour")}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {(hour12 ? HOURS_12 : HOURS_24).map((v) => (
-            <SelectItem key={v} value={String(hour12 ? v % 12 : v)}>
-              {hour12 ? v : pad(v)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        className="w-[4.5rem]"
+        aria-label={t("timeField.hour")}
+        options={(hour12 ? HOURS_12 : HOURS_24).map((v) => ({
+          value: String(hour12 ? v % 12 : v),
+          label: hour12 ? String(v) : pad(v),
+        }))}
+      />
       <span aria-hidden>:</span>
-      <Select value={String(minute)} onValueChange={(v) => emit(hour, Number(v))}>
-        <SelectTrigger className="w-[4.5rem]" aria-label={t("timeField.minute")}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {MINUTES.map((v) => (
-            <SelectItem key={v} value={String(v)}>
-              {pad(v)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <OptionSelect
+        value={String(minute)}
+        onValueChange={(v) => emit(hour, Number(v))}
+        className="w-[4.5rem]"
+        aria-label={t("timeField.minute")}
+        options={MINUTES.map((v) => ({ value: String(v), label: pad(v) }))}
+      />
       {hour12 && (
-        <Select
+        <OptionSelect
           value={pm ? "pm" : "am"}
           onValueChange={(v) => emit((hour % 12) + (v === "pm" ? 12 : 0), minute)}
-        >
-          <SelectTrigger className="w-20" aria-label={t("timeField.period")}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="am">{periodLabel(lang, 9)}</SelectItem>
-            <SelectItem value="pm">{periodLabel(lang, 15)}</SelectItem>
-          </SelectContent>
-        </Select>
+          className="w-20"
+          aria-label={t("timeField.period")}
+          options={[
+            { value: "am", label: periodLabel(lang, 9) },
+            { value: "pm", label: periodLabel(lang, 15) },
+          ]}
+        />
       )}
     </div>
   );

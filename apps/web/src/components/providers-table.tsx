@@ -9,7 +9,7 @@
 import { useState, type ReactNode } from "react";
 import { KeyRound } from "lucide-react";
 import { DataTable } from "./data-table";
-import { EmptyState, ErrorState } from "./page-states";
+import { EmptyState } from "./page-states";
 import { useConnectionTest } from "../hooks/use-connection-test";
 import {
   useProvidersRegistry,
@@ -73,8 +73,7 @@ export function ProvidersTable({
       rowActionable={(row) => row.kind === "org-key" && row.credential !== null && canWriteModels}
       rowLabel={(row) => row.label}
       isLoading={isLoading}
-      isError={Boolean(error)}
-      error={<ErrorState error={error} compact />}
+      failure={error}
       empty={
         <EmptyState message={empty.message} hint={empty.hint} icon={KeyRound} compact>
           {empty.action}

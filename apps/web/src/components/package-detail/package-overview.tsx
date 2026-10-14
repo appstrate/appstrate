@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { BookOpen, FileCode, FolderOpen, Layers, Server, Tags, Wrench } from "lucide-react";
 import { DetailSectionCard } from "../detail-section-card";
+import { Fact, FactGrid } from "../fact-grid";
 import { Markdown } from "../markdown";
 import { ManifestOverview } from "../package-manifest/manifest-overview";
 import { McpServerDetails } from "../package-manifest/mcp-server-details";
@@ -50,18 +51,12 @@ export function PackageOverview({
           <p className="text-sm">{description || t(roleFallbackKeys[type])}</p>
         </DetailSectionCard>
         <DetailSectionCard title={t("packageOverview.package")} icon={Tags}>
-          <dl className="grid grid-cols-2 gap-4">
-            <div>
-              <dt className="text-muted-foreground text-xs">{t("run.infoVersion")}</dt>
-              <dd className="mt-1 text-sm">{version || t("version.draft")}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground text-xs">{t("packageOverview.view")}</dt>
-              <dd className="mt-1 text-sm">
-                {t(historical ? "packageOverview.published" : "packageOverview.current")}
-              </dd>
-            </div>
-          </dl>
+          <FactGrid columns={2}>
+            <Fact label={t("run.infoVersion")}>{version || t("version.draft")}</Fact>
+            <Fact label={t("packageOverview.view")}>
+              {t(historical ? "packageOverview.published" : "packageOverview.current")}
+            </Fact>
+          </FactGrid>
         </DetailSectionCard>
         {type === "skill" && (
           <DetailSectionCard
