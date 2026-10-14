@@ -364,7 +364,9 @@ describe("multi-space skill distribution — access decides the sources", () => 
     ).rejects.toBeInstanceOf(CommandExit);
 
     // Distinct from "no space matches": the id IS listed, it just cannot be used.
-    expect(stderr()).toContain("cannot supply skills: you are not a member of it");
+    expect(stderr()).toContain(
+      "cannot supply skills or agent commands: you are not a member of it",
+    );
     expect(stderr()).not.toMatch(/No space matches/);
     expect(stdout()).toBe("");
     expect(await snapshot(pluginRoot())).toEqual(before);

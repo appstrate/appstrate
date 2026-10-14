@@ -113,8 +113,10 @@ type Claimant = Pick<ManagedSkill, "packageId" | "spaceId">;
 
 /**
  * One string per identity, for maps and sets. A ledger entry passes through
- * as recorded; a `ResolvedSkill`'s origin space is a download detail, so a
- * skill is keyed with {@link plannedClaimant}, never directly.
+ * as recorded. Never pass a `ResolvedSkill` or a `PlannedSkill`: they carry
+ * the `spaceId` the skill was downloaded from, which would key one skill per
+ * space. Key a skill as `{ packageId }`, or a planned entry through
+ * {@link plannedClaimant}.
  */
 export function claimKey({ packageId, spaceId }: Claimant): string {
   return spaceId ? `${spaceId}/${packageId}` : packageId;

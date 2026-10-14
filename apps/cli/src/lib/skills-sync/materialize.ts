@@ -89,7 +89,8 @@ export function spaceCollisionSlug(
 ): string {
   const name = toSlug(packageNameSegment);
   const room = SKILL_NAME_MAX_LENGTH - AGENT_SLUG_PREFIX.length - name.length - 1;
-  const space = room > 0 ? toSlug(spaceName).slice(0, room) : spaceName;
+  // No room at all leaves `run--<name>`, which `toSlug` collapses to `run-<name>`.
+  const space = toSlug(spaceName).slice(0, Math.max(room, 0));
   return freeSlug(
     `${AGENT_SLUG_PREFIX}${space}-${packageNameSegment}`,
     taken,

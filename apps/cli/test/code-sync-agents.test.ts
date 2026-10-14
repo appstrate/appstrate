@@ -392,6 +392,58 @@ describe("code sync — agents come from the selected spaces (#1972)", () => {
     });
   }
 
+  // The `runner` preset as the platform defines it: no `skills:read`.
+  const RUNNER_PRESET = [
+    "agents:run",
+    "runs:read",
+    "runs:cancel",
+    "files:read",
+    "persistence:read",
+    "integrations:read",
+    "integrations:connect",
+    "integrations:disconnect",
+    "mcp:invoke",
+  ];
+  const runnerSpace: SpaceFixture[] = [
+    { id: ONE, name: "Space One", isDefault: true, permissions: RUNNER_PRESET },
+  ];
+
+  it("installs a runner's agent commands although the role reads no skill there", async () => {
+    const server = serve([REPORT], { spaces: runnerSpace });
+    const { io, stderr } = createMemoryIO();
+
+    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
+
+    expect(await readdir(pluginSkills())).toEqual(["run-report"]);
+    expect(stderr()).toBe("");
+    expect(server.downloads()).toBe(0);
+  });
+
+  it("accepts --space naming a runner's space", async () => {
+    serve([REPORT], { spaces: runnerSpace });
+    const { io, stderr } = createMemoryIO();
+
+    await codeSyncCommand({ target: ["claude-plugin"], space: [ONE], printPath: true }, io);
+
+    expect(await readdir(pluginSkills())).toEqual(["run-report"]);
+    expect(stderr()).toBe("");
+  });
+
+  it("refuses --space naming a runner's space for a target that carries no agent", async () => {
+    serve([REPORT], { spaces: runnerSpace });
+    const { io, stderr } = createMemoryIO();
+
+    await expect(codeSyncCommand({ target: ["codex"], space: [ONE] }, io)).rejects.toBeInstanceOf(
+      CommandExit,
+    );
+
+    expect(stderr()).toContain(
+      'Space "Space One" (' +
+        ONE +
+        ") cannot supply skills: your role there does not grant skills:read.",
+    );
+  });
+
   it("names every space it skips in one note, and lists no agent there", async () => {
     const server = serve([REPORT, TRIAGE], { spaces: withRoles([], []) });
     const { io, stderr } = createMemoryIO();

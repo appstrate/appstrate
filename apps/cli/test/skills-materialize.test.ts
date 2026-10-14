@@ -13,7 +13,7 @@ import {
   unzipArtifact,
   zipArtifact,
 } from "@appstrate/core/zip";
-import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
+import { checkSkillMarkdown, isValidSkillName } from "@appstrate/afps-shared/companion-files";
 import {
   AGENT_CONTRACT_ENTRY,
   SkillMaterializeError,
@@ -23,6 +23,7 @@ import {
   materializeSkill,
   normalizeSkillMd,
   skillSlug,
+  spaceCollisionSlug,
   treeIntegrity,
   type AgentLaunchView,
 } from "../src/lib/skills-sync/materialize.ts";
@@ -310,6 +311,20 @@ describe("agentSlug", () => {
     const slug = agentSlug("x".repeat(80));
     expect(slug.length).toBe(64);
     expect(slug.startsWith("run-")).toBe(true);
+  });
+});
+
+describe("spaceCollisionSlug", () => {
+  it("drops the space, never the agent's name, when the name leaves it no room", () => {
+    const name = "n".repeat(59); // `run-` + 59 = 63: no room for `<space>-`
+    const preferred = `run-${name}`;
+
+    const slug = spaceCollisionSlug(name, "Lab", new Set([preferred]));
+
+    expect(isValidSkillName(slug)).toBe(true);
+    expect(slug.length).toBeLessThanOrEqual(64);
+    expect(slug.startsWith(`run-${"n".repeat(57)}`)).toBe(true);
+    expect(slug.endsWith("-2")).toBe(true);
   });
 });
 

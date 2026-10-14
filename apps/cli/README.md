@@ -405,11 +405,11 @@ appstrate code sync --target claude-plugin --print-path                      # t
 | `--print-path`    | Print the plugin directory as the **only** stdout line; every message goes to stderr. This is what a marketplace `command` source consumes. Requires `--target claude-plugin`, and refuses `--dry-run`.                                                                                                                                                                                                  |
 | `--dry-run`       | Print the per-target plan and write nothing. One line per target with the counts (`+N` new, `~N` refreshed, `=N` unchanged, `-N` removed), then one line per affected slug: `+`, `~` or `-`. Cannot be combined with `--print-path`: a dry run produces no plugin, so there is no path worth printing.                                                                                                   |
 
-**Space selection: your access is the selection.** By default sync takes the ACTIVE skills of **every space you are a member of**, with permission to read skills there. Being added to a space puts its skills on your machine at the next sync; being removed takes its skills off again, keeping any that another space you are still in also supplies. No second step, and nothing to edit.
+**Space selection: your access is the selection.** By default sync reads **every space you are a member of**: the ACTIVE skills of those where you may read skills, and with the plugin target the agents of those where you may launch them (see [Agent commands](#agent-commands)). Being added to a space puts its skills on your machine at the next sync; being removed takes its skills off again, keeping any that another space you are still in also supplies. No second step, and nothing to edit.
 
 `appstrate space list` shows slightly more than that: an organization also lists its `closed` spaces to every member, so you can ask to be added to one. Those are not skill sources — the server refuses to serve a space you have not joined — and sync skips them silently rather than failing.
 
-`--space` and `syncSpaces` **narrow** that set. They never widen it: a space you have not joined cannot be synced.
+`--space` and `syncSpaces` **narrow** that set. They never widen it: a space you have not joined cannot be synced, and a named space must supply at least one kind this run syncs (skills, or agent commands with the plugin target).
 
 ```sh
 appstrate code sync --target claude-plugin --space spc_prod --space spc_team   # this invocation only
@@ -518,7 +518,7 @@ With the `claude-plugin` target, sync also installs one command per agent ACTIVE
 /appstrate:run-invoice-extractor extract the totals from ~/Downloads/march-invoice.pdf
 ```
 
-**Who gets them.** Agents come from the same spaces as skills, `--space` and `syncSpaces` included. A space supplies them only where you hold `agents:run`, `runs:read` (or `runs:read-all`) and `mcp:invoke` (the `runner` role has them); sync names the spaces that supply none in one line on stderr. The same agent active in two spaces is two commands: each space has its own input layer, and each command launches, uploads and reads its run in its own space. `codex` and `claude-user` never get agent commands: nothing configures the MCP server there.
+**Who gets them.** Agents come from the same selection of spaces as skills, `--space` and `syncSpaces` included. A selected space supplies them where you hold `agents:run`, `runs:read` (or `runs:read-all`) and `mcp:invoke`, independently of `skills:read`: the `runner` role, which reads no skill, gets its agents. Sync names the spaces that supply none in one line on stderr. The same agent active in two spaces is two commands: each space has its own input layer, and each command launches, uploads and reads its run in its own space. `codex` and `claude-user` never get agent commands: nothing configures the MCP server there.
 
 **What a command contains.** `skills/run-<agent>/SKILL.md` and `input.json`, the space's launch contract — the dashboard launch form's split into `prompted` fields (taken from your request; Claude asks only for a missing required one), `prefilled` (sent only when you override them) and `locked` (never sent). Stored values are never written to disk. Its description ("Launches a metered run of the Appstrate agent …") sits in each session's context, so Claude can choose it on its own.
 

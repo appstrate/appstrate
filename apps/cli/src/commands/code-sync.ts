@@ -719,17 +719,35 @@ function suppliesSkills(space: Space): boolean {
   return space.access === "member" && space.permissions.includes(SKILLS_READ);
 }
 
-/** The grant the MCP server itself exposes `run_and_wait` on (D19). */
+/** A member holding the grant the MCP server itself exposes `run_and_wait` on (D19). */
 function suppliesAgents(space: Space): boolean {
   const has = (permission: string): boolean => space.permissions.includes(permission);
-  return reaches(agentCapabilities(has, has("mcp:invoke")).runLevel, "run");
+  return (
+    space.access === "member" && reaches(agentCapabilities(has, has("mcp:invoke")).runLevel, "run")
+  );
 }
 
-/** Why `suppliesSkills` said no — the half of the answer a user can act on. */
-function unusableReason(space: Space): string {
-  return space.access === "member"
-    ? `your role there does not grant ${SKILLS_READ}`
-    : "you are not a member of it";
+const AGENTS_GRANT = "agents:run, runs:read and mcp:invoke";
+
+/** The kinds this run syncs, and what a space must grant to supply one of them. */
+interface Kinds {
+  agents: boolean;
+}
+
+function suppliesAny(space: Space, { agents }: Kinds): boolean {
+  return suppliesSkills(space) || (agents && suppliesAgents(space));
+}
+
+/** Why `suppliesAny` said no — the half of the answer a user can act on. */
+function unusableReason(space: Space, { agents }: Kinds): string {
+  if (space.access !== "member") return "you are not a member of it";
+  return agents
+    ? `your role there grants neither ${SKILLS_READ} nor ${AGENTS_GRANT}`
+    : `your role there does not grant ${SKILLS_READ}`;
+}
+
+function whatSpacesSupply({ agents }: Kinds): string {
+  return agents ? "skills or agent commands" : "skills";
 }
 
 /**
@@ -765,13 +783,15 @@ async function reachableSpaces(
 
 interface SyncSources {
   skillSpaces: string[];
-  /** In `skillSpaces` order. */
+  /** In selection order, like `skillSpaces`. */
   agentSpaces: Space[];
 }
 
 /**
- * Agents come from the spaces that supply skills, each one kept only where the
- * role can launch through the MCP server: one selection rule for both kinds.
+ * One selection for both kinds; each selected space then supplies skills where
+ * the role reads them and agents where it can launch through the MCP server —
+ * independently, so a `runner` space with no `skills:read` still supplies its
+ * agents.
  */
 async function selectSources(
   profileName: string,
@@ -796,66 +816,69 @@ async function selectSources(
     // more, so the ordinary removal plan takes every one of them off the disk.
     return { skillSpaces: [], agentSpaces: [] };
   }
-  const skillSpaces = selectedSpaces(profileName, profile, spaces, explicit, report);
+  const kinds: Kinds = { agents: withAgents };
+  const selected = selectedSpaces(profileName, profile, spaces, explicit, kinds, report);
+  const skillSpaces = selected.filter(suppliesSkills).map((space) => space.id);
   if (!withAgents) return { skillSpaces, agentSpaces: [] };
-  const selected = skillSpaces.map((id) => spaces.find((space) => space.id === id)!);
   const refused = selected.filter((space) => !suppliesAgents(space));
   if (refused.length > 0) {
     report.note(
-      `Agent commands not synced from ${refused.map((space) => `space "${space.name}"`).join(", ")}: your role there cannot launch agents through the MCP server (needs agents:run, runs:read and mcp:invoke).`,
+      `Agent commands not synced from ${refused.map((space) => `space "${space.name}"`).join(", ")}: your role there cannot launch agents through the MCP server (needs ${AGENTS_GRANT}).`,
     );
   }
   return { skillSpaces, agentSpaces: selected.filter(suppliesAgents) };
 }
 
 /**
- * Which spaces supply skills. The default is every space this profile is a
- * MEMBER of with `skills:read` there: being granted a space is what puts its
- * skills on the machine, and losing one is what takes them off again — neither
- * should need a second, manual step. `GET /api/spaces` answers per principal
+ * Which spaces the sync reads. The default is every space this profile is a
+ * MEMBER of: being granted a space is what puts its skills and agents on the
+ * machine, and losing one is what takes them off again — neither should need a
+ * second, manual step. `GET /api/spaces` answers per principal
  * (`listSpacesForPrincipal`), so the grant is the whole mechanism — but it also
- * lists spaces one may only ask to join, which `suppliesSkills` drops.
+ * lists spaces one may only ask to join, which membership drops.
  *
- * `--space` and `syncSpaces` NARROW that set; they never widen it.
+ * `--space` and `syncSpaces` NARROW that set; they never widen it. A space
+ * named there must supply at least one of the kinds this run syncs.
  */
 function selectedSpaces(
   profileName: string,
   profile: Profile,
   spaces: Space[],
   explicit: string[] | undefined,
+  kinds: Kinds,
   report: Report,
-): string[] {
+): Space[] {
   if (explicit) {
     const chosen = explicit.map((ref) => explicitSpace(spaces, ref));
     // Typed just now, so it gets immediate feedback rather than a silent drop.
     for (const space of chosen) {
-      if (!suppliesSkills(space))
+      if (!suppliesAny(space, kinds))
         throw new Error(
-          `Space "${space.name}" (${space.id}) cannot supply skills: ${unusableReason(space)}.`,
+          `Space "${space.name}" (${space.id}) cannot supply ${whatSpacesSupply(kinds)}: ${unusableReason(space, kinds)}.`,
         );
     }
-    return [...new Set(chosen.map((space) => space.id))];
+    return [...new Set(chosen)];
   }
   const configured = syncSpaceIds(profileName, profile);
-  if (!configured) return spaces.filter(suppliesSkills).map((space) => space.id);
+  if (!configured) return spaces.filter((space) => space.access === "member");
   // A stored list outlives the grants it was written against. An id this
   // profile no longer reaches is dropped with a note, not a failure: losing
   // access is a decision elsewhere, and it must not break the other spaces.
   const listed = new Map(spaces.map((space) => [space.id, space]));
-  const kept: string[] = [];
+  const kept = new Set<Space>();
   for (const id of configured) {
     const space = listed.get(id);
-    if (space && suppliesSkills(space)) {
-      kept.push(id);
+    if (space && suppliesAny(space, kinds)) {
+      kept.add(space);
       continue;
     }
     report.note(
       space
-        ? `Configured sync space "${id}" cannot supply skills — ${unusableReason(space)}; skipped.`
+        ? `Configured sync space "${id}" cannot supply ${whatSpacesSupply(kinds)} — ${unusableReason(space, kinds)}; skipped.`
         : `Configured sync space "${id}" is not accessible in the active organization — skipped.`,
     );
   }
-  return [...new Set(kept)];
+  return [...kept];
 }
 
 /** A flag is typed by hand, so it takes an ID or an unambiguous exact name. */

@@ -26,9 +26,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the URL, so the first sync after the upgrade asks for one more `/mcp` login.
   A free-form request in Claude Code has no implicit space any more: the model
   takes `space_id` from the request or asks. Agent commands come from the same
-  spaces as skills (`--space` and `syncSpaces` narrow both), from each space
-  where your role holds `agents:run`, `runs:read` and `mcp:invoke`; one stderr
-  line names the spaces that supply none. Each command names its space in every
+  selection of spaces as skills (`--space` and `syncSpaces` narrow both): a
+  selected space supplies skills where your role holds `skills:read`, and
+  agents where it holds `agents:run`, `runs:read` and `mcp:invoke`, as the
+  `runner` role does without `skills:read`; one stderr line names the spaces
+  that supply no agent. Each command names its space in every
   call. The same agent active in two spaces is two commands: the first keeps
   `run-<name>`, the next is `run-<space name>-<name>`, and from the second sync
   on, a command keeps its name when its agent is activated in another space or
