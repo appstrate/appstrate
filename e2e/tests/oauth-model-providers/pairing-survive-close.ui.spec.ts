@@ -3,17 +3,13 @@
 /**
  * Browser coverage for a pairing whose modal is gone before the helper redeems
  * (apps/web: `pairing-store`, `<PendingPairingsWatcher>`, `OAuthPairingBody`,
- * `usePairingDismissConfirm`).
- *
- * Each test mints a pairing through the UI, then plays the helper's redeem
- * against the live server. They prove:
+ * `usePairingDismissConfirm`). The tests prove:
  *
  *   - closing the modal mid-flow never fires `DELETE /pairing`;
- *   - the watcher fires the success toast and refreshes the credential list
- *     with no modal open;
- *   - the pairing survives a full page reload (persisted to localStorage);
- *   - only non-secret fields are persisted, never the bearer token;
- *   - the localStorage entry is cleared once the pairing completes.
+ *   - the watcher toasts the success and refreshes the credential list with no
+ *     modal open, then clears the localStorage entry;
+ *   - the pairing survives a full page reload;
+ *   - only non-secret fields are persisted, never the bearer token.
  *
  * @tags @smoke
  */
@@ -34,7 +30,6 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
     authedPage: page,
     apiClient,
   }) => {
-    // Closing the modal never cancels its pairing: no DELETE is sent.
     const pairingDeletes: string[] = [];
     page.on("request", (r) => {
       if (r.method() === "DELETE" && r.url().includes("/model-providers-oauth/pairing/")) {
@@ -45,7 +40,6 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
     await page.goto(SETTINGS_PATH);
     const { token } = await openPairingModal(page);
 
-    // The pairing is registered for the watcher — non-secret fields only.
     const stored = await readStore(page);
     expect(stored).not.toBeNull();
     const persisted = JSON.parse(stored as string) as Record<string, unknown>[];
@@ -60,18 +54,14 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
     expect(stored).not.toContain(token);
     expect(stored).not.toContain("appp_");
 
-    // Close the modal while busy → confirm-on-close guard, then confirm.
     await closePairingModal(page);
 
-    // Helper redeems AFTER the modal is gone — the watcher must complete it.
     const { credentialId } = await helperRedeem(page, token);
 
     try {
-      // Watcher side effects: success toast + credential-list refresh.
       await expect(page.getByText(SUCCESS_TOAST)).toBeVisible({ timeout: 15_000 });
       await expect(page.getByText(/Connecté en tant que/).first()).toBeVisible({ timeout: 15_000 });
 
-      // Store cleared once completed; no cancel ever fired.
       await expect.poll(() => readStore(page), { timeout: 15_000 }).toBeNull();
       expect(pairingDeletes).toEqual([]);
     } finally {
@@ -90,8 +80,6 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
       timeout: 15_000,
     });
 
-    // Helper redeems against the reloaded session — the watcher resumes from
-    // localStorage and completes it.
     const { credentialId } = await helperRedeem(page, token);
 
     try {

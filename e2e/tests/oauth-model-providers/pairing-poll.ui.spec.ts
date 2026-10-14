@@ -3,25 +3,18 @@
 /**
  * Browser coverage for how the dashboard reads the outcome of a pairing
  * (apps/web: `useModelProviderPairingStatus`, `pairing-store`,
- * `<PendingPairingsWatcher>`, `OAuthPairingBody`).
+ * `<PendingPairingsWatcher>`, `OAuthPairingBody`). The tests prove:
  *
- * Each test mints a pairing through the UI, then plays the helper's redeem
- * against the live server, accepted or refused, or answers the status route in
- * the server's place. They prove:
- *
- *   - a 5xx on the status route does not end the poll: it keeps asking, and
- *     reports the success once the route answers again;
- *   - a pending pairing whose `expiresAt` has passed on the client clock is
- *     still polled after a reload: the server's answer is what ends it;
- *   - reopening the modal on the same provider shows the pending pairing's
- *     command without a second mint, the command stays out of localStorage,
- *     and the redeem closes that modal;
- *   - a refused redeem is told once: by the modal when it shows the pairing,
- *     by the watcher's toast when no modal does;
- *   - a status read the server refuses (404) ends the poll: the modal shows the
- *     command as spent, the entry leaves the store, and nothing more is asked.
- *
- * Only an accepted redeem creates a credential: the other tests clean nothing up.
+ *   - a 5xx on the status route does not end the poll, which reports the
+ *     success once the route answers again;
+ *   - a pending pairing past its `expiresAt` on the client clock is still
+ *     polled after a reload: the server's answer ends it;
+ *   - reopening the modal shows the pending pairing's command without a second
+ *     mint, keeps it out of localStorage, and the redeem closes that modal;
+ *   - a refused redeem is told once: by the modal that shows the pairing, or by
+ *     the watcher's toast when none does;
+ *   - a 404 on the status route ends the poll: the modal shows the command as
+ *     spent, the entry leaves the store, and nothing more is asked.
  *
  * @tags @smoke
  */
@@ -50,7 +43,6 @@ const BAD_GATEWAY = {
   contentType: "text/html",
   body: "<html><body><h1>502 Bad Gateway</h1></body></html>",
 };
-/** The API's own refusal of a pairing it does not state. */
 const NOT_FOUND = {
   status: 404,
   contentType: "application/problem+json",
@@ -72,17 +64,16 @@ const REGENERATE_BUTTON = "Générer une nouvelle commande";
 /** Longer than two poll periods (2.5 s each): a poll still running asks again within it. */
 const POLL_STOPPED_MS = 6_000;
 
-/**
- * Sonner mounts a toast one task after it is fired and keeps it 4 s: once this
- * has elapsed, a toast fired by an effect that has run is on screen.
- */
+// The watcher drops the store entry in the effect that fires its toast, and
+// sonner mounts a toast one task after it is fired, keeping it 4 s: this long
+// after the entry is gone, a toast that effect fired is on screen.
 const TOAST_MOUNT_MS = 500;
 
 function toast(page: Page, text: string): Locator {
   return page.locator("[data-sonner-toast]").filter({ hasText: text });
 }
 
-/** Answer every status poll with `response`; the returned function counts the answers served. */
+/** Returns the count of answers served. */
 async function answerStatusPolls(
   page: Page,
   response: { status: number; contentType: string; body: string },
@@ -107,8 +98,7 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
 
     const served = await answerStatusPolls(page, BAD_GATEWAY);
 
-    // Two responses are a request and its retry, where the query errors; a
-    // third is the poll going on.
+    // The query errors on the first answer; the ones that follow are the poll going on.
     await expect.poll(served, { timeout: 15_000 }).toBeGreaterThan(2);
 
     const { credentialId } = await helperRedeem(page, token);
@@ -169,7 +159,6 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
     expect(resumed.command).toBe(minted.command);
     expect(mints).toBe(1);
 
-    // The pairing is persisted, the command it resumes with is not.
     const persisted = await page.evaluate(() => JSON.stringify({ ...localStorage }));
     expect(persisted).toContain(STORAGE_KEY);
     expect(persisted).not.toContain("appp_");
@@ -177,9 +166,7 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
     const { credentialId } = await helperRedeem(page, minted.token);
 
     try {
-      // Nothing is clicked: the redeem closes the modal that shows the pairing.
       await expect(credentialDialog(page)).toBeHidden({ timeout: 15_000 });
-      // The watcher drops the entry in the effect that fires its toast.
       await expect.poll(() => readStore(page), { timeout: 15_000 }).toBeNull();
       await page.waitForTimeout(TOAST_MOUNT_MS);
       // Read once: a retried count would pass once a duplicate has expired.
@@ -201,7 +188,6 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
     await expect(dialog.getByText(PAIRING_FAILED)).toBeVisible({ timeout: 15_000 });
     await expect(dialog.getByRole("button", { name: REGENERATE_BUTTON })).toBeVisible();
 
-    // The watcher drops the entry in the effect that would fire its toast.
     await expect.poll(() => readStore(page), { timeout: 15_000 }).toBeNull();
     await page.waitForTimeout(TOAST_MOUNT_MS);
     // Read once: `toHaveCount(0)` would wait the toast out and pass.

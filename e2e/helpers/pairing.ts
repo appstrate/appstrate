@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Driving the OAuth model-provider pairing flow in a browser spec: the
- * dashboard side through the real UI, the helper side through the bearer route
- * `@appstrate/connect-helper` posts to.
- *
- * `claude-code` is the provider: it needs no identity claim, so the synthetic
- * redeem body stays minimal.
+ * Driving the OAuth model-provider pairing flow in a browser spec: the dashboard
+ * through the real UI, the helper through the bearer route it posts to.
+ * `claude-code` needs no identity claim, so the synthetic redeem body stays minimal.
  */
 
 import { expect, type APIResponse, type Locator, type Page } from "@playwright/test";
@@ -29,16 +26,11 @@ interface DisplayedPairing {
   command: string;
 }
 
-/** The add-credential modal, which hosts the pairing command. */
 export function credentialDialog(page: Page): Locator {
   return page.getByRole("dialog", { name: CREDENTIAL_DIALOG });
 }
 
-/**
- * Open the credentials sub-tab, launch the add-credential modal, pick the
- * OAuth provider, and return the command it shows with the bearer token read
- * from it: a fresh mint, or the pending pairing the modal resumes.
- */
+/** Returns the command the modal shows: a fresh mint, or the pending pairing it resumes. */
 export async function openPairingModal(page: Page): Promise<DisplayedPairing> {
   await page.getByRole("tab", { name: "Clés de providers de modèles", exact: true }).click();
   await page.getByRole("button", { name: "Ajouter une clé", exact: true }).first().click();
@@ -57,10 +49,8 @@ export async function openPairingModal(page: Page): Promise<DisplayedPairing> {
 }
 
 /**
- * Close the modal while its pairing is pending: the confirm-on-close guard,
- * then its confirmation. Both are the dialog's own text button, not its corner
- * ✕: the ✕ carries the same accessible name ("Fermer") through a
- * screen-reader-only label, which is what tells the two apart.
+ * Both clicks are the dialog's own text button, not its corner ✕: the ✕ carries
+ * the same accessible name ("Fermer") through a screen-reader-only label.
  */
 export async function closePairingModal(page: Page): Promise<void> {
   const closeButton = (dialogName: string) =>
@@ -73,7 +63,6 @@ export async function closePairingModal(page: Page): Promise<void> {
   await expect(credentialDialog(page)).toBeHidden();
 }
 
-/** The helper's redeem: the pairing token is its only credential. */
 function postRedeem(page: Page, token: string, providerId: string): Promise<APIResponse> {
   return page.request.post("/api/model-providers-oauth/pair/redeem", {
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -88,28 +77,23 @@ function postRedeem(page: Page, token: string, providerId: string): Promise<APIR
   });
 }
 
-/** Simulate the helper redeeming the token: the credential is created. */
 export async function helperRedeem(page: Page, token: string): Promise<{ credentialId: string }> {
   const res = await postRedeem(page, token, PROVIDER_ID);
   expect(res.status()).toBe(200);
   return (await res.json()) as { credentialId: string };
 }
 
-/**
- * Simulate a redeem the server refuses: the token is spent, no credential is
- * created, and the pairing reads `failed`.
- */
+/** The token is spent, no credential is created, and the pairing reads `failed`. */
 export async function helperRedeemRefused(page: Page, token: string): Promise<void> {
   const res = await postRedeem(page, token, OTHER_PROVIDER_ID);
   expect(res.status()).toBe(400);
 }
 
-/** The persisted pending pairings, raw; `null` once the list is empty. */
+/** `null` once the list is empty. */
 export async function readStore(page: Page): Promise<string | null> {
   return page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY);
 }
 
-/** Remove the credential a redeem created. */
 export async function deleteCredential(apiClient: ApiClient, credentialId: string): Promise<void> {
   const del = await apiClient.delete(`/model-provider-credentials/${credentialId}`);
   expect([204, 404]).toContain(del.status());
