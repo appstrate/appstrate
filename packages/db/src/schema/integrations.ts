@@ -129,8 +129,9 @@ export const integrationConnections = pgTable(
     // gymnastics. Never empty and unique per owner (`idx_integration_conn_owner_label`);
     // the resolver disambiguates a bound set holding two owners' equal labels.
     label: text("label").notNull(),
-    // Read only by scripts/migration/0044; no code reads or writes it. Dropped with its CHECKs in
-    // the next release. Shares live in `integration_connection_shares`.
+    // Read only by scripts/migration/0044 and the boot guard `assertConnectionSharesCopied`
+    // (apps/api/src/lib/boot.ts); no code writes it. Dropped with its CHECKs and the guard in the
+    // next release. Shares live in `integration_connection_shares`.
     sharedSpaceIds: text("shared_space_ids")
       .array()
       .notNull()

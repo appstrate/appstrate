@@ -336,11 +336,12 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
 
   it("surfaces 409 model_provider_unregistered for a preset whose provider is not registered", async () => {
     const h = await buildHarness();
-    // The preset's provider is its own `org_models.provider_id`, not its credential's.
+    // A provider module dropped from MODULES leaves its credential, and the models bound to it
+    // (`org_models_credential_provider_fk`), naming a provider this instance does not register.
     await db
-      .update(orgModels)
+      .update(modelProviderCredentials)
       .set({ providerId: "@gone/provider" })
-      .where(eq(orgModels.id, h.presetId));
+      .where(eq(modelProviderCredentials.id, h.credentialId));
     let upstreamCalled = false;
     mockUpstream(async () => {
       upstreamCalled = true;

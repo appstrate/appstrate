@@ -18,7 +18,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { modelProviderCredentials, orgModels } from "@appstrate/db/schema";
+import { modelProviderCredentials } from "@appstrate/db/schema";
 import {
   assertExplicitModelExists,
   listOrgModels,
@@ -186,10 +186,13 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   });
 
   it("refuses to resolve a model whose stored provider is not registered", async () => {
-    const { model } = await seedApiKeyModel();
-    // The row names its provider (`org_models.provider_id`): a module dropped from
-    // MODULES leaves it naming a provider this instance does not register.
-    await db.update(orgModels).set({ providerId: "google-ai" }).where(eq(orgModels.id, model.id));
+    const { cred, model } = await seedApiKeyModel();
+    // A module dropped from MODULES leaves the credential, and the models bound to it
+    // (`org_models_credential_provider_fk`), naming a provider this instance does not register.
+    await db
+      .update(modelProviderCredentials)
+      .set({ providerId: "google-ai" })
+      .where(eq(modelProviderCredentials.id, cred.id));
 
     // `null` would let `resolveModel` fall through to another model, so the
     // stored provider id surfaces instead.
@@ -201,9 +204,12 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   });
 
   it("refuses to resolve an org default bound to an unregistered provider", async () => {
-    const { model } = await seedApiKeyModel();
+    const { cred, model } = await seedApiKeyModel();
     await setDefaultModel(ctx.orgId, model.id);
-    await db.update(orgModels).set({ providerId: "google-ai" }).where(eq(orgModels.id, model.id));
+    await db
+      .update(modelProviderCredentials)
+      .set({ providerId: "google-ai" })
+      .where(eq(modelProviderCredentials.id, cred.id));
 
     // The org default must not cascade on to the system default.
     const err = await resolveModel(ctx.orgId, "@acme/agent", null, null).catch((e: unknown) => e);

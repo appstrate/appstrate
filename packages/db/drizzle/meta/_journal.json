@@ -673,6 +673,13 @@
       "when": 1791914788339,
       "tag": "0095_pairing_owner_and_failure",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1791914848339,
+      "tag": "0096_connection_calls_and_model_invariants",
+      "breakpoints": true
     }
   ]
 }

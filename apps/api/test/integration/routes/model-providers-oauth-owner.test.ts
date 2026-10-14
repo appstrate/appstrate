@@ -486,18 +486,22 @@ describe("subscription pairings — owner_type", () => {
       expect(await credentialCount(admin.orgId)).toBe(0);
     });
 
-    it("refuses a personal creation recorded for another user than its minter", async () => {
-      const { token } = await createPairing({
+    it("never records a personal creation for another user than its minter", async () => {
+      const refused = await createPairing({
         userId: member.user.id,
         orgId: admin.orgId,
         providerId: TEST_OAUTH_PROVIDER_ID,
         ownerUserId: secondAdmin.user.id,
         platformUrl: "http://localhost:3000",
         ttlSeconds: 300,
-      });
+      }).then(
+        () => undefined,
+        (err: unknown) => err,
+      );
 
-      expect((await redeem(token)).status).toBe(403);
-      expect(await credentialCount(admin.orgId)).toBe(0);
+      expect(String((refused as { cause?: unknown } | undefined)?.cause)).toContain(
+        "model_provider_pairings_owner_is_minter",
+      );
     });
 
     it("refuses every redeem of a minter who is no longer a member", async () => {

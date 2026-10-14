@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { pgTable, text, timestamp, bigserial, integer, uuid, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import {
+  pgTable,
+  text,
+  timestamp,
+  bigserial,
+  integer,
+  uuid,
+  index,
+  check,
+} from "drizzle-orm/pg-core";
 
 /**
  * Journal of the credential proxy's calls: one row per call that may have sent a connection's
@@ -46,5 +56,12 @@ export const connectionCalls = pgTable(
     // Both reads page on `id DESC`: a space's calls, and one connection's.
     index("idx_connection_calls_space_id").on(table.spaceId, table.id),
     index("idx_connection_calls_connection_id").on(table.connectionId, table.id),
+    // For a sweep by age (`created_at < cutoff`).
+    index("idx_connection_calls_created_at").on(table.createdAt),
+    check("connection_calls_actor_type_valid", sql`actor_type IN ('user', 'end_user')`),
+    check(
+      "connection_calls_owner_type_valid",
+      sql`owner_type IS NULL OR owner_type IN ('user', 'end_user')`,
+    ),
   ],
 );

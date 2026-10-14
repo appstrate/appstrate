@@ -88,14 +88,23 @@ describe("resolveChatModel", () => {
   it("refuses an aliased subscription row (invalid legacy state) — falls to the gateway path", async () => {
     // The member's own subscription is present: it must not serve an aliased row either.
     await seedOauthCredential();
-    // Creation refuses an alias on an unbound model (refuseUnboundAlias), so the
-    // legacy row is written directly, as a write path without those invariants could leave it.
+    // An alias is always bound (`org_models_alias_bound`): here to an organization subscription.
+    const orgSubscription = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Org OAuth",
+      accessToken: "org-access",
+      refreshToken: "org-refresh",
+      expiresAt: Date.now() + 3_600_000,
+      createdBy: ctx.user.id,
+    });
+    // The row is written directly, as a write path without the alias rule could leave it.
     const [row] = await db
       .insert(orgModels)
       .values({
         orgId: ctx.orgId,
         providerId: TEST_OAUTH_PROVIDER_ID,
-        credentialId: null,
+        credentialId: orgSubscription.id,
         label: "Masked Subscription",
         modelId: TEST_OAUTH_MODEL_ID,
         aliased: true,
