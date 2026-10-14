@@ -434,10 +434,5 @@
   "nav.sidebar": "Sidebar",
   "nav.sidebarDescription": "Displays the mobile sidebar.",
   "nav.toggleSidebar": "Toggle sidebar",
-  "switcher.spaceOnRequest": "On request",
-  "map.explain": "About \"{{concept}}\"",
-  "map.viewMore_one": "View {{count}} more",
-  "map.viewMore_other": "View {{count}} more",
-  "map.expand": "Full screen",
-  "map.collapse": "Collapse"
+  "switcher.spaceOnRequest": "On request"
 }

@@ -550,11 +550,6 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     away as the secret appears (`ApiKeyCreateModal`, `WebhookCreateModal`,
     `OAuthClientFormModal`): the secret has no address and does not survive a
     reload.
-  - **A modal repeated on a page** is named by what the repeated thing already
-    has that is stable: a map card by its relation id (`?mapConcept=<card>`,
-    `?mapCardList=<card>`). Full-screen maps are `?fullscreenMap=1`
-    (`useMapFullscreen`). A modal opened over another has its own param
-    (`?structurePanel=<section>` over `?fullscreenMap=1`).
   - **A pairing in progress** (`?connectProvider=<providerId>` in the
     onboarding) is a place too: its token lives in memory, so a reload reopens
     the modal and mints a new pairing instead of resuming the old one (which

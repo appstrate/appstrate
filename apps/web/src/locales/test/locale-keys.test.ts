@@ -193,8 +193,6 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.auth.type.", // components/integration-connect/connection-picker-menu.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
-  "integration.structure.concept.", // components/package-detail/integration-structure.tsx
-  "integration.structure.empty.", // components/package-detail/integration-structure.tsx
   "integration.structure.type.", // components/package-detail/integration-structure.tsx
   "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
   "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()

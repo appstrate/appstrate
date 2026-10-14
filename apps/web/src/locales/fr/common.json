@@ -434,10 +434,5 @@
   "nav.sidebar": "Menu latéral",
   "nav.sidebarDescription": "Affiche le menu latéral sur mobile.",
   "nav.toggleSidebar": "Afficher ou masquer le menu latéral",
-  "switcher.spaceOnRequest": "Sur demande",
-  "map.explain": "À propos de « {{concept}} »",
-  "map.viewMore_one": "Voir {{count}} autre",
-  "map.viewMore_other": "Voir {{count}} autres",
-  "map.expand": "Plein écran",
-  "map.collapse": "Réduire"
+  "switcher.spaceOnRequest": "Sur demande"
 }

@@ -25,7 +25,6 @@ export type AgentSettingsSection =
 export type PackageSettingsSection = "files" | "versions" | "general" | "bundle";
 
 export type IntegrationSettingsSection =
-  | "map"
   | "files"
   | "versions"
   | "functioning"
