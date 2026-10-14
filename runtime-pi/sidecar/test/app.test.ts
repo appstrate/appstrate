@@ -430,12 +430,24 @@ describe("ALL /llm/* — telemetry", () => {
     try {
       const enc = new TextEncoder();
       const sent = ["first-chunk", "second-chunk"];
-      const stream = new ReadableStream({
-        start(controller) {
-          for (const chunk of sent) controller.enqueue(enc.encode(chunk));
-          // Intentionally never close.
+      // Demand-driven upstream (`highWaterMark: 0`: `pull` runs only for a
+      // pending read). The read past the last chunk is never answered.
+      let resolveUpstreamPulled!: () => void;
+      const upstreamPulled = new Promise<void>((r) => (resolveUpstreamPulled = r));
+      let next = 0;
+      const stream = new ReadableStream(
+        {
+          pull(controller) {
+            if (next < sent.length) {
+              controller.enqueue(enc.encode(sent[next]!));
+              next += 1;
+              return;
+            }
+            resolveUpstreamPulled();
+          },
         },
-      });
+        { highWaterMark: 0 },
+      );
       const fetchFn = mock(
         async () =>
           new Response(stream, {
@@ -451,7 +463,9 @@ describe("ALL /llm/* — telemetry", () => {
       for (const chunk of sent) {
         expect(new TextDecoder().decode((await reader.read()).value)).toBe(chunk);
       }
-      // The queue is drained, so a `pull` is now awaiting the silent upstream.
+      // The upstream was asked for the chunk it never sends: `passUpstream`'s
+      // `pull` is now awaiting that read, so the cancel lands mid-pull.
+      await upstreamPulled;
       await reader.cancel("test-abort");
       // Let the pending read settle so a stray line would have landed.
       await new Promise((r) => setTimeout(r, 10));
