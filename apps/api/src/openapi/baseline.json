@@ -30419,11 +30419,16 @@
         "name": "status",
         "in": "query",
         "required": false,
-        "description": "Filter runs by lifecycle status: one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.",
+        "description": "Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.",
+        "style": "form",
+        "explode": false,
         "schema": {
-          "type": "string",
-          "pattern": "^(\\s*(pending|running|success|failed|timeout|cancelled)\\s*(,\\s*(pending|running|success|failed|timeout|cancelled)\\s*)*)?$",
-          "example": "failed,timeout"
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["pending", "running", "success", "failed", "timeout", "cancelled"]
+          },
+          "example": ["failed", "timeout"]
         }
       },
       "RunSearch": {

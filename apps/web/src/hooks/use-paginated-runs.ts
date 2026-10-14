@@ -67,6 +67,7 @@ export function usePaginatedRuns({
   // One value on the wire, so one value in the key: an array would key on its
   // identity, and a fresh `["failed"]` each render is a fresh cache entry.
   const statusKey = status && status.length > 0 ? status.join(",") : undefined;
+  const statusQuery = status && status.length > 0 ? status : undefined;
 
   const endpoint = scheduleId
     ? `/schedules/${scheduleId}/runs`
@@ -96,7 +97,7 @@ export function usePaginatedRuns({
         const { data } = await client.GET("/api/schedules/{id}/runs", {
           params: {
             path: { id: scheduleId },
-            query: { limit, offset, status: statusKey, q: search || undefined },
+            query: { limit, offset, status: statusQuery, q: search || undefined },
           },
         });
         return data!;
@@ -106,7 +107,7 @@ export function usePaginatedRuns({
         const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
           params: {
             path: { scope, name },
-            query: { limit, offset, status: statusKey, q: search || undefined },
+            query: { limit, offset, status: statusQuery, q: search || undefined },
           },
         });
         return data!;
@@ -118,7 +119,7 @@ export function usePaginatedRuns({
             offset,
             user,
             kind: kind && kind !== "all" ? kind : undefined,
-            status: statusKey,
+            status: statusQuery,
             q: search || undefined,
           },
         },
