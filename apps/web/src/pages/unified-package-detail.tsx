@@ -22,6 +22,7 @@ import {
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import { useHomeSpaceName } from "../hooks/use-permissions";
 import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
+import type { SchemaWrapper } from "@appstrate/core/form";
 import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState, EmptyState, ResourceErrorState } from "../components/page-states";
@@ -47,7 +48,6 @@ import { AgentInactiveAlert } from "../components/package-detail/agent-inactive-
 import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
 import { AgentSettingsView } from "../components/agent-detail/agent-settings-view";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
-import { AGENT_DETAIL_TABS } from "../lib/agent-detail-tabs";
 import { AgentRunButton } from "../components/package-detail/agent-run-button";
 import { PackageUsage } from "../components/package-detail/package-usage";
 import { PackageSettingsView } from "../components/package-detail/package-settings-view";
@@ -57,6 +57,10 @@ import { agentDiagnosticText } from "../lib/agent-diagnostics";
 import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
 
 type DetailTab = "overview" | "runs" | "settings" | "memory" | "usedBy";
+
+const AGENT_DETAIL_TABS = ["overview", "runs", "memory", "settings"] as const;
+
+const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
 
 function AgentReadinessBadge({
   packageId,
@@ -260,11 +264,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // An agent's tabs are the same for every role: a tab whose read the caller
   // lacks says so in its panel (`RoleLimitNotice`) instead of disappearing, so
   // the page reads the same whatever the role and only its content changes.
-  const agentTabVisible = (_id: (typeof AGENT_DETAIL_TABS)[number]) => true;
-  const allValidTabs: DetailTab[] =
-    type === "agent"
-      ? AGENT_DETAIL_TABS.filter(agentTabVisible)
-      : ["overview", "settings", "usedBy"];
+  const allValidTabs: readonly DetailTab[] =
+    type === "agent" ? AGENT_DETAIL_TABS : ["overview", "settings", "usedBy"];
   // Every detail has a useful summary; explicit file/version deep links still win.
   const defaultTab: DetailTab = "overview";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
@@ -313,11 +314,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // pinned, the live draft otherwise. Same rule the file explorer follows.
   const effectiveManifest = isHistoricalVersion ? versionDetail?.manifest : currentManifest;
 
-  // ── Version-aware input schema ──
-  // A version snapshot does not carry the workspace's model, proxy or saved
-  // values. The only honest form shape available here is the archived AFPS
-  // input schema. An empty schema is distinct from undefined, which means
-  // "fall back to the current draft" in the form components.
+  // A pinned version shows its OWN parameter schema; one it does not declare
+  // is an empty wrapper, never the draft's.
+  const historicalInputWrapper = isHistoricalVersion
+    ? ((versionDetail?.manifest?.input as SchemaWrapper | undefined) ?? EMPTY_INPUT_WRAPPER)
+    : undefined;
+
   const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
 
   // ── Unified detail for SharedHeader ──
@@ -369,9 +371,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     memory: t("detail.tabMemory"),
     settings: t("detail.tabSettings"),
   };
-  const agentTabs: Array<{ id: DetailTab; label: string }> = AGENT_DETAIL_TABS.filter(
-    agentTabVisible,
-  ).map((id) => ({
+  const agentTabs: Array<{ id: DetailTab; label: string }> = AGENT_DETAIL_TABS.map((id) => ({
     id,
     label: agentTabLabels[id],
   }));
@@ -620,6 +620,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 detail={agentDetail}
                 version={versionLabel}
                 isHistorical={isHistoricalVersion}
+                inputWrapperOverride={historicalInputWrapper}
                 currentManifest={currentManifest}
                 currentContent={currentContent}
               />
@@ -677,11 +678,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 packageId={packageId}
                 detail={pkgDetail}
                 version={versionLabel}
-                canEditDefinition={
-                  isOwned &&
-                  can(type === "skill" ? "skills:write" : "mcp-servers:write") &&
-                  !isHistoricalVersion
-                }
               />
             </TabsContent>
           )}

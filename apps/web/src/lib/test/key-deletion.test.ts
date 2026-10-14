@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import i18n, { i18nReady } from "../../i18n.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
-import { planKeyDeletion } from "../key-deletion.ts";
+import { keyDeletionPrompt } from "../key-deletion.ts";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
+
+const KEY = { id: "cred_a", label: "Prod" };
 
 function model(id: string, over: Partial<OrgModelInfo> = {}): OrgModelInfo {
   return {
@@ -19,37 +25,34 @@ function model(id: string, over: Partial<OrgModelInfo> = {}): OrgModelInfo {
   } as OrgModelInfo;
 }
 
-describe("planKeyDeletion", () => {
-  it("lists every row of the key, and names the accessible ones", () => {
-    const plan = planKeyDeletion(
+describe("keyDeletionPrompt", () => {
+  it("refuses a key that models use, naming the disabled and the default ones too", () => {
+    const prompt = keyDeletionPrompt(
+      KEY,
       [
-        model("a1"),
-        model("a2", { enabled: false }),
-        model("b1", { credentialId: "cred_b" }),
-        model("sys", { credentialId: null, source: "built-in", binding: "managed" }),
+        model("GPT", { is_default: true }),
+        model("Haiku", { enabled: false }),
+        model("Other", { credentialId: "cred_b" }),
+        model("Sys", { credentialId: null, source: "built-in", binding: "managed" }),
       ],
-      "cred_a",
+      i18n.t,
     );
-    expect(plan.doomed.map((m) => m.id)).toEqual(["a1", "a2"]);
-    expect(plan.accessible.map((m) => m.id)).toEqual(["a1"]);
-    expect(plan.defaultModel).toBeNull();
-    expect(plan.replacements).toEqual([]);
+    expect(prompt.blocked).toBe(true);
+    expect(prompt.description).toBe(
+      "La clé « Prod » est utilisée par 2 modèles : GPT, Haiku. Supprimez ces modèles avant la clé.",
+    );
   });
 
-  it("asks for another default when the key serves it, offering only models that can take over", () => {
-    const plan = planKeyDeletion(
-      [
-        model("a1", { is_default: true }),
-        model("a2"),
-        model("b1", { credentialId: "cred_b" }),
-        model("b2", { credentialId: "cred_b", enabled: false }),
-        model("b3", { credentialId: "cred_b", needs_reconnection: true }),
-        model("m1", { credentialId: null, binding: "member" }),
-        model("sys", { credentialId: null, source: "built-in", binding: "managed" }),
-      ],
-      "cred_a",
+  it("refuses a key that only a disabled model uses", () => {
+    const prompt = keyDeletionPrompt(KEY, [model("Haiku", { enabled: false })], i18n.t);
+    expect(prompt.blocked).toBe(true);
+    expect(prompt.description).toBe(
+      "La clé « Prod » est utilisée par 1 modèle : Haiku. Supprimez ce modèle avant la clé.",
     );
-    expect(plan.defaultModel?.id).toBe("a1");
-    expect(plan.replacements.map((m) => m.id)).toEqual(["b1", "sys"]);
+  });
+
+  it("lets an unused key go", () => {
+    const prompt = keyDeletionPrompt(KEY, [model("Other", { credentialId: "cred_b" })], i18n.t);
+    expect(prompt).toEqual({ description: "Supprimer la clé « Prod » ?", blocked: false });
   });
 });

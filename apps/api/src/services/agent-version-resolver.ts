@@ -51,6 +51,7 @@ import { ApiError, notFound } from "../lib/errors.ts";
 import {
   getLatestVersionInfo,
   getVersionDetail,
+  getVersionRow,
   requirePublishedPrompt,
   type VersionDetail,
 } from "./package-versions.ts";
@@ -150,4 +151,22 @@ export async function resolveAgentRunVersion(
     throw notFound(`Version '${sel}' not found`);
   }
   return substituteVersion(agent, detail);
+}
+
+/**
+ * The `runs.version_ref` a non-system agent's run records for `selector` —
+ * what {@link resolveAgentRunVersion} selects, read from the catalog without
+ * loading the archive. `null` when the selector names no version: the run
+ * itself would 404.
+ */
+export async function resolveVersionRef(
+  packageId: string,
+  selector: string | null | undefined,
+): Promise<string | null> {
+  const sel = selector?.trim() || undefined;
+  if (sel === VERSION_SELECTOR_DRAFT) return VERSION_SELECTOR_DRAFT;
+  if (sel === undefined || sel === VERSION_SELECTOR_PUBLISHED) {
+    return (await getLatestVersionInfo(packageId))?.version ?? null;
+  }
+  return (await getVersionRow(packageId, sel))?.version ?? null;
 }

@@ -11,6 +11,7 @@ import { useAgentRunActivity } from "../../hooks/use-paginated-runs";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { Badge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
+import { agentSettingsHref } from "../../lib/settings-section-href";
 import { PackageFilesView } from "../package-files/package-files-view";
 import { OperationalStat } from "../operational-stat";
 import { AgentHealthSection } from "./agent-health-section";
@@ -72,13 +73,6 @@ export function AgentOverviewTab({
     pinnedSuccess && memoriesSuccess
       ? memoryDates.sort((a, b) => Date.parse(b) - Date.parse(a))[0]
       : undefined;
-  const settingsHref = (section: "model" | "proxy" | "inputs" | "connections" | "schedules") => {
-    const search = new URLSearchParams(location.search);
-    if (section === "model") search.delete("agentSettings");
-    else search.set("agentSettings", section);
-    const query = search.toString();
-    return `${location.pathname}${query ? `?${query}` : ""}#settings`;
-  };
 
   if (surface === "files") {
     return (
@@ -183,7 +177,7 @@ export function AgentOverviewTab({
             <div className="flex min-w-0 flex-col">
               {nextSchedule?.next_run_at ? (
                 <Link
-                  to={settingsHref("schedules")}
+                  to={agentSettingsHref(location.pathname, "schedules")}
                   className="group hover:bg-muted/20 focus-visible:ring-ring relative flex min-w-0 flex-1 flex-col justify-center p-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
                 >
                   <div className="min-w-0">
@@ -309,7 +303,7 @@ export function AgentOverviewTab({
               }
               to={
                 activeScheduleCount && activeScheduleCount > 0
-                  ? settingsHref("schedules")
+                  ? agentSettingsHref(location.pathname, "schedules")
                   : undefined
               }
             />

@@ -19,7 +19,6 @@ import { useModalParam } from "../hooks/use-modal-param";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ResourceErrorState } from "../components/page-states";
-import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
 import { invalidateOrgStorage } from "../hooks/use-files";
 import { useMarkReadByRun } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
@@ -30,7 +29,7 @@ import { replayVersion } from "../lib/version-selector";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
-import { RUN_DETAIL_TABS, type RunDetailTab } from "../lib/run-detail-tabs";
+import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { RunHeaderActions, RunHeaderSummary } from "../components/run-detail/run-header-summary";
 import { RunExecutionView } from "../components/run-detail/run-execution-view";
 import { RunResultsView } from "../components/run-detail/run-results-view";
@@ -46,6 +45,9 @@ import { findModelFallback } from "../lib/run-model-fallback";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
+
+const RUN_DETAIL_TABS = ["overview", "journal", "results"] as const;
+type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
 
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -72,6 +74,7 @@ export function RunDetailPage() {
     isInlinePath ? undefined : packageId,
   );
   const runQuery = useRun(runId);
+  const [tab, setTab] = useTabWithHash(RUN_DETAIL_TABS, "overview");
   const { data: run, error } = runQuery;
   const runNumber = run?.runNumber ?? stateNumber;
   const requestedJournalFilter = new URLSearchParams(location.search).get("journalFilter");
@@ -248,11 +251,7 @@ export function RunDetailPage() {
     inlineName,
     numberedTitle: runCrumbLabel,
   });
-  const requestedRunTab = location.hash.replace(/^#/, "");
-  const breadcrumbTab: RunDetailTab = RUN_DETAIL_TABS.includes(requestedRunTab as RunDetailTab)
-    ? (requestedRunTab as RunDetailTab)
-    : "overview";
-  const breadcrumbTabLabel: Record<RunDetailTab, string> = {
+  const tabLabel: Record<RunDetailTab, string> = {
     overview: t("run.tabOverview"),
     journal: t("run.tabJournal"),
     results: t("run.tabResults"),
@@ -267,7 +266,7 @@ export function RunDetailPage() {
           { label: t("detail.tabRuns"), href: `/agents/${packageId}#runs` },
           { label: runCrumbLabel, href: location.pathname },
         ]),
-    { label: breadcrumbTabLabel[breadcrumbTab] },
+    { label: tabLabel[tab] },
   ];
 
   return (
@@ -335,93 +334,82 @@ export function RunDetailPage() {
         integrationEntries={agent?.dependencies.integrations}
       />
 
-      <RunDetailTabsController
-        key={runId}
-        availability={{
-          isActive: isRunning,
-          isFailed: run.status === "failed",
-          hasResults: isTerminal && hasDurableResults,
-        }}
-      >
-        {({ activeTab, setActiveTab }) => (
-          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RunDetailTab)}>
-            <div className="overflow-visible" data-run-detail-surface>
-              <DetailTabsList className="mt-6 mb-3">
-                <DetailTabsTrigger value="overview">{t("run.tabOverview")}</DetailTabsTrigger>
-                <DetailTabsTrigger value="journal">{t("run.tabJournal")}</DetailTabsTrigger>
-                <DetailTabsTrigger value="results">{t("run.tabResults")}</DetailTabsTrigger>
-              </DetailTabsList>
+      <Tabs value={tab} onValueChange={(value) => setTab(value as RunDetailTab)}>
+        <div className="overflow-visible" data-run-detail-surface>
+          <DetailTabsList className="mt-6 mb-3">
+            <DetailTabsTrigger value="overview">{t("run.tabOverview")}</DetailTabsTrigger>
+            <DetailTabsTrigger value="journal">{t("run.tabJournal")}</DetailTabsTrigger>
+            <DetailTabsTrigger value="results">{t("run.tabResults")}</DetailTabsTrigger>
+          </DetailTabsList>
 
-              <TabsContent
-                value="overview"
-                className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
-              >
-                <RunSnapshotInspector
-                  run={enrichedRun}
-                  turns={turnRows}
-                  logs={allLogs}
-                  structuredOutput={finalOutput}
-                  memoryChangeCount={runMemoryCount}
-                  modelFallback={modelFallback}
-                  onOpenJournal={(filter) => {
-                    const search = new URLSearchParams(location.search);
-                    if (filter) search.set("journalFilter", filter);
-                    else search.delete("journalFilter");
-                    const query = search.toString();
-                    navigate({
-                      pathname: location.pathname,
-                      search: query ? `?${query}` : "",
-                      hash: "#journal",
-                    });
-                  }}
-                  onOpenResults={() => {
-                    const search = new URLSearchParams(location.search);
-                    search.delete("journalFilter");
-                    const query = search.toString();
-                    navigate({
-                      pathname: location.pathname,
-                      search: query ? `?${query}` : "",
-                      hash: "#results",
-                    });
-                  }}
-                />
-              </TabsContent>
+          <TabsContent
+            value="overview"
+            className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
+          >
+            <RunSnapshotInspector
+              run={enrichedRun}
+              turns={turnRows}
+              logs={allLogs}
+              structuredOutput={finalOutput}
+              memoryChangeCount={runMemoryCount}
+              modelFallback={modelFallback}
+              onOpenJournal={(filter) => {
+                const search = new URLSearchParams(location.search);
+                if (filter) search.set("journalFilter", filter);
+                else search.delete("journalFilter");
+                const query = search.toString();
+                navigate({
+                  pathname: location.pathname,
+                  search: query ? `?${query}` : "",
+                  hash: "#journal",
+                });
+              }}
+              onOpenResults={() => {
+                const search = new URLSearchParams(location.search);
+                search.delete("journalFilter");
+                const query = search.toString();
+                navigate({
+                  pathname: location.pathname,
+                  search: query ? `?${query}` : "",
+                  hash: "#results",
+                });
+              }}
+            />
+          </TabsContent>
 
-              <TabsContent
-                value="journal"
-                className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
-              >
-                <RunExecutionView
-                  run={enrichedRun}
-                  logs={allLogs}
-                  initialFilter={journalFilter}
-                  headerActions={
-                    run.status === "success" && hasDurableResults ? (
-                      <Button variant="outline" size="sm" onClick={() => setActiveTab("results")}>
-                        {t("run.viewResults")}
-                        <ArrowRight className="size-3.5" />
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              </TabsContent>
+          <TabsContent
+            value="journal"
+            className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+          >
+            <RunExecutionView
+              run={enrichedRun}
+              logs={allLogs}
+              initialFilter={journalFilter}
+              headerActions={
+                run.status === "success" && hasDurableResults ? (
+                  <Button variant="outline" size="sm" onClick={() => setTab("results")}>
+                    {t("run.viewResults")}
+                    <ArrowRight className="size-3.5" />
+                  </Button>
+                ) : undefined
+              }
+            />
+          </TabsContent>
 
-              <TabsContent
-                value="results"
-                className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
-              >
-                <RunResultsView
-                  run={enrichedRun}
-                  packageId={packageId}
-                  output={finalOutput}
-                  hasRunMemory={hasRunMemory}
-                  isRunning={isRunning}
-                />
-              </TabsContent>
-            </div>
-          </Tabs>
-        )}
-      </RunDetailTabsController>
+          <TabsContent
+            value="results"
+            className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+          >
+            <RunResultsView
+              run={enrichedRun}
+              packageId={packageId}
+              output={finalOutput}
+              hasRunMemory={hasRunMemory}
+              isRunning={isRunning}
+            />
+          </TabsContent>
+        </div>
+      </Tabs>
     </div>
   );
 }

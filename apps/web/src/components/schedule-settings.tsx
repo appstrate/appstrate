@@ -12,14 +12,14 @@
  * saves both together.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ArrowRight, Lock, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
 import { AgentDetailSectionHeader, AgentDetailSplit } from "./agent-detail/agent-detail-split";
-import { RailLink } from "./settings/rail-link";
+import { SectionRail } from "./settings/section-rail";
 import { SettingRow } from "./settings/setting-row";
 import { InlineTextSetting } from "./settings/inline-text-setting";
 import { RoleLimitNotice } from "./role-limit-notice";
@@ -42,6 +42,7 @@ import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { useScheduleFormDeps, useUpdateSchedule } from "../hooks/use-schedules";
+import { useSaveAfterPause } from "../hooks/use-save-after-pause";
 import {
   changedInputValues,
   formatInputValue,
@@ -74,23 +75,6 @@ import {
 type Schedule = ScheduleWireDto;
 type Save = ReturnType<typeof useUpdateSchedule>;
 type Deps = NonNullable<ReturnType<typeof useScheduleFormDeps>["deps"]>;
-
-/** Debounced save of a value edited continuously (typing, a slider). */
-function useSaveAfterPause<T>(
-  value: T,
-  edited: boolean,
-  save: (value: T) => void,
-  done: () => void,
-) {
-  useEffect(() => {
-    if (!edited) return;
-    const timeout = window.setTimeout(() => {
-      done();
-      save(value);
-    }, 650);
-    return () => window.clearTimeout(timeout);
-  }, [edited, value, save, done]);
-}
 
 /**
  * The integrations every fire runs, with their `required` flag: inherit is the latest published
@@ -150,26 +134,23 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   return (
     <AgentDetailSplit
       data-schedule-settings
-      railClassName="p-3"
       rail={
-        <nav
-          className="flex flex-col gap-0.5 max-md:flex-row max-md:overflow-x-auto"
-          aria-label={t("schedule.tabSettings")}
-        >
-          {SECTIONS.map((section) => (
-            <RailLink
-              key={section.id}
-              item={{
+        <SectionRail
+          label={t("schedule.tabSettings")}
+          active={active.id}
+          groups={[
+            {
+              title: t("detail.settings.configurationGroup"),
+              items: SECTIONS.map((section) => ({
+                id: section.id,
                 to: scheduleSettingsHref(schedule.id, section.id),
                 icon: section.icon,
-                labelKey: section.labelKey,
-              }}
-              label={t(section.labelKey)}
-              active={active.id === section.id}
-              locked={!mayWrite}
-            />
-          ))}
-        </nav>
+                label: t(section.labelKey),
+                locked: !mayWrite,
+              })),
+            },
+          ]}
+        />
       }
     >
       <section className="min-w-0 p-6">

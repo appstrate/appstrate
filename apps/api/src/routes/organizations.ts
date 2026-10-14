@@ -64,17 +64,38 @@ export const createOrgSchema = z
   })
   .strict();
 
+const EMOJI_LOGO_PREFIX = "emoji:";
+const WEBP_LOGO_PREFIX = "data:image/webp;base64,";
+/** Enough for any single emoji: the longest ZWJ sequences hold about ten code points. */
+const MAX_EMOJI_CODE_POINTS = 16;
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** One emoji, or a base64 WebP image (a RIFF container whose form type is `WEBP`). */
+function isValidLogo(value: string): boolean {
+  if (value.startsWith(EMOJI_LOGO_PREFIX)) {
+    const emoji = value.slice(EMOJI_LOGO_PREFIX.length);
+    return (
+      [...emoji].length <= MAX_EMOJI_CODE_POINTS &&
+      [...graphemes.segment(emoji)].length === 1 &&
+      /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u.test(emoji)
+    );
+  }
+  if (!value.startsWith(WEBP_LOGO_PREFIX)) return false;
+  const payload = value.slice(WEBP_LOGO_PREFIX.length);
+  if (payload.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(payload)) return false;
+  const bytes = atob(payload);
+  return bytes.slice(0, 4) === "RIFF" && bytes.slice(8, 12) === "WEBP";
+}
+
 export const updateOrgSchema = z
   .object({
     name: z.string().min(1).optional(),
     slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
     logo: z
       .string()
+      // Bounds the decoded image at about 132 KiB.
       .max(180_000)
-      .refine(
-        (value) => value.startsWith("emoji:") || value.startsWith("data:image/webp;base64,"),
-        "Logo must be an emoji or a normalized WebP image",
-      )
+      .refine(isValidLogo, "Logo must be one emoji or a WebP image")
       .nullable()
       .optional(),
   })
@@ -319,11 +340,16 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
     ...(data.logo !== undefined ? { logo: data.logo } : {}),
   });
 
+  // An image logo is recorded as changed, never as its bytes.
+  const { logo, ...renamed } = data;
   await recordAuditFromContext(c, {
     action: "org.updated",
     resourceType: "org",
     resourceId: orgId,
-    after: data,
+    after: {
+      ...renamed,
+      ...(logo !== undefined ? { logo: logo?.startsWith(WEBP_LOGO_PREFIX) ? "image" : logo } : {}),
+    },
     orgIdOverride: orgId,
   });
 

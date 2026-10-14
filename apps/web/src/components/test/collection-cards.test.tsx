@@ -33,7 +33,7 @@ function makeSchedule(overrides: Partial<EnrichedSchedule> = {}): EnrichedSchedu
     next_run_at: "2026-08-24T11:00:00.000Z",
     createdAt: "2026-08-01T10:00:00.000Z",
     updatedAt: "2026-08-22T11:00:00.000Z",
-    actor_name: "Olivier Tarbès",
+    actor_name: "Bob Martin",
     actor_type: "user",
     running_runs: 1,
     unread_count: 3,
@@ -73,7 +73,7 @@ describe("the level-one collection cards", () => {
     expect(html).toContain("Fréquence");
     expect(html).toContain("0 7 * * *");
     expect(html).toContain("Prochaine");
-    expect(html).toContain("Olivier Tarbès");
+    expect(html).toContain("Bob Martin");
   });
 
   it("keeps the honest footer on an empty document card result", () => {

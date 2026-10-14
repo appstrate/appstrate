@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The header trail: the org/workspace chip, then whatever the current page
- * published to the breadcrumb store.
- *
- * The chip is the first item on purpose. Every page in the app is scoped by an
- * organisation AND an application (they ride on `X-Org-Id` / `X-Application-Id`
- * for every request), so a trail that starts below them is not just terse, it
- * is wrong — which is what the generic "Organisation" root it replaces was.
- */
+/** The header trail: whatever the current page published to the breadcrumb store. */
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useBreadcrumbStore } from "@/stores/breadcrumb-store";
 import { useCanReach } from "@/hooks/use-can-reach";
 
@@ -23,12 +16,13 @@ function Separator() {
 }
 
 export function ShellBreadcrumb() {
+  const { t } = useTranslation("common");
   const entries = useBreadcrumbStore((s) => s.entries);
   const canReach = useCanReach();
 
   return (
     <nav
-      aria-label="breadcrumb"
+      aria-label={t("nav.breadcrumb")}
       className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-sm"
     >
       {entries.map((crumb, i) => (

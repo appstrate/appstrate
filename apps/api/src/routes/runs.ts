@@ -75,7 +75,7 @@ import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
-import { runStatusValues } from "@appstrate/core/run-status";
+import { parseRunListFilters } from "../lib/run-list-filters.ts";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -217,34 +217,6 @@ function closedSetQuery<T extends string>(
     throw invalidRequest(`${name} must be one of: ${allowed.join(", ")}`, name);
   }
   return raw as T;
-}
-
-/**
- * The same closed set, several values at a time: `?status=failed,timeout`.
- *
- * "Everything that broke" is one question, not two — asking it as two requests
- * and stitching the pages together client-side gets the ordering and the total
- * wrong. One value stays valid, so this widens the parameter without moving it.
- *
- * Same rule as {@link closedSetQuery} on the way in: an unrecognised member is
- * a 400 for the whole list, never a silently dropped one, because dropping a
- * member WIDENS the answer to a caller reading it as narrowed. A repeated value
- * is not an error, only redundant — it collapses.
- */
-function closedSetListQuery<T extends string>(
-  c: Context<AppEnv>,
-  name: string,
-  allowed: readonly T[],
-): T[] | undefined {
-  const raw = c.req.query(name);
-  if (raw === undefined || raw === "") return undefined;
-  const parts = raw.split(",").map((part) => part.trim());
-  for (const part of parts) {
-    if (!(allowed as readonly string[]).includes(part)) {
-      throw invalidRequest(`${name} must be one of: ${allowed.join(", ")}`, name);
-    }
-  }
-  return [...new Set(parts)] as T[];
 }
 
 // --- Router ---
@@ -502,12 +474,16 @@ export function createRunsRouter() {
     const agent = c.get("package");
     const scope = getSpaceScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
-    const status = closedSetListQuery(c, "status", runStatusValues);
+    const { status, search } = parseRunListFilters({
+      status: c.req.query("status"),
+      q: c.req.query("q"),
+    });
     const result = await listPackageRuns(scope, agent.id, {
       limit,
       offset,
       actor: getActor(c),
       status,
+      search,
       visibility: runVisibilityFilter(c),
       canReadAgentInput: !agentReadIsSummary(c),
     });
@@ -534,11 +510,11 @@ export function createRunsRouter() {
 
   // GET /api/runs — global paginated run list across the space.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
-  // for inline-run filtering, ?status, ?start_date/?end_date, and
+  // for inline-run filtering, ?status, ?q, ?start_date/?end_date, and
   // ?chat_session_id for the conversation context sidebar.
   //
-  // `user`, `kind` and `status` are all closed sets and all go through
-  // `closedSetQuery`: an unrecognised value is a 400, not a dropped filter.
+  // `user`, `kind` and `status` are all closed sets: an unrecognised value is
+  // a 400, not a dropped filter.
   // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
   // size returns the first page, which narrows rather than widens, and callers
   // paging by `Link` headers never construct them by hand.
@@ -559,16 +535,13 @@ export function createRunsRouter() {
     const visibility = userFilter === "me" ? ownRunsFilter(actor) : runVisibilityFilter(c);
 
     const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
-    const status = closedSetListQuery(c, "status", runStatusValues);
+    const { status, search } = parseRunListFilters({
+      status: c.req.query("status"),
+      q: c.req.query("q"),
+    });
     const startDateRaw = c.req.query("start_date");
     const endDateRaw = c.req.query("end_date");
     const chatSessionId = c.req.query("chat_session_id") || undefined;
-    // Free text. Bounded because it reaches an unindexed substring match, and
-    // an unbounded one is a cheap way to make the endpoint expensive.
-    const search = c.req.query("q")?.trim() || undefined;
-    if (search && search.length > 200) {
-      throw invalidRequest("q must be 200 characters or fewer", "q");
-    }
     const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
     const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
     if (startDate && Number.isNaN(startDate.getTime())) {

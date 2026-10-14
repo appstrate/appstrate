@@ -74,8 +74,7 @@ export function usePaginatedRuns({
 
   return useQuery({
     queryKey: currentKey,
-    // `user`/`kind`/`status` are only declared (and only ever passed by
-    // callers) on the global /api/runs view.
+    // `user`/`kind` exist only on the global /api/runs view.
     queryFn: async (): Promise<ListEnvelope<EnrichedRun>> => {
       if (scheduleId) {
         const { data } = await client.GET("/api/schedules/{id}/runs", {
@@ -89,7 +88,10 @@ export function usePaginatedRuns({
       if (packageId) {
         const { scope, name } = splitPackageRef(packageId);
         const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
-          params: { path: { scope, name }, query: { limit, offset, status: statusKey } },
+          params: {
+            path: { scope, name },
+            query: { limit, offset, status: statusKey, q: search || undefined },
+          },
         });
         return data!;
       }
@@ -107,9 +109,8 @@ export function usePaginatedRuns({
       });
       return data!;
     },
-    // Keep the rows on screen while PAGING, drop them when the filters change.
-    // Blanket `(prev) => prev` did both, so ticking a status left the whole
-    // unfiltered page sitting under a filter chip that was already on screen.
+    // Keep the rows on screen while PAGING, drop them when the filters change,
+    // so rows read under other filters never sit under the chips just ticked.
     // The offset is the last segment of the key; everything before it is what
     // the user asked for.
     placeholderData: (prev, prevQuery) => {

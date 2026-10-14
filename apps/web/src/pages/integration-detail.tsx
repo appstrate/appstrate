@@ -9,7 +9,7 @@
  * ownership gates. The sections live in `components/integration-detail/`.
  */
 
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
 import {
@@ -49,7 +49,7 @@ import {
   AgentDetailSplit,
   AgentDetailSectionHeader,
 } from "../components/agent-detail/agent-detail-split";
-import { RailLink } from "../components/settings/rail-link";
+import { SectionRail, type SectionRailItem } from "../components/settings/section-rail";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
@@ -72,6 +72,14 @@ import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-i
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useSetPackageActive } from "../hooks/use-library";
+import { EditorPlaceContext } from "../hooks/use-unsaved-changes";
+import { structurePanelState } from "../lib/integration-structure-panel";
+import type { EditorPlace } from "../lib/editor-place";
+import {
+  integrationSettingsHref,
+  settingsEditorPlace,
+  type IntegrationSettingsSection,
+} from "../lib/settings-section-href";
 
 const IntegrationDefinitionEditor = lazy(() =>
   import("./package-editor").then((module) => ({
@@ -80,12 +88,14 @@ const IntegrationDefinitionEditor = lazy(() =>
 );
 
 /** Rail id → editor section. Contenu (`bundle`) is not one: it reads the bundle. */
-const DEFINITION_RAIL: Record<string, IntegrationDefinitionSection> = {
-  identity: "general",
-  source: "source",
-  "auth-methods": "auths",
-  tools: "tools",
-};
+type DefinitionRailEntry = [IntegrationSettingsSection, IntegrationDefinitionSection];
+const DEFINITION_RAIL: readonly DefinitionRailEntry[] = [
+  ["identity", "general"],
+  ["source", "source"],
+  ["auth-methods", "auths"],
+  ["tools", "tools"],
+];
+const DEFINITION_SECTIONS: readonly string[] = DEFINITION_RAIL.map(([id]) => id);
 
 function IntegrationGeneral({ detail }: { detail: IntegrationDetailWire }) {
   return <IntegrationFunctioning detail={detail} />;
@@ -124,325 +134,304 @@ function IntegrationSettings({
   const { t } = useTranslation(["settings", "agents"]);
   const location = useLocation();
   const navigate = useNavigate();
+  const hasDefinition = !!definition;
+  const sectionOf = useCallback(
+    (search: URLSearchParams): IntegrationSettingsSection => {
+      const requested = search.get("integrationSettings");
+      return requested === "tools" ||
+        requested === "functioning" ||
+        requested === "map" ||
+        (requested === "versions" && isOwned) ||
+        requested === "bundle" ||
+        (hasDefinition && requested && DEFINITION_SECTIONS.includes(requested))
+        ? (requested as IntegrationSettingsSection)
+        : requested === "files" || !canConfigure
+          ? "files"
+          : requested === "access"
+            ? "access"
+            : "authentication";
+    },
+    [isOwned, hasDefinition, canConfigure],
+  );
   const params = new URLSearchParams(location.search);
-  const requested = params.get("integrationSettings");
+  const active = sectionOf(params);
   const requestedFile = params.get("file") ?? undefined;
-  const sectionHref = (id: string, extra: Record<string, string> = {}) => {
-    const next = new URLSearchParams(location.search);
-    next.set("integrationSettings", id);
-    // A modal, or the file a link opened, belongs to the section it was opened in.
-    for (const key of ["edit", "editManifest", "file", "toolPolicy"]) next.delete(key);
-    for (const [key, value] of Object.entries(extra)) next.set(key, value);
-    return `?${next.toString()}#configuration`;
-  };
-  const active =
-    requested === "tools" ||
-    requested === "functioning" ||
-    requested === "map" ||
-    (requested === "versions" && isOwned) ||
-    requested === "bundle" ||
-    (definition && requested && requested in DEFINITION_RAIL)
-      ? requested
-      : requested === "files" || !canConfigure
-        ? "files"
-        : requested === "access"
-          ? "access"
-          : "authentication";
+  const editorPlace = useCallback<EditorPlace>(
+    (search) => settingsEditorPlace(sectionOf(search), search, DEFINITION_SECTIONS),
+    [sectionOf],
+  );
+  const sectionHref = (section: IntegrationSettingsSection, extra?: Record<string, string>) =>
+    integrationSettingsHref(location.pathname, section, extra);
   const steps = detail.manifest.setup_guide?.steps ?? [];
   // Same order as an agent's: Explorer (see it: map, files, versions), then
   // what is set here, then the AFPS package, what the integration IS for every
   // space, edited in place when the reader may. The tool catalogue belongs to
   // the package: nothing about it is set per organisation or per space.
+  const item = (
+    id: IntegrationSettingsSection,
+    icon: SectionRailItem["icon"],
+    label: string,
+  ): SectionRailItem => ({ id, to: sectionHref(id), icon, label });
   const groups = [
     {
-      label: t("detail.settings.exploreGroup", { ns: "agents" }),
+      title: t("detail.settings.exploreGroup", { ns: "agents" }),
       items: [
-        { id: "map", label: t("integration.structure.map"), icon: Workflow },
-        { id: "files", label: t("detail.overview.explorer", { ns: "agents" }), icon: FolderTree },
+        item("map", Workflow, t("integration.structure.map")),
+        item("files", FolderTree, t("detail.overview.explorer", { ns: "agents" })),
         ...(isOwned
-          ? [
-              {
-                id: "versions",
-                label: t("detail.settings.versions", { ns: "agents" }),
-                icon: History,
-              },
-            ]
+          ? [item("versions", History, t("detail.settings.versions", { ns: "agents" }))]
           : []),
       ],
     },
     ...(canConfigure
       ? [
           {
-            label: t("detail.settings.configurationGroup", { ns: "agents" }),
+            title: t("detail.settings.configurationGroup", { ns: "agents" }),
             items: [
-              {
-                id: "authentication",
-                label: t("integration.presentation.authentication"),
-                icon: KeyRound,
-              },
-              { id: "access", label: t("integration.admin.accessRules.title"), icon: ShieldCheck },
+              item("authentication", KeyRound, t("integration.presentation.authentication")),
+              item("access", ShieldCheck, t("integration.admin.accessRules.title")),
             ],
           },
         ]
       : []),
     {
-      label: t("detail.settings.definitionGroup", { ns: "agents" }),
-      items: definition
-        ? [
-            { id: "identity", label: t("editor.tabGeneral", { ns: "agents" }), icon: IdCard },
-            {
-              id: "source",
-              label: t("integrationEditor.tabSource", { ns: "agents" }),
-              icon: Server,
-            },
-            {
-              id: "auth-methods",
-              label: t("integrationEditor.tabAuthMethods", { ns: "agents" }),
-              icon: KeyRound,
-            },
-            { id: "tools", label: t("integrationEditor.tabTools", { ns: "agents" }), icon: Wrench },
-            {
-              id: "bundle",
-              label: t("editor.tabPackageFiles", { ns: "agents" }),
-              icon: FileArchive,
-            },
-          ]
-        : [
-            { id: "functioning", label: t("integration.structure.functioning"), icon: Plug },
-            { id: "tools", label: t("integrationEditor.tabTools", { ns: "agents" }), icon: Wrench },
-            {
-              id: "bundle",
-              label: t("editor.tabPackageFiles", { ns: "agents" }),
-              icon: FileArchive,
-            },
-          ],
+      title: t("detail.settings.definitionGroup", { ns: "agents" }),
+      items: [
+        ...(definition
+          ? [
+              item("identity", IdCard, t("editor.tabGeneral", { ns: "agents" })),
+              item("source", Server, t("integrationEditor.tabSource", { ns: "agents" })),
+              item(
+                "auth-methods",
+                KeyRound,
+                t("integrationEditor.tabAuthMethods", { ns: "agents" }),
+              ),
+            ]
+          : [item("functioning", Plug, t("integration.structure.functioning"))]),
+        item("tools", Wrench, t("integrationEditor.tabTools", { ns: "agents" })),
+        item("bundle", FileArchive, t("editor.tabPackageFiles", { ns: "agents" })),
+      ],
     },
   ];
-  const definitionSection = definition ? DEFINITION_RAIL[active] : undefined;
+  const definitionSection = definition
+    ? DEFINITION_RAIL.find(([id]) => id === active)?.[1]
+    : undefined;
   return (
-    <AgentDetailSplit
-      className="max-lg:grid-cols-1"
-      railClassName="p-6 max-lg:border-r-0 max-lg:border-b"
-      rail={
-        <nav className="space-y-5" aria-label={t("integration.tabs.configuration")}>
-          {groups.map((group) => (
-            <section key={group.label}>
-              <h2 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wide uppercase">
-                {group.label}
-              </h2>
-              <div className="flex flex-col gap-0.5">
-                {group.items.map((section) => {
-                  return (
-                    <RailLink
-                      key={section.id}
-                      item={{
-                        to: sectionHref(section.id),
-                        icon: section.icon,
-                        labelKey: section.label,
-                      }}
-                      label={section.label}
-                      active={active === section.id}
-                    />
-                  );
-                })}
-              </div>
-            </section>
-          ))}
-        </nav>
-      }
-    >
-      {definition && definitionSection ? (
-        <Suspense fallback={<LoadingState />}>
-          <IntegrationDefinitionEditor
-            detail={definition}
-            section={definitionSection}
-            onSection={(next) => {
-              const railId = Object.keys(DEFINITION_RAIL).find(
-                (id) => DEFINITION_RAIL[id] === next,
-              );
-              if (railId) void navigate(sectionHref(railId));
-            }}
-            toolInspection={detail.tool_catalog_inspection}
+    <EditorPlaceContext.Provider value={editorPlace}>
+      <AgentDetailSplit
+        className="max-lg:grid-cols-1"
+        railClassName="max-lg:border-r-0 max-lg:border-b"
+        rail={
+          <SectionRail
+            label={t("integration.tabs.configuration")}
+            groups={groups}
+            active={active}
           />
-        </Suspense>
-      ) : active === "bundle" ? (
-        <PackageFilesSection
-          type="integration"
-          packageId={packageId}
-          manifest={detail.manifest}
-          filesHref={(path) => sectionHref("files", { file: path })}
-        />
-      ) : active === "versions" ? (
-        <PackageVersionsSection type="integration" packageId={packageId} {...versionGrants} />
-      ) : active === "files" ? (
-        <PackageFilesView
-          key={requestedFile}
-          type="integration"
-          packageId={packageId}
-          initialPath={requestedFile}
-          editable={Boolean(definition)}
-          editHref={
-            definition
-              ? (path) =>
-                  path === "manifest.json"
-                    ? sectionHref("identity", { editManifest: "1" })
-                    : undefined
-              : undefined
-          }
-        />
-      ) : active === "functioning" || active === "map" ? (
-        <div className="p-6">
-          <AgentDetailSectionHeader
-            title={t(
-              active === "map" ? "integration.structure.map" : "integration.structure.functioning",
-            )}
-            description={null}
-          />
-          {active === "map" ? (
-            <IntegrationMap
-              detail={detail}
-              packageId={packageId}
-              renderPanel={(section, openPanel) => {
-                if (section === "files")
-                  return <PackageFilesView type="integration" packageId={packageId} />;
-                if (section === "tools")
-                  return (
-                    <IntegrationToolsSection
-                      integrationId={packageId}
-                      inspection={detail.tool_catalog_inspection}
-                      allowUndeclaredTools={detail.allow_undeclared_tools}
-                    />
-                  );
-                if (section === "functioning") return <IntegrationGeneral detail={detail} />;
-                if (section.startsWith("connections:"))
-                  return (
-                    <ConnectionsTable
-                      key={section}
-                      packageId={packageId}
-                      detail={detail}
-                      canConfigure={canConfigure}
-                      initialMethod={section.slice("connections:".length)}
-                      onConfigure={(authKey) =>
-                        openPanel(`auth:${authKey ?? detail.auths[0]?.auth_key ?? ""}`)
-                      }
-                    />
-                  );
-                if (!canConfigure)
-                  return (
-                    <p className="text-muted-foreground text-sm">
-                      {t("integration.health.adminRequired")}
-                    </p>
-                  );
-                if (!detail.active)
-                  return (
-                    <ActivationHint
-                      onActivate={onActivate}
-                      pending={activationPending}
-                      canActivate={canActivate}
-                    />
-                  );
-                if (section === "access")
-                  return (
-                    <AccessRulesSection
-                      packageId={packageId}
-                      blockUserConnections={blockUserConnections}
-                    />
-                  );
-                const authKey = section.slice("auth:".length);
-                const status = detail.auths.find((auth) => auth.auth_key === authKey);
-                const authDecl = detail.manifest.auths?.[authKey];
-                return status && authDecl ? (
-                  <ConfigAuthBlock
-                    key={authKey}
-                    packageId={packageId}
-                    status={status}
-                    authDecl={authDecl}
-                  />
-                ) : null;
+        }
+      >
+        {definition && definitionSection ? (
+          <Suspense fallback={<LoadingState />}>
+            <IntegrationDefinitionEditor
+              detail={definition}
+              section={definitionSection}
+              onSection={(next) => {
+                const railId = DEFINITION_RAIL.find(([, section]) => section === next)?.[0];
+                if (railId) void navigate(sectionHref(railId));
               }}
+              toolInspection={detail.tool_catalog_inspection}
             />
-          ) : (
-            <IntegrationGeneral detail={detail} />
-          )}
-        </div>
-      ) : active === "tools" ? (
-        <div className="p-6">
-          <AgentDetailSectionHeader
-            title={t("integrationEditor.tabTools", { ns: "agents" })}
-            description={t("integrationEditor.description.tools", { ns: "agents" })}
+          </Suspense>
+        ) : active === "bundle" ? (
+          <PackageFilesSection
+            type="integration"
+            packageId={packageId}
+            manifest={detail.manifest}
+            filesHref={(path) => sectionHref("files", { file: path })}
           />
-          <IntegrationToolsSection
-            integrationId={packageId}
-            inspection={detail.tool_catalog_inspection}
-            allowUndeclaredTools={detail.allow_undeclared_tools}
-            showBasis={false}
+        ) : active === "versions" ? (
+          <PackageVersionsSection type="integration" packageId={packageId} {...versionGrants} />
+        ) : active === "files" ? (
+          <PackageFilesView
+            key={requestedFile}
+            type="integration"
+            packageId={packageId}
+            initialPath={requestedFile}
+            editable={Boolean(definition)}
+            editHref={
+              definition
+                ? (path) =>
+                    path === "manifest.json"
+                      ? sectionHref("identity", { editManifest: "1" })
+                      : undefined
+                : undefined
+            }
           />
-        </div>
-      ) : !detail.active ? (
-        <div className="p-6">
-          <ActivationHint
-            onActivate={onActivate}
-            pending={activationPending}
-            canActivate={canActivate}
-          />
-        </div>
-      ) : (
-        <div className="p-6">
-          <AgentDetailSectionHeader
-            title={t(
-              active === "access"
-                ? "integration.admin.accessRules.title"
-                : "integration.presentation.authentication",
+        ) : active === "functioning" || active === "map" ? (
+          <div className="p-6">
+            <AgentDetailSectionHeader
+              title={t(
+                active === "map"
+                  ? "integration.structure.map"
+                  : "integration.structure.functioning",
+              )}
+              description={null}
+            />
+            {active === "map" ? (
+              <IntegrationMap
+                detail={detail}
+                packageId={packageId}
+                renderPanel={(section, openPanel) => {
+                  const state = structurePanelState(section, detail.active, canConfigure);
+                  if (state === "inactive")
+                    return (
+                      <ActivationHint
+                        onActivate={onActivate}
+                        pending={activationPending}
+                        canActivate={canActivate}
+                      />
+                    );
+                  if (state === "admin-only")
+                    return (
+                      <p className="text-muted-foreground text-sm">
+                        {t("integration.health.adminRequired")}
+                      </p>
+                    );
+                  if (section === "files")
+                    return <PackageFilesView type="integration" packageId={packageId} />;
+                  if (section === "tools")
+                    return (
+                      <IntegrationToolsSection
+                        integrationId={packageId}
+                        inspection={detail.tool_catalog_inspection}
+                        allowUndeclaredTools={detail.allow_undeclared_tools}
+                      />
+                    );
+                  if (section === "functioning") return <IntegrationGeneral detail={detail} />;
+                  if (section.startsWith("connections:"))
+                    return (
+                      <ConnectionsTable
+                        key={section}
+                        packageId={packageId}
+                        detail={detail}
+                        canConfigure={canConfigure}
+                        initialMethod={section.slice("connections:".length)}
+                        onConfigure={(authKey) =>
+                          openPanel(`auth:${authKey ?? detail.auths[0]?.auth_key ?? ""}`)
+                        }
+                      />
+                    );
+                  if (section === "access")
+                    return (
+                      <AccessRulesSection
+                        packageId={packageId}
+                        blockUserConnections={blockUserConnections}
+                      />
+                    );
+                  const authKey = section.slice("auth:".length);
+                  const status = detail.auths.find((auth) => auth.auth_key === authKey);
+                  const authDecl = detail.manifest.auths?.[authKey];
+                  return status && authDecl ? (
+                    <ConfigAuthBlock
+                      key={authKey}
+                      packageId={packageId}
+                      status={status}
+                      authDecl={authDecl}
+                    />
+                  ) : null;
+                }}
+              />
+            ) : (
+              <IntegrationGeneral detail={detail} />
             )}
-            description={t(
-              active === "access"
-                ? "integration.config.accessDescription"
-                : "integration.presentation.authenticationDescription",
-            )}
-          />
-          {active === "authentication" && (
-            <div className="space-y-6">
-              <SetupGuideSteps steps={steps} />
-              {detail.auths.length === 0 && <p className="text-sm">{t("integration.auth.none")}</p>}
-              <div className="space-y-8">
-                {detail.auths.map((status) => {
-                  const authDecl = detail.manifest.auths?.[status.auth_key];
-                  if (!authDecl) return null;
-                  return (
-                    <section
-                      key={status.auth_key}
-                      id={`auth-${status.auth_key}`}
-                      className="min-w-0"
-                    >
-                      <div className="mb-4 flex items-center gap-3">
-                        <h3 className="text-base font-semibold">
-                          {authMethodLabel(
-                            status,
-                            detail.auths,
-                            t(`integration.auth.type.${status.type}`),
-                          )}
-                        </h3>
-                        <Badge variant="secondary">
-                          {t(
-                            status.required
-                              ? "integration.auth.required"
-                              : "integration.auth.optional",
-                          )}
-                        </Badge>
-                      </div>
-                      <ConfigAuthBlock packageId={packageId} status={status} authDecl={authDecl} />
-                    </section>
-                  );
-                })}
+          </div>
+        ) : active === "tools" ? (
+          <div className="p-6">
+            <AgentDetailSectionHeader
+              title={t("integrationEditor.tabTools", { ns: "agents" })}
+              description={t("integrationEditor.description.tools", { ns: "agents" })}
+            />
+            <IntegrationToolsSection
+              integrationId={packageId}
+              inspection={detail.tool_catalog_inspection}
+              allowUndeclaredTools={detail.allow_undeclared_tools}
+              showBasis={false}
+            />
+          </div>
+        ) : !detail.active ? (
+          <div className="p-6">
+            <ActivationHint
+              onActivate={onActivate}
+              pending={activationPending}
+              canActivate={canActivate}
+            />
+          </div>
+        ) : (
+          <div className="p-6">
+            <AgentDetailSectionHeader
+              title={t(
+                active === "access"
+                  ? "integration.admin.accessRules.title"
+                  : "integration.presentation.authentication",
+              )}
+              description={t(
+                active === "access"
+                  ? "integration.config.accessDescription"
+                  : "integration.presentation.authenticationDescription",
+              )}
+            />
+            {active === "authentication" && (
+              <div className="space-y-6">
+                <SetupGuideSteps steps={steps} />
+                {detail.auths.length === 0 && (
+                  <p className="text-sm">{t("integration.auth.none")}</p>
+                )}
+                <div className="space-y-8">
+                  {detail.auths.map((status) => {
+                    const authDecl = detail.manifest.auths?.[status.auth_key];
+                    if (!authDecl) return null;
+                    return (
+                      <section
+                        key={status.auth_key}
+                        id={`auth-${status.auth_key}`}
+                        className="min-w-0"
+                      >
+                        <div className="mb-4 flex items-center gap-3">
+                          <h3 className="text-base font-semibold">
+                            {authMethodLabel(
+                              status,
+                              detail.auths,
+                              t(`integration.auth.type.${status.type}`),
+                            )}
+                          </h3>
+                          <Badge variant="secondary">
+                            {t(
+                              status.required
+                                ? "integration.auth.required"
+                                : "integration.auth.optional",
+                            )}
+                          </Badge>
+                        </div>
+                        <ConfigAuthBlock
+                          packageId={packageId}
+                          status={status}
+                          authDecl={authDecl}
+                        />
+                      </section>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
-          {active === "access" && (
-            <AccessRulesSection packageId={packageId} blockUserConnections={blockUserConnections} />
-          )}
-        </div>
-      )}
-    </AgentDetailSplit>
+            )}
+            {active === "access" && (
+              <AccessRulesSection
+                packageId={packageId}
+                blockUserConnections={blockUserConnections}
+              />
+            )}
+          </div>
+        )}
+      </AgentDetailSplit>
+    </EditorPlaceContext.Provider>
   );
 }
 
@@ -522,11 +511,8 @@ export function IntegrationDetailPage() {
   const [tab, setTab] = useTabWithHash(INTEGRATION_TABS, "overview");
   const navigate = useNavigate();
   const location = useLocation();
-  const openAuthentication = (authKey?: string) => {
-    const params = new URLSearchParams(location.search);
-    params.set("integrationSettings", authKey ? `auth:${authKey}` : "authentication");
-    void navigate({ search: params.toString(), hash: "configuration" });
-  };
+  const openAuthentication = () =>
+    void navigate(integrationSettingsHref(location.pathname, "authentication"));
   const openConnections = (authKey?: string) => {
     const params = new URLSearchParams(location.search);
     if (authKey) params.set("connectionMethod", authKey);
@@ -688,7 +674,8 @@ export function IntegrationDetailPage() {
             onActivate={onActivate}
             activationPending={setActive.isPending}
             canActivate={canActivate}
-            definition={isOwned && can("integrations:write") && pkg ? pkg : undefined}
+            // Write authority is the package's HOME space, never the space being browsed.
+            definition={homeWritable && pkg ? pkg : undefined}
             isOwned={isOwned}
             versionGrants={{
               canRestore: isOwned && !!homeWritable,

@@ -186,6 +186,21 @@ export const ROUTE_ACCESS = {
 
 export type RoutePath = keyof typeof ROUTE_ACCESS;
 
+/** `path` is `prefix` or lies below it, segment by segment (`/catalogueX` is not under `/catalogue`). */
+export const isUnder = (path: string, prefix: string) =>
+  path === prefix || path.startsWith(`${prefix}/`);
+
+/** The routed modals: mounted over the screen they were opened from, never in the main tree. */
+export const OVERLAY_PREFIXES = [
+  "/org-settings",
+  "/workspace-settings",
+  "/preferences",
+  "/catalogue",
+] as const;
+
+export const isOverlayPath = (path: string) =>
+  OVERLAY_PREFIXES.some((prefix) => isUnder(path, prefix));
+
 /**
  * The agent page's Connexions (the Paramètres section `?agentSettings=connections`, and the
  * launch toast's « Connecter » link to it): its integration reads are not implied by the route.

@@ -2,13 +2,12 @@
 
 import { useTranslation } from "react-i18next";
 import type { AgentDetail } from "@appstrate/shared-types";
-import type { JSONSchemaObject } from "@appstrate/core/form";
+import type { SchemaWrapper } from "@appstrate/core/form";
 import { AgentConfigurationTab } from "../package-detail/agent-configuration-tab";
 import { AgentConnectionsSection } from "../package-detail/agent-connections-section";
 import { AgentSchedulesTab } from "../package-detail/agent-tabs";
 import { AgentDetailSectionHeader } from "./agent-detail-split";
-
-export type ConfigurationSection = "model" | "proxy" | "inputs" | "connections" | "schedules";
+import type { ConfigurationSection } from "../../lib/settings-section-href";
 
 const CONFIGURATION_SECTION_TEXT: Record<
   ConfigurationSection,
@@ -39,20 +38,21 @@ const CONFIGURATION_SECTION_TEXT: Record<
 export function AgentConfigurationView({
   packageId,
   detail,
-  configSchemaOverride,
+  inputWrapperOverride,
   isHistorical,
   section,
 }: {
   packageId: string;
   detail: AgentDetail;
-  configSchemaOverride?: JSONSchemaObject;
+  /** The pinned version's input wrapper, when a version is pinned. */
+  inputWrapperOverride?: SchemaWrapper;
   isHistorical?: boolean;
   section: ConfigurationSection;
 }) {
   const { t } = useTranslation("agents");
   const sharedConfigurationProps = {
     packageId,
-    configSchemaOverride: isHistorical ? configSchemaOverride : detail.input?.schema,
+    inputWrapperOverride,
     isHistorical,
     showSectionDescription: false,
   };

@@ -484,18 +484,8 @@ export const schedulesPaths = {
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
         { $ref: "#/components/parameters/Offset" },
-        {
-          name: "status",
-          in: "query",
-          description: "Comma-separated lifecycle statuses.",
-          schema: { type: "string" },
-        },
-        {
-          name: "q",
-          in: "query",
-          description: "Search agent name, scope, error or run number.",
-          schema: { type: "string", maxLength: 200 },
-        },
+        { $ref: "#/components/parameters/RunStatusFilter" },
+        { $ref: "#/components/parameters/RunSearch" },
       ],
       responses: {
         "200": {

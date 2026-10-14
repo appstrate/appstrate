@@ -9,17 +9,21 @@
  * same result without each rebuilding readiness rules.
  */
 
-import type { SQL } from "drizzle-orm";
 import type { LoadedPackage } from "../types/index.ts";
 import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import type { ValidationFieldError } from "../lib/errors.ts";
+import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import { getSpacePackageSettings } from "./space-packages.ts";
-import { collectAgentReadiness } from "./agent-readiness.ts";
-import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
+import { collectBundleReadinessErrors } from "./agent-readiness.ts";
+import {
+  VERSION_SELECTOR_PUBLISHED,
+  resolveAgentRunVersion,
+  resolveVersionRef,
+  versionRefOf,
+} from "./agent-version-resolver.ts";
 import { resolveAgentConnectionReadiness } from "./integration-pins-service.ts";
-import { resolveModelCascade } from "./org-models.ts";
-import { listPackageSchedules } from "./scheduler.ts";
+import { requireBoundModel, resolveModelCascade, type ResolvedModel } from "./org-models.ts";
+import { listPackageScheduleRows } from "./scheduler.ts";
 
 export type AgentDiagnosticSeverity = "blocking" | "warning";
 export type AgentDiagnosticDestination = "bundle" | "configuration" | "schedule";
@@ -114,17 +118,15 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
   };
 }
 
-/**
- * Readiness minus connections: bundle, skills and manifest-health errors only.
- * `collectAgentReadiness` always resolves connections for its actor, and those
- * verdicts already arrive, richer, through `resolveAgentConnectionReadiness`;
- * the resolver's errors are pushed last, so dropping that tail keeps the rest.
- */
-async function collectBundleReadinessErrors(
-  params: Parameters<typeof collectAgentReadiness>[0],
-): Promise<ValidationFieldError[]> {
-  const { errors, resolutionErrors } = await collectAgentReadiness(params);
-  return errors.slice(0, errors.length - resolutionErrors.length);
+/** The launch's own refusal of a model no credential of the payer serves, else `null`. */
+function unboundModelRefusal(model: ResolvedModel, payerUserId: string | null): ApiError | null {
+  try {
+    requireBoundModel(model, payerUserId);
+    return null;
+  } catch (err) {
+    if (err instanceof ApiError) return err;
+    throw err;
+  }
 }
 
 export async function getAgentDiagnostics(args: {
@@ -143,55 +145,71 @@ export async function getAgentDiagnostics(args: {
    * else `defaultDefinitionSelector`.
    */
   version: string;
+  /** Connection verdicts are reported only to a caller holding `integrations:read`. */
+  canReadIntegrations: boolean;
   /** Schedules are reported only to a caller holding `schedules:read`. */
   canReadSchedules: boolean;
-  /** The caller's run-read predicate (`runVisibilityFilter(c)`), as the schedule list applies it. */
-  runVisibility: SQL | undefined;
 }): Promise<AgentDiagnosticsResult> {
   const { scope, principal, canConnect, canConfigureIntegrations, payerUserId } = args;
-  const { actor } = principal;
   const versionRef = args.version;
-  const { agent } = await resolveAgentRunVersion(args.agent, versionRef);
+  const { agent, overrideVersionLabel } = await resolveAgentRunVersion(args.agent, versionRef);
+  const inspectedRef = versionRefOf(overrideVersionLabel);
   const packageConfig = await getSpacePackageSettings(scope, agent.id);
 
-  // Connections are reported by their dedicated bulk service; the core
-  // readiness pass keeps only its non-connection errors to avoid duplicates.
+  // Connections are reported by their dedicated bulk service, so the bundle
+  // pass leaves them out instead of resolving them twice.
   const [readinessErrors, connections, modelCascade, schedules] = await Promise.all([
-    collectBundleReadinessErrors({
-      agent,
-      orgId: scope.orgId,
-      spaceId: scope.spaceId,
-      actor,
-    }),
-    resolveAgentConnectionReadiness({
-      scope,
-      agentPackageId: agent.id,
-      principal,
-      canConnect,
-      canConfigureIntegrations,
-      version: versionRef,
-    }),
+    collectBundleReadinessErrors({ agent, orgId: scope.orgId, spaceId: scope.spaceId }),
+    args.canReadIntegrations
+      ? resolveAgentConnectionReadiness({
+          scope,
+          agentPackageId: agent.id,
+          principal,
+          canConnect,
+          canConfigureIntegrations,
+          version: versionRef,
+        })
+      : null,
     resolveModelCascade(scope.orgId, agent.id, packageConfig.modelId, payerUserId),
-    args.canReadSchedules
-      ? listPackageSchedules(scope, agent.id, actor, args.runVisibility)
-      : Promise.resolve([]),
+    // A system agent runs one definition whatever a schedule selects.
+    args.canReadSchedules && agent.source !== "system"
+      ? listPackageScheduleRows(scope, agent.id)
+      : [],
   ]);
 
   const readinessFields = new Set(readinessErrors.map((error) => error.field));
-  const connectionErrors = connections.errors.filter((error) => !readinessFields.has(error.field));
+  const connectionErrors = (connections?.errors ?? []).filter(
+    (error) => !readinessFields.has(error.field),
+  );
   const blocking: AgentDiagnostic[] = [...readinessErrors, ...connectionErrors].map((error) => ({
     ...routeError(error),
     severity: "blocking",
   }));
 
+  // The launch's two model refusals, under its codes.
+  const modelRefusal = modelCascade ? unboundModelRefusal(modelCascade.model, payerUserId) : null;
   if (!modelCascade) {
     blocking.push({
-      code: "missing_model",
+      code: "model_not_configured",
       severity: "blocking",
       title: "Model not configured",
       explanation: "No usable model is configured for this agent or organization.",
       field: "model",
       correction: { destination: "configuration", section: "model", params: {} },
+      recoverable_on_launch: false,
+    });
+  } else if (modelRefusal) {
+    blocking.push({
+      code: modelRefusal.code,
+      severity: "blocking",
+      title: "Model credential required",
+      explanation: modelRefusal.message,
+      field: "model",
+      correction: {
+        destination: "configuration",
+        section: "model",
+        params: { model: modelCascade.model.label },
+      },
       recoverable_on_launch: false,
     });
   }
@@ -212,34 +230,45 @@ export async function getAgentDiagnostics(args: {
       correction: {
         destination: "configuration",
         section: "model",
-        params: { defaultModel: fallback },
+        params: { default_model: fallback },
       },
       recoverable_on_launch: false,
     });
   }
 
-  warnings.push(
-    ...schedules
-      .filter(
-        (schedule) =>
-          schedule.enabled &&
-          Boolean(schedule.version_override) &&
-          schedule.version_override !== versionRef,
-      )
-      .map((schedule) => ({
-        code: "schedule_version_differs",
-        severity: "warning" as const,
-        title: "Schedule uses another version",
-        explanation: `Schedule '${schedule.name ?? schedule.id}' is pinned to '${schedule.version_override}' while this view inspects '${versionRef}'.`,
-        field: `schedules.${schedule.id}.version`,
-        correction: {
-          destination: "schedule" as const,
-          section: "version",
-          params: { scheduleId: schedule.id },
-        },
-        recoverable_on_launch: false,
+  // Compared as the versions each would run: an unpinned schedule runs the
+  // latest published version, and `1.2.0` and `published` may name the same one.
+  const scheduleRefs = await Promise.all(
+    schedules
+      .filter((schedule) => schedule.enabled)
+      .map(async (schedule) => ({
+        schedule,
+        ref: await resolveVersionRef(agent.id, schedule.version_override),
       })),
   );
+  for (const { schedule, ref } of scheduleRefs) {
+    if (ref === inspectedRef) continue;
+    const name = schedule.name ?? schedule.id;
+    const runs = ref ?? schedule.version_override ?? VERSION_SELECTOR_PUBLISHED;
+    warnings.push({
+      code: "schedule_version_differs",
+      severity: "warning",
+      title: "Schedule runs another version",
+      explanation: `Schedule '${name}' runs version '${runs}' while this view inspects '${inspectedRef}'.`,
+      field: `schedules.${schedule.id}.version`,
+      correction: {
+        destination: "schedule",
+        section: "version",
+        params: {
+          scheduleId: schedule.id,
+          schedule: name,
+          schedule_version: runs,
+          inspected_version: inspectedRef,
+        },
+      },
+      recoverable_on_launch: false,
+    });
+  }
 
   const diagnostics = [...blocking, ...warnings];
   return {

@@ -15,7 +15,6 @@
 import { Input } from "@appstrate/ui/components/input";
 
 export function InlineTextSetting({
-  type = "text",
   value,
   onCommit,
   disabled,
@@ -23,7 +22,6 @@ export function InlineTextSetting({
   className,
   "aria-label": ariaLabel,
 }: {
-  type?: "text" | "email";
   value: string;
   onCommit: (next: string) => void;
   disabled?: boolean;
@@ -34,7 +32,6 @@ export function InlineTextSetting({
   return (
     <Input
       key={value}
-      type={type}
       defaultValue={value}
       disabled={disabled}
       placeholder={placeholder}

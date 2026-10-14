@@ -58,6 +58,7 @@ import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
+import { likeContains } from "../lib/like-pattern.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
 import {
   conflict,
@@ -1509,12 +1510,7 @@ export async function listFilesForActor(
   if (filters.contextChatSessionId) {
     conditions.push(await chatContextFileFilter(scope, actor, filters.contextChatSessionId));
   }
-  if (filters.search) {
-    // `%` and `_` are LIKE wildcards. A document search treats them as the
-    // characters the reader typed, matching the run-list search contract.
-    const pattern = `%${filters.search.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
-    conditions.push(ilike(files.name, pattern));
-  }
+  if (filters.search) conditions.push(ilike(files.name, likeContains(filters.search)));
 
   if (filters.startingAfter) {
     const [cursor] = await db

@@ -62,12 +62,11 @@ section.
 - `apps/api/package.json` — drop the `@appstrate/module-ee` workspace
   dependency.
 
-**3. SPA — delete (14 files)**
+**3. SPA — delete (13 files)**
 
 `apps/web/src/components/billing-contact-section.tsx`,
 `apps/web/src/components/billing-managers-section.tsx`,
 `apps/web/src/components/plan-card.tsx`,
-`apps/web/src/components/sidebar-billing.tsx`,
 `apps/web/src/components/test/plan-card.test.tsx`,
 `apps/web/src/hooks/use-billing.ts`,
 `apps/web/src/lib/billing-contact.ts`,
@@ -79,21 +78,26 @@ section.
 `apps/web/src/pages/test/billing-admin-sections.test.tsx`,
 `apps/web/src/pages/test/billing-plan-change.test.tsx`.
 
-**4. SPA — edit (7 files)**
+**4. SPA — edit (8 files)**
 
 - `apps/web/src/app.tsx` — drop the two `lazy()` imports (`OnboardingPlanStep`,
   `OrgSettingsBillingPage`), the `/onboarding/plan` `<Route>` block, and the
   `"/org-settings/billing"` entry of the `PAGES` table.
 - `apps/web/src/lib/route-access.ts` — drop the `/org-settings/billing` entry
   (`PAGES` is keyed by `RoutePath`, so the two go together or `tsc` fails).
-- `apps/web/src/components/app-sidebar.tsx` — drop the `SidebarBilling` import
-  and its usage.
+- `apps/web/src/pages/settings/navigation.ts` — drop the `/org-settings/billing`
+  entry of the organization section AND the `CreditCard` lucide import it is the
+  only user of.
 - `apps/web/src/components/onboarding-layout.tsx` — drop `"plan"` from the
   `StepKey` union and its `ALL_STEPS` entry. The `showWhen: "billing"` mechanism
   becomes vestigial; it is unused, not broken.
-- `apps/web/src/pages/org-settings/layout.tsx` — drop the
-  `/org-settings/billing` nav entry AND the `CreditCard` lucide import it was
-  the only user of.
+- `apps/web/src/pages/settings/test/route-wiring.test.ts` — drop
+  `../../org-settings/billing.tsx` from `guardedPages`: the test reads each page
+  from disk, so the deleted page crashes it with `ENOENT`.
+- `apps/web/src/components/test/route-gate.test.tsx` — its layout case uses
+  `/org-settings/billing` as the page whose module is not loaded; once the route
+  is gone the layout mounts. Point it at another module-gated page under the same
+  layout (`/org-settings/oauth`, `oidc`).
 - `apps/web/src/pages/onboarding/done-step.tsx` — drop the `useBilling` and
   `useAppConfig` imports, both hook calls, and the `{features.billing && billing
 && (…)}` card.
@@ -111,8 +115,6 @@ orphaned key is a test failure, not dead weight.
   `apps/web/src/locales/fr/settings.json` — 55 keys each: `billing.*` (24),
   `billingContact.*` (10), `billingManagers.*` (12), `onboarding.plan*` (8),
   `onboarding.summaryPlan`.
-- `apps/web/src/locales/en/common.json` and
-  `apps/web/src/locales/fr/common.json` — `nav.credits`.
 
 **6. Gates and shared packages**
 

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import i18n, { i18nReady } from "../../i18n.ts";
 import type { AgentDiagnostic } from "../../hooks/use-agent-diagnostics";
 import { agentDiagnosticText, agentDiagnosticCorrectionTarget } from "../agent-diagnostics";
+
+await i18nReady;
 
 function diagnostic(overrides: Partial<AgentDiagnostic> = {}): AgentDiagnostic {
   return {
@@ -19,8 +22,8 @@ function diagnostic(overrides: Partial<AgentDiagnostic> = {}): AgentDiagnostic {
 
 describe("agent diagnostics routing", () => {
   it("uses the backend correction destination and section", () => {
-    expect(agentDiagnosticCorrectionTarget(diagnostic(), "/agents/@tractr/demo", "")).toEqual({
-      pathname: "/agents/@tractr/demo",
+    expect(agentDiagnosticCorrectionTarget(diagnostic(), "/agents/@acme/demo", "")).toEqual({
+      pathname: "/agents/@acme/demo",
       search: "?agentSettings=inputs",
       hash: "#settings",
     });
@@ -30,11 +33,11 @@ describe("agent diagnostics routing", () => {
         diagnostic({
           correction: { destination: "bundle", section: "skills", params: {} },
         }),
-        "/agents/@tractr/demo",
+        "/agents/@acme/demo",
         "",
       ),
     ).toEqual({
-      pathname: "/agents/@tractr/demo",
+      pathname: "/agents/@acme/demo",
       search: "?agentSettings=skills",
       hash: "#settings",
     });
@@ -42,27 +45,99 @@ describe("agent diagnostics routing", () => {
 });
 
 describe("agentDiagnosticText", () => {
-  const t = (key: string, options?: Record<string, unknown>) =>
-    `${key}|${String(options?.model ?? "")}`;
+  const fr = (key: string, options?: Record<string, unknown>) =>
+    i18n.t(key, { ...options, ns: "agents", lng: "fr" });
 
-  it("words the unavailable-model point by code, with the model that will serve", () => {
-    const unavailable = diagnostic({
-      code: "pinned_model_unavailable",
-      title: "Model unavailable",
-      correction: {
-        destination: "configuration",
-        section: "model",
-        params: { defaultModel: "Mistral Medium" },
-      },
-    });
-    expect(agentDiagnosticText(unavailable, t)).toEqual({
-      title: "detail.diagnostics.pinnedModelUnavailable.title|",
-      explanation: "detail.diagnostics.pinnedModelUnavailable.explanation|Mistral Medium",
-    });
+  it("words every code the API can send in French, with its values", () => {
+    const cases: Array<[Partial<AgentDiagnostic>, string]> = [
+      [{ code: "empty_prompt" }, "Le prompt de l'agent est vide"],
+      [
+        {
+          code: "missing_skill",
+          correction: {
+            destination: "bundle",
+            section: "skills",
+            params: { skill: "@acme/notes" },
+          },
+        },
+        "Le skill @acme/notes",
+      ],
+      [
+        {
+          code: "not_connected",
+          correction: {
+            destination: "configuration",
+            section: "connections",
+            params: { integration: "@acme/gmail" },
+          },
+        },
+        "Aucune connexion à @acme/gmail",
+      ],
+      [{ code: "model_not_configured" }, "Aucun modèle utilisable"],
+      [
+        {
+          code: "model_credential_required",
+          correction: { destination: "configuration", section: "model", params: { model: "GPT" } },
+        },
+        "Le modèle GPT demande votre clé perso",
+      ],
+      [
+        {
+          code: "pinned_model_unavailable",
+          correction: {
+            destination: "configuration",
+            section: "model",
+            params: { default_model: "Mistral Medium" },
+          },
+        },
+        "le modèle par défaut (Mistral Medium)",
+      ],
+      [
+        {
+          code: "schedule_version_differs",
+          correction: {
+            destination: "schedule",
+            section: "version",
+            params: {
+              scheduleId: "sched_1",
+              schedule: "Nightly",
+              schedule_version: "1.2.0",
+              inspected_version: "draft",
+            },
+          },
+        },
+        "La planification « Nightly » exécute la version 1.2.0, alors que cette vue montre brouillon.",
+      ],
+    ];
+    for (const [overrides, expected] of cases) {
+      const text = agentDiagnosticText(diagnostic(overrides), fr);
+      expect(text.explanation).toContain(expected);
+      expect(text.title).not.toBe("Missing value");
+      expect(text.explanation).not.toBe("A value is required.");
+    }
   });
 
-  it("keeps the server's text for every other diagnostic", () => {
-    expect(agentDiagnosticText(diagnostic(), t)).toEqual({
+  it("has a sentence in both languages for every code it maps", () => {
+    for (const code of [
+      "agent_not_active",
+      "integration_not_active",
+      "insufficient_scopes",
+      "override_outranked",
+      "auth_key_serves_no_selected_tool",
+      "integration_invalid_manifest",
+    ]) {
+      for (const lng of ["fr", "en"]) {
+        const t = (key: string, options?: Record<string, unknown>) =>
+          i18n.t(key, { ...options, ns: "agents", lng });
+        const text = agentDiagnosticText(diagnostic({ code }), t);
+        expect(text.title).not.toContain("detail.diagnostics");
+        expect(text.explanation).not.toContain("detail.diagnostics");
+      }
+    }
+  });
+
+  it("keeps the server's text only for a code it does not know", () => {
+    expect(agentDiagnosticText(diagnostic({ code: "brand_new_code" }), fr)).toEqual({
       title: "Missing value",
       explanation: "A value is required.",
     });

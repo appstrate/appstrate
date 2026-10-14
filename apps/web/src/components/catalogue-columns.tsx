@@ -81,7 +81,7 @@ export function useCatalogueSelectColumn({
  * Where the package comes FROM, in two words on one line: who provides it, and
  * which space governs its draft.
  *
- * They are different facts — Tractr provides it, the space "Default" decides
+ * They are different facts — Acme provides it, the space "Default" decides
  * who may edit it — and a column each would cost the tier-3 budget a whole
  * track (`column-tiers.test.tsx` measures it). So the home rides under the
  * provider, the way Claude's connector list puts "Personnalisé" beside "Web"
@@ -284,7 +284,7 @@ export function useCatalogueSpaceColumns({
             onCheckedChange={(next) => onSetActive(item, space.id, next === true)}
           />
           {state === "offered" && (
-            // One word, not "Partagé par Julie" on two lines: who shared it is
+            // One word, not "Partagé par Alice" on two lines: who shared it is
             // on the sheet and in "Partages en attente", where the decision is
             // taken; here the cell only has to tell shared-and-off from off.
             <span className="text-primary text-[0.7rem] font-medium">

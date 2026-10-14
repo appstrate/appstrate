@@ -8,6 +8,7 @@ import { useCanReach } from "../../hooks/use-can-reach";
 import { useModels } from "../../hooks/use-models";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { RunModelFallback } from "../../lib/run-model-fallback";
+import { agentSettingsHref } from "../../lib/settings-section-href";
 import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
 import { artifactFailureCodeKey, partialArtifactFailures } from "../run-artifacts";
 
@@ -109,11 +110,7 @@ function ResolvedModelFallback({
     <ModelFallbackCard
       chosen={models?.find((m) => m.id === fallback.pinnedModelId)?.label ?? fallback.pinnedModelId}
       used={fallback.model}
-      settingsTo={
-        reachable
-          ? { pathname: agentPath, search: "?agentSettings=model", hash: "#settings" }
-          : null
-      }
+      settingsTo={reachable ? agentSettingsHref(agentPath, "model") : null}
       cardHeaders
     />
   );

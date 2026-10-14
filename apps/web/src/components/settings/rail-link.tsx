@@ -8,7 +8,6 @@ import { cn } from "@appstrate/ui/cn";
 export interface RailLinkItem {
   to: string;
   icon: LucideIcon;
-  labelKey: string;
 }
 
 function railItemClass(active: boolean, mobile: boolean): string {

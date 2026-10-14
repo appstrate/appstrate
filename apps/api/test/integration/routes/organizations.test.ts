@@ -475,20 +475,88 @@ describe("Organizations API", () => {
       expect(body).not.toHaveProperty("updatedAt");
     });
 
-    // `logo` travels the same PATCH as `name`, so it sits behind `org:update`
-    // too: the owner writes it, an admin cannot.
-    it("allows an owner to update the organization logo", async () => {
-      const ctx = await createTestContext({ orgSlug: "owner-logo-org" });
+    describe("logo", () => {
+      // A minimal WebP: the RIFF container header with the `WEBP` form type.
+      const webpBytes = new Uint8Array([
+        ...new TextEncoder().encode("RIFF"),
+        4,
+        0,
+        0,
+        0,
+        ...new TextEncoder().encode("WEBPVP8 "),
+      ]);
+      const webp = `data:image/webp;base64,${btoa(String.fromCharCode(...webpBytes))}`;
 
-      const logoRes = await app.request(`/api/orgs/${ctx.orgId}`, {
-        method: "PATCH",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ logo: "emoji:🧠" }),
+      const patchLogo = (headers: Record<string, string>, orgId: string, logo: unknown) =>
+        app.request(`/api/orgs/${orgId}`, {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ logo }),
+        });
+
+      it("lets the owner set an emoji, an image and null, and an admin none of them", async () => {
+        const ctx = await createTestContext({ orgSlug: "owner-logo-org" });
+        const owner = authHeaders(ctx);
+
+        const emoji = await patchLogo(owner, ctx.orgId, "emoji:🧠");
+        expect(emoji.status, await emoji.clone().text()).toBe(200);
+        expect(((await emoji.json()) as { logo: string | null }).logo).toBe("emoji:🧠");
+
+        const image = await patchLogo(owner, ctx.orgId, webp);
+        expect(image.status, await image.clone().text()).toBe(200);
+        expect(((await image.json()) as { logo: string | null }).logo).toBe(webp);
+
+        const cleared = await patchLogo(owner, ctx.orgId, null);
+        expect(cleared.status).toBe(200);
+        expect(((await cleared.json()) as { logo: string | null }).logo).toBeNull();
+
+        // `logo` rides the same PATCH as `name`, behind `org:update`.
+        const admin = await createTestUser();
+        await addOrgMember(ctx.orgId, admin.id, "admin");
+        const refused = await patchLogo(
+          { Cookie: admin.cookie, "X-Org-Id": ctx.orgId },
+          ctx.orgId,
+          "emoji:🚜",
+        );
+        expect(refused.status).toBe(403);
       });
 
-      expect(logoRes.status).toBe(200);
-      const logoBody = (await logoRes.json()) as { logo?: string };
-      expect(logoBody.logo).toBe("emoji:🧠");
+      it("refuses anything but one emoji or a WebP image", async () => {
+        const ctx = await createTestContext({ orgSlug: "bad-logo-org" });
+        const png = btoa("\x89PNG\r\n\x1a\n\0\0\0\rIHDR");
+        for (const logo of [
+          "emoji:",
+          "emoji:A",
+          "emoji:🧠🚜",
+          `emoji:${"x".repeat(5000)}`,
+          `emoji:🧠${"\u0301".repeat(40)}`,
+          "data:image/webp;base64,not base64!",
+          `data:image/webp;base64,${png}`,
+          `${webp}${"A".repeat(180_000)}`,
+          "data:image/png;base64,AAAA",
+          "🧠",
+        ]) {
+          const res = await patchLogo(authHeaders(ctx), ctx.orgId, logo);
+          expect(res.status, logo.slice(0, 40)).toBe(400);
+        }
+        const [org] = await db
+          .select({ logo: organizations.logo })
+          .from(organizations)
+          .where(eq(organizations.id, ctx.orgId));
+        expect(org!.logo).toBeNull();
+      });
+
+      it("audits an image logo as changed, without its bytes", async () => {
+        const ctx = await createTestContext({ orgSlug: "audit-logo-org" });
+        expect((await patchLogo(authHeaders(ctx), ctx.orgId, webp)).status).toBe(200);
+
+        const rows = await db
+          .select({ after: auditEvents.after })
+          .from(auditEvents)
+          .where(and(eq(auditEvents.orgId, ctx.orgId), eq(auditEvents.action, "org.updated")));
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.after).toEqual({ logo: "image" });
+      });
     });
 
     it("403s an admin — renaming the org is owner-only (org:update)", async () => {

@@ -23,7 +23,7 @@ interface PersonalServiceColumnsArgs {
   onChooseModels: (row: PersonalServiceRow) => void;
 }
 
-/** « Olivier Tarbès (vous), Pierre » */
+/** « Alice Martin (vous), Bob » */
 function holdersText(row: PersonalServiceRow, you: string): string {
   return row.holders.map((h) => `${h.name ?? "—"}${h.mine ? ` (${you})` : ""}`).join(", ");
 }

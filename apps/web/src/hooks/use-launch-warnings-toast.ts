@@ -9,6 +9,7 @@ import { usePermissions } from "./use-permissions";
 import { useCanReach } from "./use-can-reach";
 import { agentConnectionsTabVisible } from "../lib/route-access";
 import { packageDetailPath } from "../lib/package-paths";
+import { agentSettingsHref } from "../lib/settings-section-href";
 import {
   isViewersLaunch,
   launchWarningsToast,
@@ -46,7 +47,7 @@ export function useLaunchWarningsToast() {
           ? {
               action: {
                 label: i18n.t("detail.integrationConnect", { ns: "agents" }),
-                onClick: () => navigate(`${agentPath}?agentSettings=connections#settings`),
+                onClick: () => navigate(agentSettingsHref(agentPath, "connections")),
               },
             }
           : {}),

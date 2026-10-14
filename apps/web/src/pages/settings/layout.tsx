@@ -5,9 +5,8 @@
  *
  * Organization and workspace are independent menu sections in the rail. Each
  * section owns its selector and navigation; they are deliberately not a shared
- * context block. The pages keep their existing URLs and request headers, while
- * the keyed content outlet prevents data from the previous scope flashing
- * after a context switch.
+ * context block. The keyed content outlet prevents data from the previous scope
+ * flashing after a context switch.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -22,12 +21,11 @@ import { errorMessage } from "../../lib/mutation-error";
 import { spaceLabel } from "../../lib/space-label";
 import { AppVersion } from "../../components/app-version";
 import { SettingsHeading } from "../../components/settings/settings-heading";
-import { SettingsPageActionTargetsProvider } from "../../components/settings/settings-page-actions";
+import { SettingsPageActionTargetProvider } from "../../components/settings/settings-page-actions";
 import { RailLink } from "../../components/settings/rail-link";
 import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
 import { ContextSelector } from "../../components/settings/context-selector";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
-import { NoAccessState } from "../../components/route-gate";
 import { cn } from "@appstrate/ui/cn";
 import { PanelDialog } from "../../components/panel-dialog";
 import { useSpaces } from "../../hooks/use-spaces";
@@ -37,7 +35,6 @@ import {
   useCurrentSpaceId,
 } from "../../hooks/use-current-space";
 import { useOrg } from "../../hooks/use-org";
-import { usePermissions } from "../../hooks/use-permissions";
 import { modalReturnTarget, openAsModal, useBackgroundLocation } from "../../lib/modal-route";
 import {
   getLastWorkspaceId,
@@ -48,6 +45,7 @@ import {
   type SettingsScope,
 } from "../../lib/settings-context";
 import { useBreadcrumbStore } from "../../stores/breadcrumb-store";
+import { activeSettingsItem } from "../../lib/settings-nav";
 import {
   firstSettingsPath,
   type UnifiedSettingsNavItem,
@@ -105,24 +103,9 @@ export function UnifiedSettingsLayout() {
   const { data: applications = [] } = useSpaces();
   const spaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
-  const { can } = usePermissions();
-  const shouldOpenMobileNavigationOnEntry =
-    isMobile &&
-    background !== null &&
-    (location.pathname === "/org-settings" ||
-      location.pathname === "/org-settings/general" ||
-      location.pathname === "/workspace-settings" ||
-      location.pathname === "/workspace-settings/general");
-  const openMobileNavigationOnEntry = useRef(shouldOpenMobileNavigationOnEntry);
   const [switchingOrganization, setSwitchingOrganization] = useState(false);
-  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(
-    () =>
-      shouldOpenMobileNavigationOnEntry &&
-      (location.pathname === "/org-settings/general" ||
-        location.pathname === "/workspace-settings/general"),
-  );
-  const [desktopActionTarget, setDesktopActionTarget] = useState<HTMLDivElement | null>(null);
-  const [mobileActionTarget, setMobileActionTarget] = useState<HTMLDivElement | null>(null);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+  const [actionTarget, setActionTarget] = useState<HTMLDivElement | null>(null);
   const organizationSwitchRequest = useRef(0);
   const mobileNavigationButton = useRef<HTMLButtonElement>(null);
   const mobileNavigationPanel = useRef<HTMLDivElement>(null);
@@ -137,11 +120,14 @@ export function UnifiedSettingsLayout() {
 
   const sections = useSettingsSections();
 
-  const allItems = sections.flatMap((section) => section.items);
-  const activeItem =
-    allItems.find((item) => location.pathname === item.to) ??
-    allItems.find((item) => location.pathname.startsWith(item.to + "/"));
+  const activeItem = activeSettingsItem(
+    sections.flatMap((section) => section.items),
+    location.pathname,
+  );
   const activeScope = settingsScopeFromPath(location.pathname);
+  // On a phone the index IS the navigation: `SettingsIndexRedirect` stays put.
+  const navigationAsIndex = isMobile && sections.length > 0 && isSettingsIndex(location.pathname);
+  const navigationOpen = mobileNavigationOpen || navigationAsIndex;
   const activeSection = sections.find((section) => section.scope === activeScope);
   const contentKey = settingsContentKey(location.pathname, currentOrg?.id ?? null, spaceId);
   const keepOverlay = background ? openAsModal(background) : undefined;
@@ -152,18 +138,6 @@ export function UnifiedSettingsLayout() {
   const activeSectionHref = activeSection?.items[0]?.to ?? activeItem?.to;
 
   useEffect(() => {
-    if (
-      !openMobileNavigationOnEntry.current ||
-      (location.pathname !== "/org-settings/general" &&
-        location.pathname !== "/workspace-settings/general")
-    ) {
-      return;
-    }
-    openMobileNavigationOnEntry.current = false;
-    setMobileNavigationOpen(true);
-  }, [location.pathname]);
-
-  useEffect(() => {
     const previousBreadcrumbs = breadcrumbsBeforeSettings.current;
     return () => setBreadcrumbEntries(previousBreadcrumbs);
   }, [setBreadcrumbEntries]);
@@ -171,7 +145,7 @@ export function UnifiedSettingsLayout() {
   useEffect(() => {
     if (!activeSectionLabel || !activeItemLabel || !activeSectionHref) return;
     setBreadcrumbEntries([
-      { label: settingsBreadcrumbLabel, href: "/org-settings/general" },
+      { label: settingsBreadcrumbLabel, href: "/org-settings" },
       { label: activeSectionLabel, href: activeSectionHref },
       { label: activeItemLabel },
     ]);
@@ -184,11 +158,13 @@ export function UnifiedSettingsLayout() {
   ]);
 
   useEffect(() => {
-    if (!mobileNavigationOpen) return;
+    if (!navigationOpen) return;
 
     mobileNavigationPanel.current?.focus();
     const keepFocusInNavigation = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        // As the index there is nothing under it: the dialog's own Escape closes settings.
+        if (navigationAsIndex) return;
         event.preventDefault();
         event.stopPropagation();
         setMobileNavigationOpen(false);
@@ -222,7 +198,7 @@ export function UnifiedSettingsLayout() {
     };
     window.addEventListener("keydown", keepFocusInNavigation, true);
     return () => window.removeEventListener("keydown", keepFocusInNavigation, true);
-  }, [mobileNavigationOpen]);
+  }, [navigationOpen, navigationAsIndex]);
 
   const closeMobileNavigation = () => {
     setMobileNavigationOpen(false);
@@ -264,10 +240,6 @@ export function UnifiedSettingsLayout() {
     switchSpace(workspaceId);
     rememberWorkspace(currentOrg.id, workspaceId);
   };
-
-  // Workspace settings were admin-only before the shells were unified. A cold
-  // or bookmarked workspace URL must keep that permission contract.
-  if (activeScope === "workspace" && !can("org:read")) return <NoAccessState />;
 
   const organizationSelector = (
     <ContextSelector
@@ -319,7 +291,7 @@ export function UnifiedSettingsLayout() {
     </div>
   );
 
-  const mobileNavigation = mobileNavigationOpen ? (
+  const mobileNavigation = navigationOpen ? (
     <div
       ref={mobileNavigationPanel}
       id="settings-mobile-navigation"
@@ -337,7 +309,7 @@ export function UnifiedSettingsLayout() {
           size="icon"
           className="ml-auto size-11"
           aria-label={label("unifiedSettings.closeMenu")}
-          onClick={closeMobileNavigation}
+          onClick={navigationAsIndex ? closeSettings : closeMobileNavigation}
         >
           <X className="size-4" />
         </Button>
@@ -396,29 +368,21 @@ export function UnifiedSettingsLayout() {
             variant="outline"
             className="h-11 w-full justify-between bg-transparent px-3"
             aria-label={label("unifiedSettings.openNavigation")}
-            aria-expanded={mobileNavigationOpen}
+            aria-expanded={navigationOpen}
             aria-controls="settings-mobile-navigation"
             onClick={() => setMobileNavigationOpen(true)}
           >
             <span className="truncate">{label("unifiedSettings.menu")}</span>
             <ChevronDown className="size-4 shrink-0" />
           </Button>
-          <div className="mt-6 flex min-h-9 items-center justify-between gap-3">
-            <SettingsHeading className="mb-0" title={label(activeItem.labelKey)} />
-            <div
-              ref={setMobileActionTarget}
-              data-page-actions
-              className="flex shrink-0 items-center gap-2"
-            />
-          </div>
         </div>
       )}
       {mobileNavigation}
       {activeItem && (
-        <div className="mb-6 hidden min-h-9 items-center justify-between gap-4 md:flex">
+        <div className="mb-6 flex min-h-9 items-center justify-between gap-3 md:gap-4">
           <SettingsHeading className="mb-0" title={label(activeItem.labelKey)} />
           <div
-            ref={setDesktopActionTarget}
+            ref={setActionTarget}
             data-page-actions
             className="flex shrink-0 items-center gap-2"
           />
@@ -426,30 +390,40 @@ export function UnifiedSettingsLayout() {
       )}
       <div
         key={contentKey}
-        inert={mobileNavigationOpen}
-        aria-hidden={mobileNavigationOpen || undefined}
+        inert={navigationOpen}
+        aria-hidden={navigationOpen || undefined}
         data-settings-table-surface="integrated"
         data-settings-content-scope={activeScope}
         className="[&_[data-data-table-row]]:[grid-template-columns:var(--dt-cols-3)] [&_[data-data-table-scroll]_table]:min-w-(--dt-full-floor) [&_td[data-data-table-tier]]:flex [&_th[data-data-table-tier]]:block"
       >
-        <SettingsPageActionTargetsProvider
-          targets={{ desktop: desktopActionTarget, mobile: mobileActionTarget }}
-        >
+        <SettingsPageActionTargetProvider target={actionTarget}>
           <Outlet />
-        </SettingsPageActionTargetsProvider>
+        </SettingsPageActionTargetProvider>
       </div>
     </PanelDialog>
   );
 }
 
+const SETTINGS_INDEXES = ["/org-settings", "/workspace-settings"];
+
+function isSettingsIndex(pathname: string): boolean {
+  return SETTINGS_INDEXES.includes(pathname.replace(/\/$/, ""));
+}
+
 /**
  * `/org-settings` and `/workspace-settings` land on the first entry the rail
- * actually lists for this caller, not on a hard-coded `general`.
+ * lists for this caller in that scope. On a phone the layout shows the rail
+ * there instead.
  */
 export function SettingsIndexRedirect() {
   const sections = useSettingsSections();
-  const path = firstSettingsPath(sections);
+  const isMobile = useIsMobile();
+  const { pathname } = useLocation();
+  if (isMobile && sections.length > 0) return null;
   // No entry at all: nothing in settings is for this caller, so leave.
-  if (!path) return <NavigateKeepingState to="/" />;
-  return <NavigateKeepingState to={path} />;
+  return (
+    <NavigateKeepingState
+      to={firstSettingsPath(sections, settingsScopeFromPath(pathname)) ?? "/"}
+    />
+  );
 }

@@ -27,12 +27,7 @@
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { db } from "@appstrate/db/client";
-import {
-  integrationConnections,
-  integrationOrgDefaults,
-  integrationPins,
-  spaces,
-} from "@appstrate/db/schema";
+import { integrationConnections, integrationPins, spaces } from "@appstrate/db/schema";
 import type {
   IntegrationConnectionRow as ConnectionRow,
   IntegrationPinRow as PinRow,
@@ -1118,8 +1113,7 @@ async function loadPins(
  * when the (space, integration) row has block_user_connections=true.
  * Surfaced as a permission check, not a resolution error, because it
  * fires *before* the connection exists. The predicate is the one
- * resolution applies ({@link userConnectionsBlocked}), plus an enforced
- * space default. `enabled` is
+ * resolution applies ({@link userConnectionsBlocked}). `enabled` is
  * deliberately NOT required — a lock on a switched-off integration is
  * still the space's call.
  */
@@ -1132,18 +1126,5 @@ export async function isUserConnectionCreationBlocked(
     .select({ id: spaces.id })
     .from(spaces)
     .where(and(eq(spaces.id, spaceId), userConnectionsBlocked(spaceId, integrationId)));
-  if (rows.length > 0) return true;
-  // An ENFORCED default imposes the space's connections on every member: a
-  // personal one could never be used, so creating it is refused too.
-  const defaults = await db
-    .select({ enforce: integrationOrgDefaults.enforce })
-    .from(integrationOrgDefaults)
-    .where(
-      and(
-        eq(integrationOrgDefaults.spaceId, spaceId),
-        eq(integrationOrgDefaults.integrationId, integrationId),
-      ),
-    )
-    .limit(1);
-  return defaults[0]?.enforce === true;
+  return rows.length > 0;
 }

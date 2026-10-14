@@ -1706,6 +1706,7 @@ export async function listPackageRuns(
     offset?: number;
     actor?: Actor | null;
     status?: RunStatus[];
+    search?: string;
     /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
     visibility?: SQL;
     canReadAgentInput?: boolean;
@@ -1716,6 +1717,7 @@ export async function listPackageRuns(
     offset = 0,
     actor = null,
     status,
+    search,
     visibility,
     canReadAgentInput = false,
   } = options;
@@ -1724,9 +1726,8 @@ export async function listPackageRuns(
     eq(runs.orgId, scope.orgId),
     eq(runs.spaceId, scope.spaceId),
   ];
-  if (status && status.length > 0) {
-    conditions.push(inArray(runs.status, status));
-  }
+  if (status?.length) conditions.push(inArray(runs.status, status));
+  if (search) conditions.push(runSearchCondition(search));
   if (visibility) conditions.push(visibility);
   return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
 }
@@ -1807,29 +1808,18 @@ interface ListGlobalRunsOptions {
   offset?: number;
   kind?: GlobalRunKind;
   /**
-   * One status or several — "everything that broke" is `["failed", "timeout"]`,
-   * one question rather than two requests stitched together client-side.
-   *
-   * `RunStatus`, not `string`. This used to take a `string` and quietly drop
-   * anything outside the enum (`if (status && isRunStatus(status))`), which
-   * turned a typo into "no status filter" — the whole list, read as filtered.
-   * The route now rejects an unknown value with a 400; the narrow type is what
-   * keeps a future caller from re-opening that hole.
+   * Any of these statuses — "everything that broke" is `["failed", "timeout"]`.
+   * `RunStatus`, not `string`: the route refuses an unknown value with a 400,
+   * and the narrow type keeps a caller from turning a typo into no filter.
    */
-  status?: RunStatus | RunStatus[];
+  status?: RunStatus[];
   startDate?: Date;
   endDate?: Date;
   chatSessionId?: string;
   /**
    * Free text: the agent a run executed (its scope and name, as stamped on the
-   * run) and the error it ended on. A query that is only digits also matches
-   * the run NUMBER, which is how people refer to a run out loud.
-   *
-   * Deliberately NOT a full-text index: this is a substring match inside one
-   * org and one application, on a page of rows the tenant filter has already
-   * narrowed. It will want an index the day a single workspace holds a few
-   * hundred thousand runs, and `pg_trgm` on those two columns is the answer
-   * then.
+   * run) and the error it ended on; digits also match the run number
+   * (`runSearchCondition`). A substring match inside one space, unindexed.
    */
   search?: string;
   actor?: Actor | null;
@@ -1858,13 +1848,8 @@ export async function listGlobalRuns(
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
   if (visibility) conditions.push(visibility);
-  if (status) {
-    const wanted = Array.isArray(status) ? status : [status];
-    // An empty list would produce `IN ()` — SQL for "nothing", where the caller
-    // meant "no status filter". Absence is how you say that.
-    if (wanted.length === 1) conditions.push(eq(runs.status, wanted[0]!));
-    else if (wanted.length > 1) conditions.push(inArray(runs.status, wanted));
-  }
+  // An empty list would be `IN ()`, SQL for "nothing", where the caller meant no filter.
+  if (status?.length) conditions.push(inArray(runs.status, status));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (chatSessionId) {

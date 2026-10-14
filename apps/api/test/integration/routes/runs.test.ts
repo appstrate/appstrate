@@ -528,6 +528,40 @@ describe("Runs API", () => {
       expect(body.data.map((run) => run.status).sort()).toEqual(["failed", "timeout"]);
     });
 
+    it("searches an agent's runs by error text and run number", async () => {
+      const packageId = "@runorg/searched-agent";
+      await seedAgent({ id: packageId, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, packageId);
+      const seed = (overrides: { error?: string; runNumber?: number }) =>
+        seedRun({
+          packageId,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          userId: ctx.user.id,
+          status: "failed",
+          ...overrides,
+        });
+      const errored = await seed({ error: "clicSEQUR refused the 2FA code", runNumber: 1 });
+      const numbered = await seed({ runNumber: 77 });
+
+      const ids = async (query: string) => {
+        const res = await app.request(`/api/agents/${packageId}/runs?${query}`, {
+          headers: authHeaders(ctx),
+        });
+        expect(res.status, await res.clone().text()).toBe(200);
+        return ((await res.json()) as { data: { id: string }[] }).data.map((r) => r.id);
+      };
+
+      expect(await ids("q=clicsequr")).toEqual([errored.id]);
+      expect(await ids("q=%2377")).toEqual([numbered.id]);
+      // A number int4 cannot hold names no run; it is not a server error.
+      expect(await ids("q=99999999999")).toEqual([]);
+      const tooLong = await app.request(`/api/agents/${packageId}/runs?q=${"x".repeat(201)}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(tooLong.status).toBe(400);
+    });
+
     it("respects org isolation", async () => {
       const otherCtx = await createTestContext({ orgSlug: "otherorg" });
       await seedAgent({ id: "@otherorg/secret-agent", orgId: otherCtx.orgId });

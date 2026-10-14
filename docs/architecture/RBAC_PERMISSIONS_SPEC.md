@@ -779,7 +779,7 @@ The space Members tab accepts either `space-members:read` or `space-members:invi
 
 The SPA's role strings are display only. `packages/shared-types/src/member-role-policy.ts` keeps the assignable-role logic for the org tab — `assignableRolesForMember` (an owner is offered every org role, `owner` included, for any other member; an admin `ASSIGNABLE_ORG_ROLES = ["guest", "member", "admin"]` for guests and members) and `canLeaveOrg` (advisory; the server decides under the lock). Org settings → Users lets an owner promote a member to owner, behind a confirmation, and manage the other owners. Org settings → General's danger zone carries **Quitter l'organisation** for every member, disabled with an explanation for the sole owner and during a role preview; its confirmation states the consequences — the personal space's 30-day window, the member's shared connections no longer shared, and landing on onboarding when it was the last org. Demoting an owner asks for confirmation as well. After leaving or deleting an org the SPA moves to another org, or to onboarding when none is left, without a full reload.
 
-`features` reaches the SPA as it does for `billing` (`apps/web/src/components/sidebar-billing.tsx`).
+`features` reaches the SPA as it does for `billing`: through `useAppConfig()`, read by the route's `feature` in `apps/web/src/lib/route-access.ts`, which hides the settings entry (`apps/web/src/pages/settings/navigation.ts`) and gates the page.
 
 ---
 

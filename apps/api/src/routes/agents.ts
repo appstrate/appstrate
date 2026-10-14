@@ -418,8 +418,9 @@ export function createAgentsRouter() {
           canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
           payerUserId: requestPayerUserId(c),
           version: c.req.query("version") || (await defaultDefinitionSelector(c, agent)).selector,
+          // The doors of `connection-readiness` and of the schedule list.
+          canReadIntegrations: c.get("permissions")?.has("integrations:read") ?? false,
           canReadSchedules: c.get("permissions")?.has("schedules:read") ?? false,
-          runVisibility: runVisibilityFilter(c),
         }),
       );
     },

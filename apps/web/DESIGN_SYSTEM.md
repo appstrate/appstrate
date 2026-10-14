@@ -100,8 +100,8 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    fade marks each edge that hides tabs, nothing when they all fit. **The same
    tabs for every role** (a package's « Utilisé par » included): what a role may
    not do is said inside the tab (`RoleLimitNotice`), never by removing it. A tab
-   a type of package has no use for is not offered to that type, whatever the role. The agent's tab ids are in
-   `lib/agent-detail-tabs.ts`.
+   a type of package has no use for is not offered to that type, whatever the role. The agent's tab ids are
+   `AGENT_DETAIL_TABS` in `pages/unified-package-detail.tsx`.
 5. **Vue d'ensemble**: a grid of `DetailSectionCard`
    (`components/detail-section-card.tsx`), each with an icon, a title and, when
    it summarises a settings section, a header arrow that opens it
@@ -160,10 +160,13 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   The one exception is a write whose answer is not « saved » (an email change
   that sends a confirmation): its toast says so and the row shows only the
   pending line.
-- The one exception to the no-Save rule is a write the server cannot take in
-  parts (a schedule's new actor that must name its connections in the same
-  write): then the extra fields appear under the control with one explicit
-  button. A package's files and definition are drafts with an explicit save
+- Two writes are exceptions to the no-Save rule, each with one explicit button.
+  A write the server cannot take in parts (a schedule's new actor that must name
+  its connections in the same write): the extra fields appear under the control.
+  The account's login email (`EmailChangeField`, `pages/preferences/general.tsx`):
+  without SMTP it changes at once, so a half-typed address never commits on blur;
+  the button waits for another valid address, and an invalid one is said under
+  the field. A package's files and definition are drafts with an explicit save
   (`useUnsavedChanges`, section 12).
 - **Under a field: a note on the left, a control on the right.** A note is text
   (where the value comes from, why it is locked, with its `Lock` icon); a
@@ -351,7 +354,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     otherwise), État, « … ». An organization key serves the models bound to it (`credentialId`);
     the instance row serves the built-in ones. A key the caller cannot read stays a row, named by
     its provider, with no menu. Menu: Renommer, Choisir les modèles, Changer la clé, Tester,
-    Supprimer (the key and its models, in one gesture: see « Delete a key » below); the
+    Supprimer (a key no model uses: see « Delete a key » below); the
     instance, Choisir le modèle par défaut. A click on the row (name included)
     chooses its models. Actions menu: « Ajouter une clé org ».
   - **« Clés perso »** (`components/personal-services-table.tsx`, columns in
@@ -361,7 +364,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     (`personalServiceRows`: a provider with a model left to personal keys, or one somebody
     connected a key for). Columns: Fournisseur, Modèles (the ones usable with a personal key of that
     provider, `binding: "member"`), Clés connectées (who plugged a personal key or subscription in,
-    « Olivier Tarbès (vous), Pierre » or « Aucune », read off the credentials the server shows the
+    « Alice Martin (vous), Bob » or « Aucune », read off the credentials the server shows the
     caller), État, « … ». The members' own keys are not rows here: each manages them in
     Mes clés, linked under the table. A click on the row, or « Choisir les modèles » in its
     menu, opens the provider's checklist (`?personalModels=<providerId>`). Actions menu:
@@ -407,18 +410,12 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     `manualRow`, `lib/model-form-payload.ts`): there is no second save. A retry after a partly
     refused batch asks only for what failed: the dialog keeps the models its own submission created
     (`knownModels`, `lib/model-choice.ts`).
-  - **Delete a key** (`components/delete-org-key-confirm.tsx`, the plan in `lib/key-deletion.ts`,
-    the writes in `hooks/use-delete-org-key.ts`): one confirmation, one gesture. The server
-    refuses a key that model rows still reference (`credential_in_use`, `ON DELETE RESTRICT`), so
-    the confirmation says what it costs (« Ses 3 modèles ne seront plus accessibles : A, B, C »),
-    and on confirmation the interface deletes the key's model rows (here they really go: they
-    point at the key), then the key. When the key serves the organization's default model, the
-    confirmation asks first for the model that replaces it (a select of the accessible models
-    that are not paid by each member; the button waits for the choice) and sets it before any
-    deletion; with no candidate it says so and offers only Annuler. A step that fails stops the
-    next ones and is said inline, with what was done (« Accès retiré pour : A. Impossible pour :
-    B. La clé n'est pas supprimée : réessayez. »); the list is re-read, so the retry starts from
-    what is left. This is the one place a model row is deleted.
+  - **Delete a key** (`components/delete-org-key-confirm.tsx`, its copy in
+    `lib/key-deletion.ts`): the server refuses a key that model rows still reference
+    (`credential_in_use`, `ON DELETE RESTRICT`), so the confirmation names every model
+    using it, switched off ones included (« La clé « Prod » est utilisée par 2 modèles :
+    A, B. Supprimez ces modèles avant la clé. ») and offers only Annuler. Only a key no
+    model uses is deleted.
 - **Packages** (agents, skills, MCP servers, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
   `packages-table.tsx`. Do not build another.
@@ -683,7 +680,7 @@ canvas, surfaces on it are white cards, and heights hold across states (no jump)
 
 A surface served by an optional module reads its flag:
 `useAppConfig().features.<flag>` (`chat`, `webhooks`, `oidc`,
-`billing`, `mcp`, `custom_roles`…). Without the module the entry leaves the
+`billing`, `mcp`). Without the module the entry leaves the
 screen (a settings section, a nav item, a tab); it never opens on a 404. A route
 that needs a module says so in `lib/route-access.ts` (`feature`).
 
@@ -700,9 +697,7 @@ that needs a module says so in `lib/route-access.ts` (`feature`).
   sentence case; « 1 problème », not « 1 problèmes ».
 - « Espace de travail » (workspace) in the UI, never « application », except an
   external OAuth application.
-- No development wording in the product (« à brancher », « dev », TODO). A control
-  not wired yet is rendered only under `import.meta.env.DEV` (the global search in
-  `shell-frame.tsx`), never as a disabled button in a production build.
+- No development wording in the product (« à brancher », « dev », TODO).
 - A permission is always named by its sentence (`lib/permission-labels.ts`:
   `permissionLabel`, `permissionResourceLabel`), in the matrix, in the pickers
   (`ScopeMultiSelect`) and in badges, never by its wire string (`agents:share`).

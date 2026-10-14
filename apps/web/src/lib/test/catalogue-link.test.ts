@@ -9,8 +9,8 @@ describe("catalogueHref", () => {
   });
 
   it("opens one package's sheet when it names one", () => {
-    expect(catalogueHref("agent", { packageId: "@tractr/radar-ia" })).toBe(
-      "/catalogue/discover/agent?package=%40tractr%2Fradar-ia",
+    expect(catalogueHref("agent", { packageId: "@acme/radar-ia" })).toBe(
+      "/catalogue/discover/agent?package=%40acme%2Fradar-ia",
     );
   });
 

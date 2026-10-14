@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, lazy, Suspense, type ReactNode } from "react";
-import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
+import {
+  Routes,
+  Route,
+  Outlet,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+  Navigate,
+} from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
 import { PackageList } from "./pages/package-list";
 import { DashboardPage } from "./pages/dashboard";
 import { InviteAcceptPage } from "./pages/invite-accept";
@@ -16,7 +26,7 @@ import { MagicLinkConfirmPage } from "./pages/magic-link-confirm";
 import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
-import { useBackgroundLocation } from "./lib/modal-route";
+import { modalReturnTarget, useBackgroundLocation } from "./lib/modal-route";
 import { ShellHeader } from "./components/shell-frame";
 import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
@@ -30,13 +40,13 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
-import { NotFoundPage, RouteGate } from "./components/route-gate";
+import { NotFoundPage, RouteGate, UnavailableState } from "./components/route-gate";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { AppToaster } from "./components/app-toaster";
-import type { RoutePath } from "./lib/route-access";
+import { isOverlayPath, isUnder, OVERLAY_PREFIXES, type RoutePath } from "./lib/route-access";
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
 // lazy-loaded so their bundle is never fetched when the corresponding module
@@ -377,8 +387,8 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/org-settings/cli-sessions": <OrgSettingsCliSessionsPage />,
   "/org-settings/billing": <OrgSettingsBillingPage />,
   // Workspace settings are their own surface: everything below is scoped by
-  // `X-Application-Id`, which is a different scope from the org, not a
-  // subsection of it.
+  // `X-Space-Id`, which is a different scope from the org, not a subsection
+  // of it.
   "/workspace-settings": <Outlet />,
   "/workspace-settings/general": <OrgSettingsAppGeneralPage />,
   // Space membership and its custom roles: who is in THIS space, and as what.
@@ -396,18 +406,33 @@ const PAGES: Record<RoutePath, ReactNode> = {
 const PATHS = Object.keys(PAGES) as RoutePath[];
 
 /**
- * Routed modals: opened over the screen they came from, so they mount in the
- * overlay tree ONLY (the main tree renders the background location, so a copy
- * there could never match). The chat brings its own shell.
+ * Routed modals mount in the overlay tree ONLY (the main tree renders the
+ * background location, so a copy there could never match). The chat brings
+ * its own shell.
  */
-const OVERLAY_PREFIXES = ["/org-settings", "/workspace-settings", "/preferences", "/catalogue"];
 const CHAT_PREFIX = "/chat";
-
-const isUnder = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`);
 
 function mountOf(path: RoutePath): "main" | "chat" | "overlay" {
   if (isUnder(path, CHAT_PREFIX)) return "chat";
-  return OVERLAY_PREFIXES.some((prefix) => isUnder(path, prefix)) ? "overlay" : "main";
+  return isOverlayPath(path) ? "overlay" : "main";
+}
+
+/** An address under an overlay that matches none of its pages: said in a dialog over the background. */
+function OverlayNotFound() {
+  const { t } = useTranslation("common");
+  const navigate = useNavigate();
+  const close = modalReturnTarget(useBackgroundLocation());
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => !open && navigate(close.to, { replace: true, state: close.state })}
+    >
+      <DialogContent aria-describedby={undefined}>
+        <DialogTitle className="sr-only">{t("access.unavailable")}</DialogTitle>
+        <UnavailableState />
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 /** The nested layouts, with what each index opens. */
@@ -623,10 +648,11 @@ export function App() {
   // float over, so the dashboard stands in. The surface is then a modal in
   // every case, which removes the second, page-shaped rendering of it that
   // otherwise had to exist and had to be kept looking like the first.
-  const isOverlayPath = OVERLAY_PREFIXES.some((p) => location.pathname.startsWith(p));
   const modalBackground =
     explicitBackground ??
-    (isOverlayPath ? { ...location, pathname: "/", search: "", hash: "", state: null } : null);
+    (isOverlayPath(location.pathname)
+      ? { ...location, pathname: "/", search: "", hash: "", state: null }
+      : null);
   useExternalRedirect(!!user);
 
   if (loading) {
@@ -902,6 +928,9 @@ export function App() {
               {layoutRoute("/org-settings")}
               {layoutRoute("/workspace-settings")}
             </Route>
+            {OVERLAY_PREFIXES.map((prefix) => (
+              <Route key={prefix} path={`${prefix}/*`} element={<OverlayNotFound />} />
+            ))}
           </Routes>
         )}
       </OrgGate>

@@ -336,16 +336,8 @@ const canonicalRunsPaths = {
           schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
         },
         { $ref: "#/components/parameters/Offset" },
-        {
-          name: "status",
-          in: "query",
-          description: "One run status or a comma-separated set, for example failed,timeout.",
-          schema: {
-            type: "string",
-            pattern:
-              "^(pending|running|success|failed|timeout|cancelled)(,(pending|running|success|failed|timeout|cancelled))*$",
-          },
-        },
+        { $ref: "#/components/parameters/RunStatusFilter" },
+        { $ref: "#/components/parameters/RunSearch" },
       ],
       responses: {
         "200": {
@@ -872,13 +864,7 @@ const canonicalRunsPaths = {
           description:
             "Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
         },
-        {
-          name: "status",
-          in: "query",
-          schema: { type: "string", example: "failed,timeout" },
-          description:
-            "Filter runs by lifecycle status: one member of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.",
-        },
+        { $ref: "#/components/parameters/RunStatusFilter" },
         { name: "start_date", in: "query", schema: { type: "string", format: "date-time" } },
         { name: "end_date", in: "query", schema: { type: "string", format: "date-time" } },
         {
@@ -887,13 +873,7 @@ const canonicalRunsPaths = {
           schema: { type: "string" },
           description: "Return only runs launched from this chat session.",
         },
-        {
-          name: "q",
-          in: "query",
-          schema: { type: "string", maxLength: 200 },
-          description:
-            "Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`.",
-        },
+        { $ref: "#/components/parameters/RunSearch" },
       ],
       responses: {
         "200": {

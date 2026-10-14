@@ -294,7 +294,7 @@ export interface paths {
         };
         /**
          * Get shared diagnostics for an agent
-         * @description Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview and the launch header. Diagnostics are ordered with blockers first and carry their correction destinations.
+         * @description Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview and the launch header. Diagnostics are ordered with blockers first and carry their correction destinations. Connection verdicts are included only for a caller holding `integrations:read`, and schedule warnings only for one holding `schedules:read`.
          */
         get: operations["getAgentDiagnostics"];
         put?: never;
@@ -5611,6 +5611,7 @@ export interface components {
                     /** @enum {string} */
                     destination: "bundle" | "configuration" | "schedule";
                     section: string | null;
+                    /** @description The values the diagnostic names, keyed so a client can word it by `code`: `integration`, `skill`, `field`, `model`, `default_model`, `scheduleId`, `schedule`, `schedule_version`, `inspected_version` — each only where it applies. */
                     params: {
                         [key: string]: string;
                     };
@@ -7657,6 +7658,10 @@ export interface components {
     parameters: {
         /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
         Offset: number;
+        /** @description Filter runs by lifecycle status: one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+        RunStatusFilter: string;
+        /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
+        RunSearch: string;
         /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
         IfMatch: string;
         /** @description The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current. */
@@ -8310,7 +8315,7 @@ export interface operations {
     getAgentDiagnostics: {
         parameters: {
             query?: {
-                /** @description Agent definition to inspect. Omitted values resolve the live draft used by the editor UI. */
+                /** @description Agent definition to inspect: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitted inspects what the agent detail page renders — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft when nothing is published. `draft` named explicitly requires that write authority. Ignored for system agents. */
                 version?: string;
             };
             header?: {
@@ -8341,8 +8346,10 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description Insufficient permissions — including `draft_not_writable` when `version=draft` is named by a caller who cannot WRITE the package. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["VersionArtifactUnavailable"];
         };
     };
     saveAgentInputSettings: {
@@ -9011,8 +9018,10 @@ export interface operations {
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
-                /** @description One run status or a comma-separated set, for example failed,timeout. */
-                status?: string;
+                /** @description Filter runs by lifecycle status: one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+                status?: components["parameters"]["RunStatusFilter"];
+                /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
+                q?: components["parameters"]["RunSearch"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -13596,7 +13605,7 @@ export interface operations {
                             };
                         }[];
                         /** @description Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory. */
-                        tool_catalog_inspection?: {
+                        tool_catalog_inspection: {
                             /** @enum {string} */
                             basis: "mcp_package" | "manifest" | "platform";
                             entries: {
@@ -15003,7 +15012,7 @@ export interface operations {
                             };
                         }[];
                         /** @description Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory. */
-                        tool_catalog_inspection?: {
+                        tool_catalog_inspection: {
                             /** @enum {string} */
                             basis: "mcp_package" | "manifest" | "platform";
                             entries: {
@@ -23346,14 +23355,14 @@ export interface operations {
                 offset?: components["parameters"]["Offset"];
                 /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 kind?: "all" | "package" | "inline";
-                /** @description Filter runs by lifecycle status: one member of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
-                status?: string;
+                /** @description Filter runs by lifecycle status: one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+                status?: components["parameters"]["RunStatusFilter"];
                 start_date?: string;
                 end_date?: string;
                 /** @description Return only runs launched from this chat session. */
                 chat_session_id?: string;
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
-                q?: string;
+                q?: components["parameters"]["RunSearch"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -24902,10 +24911,10 @@ export interface operations {
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
-                /** @description Comma-separated lifecycle statuses. */
-                status?: string;
-                /** @description Search agent name, scope, error or run number. */
-                q?: string;
+                /** @description Filter runs by lifecycle status: one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+                status?: components["parameters"]["RunStatusFilter"];
+                /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
+                q?: components["parameters"]["RunSearch"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */

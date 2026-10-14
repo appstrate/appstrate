@@ -10,10 +10,7 @@ import {
 } from "@appstrate/ui/components/select";
 import { SettingsHeading } from "../settings/settings-heading";
 import { SaveFeedback } from "../settings/save-feedback";
-import {
-  useIntegrationOrgDefault,
-  useUpdateIntegrationSettings,
-} from "../../hooks/use-integrations";
+import { useUpdateIntegrationSettings } from "../../hooks/use-integrations";
 import { OrgDefaultSection } from "./org-default-section";
 import { PinManagementSection } from "./pin-management-section";
 
@@ -50,8 +47,6 @@ function BlockUserConnectionsToggle({
 }) {
   const { t } = useTranslation("settings");
   const updateSettings = useUpdateIntegrationSettings();
-  const { data: orgDefault, isLoading, isError } = useIntegrationOrgDefault(packageId);
-  const forced = orgDefault?.enforce === true;
   // Drives the control from server state. A pending mutation reads the
   // about-to-be-applied value, idle reads the latest fetched value.
   const blocked =
@@ -65,8 +60,8 @@ function BlockUserConnectionsToggle({
           {t("integration.admin.creation.title")}
         </p>
         <Select
-          value={blocked || forced ? "admins" : "members"}
-          disabled={forced || isLoading || isError || updateSettings.isPending}
+          value={blocked ? "admins" : "members"}
+          disabled={updateSettings.isPending}
           onValueChange={(value) =>
             updateSettings.mutate({
               params: { path: { packageId } },
@@ -95,11 +90,6 @@ function BlockUserConnectionsToggle({
             error={updateSettings.isError}
           />
         </div>
-        {forced && (
-          <p className="text-muted-foreground mt-2 text-sm">
-            {t("integration.admin.creation.forced")}
-          </p>
-        )}
       </div>
     </div>
   );

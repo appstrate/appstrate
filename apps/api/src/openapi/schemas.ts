@@ -2452,6 +2452,8 @@ export const schemas = {
                 params: {
                   type: "object",
                   additionalProperties: { type: "string" },
+                  description:
+                    "The values the diagnostic names, keyed so a client can word it by `code`: `integration`, `skill`, `field`, `model`, `default_model`, `scheduleId`, `schedule`, `schedule_version`, `inspected_version` — each only where it applies.",
                 },
               },
             },

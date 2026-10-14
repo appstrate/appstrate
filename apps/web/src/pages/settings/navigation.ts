@@ -16,13 +16,14 @@ import {
   Webhook,
 } from "lucide-react";
 import type { GateablePermission } from "../../hooks/use-permissions";
+import type { RoutePath } from "../../lib/route-access";
 import type { SettingsScope } from "../../lib/settings-context";
 
 export interface UnifiedSettingsNavItem {
-  to: string;
+  to: RoutePath;
   icon: LucideIcon;
   labelKey: string;
-  show?: boolean;
+  show: boolean;
 }
 
 export interface UnifiedSettingsSection {
@@ -32,146 +33,52 @@ export interface UnifiedSettingsSection {
 }
 
 interface SettingsNavigationOptions {
-  /**
-   * Per-entry gates. An ORGANISATION entry shows when the caller can DO
-   * something there, not merely read it: the server grants a guest `org:read`,
-   * `spaces:read`, `models:read` and `proxies:read` so its runs can name a
-   * model and resolve its own spaces, and following those to the letter sent
-   * someone with nothing to change into four administration screens. The
-   * routes stay on what the API allows, so a pasted URL still opens the
-   * read-only page.
-   */
+  /** Whether `RouteGate` opens the route (`lib/route-access.ts`): feature, team space, permission. */
+  canReach: (path: RoutePath) => boolean;
   can: (permission: GateablePermission) => boolean;
-  features: {
-    oidc: boolean;
-    billing: boolean;
-    webhooks: boolean;
-  };
-  /**
-   * A personal space takes no members, keys, OAuth clients, end-users or end-user
-   * sign-in configuration (SMTP, social): the server answers 409 `personal_space_*`
-   * to every write behind those entries (the routes are `teamSpaceOnly` in
-   * `lib/route-access.ts`).
-   */
-  inPersonalSpace?: boolean;
 }
 
 export function buildSettingsNavigation({
+  canReach,
   can,
-  features,
-  inPersonalSpace = false,
 }: SettingsNavigationOptions): UnifiedSettingsSection[] {
-  const teamSpace = !inPersonalSpace;
+  const entry = (
+    to: RoutePath,
+    icon: LucideIcon,
+    labelKey: string,
+    extra = true,
+  ): UnifiedSettingsNavItem => ({ to, icon, labelKey, show: canReach(to) && extra });
+  // The infrastructure screens are listed to whoever can change them: a guest
+  // reads spaces, models and proxies so its runs resolve them, which is no
+  // reason to open their administration. The routes stay on the read, so a
+  // pasted URL still opens the read-only page.
   return [
     {
       scope: "organization",
       labelKey: "orgSettings.sectionOrganization",
       items: [
-        {
-          to: "/org-settings/general",
-          icon: Building,
-          labelKey: "orgSettings.tabGeneral",
-          show: can("org:settings") || can("org:update"),
-        },
-        {
-          to: "/org-settings/members",
-          icon: Users,
-          labelKey: "orgSettings.tabMembers",
-          show: can("members:read"),
-        },
-        {
-          to: "/org-settings/roles",
-          icon: ShieldCheck,
-          labelKey: "roles.tabTitle",
-          show: can("roles:read"),
-        },
-        {
-          to: "/org-settings/spaces",
-          icon: LayoutGrid,
-          labelKey: "applications.pageTitle",
-          show: can("spaces:write"),
-        },
-        {
-          to: "/org-settings/models",
-          icon: BrainCircuit,
-          labelKey: "models.tabTitle",
-          show: can("models:write"),
-        },
-        {
-          to: "/org-settings/proxies",
-          icon: Globe,
-          labelKey: "proxies.tabTitle",
-          show: can("proxies:write"),
-        },
-        {
-          // Shown before collaborator SSO is switched on: this is where it is.
-          to: "/org-settings/oauth",
-          icon: KeyRound,
-          labelKey: "orgSettings.tabOauth",
-          show: features.oidc && can("oauth-clients:read"),
-        },
-        {
-          to: "/org-settings/cli-sessions",
-          icon: Laptop,
-          labelKey: "orgSettings.tabCliSessions",
-          show: features.oidc && can("cli-sessions:read"),
-        },
-        {
-          to: "/org-settings/billing",
-          icon: CreditCard,
-          labelKey: "billing.tabTitle",
-          show: features.billing && can("billing:read"),
-        },
+        entry("/org-settings/general", Building, "orgSettings.tabGeneral"),
+        entry("/org-settings/members", Users, "orgSettings.tabMembers"),
+        entry("/org-settings/roles", ShieldCheck, "roles.tabTitle"),
+        entry("/org-settings/spaces", LayoutGrid, "applications.pageTitle", can("spaces:write")),
+        entry("/org-settings/models", BrainCircuit, "models.tabTitle", can("models:write")),
+        entry("/org-settings/proxies", Globe, "proxies.tabTitle", can("proxies:write")),
+        entry("/org-settings/oauth", KeyRound, "orgSettings.tabOauth"),
+        entry("/org-settings/cli-sessions", Laptop, "orgSettings.tabCliSessions"),
+        entry("/org-settings/billing", CreditCard, "billing.tabTitle"),
       ],
     },
     {
       scope: "workspace",
       labelKey: "workspaceSettings.sectionGeneral",
       items: [
-        {
-          to: "/workspace-settings/general",
-          icon: Settings,
-          labelKey: "appSettings.tabGeneral",
-          show: can("space-settings:write"),
-        },
-        {
-          to: "/workspace-settings/members",
-          icon: Users,
-          labelKey: "spaceMembers.tabTitle",
-          show: teamSpace && (can("space-members:read") || can("space-members:invite")),
-        },
-        {
-          to: "/workspace-settings/auth",
-          icon: Shield,
-          labelKey: "appSettings.tabAuth",
-          show: teamSpace && features.oidc && can("space-settings:write"),
-        },
-        {
-          to: "/workspace-settings/api-keys",
-          icon: KeyRound,
-          labelKey: "orgSettings.tabApiKeys",
-          show: teamSpace && can("api-keys:read"),
-        },
-        {
-          to: "/workspace-settings/oauth",
-          icon: KeyRound,
-          labelKey: "appSettings.tabOauth",
-          show: teamSpace && features.oidc && can("oauth-clients:read"),
-        },
-        {
-          to: "/workspace-settings/end-users",
-          icon: Users,
-          labelKey: "endUsers.pageTitle",
-          // Operations, not authoring: an operator manages them, a viewer only
-          // reads them, and a screen with nothing to do on it is noise.
-          show: teamSpace && can("end-users:write"),
-        },
-        {
-          to: "/workspace-settings/webhooks",
-          icon: Webhook,
-          labelKey: "webhooks.pageTitle",
-          show: features.webhooks && (["webhooks:read", "org-webhooks:read"] as const).some(can),
-        },
+        entry("/workspace-settings/general", Settings, "appSettings.tabGeneral"),
+        entry("/workspace-settings/members", Users, "spaceMembers.tabTitle"),
+        entry("/workspace-settings/auth", Shield, "appSettings.tabAuth"),
+        entry("/workspace-settings/api-keys", KeyRound, "orgSettings.tabApiKeys"),
+        entry("/workspace-settings/oauth", KeyRound, "appSettings.tabOauth"),
+        entry("/workspace-settings/end-users", Users, "endUsers.pageTitle"),
+        entry("/workspace-settings/webhooks", Webhook, "webhooks.pageTitle"),
       ],
     },
   ];
@@ -182,18 +89,17 @@ export function visibleSettingsSections(
   options: SettingsNavigationOptions,
 ): UnifiedSettingsSection[] {
   return buildSettingsNavigation(options)
-    .map((section) => ({
-      ...section,
-      items: section.items.filter((item) => item.show !== false),
-    }))
+    .map((section) => ({ ...section, items: section.items.filter((item) => item.show) }))
     .filter((section) => section.items.length > 0);
 }
 
 /**
- * Where the overlay opens. The first entry of the rail, NOT a fixed path:
- * `/org-settings/general` is readable by a guest (`org:read`) and listed for
- * nobody but an admin, so the fixed redirect opened a page its own menu hid.
+ * Where a settings index opens: the first entry the rail lists in that scope,
+ * else the rail's first entry; `undefined` when the rail is empty.
  */
-export function firstSettingsPath(sections: UnifiedSettingsSection[]): string | undefined {
-  return sections[0]?.items[0]?.to;
+export function firstSettingsPath(
+  sections: UnifiedSettingsSection[],
+  scope: SettingsScope,
+): RoutePath | undefined {
+  return (sections.find((section) => section.scope === scope) ?? sections[0])?.items[0]?.to;
 }

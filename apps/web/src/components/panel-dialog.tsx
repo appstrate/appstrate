@@ -35,7 +35,7 @@ interface PanelDialogProps {
   contentScrollArea?: boolean;
   /** Keep page headings and toolbars below the dialog's close affordance. */
   reserveCloseArea?: boolean;
-  /** Prototype the panel as a shell surface below the two-line mobile header. */
+  /** On a phone, render as a shell surface below the two-line mobile header, not a dialog. */
   mobileAsSurface?: boolean;
   /**
    * A band at the top of the content pane that STAYS while the pane scrolls.

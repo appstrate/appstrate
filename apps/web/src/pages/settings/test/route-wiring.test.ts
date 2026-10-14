@@ -57,6 +57,14 @@ describe("unified settings route wiring", () => {
     }
   });
 
+  it("draws one title row with one actions slot, at every width", () => {
+    // Two slots portal every page's actions twice: duplicate controls and test ids.
+    const layout = read("../layout.tsx");
+    expect(layout.match(/data-page-actions\b/g)).toHaveLength(1);
+    const actions = read("../../../components/settings/settings-page-actions.tsx");
+    expect(actions.match(/createPortal\(/g)).toHaveLength(1);
+  });
+
   it("puts the API-key creation deed in the settings title slot", () => {
     const apiKeys = read("../../api-keys-page.tsx");
     expect(apiKeys).toContain("<SettingsPageActions>");

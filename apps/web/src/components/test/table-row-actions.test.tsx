@@ -8,13 +8,13 @@ import { render } from "./run-fixture.tsx";
 describe("TableRowActions", () => {
   it("is one « … » menu and nothing beside it", () => {
     const html = render(
-      <TableRowActions menuLabel="Plus d’actions pour Tractr">
+      <TableRowActions menuLabel="Plus d’actions pour Acme">
         <DropdownMenuItem>Modifier</DropdownMenuItem>
         <DropdownMenuItem>Supprimer</DropdownMenuItem>
       </TableRowActions>,
     );
 
-    expect(html).toContain('aria-label="Plus d’actions pour Tractr"');
+    expect(html).toContain('aria-label="Plus d’actions pour Acme"');
     expect(html).toContain("relative z-10");
     expect(html.match(/<button/g)).toHaveLength(1);
   });

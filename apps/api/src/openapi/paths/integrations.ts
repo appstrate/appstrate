@@ -575,6 +575,7 @@ const integrationDetailSchema = {
     "manifest",
     "auths",
     "tool_catalog",
+    "tool_catalog_inspection",
     "allow_undeclared_tools",
     "active",
     "block_user_connections",

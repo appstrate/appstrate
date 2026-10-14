@@ -1,69 +1,70 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { buildSettingsNavigation } from "../navigation";
+import { routeVerdict } from "../../../lib/route-access";
+import { buildSettingsNavigation, firstSettingsPath, visibleSettingsSections } from "../navigation";
 
-type Features = Parameters<typeof buildSettingsNavigation>[0]["features"];
+type Features = Record<string, boolean>;
 
 const ALL_FEATURES: Features = { oidc: true, billing: true, webhooks: true };
-const NO_FEATURES: Features = { oidc: false, billing: false, webhooks: false };
+const NO_FEATURES: Features = {};
 
-function destinations(features: Features, granted: string[]) {
+function options(features: Features, granted: string[], inPersonalSpace = false) {
   const can = (permission: string) => granted.includes(permission);
-  return buildSettingsNavigation({ can, features }).flatMap((section) =>
-    section.items.filter((item) => item.show !== false).map((item) => item.to),
+  return {
+    can,
+    canReach: (path: Parameters<typeof routeVerdict>[0]) =>
+      routeVerdict(path, can, features, inPersonalSpace) === "granted",
+  };
+}
+
+function destinations(features: Features, granted: string[], inPersonalSpace = false) {
+  return buildSettingsNavigation(options(features, granted, inPersonalSpace)).flatMap((section) =>
+    section.items.filter((item) => item.show).map((item) => item.to),
   );
 }
+
+const GUEST = ["org:read", "spaces:read", "models:read", "proxies:read"];
 
 describe("unified settings navigation", () => {
   it("keeps collaborator SSO available independently of its activation state", () => {
     expect(destinations(ALL_FEATURES, ["oauth-clients:read"])).toContain("/org-settings/oauth");
   });
 
-  it("offers an organisation entry only to someone who can act there", () => {
-    // A guest holds `org:read`, `spaces:read`, `models:read` and `proxies:read`
-    // so its runs work — none of which is a reason to open an administration
-    // screen. Nothing survives, and the shell then draws no Settings entry at
-    // all: connecting one's own MCP client lives in the profile.
-    const guest = destinations(ALL_FEATURES, [
-      "org:read",
-      "spaces:read",
-      "models:read",
-      "proxies:read",
-    ]);
-    expect(guest).toEqual([]);
+  it("lists General to every member: leaving the organization lives there", () => {
+    // A guest reads spaces, models and proxies so its runs resolve them; that
+    // is no reason to list their administration screens.
+    expect(destinations(ALL_FEATURES, GUEST)).toEqual(["/org-settings/general"]);
 
-    // A member adds the directory and the role catalog, and nothing else.
-    const member = destinations(ALL_FEATURES, [
-      "org:read",
-      "spaces:read",
-      "models:read",
-      "proxies:read",
-      "members:read",
-      "roles:read",
+    const member = destinations(ALL_FEATURES, [...GUEST, "members:read", "roles:read"]);
+    expect(member).toEqual([
+      "/org-settings/general",
+      "/org-settings/members",
+      "/org-settings/roles",
     ]);
-    expect(member).toEqual(["/org-settings/members", "/org-settings/roles"]);
 
-    // Writing is what the infrastructure screens are for.
-    const admin = destinations(ALL_FEATURES, ["org:settings", "spaces:write", "models:write"]);
-    expect(admin).toContain("/org-settings/general");
+    const admin = destinations(ALL_FEATURES, [
+      ...GUEST,
+      "spaces:write",
+      "models:write",
+      "space-settings:write",
+    ]);
     expect(admin).toContain("/org-settings/spaces");
     expect(admin).toContain("/org-settings/models");
     expect(admin).not.toContain("/org-settings/proxies");
-    // A space's own auth screen is its settings, not the org's spaces.
-    expect(admin).not.toContain("/workspace-settings/auth");
-    expect(destinations(ALL_FEATURES, ["space-settings:write"])).toContain(
-      "/workspace-settings/auth",
-    );
+    expect(admin).toContain("/workspace-settings/auth");
+  });
+
+  it("never lists a screen its route refuses, whatever the write grant", () => {
+    // `spaces:write` without the route's `spaces:read` reaches nothing.
+    expect(destinations(ALL_FEATURES, ["spaces:write"])).not.toContain("/org-settings/spaces");
   });
 
   it("keeps a module's screen behind its module, whatever the permission", () => {
-    // Holding the permission is not enough when the module behind it is off.
     const withoutModules = destinations(NO_FEATURES, [
       "oauth-clients:read",
       "cli-sessions:read",
       "billing:read",
-      "spaces:write",
       "webhooks:read",
       "space-settings:write",
     ]);
@@ -76,15 +77,11 @@ describe("unified settings navigation", () => {
     expect(withoutModules).toContain("/workspace-settings/general");
   });
 
-  it("keeps a space screen for whoever can act on it", () => {
-    // An operator manages end-users; a viewer, who only reads them, is not
-    // sent to a screen where every control is dead.
-    expect(destinations(ALL_FEATURES, ["end-users:write"])).toContain(
+  it("lists end-users to whoever reads them", () => {
+    expect(destinations(ALL_FEATURES, ["end-users:read"])).toContain(
       "/workspace-settings/end-users",
     );
-    expect(destinations(ALL_FEATURES, ["end-users:read"])).not.toContain(
-      "/workspace-settings/end-users",
-    );
+    expect(destinations(ALL_FEATURES, [])).not.toContain("/workspace-settings/end-users");
   });
 
   it("opens webhooks on either level's read permission", () => {
@@ -109,14 +106,15 @@ describe("unified settings navigation", () => {
   });
 
   it("drops the team-space entries in a personal space, whatever the grants", () => {
-    // The owner of a personal space holds the admin preset there; the server
-    // still refuses every write behind these five screens.
-    const all = () => true;
-    const shown = buildSettingsNavigation({
-      can: all,
-      features: ALL_FEATURES,
-      inPersonalSpace: true,
-    }).flatMap((section) => section.items.filter((i) => i.show !== false).map((i) => i.to));
+    const all = [
+      "space-settings:write",
+      "space-members:read",
+      "api-keys:read",
+      "oauth-clients:read",
+      "end-users:read",
+      "webhooks:read",
+    ];
+    const shown = destinations(ALL_FEATURES, all, true);
     for (const path of [
       "/workspace-settings/members",
       "/workspace-settings/api-keys",
@@ -129,5 +127,22 @@ describe("unified settings navigation", () => {
     expect(shown).toContain("/workspace-settings/general");
     // A webhook pinned to a personal space is accepted (201), so its page stays.
     expect(shown).toContain("/workspace-settings/webhooks");
+  });
+});
+
+describe("settings index", () => {
+  const admin = visibleSettingsSections(
+    options(ALL_FEATURES, [...GUEST, "space-settings:write", "api-keys:read"]),
+  );
+
+  it("opens each scope on its own first entry", () => {
+    expect(firstSettingsPath(admin, "organization")).toBe("/org-settings/general");
+    expect(firstSettingsPath(admin, "workspace")).toBe("/workspace-settings/general");
+  });
+
+  it("falls back to the rail's first entry when the scope lists none", () => {
+    const guest = visibleSettingsSections(options(ALL_FEATURES, GUEST));
+    expect(firstSettingsPath(guest, "workspace")).toBe("/org-settings/general");
+    expect(firstSettingsPath([], "workspace")).toBeUndefined();
   });
 });

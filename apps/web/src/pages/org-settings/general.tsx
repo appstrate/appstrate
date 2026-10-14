@@ -94,7 +94,10 @@ export function OrgSettingsGeneralPage() {
   const canCreateOrg = useCanCreateOrg();
   const { data: orgSettings } = useOrgSettings();
   const updateSettingsMutation = useUpdateOrgSettings();
+  // Every member opens this page (leaving lives here); each change is drawn
+  // only for whoever holds its permission.
   const canUpdateOrg = can("org:update");
+  const canSettings = can("org:settings");
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
@@ -163,7 +166,7 @@ export function OrgSettingsGeneralPage() {
         <SettingRow
           variant="field"
           label={t("orgSettings.logoLabel")}
-          description={t("orgSettings.logoDescription")}
+          description={canUpdateOrg ? t("orgSettings.logoDescription") : undefined}
           status={writeFeedback(updateNameMutation, "logo", processingLogo)}
         >
           <div className="flex items-center gap-3">
@@ -172,95 +175,97 @@ export function OrgSettingsGeneralPage() {
               logo={currentOrg.logo}
               className="size-16 rounded-xl text-2xl"
             />
-            <div className="flex flex-wrap gap-2">
-              <input
-                ref={logoInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
-                className="sr-only"
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (!file || !orgId) return;
-                  setProcessingLogo(true);
-                  try {
-                    const logo = await normalizeOrganizationLogo(file);
-                    updateNameMutation.mutate({
-                      params: { path: { orgId } },
-                      body: { logo },
-                    });
-                  } catch {
-                    toast.error(t("orgSettings.logoError"));
-                  } finally {
-                    setProcessingLogo(false);
-                  }
-                }}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!canUpdateOrg || updateNameMutation.isPending || processingLogo}
-                onClick={() => logoInputRef.current?.click()}
-              >
-                <Upload />
-                {t("orgSettings.logoUpload")}
-              </Button>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={!canUpdateOrg || updateNameMutation.isPending || processingLogo}
-                  >
-                    <Smile />
-                    {t("orgSettings.logoEmoji")}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="start" className="w-auto p-2">
-                  <div className="grid grid-cols-4 gap-1">
-                    {ORGANIZATION_EMOJIS.map((emoji) => (
-                      <Button
-                        key={emoji}
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="text-lg"
-                        aria-label={t("orgSettings.logoUseEmoji", { emoji })}
-                        onClick={() => {
-                          if (!orgId) return;
-                          updateNameMutation.mutate({
-                            params: { path: { orgId } },
-                            body: { logo: `emoji:${emoji}` },
-                          });
-                        }}
-                      >
-                        {emoji}
-                      </Button>
-                    ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
-              {currentOrg.logo && (
+            {canUpdateOrg && (
+              <div className="flex flex-wrap gap-2">
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                  className="sr-only"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (!file || !orgId) return;
+                    setProcessingLogo(true);
+                    try {
+                      const logo = await normalizeOrganizationLogo(file);
+                      updateNameMutation.mutate({
+                        params: { path: { orgId } },
+                        body: { logo },
+                      });
+                    } catch {
+                      toast.error(t("orgSettings.logoError"));
+                    } finally {
+                      setProcessingLogo(false);
+                    }
+                  }}
+                />
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  disabled={!canUpdateOrg || updateNameMutation.isPending || processingLogo}
-                  onClick={() => {
-                    if (!orgId) return;
-                    updateNameMutation.mutate({
-                      params: { path: { orgId } },
-                      body: { logo: null },
-                    });
-                  }}
+                  disabled={updateNameMutation.isPending || processingLogo}
+                  onClick={() => logoInputRef.current?.click()}
                 >
-                  <Trash2 />
-                  {t("orgSettings.logoRemove")}
+                  <Upload />
+                  {t("orgSettings.logoUpload")}
                 </Button>
-              )}
-            </div>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={updateNameMutation.isPending || processingLogo}
+                    >
+                      <Smile />
+                      {t("orgSettings.logoEmoji")}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-auto p-2">
+                    <div className="grid grid-cols-4 gap-1">
+                      {ORGANIZATION_EMOJIS.map((emoji) => (
+                        <Button
+                          key={emoji}
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="text-lg"
+                          aria-label={t("orgSettings.logoUseEmoji", { emoji })}
+                          onClick={() => {
+                            if (!orgId) return;
+                            updateNameMutation.mutate({
+                              params: { path: { orgId } },
+                              body: { logo: `emoji:${emoji}` },
+                            });
+                          }}
+                        >
+                          {emoji}
+                        </Button>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                {currentOrg.logo && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={updateNameMutation.isPending || processingLogo}
+                    onClick={() => {
+                      if (!orgId) return;
+                      updateNameMutation.mutate({
+                        params: { path: { orgId } },
+                        body: { logo: null },
+                      });
+                    }}
+                  >
+                    <Trash2 />
+                    {t("orgSettings.logoRemove")}
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </SettingRow>
         <SettingRow
@@ -269,15 +274,19 @@ export function OrgSettingsGeneralPage() {
           description={currentOrg.slug}
           status={writeFeedback(updateNameMutation, "name")}
         >
-          <InlineTextSetting
-            value={currentOrg.name}
-            disabled={!canUpdateOrg || updateNameMutation.isPending}
-            aria-label={t("orgSettings.nameLabel")}
-            onCommit={(name) => {
-              if (!orgId) return;
-              updateNameMutation.mutate({ params: { path: { orgId } }, body: { name } });
-            }}
-          />
+          {canUpdateOrg ? (
+            <InlineTextSetting
+              value={currentOrg.name}
+              disabled={updateNameMutation.isPending}
+              aria-label={t("orgSettings.nameLabel")}
+              onCommit={(name) => {
+                if (!orgId) return;
+                updateNameMutation.mutate({ params: { path: { orgId } }, body: { name } });
+              }}
+            />
+          ) : (
+            <span className="text-sm">{currentOrg.name}</span>
+          )}
         </SettingRow>
       </SettingsGroup>
 
@@ -337,34 +346,38 @@ export function OrgSettingsGeneralPage() {
           Activer/Désactiver button. Collaborator SSO lives on its own page
           (`oauth.tsx`) and the MCP endpoint under Préférences; repeating them
           here would be a second place to change one setting. */}
-      <SettingsGroup title={t("orgSettings.distributionTitle")}>
-        <SettingRow
-          variant="toggle"
-          label={
-            <Label htmlFor="restrict-package-copy" className="cursor-pointer">
-              {t("orgSettings.restrictCopyTitle")}
-            </Label>
-          }
-          description={t("orgSettings.restrictCopyDesc")}
-          status={writeFeedback(updateSettingsMutation, "restrict_package_copy")}
-        >
-          <Switch
-            id="restrict-package-copy"
-            checked={orgSettings?.restrict_package_copy ?? false}
-            disabled={!can("org:settings") || updateSettingsMutation.isPending}
-            onCheckedChange={(checked) =>
-              updateSettingsMutation.mutate({
-                params: { path: { orgId: currentOrg.id } },
-                body: { restrict_package_copy: checked === true },
-              })
-            }
-          />
-        </SettingRow>
-      </SettingsGroup>
+      {canSettings && (
+        <>
+          <SettingsGroup title={t("orgSettings.distributionTitle")}>
+            <SettingRow
+              variant="toggle"
+              label={
+                <Label htmlFor="restrict-package-copy" className="cursor-pointer">
+                  {t("orgSettings.restrictCopyTitle")}
+                </Label>
+              }
+              description={t("orgSettings.restrictCopyDesc")}
+              status={writeFeedback(updateSettingsMutation, "restrict_package_copy")}
+            >
+              <Switch
+                id="restrict-package-copy"
+                checked={orgSettings?.restrict_package_copy ?? false}
+                disabled={updateSettingsMutation.isPending}
+                onCheckedChange={(checked) =>
+                  updateSettingsMutation.mutate({
+                    params: { path: { orgId: currentOrg.id } },
+                    body: { restrict_package_copy: checked === true },
+                  })
+                }
+              />
+            </SettingRow>
+          </SettingsGroup>
 
-      <SettingsGroup title={t("models.tabTitle")}>
-        <PersonalCredentialsSetting />
-      </SettingsGroup>
+          <SettingsGroup title={t("models.tabTitle")}>
+            <PersonalCredentialsSetting />
+          </SettingsGroup>
+        </>
+      )}
 
       {/* Same danger zone as the workspace's: a settings group whose rows hold
           a button that opens a confirm. Leaving is offered to every member —

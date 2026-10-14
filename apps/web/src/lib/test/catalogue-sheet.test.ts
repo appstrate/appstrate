@@ -39,7 +39,7 @@ describe("sheetSpaceRows", () => {
       placement({
         activeIn: ["spc_a"],
         offeredIn: ["spc_b"],
-        offeredBy: { spc_b: "Julie Ferrand" },
+        offeredBy: { spc_b: "Bob Martin" },
         homeSpaceId: "spc_a",
       }),
       spaces,
@@ -59,7 +59,7 @@ describe("sheetSpaceRows", () => {
         name: "Bac à sable",
         state: "offered",
         home: false,
-        offeredBy: "Julie Ferrand",
+        offeredBy: "Bob Martin",
         mayToggle: true,
       },
     ]);

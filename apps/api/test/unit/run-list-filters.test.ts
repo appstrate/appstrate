@@ -42,4 +42,12 @@ describe("run list filters", () => {
       expect(query.sql).toContain('"run_number"');
     }
   });
+  it("matches no run number outside int4 or spelled other than as digits", () => {
+    for (const input of ["99999999999", "2147483648", "1e20", "1e3", "0x10", "0", "-5"]) {
+      const query = new PgDialect().sqlToQuery(runSearchCondition(input));
+      expect(query.sql).not.toContain('"run_number"');
+    }
+    const largest = new PgDialect().sqlToQuery(runSearchCondition("2147483647"));
+    expect(largest.params.at(-1)).toBe(2147483647);
+  });
 });

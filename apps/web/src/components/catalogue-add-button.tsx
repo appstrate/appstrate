@@ -14,7 +14,7 @@
  * already WAITS, adding takes it up — the activation right there is enough.
  * Anywhere else, adding makes the READER share it first, which their share
  * right in the package's home allows. So a space is marked "Partage en
- * attente", a STATE, and never "Partagé par Julie": an author read as the
+ * attente", a STATE, and never "Partagé par Alice": an author read as the
  * condition for adding, and the other spaces then looked forbidden.
  *
  * One space per click: a menu of checkboxes is heavier for a rare gesture, and

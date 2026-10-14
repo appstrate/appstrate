@@ -23,16 +23,20 @@ import { SettingsGroup, SettingRow } from "../../../components/settings/setting-
 import { InlineTextSetting } from "../../../components/settings/inline-text-setting";
 import { ApiError } from "../../../api/errors";
 import { toastError } from "../../../lib/mutation-error";
+import {
+  domainsChanged,
+  spaceUpdateBody,
+  visibilityChangeNeedsConfirmation,
+  type SpaceSettingChange,
+} from "../../../lib/space-update-body";
 
 type SpaceVisibility = components["schemas"]["SpaceObject"]["visibility"];
 
 export function OrgSettingsAppGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { can } = usePermissions();
   const spaceId = useCurrentSpaceId();
   const { data: application, isLoading, error } = useSpace(spaceId ?? "");
 
-  if (!can("org:read")) return null;
   if (!spaceId) return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState error={error} />;
@@ -68,12 +72,14 @@ function GeneralForm({
   const [editedVisibility, setEditedVisibility] = useState<SpaceVisibility | null>(null);
   const [editedDefaultRole, setEditedDefaultRole] = useState<SpaceRolePreset | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // A visibility leaving `open`, held until its consequence is confirmed.
+  const [pendingClose, setPendingClose] = useState<SpaceVisibility | null>(null);
   // The last write and how it went: each row reports its own field only.
   const [write, setWrite] = useState<{
-    field: "name" | "domains" | "visibility" | "defaultRole";
+    field: SpaceSettingChange["field"];
     state: "pending" | "success" | "error";
   } | null>(null);
-  const feedback = (field: "name" | "domains" | "visibility" | "defaultRole") => (
+  const feedback = (field: SpaceSettingChange["field"]) => (
     <SaveFeedback
       pending={write?.field === field && write.state === "pending"}
       success={write?.field === field && write.state === "success"}
@@ -100,28 +106,16 @@ function GeneralForm({
   // Each control commits on its own — "the control IS the setting". No Save
   // button under this form: in the settings surfaces a change is a change
   // without pressing something else.
-  const save = (
-    patch: {
-      name?: string;
-      domains?: string[];
-      visibility?: SpaceVisibility;
-      default_role?: SpaceRolePreset;
-    },
-    field: "name" | "domains" | "visibility" | "defaultRole",
-  ) => {
+  const save = (change: SpaceSettingChange, onSuccess?: () => void) => {
+    const { field } = change;
     setWrite({ field, state: "pending" });
     updateMutation.mutate(
+      { params: { path: { id: spaceId } }, body: spaceUpdateBody(change) },
       {
-        params: { path: { id: spaceId } },
-        body: {
-          name: (patch.name ?? application.name).trim(),
-          settings: { allowedRedirectDomains: patch.domains ?? activeDomains },
-          visibility: patch.visibility ?? activeVisibility,
-          default_role: patch.default_role ?? activeDefaultRole,
+        onSuccess: () => {
+          setWrite({ field, state: "success" });
+          onSuccess?.();
         },
-      },
-      {
-        onSuccess: () => setWrite({ field, state: "success" }),
         onError: (error) => {
           setWrite({ field, state: "error" });
           toastError(error);
@@ -132,20 +126,23 @@ function GeneralForm({
 
   const commitVisibility = (next: SpaceVisibility) => {
     setEditedVisibility(next);
-    save({ visibility: next }, "visibility");
+    save({ field: "visibility", value: next }, () => setPendingClose(null));
+  };
+
+  const chooseVisibility = (next: SpaceVisibility) => {
+    if (next === activeVisibility) return;
+    if (visibilityChangeNeedsConfirmation(activeVisibility, next)) setPendingClose(next);
+    else commitVisibility(next);
   };
 
   const commitDefaultRole = (next: SpaceRolePreset) => {
     setEditedDefaultRole(next);
-    save({ default_role: next }, "defaultRole");
+    save({ field: "defaultRole", value: next });
   };
 
   const commitDomains = (next: string[]) => {
-    // Empty rows are the residue of editing, not a value: a domain nobody typed
-    // has no business being sent, and an empty string is not one.
-    const cleaned = next.map((d) => d.trim()).filter(Boolean);
     setEditedDomains(next);
-    save({ domains: cleaned }, "domains");
+    if (domainsChanged(domains, next)) save({ field: "domains", value: next });
   };
 
   return (
@@ -157,7 +154,7 @@ function GeneralForm({
             disabled={updateMutation.isPending}
             aria-label={t("applications.nameLabel")}
             placeholder={t("applications.namePlaceholder")}
-            onCommit={(name) => save({ name }, "name")}
+            onCommit={(name) => save({ field: "name", value: name })}
           />
         </SettingRow>
 
@@ -177,7 +174,6 @@ function GeneralForm({
                     <Input
                       type="text"
                       value={domain}
-                      disabled={updateMutation.isPending}
                       className="min-w-0 flex-1"
                       onChange={(e) =>
                         setEditedDomains((prev) =>
@@ -185,7 +181,9 @@ function GeneralForm({
                         )
                       }
                       // Commits when you leave the field, like every other setting
-                      // here; Enter is the same answer for a single-line input.
+                      // here; Enter is the same answer for a single-line input. The
+                      // row controls stay enabled during a write: disabling them on
+                      // the blur would swallow the click that caused it.
                       onBlur={() => commitDomains(activeDomains)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") e.currentTarget.blur();
@@ -196,7 +194,6 @@ function GeneralForm({
                       type="button"
                       variant="ghost"
                       size="icon"
-                      disabled={updateMutation.isPending}
                       aria-label={t("btn.delete", { ns: "common" })}
                       onClick={() => commitDomains(activeDomains.filter((_, i) => i !== index))}
                     >
@@ -210,7 +207,6 @@ function GeneralForm({
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={updateMutation.isPending}
                   className="self-start"
                   onClick={() => setEditedDomains([...(activeDomains ?? []), ""])}
                 >
@@ -232,7 +228,7 @@ function GeneralForm({
               <div className="flex w-full flex-col gap-3">
                 <RadioGroup
                   value={activeVisibility}
-                  onValueChange={(value) => commitVisibility(value as SpaceVisibility)}
+                  onValueChange={(value) => chooseVisibility(value as SpaceVisibility)}
                   disabled={application.isDefault || updateMutation.isPending}
                   aria-label={t("spaces.visibilityLabel")}
                 >
@@ -256,14 +252,6 @@ function GeneralForm({
                   ))}
                 </RadioGroup>
                 <p className="text-muted-foreground text-xs">{t("spaces.adminAccessHint")}</p>
-                {/* A pick commits at once, so the consequence of closing is said
-                while the space is still open: implicit members lose access and
-                the server unshares the connections they shared here. */}
-                {activeVisibility === "open" && !application.isDefault && (
-                  <p className="text-muted-foreground text-xs">
-                    {t("spaces.closeUnsharesConnections")}
-                  </p>
-                )}
                 {application.isDefault && (
                   <p className="text-muted-foreground text-xs">
                     {t("spaces.visibilityDefaultLocked")}
@@ -329,6 +317,16 @@ function GeneralForm({
           </SettingRow>
         </SettingsGroup>
       )}
+
+      <ConfirmModal
+        open={pendingClose !== null}
+        onClose={() => setPendingClose(null)}
+        title={t("spaces.closeConfirmTitle")}
+        confirmLabel={t("spaces.closeConfirm")}
+        description={t("spaces.closeUnsharesConnections")}
+        isPending={updateMutation.isPending}
+        onConfirm={() => pendingClose && commitVisibility(pendingClose)}
+      />
 
       <ConfirmModal
         open={confirmOpen}

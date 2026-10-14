@@ -78,9 +78,9 @@ export function OrgSettingsSpacesPage() {
 
   const columns = useSpaceColumns({
     defaultLabel: t("spaces.default"),
-    // Only an orphaned space offers them, and only to whoever may write spaces.
+    // Only an orphaned space offers them, each to the permission its route checks.
     onConvert: can("spaces:write") ? (id) => setPending({ id, action: "convert" }) : undefined,
-    onSweep: can("spaces:write") ? (id) => setPending({ id, action: "sweep" }) : undefined,
+    onSweep: can("spaces:delete") ? (id) => setPending({ id, action: "sweep" }) : undefined,
     actionsBusy: busy,
   });
 

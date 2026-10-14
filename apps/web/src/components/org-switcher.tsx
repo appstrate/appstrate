@@ -7,11 +7,9 @@
  * organisations, the right one the workspaces OF THE ONE BEING EXPLORED —
  * clicking an organisation opens its workspaces, it does not switch to it.
  *
- * That is not a nicety, it is what the context actually is: you are always in a
- * workspace, never in an organisation alone. A click that switched org on its
- * own had to invent a workspace to land you in (whichever `useAutoSelect`
- * picked), so half the choice was made for you and silently. Here the pick ends
- * on a workspace, always, and org + workspace are applied together.
+ * That is what the context is: you are always in a workspace, never in an
+ * organisation alone, so the pick ends on a workspace and org + workspace are
+ * applied together. Switching org alone would have to choose a workspace for you.
  *
  * The current context and the explored one are two different things and read
  * differently: the current organisation keeps the coral fill and the only gear,
@@ -27,6 +25,7 @@ import { $api } from "../api/client";
 import { useSpaces } from "../hooks/use-spaces";
 import { usePermissions } from "../hooks/use-permissions";
 import { spaceLabel } from "../lib/space-label";
+import { isUnder } from "../lib/route-access";
 import { isSpaceEnterable, useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { useCanCreateOrg } from "../hooks/use-auth";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
@@ -65,11 +64,7 @@ function ColumnHeader({
   );
 }
 
-export function OrgSwitcher({
-  variant = "chip",
-}: {
-  variant?: "chip" | "row" | "brand" | "mobile";
-}) {
+export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -141,8 +136,7 @@ export function OrgSwitcher({
     // so a context switch does not mistake settings for the page underneath.
     const visiblePathname = window.location.pathname;
     const settingsRoute =
-      visiblePathname.startsWith("/org-settings") ||
-      visiblePathname.startsWith("/workspace-settings");
+      isUnder(visiblePathname, "/org-settings") || isUnder(visiblePathname, "/workspace-settings");
     if (orgChanged && !settingsRoute) {
       navigate(location.pathname.startsWith("/chat") ? "/chat" : "/", { replace: true });
     }
@@ -160,12 +154,9 @@ export function OrgSwitcher({
       }}
     >
       <PopoverTrigger asChild>
-        {/* Two shapes, one control. `chip` sits in the header trail;
-            `row` sits in the sidebar, under the brand cell, at full width.
-            Deliberately NOT shaped like the trail segments next to it. A
-            breadcrumb segment means "go up a level" — cheap and reversible.
-            This one replaces the whole context. The coloured avatar and the
-            up/down chevron (never a right chevron) are what say so. */}
+        {/* Two shapes, one control: `brand` heads the sidebar, `mobile` the
+            phone header. It replaces the whole context, which the coloured
+            avatar and the up/down chevron (never a right chevron) say. */}
         {variant === "mobile" ? (
           <button
             type="button"
@@ -193,7 +184,7 @@ export function OrgSwitcher({
             </span>
             <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
           </button>
-        ) : variant === "brand" ? (
+        ) : (
           /* The head of the column: whose data you are in, wearing its own
              avatar — the workspace you are looking at names itself, the way
              Notion puts the workspace logo where a product logo would go. Flat:
@@ -225,67 +216,11 @@ export function OrgSwitcher({
             </span>
             <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
           </button>
-        ) : variant === "row" ? (
-          /* A white card on the sidebar's grey, not a nav row: it is the
-             context the navigation applies to, not a place the navigation can
-             take you. One line, org then workspace, the same reading order as
-             the trail it replaces. */
-          <button
-            type="button"
-            data-testid="org-switcher-button"
-            aria-label={t("switcher.orgAriaLabel")}
-            className="bg-card hover:bg-accent data-[state=open]:bg-accent flex h-10 w-full items-center gap-2 rounded-lg border px-2 text-sm shadow-sm transition-colors"
-          >
-            <OrganizationAvatar
-              name={currentOrg.name}
-              logo={currentOrg.logo}
-              className="size-6 shrink-0 rounded-md text-[0.7rem]"
-            />
-            <span className="min-w-0 flex-1 truncate text-left">
-              <span className="font-semibold">{currentOrg.name}</span>
-              {/* The workspace stays visible even when there is only one: a
-                  level nobody ever sees is a level nobody learns. */}
-              {currentSpace && (
-                <>
-                  <span className="text-border mx-1.5" aria-hidden>
-                    |
-                  </span>
-                  <span className="text-muted-foreground">{spaceLabel(currentSpace, t)}</span>
-                </>
-              )}
-            </span>
-            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            data-testid="org-switcher-button"
-            aria-label={t("switcher.orgAriaLabel")}
-            className="hover:bg-accent data-[state=open]:bg-accent flex min-w-0 shrink items-center gap-1.5 rounded-md py-1 pr-1.5 pl-1 text-sm transition-colors"
-          >
-            <OrganizationAvatar
-              name={currentOrg.name}
-              logo={currentOrg.logo}
-              className="size-5 rounded-[5px] text-[0.65rem]"
-            />
-            <span className="truncate font-semibold">{currentOrg.name}</span>
-            {currentSpace && (
-              <>
-                {/* The workspace stays visible even when there is only one: a
-                    level nobody ever sees is a level nobody learns. */}
-                <span className="text-border" aria-hidden>
-                  |
-                </span>
-                <span className="truncate font-semibold">{spaceLabel(currentSpace, t)}</span>
-              </>
-            )}
-            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
-          </button>
         )}
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        side={variant === "chip" || mobilePresentation ? "bottom" : "right"}
+        side={mobilePresentation ? "bottom" : "right"}
         sideOffset={variant === "mobile" ? 47 : 6}
         className={cn(
           "w-[540px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0",

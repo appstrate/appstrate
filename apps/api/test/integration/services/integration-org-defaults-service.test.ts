@@ -26,7 +26,6 @@ import {
   deleteOrgDefault,
 } from "../../../src/services/integration-org-defaults-service.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
-import { isUserConnectionCreationBlocked } from "../../../src/services/integration-connection-resolver.ts";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -120,7 +119,6 @@ describe("integration-org-defaults-service", () => {
     expect(previous).toBeNull();
     expect(created.connection_ids).toEqual([connId]);
     expect(created.enforce).toBe(true);
-    expect(await isUserConnectionCreationBlocked(ctx.defaultSpaceId, INTEGRATION_ID)).toBe(true);
 
     // get
     const fetched = await getOrgDefault(scope, INTEGRATION_ID);
@@ -136,7 +134,6 @@ describe("integration-org-defaults-service", () => {
     const del = await deleteOrgDefault(scope, INTEGRATION_ID);
     expect(del.previous).toMatchObject({ connection_ids: [connId], enforce: true });
     expect(await getOrgDefault(scope, INTEGRATION_ID)).toBeNull();
-    expect(await isUserConnectionCreationBlocked(ctx.defaultSpaceId, INTEGRATION_ID)).toBe(false);
 
     // delete is idempotent — second delete reports nothing removed.
     const del2 = await deleteOrgDefault(scope, INTEGRATION_ID);

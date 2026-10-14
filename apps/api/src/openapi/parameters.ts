@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
+import { runStatusValues } from "@appstrate/core/run-status";
+
+const RUN_STATUS = `(${runStatusValues.join("|")})`;
 
 /**
  * Reusable OpenAPI parameter definitions.
@@ -13,6 +16,25 @@ export const parameters = {
     description:
       "Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`).",
     schema: { type: "integer", minimum: 0, default: 0 },
+  },
+  RunStatusFilter: {
+    name: "status",
+    in: "query" as const,
+    required: false,
+    description: `Filter runs by lifecycle status: one of ${runStatusValues.map((s) => `\`${s}\``).join(", ")}, or several separated by commas (\`failed,timeout\` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with \`400\` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.`,
+    schema: {
+      type: "string",
+      pattern: `^(${RUN_STATUS}(,${RUN_STATUS})*)?$`,
+      example: "failed,timeout",
+    },
+  },
+  RunSearch: {
+    name: "q",
+    in: "query" as const,
+    required: false,
+    description:
+      "Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`.",
+    schema: { type: "string", maxLength: 200 },
   },
   IfMatch: {
     name: "If-Match",

@@ -84,7 +84,7 @@ function renderHealth(diagnostics: object): string {
     $api.queryOptions("get", "/api/agents/{scope}/{name}/diagnostics", {
       params: {
         path: { scope: "@acme", name: "worker" },
-        header: { "X-Org-Id": ORG_ID, "X-Application-Id": SPACE_ID },
+        header: { "X-Org-Id": ORG_ID, "X-Space-Id": SPACE_ID },
       },
     }).queryKey,
     diagnostics,
@@ -125,7 +125,7 @@ describe("the agent's overview when its model is no longer accessible", () => {
           correction: {
             destination: "configuration",
             section: "model",
-            params: { defaultModel: "Mistral Medium" },
+            params: { default_model: "Mistral Medium" },
           },
           recoverable_on_launch: false,
         },

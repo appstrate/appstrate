@@ -136,7 +136,7 @@ describe("listGlobalRuns", () => {
 
     const result = await listGlobalRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-      { status: "failed" },
+      { status: ["failed"] },
     );
     expect(result.total).toBe(1);
     expect(result.data[0]?.status).toBe("failed");

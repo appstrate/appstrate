@@ -44,6 +44,7 @@ export function EndUsersPage() {
 function EndUsersPageContent() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
+  const canWrite = can("end-users:write");
   const spaceId = useCurrentSpaceId();
   const location = useLocation();
   const navigate = useNavigate();
@@ -140,19 +141,21 @@ function EndUsersPageContent() {
   const visibility = useColumnVisibility("end-users");
   const columns = visibleColumns(allColumns, visibility.hidden);
 
-  if (!can("end-users:write")) return null;
   if (!spaceId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
 
+  // Reading is the route's gate (`end-users:read`); every deed is `end-users:write`.
   return (
     <div>
-      <SettingsPageActions>
-        <PageActionsMenu>
-          <DropdownMenuItem data-page-action="create" onSelect={() => newEndUser.open()}>
-            <Plus />
-            {t("applications.newEndUser")}
-          </DropdownMenuItem>
-        </PageActionsMenu>
-      </SettingsPageActions>
+      {canWrite && (
+        <SettingsPageActions>
+          <PageActionsMenu>
+            <DropdownMenuItem data-page-action="create" onSelect={() => newEndUser.open()}>
+              <Plus />
+              {t("applications.newEndUser")}
+            </DropdownMenuItem>
+          </PageActionsMenu>
+        </SettingsPageActions>
+      )}
 
       <ListToolbar
         search={{
@@ -189,10 +192,12 @@ function EndUsersPageContent() {
               icon={Users}
               compact
             >
-              <EmptyStateAction
-                label={t("applications.newEndUser")}
-                onClick={() => newEndUser.open()}
-              />
+              {canWrite && (
+                <EmptyStateAction
+                  label={t("applications.newEndUser")}
+                  onClick={() => newEndUser.open()}
+                />
+              )}
             </EmptyState>
           )
         }
@@ -214,7 +219,7 @@ function EndUsersPageContent() {
         </Button>
       )}
 
-      {newEndUser.value !== null && <EndUserCreateModal onClose={newEndUser.close} />}
+      {canWrite && newEndUser.value !== null && <EndUserCreateModal onClose={newEndUser.close} />}
 
       {selectedUserId && selectedUser && (
         <EndUserDetailModal
@@ -222,7 +227,7 @@ function EndUsersPageContent() {
           open
           onClose={closeUser}
           endUser={selectedUser}
-          initialEditing={editSelectedUser}
+          initialEditing={canWrite && editSelectedUser}
           onEditingChange={(editing) => setEditMode(selectedUserId, editing)}
           onDeleted={hideDeletedUser}
         />

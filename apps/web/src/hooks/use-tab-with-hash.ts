@@ -15,9 +15,8 @@ export function useTabWithHash<T extends string>(
 
   // `search` is passed explicitly: a partial path descriptor goes through
   // react-router's `resolvePath`, which defaults every omitted field to `""`,
-  // so a bare `{ hash }` silently DROPS the query string. The run-detail route
-  // carries none today, but this hook has seven call sites and the retired-hash
-  // rewrite now fires automatically on load rather than only on a tab click.
+  // so a bare `{ hash }` silently DROPS the query string, and with it any
+  // modal or section the page keeps there.
   const search = location.search;
   const setActiveTab = useCallback(
     (tab: T) => {

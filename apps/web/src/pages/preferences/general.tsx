@@ -11,6 +11,8 @@ import { CheckCircle2, AlertCircle } from "lucide-react";
 import { SaveFeedback } from "../../components/settings/save-feedback";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
+import { Input } from "@appstrate/ui/components/input";
+import { Button } from "@appstrate/ui/components/button";
 import { toast } from "sonner";
 import { toastError } from "../../lib/mutation-error";
 
@@ -64,11 +66,66 @@ function EmailVerificationBadge() {
   );
 }
 
+const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * The account's address and the field to change it. The login address changes only on the
+ * explicit button, never on blur: without SMTP the change applies at once.
+ */
+export function EmailChangeField({
+  email,
+  draft,
+  pending,
+  onDraftChange,
+  onSubmit,
+}: {
+  email: string;
+  /** What is typed, `null` while the field shows the current address. */
+  draft: string | null;
+  pending: boolean;
+  onDraftChange: (next: string) => void;
+  onSubmit: (next: string) => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  const next = (draft ?? email).trim();
+  const dirty = next !== "" && next !== email;
+  const invalid = dirty && !EMAIL_FORMAT.test(next);
+
+  return (
+    <div className="w-full space-y-1.5">
+      <form
+        className="flex w-full items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (dirty && !invalid) onSubmit(next);
+        }}
+      >
+        <Input
+          type="email"
+          value={draft ?? email}
+          disabled={pending}
+          aria-label={t("preferences.email")}
+          aria-invalid={invalid}
+          onChange={(e) => onDraftChange(e.target.value)}
+        />
+        <Button type="submit" disabled={!dirty || invalid || pending}>
+          {t("preferences.changeEmail")}
+        </Button>
+      </form>
+      {invalid && (
+        <p role="alert" className="text-destructive text-xs">
+          {t("common:validation.emailFormat")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function EmailRow() {
   const { t } = useTranslation(["settings", "common"]);
   const { user, changeEmail } = useAuth();
   const [isChanging, setIsChanging] = useState(false);
-  const [resetVersion, setResetVersion] = useState(0);
+  const [draft, setDraft] = useState<string | null>(null);
   const [changedHere, setChangedHere] = useState(false);
   const { search } = useLocation();
   const email = user?.email ?? "";
@@ -76,10 +133,6 @@ function EmailRow() {
   const landing = user && !changedHere ? emailChangeLanding(search) : null;
 
   const change = async (next: string) => {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next)) {
-      setResetVersion((version) => version + 1);
-      return;
-    }
     setChangedHere(true);
     setIsChanging(true);
     try {
@@ -97,8 +150,7 @@ function EmailRow() {
         toast.success(t("preferences.emailChanged"));
       }
       // SMTP keeps the account's current address until the change is approved.
-      // Remount the uncontrolled field so it tells that truth after success.
-      setResetVersion((version) => version + 1);
+      setDraft(null);
     } catch (err) {
       if (err instanceof EmailChangeError) {
         toast.error(t("preferences.emailConflict"));
@@ -136,13 +188,12 @@ function EmailRow() {
       }
       status={<SaveFeedback pending={isChanging} success={false} error={false} />}
     >
-      <InlineTextSetting
-        key={resetVersion}
-        type="email"
-        value={email}
-        disabled={isChanging}
-        aria-label={t("preferences.email")}
-        onCommit={(next) => void change(next)}
+      <EmailChangeField
+        email={email}
+        draft={draft}
+        pending={isChanging}
+        onDraftChange={setDraft}
+        onSubmit={(next) => void change(next)}
       />
     </SettingRow>
   );

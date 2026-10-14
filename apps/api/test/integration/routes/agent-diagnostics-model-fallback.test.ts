@@ -4,7 +4,9 @@
  * The agent's diagnostics warn BEFORE a run that the model set for the agent
  * is no longer usable and that the organisation default will serve. They share
  * the launch's cascade (`resolveModelCascade`), so the run that follows records
- * the matching `model_fallback` marker (`run-model-fallback-marker.test.ts`).
+ * the matching `model_fallback` marker (`run-model-fallback-marker.test.ts`),
+ * and the launch's credential test, so a model no credential serves blocks here
+ * as the launch refuses it.
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
@@ -12,7 +14,7 @@ import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { runLogs } from "@appstrate/db/schema";
+import { orgModels, runLogs } from "@appstrate/db/schema";
 import {
   createFakeOrchestrator,
   waitForRunPipelineSettled,
@@ -131,7 +133,7 @@ describe("GET /api/agents/:scope/:name/diagnostics — pinned model unavailable"
       correction: {
         destination: "configuration",
         section: "model",
-        params: { defaultModel: DEFAULT_LABEL },
+        params: { default_model: DEFAULT_LABEL },
       },
     });
 
@@ -153,5 +155,67 @@ describe("GET /api/agents/:scope/:name/diagnostics — pinned model unavailable"
 
     const body = await getDiagnostics();
     expect(body.status).toBe("healthy");
+  });
+});
+
+describe("GET /api/agents/:scope/:name/diagnostics — model no credential serves", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "modelcred" });
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: { name: AGENT, version: "0.1.0", type: "agent" },
+      draftContent: "Do the thing.",
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    // An organization model bound to no credential: each payer brings their own.
+    const [row] = await db
+      .insert(orgModels)
+      .values({
+        orgId: ctx.orgId,
+        label: "Shared GPT",
+        modelId: "gpt-5.5",
+        providerId: "openai",
+        credentialId: null,
+        aliased: false,
+        source: "custom",
+        createdBy: ctx.user.id,
+      })
+      .returning({ id: orgModels.id });
+    await setDefaultModel(ctx.orgId, row!.id);
+  });
+
+  it("blocks with the launch's refusal when the payer holds no credential for it", async () => {
+    const res = await app.request(`/api/agents/${AGENT}/diagnostics`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiagnosticsBody;
+    expect(body.status).toBe("blocking");
+    expect(body.can_launch).toBe(false);
+    expect(body.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "model_credential_required",
+        severity: "blocking",
+        correction: {
+          destination: "configuration",
+          section: "model",
+          params: { model: "Shared GPT" },
+        },
+      }),
+    ]);
+
+    const launch = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ input: {} }),
+    });
+    expect(launch.status).toBe(409);
+    expect(((await launch.json()) as { code: string }).code).toBe("model_credential_required");
   });
 });

@@ -107,7 +107,7 @@ const SETS = {
       // The organisation view, the wider of the two: provenance, then one
       // column per space the caller reaches — three here, which is what the
       // arithmetic below has to hold.
-      useCatalogueOriginColumn("Tractr"),
+      useCatalogueOriginColumn("Globex"),
       ...useCatalogueSpaceColumns({
         spaces: [
           { id: "spc_a", name: "Default" },

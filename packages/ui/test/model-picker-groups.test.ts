@@ -20,7 +20,7 @@ const model = (over: Partial<PickerModel> & { id: string }): PickerModel => ({
 
 const orgKey: PickerCredential = {
   id: "cred_org",
-  label: "Mistral (Olivier)",
+  label: "Mistral (Alice)",
   owner: "org",
   subscription: false,
   modelIds: [],
@@ -63,7 +63,7 @@ describe("groupModelsForPicker", () => {
       credentials: [orgKey, myKey],
     });
     expect(groups.map((g) => [g.kind, g.name])).toEqual([
-      ["org", "Mistral (Olivier)"],
+      ["org", "Mistral (Alice)"],
       ["personal", "Ma clé perso"],
       ["system", null],
     ]);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { Globe, Plus } from "lucide-react";
@@ -31,6 +31,7 @@ import { openAsModal } from "../../lib/modal-route";
 import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveInputSettings } from "../../hooks/use-mutations";
+import { useSaveAfterPause } from "../../hooks/use-save-after-pause";
 import { authorDefaults, getOrderedKeys, type SchemaWrapper } from "@appstrate/core/form";
 import { formatInputValue, hasInputFields } from "../../lib/agent-input";
 import {
@@ -86,14 +87,13 @@ function InputSettingsSection({
   const [locked, setLocked] = useState<string[]>(initialLocked);
   const [hasEdited, setHasEdited] = useState(false);
 
-  useEffect(() => {
-    if (!hasEdited || isHistorical) return;
-    const timeout = window.setTimeout(() => {
-      setHasEdited(false);
-      mutation.mutate({ values, locked_fields: locked });
-    }, 650);
-    return () => window.clearTimeout(timeout);
-  }, [hasEdited, isHistorical, mutation, values, locked]);
+  const settings = useMemo(() => ({ values, locked_fields: locked }), [values, locked]);
+  useSaveAfterPause(
+    settings,
+    hasEdited && !isHistorical,
+    (next) => mutation.mutate(next),
+    () => setHasEdited(false),
+  );
 
   const defaults = authorDefaults(wrapper.schema);
   const keys = getOrderedKeys(wrapper.schema, wrapper.property_order);

@@ -3,8 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { $api, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
-import { useCurrentSpaceId } from "./use-current-space";
-import { useCurrentOrgId } from "./use-org";
+import { useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 
 export type AgentDiagnostics =
@@ -12,8 +11,7 @@ export type AgentDiagnostics =
 export type AgentDiagnostic = AgentDiagnostics["diagnostics"][number];
 
 export function useAgentDiagnostics(agentPackageId: string | undefined, version?: string) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const scope = useOrgScope();
   // The diagnostics describe what the agent is made of: `agents:read`, like the
   // route. A runner without it launches, and the kickoff's own check recovers.
   const canRead = usePermissions().can("agents:read");
@@ -27,13 +25,10 @@ export function useAgentDiagnostics(agentPackageId: string | undefined, version?
         params: {
           path,
           ...(version ? { query: { version } } : {}),
-          header: {
-            "X-Org-Id": orgId ?? undefined,
-            "X-Application-Id": spaceId ?? undefined,
-          },
+          header: scope.header,
         },
       },
-      { enabled: Boolean(canRead && orgId && spaceId && agentPackageId) },
+      { enabled: canRead && scope.enabled && Boolean(agentPackageId) },
     ),
   );
 }

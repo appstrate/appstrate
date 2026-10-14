@@ -26,10 +26,12 @@ export function useEndUserColumns({
 }): DataColumn<EndUserInfo>[] {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
-  // An operator may edit an end-user but not delete one: the deed is not offered.
+  // Each deed is offered to whoever the route grants it (PATCH `end-users:write`,
+  // DELETE `end-users:delete`); a row with neither has no actions column.
+  const canEdit = can("end-users:write");
   const canDelete = can("end-users:delete");
 
-  return [
+  const columns: DataColumn<EndUserInfo>[] = [
     {
       id: "name",
       header: t("applications.endUserName"),
@@ -75,6 +77,10 @@ export function useEndUserColumns({
         </span>
       ),
     },
+  ];
+  if (!canEdit && !canDelete) return columns;
+  return [
+    ...columns,
     {
       id: "actions",
       header: "",
@@ -88,11 +94,13 @@ export function useEndUserColumns({
           isPending={deletingUserId === user.id}
           pendingLabel={t("common:loading")}
         >
-          <DropdownMenuItem onSelect={() => onEdit(user)}>
-            <Pencil />
-            {t("common:btn.edit")}
-          </DropdownMenuItem>
-          {canDelete && <DropdownMenuSeparator />}
+          {canEdit && (
+            <DropdownMenuItem onSelect={() => onEdit(user)}>
+              <Pencil />
+              {t("common:btn.edit")}
+            </DropdownMenuItem>
+          )}
+          {canEdit && canDelete && <DropdownMenuSeparator />}
           {canDelete && (
             <DropdownMenuItem
               onSelect={() => onDelete(user)}

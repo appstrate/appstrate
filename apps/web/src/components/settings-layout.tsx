@@ -10,7 +10,7 @@
  * to keep looking like the first.
  *
  * Every group carries its label, including a surface that has only one. The
- * label states the KIND where the head only gives the NAME — "Tractr" alone
+ * label states the KIND where the head only gives the NAME — "Acme" alone
  * does not say it is an organisation — and it keeps the three surfaces built
  * the same way, which matters more than sparing one line inside any one of
  * them.

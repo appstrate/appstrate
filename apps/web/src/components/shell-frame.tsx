@@ -25,6 +25,7 @@ import { openAsModal } from "@/lib/modal-route";
 import { useCatalogueKinds } from "@/hooks/use-catalogue-kinds";
 import { usePendingOfferCount, usePendingSharesHref } from "@/hooks/use-pending-offers";
 import { catalogueHref } from "@/lib/catalogue-link";
+import { isUnder } from "@/lib/route-access";
 import { useSettingsSections } from "@/pages/settings/use-settings-sections";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -57,14 +58,14 @@ export function ShellSidebar({
   const catalogueKinds = useCatalogueKinds();
   const pendingOffers = usePendingOfferCount();
   const pendingHref = usePendingSharesHref();
-  // The page route tree deliberately renders the modal's background location.
-  // The address bar is therefore the source of truth for this one global
-  // destination while settings are open.
-  const settingsActive =
-    window.location.pathname.startsWith("/org-settings") ||
-    window.location.pathname.startsWith("/workspace-settings") ||
-    window.location.pathname.startsWith("/preferences");
-  const catalogueActive = window.location.pathname.startsWith("/catalogue");
+  // Under a routed modal the page tree renders the modal's background
+  // location, so `useLocation` answers the screen behind it: the address bar
+  // says whether settings or the catalogue is open.
+  const path = window.location.pathname;
+  const settingsActive = ["/org-settings", "/workspace-settings", "/preferences"].some((prefix) =>
+    isUnder(path, prefix),
+  );
+  const catalogueActive = isUnder(path, "/catalogue");
 
   return (
     <Sidebar>
