@@ -141,7 +141,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   a slider after a 650 ms pause. A rename in a table is `InlineEditableLabel`
   (`components/inline-editable-label.tsx`), the one rename affordance, and it is
   **opened by the row's menu only**: a click on the name does nothing and no pencil
-  appears on hover (both were noise next to the « … »). The row's « Edit » never
+  appears on hover (both are noise next to the « … »). The row's « Edit » never
   renames, it edits what the name does not (a provider's key), in a modal with no
   name field; « Rename » is its own menu entry that puts the name in edit. A name
   outside a table (a page title) is renamed in its own settings, as a text

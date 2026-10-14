@@ -10,7 +10,7 @@
  * — the org-level `spaces:read` the route merely mounts behind — pointed the one
  * preset that can act on NOTHING in that library at a page that is empty for it
  * by design: `runner` holds `agents:run` and `spaces:read` but no `agents:read`,
- * so `/space/packages` answers 200 with an empty list rather than a 403.
+ * so `/catalogue/placed/agent` answers 200 with an empty list rather than a 403.
  *
  * `runner` is also what makes the pair below discriminating rather than
  * decorative: the SAME caller holds `integrations:read` and not `agents:read`
@@ -133,7 +133,7 @@ describe("SpaceLibraryHint", () => {
   });
 
   it("does not answer the question the route was mounted behind", () => {
-    // `spaces:read` is what reaches `/space/packages`, and it is NOT what fills
+    // `spaces:read` is what reaches `/catalogue/placed/:type`, and it is NOT what fills
     // it. A gate that regressed to reachability renders on this fixture.
     expect(hintFor(["spaces:read"], "agent")).toBe("");
     expect(hintFor(["spaces:read"], "integration")).toBe("");

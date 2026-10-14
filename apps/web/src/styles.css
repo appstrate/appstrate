@@ -48,15 +48,15 @@
   --color-sidebar: var(--sidebar);
   /* Page canvas — the grey the whole chrome sits on. Distinct from
      `--background`, which stays white: that one is the COMPONENT surface
-     (dialogs, popovers, outline buttons, the active tab pill), and the
-     redesign keeps those white on top of the grey. */
+     (dialogs, popovers, outline buttons, the active tab pill), and those stay
+     white on top of the grey. */
   --color-canvas: var(--canvas);
   /* The coral of the Appstrate lightning bolt. Chrome accent only — the
      notification count and the profile avatar — never a primary action, which
      is what the blue means. */
   --color-spark: var(--spark);
   --color-spark-foreground: var(--spark-foreground);
-  /* Soft tints — the redesign's `--accent-soft` / `--spark-soft`. Selection
+  /* Soft tints of the brand blue and the spark. Selection
      fills in the switcher, where two dimensions are picked side by side and
      need to be told apart at a glance. */
   --color-primary-soft: var(--primary-soft);
@@ -73,15 +73,15 @@
   --color-avatar-6: var(--avatar-6);
   --color-avatar-7: var(--avatar-7);
   --color-avatar-8: var(--avatar-8);
-  /* Page frame — the redesign's `--droit-gutter` and its 1300px column. The
+  /* Page frame — a fluid gutter and a 1300px column. The
      header shares the gutter and not the column: it runs edge to edge, so its
      trail lines up with the content's left edge until the page is wider than
      the column. */
   --spacing-gutter: clamp(1.25rem, 3vw, 2.75rem);
   --container-page: 1300px;
-  /* The redesign's `--topnav-h`. A constant: surfaces that own their own
-     height subtract it, so a header that shrank on sidebar collapse left them
-     overflowing by 8px. */
+  /* The header's height. A constant: surfaces that own their own height
+     subtract it, so a header that changed height on sidebar collapse would
+     leave them overflowing. */
   --spacing-header: 3.5rem;
 }
 
@@ -101,14 +101,14 @@
 }
 
 :root {
-  /* Palette from the UX/UI redesign, converted hex → oklch. Two systematic
-     shifts against the stock shadcn neutrals it replaces: every grey now
-     carries a slight violet cast (hue ~286 instead of chroma 0), and the
-     brand blue is the design's #2F6FED rather than the shadcn default. The
-     redesign's own names map onto the shadcn semantics, they are not the
-     same words: its `--accent` is the BRAND blue and lands on `--primary`,
-     while shadcn's `--accent` is the subtle hover surface and takes the
-     redesign's `--bg-alt`. */
+  /* Palette from the design reference, converted hex → oklch. Two systematic
+     shifts against the stock shadcn neutrals: every grey carries a slight
+     violet cast (hue ~286 instead of chroma 0), and the brand blue is the
+     design's #2F6FED rather than the shadcn default. The reference's own
+     names map onto the shadcn semantics, they are not the same words: its
+     `--accent` is the BRAND blue and lands on `--primary`, while shadcn's
+     `--accent` is the subtle hover surface and takes the reference's
+     `--bg-alt`. */
   --background: oklch(1 0 0); /* #FFFFFF */
   --foreground: oklch(0.21 0.006 285.9); /* #18181B */
   --card: oklch(1 0 0);
@@ -145,9 +145,9 @@
   --avatar-8: oklch(0.646 0.222 41);
   --sidebar: oklch(0.985 0 0); /* #FAFAFA — merges with the canvas, split only by its border */
   --sidebar-foreground: oklch(0.21 0.006 285.9);
-  /* Stays near-black, not the brand blue: the redesign gives org avatars a
-     per-org colour set inline, so it takes no position here — and a blue
-     avatar competes with the one blue that means "primary action". */
+  /* Stays near-black, not the brand blue: the design reference gives org
+     avatars a per-org colour set inline, so it takes no position here — and a
+     blue avatar competes with the one blue that means "primary action". */
   --sidebar-primary: oklch(0.21 0.006 285.9);
   --sidebar-primary-foreground: oklch(1 0 0);
   --sidebar-accent: oklch(0.929 0.005 286.3); /* hover/active nav surface */
@@ -157,12 +157,11 @@
 }
 
 .dark {
-  /* DERIVED, not ported: the redesign defines no dark palette (its styles.css
-     has a `:root` block and nothing else). Structure and lightness steps are
-     the ones that were already here; what changed is the same two shifts as
-     the light theme — the violet cast on the neutrals, and the brand blue,
-     lifted to oklch L .68 so it holds contrast on a dark surface. Revisit
-     once the redesign takes a position on dark mode. */
+  /* DERIVED, not ported: the design reference defines no dark palette (its
+     styles.css has a `:root` block and nothing else). Structure and lightness
+     steps are those of a neutral dark theme, with the same two shifts as the
+     light theme — the violet cast on the neutrals, and the brand blue, lifted
+     to oklch L .68 so it holds contrast on a dark surface. */
   --background: oklch(0.145 0.004 286);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.18 0.004 286);

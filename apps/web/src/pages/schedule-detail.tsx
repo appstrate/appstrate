@@ -99,7 +99,7 @@ export function ScheduleDetailPage() {
             <>
               <ScheduleStatusBadge schedule={schedule} />
               {/* A schedule running as ANOTHER member is an org owner/admin
-                  act (#1611): the page deed stays where it always is, disabled,
+                  act: the page deed stays where it always is, disabled,
                   and says why. */}
               {can("schedules:write") && !mayWrite && (
                 <DisabledReasonTooltip reason={t("schedule.memberGoverned")}>
@@ -361,7 +361,6 @@ function ScheduleHistory({
       toolbar={({ columns }) => (
         <ListToolbar
           placement="panel"
-          panelFiltersAdjacent
           columns={columns}
           search={{ value: search, onChange: setSearch, placeholder: t("detail.runsSearch") }}
           filters={[

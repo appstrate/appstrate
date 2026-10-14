@@ -5,9 +5,9 @@
  *
  * A tier is a promise: "once the table reaches 36rem, these columns fit". That
  * promise is arithmetic — the sum of the tier's floors plus its gaps and
- * padding — and nothing in the type system checks it. It went unchecked once,
- * and the result was eight columns crushed into 700px with the agent name, the
- * only thing naming a run, at 6px.
+ * padding — and nothing in the type system checks it. Unchecked, it lets eight
+ * columns crush into 700px with the agent name, the only thing naming a run,
+ * at 6px.
  *
  * So the arithmetic is done here, on the real sets, at the real thresholds.
  * A column set that no longer fits fails a test instead of a screen.
@@ -340,12 +340,10 @@ describe.each(Object.entries(SETS))("the %s column set", (name, load) => {
 
   /**
    * The narrowest container a table of this family is actually given, MEASURED
-   * (22 August) rather than assumed. It used to say 390 — the window — and that
-   * was 42px too generous, because the shell's gutter takes the difference: at
-   * a 390px window every table on a page is 348px wide, and one inside the
-   * settings dialog is 340. Three sets were living in that gap, and it was not
-   * theoretical — the packages table clipped 28px of its last column at 390,
-   * inside a frame that is `overflow-hidden`.
+   * rather than assumed. Not 390 — the window — because the shell's gutter
+   * takes the difference: at a 390px window every table on a page is 348px
+   * wide, and one inside the settings dialog is 340. A set that fits 390 but
+   * not 340 clips its last column inside a frame that is `overflow-hidden`.
    *
    * One number for both containers, the tighter of the two. A set that fits 340
    * is safe on a page and in the dialog, and nobody has to remember which is

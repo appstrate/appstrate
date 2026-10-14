@@ -80,12 +80,11 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
   const isLoading = pinnedQ.isLoading || memoriesQ.isLoading;
   const isError = pinnedQ.isError || memoriesQ.isError;
 
-  // Nothing in EITHER tier, and only once both requests have answered. This
-  // used to be the panel's single early return, taken on the counts alone: two
-  // queries that had failed both counted zero, so a 500 on the endpoint drew
-  // "no memory yet" — the collection lie this family exists to end. Failure and
-  // loading are now answered per section by `ItemList`, and this one keeps only
-  // what it was ever entitled to say.
+  // Nothing in EITHER tier, and only once both requests have answered. The
+  // counts alone are not enough: two queries that failed both count zero, and a
+  // 500 on the endpoint must not draw "no memory yet". Failure and loading are
+  // answered per section by `ItemList`; this return says only that both tiers
+  // are empty.
   if (isRunView && !isLoading && !isError && pinnedCount + memoriesCount === 0) {
     return (
       <EmptyState
@@ -293,7 +292,6 @@ function AgentMemoryCollection({
           placeholder: t("agents:detail.memorySearch"),
         }}
         filters={filters}
-        panelFiltersAdjacent
         onReset={() => {
           setTypes([]);
           setScopes([]);

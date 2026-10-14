@@ -13,8 +13,7 @@ import type { BadgeProps } from "@appstrate/ui/components/badge";
  *
  * Here rather than in one of its callers because both run surfaces render the
  * same three of them — the table and the strip under the run-detail header —
- * and they were splitting the same twenty-word class string between two files
- * the moment the list stopped being a row.
+ * and the same twenty-word class string has one home rather than two.
  */
 export function MetaBadge({
   label,

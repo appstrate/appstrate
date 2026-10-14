@@ -53,8 +53,8 @@ describe("resolveRunAgentName", () => {
   });
 
   it("never returns nothing — the row's accessible label is built from it", () => {
-    // Hiding the agent COLUMN used to blank the name too, which left every row
-    // in an agent's tab announcing "Run #42 —".
+    // Hiding the agent COLUMN must not blank the name too, or every row in an
+    // agent's tab would announce "Run #42 —".
     for (const r of [run(), run({ packageId: null }), run({ package_ephemeral: true })]) {
       expect(resolveRunAgentName(r, naming())).toBeTruthy();
     }

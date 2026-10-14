@@ -190,7 +190,6 @@ export function AgentIntegrationsBlock({
     <>
       <ListToolbar
         placement="panel"
-        panelFiltersAdjacent
         search={{
           value: search,
           onChange: setSearch,

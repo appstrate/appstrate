@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect } from "react";
-import { useParams, Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
@@ -56,8 +56,7 @@ import { useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
 import { agentDiagnosticText } from "../lib/agent-diagnostics";
 import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
 
-type DetailTab =
-  "overview" | "runs" | "settings" | "memory" | "versions" | "diff" | "content" | "usedBy";
+type DetailTab = "overview" | "runs" | "settings" | "memory" | "usedBy";
 
 function AgentReadinessBadge({
   packageId,
@@ -162,8 +161,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // Only an agent has a narrower read: without `agents:read` a runner launches
   // it and follows its own runs, but does not see what it is made of.
   const fullRead = type !== "agent" || can("agents:read");
-  const location = useLocation();
-  const navigate = useNavigate();
   const {
     scope,
     name,
@@ -267,55 +264,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const allValidTabs: DetailTab[] =
     type === "agent"
       ? AGENT_DETAIL_TABS.filter(agentTabVisible)
-      : // `content` stays valid only to redirect old links to Paramètres.
-        ["overview", "versions", "diff", "settings", "content", "usedBy"];
+      : ["overview", "settings", "usedBy"];
   // Every detail has a useful summary; explicit file/version deep links still win.
   const defaultTab: DetailTab = "overview";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
-  useEffect(() => {
-    if (type !== "agent") return;
-    const legacyTab = location.hash.replace(/^#/, "");
-    if (!["files", "configuration", "versions", "diff"].includes(legacyTab)) return;
-    const search = new URLSearchParams(location.search);
-    const section =
-      legacyTab === "configuration"
-        ? search.get("agentConfig") || "model"
-        : legacyTab === "diff"
-          ? "versions"
-          : legacyTab;
-    if (section === "model") search.delete("agentSettings");
-    else search.set("agentSettings", section);
-    search.delete("agentConfig");
-    void navigate(
-      { pathname: location.pathname, search: search.toString(), hash: "settings" },
-      { replace: true },
-    );
-  }, [location.hash, location.pathname, location.search, navigate, type]);
-  // Reset tab if it becomes invalid
-  useEffect(() => {
-    // Versions and their diff moved into Paramètres › Explorer.
-    if (type !== "agent" && (tab === "versions" || tab === "diff")) {
-      const search = new URLSearchParams(location.search);
-      search.set("packageSettings", "versions");
-      navigate(
-        { pathname: location.pathname, search: `?${search.toString()}`, hash: "settings" },
-        { replace: true },
-      );
-      return;
-    }
-    // A package's files moved into Paramètres › Explorer.
-    if (tab === "content") setTab("settings");
-  }, [
-    tab,
-    hasArchivableChanges,
-    isVersionView,
-    source,
-    defaultTab,
-    setTab,
-    type,
-    location,
-    navigate,
-  ]);
   const newVersion = useModalParam("newVersion");
   // ── Loading / Error ──
   if (isQueryInFlight(detailQuery) || (isVersionView && versionLoading)) return <LoadingState />;
@@ -405,8 +357,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // Determine available tabs based on type
 
-  // The artifact file explorer — one generic tab for every package type. Keeps
-  // the historical `"content"` id so existing deep links (#content) still land.
   // The rendered manifest, next to the raw artifact it comes from.
   const overviewTab: { id: DetailTab; label: string } = {
     id: "overview",
@@ -636,8 +586,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   currentManifest={currentManifest}
                   currentContent={currentContent}
                   surface="summary"
-                  cardHeaders
-                  contained
                 />
               ) : (
                 // Without `agents:read` the summary's fields (manifest, prompt,

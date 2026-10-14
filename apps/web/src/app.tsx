@@ -17,7 +17,6 @@ import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
 import { useBackgroundLocation } from "./lib/modal-route";
-import { RedirectAppSettings } from "./components/redirect-app-settings";
 import { ShellHeader } from "./components/shell-frame";
 import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
@@ -32,7 +31,6 @@ import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
-import { NavigateKeepingState } from "./components/navigate-keeping-state";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
@@ -446,36 +444,6 @@ function layoutRoute(layout: LayoutPath) {
 }
 
 /**
- * Old addresses, kept because they are in bookmarks and docs. Each lands on a
- * declared route, whose gate then decides; none renders a page of its own.
- */
-const PAGE_REDIRECTS: Record<string, ReactNode> = {
-  // One space's inventory and the org library were the placement model again,
-  // narrowed. The catalogue's placed half is that view, graded by the caller.
-  "/space/packages": <Navigate to="/catalogue/placed/agent" replace />,
-  "/library": <NavigateKeepingState to="/catalogue/placed/agent" />,
-  "/applications": <Navigate to="/org-settings/spaces" replace />,
-  "/app-settings": <Navigate to="/workspace-settings/general" replace />,
-  "/end-users": <Navigate to="/workspace-settings/end-users" replace />,
-  "/webhooks": <Navigate to="/workspace-settings/webhooks" replace />,
-};
-
-/** Same, for addresses under an overlay prefix: only the overlay tree sees them. */
-const OVERLAY_REDIRECTS: Record<string, ReactNode> = {
-  // Workspace settings used to live inside the organisation's, as
-  // `/org-settings/app/*` here and `/org-settings/space/*` on main.
-  "/org-settings/app/:tab": <RedirectAppSettings />,
-  "/org-settings/space/:tab": <RedirectAppSettings />,
-  "/org-settings/library": <Navigate to="/catalogue/placed/agent" replace />,
-};
-
-function redirectRoutes(redirects: Record<string, ReactNode>) {
-  return Object.entries(redirects).map(([from, element]) => (
-    <Route key={from} path={from} element={element} />
-  ));
-}
-
-/**
  * The one boot placeholder. Every gate below renders it, so a visitor sees a
  * single uninterrupted spinner while the boot reads settle, never a sequence
  * of visually identical ones handed off between gates.
@@ -539,8 +507,8 @@ function GlobalRealtimeSync({ children }: { children: React.ReactNode }) {
  * agents, and their progress is pushed on the same stream.
  *
  * The space is resolved HERE, above the route gate: `RouteGate` waits on a
- * resolved space before it refuses, and the shell that also resolves it only
- * mounts once the gate lets it through.
+ * resolved space before it refuses, and every request the chat makes is scoped
+ * by it.
  */
 function ChatLayout() {
   useSpaceResolver();
@@ -914,7 +882,6 @@ export function App() {
             }
           >
             {flatPaths("main").map(pageRoute)}
-            {redirectRoutes(PAGE_REDIRECTS)}
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>
@@ -923,7 +890,6 @@ export function App() {
             match; that is why there is no page-shaped variant to keep in sync. */}
         {modalBackground && (
           <Routes>
-            {redirectRoutes(OVERLAY_REDIRECTS)}
             {flatPaths("overlay").map(pageRoute)}
             {layoutRoute("/preferences")}
             <Route

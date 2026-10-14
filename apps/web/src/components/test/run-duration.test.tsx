@@ -3,10 +3,10 @@
 /**
  * The duration column, live and frozen.
  *
- * The live figure is a LEAF (`ElapsedDuration`). It used to be a `setInterval`
- * inside the run row itself, which re-rendered the whole row — badges, trigger,
- * links, popover — ten times a second for every running run on screen. The
- * structural assertion below is what keeps it a leaf.
+ * The live figure is a LEAF (`ElapsedDuration`). A `setInterval` inside the run
+ * row itself would re-render the whole row — badges, trigger, links, popover —
+ * ten times a second for every running run on screen. The structural assertion
+ * below is what keeps it a leaf.
  */
 
 import { describe, it, expect } from "bun:test";

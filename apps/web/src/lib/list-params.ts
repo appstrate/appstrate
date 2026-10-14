@@ -17,8 +17,8 @@
  * And `reset` is ONE update, not one per dimension. Three `setParams` in the
  * same tick each read the same committed location, so the last would win and
  * the other two filters would survive a "Réinitialiser" that looked like it
- * worked. That bug is why this function exists at all rather than a loop at
- * the call site.
+ * worked. That is why this function exists at all rather than a loop at the
+ * call site.
  */
 
 import { useState } from "react";

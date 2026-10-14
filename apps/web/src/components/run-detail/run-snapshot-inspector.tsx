@@ -10,11 +10,11 @@ import {
   Code2,
   FileInput,
   Link2,
-  Settings2,
   Tags,
   Trophy,
 } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
+import { FILE_URI_PREFIX } from "@appstrate/core/file-uri";
 import { RunTurnsDetail } from "../run-execution-tab";
 import type { RunTurnRow } from "../log-utils";
 import { RunCostReadout } from "../run-cost-readout";
@@ -45,8 +45,6 @@ export function RunSnapshotInspector({
   modelFallback,
   onOpenJournal,
   onOpenResults,
-  cardHeaders = false,
-  contained = false,
 }: {
   run: EnrichedRun;
   turns: RunTurnRow[];
@@ -57,8 +55,6 @@ export function RunSnapshotInspector({
   modelFallback: RunModelFallback | null;
   onOpenJournal: (filter?: JournalOverviewFilter) => void;
   onOpenResults: () => void;
-  cardHeaders?: boolean;
-  contained?: boolean;
 }) {
   const { t } = useTranslation("agents");
   const turnsParam = useModalParam("turns");
@@ -80,10 +76,9 @@ export function RunSnapshotInspector({
     inputDocumentEntries.length === 1
       ? humanizeInputKey(inputDocumentEntries[0]![0])
       : t("run.snapshotInputFiles");
-  const config = (run.input as Record<string, unknown> | null) ?? null;
   const metadata = (run.metadata as Record<string, unknown> | null) ?? null;
   const usage = run.token_usage;
-  // One fact per integration, listing every connection it bound (#1611), and one per
+  // One fact per integration, listing every connection it bound, and one per
   // declared integration the run started without.
   const connections = runConnectionRows(run);
   const agentExecuted =
@@ -93,9 +88,7 @@ export function RunSnapshotInspector({
     run.runner_name ??
     (run.runOrigin === "remote" ? t("run.infoRunnerRemote") : t("run.infoRunnerPlatform"));
   const toolCallCount = logs.filter((entry) => entry.kind === "tool").length;
-  const warningCount = logs.filter(
-    (entry) => entry.level === "warn" || entry.level === "warning",
-  ).length;
+  const warningCount = logs.filter((entry) => entry.level === "warn").length;
   const errorCount = logs.filter(
     (entry) =>
       entry.level === "error" ||
@@ -111,22 +104,14 @@ export function RunSnapshotInspector({
 
   return (
     <>
-      <div
-        data-run-snapshot
-        className={contained ? undefined : cardHeaders ? "py-4 md:py-6" : "p-4 md:p-6"}
-      >
+      <div data-run-snapshot>
         {problem && (
           <div className="mb-6">
-            <HealthCard
-              title={t("run.overview.problem")}
-              tone="blocking"
-              cardHeaders={cardHeaders}
-              badge={null}
-            >
-              <ul className={cardHeaders ? "px-4" : "mt-3"}>
+            <HealthCard title={t("run.overview.problem")} tone="blocking" cardHeaders badge={null}>
+              <ul className="px-4">
                 <HealthCardItem
                   title={runErrorText(run, t)}
-                  cardHeaders={cardHeaders}
+                  cardHeaders
                   actions={
                     <HealthAction onClick={() => onOpenJournal("errors")}>
                       {t("run.overview.problemJournal")}
@@ -139,34 +124,29 @@ export function RunSnapshotInspector({
         )}
         {cancelled && (
           <div className="mb-6">
-            <HealthCard
-              title={t("run.overview.cancelled")}
-              tone="neutral"
-              cardHeaders={cardHeaders}
-              badge={null}
-            >
-              <ul className={cardHeaders ? "px-4" : "mt-3"}>
+            <HealthCard title={t("run.overview.cancelled")} tone="neutral" cardHeaders badge={null}>
+              <ul className="px-4">
                 {/* The run keeps no name for who stopped it: the platform's reason and the time do. */}
                 <HealthCardItem
                   title={run.error ? runErrorText(run, t) : t("run.cancelledByUser")}
                   description={
                     run.completed_at ? formatDateField(run.completed_at, "datetime") : undefined
                   }
-                  cardHeaders={cardHeaders}
+                  cardHeaders
                   actions={null}
                 />
               </ul>
             </HealthCard>
           </div>
         )}
-        <RunWarnings run={run} modelFallback={modelFallback} cardHeaders={cardHeaders} />
+        <RunWarnings run={run} modelFallback={modelFallback} />
         <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
           <div className="grid min-w-0 content-start gap-6 lg:grid-cols-2">
             <RunDetailCard
               title={t("run.infoExecution")}
               icon={CirclePlay}
               className="lg:col-span-2"
-              headerInside={cardHeaders}
+              headerInside
             >
               <SnapshotFacts columns four>
                 <SnapshotFact label={t("run.sourceAgent")} value={agentExecuted} />
@@ -219,7 +199,7 @@ export function RunSnapshotInspector({
               title={t("run.overview.activity")}
               icon={Activity}
               bodyClassName="p-0"
-              headerInside={cardHeaders}
+              headerInside
               headerAction={
                 logs.length > 0
                   ? {
@@ -260,7 +240,7 @@ export function RunSnapshotInspector({
               title={t("run.overview.results")}
               icon={Trophy}
               bodyClassName="p-0"
-              headerInside={cardHeaders}
+              headerInside
               headerAction={
                 run.file_counts.output + structuredFieldCount + memoryChangeCount > 0
                   ? {
@@ -298,7 +278,7 @@ export function RunSnapshotInspector({
               title={t("run.infoUsage")}
               icon={ChartNoAxesCombined}
               bodyClassName="flex flex-col p-0"
-              headerInside={cardHeaders}
+              headerInside
             >
               <div className="flex-1 p-4">
                 <SnapshotFacts columns>
@@ -346,7 +326,7 @@ export function RunSnapshotInspector({
               )}
             </RunDetailCard>
 
-            <RunDetailCard title={t("run.infoInput")} icon={FileInput} headerInside={cardHeaders}>
+            <RunDetailCard title={t("run.infoInput")} icon={FileInput} headerInside>
               {inputValueEntries.length === 0 &&
               inputFileCount === 0 &&
               inputDocuments.length === 0 &&
@@ -391,11 +371,7 @@ export function RunSnapshotInspector({
             </RunDetailCard>
 
             {connections.length > 0 && (
-              <RunDetailCard
-                title={t("run.infoConnections")}
-                icon={Link2}
-                headerInside={cardHeaders}
-              >
+              <RunDetailCard title={t("run.infoConnections")} icon={Link2} headerInside>
                 <SnapshotFacts>
                   {connections.map(({ integrationId, bound, unboundCause }) => (
                     <SnapshotFact
@@ -436,22 +412,8 @@ export function RunSnapshotInspector({
               </RunDetailCard>
             )}
 
-            {config && Object.keys(config).length > 0 && (
-              <RunDetailCard
-                title={t("run.infoConfig")}
-                icon={Settings2}
-                headerInside={cardHeaders}
-              >
-                <SnapshotFacts columns>
-                  {Object.entries(config).map(([key, value]) => (
-                    <SnapshotFact key={key} label={key} value={formatSnapshotValue(value)} />
-                  ))}
-                </SnapshotFacts>
-              </RunDetailCard>
-            )}
-
             {metadata && Object.keys(metadata).length > 0 && (
-              <RunDetailCard title={t("run.infoMetadata")} icon={Tags} headerInside={cardHeaders}>
+              <RunDetailCard title={t("run.infoMetadata")} icon={Tags} headerInside>
                 <SnapshotFacts columns wide>
                   {Object.entries(metadata).map(([key, value]) => (
                     <SnapshotFact key={key} label={key} value={formatSnapshotValue(value)} />
@@ -461,11 +423,7 @@ export function RunSnapshotInspector({
             )}
 
             {run.package_ephemeral && (run.inline_prompt || run.inline_manifest) && (
-              <RunDetailCard
-                title={t("run.technicalDetails")}
-                icon={Code2}
-                headerInside={cardHeaders}
-              >
+              <RunDetailCard title={t("run.technicalDetails")} icon={Code2} headerInside>
                 <SnapshotFacts>
                   {run.inline_prompt && (
                     <SnapshotFact label={t("run.tabPrompt")} value={run.inline_prompt} />
@@ -580,7 +538,7 @@ function humanizeInputKey(key: string): string {
 }
 
 function hasDocumentReference(value: unknown): boolean {
-  if (typeof value === "string") return value.startsWith("document://");
+  if (typeof value === "string") return value.startsWith(FILE_URI_PREFIX);
   if (Array.isArray(value)) return value.some(hasDocumentReference);
   if (value && typeof value === "object") {
     return Object.values(value as Record<string, unknown>).some(hasDocumentReference);
@@ -593,7 +551,7 @@ function countDocumentReferences(value: unknown): number {
 
   const visit = (candidate: unknown) => {
     if (typeof candidate === "string") {
-      if (candidate.startsWith("document://")) references.add(candidate);
+      if (candidate.startsWith(FILE_URI_PREFIX)) references.add(candidate);
       return;
     }
     if (Array.isArray(candidate)) {

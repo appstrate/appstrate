@@ -36,7 +36,7 @@ import {
  * The table takes the dialog's width and the permission column what is left,
  * wrapping its labels; role columns are fixed. It only scrolls once the roles
  * outgrow the dialog. Sized to its content instead (`w-max`), the longest label
- * refused to wrap and pushed a role that would have fitted out of view.
+ * would refuse to wrap and push a role that fits out of view.
  */
 const PERMISSION_COLUMN = 224;
 const ROLE_COLUMN = 96;

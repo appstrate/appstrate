@@ -54,16 +54,6 @@ export function localServerRef(
     : undefined;
 }
 
-/** The local MCP server package a `mcp-local` integration runs, if any. */
-export function localServerOf(
-  integration: Pick<IntegrationSummaryWire, "manifest">,
-): string | undefined {
-  const source = (
-    integration.manifest as { source?: { kind?: string; server?: { name?: string } } }
-  ).source;
-  return source?.kind === "local" ? source.server?.name : undefined;
-}
-
 export function integrationStatus(integration: IntegrationSummaryWire): IntegrationStatus {
   return integration.active ? "active" : "inactive";
 }
@@ -82,10 +72,7 @@ export function isOrganizationIntegration(integration: IntegrationSummaryWire): 
   return integration.source === "local" || Boolean(integration.active);
 }
 
-export function integrationMatchesQuery(
-  integration: IntegrationSummaryWire,
-  query: string,
-): boolean {
+function integrationMatchesQuery(integration: IntegrationSummaryWire, query: string): boolean {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return true;
   const manifest = integration.manifest;

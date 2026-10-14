@@ -25,7 +25,9 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
 import { persistenceKeys } from "../lib/query-keys";
-import type { PersistenceScopeFilter } from "../components/persistence/scope-filter";
+
+/** Which persistence rows a read returns: everything, the shared ones, or the caller's own. */
+export type PersistenceScopeFilter = "all" | "shared" | "mine";
 
 interface PersistenceResponse {
   pinned?: AgentPinnedSlotItem[];

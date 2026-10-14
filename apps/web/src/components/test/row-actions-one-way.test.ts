@@ -11,8 +11,8 @@
  * - the `actions` column of a column set draws a `<Button>`: that column is the
  *   row's end, and its only content is the menu;
  * - a `<Button>` or `<…ConnectButton>` is rendered as the sibling of a
- *   `<TableRowActions>` in the same wrapper (the reconnect icon that used to sit
- *   next to the connection menu).
+ *   `<TableRowActions>` in the same wrapper (a reconnect icon next to the
+ *   connection menu).
  * A control that IS the setting (a role select, a switch, a share editor) lives in
  * its own column and is not an action of the row.
  */

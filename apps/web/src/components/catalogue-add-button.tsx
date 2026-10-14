@@ -4,8 +4,8 @@
  * The deed of a Découvrir card whose package the reader's space does not run:
  * add it — and always say WHERE.
  *
- * It used to read "Ajouter" and meant "in the space the app is in", which the
- * card never wrote. Now the space is named: one possible space is one click
+ * A bare "Ajouter" would mean "in the space the app is in", which the card
+ * never writes. So the space is named: one possible space is one click
  * ("Ajouter à Default"); several open a menu of them, the reader's own first
  * and marked "ici". The list holds only the spaces where adding is allowed
  * (`mayActivateIn`), so no item leads to a refusal.

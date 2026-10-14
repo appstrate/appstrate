@@ -383,7 +383,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     // Every caller builds `body` through `packageUpdateBody`, and none of them
-    // sends the API's `content` field any more: a package's primary file is
+    // sends the API's `content` field: a package's primary file is
     // one of its files, written as a file operation like the others.
     meta: { errorHandledByCaller: true },
     mutationFn: async ({

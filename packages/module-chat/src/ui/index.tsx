@@ -153,8 +153,6 @@ export interface ChatPageProps {
    * to deep tool UIs via context, not props.
    */
   onOpenFile?: OpenFile;
-  /** Optional host-owned actions displayed beside the conversation title. */
-  headerActions?: ReactNode;
   /** Optional host-owned controls beside the model picker. Pass a memoized node. */
   composerActions?: ReactNode;
   /**

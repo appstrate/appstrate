@@ -3,7 +3,7 @@
 /**
  * What the catalogue knows about one package, read off its PLACEMENTS.
  *
- * The placement model (#1437) has three axes and the catalogue is their one
+ * The placement model has three axes and the catalogue is their one
  * projection: a package is placed in a space by its home or by a share, and
  * that placement is separately switched on. So a row has three possible states
  * in a given space, and they are not degrees of one another:

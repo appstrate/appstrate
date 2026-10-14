@@ -145,11 +145,7 @@ export function SchedulesListPage() {
           items={shown}
           itemKey={(schedule) => schedule.id}
           renderCard={(schedule) => (
-            <ScheduleCard
-              schedule={schedule}
-              agentName={agentName(schedule.packageId)}
-              variant="collection"
-            />
+            <ScheduleCard schedule={schedule} agentName={agentName(schedule.packageId)} />
           )}
           isLoading={isLoading}
           isError={isError}

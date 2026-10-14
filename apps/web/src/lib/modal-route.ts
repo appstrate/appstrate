@@ -23,11 +23,6 @@ export function useBackgroundLocation(): Location | null {
   return (location.state as ModalState | null)?.backgroundLocation ?? null;
 }
 
-/** True when the current route is being presented as an overlay. */
-export function useIsModalRoute(): boolean {
-  return useBackgroundLocation() !== null;
-}
-
 /**
  * Navigation state that turns a `<Link>` into a modal opener. Pass the location
  * the user is currently on:

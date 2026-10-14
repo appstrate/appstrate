@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { File as FileIcon, FileArchive, FileCode, FileImage, FileText } from "lucide-react";
 import {
   documentExpiryInfo,
   documentPreviewHref,
   documentRunHref,
-  isImageMime,
-  isMarkdownDoc,
-  mimeIconFor,
   type DocumentLike,
 } from "../documents.ts";
 
@@ -21,22 +17,6 @@ function doc(overrides: Partial<DocumentLike>): DocumentLike {
     ...overrides,
   };
 }
-
-describe("mimeIconFor", () => {
-  it("maps common families", () => {
-    expect(mimeIconFor("image/png")).toBe(FileImage);
-    expect(mimeIconFor("text/html")).toBe(FileCode);
-    expect(mimeIconFor("application/json")).toBe(FileCode);
-    expect(mimeIconFor("application/zip")).toBe(FileArchive);
-    expect(mimeIconFor("text/plain")).toBe(FileText);
-    expect(mimeIconFor("application/pdf")).toBe(FileText);
-  });
-
-  it("falls back to the neutral file icon", () => {
-    expect(mimeIconFor("application/octet-stream")).toBe(FileIcon);
-    expect(mimeIconFor("")).toBe(FileIcon);
-  });
-});
 
 describe("documentRunHref", () => {
   it("builds the agent run route with literal scope slashes", () => {
@@ -115,43 +95,5 @@ describe("documentExpiryInfo", () => {
     expect(info.hours).toBe(0);
     expect(info.soon).toBe(true);
     expect(info.expired).toBe(true);
-  });
-});
-
-describe("isImageMime", () => {
-  it("is true only for an image/* mime", () => {
-    expect(isImageMime("image/png")).toBe(true);
-    expect(isImageMime("image/svg+xml")).toBe(true);
-    expect(isImageMime("text/plain")).toBe(false);
-    expect(isImageMime(null)).toBe(false);
-    expect(isImageMime(undefined)).toBe(false);
-    expect(isImageMime("")).toBe(false);
-  });
-});
-
-describe("isMarkdownDoc", () => {
-  it("accepts an explicit text/markdown mime, with or without parameters", () => {
-    expect(isMarkdownDoc("text/markdown", "notes")).toBe(true);
-    expect(isMarkdownDoc("text/markdown; charset=utf-8", "notes")).toBe(true);
-    expect(isMarkdownDoc("TEXT/MARKDOWN", "notes")).toBe(true);
-  });
-
-  it("accepts a .md file served with a text-ish mime (the preview route relabels markdown)", () => {
-    // The server serves markdown as `text/plain` to defeat md→HTML sniffing, so
-    // on that path the rich-render decision has to come from the name.
-    expect(isMarkdownDoc("text/plain", "report.md")).toBe(true);
-    expect(isMarkdownDoc("text/plain", "REPORT.MD")).toBe(true);
-  });
-
-  it("rejects a .md name under a non-text mime", () => {
-    // A binary body named `.md` must not be routed through the HTML renderer.
-    expect(isMarkdownDoc("application/octet-stream", "report.md")).toBe(false);
-  });
-
-  it("rejects plain text and other document kinds", () => {
-    expect(isMarkdownDoc("text/plain", "notes.txt")).toBe(false);
-    expect(isMarkdownDoc("text/html", "page.html")).toBe(false);
-    expect(isMarkdownDoc("application/pdf", "doc.pdf")).toBe(false);
-    expect(isMarkdownDoc("image/png", "shot.png")).toBe(false);
   });
 });

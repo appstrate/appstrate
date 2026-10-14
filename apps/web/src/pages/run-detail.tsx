@@ -122,8 +122,8 @@ export function RunDetailPage() {
     }
     const { entries, output } = buildLogEntries(logs, { isRunTerminal: isTerminal });
     // Turn breadcrumbs are filtered OUT of the log stream by `buildLogEntries`
-    // and projected here into the Exécution pane's per-turn table instead
-    // (`TurnsTable` in `run-execution-tab.tsx`, fed by the `turns` prop below).
+    // and projected here into the per-turn table instead (`TurnsTable` in
+    // `run-execution-tab.tsx`, opened from the overview's Usage card).
     return { historicalLogs: entries, structuredOutput: output, turnRows: buildTurnRows(logs) };
   }, [logs, isTerminal]);
 
@@ -189,8 +189,8 @@ export function RunDetailPage() {
     onMetric: useCallback(
       (metric: RunMetricEvent) => {
         // Patch the cached run row with the running token usage + cost
-        // so the header readout above and the Exécution pane's Usage card
-        // (`run-execution-tab.tsx`) reflect live progress without polling.
+        // so the overview's Usage card (`run-snapshot-inspector.tsx`)
+        // reflects live progress without polling.
         // `runs.cost` is the cached aggregate written at finalize on
         // the server; mid-run we render the broadcaster's
         // `cost_so_far` instead. The next terminal-status invalidation
@@ -384,8 +384,6 @@ export function RunDetailPage() {
                       hash: "#results",
                     });
                   }}
-                  cardHeaders
-                  contained
                 />
               </TabsContent>
 

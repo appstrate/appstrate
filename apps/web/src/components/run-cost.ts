@@ -4,11 +4,12 @@
  * Pure logic behind "how do I render a run's cost, given what the platform
  * actually knows about its pricing".
  *
- * Two surfaces show the number — the run header readout (`run-detail.tsx`) and
- * the Exécution pane's Usage card (`run-execution-tab.tsx`) — and they must
- * agree: a header saying `—` above a card saying
- * `$0.0000` is worse than either alone. This module is the single decision;
- * {@link RunCostReadout} (`run-cost-readout.tsx`) is its only renderer.
+ * Two surfaces show the number — the run header
+ * (`run-detail/run-header-summary.tsx`) and the Usage card
+ * (`run-detail/run-snapshot-inspector.tsx`) — and they must agree: a header
+ * saying `—` above a card saying `$0.0000` is worse than either alone. This
+ * module is the single decision; {@link RunCostReadout}
+ * (`run-cost-readout.tsx`) is its only renderer.
  *
  * Split from the component because the web test runner has no DOM: the mapping
  * is the part worth testing, and it is testable only if it does not import the

@@ -12,12 +12,12 @@
  * shadcn keeps them inline in the bar. That works for their example, which is
  * a full-width page with two of them. Ours sit to the right of a 256px sidebar,
  * a screen can have three, and their width depends on how many values are
- * picked and how long the translations run — so the bar spent several rounds
- * either wrapping (flexbox sends the LAST child down, which is the end that
- * must not move) or shedding through a ladder of breakpoints, then measuring
- * itself with a ghost row and a `ResizeObserver` to decide when to fold.
+ * picked and how long the translations run — so an inline bar has to either
+ * wrap (flexbox sends the LAST child down, which is the end that must not
+ * move), shed through a ladder of breakpoints, or measure itself with a ghost
+ * row and a `ResizeObserver` to decide when to fold.
  *
- * All of that is gone. **The filters live behind one button, and open a row of
+ * None of that here. **The filters live behind one button, and open a row of
  * their own** under the bar, where wrapping is not an accident but the point.
  * One layout at every width, nothing to measure.
  *
@@ -29,8 +29,8 @@
  *   filter yourself — a link someone sent you — has to say why it is short. An
  *   icon with a badge says "three filters"; the open row says which three.
  * - **The search never moves.** It is the one thing you type into, it stays at
- *   the left of the bar at every width. (It used to travel into the disclosure
- *   row with the filters, which was simply a bug.)
+ *   the left of the bar at every width, and never travels into the disclosure
+ *   row with the filters.
  * - **The right end sheds words before icons** as the bar narrows: the count
  *   goes first, then the labels on the filter and column buttons, then the
  *   label on the page's own action — which the CALLER writes with `@…/bar`, the
@@ -149,8 +149,7 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
           className={cn(
             // `px-2.5 gap-1.5` is what shadcn's own `size="sm"` resolves to for
             // a button carrying an icon (`has-[>svg]:px-2.5`); ours is a flat
-            // `px-3 gap-2`, which is where the extra width inside every filter
-            // was coming from.
+            // `px-3 gap-2`, which would put extra width inside every filter.
             "h-8 gap-1.5 bg-transparent px-2.5 shadow-none",
             // Dashed AND `+` mean "an empty slot you can fill". Once it is
             // filled the button is not an invitation any more, it is a
@@ -166,7 +165,7 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
             <>
               <Separator orientation="vertical" className="mx-1.5 h-4" />
               {/* Named while there are few, counted beyond — shadcn's rule, and
-                  no breakpoint any more: in a row of their own these buttons
+                  no breakpoint: in a row of their own these buttons
                   may wrap, so they never have to shorten for want of space. */}
               {selected.length > NAMED_VALUES ? (
                 <Badge variant="secondary" className="rounded-sm px-1 font-normal">
@@ -339,10 +338,8 @@ export function ListToolbar({
   view,
   onViewChange,
   actions,
-  adjacentActions,
   tabs,
   placement = "page",
-  panelFiltersAdjacent = false,
 }: {
   /**
    * The text filter that opens shadcn's own toolbar — present only where the
@@ -365,18 +362,18 @@ export function ListToolbar({
   onViewChange?: (view: ListView) => void;
   /** Actions for an embedded collection that has no page header of its own. */
   actions?: ReactNode;
-  /** Compact controls that belong directly beside panel search and filters. */
-  adjacentActions?: ReactNode;
   /**
    * `CollectionTabs` splitting the list, drawn FIRST on the bar's line — the
    * part you are in, then how to search it. On a phone the line has no room
    * for both, so the tabs take a line of their own above it.
    */
   tabs?: ReactNode;
-  /** A panel keeps its compact, always-visible search instead of page-level responsive chrome. */
+  /**
+   * A panel keeps its compact, always-visible search instead of page-level
+   * responsive chrome, with the filter trigger beside it and the actions on the
+   * right.
+   */
   placement?: "page" | "panel";
-  /** Keep the filter trigger beside search while panel actions stay on the right. */
-  panelFiltersAdjacent?: boolean;
 }) {
   const { t } = useTranslation("common");
   const activeCount = filters.reduce((total, filter) => total + filter.values.length, 0);
@@ -402,7 +399,7 @@ export function ListToolbar({
                 className="[[data-slot=dialog-content]_&]:bg-background h-8 w-full max-w-[250px]"
               />
             )}
-            {panelFiltersAdjacent && filters.length > 0 && (
+            {filters.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
@@ -420,28 +417,9 @@ export function ListToolbar({
                 )}
               </Button>
             )}
-            {adjacentActions}
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            {!panelFiltersAdjacent && filters.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                aria-expanded={open}
-                title={t("toolbar.filters")}
-                className={cn(TOOLBAR_UTILITY, "aria-expanded:bg-accent")}
-                onClick={() => setOpen((wasOpen) => !wasOpen)}
-              >
-                <Filter />
-                <span className="hidden @xl/bar:inline">{t("toolbar.filters")}</span>
-                {activeCount > 0 && (
-                  <Badge variant="secondary" className="rounded-sm px-1 font-normal">
-                    {activeCount}
-                  </Badge>
-                )}
-              </Button>
-            )}
             {columns && <ColumnsMenu columns={columns} />}
             {actions}
             {view && onViewChange && <ListViewToggle view={view} onChange={onViewChange} />}
@@ -578,8 +556,8 @@ export function ListToolbar({
 /**
  * Under the table: what it amounts to, and how to move through it.
  *
- * The count used to sit at the right end of the toolbar. It reads better here,
- * which is also where shadcn keeps it (`data-table-pagination.tsx`, "N row(s)
+ * The count sits here rather than at the right end of the toolbar, which is
+ * also where shadcn keeps it (`data-table-pagination.tsx`, "N row(s)
  * selected" on the left of the page controls): a toolbar is what you act WITH,
  * a footer is what the table came to. It frees the bar's right end for controls
  * as well, which is the end that runs out of room first.

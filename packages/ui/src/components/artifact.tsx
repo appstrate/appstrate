@@ -3,8 +3,8 @@
 // Adapted from Vercel AI Elements (`packages/elements/src/artifact.tsx`,
 // https://github.com/vercel/ai-elements), Copyright 2023 Vercel, Inc., licensed
 // under the Apache License, Version 2.0. Changes: our tokens (the header is the
-// muted band of our tables), close is an ordinary action passed by the caller, and a tooltip provider scoped to
-// the action rather than assumed at the root.
+// muted band of our tables), and close is an ordinary action passed by the
+// caller. The action's tooltip relies on the host's root `TooltipProvider`.
 
 import * as React from "react";
 import type { LucideIcon } from "lucide-react";

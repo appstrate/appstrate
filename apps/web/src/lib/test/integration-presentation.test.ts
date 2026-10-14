@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { authMethodLabel, integrationConnectionState } from "../integration-presentation";
+import { authMethodLabel } from "../integration-presentation";
 import type { IntegrationAuthStatus } from "../../hooks/use-integrations";
 
 function auth(overrides: Partial<IntegrationAuthStatus> = {}): IntegrationAuthStatus {
@@ -29,22 +29,5 @@ describe("integration presentation", () => {
     const methods = [auth({ auth_key: "drive" }), auth({ auth_key: "mcp" })];
     expect(authMethodLabel(methods[0]!, methods, "OAuth")).toBe("OAuth (drive)");
     expect(authMethodLabel(methods[1]!, methods, "OAuth")).toBe("OAuth (mcp)");
-  });
-  it("does not warn about an unused optional method when a required account is available", () => {
-    expect(
-      integrationConnectionState(true, [auth({ ready: true }), auth({ required: false })]),
-    ).toBe("available");
-  });
-  it("reports missing required access despite another available account", () => {
-    expect(integrationConnectionState(true, [auth(), auth({ ready: true })])).toBe("missing");
-  });
-  it("shows optional-only empty accounts neutrally", () => {
-    expect(integrationConnectionState(true, [auth({ required: false })])).toBe("none");
-  });
-  it("distinguishes no authentication from missing credentials", () => {
-    expect(integrationConnectionState(true, [])).toBe("noAuth");
-  });
-  it("does not imply activation merely because accounts exist", () => {
-    expect(integrationConnectionState(false, [auth({ ready: true })])).toBe("inactive");
   });
 });

@@ -3,11 +3,9 @@
 /**
  * A page of runs: the query, the paging, and the table underneath.
  *
- * It used to have a presentation half of its own (`RunRows`) that resolved
- * agent names, picked the empty state and then delegated. Both halves of that
- * job moved to where they belong when the list became a table — the naming to
- * `use-run-agent-name.ts`, the states into `RunsTable` — so what is left here
- * is fetching, which is all this component was ever about.
+ * It holds no presentation of its own: agent names resolve in
+ * `use-run-agent-name.ts` and the states belong to `RunsTable`, so what is
+ * left here is fetching.
  */
 
 import { useState } from "react";
@@ -100,10 +98,10 @@ export function RunList({
   const columns = visibleColumns(allColumns, visibility.hidden);
 
   // Paging resets when the filters change — WITHOUT remounting this component.
-  // It used to be a `key` at the call site, which is the idiomatic way to reset
-  // state; but the toolbar renders inside here, so remounting closed its open
-  // menu on every tick and made multi-select unusable. The page is derived
-  // from the filter set instead: a new set reads as page zero straight away.
+  // A `key` at the call site is the idiomatic way to reset state, but the
+  // toolbar renders inside here, so remounting would close its open menu on
+  // every tick and make multi-select unusable. The page is derived from the
+  // filter set instead: a new set reads as page zero straight away.
   const signature = `${user ?? ""}|${kind ?? ""}|${status?.join(",") ?? ""}|${search ?? ""}`;
   const [paging, setPaging] = useState({ signature, page: 0 });
   const page = paging.signature === signature ? paging.page : 0;
@@ -122,7 +120,7 @@ export function RunList({
 
   const runs: EnrichedRun[] = data?.data ?? [];
   // Undefined until the request answers — the count and the pager both read
-  // it, and `?? 0` here used to tell the footer there were zero runs on a 500.
+  // it, and `?? 0` here would tell the footer there were zero runs on a 500.
   const total = data?.total;
   const totalPages = total === undefined ? 0 : Math.ceil(total / pageSize);
 

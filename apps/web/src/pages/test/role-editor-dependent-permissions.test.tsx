@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Issue #1513 in the role editor: ticking an action ticks its read, which stays held —
+ * Dependent reads in the role editor: ticking an action ticks its read, which stays held —
  * unticking it is undone, and its note names what needs it — while a selected action
  * depends on it alone. The picker is a closed popover under a static render, so the
  * decisions are pinned here, on the pure functions the editor feeds it.

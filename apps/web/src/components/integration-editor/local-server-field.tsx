@@ -3,8 +3,8 @@
 /**
  * The server a LOCAL integration runs, picked rather than typed.
  *
- * It used to be two free-text fields, and nothing downstream checks them: an
- * integration is published and installed whatever they say, and at run time a
+ * Free text would not do, because nothing downstream checks it: an
+ * integration is published and installed whatever it says, and at run time a
  * server that does not exist is dropped without a word
  * (`integration-spawn-resolver.ts`, `mcp_server_unresolved`) — the agent runs
  * without its tools. Only a version range no published version satisfies fails

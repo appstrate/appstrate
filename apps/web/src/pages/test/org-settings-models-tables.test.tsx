@@ -251,7 +251,7 @@ describe("the providers table", () => {
     expect(quiet).not.toContain(settingsFr["models.credentialUnavailable"]);
     expect(quiet).not.toContain(`>${settingsFr["models.default"]}<`);
     expect(quiet).not.toContain(settingsFr["providers.state.disabled"]);
-    // No badge beside the name any more.
+    // The state is said once, never repeated as a badge beside the name.
     expect(
       rowOf(html, DEAD_KEY.label).split(settingsFr["models.credentialUnavailable"]),
     ).toHaveLength(2);

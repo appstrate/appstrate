@@ -476,7 +476,7 @@ describe("Organizations API", () => {
     });
 
     // `logo` travels the same PATCH as `name`, so it sits behind `org:update`
-    // too: the owner writes it, an admin no longer can.
+    // too: the owner writes it, an admin cannot.
     it("allows an owner to update the organization logo", async () => {
       const ctx = await createTestContext({ orgSlug: "owner-logo-org" });
 

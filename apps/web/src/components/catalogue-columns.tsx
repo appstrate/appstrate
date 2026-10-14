@@ -7,7 +7,7 @@
  * "Where it is already active" is the column this screen cannot do without.
  * There is no organisation-level install in this product — a package is in the
  * org's catalogue, and then it is switched on space by space — so "activate"
- * with nothing beside it never said WHERE. Now the row says where it already
+ * with nothing beside it would never say WHERE. The row says where it already
  * runs, and the button names the space it would add.
  */
 import { useTranslation } from "react-i18next";
@@ -194,11 +194,11 @@ export function useCatalogueProtocolColumn(
  * One column per space the caller reaches, each cell saying — and changing —
  * this package's state THERE.
  *
- * It replaces the pair of columns that came before it ("Statut", then "Actif
- * dans"), which between them could not name the space they spoke about: the
- * first reasoned on the current space and never wrote its name, the second
- * listed the others. With three states and several spaces, a row needs the
- * same word in the same place for every space, which is a column each.
+ * Not a pair such as "Statut" and "Actif dans", which between them cannot name
+ * the space they speak about: the first reasons on the current space without
+ * writing its name, the second lists the others. With three states and
+ * several spaces, a row needs the same word in the same place for every space,
+ * which is a column each.
  *
  * The switch IS the deed, not a report of it: activating a package in a space
  * it is not placed in shares it there and switches it on in one transaction,

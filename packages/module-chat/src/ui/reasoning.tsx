@@ -5,7 +5,7 @@
  * (`reasoning-delta`, `pi-chat/ui-stream-mapper.ts`); assistant-ui's default
  * renderer for a reasoning part is `() => null`, and it hides `Empty` (the
  * thinking dots) as soon as the last part is reasoning, so without this the
- * bubble stayed blank for the whole reasoning phase (#1601).
+ * bubble would stay blank for the whole reasoning phase.
  *
  * One disclosure per run of consecutive reasoning parts (`ReasoningGroup`),
  * open while that run is the part still streaming, so it takes the place the

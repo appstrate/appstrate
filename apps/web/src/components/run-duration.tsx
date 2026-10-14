@@ -5,14 +5,14 @@
  *
  * Its own file because two surfaces need it — the run table and the row pinned
  * under the run-detail header — and because of what the live variant is: a
- * LEAF. The interval used to live in the row itself, so every tick re-rendered
- * badges, trigger, links and popover ten times a second, per running run on
- * screen. Here the state that changes is owned by the only node that shows it,
- * and a tick re-renders one `<span>`.
+ * LEAF. An interval in the row itself would re-render badges, trigger, links
+ * and popover ten times a second, per running run on screen. Here the state
+ * that changes is owned by the only node that shows it, and a tick re-renders
+ * one `<span>`.
  *
  * The formatting itself is the platform's (`@appstrate/core/format`), so a run
  * reads the same here as in its Info tab — and a five-minute run reads
- * "5m 12s" rather than the "312.0s" this file used to print.
+ * "5m 12s" rather than "312.0s".
  */
 
 import { useState, useEffect } from "react";

@@ -3,12 +3,11 @@
 /**
  * The schedules column set (`dt-sched` in the reference).
  *
- * The card it replaces was a row wearing a card's border: a flex line with the
- * name, some badges and the actor pushed right, plus a dashed strip underneath
- * previewing the next run. Stacked, those made a list where no two rows agreed
- * on where anything was — and the one question a schedule list answers, "when
- * does this fire next", was drawn differently on every row depending on which
- * badges came before it.
+ * Columns, not cards: a flex line with the name, some badges and the actor
+ * pushed right, plus a strip underneath previewing the next run, stacks into a
+ * list where no two rows agree on where anything is — and the one question a
+ * schedule list answers, "when does this fire next", would land differently on
+ * every row depending on which badges come before it.
  *
  * What the columns say, in order: what it is, how often, whether it is on, when
  * next, when last, and who it runs as.

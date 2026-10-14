@@ -3,10 +3,10 @@
 /**
  * One package, read inside the catalogue rather than instead of it.
  *
- * A row used to link to the package's own page, which threw away the panel,
- * the space you were in and the list you were reading — and landed on a page
- * whose breadcrumb claims the current space for a package that is not in it.
- * This reads in place: the rail stays, Back comes straight back.
+ * A row does not link to the package's own page: that would throw away the
+ * panel, the space you were in and the list you were reading — and land on a
+ * page whose breadcrumb claims the current space for a package that is not in
+ * it. This reads in place: the rail stays, Back comes straight back.
  *
  * It answers the three questions a reader opens it with, in their order:
  *
@@ -420,7 +420,7 @@ export function CataloguePreview({
             </PropertyRow>
           )}
           {home && (
-            // Where the package lives, which is where it is edited (#1437).
+            // Where the package lives, which is where it is edited.
             <PropertyRow
               icon={House}
               label={t("catalogue.homeSpace")}

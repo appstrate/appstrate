@@ -17,9 +17,9 @@
  * A cell that needs its own state or its own mutation is a COMPONENT, not a
  * closure: `cell` is called during the table's render, so a hook inside one
  * would be a hook inside a loop. Those components live in
- * `integration-connection-cells.tsx` — the row's controls each own their state
- * now, the rename in the account cell and the confirmation in the actions cell,
- * instead of one row component holding both.
+ * `integration-connection-cells.tsx` — the row's controls each own their state,
+ * the rename in the account cell and the confirmation in the actions cell,
+ * rather than one row component holding both.
  */
 
 import { useState } from "react";

@@ -352,7 +352,7 @@ for (const nonInline of [false, true]) {
     // Reopened WITHOUT a page reload, which is the whole point: the explorer
     // must wait for a fresh index instead of seeding Monaco from the cache the
     // save left behind. Files are reached through Paramètres › Explorer ›
-    // Fichiers; the detail page's actions menu no longer offers Modifier.
+    // Fichiers; the detail page's actions menu offers no Modifier.
     await page.getByRole("tab", { name: "Paramètres", exact: true }).click();
     // Scoped to the settings rail: the main navigation carries a "Fichiers"
     // link of its own, for the org's files, and an unscoped match takes it.

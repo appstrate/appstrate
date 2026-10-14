@@ -19,7 +19,7 @@ export const AGENT_COLOR_CATALOG = {
 
 export type AgentColorKey = keyof typeof AGENT_COLOR_CATALOG;
 
-export function isAgentIconName(value: string | null | undefined): value is AgentIconName {
+function isAgentIconName(value: string | null | undefined): value is AgentIconName {
   return Boolean(value && AGENT_ICON_NAME_SET.has(value));
 }
 
@@ -27,7 +27,7 @@ export function isAgentColorKey(value: string | null | undefined): value is Agen
   return Boolean(value && value in AGENT_COLOR_CATALOG);
 }
 
-export function isAgentCustomColor(value: string | null | undefined): value is `#${string}` {
+function isAgentCustomColor(value: string | null | undefined): value is `#${string}` {
   return Boolean(value && /^#[0-9a-f]{6}$/i.test(value));
 }
 

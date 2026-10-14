@@ -2,32 +2,19 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
-import { Button } from "@appstrate/ui/components/button";
+import { useLocation } from "react-router-dom";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { MemoryPanel } from "../persistence/memory-panel";
 import { useSchedules } from "../../hooks/use-schedules";
-import { useApiKeys } from "../../hooks/use-api-keys";
-import {
-  isFileField,
-  schemaHasFileFields,
-  type JSONSchemaObject,
-  type JSONSchema7,
-} from "@appstrate/core/form";
-import { useOrg } from "../../hooks/use-org";
+import { schemaHasFileFields } from "@appstrate/core/form";
 import { usePermissions } from "../../hooks/use-permissions";
-import { useCanReach } from "../../hooks/use-can-reach";
 import { RunList } from "../run-list";
 import { SchedulesTable, useScheduleColumns } from "../schedules-table";
 import { AgentRunButton } from "./agent-run-button";
-import { ApiKeyCreateModal, NEW_API_KEY_PARAM } from "../api-key-create-modal";
 import { Ban, CalendarClock, Play, SearchX } from "lucide-react";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { EmptyState, EmptyStateAction } from "../page-states";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
-import { openAsModal } from "../../lib/modal-route";
 import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
-import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
 
@@ -71,7 +58,6 @@ export function AgentRunsTab({
       toolbar={() => (
         <ListToolbar
           placement="panel"
-          panelFiltersAdjacent
           search={{
             value: search,
             onChange: setSearch,
@@ -151,7 +137,6 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
         <>
           <ListToolbar
             placement="panel"
-            panelFiltersAdjacent
             search={{
               value: search,
               onChange: setSearch,
@@ -188,273 +173,4 @@ export function AgentMemoryTab({ packageId }: { packageId: string }) {
   const initialTypes: Array<"pinned" | "archive"> =
     requestedType === "pinned" || requestedType === "archive" ? [requestedType] : [];
   return <MemoryPanel packageId={packageId} initialTypes={initialTypes} />;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────
-
-function buildInputExample(properties?: Record<string, JSONSchema7>): Record<string, unknown> {
-  if (!properties) return {};
-  const example: Record<string, unknown> = {};
-  for (const [key, prop] of Object.entries(properties)) {
-    if (isFileField(prop)) continue;
-    if (prop.default !== undefined) {
-      example[key] = prop.default;
-    } else if (prop.enum && prop.enum.length > 0) {
-      example[key] = prop.enum[0];
-    } else if (prop.type === "number" || prop.type === "integer") {
-      example[key] = 0;
-    } else if (prop.type === "boolean") {
-      example[key] = false;
-    } else {
-      example[key] = "";
-    }
-  }
-  return example;
-}
-
-interface CurlParams {
-  packageId: string;
-  orgId: string;
-  authToken: string;
-  inputSchema?: JSONSchemaObject;
-  baseUrl: string;
-}
-
-function buildCurlExample(params: CurlParams): string {
-  const { packageId, orgId, authToken, inputSchema, baseUrl } = params;
-  const url = `${baseUrl}/api/agents/${packageId}/run`;
-
-  const inputExample = buildInputExample(inputSchema?.properties);
-  const hasInput = Object.keys(inputExample).length > 0;
-  const body = hasInput ? JSON.stringify({ input: inputExample }, null, 2) : "{}";
-
-  const lines = [
-    `curl -X POST "${url}" \\`,
-    `  -H "Authorization: Bearer ${authToken}" \\`,
-    `  -H "X-Org-Id: ${orgId}" \\`,
-    `  -H "Content-Type: application/json" \\`,
-    `  -d '${body}'`,
-  ];
-
-  return lines.join("\n");
-}
-
-function buildCurlMultipartExample(params: CurlParams): string {
-  const { packageId, orgId, authToken, inputSchema, baseUrl } = params;
-  const url = `${baseUrl}/api/agents/${packageId}/run`;
-
-  const properties = inputSchema?.properties ?? {};
-  const inputExample = buildInputExample(properties);
-  const hasInput = Object.keys(inputExample).length > 0;
-
-  const lines = [
-    `curl -X POST "${url}" \\`,
-    `  -H "Authorization: Bearer ${authToken}" \\`,
-    `  -H "X-Org-Id: ${orgId}" \\`,
-  ];
-
-  if (hasInput) {
-    lines.push(`  -F 'input=${JSON.stringify(inputExample)}' \\`);
-  }
-
-  for (const [key, prop] of Object.entries(properties)) {
-    if (!isFileField(prop)) continue;
-    lines.push(`  -F '${key}=@/path/to/${key}.pdf' \\`);
-  }
-
-  // Remove trailing backslash from the last line
-  const last = lines.length - 1;
-  lines[last] = lines[last]!.replace(/ \\$/, "");
-
-  return lines.join("\n");
-}
-
-/** The launch answers `201` with the run resource; abridged here. */
-const RUN_RESPONSE_EXAMPLE = `{
-  "id": "run_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "status": "pending",
-  …
-}`;
-
-// ─── Agent API Tab ─────────────────────────────────────────────────────
-
-export function AgentApiTab({ packageId }: { packageId: string }) {
-  const location = useLocation();
-  const { t } = useTranslation(["agents", "common"]);
-  const { data: detail } = usePackageDetail("agent", packageId);
-  const { data: apiKeys, isLoading: keysLoading } = useApiKeys();
-  const { currentOrg } = useOrg();
-  const { can } = usePermissions();
-  // The key section follows the keys page (absent in a personal space).
-  const canReach = useCanReach();
-
-  const [rawKey, setRawKey] = useState<string | null>(null);
-  const newApiKey = useModalParam(NEW_API_KEY_PARAM);
-  const { copied, copy } = useCopyToClipboard();
-
-  if (!detail || !currentOrg) return null;
-
-  const firstKey = apiKeys?.[0] ?? null;
-  const baseUrl = window.location.origin;
-
-  // Determine the auth token to show in the curl
-  let authToken: string;
-  if (rawKey) {
-    authToken = rawKey;
-  } else if (firstKey) {
-    authToken = `${firstKey.keyPrefix}${"•".repeat(28)}`;
-  } else {
-    authToken = "<your-api-key>";
-  }
-
-  const curlParams: CurlParams = {
-    packageId,
-    orgId: currentOrg.id,
-    authToken,
-    inputSchema: detail.input?.schema,
-    baseUrl,
-  };
-
-  const schema = detail.input?.schema;
-  const fileKeys = schema?.properties
-    ? Object.entries(schema.properties)
-        .filter(([, p]) => isFileField(p))
-        .map(([k]) => k)
-    : [];
-  const hasFileInput = fileKeys.length > 0;
-  const hasRequiredFile = hasFileInput && fileKeys.some((k) => schema?.required?.includes(k));
-
-  const curlExample = buildCurlExample(curlParams);
-  const curlMultipart = hasFileInput ? buildCurlMultipartExample(curlParams) : null;
-
-  const handleCopy = (text: string) => void copy(text);
-
-  const handleKeyCreated = (key: string) => {
-    setRawKey(key);
-  };
-
-  return (
-    <div className="border-border bg-card space-y-5 rounded-lg border p-5">
-      <h3 className="text-foreground text-sm font-medium">{t("api.title")}</h3>
-
-      {/* API Key section — the curl below stands on its own without it */}
-      {!canReach("/workspace-settings/api-keys") ? null : keysLoading ? (
-        <div className="text-muted-foreground text-sm">{t("loading", { ns: "common" })}</div>
-      ) : !firstKey && !rawKey ? (
-        <div className="border-warning/30 bg-warning/5 rounded-md border px-4 py-3">
-          <p className="text-warning text-sm">{t("api.noKey")}</p>
-          <p className="text-muted-foreground mt-1 text-xs">{t("api.noKeyHint")}</p>
-          {can("api-keys:create") && (
-            <Button size="sm" className="mt-2" onClick={() => newApiKey.open()}>
-              {t("api.createKey")}
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-2 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground shrink-0">{t("api.selectKey")} :</span>
-            {rawKey ? (
-              <code className="bg-success/10 text-success truncate rounded px-2 py-0.5 font-mono text-xs">
-                {rawKey.slice(0, 13)}
-                {"•".repeat(20)}
-              </code>
-            ) : firstKey ? (
-              <code className="bg-muted/50 text-foreground truncate rounded px-2 py-0.5 font-mono text-xs">
-                {firstKey.keyPrefix}
-                {"•".repeat(28)}
-              </code>
-            ) : null}
-            {!rawKey && (
-              <span className="text-muted-foreground shrink-0 text-xs">{t("api.keyMasked")}</span>
-            )}
-          </div>
-          <Link
-            to="/workspace-settings/api-keys"
-            state={openAsModal(location)}
-            className="text-primary text-xs hover:underline"
-          >
-            {t("api.manageKeys")}
-          </Link>
-        </div>
-      )}
-
-      {/* Key just created banner */}
-      {rawKey && (
-        <Alert variant="success">
-          <AlertDescription>{t("api.keyCreated")}</AlertDescription>
-        </Alert>
-      )}
-
-      {/* curl example — JSON (hidden when files are required) */}
-      {!hasRequiredFile && (
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <h4 className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
-              {t("api.curlTitle")}
-              {curlMultipart && <span className="ml-1 tracking-normal normal-case">— JSON</span>}
-            </h4>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => handleCopy(curlExample)}
-            >
-              {copied ? t("api.copied") : t("api.copy")}
-            </Button>
-          </div>
-          <pre className="text-foreground bg-muted/50 border-border overflow-x-auto rounded-md border p-4 font-mono text-xs whitespace-pre-wrap">
-            {curlExample}
-          </pre>
-        </div>
-      )}
-
-      {/* curl example — multipart (when agent has file inputs) */}
-      {curlMultipart && (
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <h4 className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
-              {t("api.curlTitle")}
-              <span className="ml-1 tracking-normal normal-case">— multipart/form-data</span>
-            </h4>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => handleCopy(curlMultipart)}
-            >
-              {copied ? t("api.copied") : t("api.copy")}
-            </Button>
-          </div>
-          <pre className="text-foreground bg-muted/50 border-border overflow-x-auto rounded-md border p-4 font-mono text-xs whitespace-pre-wrap">
-            {curlMultipart}
-          </pre>
-        </div>
-      )}
-
-      {/* Response example */}
-      <div>
-        <h4 className="text-muted-foreground mb-2 text-xs font-medium tracking-wider uppercase">
-          {t("api.responseTitle")}
-        </h4>
-        <pre className="text-foreground bg-muted/50 border-border overflow-x-auto rounded-md border p-4 font-mono text-xs whitespace-pre-wrap">
-          {RUN_RESPONSE_EXAMPLE}
-        </pre>
-        <p className="text-muted-foreground mt-2 text-xs">{t("api.responseHint")}</p>
-      </div>
-
-      {/* Docs link */}
-      <a
-        href="/api/docs"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
-      >
-        {t("api.docsLink")} &rarr;
-      </a>
-
-      {/* Create API Key Modal */}
-      <ApiKeyCreateModal onKeyCreated={handleKeyCreated} />
-    </div>
-  );
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-space authentication settings (org settings → Espace → Authentification),
+ * Per-space authentication settings (workspace settings → Authentification),
  * driven through the form and read back two ways: what the tab re-seeds itself
  * with after a reload, and what the routes put on the wire.
  *
@@ -21,7 +21,7 @@
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import type { Locator, Page } from "@playwright/test";
 
-const AUTH_TAB_PATH = "/org-settings/space/auth";
+const AUTH_TAB_PATH = "/workspace-settings/auth";
 const CAMEL_CASE_CARVE_OUT = new Set(["spaceId", "createdAt", "updatedAt"]);
 
 function camelCaseKeys(body: Record<string, unknown>): string[] {

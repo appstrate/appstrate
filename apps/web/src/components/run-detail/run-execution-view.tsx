@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
 import { LogEntryInspector, LogViewer } from "../log-viewer";
@@ -19,7 +18,6 @@ export function RunExecutionView({
   headerActions?: ReactNode;
   initialFilter?: JournalOverviewFilter;
 }) {
-  const { t } = useTranslation("agents");
   const [selectedEntry, setSelectedEntry] = useState<ExecutionEntry | null>(null);
 
   return (
@@ -35,8 +33,6 @@ export function RunExecutionView({
           <LogViewer
             entries={logs}
             focusError={run.status === "failed"}
-            variant="integrated"
-            heading={t("run.executionStream")}
             headerActions={headerActions}
             selectedEntryId={selectedEntry?.id}
             onSelectEntry={setSelectedEntry}

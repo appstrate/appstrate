@@ -738,7 +738,7 @@ export function createOidcRouter() {
    * and a personal space takes neither (`personal_space_takes_no_oauth_clients`,
    * `personal_space_takes_no_end_users`): configuring them there would be dead
    * config. A 409, not a 404: only that space's owner reaches it. The deletes
-   * stay open so a row saved before this rule can still be removed.
+   * stay open, so a row that exists there can always be removed.
    */
   const refusePersonalSpace = (c: Context<AppEnv>) => {
     if (c.get("space")?.ownerUserId) {

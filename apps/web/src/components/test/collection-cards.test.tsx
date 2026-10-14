@@ -65,14 +65,8 @@ describe("the level-one collection cards", () => {
     expect(html).toContain("Agent supprimé");
   });
 
-  it("gives the schedule collection variant a vertical set of comparable facts", () => {
-    const html = render(
-      <ScheduleCard
-        schedule={makeSchedule()}
-        agentName="Rapport trimestriel"
-        variant="collection"
-      />,
-    );
+  it("gives a schedule card a vertical set of comparable facts", () => {
+    const html = render(<ScheduleCard schedule={makeSchedule()} agentName="Rapport trimestriel" />);
 
     expect(html).toContain("Rapport du matin");
     expect(html).toContain("Rapport trimestriel");
@@ -80,14 +74,6 @@ describe("the level-one collection cards", () => {
     expect(html).toContain("0 7 * * *");
     expect(html).toContain("Prochaine");
     expect(html).toContain("Olivier Tarbès");
-  });
-
-  it("leaves the existing compact schedule variant compact", () => {
-    const html = render(<ScheduleCard schedule={makeSchedule()} agentName="Rapport trimestriel" />);
-
-    expect(html).toContain("Rapport du matin");
-    expect(html).not.toContain("Fréquence");
-    expect(html).not.toContain("0 7 * * *");
   });
 
   it("keeps the honest footer on an empty document card result", () => {

@@ -266,7 +266,6 @@ export function ResourceSection({
   const toolbar = (
     <ListToolbar
       placement="panel"
-      panelFiltersAdjacent
       search={{ value: search, onChange: setSearch, placeholder: t("editor.resourceSearch") }}
       filters={[
         {
@@ -478,7 +477,7 @@ export function ResourceSection({
               }),
           ])
         }
-        // One door for every family (#1437): activating is a space placement
+        // One door for every family: activating is a space placement
         // switch, not an integration-only verb.
         onActivate={(id) => {
           if (!currentSpaceId || !canActivate) return;

@@ -47,11 +47,11 @@ export const runKeys = {
  * silently leaves this family alone.
  *
  * That costs more than a stale log list. The run-detail page appends live SSE
- * frames into this cache with `setQueryData`, and the per-turn breadcrumbs
- * carrying BOTH the context gauge's numerator and its denominator ride in it: a
- * frame arriving between the last render and the stream teardown is lost for
- * good, leaving a run that peaked at 187k reporting whatever the last surviving
- * turn said — or, with no window left in the cache, no gauge at all.
+ * frames into this cache with `setQueryData`, and the per-turn breadcrumbs the
+ * turns table reads (each turn's context and the window) ride in it: a frame
+ * arriving between the last render and the stream teardown is lost for good,
+ * leaving the table without its last turns — or, with no window left in the
+ * cache, without its percentages.
  */
 export function invalidateRunLogs(qc: QueryClient, orgId: Id, spaceId: Id, runId: Id) {
   return qc.invalidateQueries({ queryKey: runKeys.logs(orgId, spaceId, runId) });

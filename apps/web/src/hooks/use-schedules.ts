@@ -228,9 +228,10 @@ export function useScheduleFormDeps(
   const denied = !!packageId && ready && !packageSightPermissions("agent").some(can);
 
   // `deps` stays null until the AGENT DETAIL itself lands, not merely until an
-  // agent is picked: `ScheduleForm` seeds its input state once, in a `useState`
-  // initialiser, and a form mounted on empty settings would seed a field that
-  // has since been locked — unremovable through the UI and refused on save
+  // agent is picked: the schedule forms (`new-schedule-modal.tsx`, the inputs
+  // section of `schedule-settings.tsx`) seed their input state once, in a
+  // `useState` initialiser, and a form mounted on empty settings would seed a
+  // field that has since been locked — unremovable through the UI and refused on save
   // (400 `locked_input_field`). `key={schedule.id}` means no remount when the
   // detail arrives, so the only safe answer while it is in flight is "not yet".
   if (!packageId || !agentDetail) return { deps: null, error, denied };

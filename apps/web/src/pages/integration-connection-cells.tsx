@@ -129,11 +129,10 @@ function useRowGrants(connection: IntegrationConnection, isAdmin: boolean) {
  * connection's variables (its instance URL) sit under the label: they are what
  * tells two accounts of one integration apart.
  *
- * It used to be a pencil that swapped the label for an input, which is the Edit
- * button the product owner ruled out ("Direct manipulation in forms. No Edit
- * button revealing a field"), and it left the app with two rename affordances:
- * click-to-edit on the credentials table, pencil-then-field here. One now, the
- * shared `InlineEditableLabel`, started by « Rename » in the row's menu (a click
+ * No pencil swapping the label for an input: that is the Edit button the
+ * product owner ruled out ("Direct manipulation in forms. No Edit button
+ * revealing a field"). The app has one rename affordance, the shared
+ * `InlineEditableLabel`, started by « Rename » in the row's menu (a click
  * on the name opens the row, like the rest of it). The label cannot be cleared: a run addresses
  * each bound connection by it, so an emptied field just cancels the edit.
  */

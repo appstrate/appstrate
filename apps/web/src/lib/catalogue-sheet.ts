@@ -4,7 +4,7 @@
  * What a package's catalogue sheet says about SPACES, graded by what the reader
  * may do in them.
  *
- * The sheet used to ask "add it where?" through a menu and a button: two
+ * The sheet does not ask "add it where?" through a menu and a button: two
  * gestures for a question whose answer reads better at a glance, the state in
  * each space with the switch on the same line. How much of that the reader gets
  * depends on their reach, and the grading is the rule this file pins:

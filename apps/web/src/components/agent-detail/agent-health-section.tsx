@@ -15,11 +15,9 @@ import { HealthCard, HealthCardItem, HealthAction } from "../health-card";
 export function AgentHealthSection({
   packageId,
   version,
-  cardHeaders = false,
 }: {
   packageId: string;
   version?: string;
-  cardHeaders?: boolean;
 }) {
   const { t } = useTranslation("agents");
   const location = useLocation();
@@ -30,20 +28,11 @@ export function AgentHealthSection({
   if (diagnostics.isLoading) {
     return (
       <section
-        className={cn(
-          "border-border rounded-lg border",
-          cardHeaders && "bg-muted/35",
-          cardHeaders ? "overflow-hidden" : "p-4",
-        )}
+        className="border-border bg-muted/35 overflow-hidden rounded-lg border"
         aria-label={t("detail.diagnostics.sectionTitle")}
         aria-busy="true"
       >
-        <div
-          className={cn(
-            "flex flex-wrap items-center gap-2",
-            cardHeaders && "bg-muted/35 px-4 py-3",
-          )}
-        >
+        <div className="bg-muted/35 flex flex-wrap items-center gap-2 px-4 py-3">
           <span className="bg-muted size-4 animate-pulse rounded" />
           <span className="bg-muted h-4 w-28 animate-pulse rounded" />
           <span className="bg-muted h-5 w-32 animate-pulse rounded-md" />
@@ -67,7 +56,6 @@ export function AgentHealthSection({
       <HealthCard
         title={t("detail.diagnostics.sectionTitle")}
         tone={tone}
-        cardHeaders={cardHeaders}
         badge={
           result ? (
             <button type="button" onClick={() => issues.open()}>
@@ -78,7 +66,7 @@ export function AgentHealthSection({
           )
         }
       >
-        <div className={cn(cardHeaders && "px-4")}>
+        <div className="px-4">
           {result?.status === "blocking" && result.warning_count > 0 && (
             <p className="text-muted-foreground pt-4 text-xs">
               {t("detail.diagnostics.warningAlongside", { count: result.warning_count })}
@@ -89,8 +77,7 @@ export function AgentHealthSection({
             <ul
               className={cn(
                 "divide-y",
-                !cardHeaders && "mt-3",
-                cardHeaders && result?.status === "blocking" && result.warning_count > 0 && "mt-3",
+                result?.status === "blocking" && result.warning_count > 0 && "mt-3",
               )}
             >
               {visible.map((diagnostic) => {
@@ -100,7 +87,6 @@ export function AgentHealthSection({
                     key={`${diagnostic.code}:${diagnostic.field}`}
                     title={text.title}
                     description={text.explanation}
-                    cardHeaders={cardHeaders}
                     actions={
                       <HealthAction
                         to={agentDiagnosticCorrectionTarget(
@@ -117,20 +103,8 @@ export function AgentHealthSection({
               })}
             </ul>
           )}
-
-          {result && result.diagnostics.length > 3 && !cardHeaders && (
-            <div className="mt-3">
-              <button
-                type="button"
-                onClick={() => issues.open()}
-                className="text-primary text-xs font-medium hover:underline"
-              >
-                {t("detail.diagnostics.seeAll")}
-              </button>
-            </div>
-          )}
         </div>
-        {result && result.diagnostics.length > 3 && cardHeaders && (
+        {result && result.diagnostics.length > 3 && (
           <OverviewCardAction onClick={() => issues.open()}>
             {t("detail.diagnostics.seeAll")}
           </OverviewCardAction>

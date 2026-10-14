@@ -65,7 +65,6 @@ export interface PackageCollectionProps {
   view: ListView;
   /** Absent when the view is the surface's decision, not the reader's. */
   onViewChange?: (view: ListView) => void;
-  placement?: "page" | "panel";
   /**
    * Whether the list can say what is running or what uses this package. The
    * catalogue reads the library, which knows neither, so it offers origin only
@@ -132,7 +131,6 @@ export function PackageCollection({
   list,
   view,
   onViewChange,
-  placement = "page",
   activityFilter = true,
   originFilter = true,
   extraFilters = NO_FILTERS,
@@ -215,9 +213,9 @@ export function PackageCollection({
 
   // An empty list, a search that matched nothing, and a request that failed are
   // three different sentences, and the body says whichever applies IN PLACE —
-  // the bar and the count above and below it never move. This used to be three
-  // early returns above the toolbar, which is how an empty list lost its bar
-  // and had to re-offer the page's own actions as unlabelled icons.
+  // the bar and the count above and below it never move. An early return above
+  // the toolbar would cost an empty list its bar and make it re-offer the
+  // page's own actions as unlabelled icons.
   const resetAll = () => {
     list.reset();
     onResetFilters?.();
@@ -239,7 +237,6 @@ export function PackageCollection({
       {header}
       <ListToolbar
         tabs={tabs}
-        placement={placement}
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
         filters={filters}
         onReset={resetAll}

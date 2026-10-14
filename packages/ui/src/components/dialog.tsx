@@ -58,20 +58,11 @@ const DialogSurface = React.forwardRef<
 });
 DialogSurface.displayName = "DialogSurface";
 
-interface DialogContentProps extends React.ComponentPropsWithoutRef<
-  typeof DialogPrimitive.Content
-> {
-  hideCloseButton?: boolean;
-  /** Overrides the translated default from `UiLabelsContext`. */
-  closeLabel?: string;
-}
-
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  DialogContentProps
->(({ className, children, hideCloseButton = false, closeLabel, ...props }, ref) => {
-  const labels = useUiLabels();
-  const close = closeLabel ?? labels.close;
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+>(({ className, children, ...props }, ref) => {
+  const close = useUiLabels().close;
   return (
     <DialogPortal>
       <DialogOverlay>
@@ -86,15 +77,13 @@ const DialogContent = React.forwardRef<
             {...props}
           >
             {children}
-            {!hideCloseButton && (
-              <DialogPrimitive.Close
-                aria-label={close}
-                className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:pointer-events-none"
-              >
-                <X className="h-4 w-4" />
-                <span className="sr-only">{close}</span>
-              </DialogPrimitive.Close>
-            )}
+            <DialogPrimitive.Close
+              aria-label={close}
+              className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:pointer-events-none"
+            >
+              <X className="h-4 w-4" />
+              <span className="sr-only">{close}</span>
+            </DialogPrimitive.Close>
           </DialogSurface>
         </div>
       </DialogOverlay>

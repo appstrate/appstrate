@@ -33,14 +33,10 @@ interface PanelDialogProps {
   mobileNav?: ReactNode;
   /** Use the design-system overlay scrollbar for this panel's content pane. */
   contentScrollArea?: boolean;
-  /** Localized accessible name for the standard dialog close control. */
-  closeLabel?: string;
   /** Keep page headings and toolbars below the dialog's close affordance. */
   reserveCloseArea?: boolean;
   /** Prototype the panel as a shell surface below the two-line mobile header. */
   mobileAsSurface?: boolean;
-  /** Sticky action area owned by the content pane, never by the rail. */
-  contentFooter?: ReactNode;
   /**
    * A band at the top of the content pane that STAYS while the pane scrolls.
    *
@@ -61,10 +57,8 @@ export function PanelDialog({
   rail,
   mobileNav,
   contentScrollArea = false,
-  closeLabel,
   reserveCloseArea = false,
   mobileAsSurface = false,
-  contentFooter,
   contentHeader,
   children,
   onClose,
@@ -148,7 +142,6 @@ export function PanelDialog({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        closeLabel={closeLabel}
         onEscapeKeyDown={keepOpenWhileRenaming}
         className={[
           "flex h-[min(720px,calc(100dvh-6rem))] w-[min(1080px,calc(100vw-4rem))] max-w-none gap-0 overflow-hidden p-0",
@@ -179,12 +172,10 @@ export function PanelDialog({
         {contentScrollArea ? (
           <div className="flex min-w-0 flex-1 flex-col">
             <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
-            {contentFooter}
           </div>
         ) : (
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto">{content}</div>
-            {contentFooter}
           </div>
         )}
       </DialogContent>

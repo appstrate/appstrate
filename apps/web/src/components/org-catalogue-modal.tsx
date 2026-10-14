@@ -116,26 +116,7 @@ import { RailButton } from "./settings/rail-link";
 import { RailGroup, RailHeader } from "./settings/rail-shell";
 import { SettingsHeading } from "./settings/settings-heading";
 import { Spinner } from "./spinner";
-
-/**
- * The catalogue's two READINGS of one set: `discover` browses every package in
- * cards, `placed` manages what the reader's spaces hold, space by space.
- *
- * The URL still says `placed` for the second, which is what it shows.
- *
- * It used to be provenance (the org's packages versus Appstrate's), which
- * answered a question nobody asks first: a reader wants to know what they
- * already have before knowing who made it. Provenance is a filter now.
- *
- * The old spellings (`org`, `appstrate`) still resolve — they are in links,
- * in the navigation and in bookmarks — and land on the placed tab.
- */
-export type CatalogueScope = "placed" | "discover" | "shared";
-
-function catalogueScope(raw: string): CatalogueScope {
-  if (raw === "discover" || raw === "shared") return raw;
-  return "placed";
-}
+import type { CatalogueScope } from "../lib/catalogue-link";
 
 const KINDS: Array<{ type: PackageType; icon: typeof Layers; titleKey: string }> = [
   { type: "agent", icon: Layers, titleKey: "packages.type.agents" },
@@ -157,13 +138,13 @@ function isPackageType(value: string): value is PackageType {
 }
 
 export function OrgCatalogueModal({
-  scope: rawScope,
+  scope,
   type,
   onSelect,
   onClose,
 }: {
-  /** Both straight from the URL, so a link opens exactly one view. */
-  scope: string;
+  /** Both from the URL, so a link opens exactly one view. */
+  scope: CatalogueScope;
   type: string;
   onSelect: (scope: CatalogueScope, type: PackageType) => void;
   onClose: () => void;
@@ -186,7 +167,6 @@ export function OrgCatalogueModal({
   const preview = useModalParam("package");
   const qc = useQueryClient();
 
-  const scope = catalogueScope(rawScope);
   const discovering = scope === "discover";
   const view: "cards" | "table" = discovering ? "cards" : "table";
   const visibleKinds = KINDS.filter((kind) => allowed.includes(kind.type));
@@ -230,8 +210,8 @@ export function OrgCatalogueModal({
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   // Every space the reader reaches is a column, theirs first. Narrowing to one
-  // used to be a mode and a filter of its own; hiding a column is what the
-  // column menu is for, and "what does my space run" is Découvrir's question.
+  // is not a mode or a filter of its own; hiding a column is what the column
+  // menu is for, and "what does my space run" is Découvrir's question.
   const spaceColumnsInput = spaces.map((space) => ({
     id: space.id,
     name: space.name,
@@ -268,10 +248,10 @@ export function OrgCatalogueModal({
       if (row && integrationExecution(row) !== execution) return false;
     }
     // Découvrir is the WHOLE catalogue, the way a store keeps showing what you
-    // already own with a tick beside it. It used to hold the complement of the
-    // other half, so a package left it the moment it was placed — and for
-    // agents and skills that emptied it, since an organisation's own packages
-    // are placed by their home. Espaces stays the matrix of what is placed.
+    // already own with a tick beside it. Were it the complement of the other
+    // half, a package would leave it the moment it was placed — and for agents
+    // and skills that would empty it, since an organisation's own packages are
+    // placed by their home. Espaces stays the matrix of what is placed.
     if (discovering) return true;
     const placement = placementById.get(item.id);
     return placement ? inPlacedTab(placement) : false;
@@ -290,11 +270,10 @@ export function OrgCatalogueModal({
   /**
    * May this reader switch the package ON in that space?
    *
-   * Two verdicts, and the card used to ask only the first: the activation
-   * right in the target space, and — when the package is not placed there
-   * yet — the SHARE right in its home, since the route shares it before it
-   * activates it (`routes/spaces.ts`). Without the second, a member saw an
-   * "Ajouter" the server refused.
+   * Two verdicts: the activation right in the target space, and — when the
+   * package is not placed there yet — the SHARE right in its home, since the
+   * route shares it before it activates it (`routes/spaces.ts`). Without the
+   * second, a member would see an "Ajouter" the server refuses.
    */
   const mayActivateIn = (pkg: LibraryPackageItem, targetSpaceId: string) =>
     maySetPackageActive(grantById.get(targetSpaceId), pkg.type, true) &&
@@ -398,7 +377,7 @@ export function OrgCatalogueModal({
     onChange: setStates,
   };
   // Provenance: an attribute of the package, not the question a reader asks
-  // first — which is why it stopped being the rail's axis.
+  // first — which is why it is a filter and not the rail's axis.
   const origins = list.values("origin", ["org", "system"] as const);
   const shown = rows.filter(
     (item) => origins.length === 0 || origins.includes(item.source === "system" ? "system" : "org"),
@@ -625,8 +604,8 @@ export function OrgCatalogueModal({
    * The two READINGS of one catalogue, in the bar's corner rather than the
    * rail's head.
    *
-   * They used to be the rail's first axis, which made them read as two places
-   * holding different things. They are one set seen two ways — browsing in
+   * As the rail's first axis they would read as two places holding different
+   * things. They are one set seen two ways — browsing in
    * cards, managing in a matrix — so they sit with the other ways of seeing
    * the list (search, filters, columns), and the rail is left with the one
    * axis that IS a partition: the kinds.
@@ -744,7 +723,6 @@ export function OrgCatalogueModal({
       rail={rail}
       mobileNav={mobileNav}
       contentScrollArea
-      closeLabel={t("btn.close", { ns: "common" })}
       reserveCloseArea
       // Where the reader is, kept in place while the pane scrolls: the kind
       // they are browsing, or the package they opened, with the way back.
@@ -890,13 +868,10 @@ export function OrgCatalogueModal({
               />
             ) : undefined
           }
-          // The page's own bar, not a panel variant of it: same icon-only
-          // filter and column buttons, in the same place, at the same size.
-          placement="page"
           // The library says where a package is placed, not what runs or uses
           // it, so the activity dimension would filter on nothing. Provenance
-          // is one of this bar's own filters now, in the shape every other
-          // filter here has, rather than the collection's built-in one.
+          // is one of this bar's own filters, in the shape every other filter
+          // here has, rather than the collection's built-in one.
           activityFilter={false}
           originFilter={false}
           extraFilters={discovering ? [originFilter] : [stateFilter, originFilter]}

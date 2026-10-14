@@ -20,11 +20,11 @@ import { usePermissions } from "../hooks/use-permissions";
 /**
  * The filters live in the URL, so a filtered list is a link. They also come
  * back as one closed set rather than two tab strips: three dimensions drawn as
- * tabs is three rows of chrome above five rows of data, and `status` — which
- * the API has always accepted — had nowhere to go at all.
+ * tabs is three rows of chrome above five rows of data, and `status` would have
+ * nowhere to go at all.
  *
  * Each dimension takes SEVERAL values. It matters for one of them: "everything
- * that broke" is `failed` or `timeout`, one question the endpoint now answers
+ * that broke" is `failed` or `timeout`, one question the endpoint answers
  * in one request. The other two are narrower on the wire, and squaring that
  * with the checkboxes is THIS file's job, not the toolbar's — a tick has to
  * mean a tick on every menu.

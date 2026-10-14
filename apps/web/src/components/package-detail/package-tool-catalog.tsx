@@ -267,7 +267,6 @@ export function PackageToolCatalog({
       )}
       <ListToolbar
         placement="panel"
-        panelFiltersAdjacent
         actions={actions}
         search={{ value: search, onChange: setSearch, placeholder: t("packageTools.search") }}
         filters={[

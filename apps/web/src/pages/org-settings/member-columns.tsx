@@ -5,14 +5,12 @@
  *
  * A settings list is a list of RECORDS: the same fields, in the same order, on
  * every row. That is the table's bargain — alignment across rows, paid for in
- * width — and drawing it as stacked cards instead meant every row reprinted its
- * own labels. The CLI sessions card was the clearest case (four labels repeated
- * per row where a head writes them once), but members had the same shape.
+ * width — and drawing it as stacked cards instead would make every row reprint
+ * its own labels (a head writes them once).
  *
- * The move to a table settled something the card had left crooked: the role was
- * drawn TWICE, as a badge in the header and as a `Select` in a footer strip.
- * One column now, and it holds the CONTROL when the actor may change the role,
- * falling back to plain text when they may not — "the control IS the setting",
+ * The role is drawn ONCE, not as a badge in a header beside a `Select` in a
+ * footer strip: one column, and it holds the CONTROL when the actor may change
+ * the role, falling back to plain text when they may not — "the control IS the setting",
  * which a value with a picker beside it is not.
  *
  * Out of the page for the same reason as `model-columns.tsx`: a column set is

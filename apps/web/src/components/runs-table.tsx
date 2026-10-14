@@ -5,13 +5,12 @@
  *
  * The reference calls it `.dt-runs`: eight columns over the shared table, with
  * the number and the name doing the identifying and the rest reading as
- * columns rather than as a sentence. The row used to be a flex line where
- * every fact floated to wherever the previous one ended, so nothing lined up
- * between rows and the eye had to re-read each one.
+ * columns rather than as a sentence, so facts line up between rows and the eye
+ * does not re-read each one.
  *
- * What the change buys, beyond alignment: a RESULT column. A failed run's
- * error was invisible in the list — you had to open the run to learn what
- * broke, on the very screen whose job is to tell you which one did.
+ * Beyond alignment, a RESULT column: a failed run's error shows in the list,
+ * on the very screen whose job is to tell you which run broke, without opening
+ * the run.
  *
  * The set is ONE array of column literals. Widths, breakpoint behaviour,
  * alignment and content sit together per column, so adding one is one edit

@@ -369,12 +369,11 @@ export function UnifiedSettingsLayout() {
       title={label("unifiedSettings.title")}
       rail={rail}
       contentScrollArea
-      closeLabel={t("btn.close", { ns: "common" })}
       reserveCloseArea
       mobileAsSurface
       // The same band as the catalogue: invisible at rest, the section's name
       // once the page has scrolled past its own heading — and an opaque surface
-      // under the close control, which the page used to scroll beneath.
+      // under the close control, so the page does not scroll beneath it.
       contentHeader={(stuck) =>
         activeItem ? (
           <span

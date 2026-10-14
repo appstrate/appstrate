@@ -19,16 +19,13 @@ export function LoadingState() {
 /**
  * The request failed — drawn the way the empty state is drawn.
  *
- * It used to be a bare sentence floating in an empty card, which on a list
- * screen read as a rendering failure rather than as an answer: the state a
- * screen shows most often when something IS wrong was the one state nobody had
- * designed. Same rings, same badge, one different glyph — so a reader tells the
- * two apart by the icon and the words, not by one state looking finished and
- * the other looking broken.
+ * A bare sentence floating in an empty card would read, on a list screen, as a
+ * rendering failure rather than as an answer. Same rings, same badge, one
+ * different glyph — so a reader tells the two apart by the icon and the words,
+ * not by one state looking finished and the other looking broken.
  *
- * What it still lacks is a way out (a Retry), which needs a refetch its 60-odd
- * callers do not hand it. That belongs to the pass that takes the state family
- * as a whole.
+ * It offers no way out (a Retry): that needs a refetch its callers do not
+ * hand it.
  */
 export function ErrorState({
   message,

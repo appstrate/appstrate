@@ -13,7 +13,7 @@
 
 import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { LibraryBig, Menu, PanelLeft, Search, Settings } from "lucide-react";
+import { LibraryBig, Menu, PanelLeft, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavUser } from "@/components/nav-user";
 import { OrgSwitcher } from "@/components/org-switcher";
@@ -152,7 +152,7 @@ export function ShellSidebar({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        {/* Who you are, and nothing else: the collapse moved to the head. */}
+        {/* Who you are, and nothing else: the collapse control is in the head. */}
         <div className="border-sidebar-border border-t p-2">
           <NavUser variant="row" />
         </div>
@@ -215,30 +215,13 @@ export function ShellHeader({
         <div className="hidden min-w-0 flex-1 md:flex">
           <ShellBreadcrumb />
         </div>
-        {/* The page's own actions, then the two utilities that are global but
-            not personal: search and notifications. They sit here rather than in
-            the sidebar because the sidebar answers "where am I" and these two
-            answer "what is new" and "find me something" — and because a header
-            holding only a trail is a header holding nothing. */}
+        {/* The page's own actions, then the one utility that is global but not
+            personal: notifications. It sits here rather than in the sidebar
+            because the sidebar answers "where am I" and this answers "what is
+            new" — and because a header holding only a trail is a header holding
+            nothing. */}
         <div className="flex shrink-0 items-center gap-1">
           {actions}
-          {/* Not wired to anything yet: there is no global search in the app.
-              Shown in development only, so the arrangement can be judged; a
-              production build carries no dead control. */}
-          {import.meta.env.DEV && (
-            <button
-              type="button"
-              disabled
-              title="Recherche globale (à brancher)"
-              aria-label="Rechercher"
-              // `p-0` is not decoration: the base layer gives every `button`
-              // `px-3 py-1.5`, which leaves an 18px icon 8px of room in a 32px
-              // box and squashes it. Same reset the notification bell carries.
-              className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-8 shrink-0 items-center justify-center rounded-md p-0 disabled:opacity-40"
-            >
-              <Search size={18} />
-            </button>
-          )}
           <NotificationBell />
         </div>
       </div>

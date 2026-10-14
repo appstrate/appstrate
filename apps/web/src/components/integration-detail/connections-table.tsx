@@ -98,7 +98,6 @@ export function ConnectionsTable({
     <div data-testid="integration-connections-table">
       <ListToolbar
         placement="panel"
-        panelFiltersAdjacent
         search={{
           value: search,
           onChange: setSearch,

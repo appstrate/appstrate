@@ -1,18 +1,2 @@
--- `organizations.logo` reaches the schema a third time, and the reason is the
--- same twice over.
---
--- It arrived with the redesigned org surfaces as `0039_rainy_next_avengers`,
--- which the 10 September merge of main dropped: main owned a `0039`, the
--- journal kept one file, and the column stayed in the Drizzle schema with
--- nothing to create it. Restored as `0063_org_logo` on 20 September — and the
--- #1437 merge the same day took `0063` through `0068`, so it moved to `0069`;
--- the 30 September merge found main at `0077`, so it moved to `0078`; the
--- 8 October merge found main at `0081`, so it moved to `0082`; the 9 October
--- merge found main at `0086`, so it moved to `0087`; the 10 October merge
--- found main at `0087`, so it moved to `0088`; the 10 October evening merge
--- found main at `0089`, so it moved to `0090`; the 12 October merge found main
--- at `0090`, so it moves here.
---
--- `IF NOT EXISTS` because the databases that ran either earlier copy already
--- hold the column, and they must migrate rather than abort.
+-- An organization's logo: `emoji:<char>` or a WebP data URL, null when unset.
 ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "logo" text;

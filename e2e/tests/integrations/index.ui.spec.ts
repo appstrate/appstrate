@@ -7,9 +7,8 @@
  *
  * It reads the whole management listing (`GET /api/integrations`) and tells the
  * two states apart with a Statut column, so a custom integration switched off in
- * this space is still a row, marked « Non activée », instead of vanishing. That
- * is the redesign's point: the page is where you manage them, not just where you
- * find what is running.
+ * this space is still a row, marked « Non activée », instead of vanishing: the
+ * page is where you manage them, not just where you find what is running.
  *
  * The row and the search box read the same manifest projection the route emits
  * (`display_name`, `description`, `keywords`), so a keyword that appears nowhere

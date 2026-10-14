@@ -12,15 +12,19 @@
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
-import { OrgCatalogueModal, type CatalogueScope } from "../components/org-catalogue-modal";
+import { OrgCatalogueModal } from "../components/org-catalogue-modal";
+import { isCatalogueScope, type CatalogueScope } from "../lib/catalogue-link";
 import { modalReturnTarget, useBackgroundLocation } from "../lib/modal-route";
 import { useCatalogueKinds } from "../hooks/use-catalogue-kinds";
 import { useOverlayBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
-import { NoAccessState } from "../components/route-gate";
+import { NoAccessState, UnavailableState } from "../components/route-gate";
 
 export function CataloguePage() {
-  const { origin: scope, type } = useParams();
+  // Découvrir by default: it is the reading everybody needs — what exists,
+  // and whether the space I am in runs it — while the matrix serves the
+  // reader who manages several spaces.
+  const { origin: scope = "discover", type } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const background = useBackgroundLocation();
@@ -46,19 +50,28 @@ export function CataloguePage() {
     );
   }
 
+  // A reading the catalogue does not have is an address that does not exist.
+  if (!isCatalogueScope(scope)) {
+    return (
+      <Dialog open onOpenChange={(open) => !open && close()}>
+        <DialogContent aria-describedby={undefined}>
+          <DialogTitle className="sr-only">{t("access.unavailable")}</DialogTitle>
+          <UnavailableState />
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <OrgCatalogueModal
-      // Découvrir by default: it is the reading everybody needs — what exists,
-      // and whether the space I am in runs it — while the matrix serves the
-      // reader who manages several spaces.
-      scope={scope ?? "discover"}
+      scope={scope}
       type={type ?? ""}
       onSelect={(nextScope: CatalogueScope, nextType: PackageType) => {
         // The state filter speaks each reading's own words (here / elsewhere
         // against active / inactive), so it does not survive a change of
         // reading; the rest of the query does.
         const query = new URLSearchParams(location.search);
-        if (nextScope !== (scope ?? "discover")) query.delete("state");
+        if (nextScope !== scope) query.delete("state");
         const search = query.toString();
         navigate(`/catalogue/${nextScope}/${nextType}${search ? `?${search}` : ""}`, {
           replace: true,

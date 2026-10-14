@@ -137,8 +137,8 @@ describe("the reset", () => {
 
 describe("the search", () => {
   it("stays on the bar, whatever the filters are doing", () => {
-    // It used to travel into the disclosure row with the filters, which was
-    // simply a bug: it is the one thing you type into, and it does not move.
+    // It never travels into the disclosure row with the filters: it is the one
+    // thing you type into, and it does not move.
     const withRowOpen = render(
       <ListToolbar
         filters={filters({ status: ["failed"] })}

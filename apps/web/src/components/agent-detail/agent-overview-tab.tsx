@@ -23,8 +23,6 @@ export function AgentOverviewTab({
   currentManifest,
   currentContent,
   surface,
-  cardHeaders = false,
-  contained = false,
   fileEditHref,
   initialFilePath,
   canEditFiles = false,
@@ -36,8 +34,6 @@ export function AgentOverviewTab({
   currentManifest?: Record<string, unknown> | undefined;
   currentContent?: string | null | undefined;
   surface: "summary" | "files";
-  cardHeaders?: boolean;
-  contained?: boolean;
   fileEditHref?: (path: string) => string | undefined;
   /** Explorer › Fichiers opened on this bundle file, when a link sent the reader to it. */
   initialFilePath?: string;
@@ -135,34 +131,23 @@ export function AgentOverviewTab({
   };
 
   return (
-    <div
-      className={cn(
-        "space-y-8",
-        !contained && "pt-8 pb-4 md:pb-6",
-        !cardHeaders && !contained && "px-4 md:px-6",
-      )}
-      data-agent-operational-overview
-    >
-      <AgentHealthSection packageId={packageId} version={version} cardHeaders={cardHeaders} />
+    <div className="space-y-8" data-agent-operational-overview>
+      <AgentHealthSection packageId={packageId} version={version} />
 
       <div className="grid gap-6 xl:grid-cols-3">
         <section
-          className={cn(
-            "flex min-w-0 flex-col",
-            cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
-          )}
+          className="border-border bg-muted/35 flex min-w-0 flex-col overflow-hidden rounded-lg border"
           aria-labelledby="agent-executions-heading"
         >
           <OverviewSectionHeading
             id="agent-executions-heading"
             icon={PlayCircle}
             title={t("detail.overview.executions")}
-            embedded={cardHeaders}
           />
           <div
             className={cn(
               "border-border bg-card grid h-full divide-y overflow-hidden rounded-lg border",
-              cardHeaders && "rounded-t-lg border-x-0 border-b-0",
+              "rounded-t-lg border-x-0 border-b-0",
             )}
           >
             <div className="flex min-w-0 flex-col">
@@ -230,17 +215,13 @@ export function AgentOverviewTab({
         </section>
 
         <section
-          className={cn(
-            "flex min-w-0 flex-col",
-            cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
-          )}
+          className="border-border bg-muted/35 flex min-w-0 flex-col overflow-hidden rounded-lg border"
           aria-labelledby="agent-activity-heading"
         >
           <OverviewSectionHeading
             id="agent-activity-heading"
             icon={ChartNoAxesCombined}
             title={t("detail.overview.activity")}
-            embedded={cardHeaders}
             trailing={
               <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] font-medium">
                 {t("detail.overview.lastThirtyDays")}
@@ -252,7 +233,7 @@ export function AgentOverviewTab({
           <dl
             className={cn(
               "border-border bg-card grid h-full grid-cols-2 divide-x overflow-hidden rounded-lg border md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0",
-              cardHeaders && "rounded-t-lg border-x-0 border-b-0",
+              "rounded-t-lg border-x-0 border-b-0",
             )}
           >
             <OperationalStat
@@ -336,17 +317,13 @@ export function AgentOverviewTab({
         </section>
 
         <section
-          className={cn(
-            "flex min-w-0 flex-col",
-            cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
-          )}
+          className="border-border bg-muted/35 flex min-w-0 flex-col overflow-hidden rounded-lg border"
           aria-labelledby="agent-memory-heading"
         >
           <OverviewSectionHeading
             id="agent-memory-heading"
             icon={Database}
             title={t("detail.overview.memoryActivity")}
-            embedded={cardHeaders}
             to={
               (pinned?.length ?? 0) + (memories?.length ?? 0) > 0
                 ? destination("#memory")
@@ -357,7 +334,7 @@ export function AgentOverviewTab({
           <dl
             className={cn(
               "border-border bg-card grid h-full grid-cols-1 divide-y overflow-hidden rounded-lg border sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-1 lg:divide-x-0 lg:divide-y",
-              cardHeaders && "rounded-t-lg border-x-0 border-b-0",
+              "rounded-t-lg border-x-0 border-b-0",
             )}
           >
             <OperationalStat
@@ -406,7 +383,6 @@ function OverviewSectionHeading({
   trailing,
   to,
   actionLabel,
-  embedded = false,
 }: {
   id: string;
   icon: typeof Brain;
@@ -414,7 +390,6 @@ function OverviewSectionHeading({
   trailing?: React.ReactNode;
   to?: To;
   actionLabel?: string;
-  embedded?: boolean;
 }) {
   const content = (
     <>
@@ -437,7 +412,7 @@ function OverviewSectionHeading({
         title={actionLabel}
         className={cn(
           "group focus-visible:ring-ring flex min-h-5 items-center gap-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset",
-          embedded ? "bg-muted/35 hover:bg-muted px-4 py-3" : "hover:bg-muted/40 mb-2 rounded-sm",
+          "bg-muted/35 hover:bg-muted px-4 py-3",
         )}
       >
         {content}
@@ -445,11 +420,5 @@ function OverviewSectionHeading({
     );
   }
 
-  return (
-    <div
-      className={cn("flex min-h-5 items-center gap-2", embedded ? "bg-muted/35 px-4 py-3" : "mb-2")}
-    >
-      {content}
-    </div>
-  );
+  return <div className="bg-muted/35 flex min-h-5 items-center gap-2 px-4 py-3">{content}</div>;
 }

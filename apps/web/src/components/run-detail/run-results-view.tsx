@@ -68,9 +68,8 @@ export function RunResultsView({
       documentsLoading: documentsQuery.isLoading,
       documentsError: Boolean(documentsQuery.error),
       hasRunMemory,
-      // `primary_document_id` a disparu du run avec #1193 : la mise en avant
-      // est désormais DÉRIVÉE — un run qui a produit exactement un fichier le
-      // met en avant, zéro ou plusieurs n'en mettent aucun.
+      // The featured file is DERIVED: a run that produced exactly one file
+      // features it, zero or several feature none.
       hasPrimaryDocument: Boolean(featuredRunFile(documentsQuery.data?.data ?? [], run.id)),
     });
   const sections = [

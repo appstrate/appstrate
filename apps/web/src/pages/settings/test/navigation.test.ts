@@ -24,8 +24,7 @@ describe("unified settings navigation", () => {
     // A guest holds `org:read`, `spaces:read`, `models:read` and `proxies:read`
     // so its runs work — none of which is a reason to open an administration
     // screen. Nothing survives, and the shell then draws no Settings entry at
-    // all: connecting one's own MCP client moved to the profile, which is what
-    // this list used to keep alive for them.
+    // all: connecting one's own MCP client lives in the profile.
     const guest = destinations(ALL_FEATURES, [
       "org:read",
       "spaces:read",
@@ -44,10 +43,6 @@ describe("unified settings navigation", () => {
       "roles:read",
     ]);
     expect(member).toEqual(["/org-settings/members", "/org-settings/roles"]);
-
-    // The library is gone from this rail: the catalogue carries the placement
-    // model, in the navigation, gated on its own verdict.
-    expect(destinations(ALL_FEATURES, ["skills:write"])).not.toContain("/org-settings/library");
 
     // Writing is what the infrastructure screens are for.
     const admin = destinations(ALL_FEATURES, ["org:settings", "spaces:write", "models:write"]);

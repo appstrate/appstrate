@@ -37,16 +37,9 @@ describe("unified settings route wiring", () => {
     // A page whose module is off says so instead of sending the caller elsewhere.
     const oauth = read("../../org-settings/oauth.tsx");
     expect(oauth).toContain("<UnavailableState />");
-
-    const agentTabs = read("../../../components/package-detail/agent-tabs.tsx");
-    expect(agentTabs).toContain('to="/workspace-settings/api-keys"');
-    expect(agentTabs).toContain("state={openAsModal(location)}");
   });
 
   it("answers a settings guard with a refusal state, never a silent redirect", () => {
-    // `library-page.tsx` left this list when the org-wide gate gave way to a
-    // per-space one: the page now renders for everyone and each install
-    // checkbox carries its own permission, so there is no redirect to preserve.
     const guardedPages = [
       "../../org-settings/models.tsx",
       "../../org-settings/proxies.tsx",

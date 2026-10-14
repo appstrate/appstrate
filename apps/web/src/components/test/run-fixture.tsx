@@ -9,7 +9,7 @@
  * dependency: `react-dom`, `react-router-dom` and `i18next` are already SPA
  * deps.
  *
- * Shared rather than copied per file because three suites now render the same
+ * Shared rather than copied per file because three suites render the same
  * run through three different surfaces (the table row, the detail strip, the
  * duration leaf), and a fixture that drifts between them makes "the table shows
  * it, the strip does not" impossible to trust.

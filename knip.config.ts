@@ -319,16 +319,6 @@ const config: KnipConfig = {
    */
   ignoreIssues: {
     "packages/ui/src/components/*.tsx": ["exports"],
-    /** Helpers of the screens listed above, same debt. */
-    "apps/web/src/components/agent-identity-options.ts": ["exports"],
-    "apps/web/src/components/persistence/scope-filter.tsx": ["files", "exports"],
-    "apps/web/src/lib/integration-collection.ts": ["exports"],
-    "apps/web/src/lib/list-params.ts": ["exports"],
-    "apps/web/src/lib/modal-route.ts": ["exports"],
-    "apps/web/src/pages/api-key-columns.tsx": ["exports"],
-    "apps/web/src/test/render.tsx": ["exports"],
-    "apps/web/src/components/package-detail/agent-tabs.tsx": ["exports"],
-    "apps/api/src/lib/agent-appearance.ts": ["exports"],
   },
 
   /**

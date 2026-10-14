@@ -160,10 +160,7 @@ export function AgentSettingsView({
     items: group.items.filter((item) => applies(item.id)),
   })).filter((group) => group.items.length > 0);
   const params = new URLSearchParams(location.search);
-  const requestedRaw = params.get("agentSettings");
-  // The prompt stopped being a section: it is a file, read in Contenu and
-  // changed in Explorer › Fichiers.
-  const requested = requestedRaw === "prompt" ? "files" : requestedRaw;
+  const requested = params.get("agentSettings");
   const requestedFile = params.get("file") ?? undefined;
   const fallback: AgentSettingsSection = groups[0]?.items[0]?.id ?? "connections";
   const firstOpen =
@@ -181,7 +178,6 @@ export function AgentSettingsView({
     const search = new URLSearchParams(location.search);
     if (section === "model") search.delete("agentSettings");
     else search.set("agentSettings", section);
-    search.delete("agentConfig");
     // A file modal belongs to the section it was opened in.
     search.delete("edit");
     search.delete("editManifest");
@@ -253,7 +249,6 @@ export function AgentSettingsView({
       isHistorical={isHistorical}
       // Past the two branches above, only configuration sections remain.
       section={activeSection as ConfigurationSection}
-      embedded
     />
   );
 

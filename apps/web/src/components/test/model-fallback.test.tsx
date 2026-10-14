@@ -98,7 +98,7 @@ function renderHealth(diagnostics: object): string {
     id: SPACE_ID,
   });
   try {
-    return render(<AgentHealthSection packageId="@acme/worker" cardHeaders />, {
+    return render(<AgentHealthSection packageId="@acme/worker" />, {
       queryClient,
       initialEntries: [AGENT_PATH],
     });

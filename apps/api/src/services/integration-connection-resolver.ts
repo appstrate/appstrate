@@ -1099,7 +1099,7 @@ async function loadPins(
  * Surfaced as a permission check, not a resolution error, because it
  * fires *before* the connection exists. The predicate is the one
  * resolution applies ({@link userConnectionsBlocked}), plus an enforced
- * space default (the redesign's rule, kept across main's #1881). `enabled` is
+ * space default. `enabled` is
  * deliberately NOT required — a lock on a switched-off integration is
  * still the space's call.
  */

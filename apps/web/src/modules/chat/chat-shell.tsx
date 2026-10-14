@@ -10,12 +10,6 @@
  * org/workspace chip, the same meta block at the foot, the same icon rail on
  * collapse. Where Studio lists Activité/Construire, the chat lists
  * conversations. Two products, one app.
- *
- * It replaces the trick this page used to play instead: mounting inside
- * `MainLayout` and collapsing the Studio sidebar on mount
- * (`setOpenTransient(false)`). That left the rail sitting there, spending 48px
- * and a column of unreadable icons on a navigation the chat never uses, and it
- * made the chat's own conversation list the SECOND sidebar on screen.
  */
 
 import type { ReactNode } from "react";
@@ -31,7 +25,6 @@ import {
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { ShellHeader, ShellSidebar } from "@/components/shell-frame";
 import { ViewAsBanner } from "@/components/view-as-banner";
-import { useSpaceResolver } from "@/hooks/use-current-space";
 import { useChatSidebarStore } from "@/stores/sidebar-store";
 import { ChatTitleCrumb } from "./chat-title-crumb";
 
@@ -54,10 +47,6 @@ export function ChatShell({
   can: ChatCan;
   children: ReactNode;
 }) {
-  // Every request the chat makes is scoped by the current workspace, and it is
-  // this hook that resolves one. `MainLayout` calls it for the rest of the app;
-  // the chat no longer passes through it.
-  useSpaceResolver();
   const { open, setOpen } = useChatSidebarStore();
 
   // The chat's two contexts, raised over the WHOLE shell rather than published

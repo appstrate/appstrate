@@ -70,8 +70,8 @@ describe("unpriced badge wiring", () => {
   }
 
   it("the model column set decides through isModelUnpriced, not a restated condition", () => {
-    // The badge moved with the column set when the page went onto `DataTable`;
-    // the rule it must not restate moved with it.
+    // The badge lives with the column set, and so does the rule it must not
+    // restate.
     const source = read("../../../components/provider-models-cell.tsx");
     expect(source).toContain("isModelUnpriced(model)");
     // A second copy of the rule in the JSX is exactly the drift this split

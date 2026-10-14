@@ -104,8 +104,7 @@ describe("sheetOffers", () => {
   });
 });
 
-// Ported from the space library's tests, which went with its screen: the rule
-// is the same, only the control moved to the sheet's Espaces table.
+// The chat-enforce control lives in the sheet's Espaces table.
 describe("sheetChatEnforce", () => {
   const facts = { enforced: false, published: true, mayConfigure: true };
 

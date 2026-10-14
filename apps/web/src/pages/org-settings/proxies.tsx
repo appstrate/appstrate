@@ -217,7 +217,7 @@ export function OrgSettingsProxiesPage() {
       : null,
   });
 
-  // Every hook first, THEN the guard: the column set is a hook now, and a
+  // Every hook first, THEN the guard: the column set is a hook, and a
   // return above it makes the call conditional.
   if (!can("proxies:read")) return <NoAccessState />;
 

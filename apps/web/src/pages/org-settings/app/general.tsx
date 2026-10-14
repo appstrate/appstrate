@@ -97,10 +97,9 @@ function GeneralForm({
     .filter((role) => role.kind === "preset")
     .map((role) => ({ value: role.key, label: t(`roles.preset.${role.key}`) }));
 
-  // Each control commits on its own — "the control IS the setting". The Save
-  // button that used to sit under this form was the last one in the settings
-  // surfaces, and it made the workspace the one screen where a change was not
-  // a change until you pressed something else.
+  // Each control commits on its own — "the control IS the setting". No Save
+  // button under this form: in the settings surfaces a change is a change
+  // without pressing something else.
   const save = (
     patch: {
       name?: string;

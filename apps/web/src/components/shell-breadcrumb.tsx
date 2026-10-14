@@ -44,7 +44,7 @@ export function ShellBreadcrumb() {
               {crumb.label}
             </Link>
           ) : crumb.href ? (
-            // A parent the caller may not open: named, not linked (#1569).
+            // A parent the caller may not open: named, not linked.
             <span className="text-muted-foreground truncate">{crumb.label}</span>
           ) : (
             // Last segment: where you are, so it carries the weight.

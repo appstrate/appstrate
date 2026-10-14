@@ -57,7 +57,6 @@ import {
 import { useSessions } from "./use-sessions.ts";
 
 /**
-/**
  * ISO timestamp → compact relative time ("5 min", "2 h", "3 j"), as of `now`.
  * `Intl.RelativeTimeFormat` always prefixes "il y a" / "ago", three words more
  * than a 56px column holds, so the unit comes from the bundle (plural rules

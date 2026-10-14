@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Driving the tables of the redesigned settings: a row has one way to act, its
+ * Driving the settings tables: a row has one way to act, its
  * « … » menu (`TableRowActions`), whose button is named « Plus d'actions pour
  * <row name> ».
  */

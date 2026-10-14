@@ -8,8 +8,8 @@
  * so it belongs in a table where those are named once at the top rather than
  * in a card that reprints them per row.
  *
- * The kind column is what carries main's personal spaces (#1437): a member's
- * own space, and an ORPHANED one whose owner has left. The two acts an orphan
+ * The kind column is what carries the personal spaces: a member's own space,
+ * and an ORPHANED one whose owner has left. The two acts an orphan
  * offers ride in the row's Actions menu rather than as buttons on a card,
  * because a row here carries one menu and no loose buttons.
  */

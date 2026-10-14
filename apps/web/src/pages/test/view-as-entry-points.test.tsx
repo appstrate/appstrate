@@ -260,9 +260,9 @@ describe("permission gating on the roles page", () => {
   });
 
   it("hides create, edit and delete from a reader holding only `roles:read`", () => {
-    // The half that must stay closed now that no deployment flag sits on top
-    // (#1452): the `roles:*` grants are the whole gate, so a reader still
-    // authors nothing while reading the same catalogue.
+    // The half that must stay closed with no deployment flag on top: the
+    // `roles:*` grants are the whole gate, so a reader authors nothing while
+    // reading the same catalogue.
     const html = renderAs("admin", <OrgSettingsRolesPage />, {
       customRoles: [custom],
       path: "/org-settings/roles?tab=space",

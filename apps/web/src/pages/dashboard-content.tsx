@@ -538,7 +538,7 @@ export function DashboardContent(data: DashboardData) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
   // The dashboard is the fallback route and renders for ANY principal: each
-  // section answers to the guard of the query that feeds it (#1556).
+  // section answers to the guard of the query that feeds it.
   const sections = dashboardSections(can);
   const canReadSchedules = sections.schedules;
   const metrics = dashboardMetrics(data, sections, t);

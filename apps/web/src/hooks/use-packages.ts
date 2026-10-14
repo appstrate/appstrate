@@ -163,7 +163,7 @@ async function fetchPackageDetail(
  * `GET /api/packages/{type}` answers the active set — placed in this space and
  * switched on — which is the same rule every launch route checks, so a row on
  * this list is a row that can be used. What is placed here but switched off, and
- * what has merely been offered, lives in the space library (`/space/packages`),
+ * what has merely been offered, lives in the catalogue's placed view (`/catalogue/placed/:type`),
  * the one management view. There is no selector: a narrower and a wider list
  * would be two answers to one question.
  */

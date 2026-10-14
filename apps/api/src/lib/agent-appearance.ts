@@ -2,7 +2,7 @@
 
 import { asRecord } from "@appstrate/core/safe-json";
 
-export const AGENT_UI_META_KEY = "dev.appstrate/ui";
+const AGENT_UI_META_KEY = "dev.appstrate/ui";
 
 /**
  * Portable Agent identity used by Appstrate surfaces.

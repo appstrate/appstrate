@@ -108,7 +108,7 @@ export function SharedHeader({
               </Badge>
             )}
             {/* Where the package LIVES, which is where it may be edited. A
-                badge like the ones beside it rather than main's bare span: the
+                badge like the ones beside it rather than a bare span: the
                 header speaks one vocabulary. */}
             {detail.homeSpaceName && (
               <Badge variant="secondary">

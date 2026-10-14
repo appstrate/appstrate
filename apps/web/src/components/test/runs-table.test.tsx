@@ -19,7 +19,7 @@ const STARTED_AT_LABEL = formatDateField(STARTED_AT);
 const agentName = () => "Rapport trimestriel";
 
 /**
- * The column set is a hook now — the toolbar's column menu and the table have
+ * The column set is a hook — the toolbar's column menu and the table have
  * to name the same columns — so the suite goes through a component that holds
  * it, exactly as a screen does.
  */

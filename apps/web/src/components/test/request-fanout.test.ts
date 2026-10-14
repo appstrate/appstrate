@@ -108,10 +108,9 @@ describe("schedule cards read their counters from the schedule", () => {
     expect(code(SCHEDULE_CARD)).not.toContain("/runs");
   });
 
-  it("reads the three counters served with the list payload", () => {
+  it("reads the counters served with the list payload", () => {
     expect(SCHEDULE_CARD).toContain("schedule.running_runs");
     expect(SCHEDULE_CARD).toContain("schedule.unread_count");
-    expect(SCHEDULE_CARD).toContain("schedule.last_run_number");
   });
 });
 
@@ -134,9 +133,9 @@ describe("agent page", () => {
 });
 
 describe("package pages other than an agent's", () => {
-  // A skill page loaded the org's models and proxies, which only the
-  // agent's settings show. The page itself reads neither now: the agent
-  // settings view and the model alert (agents only) each read their own.
+  // The org's models and proxies are shown only by an agent's settings. The
+  // page itself reads neither: the agent settings view and the model alert
+  // (agents only) each read their own.
   it("do not read the model and proxy lists", () => {
     const detail = read("../../pages/unified-package-detail.tsx");
     expect(detail).not.toContain("useProxies(");

@@ -546,7 +546,7 @@ export function DataTable<T>({
 
   // Three templates, one per tier: narrow keeps only the columns that carry the
   // row's identity (and every control), and each step up adds the ones the
-  // width can now hold.
+  // width can hold.
   const tierOne = columns.filter((c) => !c.tier);
   const tierTwo = columns.filter((c) => !c.tier || c.tier === 2);
   const tracks = {
@@ -580,8 +580,8 @@ export function DataTable<T>({
   );
 
   // A failure always draws something, whether or not the caller wrote the
-  // sentence — it used to be folded into `empty` at every call site, which is
-  // how a 500 could read as "no runs".
+  // sentence: folded into `empty` at the call site, a 500 would read as
+  // "no runs".
   if (verdict === "error" || verdict === "empty") {
     return (
       <div className={frameClass}>

@@ -3,16 +3,15 @@
 /**
  * The organization's spaces, as one table.
  *
- * Main (#1437) added two kinds of row that did not exist before: a member's
- * PERSONAL space, and a personal space that has been ORPHANED — its owner left
- * the organization, a 30-day window is running, and an owner or admin decides
- * between converting it to a team space and sweeping it (RBAC spec §3.6).
+ * Beside team spaces it lists two kinds of row: a member's PERSONAL space, and
+ * a personal space that has been ORPHANED — its owner left the organization, a
+ * 30-day window is running, and an owner or admin decides between converting
+ * it to a team space and sweeping it (RBAC spec §3.6).
  *
- * Main renders the second kind as a separate section of cards with two buttons
- * on each. Here they are rows like the others: the state is a column, and the
- * two acts join the row's own Actions menu, because a list on this surface is
- * a table and a row carries one menu. Neither act is reversible, so both still
- * go through a confirmation.
+ * They are rows like the others: the state is a column, and the two acts an
+ * orphan offers join the row's own Actions menu, because a list on this
+ * surface is a table and a row carries one menu. Neither act is reversible, so
+ * both go through a confirmation.
  */
 
 import { useState } from "react";

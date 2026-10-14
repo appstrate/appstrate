@@ -1052,7 +1052,7 @@ export function resolveIntegrationToolSurface(input: ResolveIntegrationToolCatal
     });
   }
   // Keep orphan policy/hide references visible without inventing upstream tools
-  // or widening the effective catalog. Legacy API aliases already resolve above.
+  // or widening the effective catalog. API tool aliases already resolve above.
   const known = new Set(entries.map((entry) => entry.name));
   for (const name of new Set([
     ...Object.keys(policyTable),

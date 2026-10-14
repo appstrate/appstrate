@@ -91,7 +91,7 @@ export function OrgSettingsRolesPage() {
   const [confirmDelete, setConfirmDelete] = useState<RoleObject | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Authoring bundles is OSS platform code (#1452): the permission is the whole
+  // Authoring bundles is OSS platform code: the permission is the whole
   // gate, with no deployment-level feature on top of it.
   const canWrite = can("roles:write");
   const canDelete = can("roles:delete");
@@ -157,8 +157,8 @@ export function OrgSettingsRolesPage() {
   };
 
   // The row opens the role: to edit it when it is yours to edit, to read it
-  // otherwise. A preset's permissions used to hide behind a disclosure on its
-  // card; they are one click away now, on the same gesture as every row.
+  // otherwise. A preset's permissions are one click away, on the same gesture
+  // as every row.
   // Keeps the tab and view in the address, so closing the role lands back on them.
   const roleHref = (role: RoleObject) => {
     const params = new URLSearchParams(searchParams);
@@ -432,7 +432,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
   );
   // A read a selected action depends on alone is held: ticking the action
   // ticks it, unticking it is undone, and its note names what needs it. The
-  // server refuses a role missing one (issue #1513); the picker answers first.
+  // server refuses a role missing one; the picker answers first.
   const locked = lockedReads(selected, entries);
   const requiredBy = (permission: string) => {
     const dependents = locked.get(permission);

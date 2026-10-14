@@ -4,8 +4,8 @@
  * The pending-invitation column set.
  *
  * An invitation is a record like a member is — the same fields in the same
- * order on every row — so it takes the table rather than the stacked card that
- * reprinted "Accès à l'organisation" and "Rôles dans les espaces" on each one.
+ * order on every row — so it takes the table rather than a stacked card
+ * reprinting "Accès à l'organisation" and "Rôles dans les espaces" on each one.
  * Editing is what a click on the row does, and it is the menu's first entry;
  * copying the link and cancelling follow, cancelling last because it is
  * destructive.

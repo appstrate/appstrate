@@ -60,7 +60,7 @@ import { GenerationSettingRows } from "../model-generation-rows";
  * nothing behind it is the one refused combination (400
  * `locked_required_field_empty`), surfaced as a toast naming the field.
  *
- * It saves itself, like the rest of the redesigned settings: a pause after the
+ * It saves itself, like the rest of the settings: a pause after the
  * last change sends the whole pair, and the line under the form says so.
  */
 function InputSettingsSection({

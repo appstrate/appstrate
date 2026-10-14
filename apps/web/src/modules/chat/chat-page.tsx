@@ -18,7 +18,6 @@ import { useAuth } from "../../hooks/use-auth";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useCollapsedGlobalSidebar } from "../../hooks/use-collapsed-global-sidebar";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { formatBytes } from "../../lib/format-bytes";
 import { useUploadClient } from "../../hooks/use-upload";
@@ -43,7 +42,6 @@ import { pickerCredentials } from "../../lib/model-picker";
 const COMPOSER_ACTIONS = <ChatAccessChip />;
 
 export function ChatModulePage() {
-  useCollapsedGlobalSidebar();
   // The agent-authoring preference is per user: bind it before the composer paints.
   const userId = useAuth().user?.id ?? null;
   useLayoutEffect(() => bindAgentAuthoringUser(userId), [userId]);

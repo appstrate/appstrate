@@ -61,7 +61,6 @@ export function VersionHistory({
     <>
       <ListToolbar
         placement="panel"
-        panelFiltersAdjacent
         search={{ value: search, onChange: setSearch, placeholder: t("version.search") }}
         filters={[
           {

@@ -181,17 +181,15 @@ describe("t() keys", () => {
  */
 const DYNAMIC_KEY_PREFIXES = [
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
-  "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx
-  "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
   "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
+  "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx: one per runtime tool id
+  "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
+  "integration.admin.creation.", // pages/integration-detail.tsx — t(`integration.admin.creation.${value}`)
+  "integration.admin.orgDefault.connection.", // pages/integration-detail.tsx — forced / default
+  "integration.admin.usage.", // pages/integration-detail.tsx — t(`integration.admin.usage.${mode}Help`)
   "integration.auth.type.", // components/integration-connect/connection-picker-menu.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
-  "integration.admin.creation.", // pages/integration-detail.tsx — t(`integration.admin.creation.${value}`)
-  "integration.admin.usage.",
-  "integration.admin.orgDefault.connection.", // pages/integration-detail.tsx — forced / default
-  "integration.structure.type.", // components/package-detail/integration-structure.tsx
-  "integration.structure.concept.", // components/package-detail/integration-structure.tsx
-  "integration.structure.empty.", // components/package-detail/integration-structure.tsx // pages/integration-detail.tsx — t(`integration.admin.usage.${mode}Help`)
+  "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
   "integration.inventory.basis.", // components/package-detail/package-tool-catalog.tsx
   "integration.inventory.exposure.", // components/package-detail/package-tool-catalog.tsx
   "integration.inventory.filter.", // components/package-detail/package-tool-catalog.tsx
@@ -199,36 +197,37 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.inventory.originDetail.", // components/package-detail/package-tool-catalog.tsx
   "integration.inventory.reason.", // components/package-detail/package-tool-catalog.tsx
   "integration.inventory.rules.", // components/package-detail/package-tool-catalog.tsx
-  "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx: one per runtime tool id
-  "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()
+  "integration.structure.concept.", // components/package-detail/integration-structure.tsx
+  "integration.structure.empty.", // components/package-detail/integration-structure.tsx
+  "integration.structure.type.", // components/package-detail/integration-structure.tsx
   "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
+  "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
   "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
-  "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
-  "purpose.", // components/document-columns.tsx — t(`purpose.${doc.purpose}`)
-  "type.", // components/document-columns.tsx — t(`type.${mimeKind(doc.mime)}`)
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
+  "orgRolesGuide.access.", // pages/org-settings/org-roles.tsx — space reach per org role
+  "orgRolesGuide.can.", // pages/org-settings/org-roles.tsx — one key per capability row
   "orgSettings.roleHint.", // components/org-invitation-form.tsx + OAuth signup form
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx
-  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/org-settings/space/general.tsx
-  "roles.presetDesc.", // hooks/use-roles.ts — spaceRoleDescription()
   "permissions.label.", // lib/permission-labels.ts — permissionLabel()
   "permissions.resource.", // lib/permission-labels.ts — permissionResourceLabel()
-  "orgRolesGuide.can.", // pages/org-settings/org-roles.tsx — one key per capability row
-  "orgRolesGuide.access.", // pages/org-settings/org-roles.tsx — space reach per org role
+  "purpose.", // components/document-columns.tsx — t(`purpose.${doc.purpose}`)
+  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/org-settings/space/general.tsx
+  "roles.presetDesc.", // hooks/use-roles.ts — spaceRoleDescription()
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
   "run.connSource.", // components/run-detail/run-snapshot-inspector.tsx, run-execution-tab.tsx
-  "run.triggerType.", // components/run-detail/{run-header-summary,run-snapshot-inspector}.tsx
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
+  "run.triggerType.", // components/run-detail/{run-header-summary,run-snapshot-inspector}.tsx
   "schedule.disabledReason.", // components/schedule-status-badge.tsx, pages/schedule-detail.tsx
   "spaceMembers.source.", // pages/org-settings/space/members.tsx — t(`spaceMembers.source.${member.source}`)
   "spaces.visibility.", // pages/org-settings/space/general.tsx — t(`spaces.visibility.${value}`)
   "spaces.visibilityDesc.", // pages/org-settings/space/general.tsx — t(`spaces.visibilityDesc.${value}`)
   "status.", // components/status-badge.tsx — t(`status.${status}`)
   "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
+  "type.", // components/document-columns.tsx — t(`type.${mimeKind(doc.mime)}`)
   "validation.schema.", // hooks/use-schema-form-labels.ts — one key per JSON Schema keyword
   "viewAs.stopped.", // components/view-as-banner.tsx — t(`viewAs.stopped.${code}`)
 ];
@@ -245,8 +244,11 @@ const SOURCE_BLOB = SOURCES.map((f) => readFileSync(f, "utf8")).join("\n");
 
 function isReferenced(key: string): boolean {
   for (const quote of ['"', "'", "`"]) {
-    if (SOURCE_BLOB.includes(quote + key)) return true;
-    for (const ns of en.keys()) if (SOURCE_BLOB.includes(`${quote}${ns}:${key}`)) return true;
+    // The whole literal, closing quote included: `"detail.open` is no
+    // reference to `detail.open` when it is the head of `"detail.openRuns"`.
+    if (SOURCE_BLOB.includes(quote + key + quote)) return true;
+    for (const ns of en.keys())
+      if (SOURCE_BLOB.includes(`${quote}${ns}:${key}${quote}`)) return true;
   }
   return false;
 }

@@ -24,13 +24,7 @@ function parseDegradedIntegrations(metadata: unknown): string[] {
   return raw.filter((v): v is string => typeof v === "string");
 }
 
-function DegradedIntegrationItem({
-  integrationId,
-  cardHeaders,
-}: {
-  integrationId: string;
-  cardHeaders: boolean;
-}) {
+function DegradedIntegrationItem({ integrationId }: { integrationId: string }) {
   const { t } = useTranslation("common");
   const { data } = useIntegrationDetail(integrationId);
   const canReach = useCanReach();
@@ -38,7 +32,7 @@ function DegradedIntegrationItem({
   return (
     <HealthCardItem
       title={data?.manifest.display_name ?? integrationId}
-      cardHeaders={cardHeaders}
+      cardHeaders
       actions={
         canReach(integrationPath) ? (
           <HealthAction to={integrationPath}>{t("btn.reconnect")}</HealthAction>
@@ -103,11 +97,9 @@ export function ModelFallbackCard({
 function ResolvedModelFallback({
   run,
   fallback,
-  cardHeaders,
 }: {
   run: EnrichedRun;
   fallback: RunModelFallback;
-  cardHeaders: boolean;
 }) {
   const canReach = useCanReach();
   const { data: models } = useModels(usePermissions().can("models:read"));
@@ -122,7 +114,7 @@ function ResolvedModelFallback({
           ? { pathname: agentPath, search: "?agentSettings=model", hash: "#settings" }
           : null
       }
-      cardHeaders={cardHeaders}
+      cardHeaders
     />
   );
 }
@@ -144,36 +136,30 @@ function ResolvedModelFallback({
 export function RunWarnings({
   run,
   modelFallback,
-  cardHeaders,
 }: {
   run: EnrichedRun;
   modelFallback: RunModelFallback | null;
-  cardHeaders: boolean;
 }) {
   const { t } = useTranslation("agents");
   const degraded = parseDegradedIntegrations(run.metadata);
   const lost = partialArtifactFailures(run.artifacts);
-  const intro = cardHeaders
-    ? "text-muted-foreground px-4 pt-3 text-xs"
-    : "text-muted-foreground mt-3 text-xs";
-  const list = cardHeaders ? "px-4" : "mt-1";
   return (
     <>
-      {modelFallback && (
-        <ResolvedModelFallback run={run} fallback={modelFallback} cardHeaders={cardHeaders} />
-      )}
+      {modelFallback && <ResolvedModelFallback run={run} fallback={modelFallback} />}
       {degraded.length > 0 && (
         <div className="mb-6">
           <HealthCard
             title={t("run.degradedIntegrations.title")}
             tone="warning"
-            cardHeaders={cardHeaders}
+            cardHeaders
             badge={null}
           >
-            <p className={intro}>{t("run.degradedIntegrations.message")}</p>
-            <ul className={list}>
+            <p className="text-muted-foreground px-4 pt-3 text-xs">
+              {t("run.degradedIntegrations.message")}
+            </p>
+            <ul className="px-4">
               {degraded.map((id) => (
-                <DegradedIntegrationItem key={id} integrationId={id} cardHeaders={cardHeaders} />
+                <DegradedIntegrationItem key={id} integrationId={id} />
               ))}
             </ul>
           </HealthCard>
@@ -184,17 +170,19 @@ export function RunWarnings({
           <HealthCard
             title={t("run.artifacts.partial.title")}
             tone="warning"
-            cardHeaders={cardHeaders}
+            cardHeaders
             badge={null}
           >
-            <p className={intro}>{t("run.artifacts.partial.message")}</p>
-            <ul className={list}>
+            <p className="text-muted-foreground px-4 pt-3 text-xs">
+              {t("run.artifacts.partial.message")}
+            </p>
+            <ul className="px-4">
               {lost.map((file) => (
                 <HealthCardItem
                   key={file.name}
                   title={<span className="font-mono text-xs break-all">{file.name}</span>}
                   description={t(artifactFailureCodeKey(file.code))}
-                  cardHeaders={cardHeaders}
+                  cardHeaders
                   actions={null}
                 />
               ))}

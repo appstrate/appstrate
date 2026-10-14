@@ -20,18 +20,9 @@ import { PackageFilesView } from "../components/package-files/package-files-view
 import { PackageFilesSection } from "../components/package-files/package-files-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 
-/** Keep legacy fragments readable after moving files into settings. */
-const INTEGRATION_TABS = [
-  "overview",
-  "connections",
-  "configuration",
-  "tools",
-  "about",
-  "content",
-  "versions",
-] as const;
+const INTEGRATION_TABS = ["overview", "connections", "configuration"] as const;
 import { useTranslation } from "react-i18next";
-import { Link, Navigate, useParams, useLocation, useNavigate } from "react-router-dom";
+import { Link, useParams, useLocation, useNavigate } from "react-router-dom";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { IntegrationDefinitionSection } from "./package-editor";
 import {
@@ -96,12 +87,6 @@ const DEFINITION_RAIL: Record<string, IntegrationDefinitionSection> = {
   tools: "tools",
 };
 
-/** Sections that moved: the policy joined the catalog, the document the files table. */
-const RENAMED_SECTIONS: Record<string, string> = {
-  "tool-policies": "tools",
-  documentation: "files",
-};
-
 function IntegrationGeneral({ detail }: { detail: IntegrationDetailWire }) {
   return <IntegrationFunctioning detail={detail} />;
 }
@@ -140,8 +125,7 @@ function IntegrationSettings({
   const location = useLocation();
   const navigate = useNavigate();
   const params = new URLSearchParams(location.search);
-  const requestedRaw = params.get("integrationSettings");
-  const requested = (requestedRaw && RENAMED_SECTIONS[requestedRaw]) ?? requestedRaw;
+  const requested = params.get("integrationSettings");
   const requestedFile = params.get("file") ?? undefined;
   const sectionHref = (id: string, extra: Record<string, string> = {}) => {
     const next = new URLSearchParams(location.search);
@@ -535,9 +519,7 @@ export function IntegrationDetailPage() {
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if
   // it can point at the screen where that happens.
-  const [storedTab, setTab] = useTabWithHash(INTEGRATION_TABS, "overview");
-  // Keep legacy #about links useful without retaining a duplicate destination.
-  const tab = storedTab === "about" ? "overview" : storedTab;
+  const [tab, setTab] = useTabWithHash(INTEGRATION_TABS, "overview");
   const navigate = useNavigate();
   const location = useLocation();
   const openAuthentication = (authKey?: string) => {
@@ -555,18 +537,6 @@ export function IntegrationDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const canBrowseIntegrations = useCanReach()("/integrations");
-
-  // Versions moved into Paramètres › Explorer.
-  if (storedTab === "versions") {
-    const params = new URLSearchParams(location.search);
-    params.set("integrationSettings", "versions");
-    return <Navigate replace to={{ search: params.toString(), hash: "#configuration" }} />;
-  }
-  if (storedTab === "content" || storedTab === "tools") {
-    const params = new URLSearchParams(location.search);
-    params.set("integrationSettings", storedTab === "tools" ? "tools" : "files");
-    return <Navigate replace to={{ search: params.toString(), hash: "#configuration" }} />;
-  }
 
   // `source` (system or local) comes from the package detail only: wait for it.
   if (isLoading || pkgLoading) return <LoadingState />;

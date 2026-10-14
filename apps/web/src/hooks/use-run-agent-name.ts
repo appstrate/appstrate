@@ -11,7 +11,7 @@
  *
  * It ALWAYS returns a name. A surface that shows the agent in its title drops
  * the COLUMN — it does not blank the name, which is also what the row's
- * accessible label is built from: hiding the column used to leave every row
+ * accessible label is built from: a blank name would leave every row
  * announcing "Run #42 —".
  */
 

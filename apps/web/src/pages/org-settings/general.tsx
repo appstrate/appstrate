@@ -332,12 +332,11 @@ export function OrgSettingsGeneralPage() {
         </>
       )}
 
-      {/* Main's restrict-package-copy setting (#1437), in this app's own
-          grammar: a labelled switch in a SettingsGroup, not a card with an
-          Activer/Désactiver button. The two other blocks main renders here are
-          NOT carried over — collaborator SSO lives on its own page (`oauth.tsx`)
-          and the MCP endpoint under Préférences, so repeating them here would
-          be a second place to change one setting. */}
+      {/* The restrict-package-copy setting, in this app's own grammar: a
+          labelled switch in a SettingsGroup, not a card with an
+          Activer/Désactiver button. Collaborator SSO lives on its own page
+          (`oauth.tsx`) and the MCP endpoint under Préférences; repeating them
+          here would be a second place to change one setting. */}
       <SettingsGroup title={t("orgSettings.distributionTitle")}>
         <SettingRow
           variant="toggle"

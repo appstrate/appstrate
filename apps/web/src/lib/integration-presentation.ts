@@ -13,14 +13,6 @@ export function authMethodLabel(
     : typeLabel;
 }
 
-export function integrationConnectionState(active: boolean, auths: IntegrationAuthStatus[]) {
-  if (!active) return "inactive";
-  if (!auths.length) return "noAuth";
-  if (auths.some((auth) => auth.required && !auth.ready)) return "missing";
-  if (auths.some((auth) => auth.ready)) return "available";
-  return "none";
-}
-
 export interface ConnectionAuthContext {
   authKey: string;
   authType: IntegrationAuthType;

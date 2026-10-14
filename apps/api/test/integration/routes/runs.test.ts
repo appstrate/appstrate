@@ -774,10 +774,9 @@ describe("Runs API", () => {
     });
 
     it("combines ?user=me with the other filters instead of dropping them", async () => {
-      // `?user=me` used to take a separate query that ignored `kind`, `status`
-      // and the date range — so "my failed runs" answered "my runs", and a UI
-      // showing both filters as active was showing a filter the server never
-      // applied.
+      // `?user=me` narrows the same query as `kind`, `status` and the date
+      // range: "my failed runs" must not answer "my runs", or a UI showing both
+      // filters as active shows a filter the server never applied.
       const otherUser = await createTestUser();
       await addOrgMember(ctx.orgId, otherUser.id);
       await seedAgent({ id: "@runorg/combined-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
