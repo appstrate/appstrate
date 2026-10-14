@@ -16,7 +16,7 @@ export interface AdminCliSession extends CliSessionDisplay {
   userName: string | null;
 }
 
-export function memberLabel(session: AdminCliSession): string {
+export function cliSessionUserLabel(session: AdminCliSession): string {
   return session.userName || session.userEmail || session.userId;
 }
 
@@ -50,8 +50,11 @@ export function useCliSessionColumns({
       width: "minmax(60px,1fr)",
       tier: 2,
       cell: (session) => (
-        <span className="text-muted-foreground block truncate text-xs" title={memberLabel(session)}>
-          {memberLabel(session)}
+        <span
+          className="text-muted-foreground block truncate text-xs"
+          title={cliSessionUserLabel(session)}
+        >
+          {cliSessionUserLabel(session)}
         </span>
       ),
     },

@@ -90,12 +90,13 @@ export function ShellSidebar({
       <SidebarFooter className="gap-0 p-0">
         <SidebarMenu className="px-2 pb-2" hidden={!canReach("/catalogue")}>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild isActive={catalogueActive} tooltip={t("nav.catalogue")}>
+            <SidebarMenuButton asChild isActive={catalogueActive}>
+              {/* Where you are is not a control: nothing to click. */}
               {catalogueActive ? (
-                <button type="button">
+                <span aria-current="page">
                   <LibraryBig />
                   <span>{t("nav.catalogue")}</span>
-                </button>
+                </span>
               ) : (
                 <Link
                   // With shares waiting, the entry opens ON them: the count is a
@@ -125,12 +126,12 @@ export function ShellSidebar({
         </SidebarMenu>
         <SidebarMenu className="px-2 pb-2">
           <SidebarMenuItem>
-            <SidebarMenuButton asChild isActive={settingsActive} tooltip={t("nav.settings")}>
+            <SidebarMenuButton asChild isActive={settingsActive}>
               {settingsActive ? (
-                <button type="button">
+                <span aria-current="page">
                   <Settings />
                   <span>{t("nav.settings")}</span>
-                </button>
+                </span>
               ) : (
                 <Link to="/org-settings">
                   <Settings />

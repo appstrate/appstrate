@@ -11,7 +11,11 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { deriveLabel } from "../../lib/cli-sessions";
-import { memberLabel, useCliSessionColumns, type AdminCliSession } from "./cli-session-columns";
+import {
+  cliSessionUserLabel,
+  useCliSessionColumns,
+  type AdminCliSession,
+} from "./cli-session-columns";
 
 export function OrgSettingsCliSessionsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -84,7 +88,7 @@ export function OrgSettingsCliSessionsPage() {
           pendingRevoke
             ? t("orgCliSessions.confirmRevokeDescription", {
                 device: deriveLabel(pendingRevoke, t),
-                user: memberLabel(pendingRevoke),
+                user: cliSessionUserLabel(pendingRevoke),
               })
             : ""
         }

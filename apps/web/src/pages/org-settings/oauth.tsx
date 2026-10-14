@@ -7,9 +7,7 @@ import { Switch } from "@appstrate/ui/components/switch";
 import { Label } from "@appstrate/ui/components/label";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useOrg } from "../../hooks/use-org";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { usePermissions } from "../../hooks/use-permissions";
-import { UnavailableState } from "../../components/route-gate";
 import { EmptyState, ErrorState, LoadingState } from "../../components/page-states";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { SaveFeedback } from "../../components/settings/save-feedback";
@@ -25,11 +23,9 @@ export function OrgSettingsOAuthPage() {
   const { data: orgSettings, isLoading, failureReason } = useOrgSettings();
   const updateSettingsMutation = useUpdateOrgSettings();
   const { currentOrg } = useOrg();
-  const { features } = useAppConfig();
   // Switching collaborator SSO is `org:settings`, as the API requires; reading
   // the clients below stays open to whoever reached the page.
   const { can } = usePermissions();
-  if (!features.oidc) return <UnavailableState />;
 
   if (failureReason) return <ErrorState error={failureReason} />;
   if (isLoading) return <LoadingState />;
