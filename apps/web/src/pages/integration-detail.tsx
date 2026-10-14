@@ -210,8 +210,6 @@ function IntegrationSettings({
   return (
     <EditorPlaceContext.Provider value={editorPlace}>
       <AgentDetailSplit
-        className="max-lg:grid-cols-1"
-        railClassName="max-lg:border-r-0 max-lg:border-b"
         phoneMenu={t("integration.tabs.configuration")}
         rail={
           <SectionRail
