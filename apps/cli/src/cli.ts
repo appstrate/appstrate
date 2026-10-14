@@ -234,7 +234,7 @@ program
   )
   .option(
     "--app-url <url>",
-    "Public URL of the platform for remote deployments behind a reverse proxy, e.g. https://appstrate.example.com (origin only). Drives APP_URL + TRUSTED_ORIGINS and auto-enables TRUST_PROXY for non-localhost/https URLs. Independent of --port (the host bind port the proxy forwards to). Also honored via APPSTRATE_APP_URL. Default: http://localhost:<port>.",
+    "Public URL of the platform for remote deployments behind a reverse proxy, e.g. https://appstrate.example.com (origin only). Drives APP_URL and auto-enables TRUST_PROXY for non-localhost/https URLs. Independent of --port (the host bind port the proxy forwards to). Also honored via APPSTRATE_APP_URL. Default: http://localhost:<port>.",
   )
   .option(
     "--force",
@@ -1113,7 +1113,7 @@ program
   .option("--json", "Emit canonical RunEvents as JSONL on stdout")
   .option(
     "--report <mode>",
-    "Register the run on the Appstrate instance and stream its events there: auto (default — on when a profile or API key is present), true (force on), false (off — integration calls then need credential-proxy:call-own and reach your own connections; with credential-proxy:call-run as well, the space's org default applies first)",
+    "Register the run on the Appstrate instance and stream its events there: auto (default — on when a profile or API key is present), true (force on), false (off — integration calls then need credential-proxy:call-own and reach your own connections; with credential-proxy:call they reach the connections usable in the space, the org default first)",
   )
   .option(
     "--report-fallback <mode>",

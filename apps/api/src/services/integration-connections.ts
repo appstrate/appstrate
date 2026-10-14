@@ -443,7 +443,7 @@ type ConnectionSelectionContext = { spaceId: string; actor: Actor } & ProxySelec
  * The credential proxy's connection of `packageId`. Under a run, a member of its bound set, a
  * colleague's shared row included: the kickoff applied every layer. Outside a run, one of the
  * rows in reach: `usable` walks the cascade, pins aside; under `own` no org default
- * applies, and an integration an ENFORCED one governs answers `call_run_permission_required`. `null` when nothing
+ * applies, and an integration an ENFORCED one governs answers `call_permission_required`. `null` when nothing
  * answers, as for an id out of reach (a colleague's row or none). The pick passes health checks.
  */
 export async function selectAccessibleConnection(
@@ -475,7 +475,7 @@ export async function selectAccessibleConnection(
     } else if (bound.length === 0) {
       return null;
     }
-    rows = await listReachableConnections(context, "usable", packageId);
+    rows = await listReachableConnections(context, "usable", [packageId]);
     if (!named) {
       const ids = new Set(bound.map((m) => m.connectionId));
       throw mustChoose(
@@ -490,13 +490,13 @@ export async function selectAccessibleConnection(
       orgDefaults = spaceDefaults;
     } else if (spaceDefaults[packageId]?.enforce) {
       throw proxyProblem(
-        "call_run_permission_required",
+        "call_permission_required",
         `Integration '${packageId}' is governed by an enforced org default in this space: it is ` +
-          `reached by a caller who also holds credential-proxy:call-run, or through an agent ` +
-          `run the platform executes.`,
+          `reached by a caller holding credential-proxy:call, or through an agent run the ` +
+          `platform executes.`,
       );
     }
-    rows = await listReachableConnections(context, reach, packageId);
+    rows = await listReachableConnections(context, reach, [packageId]);
   }
 
   const { resolved, errors } = resolveConnections({
@@ -533,15 +533,23 @@ export async function selectAccessibleConnection(
   throw mustChoose(packageId, candidatesOf(set), "The org default holds several connections");
 }
 
-export function listReachableConnections(
+/**
+ * The rows the actor reaches in `spaceId`, {@link OLDEST_FIRST}: under `usable` what it may bind
+ * there ({@link usableInSpace}), under `own` its own ({@link ownUsableInSpace}); of
+ * `integrationIds` when given, of every integration otherwise.
+ */
+export async function listReachableConnections(
   context: { spaceId: string; actor: Actor },
   reach: ProxyReach,
-  packageId?: string,
-) {
+  integrationIds?: string[],
+): Promise<SelectableRow[]> {
+  if (integrationIds?.length === 0) return [];
   const inReach = reach === "own" ? ownUsableInSpace : usableInSpace;
   return loadSelectableRows(
     and(
-      packageId === undefined ? undefined : eq(integrationConnections.integrationId, packageId),
+      integrationIds === undefined
+        ? undefined
+        : inArray(integrationConnections.integrationId, integrationIds),
       inReach(context.spaceId, context.actor),
     ),
   );
@@ -3357,7 +3365,7 @@ export async function saveIntegrationConnection(
 }
 
 /**
- * The resolver's set ({@link usableInSpace}), each row projected for `caller`
+ * The resolver's set ({@link listReachableConnections} under `usable`), each row projected for `caller`
  * ({@link connectionViewOf}), with the actions it holds and, for its owner, the spaces it may share
  * it into under its org role `orgRole` here (`null`: none). `locked_by`: what a 409 would refuse —
  * an own row's delete (a lock anywhere), another's withdrawal from this space.
@@ -3370,12 +3378,9 @@ export async function listIntegrationConnections(
 ): Promise<IntegrationConnectionSummary[]> {
   await assertSpaceInScope(scope);
   const actor = caller.principal.actor;
-  const rows = await db
-    .select()
-    .from(integrationConnections)
-    .where(
-      and(eq(integrationConnections.integrationId, packageId), usableInSpace(scope.spaceId, actor)),
-    );
+  const rows = await listReachableConnections({ spaceId: scope.spaceId, actor }, "usable", [
+    packageId,
+  ]);
   const ownerName = await resolveConnectionOwnerNames(rows);
   const own = rows.filter((row) => actorOwns(actor, row)).map((row) => row.id);
   const others = rows.filter((row) => !actorOwns(actor, row)).map((row) => row.id);

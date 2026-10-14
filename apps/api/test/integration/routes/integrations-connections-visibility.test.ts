@@ -85,6 +85,7 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
     needsReconnection?: boolean;
     originSpaceId?: string;
     sharedSpaceIds?: string[];
+    createdAt?: Date;
   }): Promise<string> {
     const orgScoped = opts.originSpaceId !== undefined;
     const [row] = await db
@@ -103,6 +104,7 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
         scopesGranted: [],
         identityClaims: { email: `${opts.accountId}@example.com`, sub: `sub-${opts.accountId}` },
         needsReconnection: opts.needsReconnection ?? false,
+        ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
       })
       .returning({ id: integrationConnections.id });
     await seedShares(row!.id, opts.sharedSpaceIds ?? (opts.shared ? [ctx.defaultSpaceId] : []));
@@ -282,6 +284,26 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
     const body = (await res.json()) as ConnectionDTO & { label?: string | null };
     expect(body.label).toBe("Renamed by admin");
     expect(body.identity_claims).toBeNull();
+  });
+
+  it("lists oldest first, and a rename does not move the row", async () => {
+    // PGlite's clock can stamp both rows alike; the id would then order them, not the age.
+    const older = await seedConnection({
+      userId: ctx.user.id,
+      accountId: "older",
+      shared: false,
+      createdAt: new Date(Date.now() - 60_000),
+    });
+    const newer = await seedConnection({ userId: ctx.user.id, accountId: "newer", shared: true });
+
+    const res = await app.request(`/api/integrations/${INTEGRATION}/connections/${older}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "Renamed" }),
+    });
+    expect(res.status).toBe(200);
+
+    expect((await listAs(authHeaders(ctx))).map((c) => c.id)).toEqual([older, newer]);
   });
 
   it("still returns identity_claims when the caller renames their OWN connection", async () => {

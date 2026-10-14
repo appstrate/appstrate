@@ -14,12 +14,14 @@ import {
   effectivePermissions,
   orgPermissions,
   presetPermissions,
+  toScopeCeiling,
   validateScopes,
   API_KEY_ALLOWED_SCOPES,
   type Permission,
 } from "../../src/lib/permissions.ts";
 import { OIDC_ALLOWED_SCOPES } from "../../src/modules/oidc/auth/scopes.ts";
 import { resolveSpaceRole, spacePermissions } from "../../src/lib/space-role.ts";
+import { canGrantSpaceRole } from "../../src/lib/space-role-policy.ts";
 
 /**
  * What `role` reaches in a plain `open` space with the default preset — the
@@ -435,6 +437,65 @@ describe("validateScopes", () => {
 
   it("returns empty array for empty input", () => {
     expect(validateScopes([], inDefaultSpace("admin"))).toHaveLength(0);
+  });
+});
+
+describe("implied permissions across a delegation", () => {
+  /** A member whose space role is a custom bundle naming exactly `granted`. */
+  const customRole = (...granted: string[]) =>
+    effectivePermissions({
+      orgPermissions: orgPermissions("member"),
+      spacePermissions: spacePermissions({
+        kind: "custom",
+        role: { id: "srl_test", key: "custom", name: "Custom", permissions: granted },
+      }),
+    });
+
+  it("mints a key scoped to the narrower grant from a role naming the wider one", () => {
+    expect(
+      validateScopes(["credential-proxy:call-own"], customRole("credential-proxy:call")),
+    ).toEqual(["credential-proxy:call-own"]);
+    expect(validateScopes(["runs:read"], customRole("runs:read-all"))).toEqual(["runs:read"]);
+  });
+
+  it("never mints the wider grant from the narrower one", () => {
+    expect(
+      validateScopes(["credential-proxy:call"], customRole("credential-proxy:call-own")),
+    ).toEqual([]);
+    expect(validateScopes(["runs:read-all"], customRole("runs:read"))).toEqual([]);
+  });
+
+  it("serves such a key: the role's wider grant meets the key's narrower scope", () => {
+    const keyed = effectivePermissions({
+      orgPermissions: customRole("credential-proxy:call", "runs:read-all"),
+      scopeCeiling: toScopeCeiling(["credential-proxy:call-own", "runs:read"]),
+    });
+    expect(keyed.has("credential-proxy:call-own")).toBe(true);
+    expect(keyed.has("runs:read")).toBe(true);
+    expect(keyed.has("credential-proxy:call")).toBe(false);
+    expect(keyed.has("runs:read-all")).toBe(false);
+  });
+
+  it("caps a key scoped to the wider grant at the narrower one its creator holds", () => {
+    const keyed = effectivePermissions({
+      orgPermissions: customRole("credential-proxy:call-own"),
+      scopeCeiling: toScopeCeiling(["credential-proxy:call"]),
+    });
+    expect(keyed.has("credential-proxy:call-own")).toBe(true);
+    expect(keyed.has("credential-proxy:call")).toBe(false);
+  });
+
+  it("lets a holder of the wider grant hand out a role naming the narrower one", () => {
+    const bundle = (permission: string) => ({
+      kind: "custom" as const,
+      role: { id: "srl_test", key: "bundle", name: "Bundle", permissions: [permission] },
+    });
+    expect(
+      canGrantSpaceRole(customRole("credential-proxy:call"), bundle("credential-proxy:call-own")),
+    ).toBe(true);
+    expect(
+      canGrantSpaceRole(customRole("credential-proxy:call-own"), bundle("credential-proxy:call")),
+    ).toBe(false);
   });
 });
 

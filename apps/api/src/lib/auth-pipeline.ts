@@ -36,6 +36,7 @@ import { authChallengeResponder } from "./auth-challenges.ts";
 import { enforceResourceAudience } from "./protected-resources.ts";
 import { adoptViewAs, orgHalfFor, resolveViewAs, viewAsTransportGuard } from "./view-as.ts";
 import { principalGrants } from "./principal-permissions.ts";
+import { toScopeCeiling } from "./permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { INTEGRATION_TAGGED_CALLBACK_PATH } from "./integration-callback-url.ts";
 import { logger } from "./logger.ts";
@@ -171,13 +172,15 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
             `auth strategy '${strategy.id}': principal '${resolution.principalKind}' and endUser ${resolution.endUser ? "present" : "absent"} disagree`,
           );
         }
+        // `AuthResolution` keeps the two ceilings apart; this holds a strategy the
+        // compiler never saw to the same rule.
         if (
-          resolution.deferOrgResolution &&
-          resolution.orgRole === undefined &&
-          resolution.permissions.length > 0
+          resolution.deferOrgResolution
+            ? resolution.orgRole !== undefined || resolution.permissions.length > 0
+            : resolution.scopeCeiling !== undefined
         ) {
           throw new Error(
-            `auth strategy '${strategy.id}': a deferred resolution declares its ceiling in scopeCeiling, not permissions`,
+            `auth strategy '${strategy.id}': a deferred resolution declares its ceiling in scopeCeiling alone (no orgRole, no permissions), an inline one in permissions alone`,
           );
         }
         c.set("principalKind", resolution.principalKind);
@@ -193,7 +196,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         // an EMPTY list too — an undefined `scopeCeiling` would later hand an
         // identity-only OIDC token the space preset's full set (RBAC spec §7.2).
         if (resolution.orgRole !== undefined) {
-          const ceiling = new Set<string>(resolution.permissions);
+          const ceiling = toScopeCeiling(resolution.permissions);
           c.set("scopeCeiling", ceiling);
           c.set(
             "permissions",
@@ -202,13 +205,13 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         } else if (!resolution.deferOrgResolution) {
           // No org role and not deferring: the strategy's list IS the whole
           // answer (an OIDC end-user token's fixed allowlist), empty included.
-          const ceiling = new Set<string>(resolution.permissions);
+          const ceiling = toScopeCeiling(resolution.permissions);
           c.set("scopeCeiling", ceiling);
           c.set("permissions", new Set(ceiling));
         } else if (resolution.scopeCeiling !== undefined) {
           // Deferring: the grant arrives with the org role the org-context
           // middleware resolves, under the ceiling the strategy declared.
-          c.set("scopeCeiling", new Set<string>(resolution.scopeCeiling));
+          c.set("scopeCeiling", toScopeCeiling(resolution.scopeCeiling));
         }
         // Deferring without a declared ceiling writes NONE: the OIDC instance
         // token (CLI as the full user) picks its org via `X-Org-Id` like a
@@ -254,7 +257,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       // The key's scopes are the ceiling; the grant is the creator's live
       // authority narrowed by them. The space half arrives in
       // `requireSpaceContext` from the CREATOR's membership (RBAC spec §7.1).
-      const keyCeiling = new Set<string>(keyInfo.scopes);
+      const keyCeiling = toScopeCeiling(keyInfo.scopes);
       c.set("scopeCeiling", keyCeiling);
       c.set("permissions", applyOrgPermissions(c, keyInfo.creatorRole));
       c.set("authMethod", "api_key");

@@ -4,7 +4,9 @@
  * Idempotency middleware — ensures POST requests with the same `Idempotency-Key`
  * produce the same response without re-executing.
  *
- * Pattern: Stripe `Idempotency-Key` header (IETF draft-ietf-httpapi-idempotency-key-header).
+ * Pattern: Stripe `Idempotency-Key` header (IETF draft-ietf-httpapi-idempotency-key-header). A key
+ * belongs to the principal that sent it (`idempotencyPrincipal`): only that caller is ever replayed
+ * the stored response, so a one-time secret in it never reaches another member of the space.
  *
  * Only a 2xx is stored, as at Stripe: a 4xx is a refusal that often depends on state the caller
  * can change (a connection, a quota), so its key is released and a retry is judged again.
@@ -14,11 +16,14 @@ import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 import { ApiError } from "../lib/errors.ts";
+import { getActor } from "../lib/actor.ts";
 import {
   acquireIdempotencyLock,
   storeIdempotencyResult,
   releaseIdempotencyLock,
   computeRequestHash,
+  idempotencyPrincipal,
+  type IdempotencyScope,
 } from "../lib/idempotency.ts";
 
 const MAX_KEY_LENGTH = 255;
@@ -97,7 +102,7 @@ function storableBody(
 export function idempotency(
   options: {
     replay?: (c: Context<AppEnv>, response: Response) => Promise<Response>;
-    /** Rewrites a stored 2xx JSON-object body, and so what is replayed to any key reuser. */
+    /** Rewrites a stored 2xx JSON-object body, and so what a retry of the same principal is replayed. */
     storedBody?: (body: Record<string, unknown>) => Record<string, unknown>;
   } = {},
 ) {
@@ -116,14 +121,21 @@ export function idempotency(
       });
     }
 
-    const orgId = c.get("orgId");
-    // Scope the key to the space too, so one org's `Idempotency-Key`
-    // cannot replay a cached response across two different spaces.
-    const spaceId = c.get("spaceId");
+    const authExtra = c.get("authExtra") as { clientId?: unknown } | undefined;
+    const scope: IdempotencyScope = {
+      orgId: c.get("orgId"),
+      spaceId: c.get("spaceId"),
+      principal: idempotencyPrincipal({
+        authMethod: c.get("authMethod"),
+        apiKeyId: c.get("apiKeyId") ?? null,
+        clientId: typeof authExtra?.clientId === "string" ? authExtra.clientId : null,
+        actor: getActor(c),
+      }),
+    };
     const rawBody = await c.req.text();
     const requestHash = computeRequestHash(c.req.raw, rawBody);
 
-    const lockResult = await acquireIdempotencyLock(orgId, spaceId, key, requestHash);
+    const lockResult = await acquireIdempotencyLock(scope, key, requestHash);
 
     if (lockResult.status === "request_mismatch") {
       throw new ApiError({
@@ -177,7 +189,7 @@ export function idempotency(
       await next();
     } catch (err) {
       try {
-        await releaseIdempotencyLock(orgId, spaceId, key);
+        await releaseIdempotencyLock(scope, key);
       } catch {
         // Best-effort release — lock will expire via TTL (24h) if release fails
       }
@@ -188,7 +200,7 @@ export function idempotency(
     const statusCode = res.status;
 
     if (statusCode < 200 || statusCode >= 300) {
-      await releaseIdempotencyLock(orgId, spaceId, key);
+      await releaseIdempotencyLock(scope, key);
       return;
     }
 
@@ -202,7 +214,7 @@ export function idempotency(
     const body = storableBody(resBody, storedBody);
     if (body !== resBody) delete resHeaders["content-length"];
 
-    await storeIdempotencyResult(orgId, spaceId, key, {
+    await storeIdempotencyResult(scope, key, {
       statusCode,
       headers: resHeaders,
       body,

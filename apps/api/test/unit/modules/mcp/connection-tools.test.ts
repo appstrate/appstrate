@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { withImpliedPermissions } from "@appstrate/core/permissions";
 import {
   FORWARDED_AUTH_HEADERS,
   type Dispatch,
@@ -138,6 +139,15 @@ describe("connection tools — declaration", () => {
     expect(declared).not.toContain("api_call");
   });
 
+  it("declares both under either permission of a call outside a run", () => {
+    // `credential-proxy:call` implies `call-own`: the closed set of either declares the tools.
+    for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
+      const declared = names([...withImpliedPermissions(["mcp:read", "mcp:invoke", permission])]);
+      expect(declared, permission).toContain("list_connections");
+      expect(declared, permission).toContain("api_call");
+    }
+  });
+
   it("withholds both when the proxy would refuse the credential the request carries", () => {
     const declared = names(CALL_OWN, false);
     expect(declared).not.toContain("list_connections");
@@ -167,7 +177,7 @@ describe("list_connections", () => {
     authorized_uris: ["https://api.example.com/**"],
     allow_all_uris: false,
     needs_reconnection: false,
-    call_run_permission_required: false,
+    call_permission_required: false,
   };
 
   it("reads the route in-process, as the caller, and returns its rows", async () => {
@@ -494,7 +504,7 @@ describe("api_call — result", () => {
       ok: () => relayedJson({ ok: true }),
       // The upstream refusing the connection's credential: relayed, not the platform's 401.
       upstream401: () => relayedJson({ error: "invalid_token" }, 401),
-      call_run_permission_required: () => problem(403, "call_run_permission_required", "Refused."),
+      call_permission_required: () => problem(403, "call_permission_required", "Refused."),
       must_choose: () =>
         problem(409, "must_choose_connection", "Name one with the X-Connection-Id header.", {
           errors: [{ field: "integrations.x", candidate_connections: candidates }],
@@ -509,15 +519,15 @@ describe("api_call — result", () => {
 
     expect(calls).toHaveLength(order.length);
     expect(result.isError).toBe(false);
-    const [ok, upstream401, callRunPermissionRequired, mustChoose, rateLimited] = entries(payload);
+    const [ok, upstream401, callPermissionRequired, mustChoose, rateLimited] = entries(payload);
     expect(ok).toMatchObject({ index: 0, status: 200, body: { ok: true } });
     expect(upstream401).toMatchObject({ index: 1, status: 401, body: { error: "invalid_token" } });
     expect(upstream401).not.toHaveProperty("error");
-    expect(callRunPermissionRequired).toEqual({
+    expect(callPermissionRequired).toEqual({
       index: 2,
       error: {
         status: 403,
-        code: "call_run_permission_required",
+        code: "call_permission_required",
         detail: "Refused.",
         request_id: "req_1",
       },

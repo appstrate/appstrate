@@ -8,8 +8,9 @@
  *     bun scripts/migration/0044-connection-shares.ts [--apply]
  *
  * Drizzle `0089` creates `integration_connection_shares` and leaves `shared_space_ids` in place,
- * read by nothing but this script. Each `(id, unnest(shared_space_ids))` becomes one share row in
- * the connection's org, `ON CONFLICT DO NOTHING`; a target space that no longer exists or belongs
+ * read only by this script and the boot guard `assertConnectionSharesCopied`. Each
+ * `(id, unnest(shared_space_ids))` becomes one share row in the connection's org,
+ * `ON CONFLICT DO NOTHING`; a target space that no longer exists or belongs
  * to another organization is skipped and printed. The column is then emptied, and `updated_at`
  * bumped, on every row that held one (its owner's open pages refetch). Then, in each organization
  * that gained a share, the access-loss sweep (`unshareConnectionsOfOwnersWithoutAccess`) withdraws
@@ -17,10 +18,11 @@
  * them, as a live access loss does. Each share added is audited `integration.connection.share_added`
  * (`reason: migrated`), each withdrawal `share_removed` (`reason: access_lost`), both by the
  * `system` actor. The target spaces are locked `FOR KEY SHARE` in id order before any connection
- * row, the order a space delete takes. Run after the migrate service (`appstrate-migrate`) has applied `0089` and BEFORE
- * the app starts, `pg_dump` first: an app serving `0089` before it runs sees no existing share.
- * Refuses an empty `DATABASE_URL` (the client would open `./data/pglite`). One transaction; dry run
- * by default (rolled back), `--apply` commits. A second `--apply` finds the column empty and
+ * row, the order a space delete takes. Run after the migrations (the migrate service) have
+ * applied `0089` and BEFORE the app starts, `pg_dump` first: an app serving `0089` before it runs
+ * sees no existing share, and the platform refuses to boot until it has.
+ * Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`).
+ * One transaction; dry run by default (rolled back), `--apply` commits. A second `--apply` finds the column empty and
  * inserts nothing, so a share withdrawn since the first stays withdrawn.
  */
 
@@ -33,6 +35,7 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 class DryRunRollback extends Error {}
 
@@ -185,6 +188,7 @@ export async function runConnectionShares(options: {
 }
 
 if (import.meta.main) {
+  exitUnlessDatabaseNamed();
   let code = 1;
   let closeDb: (() => Promise<void>) | undefined;
   try {
@@ -194,9 +198,6 @@ if (import.meta.main) {
       strict: true,
     });
     const apply = values.apply === true;
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is empty — refusing the embedded ./data/pglite; load the .env");
-    }
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
     out(`0044 — ${apply ? "APPLY" : "DRY RUN"}`);

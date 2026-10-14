@@ -34,6 +34,16 @@ Coolify's `docker_compose_domains` maps **these** service names to `app.appstrat
 
 **A release is not always an image swap.** Migrations that cannot be replayed, one-off data scripts, and environment variables that must land at a particular moment are all real. The runbook is the authority; this file is not a substitute for it.
 
+**A redeploy migrates and starts in one step**, so it cannot carry a release that runs data scripts between the two. For such a release, stop the application container, run the migrations and then the scripts from the new image (it ships `scripts/migration/`) against the resource's database, then set the version and redeploy: the migrate service then finds nothing pending. Never with a bare `docker compose` from a checkout of this directory: `name:` is inert under Coolify (below), so that run creates an empty `appstrate-prod_pgdata`, migrates it, succeeds, and the scripts never touch production. Run the image in the network namespace of the resource's database container (labelled `com.docker.compose.project=<resource-uuid>` and `com.docker.compose.service=appstrate-postgres`), with the stopped application container's environment: a script validates the platform's whole environment schema when it opens the database, so `DATABASE_URL` alone fails before connecting. That `DATABASE_URL` must name that postgres.
+
+```sh
+docker run --rm --network container:<postgres container> \
+  --env-file <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' <app container>) \
+  ghcr.io/appstrate/appstrate:<version> bun scripts/migration/<script>.ts
+```
+
+The migrations are `bun packages/db/src/migrate.ts` the same way. Which scripts a release needs, and in what order, is in `scripts/migration/README.md`; the exact commands are in the release runbook.
+
 ## Production
 
 Deployed by Coolify as a single `dockercompose` application resource. Its UUID is not written here on purpose: the UUID names the volumes, and a stale one in a document is worse than none — read it off the resource.

@@ -162,11 +162,17 @@ export const oidcAuthStrategy: AuthStrategy = {
     }
 
     // Surface the token's RFC 8707 audiences so a resource server (e.g. an MCP
-    // endpoint `/api/mcp/o/:org`) can enforce that the token was issued for it.
+    // endpoint `/api/mcp/o/:org`) can enforce that the token was issued for it,
+    // and its `azp` client so two clients acting for one user stay two callers
+    // (the idempotency namespace reads it).
     if (resolution) {
       resolution = {
         ...resolution,
-        extra: { ...(resolution.extra ?? {}), tokenAudiences: claims.audiences },
+        extra: {
+          ...(resolution.extra ?? {}),
+          tokenAudiences: claims.audiences,
+          ...(claims.clientId ? { clientId: claims.clientId } : {}),
+        },
       };
     }
     return resolution;
@@ -182,9 +188,7 @@ export const oidcAuthStrategy: AuthStrategy = {
 function capToSpaceKeyScopes(resolution: AuthResolution): AuthResolution {
   if (resolution.principalKind === "end_user") return resolution;
   const keyScopes = getApiKeyAllowedScopes();
-  if (resolution.deferOrgResolution && resolution.orgRole === undefined) {
-    return { ...resolution, scopeCeiling: [...keyScopes] };
-  }
+  if (resolution.deferOrgResolution) return { ...resolution, scopeCeiling: [...keyScopes] };
   return { ...resolution, permissions: resolution.permissions.filter((p) => keyScopes.has(p)) };
 }
 

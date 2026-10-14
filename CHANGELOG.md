@@ -77,16 +77,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   does not fire for a non-required integration that has no connection: that
   run starts, and its `run.started` delivery carries `integrationsUnbound`.
 
-- **Before the deploy, run
-  `DATABASE_URL=<platform> bun scripts/migration/0040-token-usage-shape.ts`,
-  then with `--apply`, and `--apply` again right after the deploy** (beta.66
-  keeps writing until the swap; the script is idempotent) (#1846). `--apply`
-  drops undeclared keys and malformed `tiers` bands from stored
-  `token_usage`, so each run matches the strict `TokenUsage` component; no
+- **After the deploy, run
+  `DATABASE_URL=<platform> bun scripts/migration/0040-token-usage-shape.ts`
+  once, then with `--apply` only if it lists a run** (#1846). The release
+  stores `token_usage` only through the token-usage rule and its read paths
+  project the column through it, so one pass after the swap sees every row
+  that will ever need it. `--apply` drops undeclared keys and malformed
+  `tiers` bands from stored `token_usage`, so each run matches the strict `TokenUsage` component; no
   counter is changed. A run whose usage is malformed as a whole (not an
   object, or a counter that is not a non-negative integer, e.g. a fraction)
   is listed `MALFORMED` and left as is, and the script exits 1 until an
-  operator decides what each such row becomes.
+  operator decides what each such row becomes. Where to run it, an embedded
+  database included: "The image ships `scripts/migration/`" below.
 
 - **A connection whose OAuth client registration is broken
   (`invalid_client` / `unauthorized_client`) is never flagged for
@@ -114,10 +116,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `integration_connection_shares` and copies nothing into it: an app serving
   `0089` before 0044 has run sees no share, and every connection shared into
   another space, including those `0086` folded from `shared_with_org`, would be
-  visible only to its owner. Before the deploy, `SELECT count(*) FROM
+  visible only to its owner; the release refuses to boot while shares wait
+  for it (see Changed). Before the deploy, `SELECT count(*) FROM
 integration_connections WHERE shared_with_org;` tells whether the step
   applies; a non-zero result makes it required. The order, app stopped and
-  `pg_dump` taken: the `appstrate-migrate` service run alone (applies `0089`), then 0044's dry run
+  `pg_dump` taken: the migrate service run alone (applies `0089`; where each
+  command runs: "The image ships `scripts/migration/`" below), then 0044's dry
+  run
   (`set -a && . ./.env && set +a && bun scripts/migration/0044-connection-shares.ts`),
   which writes nothing and lists the shares it will insert and the target
   spaces it will skip (deleted, or owned by another organization), then the
@@ -127,14 +132,14 @@ integration_connections WHERE shared_with_org;` tells whether the step
   inserts nothing, so a share withdrawn since stays withdrawn. The
   `shared_space_ids` column and its two CHECKs are dropped in beta.68.
 
-- **`pg_dump` the platform database BEFORE deploying, then after the deploy
-  and after `0044`, run
+- **`pg_dump` the platform database BEFORE deploying, then in the deploy
+  window, after `0044` and with the app still stopped, run
   `scripts/migration/0041-widen-connections-to-org-scope.ts`** (#1870).
   Migration `0086` is one-way at boot (`shared_with_org` dropped, `org_id`
   NOT NULL): rolling back means restoring that dump. Drizzle `0086` adds `org_id` to `integration_connections`, makes
   `space_id` nullable and folds `shared_with_org` into `shared_space_ids`,
-  leaving every row space-scoped with the reach it had. With the app up,
-  take a `pg_dump`, run the dry run
+  leaving every row space-scoped with the reach it had. With the app stopped,
+  run the dry run
   (`set -a && . ./.env && set +a && bun scripts/migration/0041-widen-connections-to-org-scope.ts`),
   read the rows it will widen per organization and the labels it will rename
   `<label> (n)`, then run it again with `--apply`. It widens the user-owned
@@ -190,8 +195,9 @@ integration_connections WHERE shared_with_org;` tells whether the step
   minted for a personal subscription would be redeemed as an organization
   credential.
 
-- **After the deploy, run `scripts/migration/0043-promote-auto-clients-to-org.ts`,
-  dry, then with `--apply`, once `0044` and `0041` are done** (#1910). It
+- **In the deploy window, app still stopped, run
+  `scripts/migration/0043-promote-auto-clients-to-org.ts`, dry, then with
+  `--apply`, once `0044` and `0041` are done** (#1910). It
   promotes the auto-provisioned OAuth clients (RFC 7591 DCR, CIMD) that were
   registered at a space's tier to the organization tier, so one client per
   authorization server serves the organization. Where an organization holds
@@ -202,47 +208,72 @@ integration_connections WHERE shared_with_org;` tells whether the step
   The dry run prints that number. A second `--apply` promotes nothing.
   Details: `scripts/migration/README.md`.
 
-- **After the deploy, run
+- **In the deploy window, app still stopped, run
   `scripts/migration/0045-pin-connection-made-in-space.ts`, dry, then with
-  `--apply`, right after `0041 --apply` and `0043 --apply`** (#1929), app up.
-  Those two leave a member who connected one integration from two spaces
-  owning two connections in each, where a run now asks (see Changed),
+  `--apply`, right after `0041 --apply` and `0043 --apply` and before the app
+  starts** (#1929). Those two leave a member who connected one integration
+  from two spaces owning two connections in each, where a run now asks (see
+  Changed),
   scheduled fires included. `0045` writes a member pin on the connection made
   in the space for each agent whose last run there bound it by default; it
   refuses to run while `0041` or `0043` has work left. Its dry run also lists
   every enabled schedule of those members naming no set, `binds through the
-pin` or `no pin: name the set`: the latter answers `must_choose_connection`
-  at its next fire until its owner names the set (on the schedule, or a member
-  pin on the agent), and an agent it does not pin asks on its next run. A
+pin` or `no pin: name the set`: the latter's next fire answers
+  `must_choose_connection` and disables it (`connection_choice_invalid`, see
+  Fixed) until its member names the set (on the schedule, or a member pin on
+  the agent) and enables it again; a fire landing between `0041 --apply` and
+  `0045 --apply` disables the schedules `0045` would have pinned, which is why
+  the app stays stopped. An agent it does not pin asks on its next run. A
   second `--apply` pins nothing. Details: `scripts/migration/README.md`.
 
 - **API clients that write schedules must name their connection sets**
   (#1929): the write of an enabled schedule is refused `409` until they do;
   see Changed.
 
-- **Run `scripts/migration/0046-split-credential-proxy-call-scope.ts --apply`
-  in the window** (#1894, #1957). `credential-proxy:call` is split into
-  `credential-proxy:call-run`, for a call made for a run, and
-  `credential-proxy:call-own`, for a call outside one; the pair is what
-  `credential-proxy:call` was. A stored permission the release does not know
-  is ignored, so in `api_keys.scopes` and `space_roles.permissions` the script
-  puts `credential-proxy:call-run` in place of the old name and appends
-  `credential-proxy:call-own`: existing API keys and custom roles keep both
-  paths, and what a call answers differently is under Changed. Run it dry
-  (`set -a && . ./.env && set +a && bun scripts/migration/0046-split-credential-proxy-call-scope.ts`),
-  then with `--apply`, after the migrate step and before the new release
-  serves requests; never on the running previous release, which ignores the
-  new names. A client that mints keys naming `credential-proxy:call` names
-  `credential-proxy:call-run` and `credential-proxy:call-own` instead (`400`
-  otherwise). Details: `scripts/migration/README.md`.
+- **Migration `0092` only creates `connection_calls`, the proxy's call
+  journal** (see Added), and rewrites nothing.
 
-  From the deploy on, a call to `/api/credential-proxy/proxy` without
-  `X-Run-Id` made in a personal space answers `403`: a personal space grants
-  `credential-proxy:call-own` to nobody, its owner included. Who holds each
-  permission and what a call outside a run reaches are in Changed.
+- **Before the deploy, list the custom space roles that manage `operator`
+  members** (#1963). The `operator` preset gains `credential-proxy:call-own`
+  (see Changed), and a caller grants, re-roles or removes only a member whose
+  role they hold in full, so a custom role that invites, re-roles or removes
+  members, or writes space settings, without any `credential-proxy:*` grant
+  can no longer do so for an `operator`. Read-only:
 
-  Migration `0092` only creates `connection_calls`, the proxy's call journal
-  (see Added), and rewrites nothing.
+  ```sql
+  SELECT r.org_id, r.id, r.key, r.name, count(m.user_id) AS holders
+  FROM space_roles r
+  LEFT JOIN space_members m ON m.custom_role_id = r.id
+  WHERE r.permissions && ARRAY['space-members:invite', 'space-members:remove',
+                               'space-members:change-role', 'space-settings:write']
+    AND NOT EXISTS (
+      SELECT 1 FROM unnest(r.permissions) AS p WHERE p LIKE 'credential-proxy:%'
+    )
+  GROUP BY r.org_id, r.id, r.key, r.name
+  ORDER BY r.org_id, r.key;
+  ```
+
+  Add `credential-proxy:call-own` to a listed role that should keep that
+  authority (the roles editor, or `PATCH /api/roles/{id}`).
+
+- **The image ships `scripts/migration/`** (#1963). With
+  `examples/self-hosting/`, the migrate service is
+  `docker compose run --rm migrate` and a data task
+  `docker compose run --rm --no-deps appstrate bun scripts/migration/<script>.ts`
+  (dry run; `--apply` to commit). With `deploy/`
+  under Coolify, run the release image against the resource's database
+  container with the application's environment, not `DATABASE_URL` alone, as
+  `scripts/migration/README.md` shows; never a bare `docker compose` from a
+  checkout of `deploy/`. On an embedded database (no `DATABASE_URL`), name it:
+  `PGLITE_DATA_DIR=./data/pglite bun scripts/migration/<script>.ts`, the
+  platform stopped; `0040` and the window scripts refuse to run with neither
+  variable set. beta.67's window:
+  `scripts/migration/README.md`, "Release beta.67", and
+  `examples/self-hosting/README.md`, "Upgrading to 1.0.0-beta.67".
+
+- **Set `TRUSTED_ORIGINS` if a browser reaches the platform from, or a
+  sign-in redirects to, an origin other than `APP_URL`** (#1963): unset, it trusts no extra origin, where it
+  trusted `http://localhost:3000` and `http://localhost:5173`; see Security.
 
 - **Before the deploy, run `scripts/migration/0035-verify-manifest-expressions.ts`
   and read its `[default-tools]` lines** (#1923). It writes nothing. Each
@@ -261,21 +292,33 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Changed
 
-- **BREAKING (API): the credential proxy has one permission per path,
-  `credential-proxy:call-run` and `credential-proxy:call-own`** (#1894,
-  #1957). `credential-proxy:call` no longer exists. A call made for a run
-  (`X-Run-Id`) requires `credential-proxy:call-run`, and reaches the
-  connections the run bound, a colleague's shared one included. A call
-  without `X-Run-Id` requires `credential-proxy:call-own`, a space-level
-  permission of its own. `admin` and `builder` hold both; `operator`,
-  `runner` and `viewer` hold neither; a custom role can list either, an API
-  key carries each from a creator who holds it, and a personal space grants
-  `credential-proxy:call-own` to nobody, its owner included. What a call
-  outside a run reaches depends on whether the caller also holds
-  `credential-proxy:call-run`:
-  - with both, the connections usable in the space, the caller's own and
-    those shared into it, through the resolver's cascade without pins: the
-    rows a run in the space binds for that caller, under the space's org
+- **The credential proxy gains `credential-proxy:call-own`, a call outside a
+  run on the caller's own connections** (#1894, #1957, #1963).
+  `credential-proxy:call` keeps its name and its reach: for a run
+  (`X-Run-Id`), the connections the run bound, a colleague's shared one
+  included; outside a run, the connections usable in the space.
+  The proxy's routes guard on `credential-proxy:call-own` alone, and
+  `credential-proxy:call` implies it, so an API key or a role storing
+  `credential-proxy:call` alone keeps every path, and nothing is rewritten.
+  `admin` and `builder` hold both, `operator` holds
+  `credential-proxy:call-own` (and so the MCP tools `list_connections` and
+  `api_call`), `runner` and `viewer` neither; a custom role can list either,
+  an API key carries each from a creator who holds it, and the owner of a
+  personal space holds their preset there in full. Handing out the `operator`
+  preset now asks for one of the two as well, since a caller only grants or
+  manages a role whose permissions they hold: inviting an `operator`, moving a
+  member to or from it, removing one, making `operator` a space's
+  `default_role` (or opening a space whose default it is), and previewing it
+  through `X-View-As` answer `403` naming `credential-proxy:call-own` to a
+  caller holding neither. Owners, admins and the `admin` preset hold both; a
+  custom role that governs members without a `credential-proxy:*` grant is
+  the one affected (see Operators). The run path requires
+  `credential-proxy:call` (`403` naming it). What a call outside a run
+  reaches:
+  - with `credential-proxy:call`, the connections usable in the space, the
+    caller's own and those shared into it, through the resolver's cascade
+    without pins: the rows a run in the space binds for that caller, under
+    the space's org
     defaults, enforced and soft, a named `X-Connection-Id` being the
     override. A shared connection is used when it is named or an org default
     designates it, never by fallback: with nothing named and no org default,
@@ -289,23 +332,22 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     space (another member's connection not shared into it, or an unknown id)
     answers one and the same `404 credential_not_found`. These are the
     answers a holder of `credential-proxy:call` gets from the release in
-    service, but for the `400`, whose problem carries no `param` and whose
-    detail names neither the connection nor the default's members;
+    service, but for the `400`: both releases name `X-Connection-Id` in its
+    `param`, and its `detail`, which in the release in service named the
+    connection and the default's members, names neither;
   - with `credential-proxy:call-own` alone, the caller's own connections
     usable in the space and nothing else. No org default applies, a soft one
     included, and an integration an enforced org default governs answers
-    `403 call_run_permission_required`, whatever is named. A named `X-Connection-Id` that is
-    not one of the caller's own (another member's connection, shared into
+    `403 call_permission_required`, whatever is named. A named
+    `X-Connection-Id` that is not one of the caller's own (another member's connection, shared into
     the space or not, or an unknown id) answers one and the same
     `404 credential_not_found`. With nothing named: the caller's single own
     connection, `404 credential_not_found` for none,
     `409 must_choose_connection` for several, listing those and no one
     else's.
 
-  The `403` of a caller that holds `credential-proxy:call-run` without
-  `credential-proxy:call-own` names the latter and the run path. The rule:
-  `docs/architecture/INTEGRATIONS_RUNTIME.md`, "AFPS Integrations — platform
-  credential proxy (`/api/credential-proxy/*`)".
+  The rule: `docs/architecture/INTEGRATIONS_RUNTIME.md`, "AFPS Integrations —
+  platform credential proxy (`/api/credential-proxy/*`)".
 
 - **BREAKING (API): the credential proxy refuses an `X-Run-Id` naming a run
   the platform executes** (#1894): `403`. Such a run reaches its connections
@@ -384,6 +426,30 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   guarantee every copied row passes. Run it with the app stopped, as
   `scripts/migration/README.md` orders, and include 0044 after `0091` in the
   dump rehearsal. (#1925)
+- **The platform refuses to boot while a connection still holds an entry in
+  `integration_connections.shared_space_ids`** (#1963), naming the
+  `scripts/migration/0044-connection-shares.ts` command for its database:
+  until that script copies them, those shares are invisible and each schedule
+  naming one would be disabled at its next fire. A local database migrated
+  past `0089` that still holds shares refuses too: run the script against it
+  (where: Operators, "The image ships `scripts/migration/`").
+- **The database states invariants the writers already held** (#1963,
+  migration `0096`). `connection_calls` accepts `user` / `end_user` only in
+  `actor_type` and `owner_type` (NULL kept for a connection gone at call
+  time). An `org_models` alias must be
+  bound to a credential, and a bound model's `provider_id` must be its
+  credential's: the single-column foreign key on `credential_id` becomes
+  `org_models_credential_provider_fk` on `(credential_id, provider_id)`,
+  still `ON DELETE RESTRICT`. A subscription pairing is
+  owned by the organization or by the member who minted it, and a redeem ends
+  with a credential or a failure, never both, a failure only on a consumed
+  token. Every constraint is added validated: a row that breaks one fails the
+  migration instead of being excused. No data is rewritten. A database created before the
+  migrations were squashed into `0000_init.sql` (#481) must have run
+  `scripts/migration/0018-prod-schema-realign.sql` before this release:
+  migration `0096` drops
+  `org_models_credential_id_model_provider_credentials_id_fk` by the name
+  `0018` gives it.
 - **The connection reuse hint says what it counts**: "N agents de ses espaces
   déclarent l'intégration". (#1925)
 - **The starter agent's publication is audited**: a new organization's
@@ -585,12 +651,16 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   `packages/mcp-transport`), in addition to the run deadline. `MAX_WAIT_SECONDS`
   stays 55, below the MCP SDK's 60 s request timeout (a unit test holds it there).
 - **API: one payer vocabulary, the member payer recorded in the ledger**
-  (#1909). Wire changes on the model and credential endpoints:
+  (#1909, #1963). Wire changes on the model and credential endpoints:
   - `billed_to` gains `system` (a built-in model, paid by the platform); it
     takes the values of `MODEL_PAYERS` (`system`, `org`, `user`) or `null`.
-  - `binding` (`org` | `member` | `managed`) is required on every model: `org`
-    bound to one credential, `member` unbound (each member serves it), `managed`
-    an alias. `credentialId` is `null` for `member` and `managed`.
+  - `binding` (`MODEL_BINDINGS`: `system` | `org` | `user` | `managed`) is
+    required on every model, in the vocabulary of `billed_to`: `system` a
+    built-in model served by the platform's key, `org` bound to an organization
+    credential, `user` unbound (each member serves it with their own
+    credential), `managed` an alias. `credentialId` is `null` for `user` and
+    `managed`. `owner_type` on the credential endpoints takes
+    `MODEL_CREDENTIAL_OWNERS` (`org`, `user`).
   - Credential DTO: `allowed_actions` (`edit`, `delete`, `test`, `reconnect`),
     `bindable`. `bindable` is true for an organization credential, API key or
     subscription. `reconnect` is listed on an OAuth credential the caller may
@@ -1044,18 +1114,18 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 - **`GET /api/credential-proxy/connections`** (#1894, #1957): what a call
   through the credential proxy outside a run would accept for the caller,
   read with the rule the proxy applies. A holder of
-  `credential-proxy:call-own` alone gets their own connections; a caller who
-  also holds `credential-proxy:call-run` gets the connections usable in the
-  space, and under an enforced org default only its members. Per connection:
+  `credential-proxy:call-own` alone gets their own connections; a holder of
+  `credential-proxy:call` gets the connections usable in the space, and under
+  an enforced org default only its members. Per connection:
   the `integration_package_id` and `connection_id` to send, its label,
   `owned_by_actor` (`false` for another member's connection shared into the
   space) and auth, `scopes_granted`, the auth's `authorized_uris`,
   `allow_all_uris`, and the two flags a call would still be refused on,
-  `needs_reconnection` and `call_run_permission_required`. It decrypts nothing: an
+  `needs_reconnection` and `call_permission_required`. It decrypts nothing: an
   `authorized_uris` entry templated on a credential field is given as the
   manifest declares it (`{$credential.<field>}`), and a caller targets it by
   writing `{{<field>}}` at that place in the target. Requires
-  `credential-proxy:call-own`.
+  `credential-proxy:call-own`, which `credential-proxy:call` implies.
 
 - **A journal of the credential proxy's calls** (#1894). Every call that may
   have sent a connection's credential writes one row once its outcome is
@@ -1080,7 +1150,8 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   report that matches it reads the journal instead.
 
 - **MCP: `list_connections` and `api_call`** (#1894, #1957), declared to a
-  bearer caller holding `mcp:invoke` and `credential-proxy:call-own`.
+  bearer caller holding `mcp:invoke` and `credential-proxy:call-own` (which
+  `credential-proxy:call` implies).
   `list_connections` is the listing above. `api_call` sends 1 to 50 requests
   through the credential proxy in one call, each with typed arguments
   (integration, method, target, headers, body, connection) in place of the
@@ -1091,8 +1162,8 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   tool generates the proxy session and returns its `session_id`, to pass back
   to keep the upstream's cookies. It names no run: its calls reach what a
   call outside a run reaches for the caller (see Changed), a connection
-  another member shared included when the caller also holds
-  `credential-proxy:call-run`. Guide:
+  another member shared included when the caller holds
+  `credential-proxy:call`. Guide:
   `docs/guides/connecting-mcp-clients.md`.
 
 - **Boot warning for environment keys this version does not read.** One `warn`
@@ -1294,6 +1365,36 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Fixed
 
+- **The sidecar's `/mcp` no longer waits for the integration boot, and the
+  agent's boot report has one deadline** (#1963). `/mcp` held the agent's MCP
+  handshake for up to 30 s while integrations booted, although the agent
+  reads `GET /integrations/boot-report` (which waits for the boot) before it
+  lists its tools (#1936); the handshake, and `mcpConnectMs`, complete as
+  soon as the sidecar listens, and the `integration boot wait exceeded` log
+  line is gone. The boot report fetch retried a timed-out request as a
+  transient race, so a hung boot failed the run after about 180 s instead of
+  the documented 60 s: it has one 120 s deadline for every attempt together,
+  retries any failed request other than the deadline's own abort, and takes
+  an HTTP error or an unreadable body as final. The agent container starts its heartbeat
+  as soon as its sink is built, before its first event, so workspace
+  provisioning, the MCP connect and the boot report wait are covered and the
+  stall watchdog no longer reaps a run waiting on a slow integration boot as
+  "Runner stopped reporting".
+- **An integration's connection list keeps its order** (#1963).
+  `GET /api/integrations/{packageId}/connections` returned its rows in
+  physical storage order, so renaming or refreshing a connection moved it in
+  the settings list. It lists them oldest first, the order the resolver and
+  the connection picker already used; all three read one loader.
+- **An API key can carry a permission its creator holds by implication**
+  (#1963). `credential-proxy:call` implies `credential-proxy:call-own`, and
+  `runs:read-all` implies `runs:read`, but minting and the request-time
+  ceiling compared literal strings. A creator whose custom role named only
+  the wider grant could not mint a key scoped to the narrower one, and such a
+  key resolved to nothing. Both sides of the ceiling, and the creator's set
+  at mint, are closed under these implications. The same applies to granting
+  or previewing a custom space role naming the narrower grant. An effective
+  permission set lists the implied permission next to the grant that implies
+  it.
 - **A subscription pairing's redeem is audited.**
   `oauth_model_provider.imported` and `oauth_model_provider.reconnected` were
   dropped: the redeem route carries no organization context. They are recorded
@@ -1506,6 +1607,38 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   does not know yet** (#1848).
 
 ### Security
+
+- **`Idempotency-Key` is scoped to the caller** (#1963). A stored response
+  was keyed by organization, space, key, method, URL and body only, so
+  another member of the same space (or another API key) replaying the same
+  key and body was served the first caller's response: on
+  `POST /api/runs/remote` that included the one-time sink `secret` (letting
+  them post events to and finalize someone else's run), and on agent
+  launches the first caller's run. The cache namespace includes the
+  authenticated principal (auth method, API key id or OAuth client id,
+  member or end-user): a key reused by another principal (another member,
+  another API key, another OAuth client acting for the same user) is a new
+  request, as at Stripe. A retry by the same caller still replays the
+  identical response. Responses cached before the upgrade are not replayed
+  after it.
+
+- **An unset or empty `TRUSTED_ORIGINS` trusts no extra origin** (#1963). The
+  schema default was `http://localhost:3000,http://localhost:5173`, and the
+  self-hosting composes pass `${TRUSTED_ORIGINS:-}` (empty, which counts as
+  unset), so every install that never set it trusted those localhost origins
+  in its three uses: CORS with credentials, Better Auth's trusted origins and
+  the SPA's post-login `?redirect=` allowlist. Each takes the app's own origin
+  (`APP_URL`) without an entry: same-origin calls need no CORS grant, Better
+  Auth always trusts its `baseURL`, and the allowlist the SPA reads holds
+  `APP_URL` ahead of `TRUSTED_ORIGINS`. An install that relied on the
+  implicit localhost origins (for example, a Vite dev server on `:5173`)
+  sets `TRUSTED_ORIGINS` explicitly (see Operators). `appstrate install` no
+  longer writes `TRUSTED_ORIGINS=<APP_URL>` into a new `.env`, which was
+  redundant; `appstrate doctor` reports a compose line
+  `- TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}` as a duplicated default, and
+  `appstrate install --upgrade-compose` rewrites it to a bare passthrough.
+  `POST /api/auth/sign-out` declares its `403` (`INVALID_ORIGIN`) in the
+  OpenAPI.
 
 - **Connecting reads the integration's published version, not its draft**
   (#1947). Every connect flow (OAuth kickoff and callback, the hosted form,

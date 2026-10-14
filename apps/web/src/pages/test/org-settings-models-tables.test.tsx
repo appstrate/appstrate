@@ -223,7 +223,7 @@ describe("the models table, for the credential each model names", () => {
   const bound = model({ id: "mdl_bound" });
   const unbound = model({
     id: "mdl_each",
-    binding: "member",
+    binding: "user",
     credentialId: null,
     billed_to: null,
   });

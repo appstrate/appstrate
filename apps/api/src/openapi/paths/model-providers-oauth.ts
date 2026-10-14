@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MODEL_CREDENTIAL_OWNERS } from "@appstrate/core/model-payer";
 import { CONNECT_HELPER_PACKAGE } from "../../lib/connect-helper.ts";
 
 export const modelProvidersOAuthPaths = {
@@ -32,7 +33,7 @@ export const modelProvidersOAuthPaths = {
                 },
                 owner_type: {
                   type: "string",
-                  enum: ["org", "user"],
+                  enum: [...MODEL_CREDENTIAL_OWNERS],
                   default: "org",
                   description:
                     "New connection: `org` (default) pairs an organization credential; `user` pairs a personal credential owned by the caller. Never sent with `credentialId`: a reconnect takes its owner from the credential.",

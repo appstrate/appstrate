@@ -13,11 +13,12 @@
  *
  * Rule and schedule listing: scripts/migration/README.md, Detail (script `0045`).
  *
- * Run after `0041 --apply` and `0043 --apply`, app up, `pg_dump` first; it refuses to run while
- * `0041` or `0043` has work left. Refuses an empty `DATABASE_URL`
- * (the client would open `./data/pglite`). One transaction per organization; dry run by default
- * (each rolled back), `--apply` commits each. With `--apply`, the pins left to write must be 0,
- * else it exits 1. Idempotent: a second run finds nothing to pin.
+ * Run after `0041 --apply` and `0043 --apply`, in the same window, the app stopped until this has
+ * run (a schedule fire answering `must_choose_connection` before its pins exist disables the
+ * schedule), `pg_dump` first; it refuses to run while `0041` or `0043` has work left.
+ * Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`).
+ * One transaction per organization; dry run by default (each rolled back), `--apply` commits
+ * each. With `--apply`, the pins left to write must be 0, else it exits 1. Idempotent: a second run finds nothing to pin.
  */
 
 import { parseArgs } from "node:util";
@@ -40,6 +41,7 @@ import type { DbOrTx } from "../../apps/api/src/lib/db-helpers.ts";
 import { sharedInto, usableInSpace } from "../../apps/api/src/services/connection-reach.ts";
 import { TO_WIDEN } from "./0041-widen-connections-to-org-scope.ts";
 import { SPACE_AUTO } from "./0043-promote-auto-clients-to-org.ts";
+import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 class DryRunRollback extends Error {}
 
@@ -372,6 +374,7 @@ export async function runPinConnectionMadeInSpace(options: {
 }
 
 if (import.meta.main) {
+  exitUnlessDatabaseNamed();
   let code = 1;
   let closeDb: (() => Promise<void>) | undefined;
   try {
@@ -381,9 +384,6 @@ if (import.meta.main) {
       strict: true,
     });
     const apply = values.apply === true;
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is empty — refusing the embedded ./data/pglite; load the .env");
-    }
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
     out(`0045 — ${apply ? "APPLY" : "DRY RUN"}`);

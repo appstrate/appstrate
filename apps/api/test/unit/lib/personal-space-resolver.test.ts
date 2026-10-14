@@ -40,21 +40,17 @@ describe("resolveSpaceRole on a personal space", () => {
       expect(resolveSpaceRole(orgRole, personal, null, OWNER)).toEqual({
         kind: "preset",
         preset: "admin",
-        personalOwner: true,
       });
     }
   });
 
-  it("grants its owner everything `admin` holds but credential-proxy:call-own", () => {
-    // Nobody but its owner sees what is called from a personal space (RBAC spec §3.6).
+  it("grants its owner exactly what `admin` holds, the credential proxy included", () => {
     const admin = presetPermissions("admin");
     for (const orgRole of ["owner", "member"] as const) {
       const owned = spacePermissions(resolveSpaceRole(orgRole, personal, null, OWNER));
-      expect(
-        [...admin].filter((permission) => !owned.has(permission)),
-        orgRole,
-      ).toEqual(["credential-proxy:call-own"]);
-      expect([...owned].filter((permission) => !admin.has(permission))).toEqual([]);
+      expect([...owned].sort(), orgRole).toEqual([...admin].sort());
+      expect(owned.has("credential-proxy:call")).toBe(true);
+      expect(owned.has("credential-proxy:call-own")).toBe(true);
     }
   });
 
@@ -65,7 +61,6 @@ describe("resolveSpaceRole on a personal space", () => {
     expect(resolveSpaceRole("guest", personal, null, OWNER)).toEqual({
       kind: "preset",
       preset: "operator",
-      personalOwner: true,
     });
   });
 

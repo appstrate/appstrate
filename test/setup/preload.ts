@@ -99,7 +99,9 @@ process.env.CONNECTION_ENCRYPTION_KEY = Buffer.from("0123456789abcdef0123456789a
   "base64",
 ); // 32 bytes
 process.env.APP_URL = "http://localhost:3000";
-process.env.TRUSTED_ORIGINS = "http://localhost:3000";
+// No extra trusted origin: APP_URL alone must carry the auth flows. Deleted
+// rather than left alone so a developer `.env` (auto-loaded by Bun) cannot add one.
+delete process.env.TRUSTED_ORIGINS;
 process.env.LOG_LEVEL = "error"; // Suppress logs during tests
 // Swap Better Auth's scrypt hasher (~35ms/hash) for a plain SHA-256 in tests —
 // most tests sign up a real user per beforeEach, so scrypt dominates the run.

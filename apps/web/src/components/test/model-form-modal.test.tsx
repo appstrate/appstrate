@@ -98,7 +98,7 @@ const CLAUDE_CODE: ProviderRegistryEntry = {
   authMode: "oauth2",
 };
 
-/** The row's binding follows its credential, as the server projects it: unbound is `member`. */
+/** The row's binding follows its credential, as the server projects it: unbound is `user`. */
 function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
   const credentialId = overrides.credentialId === undefined ? "cred_1" : overrides.credentialId;
   return {
@@ -118,7 +118,7 @@ function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
     aliased: false,
     iconUrl: null,
     source: "custom",
-    binding: credentialId === null ? "member" : "org",
+    binding: credentialId === null ? "user" : "org",
     credentialId,
     billed_to: "org",
     created_by: null,

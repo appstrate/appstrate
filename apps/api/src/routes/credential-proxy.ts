@@ -20,10 +20,11 @@
  *     device-flow JWTs (`oauth2-instance`, `oauth2-dashboard`). Cookie
  *     sessions are rejected because the drive-by CSRF threat model
  *     doesn't fit an endpoint that reaches third-party providers.
- *   - One permission per path (`credential-proxy/access.ts`):
- *     `credential-proxy:call-run` with `X-Run-Id`, which must name the actor's own
- *     in-flight run that the caller executes (never one the platform executes);
- *     `credential-proxy:call-own` without it
+ *   - Permissions (`credential-proxy/access.ts`): `credential-proxy:call` with
+ *     `X-Run-Id`, which must name the actor's own in-flight run that the caller
+ *     executes (never one the platform executes); without it, `credential-proxy:call`
+ *     reaches the connections usable in the space and `credential-proxy:call-own`
+ *     the caller's own only
  *   - Per-space scope (principal cannot reach providers in another space)
  *   - Run binding — `X-Run-Id` confines the call to its run's bound connections,
  *     a colleague's shared one included (`selectAccessibleConnection`)
@@ -73,7 +74,7 @@ import { callerPermissions } from "../lib/permissions.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { relayIdempotencyKey } from "../middleware/idempotency.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import {
   ApiError,
@@ -88,12 +89,7 @@ import { recordConnectionCall } from "../services/credential-proxy/call-journal.
 import { trackAudit } from "../services/audit.ts";
 import { PROXY_CONTROL_HEADERS } from "../services/credential-proxy/control-headers.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
-import {
-  authorizeProxyCall,
-  PROXY_OWN_PERMISSION,
-  PROXY_RUN_PERMISSION,
-  reachOutsideRun,
-} from "../services/credential-proxy/access.ts";
+import { authorizeProxyCall, reachOutsideRun } from "../services/credential-proxy/access.ts";
 import {
   listConnectionsOutsideRun,
   runBoundSelection,
@@ -126,9 +122,8 @@ export function createCredentialProxyRouter() {
   router.all(
     "/proxy",
     rateLimit(limits.rate_per_min),
-    // Either path's permission opens the route; `authorizeProxyCall` requires the one of the path
-    // the call takes.
-    requireAnyPermission([PROXY_RUN_PERMISSION, PROXY_OWN_PERMISSION]),
+    // `credential-proxy:call` implies `call-own`; `authorizeProxyCall` requires `call` for a run.
+    requirePermission("credential-proxy", "call-own"),
     async (c: Context<AppEnv>) => {
       // Accept headless API keys and bearer JWTs from the interactive CLI
       // (device-flow `oauth2-instance`) or dashboard (`oauth2-dashboard`).
@@ -149,14 +144,16 @@ export function createCredentialProxyRouter() {
       // X-Run-Id is optional — a runner executing a run (`appstrate run --report`) sends it. With
       // or without it decides which permission the call needs and which connections it reaches.
       const runId = c.req.header("X-Run-Id") || null;
-      await authorizeProxyCall({
-        permissions: callerPermissions(c),
-        orgId,
-        spaceId,
-        actor,
-        runId,
-        onDenied: (required) => reportPermissionDenial(c, required),
-      });
+      if (runId !== null) {
+        await authorizeProxyCall({
+          permissions: callerPermissions(c),
+          orgId,
+          spaceId,
+          actor,
+          runId,
+          onDenied: (required) => reportPermissionDenial(c, required),
+        });
+      }
 
       // Canonical header is `X-Integration-Id` (suffix parity with `X-Connection-Id`).
       const integrationId = c.req.header("X-Integration-Id");

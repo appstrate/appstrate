@@ -929,20 +929,11 @@ export interface AuthStrategyRequest {
 export const PRINCIPAL_KINDS = ["user", "delegate", "end_user"] as const;
 export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number];
 
-/**
- * Resolution returned by a successful `AuthStrategy.authenticate()` call.
- * Mirrors the shape the core auth middleware sets on `c` via `c.set(...)`.
- *
- * `permissions` is `readonly string[]` (not the typed `Permission` union) to
- * avoid dragging the RBAC permission catalog into `@appstrate/core`. At
- * request time, `requirePermission(resource, action)` validates membership;
- * invalid strings from a strategy surface as a 403 at the guard site.
- */
-export interface AuthResolution {
+/** The fields of an {@link AuthResolution} that do not depend on when its authority resolves. */
+interface AuthResolutionBase {
   user: { id: string; email: string; name: string };
   orgId?: string;
   orgSlug?: string;
-  orgRole?: OrgRole;
   /**
    * Strategy-chosen identifier for this auth method (e.g. "oidc", "mtls",
    * "webhook-hmac"). Written to `c.set("authMethod", ...)`. NOT constrained
@@ -962,15 +953,6 @@ export interface AuthResolution {
    * `X-Space-Id` header handled by `requireSpaceContext()`.
    */
   spaceId?: string;
-  /** Permission strings already resolved by the strategy. */
-  permissions: readonly string[];
-  /**
-   * The scope ceiling of a `deferOrgResolution` resolution without `orgRole`,
-   * applied over the org role resolved later. Absent, the caller is uncapped.
-   * Other resolutions take `permissions` as their ceiling; a deferred
-   * resolution without `orgRole` must leave `permissions` empty.
-   */
-  scopeCeiling?: readonly string[];
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
   endUser?: EndUserContext;
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */
@@ -985,13 +967,51 @@ export interface AuthResolution {
    * `c.get("firstPartyLoopback")`.
    */
   firstPartyLoopback?: boolean;
+}
+
+/** The strategy resolves the caller's authority itself; `permissions` carries its ceiling. */
+interface InlineAuthResolution extends AuthResolutionBase {
+  orgRole?: OrgRole;
+  /**
+   * With `orgRole`, the ceiling over that role's grants (a token's scope
+   * claim); without it, the whole grant (an end-user token's fixed allowlist).
+   * Empty means nothing either way.
+   */
+  permissions: readonly string[];
+  deferOrgResolution?: false;
+  scopeCeiling?: never;
+}
+
+/** The org, its role and the grant arrive later, from the `X-Org-Id` middleware. */
+interface DeferredAuthResolution extends AuthResolutionBase {
   /**
    * Pipeline ordering only: org and permissions come from the `X-Org-Id`
    * middleware later instead of at token-verification time. Says nothing about
    * who the caller is — that is `principalKind`, and no gate may read this.
    */
-  deferOrgResolution?: boolean;
+  deferOrgResolution: true;
+  orgRole?: never;
+  /** Always empty: a deferred resolution declares its ceiling in `scopeCeiling`. */
+  permissions: readonly never[];
+  /** The ceiling over the org role resolved later. Absent, the caller is uncapped. */
+  scopeCeiling?: readonly string[];
 }
+
+/**
+ * Resolution returned by a successful `AuthStrategy.authenticate()` call.
+ * Mirrors the shape the core auth middleware sets on `c` via `c.set(...)`.
+ *
+ * Either inline or deferred (`deferOrgResolution: true`), and each declares its
+ * ceiling in one place: `permissions` inline, `scopeCeiling` deferred. The
+ * pipeline refuses a resolution mixing the two, for a strategy the compiler
+ * never saw.
+ *
+ * Permission strings are `readonly string[]` (not the typed `Permission` union)
+ * to avoid dragging the RBAC permission catalog into `@appstrate/core`. At
+ * request time, `requirePermission(resource, action)` validates membership;
+ * invalid strings from a strategy surface as a 403 at the guard site.
+ */
+export type AuthResolution = InlineAuthResolution | DeferredAuthResolution;
 
 /**
  * End-user impersonation context. Set on the Hono request context under

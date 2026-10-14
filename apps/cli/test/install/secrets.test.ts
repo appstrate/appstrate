@@ -50,7 +50,6 @@ describe("generateEnvForTier — tier envelope", () => {
         "CONNECTION_ENCRYPTION_KEY",
         "CONNECT_SESSION_SECRET",
         "RUN_TOKEN_SECRET",
-        "TRUSTED_ORIGINS",
         "UPLOAD_SIGNING_SECRET",
       ].sort(),
     );
@@ -119,16 +118,16 @@ describe("generateEnvForTier — value formats", () => {
     expect(env.MINIO_ROOT_PASSWORD).toMatch(BASE64URL_PASSWORD_24);
   });
 
-  it("APP_URL defaults to http://localhost:3000 and is reflected in TRUSTED_ORIGINS", () => {
+  it("APP_URL defaults to http://localhost:3000", () => {
     const env = generateEnvForTier(0);
     expect(env.APP_URL).toBe("http://localhost:3000");
-    expect(env.TRUSTED_ORIGINS).toBe("http://localhost:3000");
   });
 
-  it("APP_URL can be overridden and TRUSTED_ORIGINS tracks it", () => {
+  // APP_URL's origin is always trusted; TRUSTED_ORIGINS only names extra ones.
+  it("APP_URL can be overridden and writes no TRUSTED_ORIGINS", () => {
     const env = generateEnvForTier(0, "https://my.appstrate.io");
     expect(env.APP_URL).toBe("https://my.appstrate.io");
-    expect(env.TRUSTED_ORIGINS).toBe("https://my.appstrate.io");
+    expect(env.TRUSTED_ORIGINS).toBeUndefined();
   });
 });
 
@@ -479,10 +478,9 @@ describe("generateEnvForTier — TRUST_PROXY wiring (issue #822)", () => {
     expect(env.TRUST_PROXY).toBeUndefined();
   });
 
-  it("remote APP_URL sets TRUST_PROXY=true and mirrors the URL into TRUSTED_ORIGINS", () => {
+  it("remote APP_URL sets TRUST_PROXY=true", () => {
     const env = generateEnvForTier(3, "https://appstrate.example.com");
     expect(env.APP_URL).toBe("https://appstrate.example.com");
-    expect(env.TRUSTED_ORIGINS).toBe("https://appstrate.example.com");
     expect(env.TRUST_PROXY).toBe("true");
   });
 

@@ -35,11 +35,20 @@ import type { AppstrateModule, AuthResolution, AuthStrategy } from "@appstrate/c
 
 /**
  * Tokens that resolve to the `"valid"` shape carrying ONE deliberate defect in
- * its principal declaration. `principalKind` is required and must agree with
- * `endUser`, so the type system refuses each of them — which is precisely why
- * the pipeline's own runtime check has to be what answers.
+ * its principal or ceiling declaration. `principalKind` is required and must
+ * agree with `endUser`, and a resolution declares its ceiling in `permissions`
+ * inline or in `scopeCeiling` deferred, so the type system refuses each of them
+ * — which is precisely why the pipeline's own runtime check has to be what
+ * answers.
  */
-const MISDECLARED = ["no-kind", "kind-without-enduser", "enduser-without-kind"] as const;
+const MISDECLARED = [
+  "no-kind",
+  "kind-without-enduser",
+  "enduser-without-kind",
+  "inline-with-scope-ceiling",
+  "deferred-with-permissions",
+  "deferred-with-role",
+] as const;
 
 /** The external identity the `"admin"` token impersonates; seeded where a test needs the row. */
 const STUB_END_USER_ID = "eu_stub_admin_placeholder";
@@ -164,21 +173,23 @@ const stubStrategy: AuthStrategy = {
           : undefined,
     };
     if (!misdeclared) return resolution;
-    const defect: Record<string, unknown> =
-      misdeclared === "no-kind"
-        ? { principalKind: undefined }
-        : misdeclared === "kind-without-enduser"
-          ? { principalKind: "end_user", endUser: undefined }
-          : {
-              principalKind: "user",
-              endUser: {
-                id: "eu_stub_contract",
-                spaceId: currentCtx.defaultSpaceId,
-                name: "Contract",
-                email: "contract@test.com",
-              },
-            };
-    return { ...resolution, ...defect } as unknown as AuthResolution;
+    const defects: Record<(typeof MISDECLARED)[number], Record<string, unknown>> = {
+      "no-kind": { principalKind: undefined },
+      "kind-without-enduser": { principalKind: "end_user", endUser: undefined },
+      "enduser-without-kind": {
+        principalKind: "user",
+        endUser: {
+          id: "eu_stub_contract",
+          spaceId: currentCtx.defaultSpaceId,
+          name: "Contract",
+          email: "contract@test.com",
+        },
+      },
+      "inline-with-scope-ceiling": { scopeCeiling: ["agents:read"] },
+      "deferred-with-permissions": { orgRole: undefined, deferOrgResolution: true },
+      "deferred-with-role": { permissions: [], deferOrgResolution: true },
+    };
+    return { ...resolution, ...defects[misdeclared] } as unknown as AuthResolution;
   },
 };
 
@@ -674,6 +685,16 @@ describe("module auth strategy pipeline", () => {
     it("500s either half of an `end_user` disagreement", async () => {
       await expectProblem(await request("kind-without-enduser"), 500, { code: "internal_error" });
       await expectProblem(await request("enduser-without-kind"), 500, { code: "internal_error" });
+    });
+
+    it("500s a resolution declaring its ceiling in the other variant's field", async () => {
+      for (const token of [
+        "inline-with-scope-ceiling",
+        "deferred-with-permissions",
+        "deferred-with-role",
+      ]) {
+        await expectProblem(await request(token), 500, { code: "internal_error" });
+      }
     });
 
     it("tells the caller nothing about the throw", async () => {

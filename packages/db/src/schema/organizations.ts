@@ -322,6 +322,8 @@ export const modelProviderCredentials = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_model_provider_credentials_created_by").on(t.createdBy),
+    // Target of `org_models_credential_provider_fk`: a model's provider is its credential's.
+    uniqueIndex("uq_model_provider_credentials_id_provider_id").on(t.id, t.providerId),
   ],
 );
 
@@ -450,6 +452,20 @@ export const modelProviderPairings = pgTable(
       foreignColumns: [modelProviderCredentials.id],
       name: "model_provider_pairings_credential_id_fk",
     }).onDelete("set null"),
+    // A personal credential is minted for the member minting it, never for another member.
+    check(
+      "model_provider_pairings_owner_is_minter",
+      sql`owner_user_id IS NULL OR owner_user_id = user_id`,
+    ),
+    // A redeem ends with a credential or a failure, never both; only a consumed token fails.
+    check(
+      "model_provider_pairings_outcome_single",
+      sql`NOT (credential_id IS NOT NULL AND failed_at IS NOT NULL)`,
+    ),
+    check(
+      "model_provider_pairings_failed_consumed",
+      sql`failed_at IS NULL OR consumed_at IS NOT NULL`,
+    ),
   ],
 );
 
@@ -471,15 +487,14 @@ export const orgModels = pgTable(
      */
     providerId: text("provider_id").notNull(),
     /**
-     * Strict FK to `model_provider_credentials.id`. ON DELETE RESTRICT —
-     * deleting a credential while any model still references it is rejected
-     * at the DB level so the API can surface a clear error. The bound credential
-     * is an organization one (`owner_user_id IS NULL`), API key or subscription.
-     * NULL: each member brings their own personal credential for `providerId`.
+     * The bound credential, an organization one (`owner_user_id IS NULL`), API
+     * key or subscription, whose provider is `providerId`
+     * (`org_models_credential_provider_fk`). ON DELETE RESTRICT: deleting a
+     * credential a model still references is rejected so the API can surface a
+     * clear error. NULL: each member brings their own personal credential for
+     * `providerId`.
      */
-    credentialId: uuid("credential_id").references(() => modelProviderCredentials.id, {
-      onDelete: "restrict",
-    }),
+    credentialId: uuid("credential_id"),
     input: jsonb("input").$type<ModelInputModality[]>(),
     contextWindow: integer("context_window"), // 200000 | null
     maxTokens: integer("max_tokens"), // 16384 | null
@@ -513,10 +528,17 @@ export const orgModels = pgTable(
       .on(table.orgId, table.credentialId, table.modelId)
       .where(sql`${table.aliased} = false`),
     // The same for a model each member serves with their own credential (no
-    // binding): one row per (org, provider, model). An alias always has a binding.
+    // binding): one row per (org, provider, model). An alias always has a binding
+    // (`org_models_alias_bound`).
     uniqueIndex("uq_org_models_unbound")
       .on(table.orgId, table.providerId, table.modelId)
       .where(sql`${table.credentialId} IS NULL`),
     check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
+    check("org_models_alias_bound", sql`NOT aliased OR credential_id IS NOT NULL`),
+    foreignKey({
+      columns: [table.credentialId, table.providerId],
+      foreignColumns: [modelProviderCredentials.id, modelProviderCredentials.providerId],
+      name: "org_models_credential_provider_fk",
+    }).onDelete("restrict"),
   ],
 );
