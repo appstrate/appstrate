@@ -64,7 +64,7 @@ import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 import { isPlatformRequestHeader } from "@appstrate/connect/platform-request-headers";
 import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
-import { PROXY_CALL_PERMISSIONS, reportPermissionDenial } from "@appstrate/core/permissions";
+import { reportPermissionDenial } from "@appstrate/core/permissions";
 import { getActor } from "../lib/actor.ts";
 import { isUuid } from "../lib/db-helpers.ts";
 import { listResponse } from "../lib/list-response.ts";
@@ -74,7 +74,7 @@ import { callerPermissions } from "../lib/permissions.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { relayIdempotencyKey } from "../middleware/idempotency.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireAnyPermission } from "../middleware/require-permission.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import {
   ApiError,
@@ -109,7 +109,7 @@ export function createCredentialProxyRouter() {
   router.use("/*", requireSpaceContext());
 
   // What the caller reaches outside a run: the rows and the rule `/proxy` selects from.
-  router.get("/connections", requireAnyPermission(PROXY_CALL_PERMISSIONS), async (c) => {
+  router.get("/connections", requirePermission("credential-proxy", "call-own"), async (c) => {
     const reach = reachOutsideRun(callerPermissions(c));
     const data = await listConnectionsOutsideRun(getSpaceScope(c), getActor(c), reach);
     return c.json(listResponse(data));
@@ -122,9 +122,8 @@ export function createCredentialProxyRouter() {
   router.all(
     "/proxy",
     rateLimit(limits.rate_per_min),
-    // A call outside a run takes either permission; `authorizeProxyCall` requires
-    // `credential-proxy:call` for a run.
-    requireAnyPermission(PROXY_CALL_PERMISSIONS),
+    // `credential-proxy:call` implies `call-own`; `authorizeProxyCall` requires `call` for a run.
+    requirePermission("credential-proxy", "call-own"),
     async (c: Context<AppEnv>) => {
       // Accept headless API keys and bearer JWTs from the interactive CLI
       // (device-flow `oauth2-instance`) or dashboard (`oauth2-dashboard`).
@@ -145,14 +144,16 @@ export function createCredentialProxyRouter() {
       // X-Run-Id is optional — a runner executing a run (`appstrate run --report`) sends it. With
       // or without it decides which permission the call needs and which connections it reaches.
       const runId = c.req.header("X-Run-Id") || null;
-      await authorizeProxyCall({
-        permissions: callerPermissions(c),
-        orgId,
-        spaceId,
-        actor,
-        runId,
-        onDenied: (required) => reportPermissionDenial(c, required),
-      });
+      if (runId !== null) {
+        await authorizeProxyCall({
+          permissions: callerPermissions(c),
+          orgId,
+          spaceId,
+          actor,
+          runId,
+          onDenied: (required) => reportPermissionDenial(c, required),
+        });
+      }
 
       // Canonical header is `X-Integration-Id` (suffix parity with `X-Connection-Id`).
       const integrationId = c.req.header("X-Integration-Id");

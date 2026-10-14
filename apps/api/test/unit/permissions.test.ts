@@ -451,19 +451,18 @@ describe("implied permissions across a delegation", () => {
       }),
     });
 
-  it("mints a key scoped to the narrower grant from a creator holding the wider one", () => {
-    // `validateScopes` closes the set it is handed, whoever built it.
+  it("mints a key scoped to the narrower grant from a role naming the wider one", () => {
     expect(
-      validateScopes(["credential-proxy:call-own"], new Set(["credential-proxy:call"])),
+      validateScopes(["credential-proxy:call-own"], customRole("credential-proxy:call")),
     ).toEqual(["credential-proxy:call-own"]);
-    expect(validateScopes(["runs:read"], new Set(["runs:read-all"]))).toEqual(["runs:read"]);
+    expect(validateScopes(["runs:read"], customRole("runs:read-all"))).toEqual(["runs:read"]);
   });
 
   it("never mints the wider grant from the narrower one", () => {
     expect(
-      validateScopes(["credential-proxy:call"], new Set(["credential-proxy:call-own"])),
+      validateScopes(["credential-proxy:call"], customRole("credential-proxy:call-own")),
     ).toEqual([]);
-    expect(validateScopes(["runs:read-all"], new Set(["runs:read"]))).toEqual([]);
+    expect(validateScopes(["runs:read-all"], customRole("runs:read"))).toEqual([]);
   });
 
   it("serves such a key: the role's wider grant meets the key's narrower scope", () => {

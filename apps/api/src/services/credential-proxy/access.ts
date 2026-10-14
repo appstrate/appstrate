@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Who may call the credential proxy. Decided here from the caller, so every door that reaches the
- * proxy (the REST route, and through it the MCP module's `api_call` tool, its one MCP path)
- * applies one rule:
+ * Who may call the credential proxy. The route admits a caller holding `credential-proxy:call-own`,
+ * which `credential-proxy:call` implies; what a call may reach depends on which the caller holds:
  *
  *   - for a run (`X-Run-Id`): `credential-proxy:call`, and the run is the actor's own, in flight,
  *     and executed by the caller ({@link requireCallerRun}). It reaches what the run bound, a
@@ -12,9 +11,10 @@
  *   - outside a run: `credential-proxy:call` reaches the connections usable in the space,
  *     `credential-proxy:call-own` the caller's own only ({@link reachOutsideRun},
  *     `selectAccessibleConnection`).
+ *
+ * The REST route decides it here, and the MCP module's `api_call` tool re-enters that route.
  */
 
-import { PROXY_CALL_PERMISSIONS } from "@appstrate/core/permissions";
 import type { Actor } from "../../lib/actor.ts";
 import type { Permission } from "../../lib/permissions.ts";
 import { forbidden } from "../../lib/errors.ts";
@@ -29,29 +29,18 @@ export function reachOutsideRun(permissions: ReadonlySet<string>): ProxyReach {
   return permissions.has(PROXY_CALL_PERMISSION) ? "usable" : "own";
 }
 
-interface ProxyAccessInput {
+/** Throws unless the caller may call the proxy for the run it names with `X-Run-Id`. */
+export async function authorizeProxyCall(input: {
   /** The caller's effective permissions in the space. */
   permissions: ReadonlySet<string>;
   orgId: string;
   spaceId: string;
   actor: Actor;
-  /** The run the call names with `X-Run-Id`; `null` outside a run. */
-  runId: string | null;
+  runId: string;
   /** Receives the permission a refusal names, for the door's denial audit. */
   onDenied: (required: string) => void;
-}
-
-/** Throws unless the caller may take the path its `runId` selects. */
-export async function authorizeProxyCall(input: ProxyAccessInput): Promise<void> {
+}): Promise<void> {
   const { permissions, orgId, spaceId, actor, runId, onDenied } = input;
-  if (runId === null) {
-    if (PROXY_CALL_PERMISSIONS.some((permission) => permissions.has(permission))) return;
-    const required = PROXY_CALL_PERMISSIONS.join("|");
-    onDenied(required);
-    throw forbidden(
-      `Insufficient permissions: ${required} required to call the credential proxy outside a run`,
-    );
-  }
   if (!permissions.has(PROXY_CALL_PERMISSION)) {
     onDenied(PROXY_CALL_PERMISSION);
     throw forbidden(

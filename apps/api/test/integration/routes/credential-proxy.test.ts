@@ -29,8 +29,8 @@
  * route only accepts API keys / device-flow JWTs (the JWT door is covered in
  * `modules/oidc/test/integration/routes/credential-proxy-jwt.test.ts`). The
  * caller is an org member holding `credential-proxy:call` and `call-own` through a
- * custom space role; a key's `scopes` narrow it, by default to `credential-proxy:call` alone, as
- * the stored keys of the release in service carry it.
+ * custom space role; a key's `scopes` narrow it, by default to `credential-proxy:call` alone, which
+ * implies `call-own`.
  */
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
@@ -208,9 +208,8 @@ async function proxyCallerContext(): Promise<TestContext> {
 }
 
 /**
- * An API key of `ctx.user`: of `scopes`, it carries what its creator holds. The default is
- * `credential-proxy:call` without `call-own`, the scopes a stored key of the release in service
- * carries.
+ * An API key of `ctx.user`: of `scopes`, it carries what its creator holds. The default is a key
+ * scoped `credential-proxy:call` alone, which implies `call-own`.
  */
 async function mintProxyKey(ctx: TestContext, scopes: string[] = CALL): Promise<string> {
   const key = await seedApiKey({
@@ -1208,9 +1207,9 @@ describe("POST /api/credential-proxy/proxy — the permission of each path", () 
   });
 
   it("neither permission: the route guard refuses with or without X-Run-Id", async () => {
-    const required = "credential-proxy:call-own|credential-proxy:call";
-    expect(await refusal(await call(["runs:read"]))).toContain(required);
-    expect(await refusal(await call(["runs:read"], await ownRun()))).toContain(required);
+    const detail = "Insufficient permissions: credential-proxy:call-own required";
+    expect(await refusal(await call(["runs:read"]))).toBe(detail);
+    expect(await refusal(await call(["runs:read"], await ownRun()))).toBe(detail);
   });
 
   it("X-Run-Id naming a run the platform executes: 403, the caller's own included", async () => {
@@ -1421,8 +1420,8 @@ describe("POST /api/credential-proxy/proxy — outside a run, credential-proxy:c
     ctx = await proxyCallerContext();
     colleague = await memberContext(ctx, "member");
     keys = {
-      // `credential-proxy:call` alone, as a stored key carries it: no `call-own`, which it
-      // implies, and no `agents:run`, so this caller can launch no run.
+      // `credential-proxy:call` alone, which implies `call-own`, and no `agents:run`, so this
+      // caller can launch no run.
       call: await mintProxyKey(ctx, ["credential-proxy:call"]),
       "call-own alone": await mintProxyKey(ctx, ["credential-proxy:call-own"]),
     };
@@ -1790,9 +1789,9 @@ describe("GET /api/credential-proxy/connections", () => {
     });
   }
 
-  it("requires credential-proxy:call-own or credential-proxy:call, which implies it", async () => {
+  it("requires credential-proxy:call-own, which credential-proxy:call implies", async () => {
     const body = await expectProblem(await list(["runs:read"]), 403, { code: "forbidden" });
-    expect(body.detail).toContain("credential-proxy:call-own|credential-proxy:call");
+    expect(body.detail).toBe("Insufficient permissions: credential-proxy:call-own required");
     expect((await list(["credential-proxy:call"])).status).toBe(200);
   });
 

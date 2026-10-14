@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { withImpliedPermissions } from "@appstrate/core/permissions";
 import {
   FORWARDED_AUTH_HEADERS,
   type Dispatch,
@@ -139,9 +140,9 @@ describe("connection tools — declaration", () => {
   });
 
   it("declares both under either permission of a call outside a run", () => {
-    // `credential-proxy:call` implies `call-own`: a credential holding it alone gets the tools.
+    // `credential-proxy:call` implies `call-own`: the closed set of either declares the tools.
     for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
-      const declared = names(["mcp:read", "mcp:invoke", permission]);
+      const declared = names([...withImpliedPermissions(["mcp:read", "mcp:invoke", permission])]);
       expect(declared, permission).toContain("list_connections");
       expect(declared, permission).toContain("api_call");
     }

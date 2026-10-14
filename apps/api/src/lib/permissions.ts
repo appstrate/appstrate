@@ -597,8 +597,6 @@ export function listedOrgPermissions(role: OrgRole): string[] {
  *
  * `creatorEffective` is the creator's effective set in the key's space — the
  * `permissions` the pipeline computed for the minting request (RBAC spec §7.1).
- * A scope a held grant implies is held (`withImpliedPermissions`): a creator
- * whose role names `runs:read-all` alone delegates `runs:read`.
  *
  * @throws ApiError 400 `invalid_request` when a scope is not grantable to an
  *   API key.
@@ -616,6 +614,5 @@ export function validateScopes(
       "scopes",
     );
   }
-  const held = withImpliedPermissions(creatorEffective);
-  return scopes.filter((s): s is Permission => held.has(s));
+  return scopes.filter((s): s is Permission => creatorEffective.has(s));
 }

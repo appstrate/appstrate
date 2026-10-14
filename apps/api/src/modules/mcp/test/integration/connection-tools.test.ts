@@ -317,7 +317,7 @@ describe("mcp connection tools", () => {
       expect(without).not.toContain("api_call");
       expect(without).toContain("run_and_wait");
 
-      // `credential-proxy:call` alone, as a stored key of the release in service carries it.
+      // A key scoped `credential-proxy:call` alone, which implies `call-own`.
       for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
         const withIt = await toolNames(
           await keyCaller(owner, ["mcp:read", "mcp:invoke", permission]),

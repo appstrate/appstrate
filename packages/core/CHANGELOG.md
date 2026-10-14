@@ -55,8 +55,8 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   `CoreResources["credential-proxy"]` is `"call" | "call-own"`, and
   `CorePermission` and `SpaceLevelPermission` gain the string.
   `PROXY_CALL_PERMISSIONS` (`["credential-proxy:call-own",
-"credential-proxy:call"]`) is the tuple every guard of a call outside a run
-  accepts, as `RUNS_READ_PERMISSIONS` is for `runs:read`. (#1894, #1963)
+"credential-proxy:call"]`) is the implication tuple `withImpliedPermissions`
+  reads, `call` implying `call-own`. (#1894, #1963)
 - **`withImpliedPermissions(held)`** (`@appstrate/core/permissions`): `held`
   plus every permission a held one implies. The implications are
   `RUNS_READ_PERMISSIONS` and `PROXY_CALL_PERMISSIONS`, the last element of
