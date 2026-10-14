@@ -81,7 +81,9 @@ export function OrgSettingsModelsPage() {
   const canConnect = can("model-provider-credentials:connect");
 
   const { data: models, isLoading: modelsLoading, error: modelsError } = useModels();
-  const { data: credentials, isLoading: pkLoading } = useModelProviderCredentials();
+  const { data: credentials, isLoading: pkLoading, error: pkError } = useModelProviderCredentials();
+  // A row is a key and its models: either read failing leaves the table wrong, so both surface.
+  const tableError = modelsError ?? pkError;
   const { data: registry } = useProvidersRegistry();
   const { data: orgSettings } = useOrgSettings();
 
@@ -205,7 +207,7 @@ export function OrgSettingsModelsPage() {
             tableId="org-providers"
             rows={orgRows}
             isLoading={modelsLoading || (canReadCredentials && pkLoading)}
-            error={modelsError}
+            error={tableError}
             empty={emptyOrg}
             canWriteModels={canWriteModels}
             {...keyDeeds}
@@ -235,7 +237,7 @@ export function OrgSettingsModelsPage() {
             <PersonalServicesTable
               rows={serviceRows}
               isLoading={modelsLoading || (canReadCredentials && pkLoading)}
-              error={modelsError}
+              error={tableError}
               canWriteModels={canWriteModels}
               onChooseModels={(row) => personalModels.open(row.id)}
             />

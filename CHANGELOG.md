@@ -45,6 +45,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   may not be the space it was pinned to, and an agent whose read fails loses
   its command until the next sync. Both settle on the following sync.
 
+- **The dashboard is redesigned** (#1937). The interface changes, not what the
+  platform accepts or refuses: settings and preferences open as routed
+  overlays, every real dialog has a URL, tables share one component, and one
+  connection menu and one model picker serve every screen. Additive API
+  changes behind it: `GET /api/runs`, `GET /api/agents/{scope}/{name}/runs` and
+  `GET /api/schedules/{id}/runs` take several comma-separated `status` values
+  (an unknown one is a 400 for the whole list) and a `q` search over agent,
+  error and run number (400 above 200 characters), applied before pagination;
+  `GET /api/files` takes `q` (by name, inside the existing visibility filter);
+  the agent list and detail return optional `icon` and `color`; organizations
+  carry a `logo` (migration `0097_org_logo`, a nullable column), returned by
+  `GET /api/orgs`, `GET /api/me/orgs` and invitation accept and written by
+  `PATCH /api/orgs/{id}` as `emoji:<one grapheme>`, a WebP data URL of at most
+  48 000 characters, or `null`. The audit log records an image logo as
+  `"image"`, never its bytes. In the OpenAPI spec the `status` parameter of the
+  run lists becomes a string with a pattern instead of an enum, so a generated
+  client types it more widely; the server refuses the same values.
+
 ### Fixed
 
 - **A non-UUID organization id is refused like an unknown org, not with a

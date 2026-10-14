@@ -17,12 +17,18 @@ import { isSpaceEnterable, useCurrentSpaceId } from "../hooks/use-current-space"
 import { roleI18nKey } from "../hooks/use-permissions";
 import { spaceRoleLabel } from "../hooks/use-roles";
 import { useSpaces } from "../hooks/use-spaces";
+import { useOverlayPath } from "../lib/modal-route";
 
 /**
  * The preview's only visible state, and its only exit. Mounted once in the app
  * frame, above the scroll container, so it survives every route and every
  * permission-denied page. Not dismissible: hiding it would leave an admin
  * acting under a downgraded authority with no sign of it.
+ *
+ * An open overlay (settings, catalogue) is a modal: everything behind it is
+ * inert, the frame's banner and its exit included. The overlay therefore
+ * carries its own (`inOverlay`) and the frame's steps aside, so exactly one
+ * banner exists at a time and it is always the reachable one.
  *
  * It says first what holds WHERE THE USER IS. In the persona's own space that
  * is both roles. Anywhere else the persona is only its org role, which gives an
@@ -35,13 +41,14 @@ import { useSpaces } from "../hooks/use-spaces";
  * without replacing them (`apps/api/src/lib/view-as.ts`), so anything gated on
  * identity survives it — `runs:read` still means "mine".
  */
-export function ViewAsBanner() {
+export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}) {
   const { t } = useTranslation(["common", "settings"]);
   const persona = useViewAs();
   const stopped = useViewAsStopped();
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
+  const overlayOpen = useOverlayPath() !== null;
 
   // The refusal typically lands on the boot org list, before `<Toaster/>`
   // subscribes; this is the first mount that can report it.
@@ -58,6 +65,7 @@ export function ViewAsBanner() {
 
   // A persona applies in ONE organization; elsewhere the caller is themselves.
   if (!persona || persona.orgId !== orgId) return null;
+  if (overlayOpen !== inOverlay) return null;
 
   const inPersonaSpace = !!persona.space && currentSpaceId === persona.space.spaceId;
   const key = inPersonaSpace ? "viewAs.bannerSpace" : "viewAs.banner";
