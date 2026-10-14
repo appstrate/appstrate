@@ -6113,6 +6113,50 @@ export interface components {
             /** @description Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and `/upstream-success`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload. */
             credential_revision?: string;
         };
+        IntegrationIndexItem: {
+            id: string;
+            /** @description Owning organization ID (null for system packages) */
+            orgId?: string | null;
+            name: string;
+            description: string | null;
+            /** @description The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
+            icon: string | null;
+            /** @description The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description. */
+            keywords: string[];
+            /** @enum {string} */
+            source: "local" | "system";
+            created_by: string | null;
+            created_by_name?: string;
+            used_by_agents: number;
+            /** @description Manifest version (semver) */
+            version: string | null;
+            auto_installed: boolean;
+            /** @description Source package ID if forked */
+            forked_from: string | null;
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
+            home_space_id: string | null;
+            /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
+            home_writable: boolean;
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            home_deletable: boolean;
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            home_shareable: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /**
+             * @description The manifest's `source.kind`: `local` runs an MCP server package in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).
+             * @enum {string}
+             */
+            source_kind: "local" | "remote" | "none";
+            /** @description `source.server` of a `local` integration — the MCP server package it runs and its version range. `null` for any other source. */
+            server: {
+                name: string;
+                /** @description Semver range */
+                version: string;
+            } | null;
+        };
         IntegrationPin: {
             agent_package_id: string;
             integration_package_id: string;
@@ -20559,7 +20603,7 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "list";
-                        data: components["schemas"]["OrgPackageItem"][];
+                        data: components["schemas"]["IntegrationIndexItem"][];
                         hasMore: boolean;
                     };
                 };

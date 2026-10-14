@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The integration index: the ACTIVE set of this space, the rest left to the space library, and a
- * page menu only for a caller with a deed in it.
+ * The integration index: the server's ACTIVE set of this space, split by execution, the rest left
+ * to the space library, and a page menu only for a caller with a deed in it.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
-import type { IntegrationSummaryWire } from "../../hooks/use-integrations.ts";
+import type { IntegrationIndexItem } from "@appstrate/shared-types";
+import { packageKeys } from "../../lib/query-keys.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
@@ -24,27 +25,35 @@ await i18nModule.default.changeLanguage("fr");
 
 const SPACE_ID = "spc_here";
 
-function integration(id: string, name: string, active: boolean): IntegrationSummaryWire {
+function integration(
+  id: string,
+  name: string,
+  sourceKind: IntegrationIndexItem["source_kind"] = "remote",
+): IntegrationIndexItem {
   return {
     id,
     source: "local",
-    active,
-    orgId: "org_a",
-    manifest: {
-      name: id,
-      type: "integration",
-      version: "1.0.0",
-      display_name: name,
-      source: {
-        kind: "remote",
-        remote: { url: "https://example.test/mcp", transport: "streamable-http" },
-      },
-      auths: {},
-    },
+    name,
+    description: null,
+    icon: null,
+    keywords: [],
+    version: "1.0.0",
+    forked_from: null,
+    created_by: null,
+    createdAt: "2026-09-05T10:00:00Z",
+    updatedAt: "2026-09-05T10:00:00Z",
+    used_by_agents: 0,
+    auto_installed: false,
+    home_space_id: SPACE_ID,
+    home_writable: false,
+    home_deletable: false,
+    home_shareable: false,
+    source_kind: sourceKind,
+    server: sourceKind === "local" ? { name: `${id}-server`, version: "^1.0.0" } : null,
   };
 }
 
-function page(permissions: string[], integrations: IntegrationSummaryWire[]): string {
+function page(permissions: string[], integrations: IntegrationIndexItem[]): string {
   const qc = new QueryClient();
   // No org is selected here: every scoped query is disabled and serves the cache as seeded.
   qc.setQueryData(
@@ -74,19 +83,8 @@ function page(permissions: string[], integrations: IntegrationSummaryWire[]): st
       ],
     },
   );
-  qc.setQueryData(
-    [
-      "get",
-      "/api/integrations",
-      {
-        params: {
-          query: { limit: 100, offset: 0 },
-          header: { "X-Org-Id": undefined, "X-Space-Id": SPACE_ID },
-        },
-      },
-    ],
-    integrations,
-  );
+  // The index of this space, as the server answers it: the active set only.
+  qc.setQueryData(packageKeys.list("integrations", null, SPACE_ID), integrations);
   const snapshot = spyOn(spaceStore, "getInitialState").mockReturnValue({
     ...spaceStore.getInitialState(),
     id: SPACE_ID,
@@ -101,17 +99,19 @@ function page(permissions: string[], integrations: IntegrationSummaryWire[]): st
 const READER = ["spaces:read", "integrations:read"];
 
 describe("the integration index", () => {
-  it("lists the integrations active here, not one switched off or merely offered", () => {
+  it("draws the server's index, the remote tab without the local integrations", () => {
     const html = page(READER, [
-      integration("@acme/on", "Allumée", true),
-      integration("@acme/off", "Éteinte", false),
+      integration("@acme/remote", "Zéphyr"),
+      integration("@acme/api", "Boréal", "none"),
+      integration("@acme/local", "Kestrel", "local"),
     ]);
-    expect(html).toContain("Allumée");
-    expect(html).not.toContain("Éteinte");
+    expect(html).toContain("Zéphyr");
+    expect(html).toContain("Boréal");
+    expect(html).not.toContain("Kestrel");
   });
 
   it("points at the space library when nothing is active here", () => {
-    const html = page(READER, [integration("@acme/off", "Éteinte", false)]);
+    const html = page(READER, []);
     expect(html).toContain(settingsFr["integrations.empty.space"]);
     expect(html).toMatch(/href="\/catalogue\/[^"]*integration[^"]*"/);
   });

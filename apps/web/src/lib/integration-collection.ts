@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { IntegrationSummaryWire } from "../hooks/use-integrations";
+import type { IntegrationIndexItem } from "@appstrate/shared-types";
 import { matchesSearch } from "./strings";
 
 export const INTEGRATION_ORIGINS = ["system", "custom"] as const;
 /**
- * Two attributes of how an integration reaches its service, read off the
- * manifest's `source.kind` — not a choice anyone makes while adding one.
+ * Two attributes of how an integration reaches its service, read off its
+ * `source.kind` — not a choice anyone makes while adding one.
  *
  * - **Execution**: nothing runs on our side (`remote`), or a local MCP server
  *   package runs in the sandbox (`local`).
@@ -20,50 +20,23 @@ export const INTEGRATION_PROTOCOLS = ["api", "mcp"] as const;
 export type IntegrationOrigin = (typeof INTEGRATION_ORIGINS)[number];
 export type IntegrationExecution = (typeof INTEGRATION_EXECUTIONS)[number];
 export type IntegrationProtocol = (typeof INTEGRATION_PROTOCOLS)[number];
+/** `source.kind`: the index row's `source_kind`, or a manifest's own. */
+type IntegrationSourceKind = IntegrationIndexItem["source_kind"];
 
-function sourceKind(integration: Pick<IntegrationSummaryWire, "manifest">): string | undefined {
-  return (integration.manifest as { source?: { kind?: string } }).source?.kind;
+export function integrationExecution(kind: IntegrationSourceKind): IntegrationExecution {
+  return kind === "local" ? "local" : "remote";
 }
 
-export function integrationExecution(
-  integration: Pick<IntegrationSummaryWire, "manifest">,
-): IntegrationExecution {
-  return sourceKind(integration) === "local" ? "local" : "remote";
+export function integrationProtocol(kind: IntegrationSourceKind): IntegrationProtocol {
+  return kind === "none" ? "api" : "mcp";
 }
 
-/** A manifest with no `source` predates the field and has no MCP backing. */
-export function integrationProtocol(
-  integration: Pick<IntegrationSummaryWire, "manifest">,
-): IntegrationProtocol {
-  const kind = sourceKind(integration);
-  return kind === "local" || kind === "remote" ? "mcp" : "api";
-}
-
-/** The local server package and version range a local integration runs. */
-export function localServerRef(
-  integration: Pick<IntegrationSummaryWire, "manifest">,
-): { name: string; version?: string } | undefined {
-  const source = (
-    integration.manifest as {
-      source?: { kind?: string; server?: { name?: string; version?: string } };
-    }
-  ).source;
-  return source?.kind === "local" && source.server?.name
-    ? { name: source.server.name, version: source.server.version }
-    : undefined;
-}
-
-export function integrationOrigin(integration: IntegrationSummaryWire): IntegrationOrigin {
+export function integrationOrigin(integration: IntegrationIndexItem): IntegrationOrigin {
   return integration.source === "system" ? "system" : "custom";
 }
 
-function integrationMatchesQuery(integration: IntegrationSummaryWire, query: string): boolean {
-  const { display_name, description, keywords } = integration.manifest;
-  return matchesSearch(query, [integration.id, display_name, description, keywords]);
-}
-
 export function filterIntegrations(
-  integrations: IntegrationSummaryWire[],
+  integrations: IntegrationIndexItem[],
   {
     query,
     origins,
@@ -75,12 +48,13 @@ export function filterIntegrations(
     executions?: IntegrationExecution[];
     protocols?: IntegrationProtocol[];
   },
-): IntegrationSummaryWire[] {
+): IntegrationIndexItem[] {
   return integrations.filter((integration) => {
-    const origin = integrationOrigin(integration);
-    if (origins?.length && !origins.includes(origin)) return false;
-    if (executions?.length && !executions.includes(integrationExecution(integration))) return false;
-    if (protocols?.length && !protocols.includes(integrationProtocol(integration))) return false;
-    return integrationMatchesQuery(integration, query);
+    if (origins?.length && !origins.includes(integrationOrigin(integration))) return false;
+    const kind = integration.source_kind;
+    if (executions?.length && !executions.includes(integrationExecution(kind))) return false;
+    if (protocols?.length && !protocols.includes(integrationProtocol(kind))) return false;
+    const { id, name, description, keywords } = integration;
+    return matchesSearch(query, [id, name, description, keywords]);
   });
 }

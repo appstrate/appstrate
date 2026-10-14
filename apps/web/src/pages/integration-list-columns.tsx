@@ -1,22 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import type { IntegrationIndexItem } from "@appstrate/shared-types";
 import type { DataColumn } from "../components/data-table";
 import { IntegrationIcon } from "../components/integration-icon";
 import {
   useCatalogueOriginColumn,
   useCatalogueProtocolColumn,
 } from "../components/catalogue-columns";
-import type { IntegrationSummaryWire } from "../hooks/use-integrations";
 import { useOrg } from "../hooks/use-org";
-import { integrationProtocol, localServerRef } from "../lib/integration-collection";
+import { integrationProtocol } from "../lib/integration-collection";
 
 /** One comparable integration fact per column. */
-export function useIntegrationListColumns(): DataColumn<IntegrationSummaryWire>[] {
+export function useIntegrationListColumns(): DataColumn<IntegrationIndexItem>[] {
   const { t } = useTranslation("settings");
-  const origin = useCatalogueOriginColumn<IntegrationSummaryWire>(useOrg().currentOrg?.name ?? "");
+  const origin = useCatalogueOriginColumn<IntegrationIndexItem>(useOrg().currentOrg?.name ?? "");
   // Remote tab only: API or MCP.
-  const protocol = useCatalogueProtocolColumn<IntegrationSummaryWire>(integrationProtocol);
+  const protocol = useCatalogueProtocolColumn<IntegrationIndexItem>((integration) =>
+    integrationProtocol(integration.source_kind),
+  );
 
   return [
     {
@@ -25,10 +27,8 @@ export function useIntegrationListColumns(): DataColumn<IntegrationSummaryWire>[
       width: "minmax(132px,1.6fr)",
       cell: (integration) => (
         <div className="flex min-w-0 items-center gap-2">
-          <IntegrationIcon src={integration.manifest.icon} size="sm" />
-          <span className="truncate font-medium">
-            {integration.manifest.display_name ?? integration.id}
-          </span>
+          <IntegrationIcon src={integration.icon ?? undefined} size="sm" />
+          <span className="truncate font-medium">{integration.name}</span>
         </div>
       ),
     },
@@ -40,14 +40,11 @@ export function useIntegrationListColumns(): DataColumn<IntegrationSummaryWire>[
       header: t("integrations.col.server"),
       width: "minmax(140px,1fr)",
       tier: 3,
-      cell: (integration) => {
-        const server = localServerRef(integration);
-        return (
-          <span className="text-muted-foreground truncate font-mono text-xs">
-            {server ? `${server.name}${server.version ? ` ${server.version}` : ""}` : "—"}
-          </span>
-        );
-      },
+      cell: ({ server }) => (
+        <span className="text-muted-foreground truncate font-mono text-xs">
+          {server ? `${server.name} ${server.version}` : "—"}
+        </span>
+      ),
     },
     {
       id: "version",
@@ -56,7 +53,7 @@ export function useIntegrationListColumns(): DataColumn<IntegrationSummaryWire>[
       tier: 3,
       cell: (integration) => (
         <span className="text-muted-foreground truncate font-mono text-xs">
-          {integration.manifest.version ?? "—"}
+          {integration.version ?? "—"}
         </span>
       ),
     },

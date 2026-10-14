@@ -200,8 +200,6 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.inventory.originDetail.", // components/package-detail/package-tool-catalog.tsx
   "integration.inventory.reason.", // components/package-detail/package-tool-catalog.tsx
   "integration.inventory.rules.", // components/package-detail/package-tool-catalog.tsx
-  "integration.structure.concept.", // components/package-detail/integration-structure.tsx
-  "integration.structure.empty.", // components/package-detail/integration-structure.tsx
   "integration.structure.type.", // components/package-detail/integration-structure.tsx
   "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
   "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()

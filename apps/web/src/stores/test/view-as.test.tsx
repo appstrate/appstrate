@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 // Type-only: erased at compile time, so it does not pull the store in before
 // the fake storage below is installed.
 import type { ViewAsPersona } from "../view-as-store.ts";
+import type { ReactElement } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/client.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -43,6 +44,7 @@ const { endPreviewIfRefused, noteViewAsRefusal, viewAsRefusalCode } =
   await import("../../lib/view-as-refusal.ts");
 const { ApiError } = await import("../../api/errors.ts");
 const { ViewAsBanner } = await import("../../components/view-as-banner.tsx");
+const { OverlayProvider } = await import("../../lib/modal-route.ts");
 const { render } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 
@@ -413,6 +415,7 @@ function renderBanner(
   persona: ViewAsPersona | null,
   orgId: string,
   here: { spaceId: string; spaces: SpaceObject[] } = { spaceId: "spc_1", spaces: [] },
+  node: ReactElement = <ViewAsBanner />,
 ): string {
   const viewAsSnapshot = spyOn(viewAsStore, "getInitialState").mockReturnValue({
     ...viewAsStore.getInitialState(),
@@ -432,7 +435,7 @@ function renderBanner(
     { object: "list", data: here.spaces, hasMore: false },
   );
   try {
-    return render(<ViewAsBanner />, { queryClient: client });
+    return render(node, { queryClient: client });
   } finally {
     viewAsSnapshot.mockRestore();
     orgSnapshot.mockRestore();
@@ -441,6 +444,23 @@ function renderBanner(
 }
 
 describe("banner", () => {
+  it("is carried by an open overlay alone, since the frame behind a modal is inert", () => {
+    const settings = {
+      path: "/org-settings/members",
+      background: { pathname: "/", search: "", hash: "", state: null, key: "default" },
+    };
+    const here = { spaceId: "spc_1", spaces: [] };
+    const underOverlay = (node: ReactElement) => (
+      <OverlayProvider value={settings}>{node}</OverlayProvider>
+    );
+    expect(renderBanner(PERSONA, "org_a", here, underOverlay(<ViewAsBanner />))).toBe("");
+    expect(
+      renderBanner(PERSONA, "org_a", here, underOverlay(<ViewAsBanner inOverlay />)),
+    ).toContain("Quitter");
+    // No overlay open: an overlay's banner has nothing to stand in for.
+    expect(renderBanner(PERSONA, "org_a", here, <ViewAsBanner inOverlay />)).toBe("");
+  });
+
   it("names the role, the space role and the space, with an exit", () => {
     const html = renderBanner(PERSONA, "org_a");
     expect(html).toContain("Aperçu avec le rôle");

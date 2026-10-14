@@ -24,6 +24,7 @@ import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@appstrate/ui/components/sheet";
 import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 import { ErrorBoundary } from "./error-boundary";
+import { ViewAsBanner } from "./view-as-banner";
 
 interface PanelDialogProps {
   /** Announced to screen readers; the visible heading lives in `rail`. */
@@ -153,6 +154,7 @@ export function PanelDialog({ title, rail, contentHeader, children, onClose }: P
           {rail}
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
+          <ViewAsBanner inOverlay />
           <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
         </div>
       </DialogContent>

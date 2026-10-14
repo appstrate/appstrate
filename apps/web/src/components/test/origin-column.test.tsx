@@ -7,7 +7,7 @@ import type { ReactElement } from "react";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import type { DataColumn } from "../data-table.tsx";
 import type { CardItem } from "../../pages/package-list.tsx";
-import type { IntegrationSummaryWire } from "../../hooks/use-integrations.ts";
+import type { IntegrationIndexItem } from "@appstrate/shared-types";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
@@ -47,7 +47,7 @@ describe("the origin column", () => {
     expect(render(<>{packageOrigin.cell(system as CardItem)}</>)).toContain(
       settingsFr["catalogue.sourceSystem"],
     );
-    expect(render(<>{integrationOrigin.cell(system as IntegrationSummaryWire)}</>)).toContain(
+    expect(render(<>{integrationOrigin.cell(system as IntegrationIndexItem)}</>)).toContain(
       settingsFr["catalogue.sourceSystem"],
     );
   });
