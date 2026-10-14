@@ -104,6 +104,7 @@ export function PackageSettingsView({
     <EditorPlaceContext.Provider value={editorPlace}>
       <AgentDetailSplit
         data-package-settings
+        phoneMenu={t("detail.tabSettings")}
         rail={<SectionRail label={t("detail.tabSettings")} groups={groups} active={active} />}
       >
         {active === "versions" ? (
