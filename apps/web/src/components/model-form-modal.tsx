@@ -362,7 +362,9 @@ function ModelForm({
       const retryable = outcome.failedModelIds.filter(
         (id) => !outcome.duplicateModelIds.includes(id),
       );
-      setFailedModelIds(retryable);
+      // Name the rows the server refused; nothing was written, so every other retryable row
+      // stays checked for the next attempt.
+      setFailedModelIds(outcome.refusedModelIds ?? retryable);
       setDuplicateModelIds(outcome.duplicateModelIds);
       // Only what can be retried stays checked — the rest are rows in the table now.
       setPicked(picked.filter((r) => retryable.includes(r.id)));

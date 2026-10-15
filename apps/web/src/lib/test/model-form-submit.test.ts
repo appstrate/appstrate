@@ -134,7 +134,7 @@ describe("submitModelForm — creation is one apply", () => {
 });
 
 describe("submitModelForm — a refused creation", () => {
-  it("keeps every entry to submit again — nothing was written — and says the server's code", async () => {
+  it("keeps every entry to submit again — nothing was written — and names the refused one", async () => {
     const h = harness({ apply: refusedEntries({ field: "add.1", code: "model_not_offered" }) });
     const outcome = await run(h)(batchWithTypedKey);
 
@@ -142,8 +142,19 @@ describe("submitModelForm — a refused creation", () => {
       failedModelIds: ["gpt-6", "gpt-6-mini"],
       duplicateModelIds: [],
       refusalCode: "model_not_offered",
+      refusedModelIds: ["gpt-6-mini"],
     });
     expect(h.successes).toBe(0);
+  });
+
+  it("names the refused entry from a body-validation path (add[<i>].<key>)", async () => {
+    const h = harness({
+      apply: refusedEntries({ field: "add[1].maxTokens", code: "invalid_value" }),
+    });
+    const outcome = await run(h)(batchWithTypedKey);
+
+    expect(outcome.refusedModelIds).toEqual(["gpt-6-mini"]);
+    expect(outcome.failedModelIds).toEqual(["gpt-6", "gpt-6-mini"]);
   });
 
   it("reports an entry the organization already holds apart from the ones to retry", async () => {

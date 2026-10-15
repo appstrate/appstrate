@@ -79,7 +79,8 @@ export function choiceRefusal(err: unknown, plan: ModelChoicePlan): ModelChoiceR
     if (typeof item !== "object" || item === null) continue;
     const { field, code, message } = item as Record<string, unknown>;
     if (typeof field !== "string" || typeof code !== "string") continue;
-    const [list, index] = field.split(".");
+    // `add.<i>` from the service, `add[<i>].<key>` from body validation.
+    const [, list, index] = /^([a-z_]+)(?:[.[](\d+))?/.exec(field) ?? [];
     const at = Number(index);
     const modelId =
       list === "add"

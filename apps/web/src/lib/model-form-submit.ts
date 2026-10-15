@@ -59,16 +59,21 @@ function toChoiceCredential(data: ModelFormSubmission): ModelChoiceBody["credent
  */
 function refusalOutcome(err: unknown, modelIds: string[]): ModelFormSubmitOutcome {
   const duplicateModelIds: string[] = [];
+  const refusedModelIds: string[] = [];
   let refusalCode: string | undefined;
   if (err instanceof ApiError) {
     const items = err.code === "validation_failed" ? (err.errors ?? []) : [];
     for (const item of items) {
       const { field, code } = (item ?? {}) as Record<string, unknown>;
-      const at =
-        typeof field === "string" && field.startsWith("add.") ? Number(field.slice(4)) : NaN;
+      // `add.<i>` from the service, `add[<i>].<key>` from body validation.
+      const at = typeof field === "string" ? Number(/^add(?:\.|\[)(\d+)/.exec(field)?.[1]) : NaN;
       const modelId = modelIds[at];
       if (modelId !== undefined && code === "model_already_added") duplicateModelIds.push(modelId);
-      else if (typeof code === "string") refusalCode ??= code;
+      else {
+        if (modelId !== undefined && !refusedModelIds.includes(modelId))
+          refusedModelIds.push(modelId);
+        if (typeof code === "string") refusalCode ??= code;
+      }
     }
     if (items.length === 0) refusalCode = err.code;
   }
@@ -76,6 +81,7 @@ function refusalOutcome(err: unknown, modelIds: string[]): ModelFormSubmitOutcom
     failedModelIds: modelIds,
     duplicateModelIds,
     ...(refusalCode ? { refusalCode } : {}),
+    ...(refusedModelIds.length > 0 ? { refusedModelIds } : {}),
   };
 }
 

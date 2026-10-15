@@ -123,6 +123,13 @@ export interface ModelFormSubmitOutcome {
   duplicateModelIds: string[];
   /** The server's code for the first refusal that is not a duplicate: the form names it when it can. */
   refusalCode?: string;
+  /**
+   * The entries of `failedModelIds` the server named as refused for a reason of their own
+   * (an `errors[]` item on `add.<i>` other than a duplicate). The choice is atomic, so the other
+   * entries were not written either and stay to submit — but these are the ones to tell the user
+   * about. Empty when the refusal names no entry.
+   */
+  refusedModelIds?: string[];
   credentialId?: string;
 }
 

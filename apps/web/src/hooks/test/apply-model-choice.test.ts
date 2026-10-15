@@ -93,6 +93,11 @@ describe("choiceRefusal", () => {
     );
   });
 
+  it("names the entry of a body-validation path (add[<i>].<key>)", () => {
+    const err = refused([{ field: "add[0].maxTokens", code: "invalid_value", message: "too big" }]);
+    expect(choiceRefusal(err, plan)?.failedModelIds).toEqual(["opus"]);
+  });
+
   it("is not an entry refusal when the key or the permission is refused", () => {
     expect(choiceRefusal(new ApiError("forbidden", "no", 403), plan)).toBeNull();
     expect(
