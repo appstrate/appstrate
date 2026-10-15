@@ -9,6 +9,12 @@ export function TranslatedUiLabels({ children }: { children: ReactNode }) {
   const { t } = useTranslation("common");
   const labels = useMemo(
     () => ({
+      close: t("btn.close"),
+      sidebar: t("nav.sidebar"),
+      sidebarDescription: t("nav.sidebarDescription"),
+      toggleSidebar: t("nav.toggleSidebar"),
+      carouselPrevious: t("carousel.previous"),
+      carouselNext: t("carousel.next"),
       copy: t("btn.copy"),
       copied: t("btn.copied"),
       copyFailed: t("error.copyFailed"),

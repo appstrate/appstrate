@@ -103,9 +103,8 @@ export function PanelDialog({ title, rail, contentHeader, children, onClose }: P
         className={[
           "flex h-[min(720px,calc(100dvh-6rem))] w-[min(1080px,calc(100vw-4rem))] max-w-none gap-0 overflow-hidden p-0",
           // Full screen on a phone: two panes side by side do not survive
-          // 390px. The negative margin cancels the padding the shared dialog
-          // wrapper puts around every content box.
-          "max-sm:-m-4 max-sm:h-[100dvh] max-sm:w-[100vw] max-sm:rounded-none max-sm:border-0",
+          // 390px. The shared dialog's height cap is lifted with it.
+          "max-sm:h-[100dvh] max-sm:max-h-none max-sm:w-[100vw] max-sm:rounded-none max-sm:border-0",
           // The header band owns the close control at every width.
           "[&>button]:top-1.5 [&>button]:right-1.5 [&>button]:z-30 [&>button]:flex [&>button]:size-11 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-md",
         ].join(" ")}
