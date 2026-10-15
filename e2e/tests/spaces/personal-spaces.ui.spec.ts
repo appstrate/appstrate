@@ -108,7 +108,7 @@ test("an agent authored in a personal space is invisible to a colleague and to t
   const authorContext = await createAuthedContext(browser, author, orgId, personalId);
   try {
     const authorPage = await authorContext.newPage();
-    await authorPage.goto("/catalogue/placed/agent");
+    await authorPage.goto("/catalogue/agent");
     await expect(libraryRow(authorPage)).toBeVisible();
     await authorPage.goto(agentPath);
     // The detail page DOES print the id, under the display name.
@@ -132,7 +132,7 @@ test("an agent authored in a personal space is invisible to a colleague and to t
           response.request().method() === "GET" &&
           /\/api\/(spaces\/[^/]+\/)?library(\?|$)/.test(response.url()),
       );
-      await page.goto("/catalogue/placed/agent");
+      await page.goto("/catalogue/agent");
       expect((await library).status()).toBe(200);
       await expect(libraryRow(page)).toHaveCount(0);
 

@@ -78,32 +78,20 @@ describe("catalogueDeeds", () => {
     placement("spc_guest", "shared", "none"),
   ];
 
-  it("offers the move, the share and each withdrawal to a reader with the home's authority", () => {
+  it("offers the share and each withdrawal to a reader with the home's authority", () => {
     expect(
       catalogueDeeds(
-        packageRow("agent", placements, {
-          home_space_id: "spc_home",
-          home_writable: true,
-          home_shareable: true,
-        }),
+        packageRow("agent", placements, { home_space_id: "spc_home", home_shareable: true }),
       ),
-    ).toEqual({ moveHome: true, share: true, revokeFrom: ["spc_guest"] });
+    ).toEqual({ share: true, revokeFrom: ["spc_guest"] });
   });
 
-  it("offers neither the move nor the share to a reader without the home's authority", () => {
-    // CONTROL for the case above, on the same placements.
-    expect(catalogueDeeds(packageRow("agent", placements, { home_space_id: "spc_home" }))).toEqual({
-      moveHome: false,
-      share: false,
-      revokeFrom: [],
-    });
-  });
-
-  it("reads the two verbs apart: writing does not grant sharing", () => {
-    expect(catalogueDeeds(packageRow("agent", placements, { home_writable: true }))).toEqual({
-      moveHome: true,
-      share: false,
-      revokeFrom: [],
-    });
+  it("offers neither to a reader without the home's authority", () => {
+    // CONTROL for the case above, on the same placements. Writing does not grant sharing.
+    expect(
+      catalogueDeeds(
+        packageRow("agent", placements, { home_space_id: "spc_home", home_writable: true }),
+      ),
+    ).toEqual({ share: false, revokeFrom: [] });
   });
 });

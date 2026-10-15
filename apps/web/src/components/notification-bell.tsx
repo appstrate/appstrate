@@ -43,7 +43,7 @@ function notificationTarget(
   if (notification.type === "package_shared") {
     // One share, one decision: open THAT package's sheet, not a list to search.
     const share = notification.payload;
-    return share && canReach("/catalogue/:reading/:type")
+    return share && canReach("/catalogue/:type")
       ? catalogueHref(share.package_type, { packageId: share.packageId })
       : null;
   }

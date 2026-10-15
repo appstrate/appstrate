@@ -303,13 +303,15 @@ test("an offer is taken up from the catalogue and lands on an already visited in
       page.getByRole("heading", { name: `Test Agent ${name}`, exact: true }),
     ).toBeVisible();
 
-    // And switched on there.
+    // And switched on there, from the sheet's own switch for that space.
     const activated = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
         response.url().endsWith(`/spaces/${personalId}/packages`),
     );
-    await page.getByRole("button", { name: "Activer dans Mon espace", exact: true }).click();
+    await page
+      .getByRole("switch", { name: `Activer Test Agent ${name} dans Mon espace`, exact: true })
+      .click();
     expect((await activated).status()).toBe(201);
 
     // And now it is on the index that was visited before any of this — without
@@ -363,15 +365,15 @@ test("a guest finds an offer in the catalogue and switches it on", async ({
         response.request().method() === "POST" &&
         response.url().endsWith(`/spaces/${guestSpaceId}/packages`),
     );
-    await page.getByRole("button", { name: "Activer dans Mon espace", exact: true }).click();
-    expect((await activated).status()).toBe(201);
-
-    // Off again from the space's switch, and back on. Deactivating keeps the placement: the
-    // switch stays, unchecked, and switching it back on is another 201.
     const toggle = page.getByRole("switch", {
       name: `Activer Test Agent ${name} dans Mon espace`,
       exact: true,
     });
+    await toggle.click();
+    expect((await activated).status()).toBe(201);
+
+    // Off again from the space's switch, and back on. Deactivating keeps the placement: the
+    // switch stays, unchecked, and switching it back on is another 201.
     await expect(toggle).toBeChecked();
     const deactivated = page.waitForResponse(
       (response) =>
@@ -515,7 +517,7 @@ test("a non-admin builder switches a team offer on and off from the space packag
   ).toBe(200);
   const page = await (await createAuthedContext(browser, member, orgId, spaceId)).newPage();
   try {
-    await page.goto("/catalogue/placed/agent");
+    await page.goto("/catalogue/agent");
     // One row, one switch: the offer and the packages already running here sit
     // in the same list, told apart by a mark in the space's cell (« Partagé »)
     // rather than by a second section with a button of its own.

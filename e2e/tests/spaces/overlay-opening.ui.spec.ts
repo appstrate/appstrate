@@ -50,7 +50,7 @@ test("a cold catalogue address keeps one dialog and one backdrop from skeleton t
     }).observe(document, { childList: true, subtree: true });
   });
 
-  await page.goto("/catalogue/discover/agent");
+  await page.goto("/catalogue/agent");
 
   // The skeleton: the dialog is open and the panes are still blocks.
   const dialog = page.getByRole("dialog");

@@ -1,68 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The columns the catalogue adds to the package table: the tick, the origin, one
- * switch per space (where a package is active) and the row deeds. There is no
- * organization-level install, so every activation has to say WHERE.
+ * The columns the catalogue adds to the package table: the origin and one switch
+ * per space (where a package is active). There is no organization-level install,
+ * so every activation has to say WHERE.
  */
 import { useTranslation } from "react-i18next";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Switch } from "@appstrate/ui/components/switch";
 import { placementIn, type CataloguePlacement } from "../lib/catalogue-placement";
-import {
-  ACTIVATION_REFUSAL_KEY,
-  type ActivationGate,
-  type CatalogueDeeds,
-} from "../lib/catalogue-gates";
+import { ACTIVATION_REFUSAL_KEY, type ActivationGate } from "../lib/catalogue-gates";
 import type { DataColumn } from "./data-table";
-import { CatalogueRowMenu } from "./catalogue-row";
-import { rowActionsColumn } from "./row-actions-column";
 import { CellEmpty, CellText } from "./table-cells";
 import { MetaBadge } from "./status-badge";
 import type { CardItem } from "../lib/package-card-item";
 import type { IntegrationProtocol } from "../lib/integration-collection";
-
-export function useCatalogueSelectColumn({
-  selected,
-  allSelected,
-  selectable,
-  onToggle,
-  onToggleAll,
-}: {
-  selected: ReadonlySet<string>;
-  allSelected: boolean;
-  /** A row with nothing to activate cannot be part of a bulk activation. */
-  selectable: (item: CardItem) => boolean;
-  onToggle: (id: string) => void;
-  onToggleAll: () => void;
-}): DataColumn<CardItem> {
-  const { t } = useTranslation("settings");
-
-  return {
-    id: "select",
-    header: t("catalogue.selectColumn"),
-    headerNode: (
-      <Checkbox
-        checked={allSelected}
-        onCheckedChange={onToggleAll}
-        aria-label={t("models.form.discoverSelectAll")}
-      />
-    ),
-    width: 36,
-    control: true,
-    cell: (item) =>
-      selectable(item) ? (
-        // Raised above the row's link overlay, or ticking would open the package.
-        <span className="relative z-10 flex">
-          <Checkbox
-            checked={selected.has(item.id)}
-            onCheckedChange={() => onToggle(item.id)}
-            aria-label={t("catalogue.selectOne", { name: item.displayName })}
-          />
-        </span>
-      ) : null,
-  };
-}
 
 /**
  * The one origin column of every package table: the provider, with the home space
@@ -98,42 +49,6 @@ export function useCatalogueOriginColumn<
       );
     },
   };
-}
-
-const NO_DEEDS: CatalogueDeeds = { moveHome: false, share: false, revokeFrom: [] };
-
-/** The row's deeds, behind the table's standard "…" menu. */
-export function useCatalogueActionsColumn({
-  isPending,
-  deedsOf,
-  spaceNameOf,
-  onOpen,
-  onMoveHome,
-  onShare,
-  onRevoke,
-}: {
-  isPending: boolean;
-  /** `undefined` for a row the library does not carry: its menu only opens it. */
-  deedsOf: (item: CardItem) => CatalogueDeeds | undefined;
-  spaceNameOf: (spaceId: string) => string;
-  onOpen: (item: CardItem) => void;
-  onMoveHome: (item: CardItem) => void;
-  onShare: (item: CardItem) => void;
-  onRevoke: (item: CardItem, spaceId: string) => void;
-}): DataColumn<CardItem> {
-  return rowActionsColumn((item) => (
-    <CatalogueRowMenu
-      item={item}
-      // A system package has no home to move and no audience to offer.
-      deeds={deedsOf(item) ?? NO_DEEDS}
-      spaceNameOf={spaceNameOf}
-      isPending={isPending}
-      onOpen={onOpen}
-      onMoveHome={onMoveHome}
-      onShare={onShare}
-      onRevoke={onRevoke}
-    />
-  ));
 }
 
 /** API or MCP, for a remote integration — a local one is always MCP. */
@@ -223,7 +138,7 @@ export function useCatalogueSpaceColumns({
             onCheckedChange={(next) => onSetActive(item, space.id, next === true)}
           />
           {state === "offered" && (
-            // One word: who shared it is on the sheet and in "Partages en attente".
+            // One word: who shared it is on the sheet.
             <span className="text-primary text-[0.7rem] font-medium">
               {t("catalogue.offeredHere")}
             </span>

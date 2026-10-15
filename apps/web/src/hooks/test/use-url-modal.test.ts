@@ -146,16 +146,16 @@ describe("opening a modal on another address", () => {
   it("closes it the way Back does, to the list it was opened from", async () => {
     // The catalogue's waiting shares open a package's sheet on its own kind.
     const router = createMemoryRouter([{ path: "*" }], {
-      initialEntries: ["/catalogue/shared/agent"],
+      initialEntries: ["/catalogue/agent"],
     });
     const from = router.state.location;
-    await router.navigate("/catalogue/discover/skill?package=%40acme%2Fnotes", {
+    await router.navigate("/catalogue/skill?package=%40acme%2Fnotes", {
       state: modalOpeningState(from.state, "package"),
     });
     const { location } = router.state;
     expect(modalParamStep(location, "package", null)).toEqual({ back: true });
     await router.navigate(-1);
-    expect(router.state.location.pathname).toBe("/catalogue/shared/agent");
+    expect(router.state.location.pathname).toBe("/catalogue/agent");
   });
 
   it("keeps the entry's other state", () => {

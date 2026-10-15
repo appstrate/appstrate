@@ -17,8 +17,6 @@ export interface CataloguePlacement {
   offeredBy: Record<string, string | null>;
   /** The space that governs the draft, `null` when the caller cannot reach it. */
   homeSpaceId: string | null;
-  /** Placed nowhere this caller can see. */
-  unplaced: boolean;
 }
 
 // The wire's `none` means "no row in this space"; only a share's `none` is an offer.
@@ -32,7 +30,7 @@ function isPendingOffer(placement: LibraryPlacement): boolean {
 }
 
 export function cataloguePlacement(
-  pkg: Pick<LibraryPackageItem, "placements" | "home_space_id" | "source">,
+  pkg: Pick<LibraryPackageItem, "placements" | "home_space_id">,
   spaceId: string | null | undefined,
 ): CataloguePlacement {
   const byState = { active: [] as string[], inactive: [] as string[], offered: [] as string[] };
@@ -52,11 +50,6 @@ export function cataloguePlacement(
     offeredIn: byState.offered,
     offeredBy,
     homeSpaceId: pkg.home_space_id,
-    // A system integration switched on nowhere is still something to DISCOVER, though the wire
-    // lists it with a placement in every space.
-    unplaced: !pkg.placements.some(
-      (placement) => placement.via !== "system" || placement.state === "active",
-    ),
   };
 }
 
@@ -64,10 +57,6 @@ export function placementIn(placement: CataloguePlacement, spaceId: string): Pla
   if (placement.activeIn.includes(spaceId)) return "active";
   if (placement.offeredIn.includes(spaceId)) return "offered";
   return placement.inactiveIn.includes(spaceId) ? "inactive" : null;
-}
-
-export function inPlacedTab(placement: CataloguePlacement): boolean {
-  return !placement.unplaced;
 }
 
 export interface PendingShare {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { CATALOGUE_SHARED_HREF, catalogueHref } from "../../lib/catalogue-link.ts";
+import { catalogueHref } from "../../lib/catalogue-link.ts";
 import { pendingSharesEntry } from "../use-pending-offers.ts";
 
 const share = (id: string, type: "agent" | "skill") => ({ pkg: { id, type } });
@@ -18,9 +18,9 @@ describe("the catalogue entry's pending shares", () => {
     });
   });
 
-  it("opens the list of them all when several wait, whatever their kinds", () => {
+  it("opens the first one's kind when several wait", () => {
     expect(
       pendingSharesEntry([share("@acme/triage", "agent"), share("@acme/notes", "skill")]),
-    ).toEqual({ count: 2, href: CATALOGUE_SHARED_HREF });
+    ).toEqual({ count: 2, href: catalogueHref("agent") });
   });
 });

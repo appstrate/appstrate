@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import {
-  pinnedVersionState,
-  sheetChatEnforce,
-  sheetOffers,
-  sheetSpaceMode,
-  sheetSpaceRows,
-} from "../catalogue-sheet.ts";
+import { sheetChatEnforce, sheetSpaceRows } from "../catalogue-sheet.ts";
 import type { CataloguePlacement } from "../catalogue-placement.ts";
 import type { ActivationGate } from "../catalogue-gates.ts";
 
@@ -19,7 +13,6 @@ function placement(overrides: Partial<CataloguePlacement> = {}): CataloguePlacem
     offeredIn: [],
     offeredBy: {},
     homeSpaceId: null,
-    unplaced: false,
     ...overrides,
   };
 }
@@ -92,32 +85,6 @@ describe("sheetSpaceRows refusals", () => {
   });
 });
 
-describe("sheetSpaceMode", () => {
-  it("is read-only when the reader may switch it nowhere", () => {
-    const p = placement({ activeIn: ["spc_a"] });
-    expect(sheetSpaceMode(sheetSpaceRows(p, spaces, DENY))).toBe("readonly");
-  });
-
-  it("is one line, not a table, with one space within reach", () => {
-    const p = placement();
-    expect(sheetSpaceMode(sheetSpaceRows(p, spaces.slice(0, 1), ALLOW))).toBe("single");
-  });
-
-  it("is a table as soon as there are two spaces to compare", () => {
-    const p = placement();
-    expect(
-      sheetSpaceMode(sheetSpaceRows(p, spaces, (id) => (id === "spc_b" ? ALLOW() : DENY()))),
-    ).toBe("table");
-  });
-});
-
-describe("sheetOffers", () => {
-  it("keeps the offers alone", () => {
-    const p = placement({ activeIn: ["spc_a"], offeredIn: ["spc_b"] });
-    expect(sheetOffers(sheetSpaceRows(p, spaces, ALLOW)).map((row) => row.id)).toEqual(["spc_b"]);
-  });
-});
-
 // The chat-enforce control lives in the sheet's Espaces table.
 describe("sheetChatEnforce", () => {
   const facts = { enforced: false, published: true, mayConfigure: true };
@@ -163,26 +130,5 @@ describe("sheetChatEnforce", () => {
     for (const type of ["agent", "integration", "mcp-server"] as const) {
       expect(sheetChatEnforce(type, { state: "active" }, facts)).toBeNull();
     }
-  });
-});
-
-describe("pinnedVersionState", () => {
-  const read = { pinned: "1.0.0", missing: false, latestPublished: "2.0.0" };
-
-  it("has nothing to say about a sheet no version was pinned on", () => {
-    expect(pinnedVersionState({ ...read, pinned: undefined })).toBeNull();
-  });
-
-  it("names a version the server no longer has", () => {
-    expect(pinnedVersionState({ ...read, missing: true })).toBe("missing");
-  });
-
-  it("warns when the spaces run a newer version than the one read", () => {
-    expect(pinnedVersionState(read)).toBe("behind");
-  });
-
-  it("is current on the latest version, and while the latest is still unknown", () => {
-    expect(pinnedVersionState({ ...read, pinned: "2.0.0" })).toBe("current");
-    expect(pinnedVersionState({ ...read, latestPublished: undefined })).toBe("current");
   });
 });

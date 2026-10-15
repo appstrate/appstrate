@@ -1,21 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The catalogue's addresses: `/catalogue/:reading/:type`. Links open on Découvrir,
- * and given a package on that package's sheet.
- */
+/** The catalogue's addresses: `/catalogue/:type`, and given a package that package's sheet. */
 
 import type { PackageType } from "@appstrate/core/validation";
 
-/** The route's `:reading` segment. */
-const CATALOGUE_READINGS = ["placed", "discover", "shared"] as const;
-export type CatalogueReading = (typeof CATALOGUE_READINGS)[number];
-
-export function isCatalogueReading(value: string): value is CatalogueReading {
-  return (CATALOGUE_READINGS as readonly string[]).includes(value);
-}
-
-/** The route's `:type` segment, in the rail's order. Every reading names one, `shared` included. */
+/** The route's `:type` segment, in the rail's order. */
 export const CATALOGUE_KINDS = [
   "agent",
   "skill",
@@ -36,7 +25,7 @@ export const CATALOGUE_TYPE_LABEL_KEY: Record<PackageType, string> = {
 };
 
 /** The sheet's package, and the published version it is read at (`?package=…&version=…`). */
-export const CATALOGUE_PACKAGE_PARAM = "package";
+const CATALOGUE_PACKAGE_PARAM = "package";
 export const CATALOGUE_VERSION_PARAM = "version";
 
 /**
@@ -47,7 +36,7 @@ export function catalogueHref(
   type: PackageType,
   options: { packageId?: string; version?: string } = {},
 ): string {
-  const base = `/catalogue/discover/${type}`;
+  const base = `/catalogue/${type}`;
   if (!options.packageId) return base;
   const query = new URLSearchParams({ [CATALOGUE_PACKAGE_PARAM]: options.packageId });
   if (options.version) query.set(CATALOGUE_VERSION_PARAM, options.version);
@@ -69,5 +58,3 @@ export function catalogueVersionFor(page: {
   if (!page.isHistoricalVersion || page.source === "system") return undefined;
   return page.version || undefined;
 }
-
-export const CATALOGUE_SHARED_HREF = `/catalogue/shared/${CATALOGUE_KINDS[0]}`;

@@ -35,23 +35,10 @@ export function PackageCard({
   unreadCount,
   actions,
   autoInstalled,
-  icon,
   identity,
   logo,
-  status,
-  meta,
-  showRun = true,
-  onOpen,
   headingLevel = 2,
 }: CardItem & {
-  /**
-   * Whether an agent card offers to run it. False in the catalogue: a package
-   * this space has not activated cannot be run from here, and the button would
-   * make those cards a row taller than the rest.
-   */
-  showRun?: boolean;
-  /** Read it in place instead of navigating — what the catalogue's rows do. */
-  onOpen?: () => void;
   /** 3 where the cards sit under a section's `<h2>` (the dashboard). */
   headingLevel?: 2 | 3;
 }) {
@@ -67,26 +54,18 @@ export function PackageCard({
       {/* The icon tile sits LEFT of the title and its description, the way a
           store's card reads: what it is, then what it does. */}
       <div className="flex min-w-0 gap-3">
-        {icon ?? (
-          <PackageIcon
-            type={type}
-            icon={type === "agent" ? identity?.icon : logo}
-            color={identity?.color}
-          />
-        )}
+        <PackageIcon
+          type={type}
+          icon={type === "agent" ? identity?.icon : logo}
+          color={identity?.color}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
               <Heading className="text-foreground truncate text-sm font-medium">
-                {onOpen ? (
-                  <button type="button" className={titleClass} onClick={onOpen}>
-                    {displayName}
-                  </button>
-                ) : (
-                  <Link to={packageDetailPath(type, id)} className={titleClass}>
-                    {displayName}
-                  </Link>
-                )}
+                <Link to={packageDetailPath(type, id)} className={titleClass}>
+                  {displayName}
+                </Link>
               </Heading>
             </div>
             <div className="relative z-10 flex shrink-0 items-center gap-1.5">
@@ -112,7 +91,7 @@ export function PackageCard({
                   the card never has to explain an activation the row could not
                   carry. A package placed here but switched off is not on this
                   list at all — it is in the space library, with its switch. */}
-              {type === "agent" && showRun && (
+              {type === "agent" && (
                 <RunAgentButton
                   packageId={id}
                   variant="ghost"
@@ -129,20 +108,14 @@ export function PackageCard({
           <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">{description || ""}</p>
           {/* Under the description and still right of the icon: the text column
               never runs under the tile. */}
-          {(version || meta) && (
+          {version && (
             <div className="text-muted-foreground/80 mt-2 flex min-w-0 items-center gap-2 text-xs">
-              {version && (
-                <UIBadge variant="secondary" className="shrink-0 font-mono text-[10px]">
-                  v{version}
-                </UIBadge>
-              )}
-              {meta}
+              <UIBadge variant="secondary" className="shrink-0 font-mono text-[10px]">
+                v{version}
+              </UIBadge>
             </div>
           )}
         </div>
-        {/* Its own column, top-aligned with the title, the way a store's "+"
-            sits: the text wraps before it instead of running underneath. */}
-        {status && <div className="relative z-10 shrink-0 self-start">{status}</div>}
       </div>
       {keywords?.length || (type !== "agent" && (usedByAgents ?? 0) > 0) ? (
         <ScrollArea className="relative z-10 mt-2 w-full">

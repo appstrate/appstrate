@@ -10,7 +10,6 @@ import { describe, it, expect } from "bun:test";
 import {
   cataloguePlacement,
   detailSpace,
-  inPlacedTab,
   pendingShares,
   placementIn,
 } from "../catalogue-placement.ts";
@@ -58,38 +57,9 @@ describe("cataloguePlacement", () => {
     expect(placement.offeredIn).toEqual(["spc_c"]);
   });
 
-  it("answers null for a space the package does not reach, without calling it unplaced", () => {
+  it("answers null for a space the package does not reach", () => {
     const placement = cataloguePlacement(pkg([{ space_id: "spc_home", state: "active" }]), "spc_z");
     expect(placement.here).toBeNull();
-    expect(placement.unplaced).toBe(false);
-  });
-
-  it("calls a package with no placement unplaced — the second tab's subject", () => {
-    const placement = cataloguePlacement(pkg([], null), "spc_a");
-    expect(placement.unplaced).toBe(true);
-    expect(inPlacedTab(placement)).toBe(false);
-  });
-
-  it("keeps a system package in the placed tab: the wire says it is active there", () => {
-    // A system package has a placement in every space and, with no row of its
-    // own, the server answers `active` — so it is placed, like any other row,
-    // and its switch is the sticky opt-out.
-    const placement = cataloguePlacement(
-      pkg([{ space_id: "spc_a", via: "system", state: "active" }], null),
-      "spc_a",
-    );
-    expect(placement.unplaced).toBe(false);
-    expect(inPlacedTab(placement)).toBe(true);
-  });
-
-  it("sends a system package switched off in every space to Découvrir", () => {
-    // Every space opted out: nothing runs it, and the second tab is where one
-    // switches it back on.
-    const placement = cataloguePlacement(
-      pkg([{ space_id: "spc_a", via: "system", state: "inactive" }], null),
-      "spc_a",
-    );
-    expect(inPlacedTab(placement)).toBe(false);
   });
 });
 
@@ -111,34 +81,6 @@ describe("what is an offer, and what is merely off", () => {
       "spc_home",
     );
     expect(placement.here).toBe("inactive");
-  });
-
-  it("sends a system integration switched on nowhere to Découvrir", () => {
-    const placement = cataloguePlacement(
-      pkg(
-        [
-          { space_id: "spc_a", state: "none", via: "system" },
-          { space_id: "spc_b", state: "none", via: "system" },
-        ],
-        null,
-      ),
-      "spc_a",
-    );
-    expect(inPlacedTab(placement)).toBe(false);
-  });
-
-  it("keeps it in Espaces once one space runs it", () => {
-    const placement = cataloguePlacement(
-      pkg(
-        [
-          { space_id: "spc_a", state: "active", via: "system" },
-          { space_id: "spc_b", state: "none", via: "system" },
-        ],
-        null,
-      ),
-      "spc_b",
-    );
-    expect(inPlacedTab(placement)).toBe(true);
   });
 });
 
@@ -198,8 +140,7 @@ describe("detailSpace", () => {
 
   it("reads an agent not placed in the current space from its home, not from the current space", () => {
     // The space the reader stands in cannot read it: the detail answers only
-    // where the package is placed, and a failed read would skip the
-    // activation's integration question.
+    // where the package is placed.
     const placement = cataloguePlacement(
       pkg([{ space_id: "spc_home", state: "active", via: "home" }]),
       "spc_here",
