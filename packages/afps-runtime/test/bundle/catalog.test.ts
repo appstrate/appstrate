@@ -30,7 +30,7 @@ function makePkg(identity: PackageIdentity, prompt = "p"): BundlePackage {
 
 describe("emptyPackageCatalog", () => {
   it("resolves nothing", async () => {
-    expect(await emptyPackageCatalog.resolve("@me/x", "1.0.0")).toBeNull();
+    expect(await emptyPackageCatalog.resolve("@me/x", "1.0.0", "skills")).toBeNull();
   });
   it("throws on fetch", async () => {
     await expect(emptyPackageCatalog.fetch("@me/x@1.0.0" as PackageIdentity)).rejects.toThrow(

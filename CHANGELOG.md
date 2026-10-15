@@ -68,6 +68,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     without the `output` runtime tool now answers the `errors[]` item
     `output_tool_required` on `manifest.runtime_tools` instead of
     `invalid_manifest`, and items carry `line`/`column` on a YAML syntax error.
+- **An integration's `INTEGRATION.md` reaches the agent as a file, not inlined
+  in the prompt** (#2005). The run bundle carries each integration the run uses
+  at the version the run froze, written to `.pi/integrations/<id>/`; the
+  prompt lists them in an `<available_integrations>` catalog (name,
+  description, path of the doc) and the agent reads the doc before its first
+  call. The doc is no longer cut at 50 KB, and it is the one of the version the
+  run executes, not the integration's draft. The prompt's own `### Skills`
+  list is removed: Pi already lists the skills from their `SKILL.md`
+  frontmatter, so the agent saw each skill twice, with two descriptions.
+  - **Agent export** (`GET /api/agents/{scope}/{name}/bundle`) carries the same
+    integration members, frozen as a run freezes them: an integration pin no
+    version satisfies answers `422 dependency_unresolved`, and an export of an
+    agent that declares integrations needs `integrations:read`. An API key
+    minted without that scope now gets a 403 on such an export.
+    Each integration member must also be readable by the caller in one of its
+    spaces: one confined to a space the caller cannot read fails the export
+    with `404 not_found`. Under `restrict_package_copy`, each integration
+    member also needs `integrations:share` in its home space, as its own
+    `download` does (`403 package_copy_restricted`).
+    The export applies no dependency override, so
+    `appstrate run <agent>@draft --local` on an agent that depends on a
+    never-published integration now answers that same 422, as a server-side
+    run without `dependency_overrides` does.
+  - **`INTEGRATION.md` sent as the JSON `content` field** of
+    `POST /api/packages/integrations` or of an editor save is now stored with
+    the package's files, so the versions published from it carry the doc.
+    Before, it reached only the draft column, and a version published from
+    such a draft had no `INTEGRATION.md`: republish one to give runs its doc.
+    An empty `content` now removes the stored `INTEGRATION.md`, so the next
+    version published carries no doc, instead of the previous one. Saved with
+    `operations`, `content` is applied first and they apply on top, as for a
+    skill's `SKILL.md`; before, it was ignored.
+  - **A run on an integration's draft** whose manifest is saved between the
+    freeze and the bundle starts the tools it froze without the doc (a
+    warning is logged), rather than with a doc written for other tools.
+  - **An integration member is bundled alone**: the dependencies its own
+    manifest declares (a `dependencies.skills` entry, say) are not bundled.
+  - **Integrity**: a declared integration whose stored archive no longer
+    matches its published hash fails the run (`bundle_integrity_mismatch`),
+    even when the run does not start that integration, as for a skill. A
+    missing archive or a signature-policy refusal only withholds its doc.
+  - **System integrations** are served into the bundle from the registry
+    loaded at boot, at the version that registry holds.
+  - **`AFPS_SIGNATURE_POLICY`** applies to an organization's published
+    integration when a run fetches it. Under `required`, an unsigned or
+    unverifiable one is left out of the bundle with a warning: its doc is
+    withheld from the agent, and the run is not failed for it.
+  - **`appstrate run`** on an exported agent wires the integrations'
+    `{ns}__api_call` tools, since the bundle now carries their manifests, and
+    shows the same catalog for the integrations it wired. With
+    `--local --integrations local` it therefore needs credentials for every
+    `api_call` integration the exported agent declares, as a local bundle
+    read from disk already did.
 
 ## [1.0.0-beta.68] - 2026-10-15
 

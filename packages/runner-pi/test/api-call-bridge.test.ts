@@ -55,7 +55,7 @@ function bundleWith(
 
 /** Names of the Pi tools the bridge registers for `bundle`, given one resolved tool per auth. */
 async function registeredNames(bundle: ReturnType<typeof bundleWith>, resolved: string[]) {
-  const factories = await buildApiCallExtensionFactory({
+  const { factories } = await buildApiCallExtensionFactory({
     bundle,
     integrationResolver: {
       resolve: async () =>
@@ -85,7 +85,9 @@ async function registerApiCall(execute: AfpsTool["execute"]) {
     parameters: { type: "object" },
     execute,
   };
-  const [factory] = await buildApiCallExtensionFactory({
+  const {
+    factories: [factory],
+  } = await buildApiCallExtensionFactory({
     bundle: bundleWith({ tools: ["api_call"] }),
     integrationResolver: { resolve: async () => [tool] },
     runId: "run_test",

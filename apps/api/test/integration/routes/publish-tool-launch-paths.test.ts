@@ -137,6 +137,7 @@ describe("publish_file across every launch path", () => {
       actor: { type: "user", id: ctx.user.id },
       modelCascade: await resolveModelCascade(ctx.orgId, agent.id, null, null),
       input: {},
+      resolvedIntegrationVersions: {},
       ...(versionLabel ? { overrideVersionLabel: versionLabel } : {}),
     });
 

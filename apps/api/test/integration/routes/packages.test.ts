@@ -4167,9 +4167,9 @@ describe("Packages API", () => {
       const targetId = "@pkgorg/documented";
       await forkInto(sourceId, targetId);
 
-      // The column the runtime reads (`fetchIntegrationPromptDocs`) — it was
-      // `""`, so the fork silently stopped contributing its docs to every
-      // agent's platform prompt.
+      // The column a draft run's bundle takes its INTEGRATION.md from
+      // (`applyDraftOverlay`) — it was `""`, so the fork's docs silently
+      // vanished from every run of its draft.
       expect(await draftContentOf(targetId)).toBe(INTEGRATION_DOC);
 
       // …and what the explorer serves. The ZIP entry was always there; the

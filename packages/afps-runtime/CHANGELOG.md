@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — catalogs resolve per dependency section (#2005, BREAKING)
+
+- `PackageCatalog.resolve(name, versionSpec, section)` takes a required third
+  parameter, the `dependencies.*` section the request comes from, typed by the
+  new exported `DependencySection` (`"skills" | "mcp_servers" |
+"integrations"`), so a catalog can resolve each package type from its own
+  source of truth. Every `PackageCatalog` implementation must accept it.
+
+### Added — dependency sections a bundle may skip (#2005)
+
+- `BuildBundleOptions.optionalDepTypes`: an entry of one of these sections that
+  `resolve` returns `null` for, or whose `fetch` throws, is reported through
+  `onWarn` and left out of the bundle instead of failing the build. An
+  `INTEGRITY_MISMATCH` from `fetch` is the exception: it fails the build as it
+  does for any other section, aggregated with the others into one error.
+  A member of such a section is a leaf: it is bundled alone, and its own
+  `dependencies.*` are neither resolved nor fetched.
+
+### Changed — integrations disclosed as a catalog, not inlined (#2005, BREAKING)
+
+- `renderPlatformPrompt` renders the integrations as a `### Integrations`
+  catalog (`<available_integrations>`, one `<integration>` with `<name>`,
+  optional `<description>` and `<location>`), instead of one
+  `## Integration: <id>` section with the `INTEGRATION.md` text inlined under
+  `### API Documentation`. The agent reads the file on demand (AFPS §3.5).
+- The `### Skills` section is gone: Pi announces the bundled skills itself
+  (`<available_skills>`, from each `SKILL.md` frontmatter), and the second list,
+  built from the manifests, could describe them differently.
+  `PlatformPromptOptions.availableSkills` and the `PlatformPromptTool` type are
+  removed.
+- `PlatformPromptIntegration.doc` is removed; pass `location` (the
+  workspace-relative path of `INTEGRATION.md`) instead.
+- `buildPlatformPromptInputs` derives `integrations` from the bundle: one
+  entry per integration the root manifest declares in
+  `dependencies.integrations`, in declaration order, with the member's
+  `description` and `location` (`.pi/integrations/<packageId>/INTEGRATION.md`)
+  when the bundle carries it. The new override `availableIntegrationIds`
+  keeps only the integrations the run starts (none when absent); the
+  `integrations` override is removed.
+
 ### Changed — `api_call` values encoded for their place (#1915, BREAKING)
 
 - `prepareApiCallRequest` (`./resolvers`) renders the target, the headers and

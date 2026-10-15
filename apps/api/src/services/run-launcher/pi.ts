@@ -174,7 +174,7 @@ async function runPlatformContainerImpl(
   // The same route the pipeline stamped on `runs.inference_route`.
   const delivery = resolveCredentialDelivery(llmConfig);
 
-  const prompt = await buildPlatformSystemPrompt(context, plan);
+  const prompt = buildPlatformSystemPrompt(context, plan);
   // The container's MODEL_ID is the PUBLIC id: the alias for a model alias, the
   // real id otherwise. The agent sends it verbatim as the request `model`; the
   // sidecar swaps alias→real upstream. The real backing id never enters the

@@ -320,6 +320,27 @@ export function resolveDraftContent(
 }
 
 /**
+ * The stored-tree entry a resolved `draft_content` must also be written to,
+ * or `null`. Publish and every version read freeze the STORED tree, so the
+ * column and that entry must hold one document. A required entry is already
+ * the `content` field's storage sink (`storageFileName`); the optional
+ * `INTEGRATION.md` is not (an integration's sink is `manifest.json`), so a
+ * JSON `content` write puts it there — and an empty one removes it, or the
+ * stored copy would outlive the cleared column into the next publish. The
+ * manifest-text fallback is no document (the predicate
+ * {@link applyDraftOverlay} uses) and governs nothing.
+ */
+export function optionalContentEntryPath(
+  type: PackageType,
+  content: string | undefined,
+): string | null {
+  const entry = PACKAGE_CONTENT_ENTRY[type];
+  if (!entry || entry.required || content === undefined || isManifestTextFallback(content))
+    return null;
+  return entry.path;
+}
+
+/**
  * What a read WILL produce, resolved without touching object storage.
  *
  * A published version is content-addressed by the `integrity` column, so its

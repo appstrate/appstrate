@@ -8,6 +8,7 @@ import type {
   ToolMeta,
 } from "../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { Bundle, BundlePackage, PackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { defaultTestAgentResources } from "../helpers/run-resources.ts";
@@ -23,6 +24,8 @@ function makeTestBundle(opts: {
   schemas?: TestSchemas;
   timeout?: number;
   integrations?: ToolMeta[];
+  /** Declared by the root, with no bundle member (the build skipped it). */
+  memberlessIntegrations?: string[];
   mcpServers?: ToolMeta[];
   skills?: ToolMeta[];
   /**
@@ -43,6 +46,16 @@ function makeTestBundle(opts: {
     ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
     ...(opts.schemas?.input ? { input: { schema: opts.schemas.input } } : {}),
     ...(opts.schemas?.output ? { output: { schema: opts.schemas.output } } : {}),
+    ...(opts.integrations?.length || opts.memberlessIntegrations?.length
+      ? {
+          dependencies: {
+            integrations: Object.fromEntries([
+              ...(opts.integrations ?? []).map((i) => [i.id, "1.0.0"]),
+              ...(opts.memberlessIntegrations ?? []).map((id) => [id, "1.0.0"]),
+            ]),
+          },
+        }
+      : {}),
   };
   const rootFiles = new Map<string, Uint8Array>();
   rootFiles.set("manifest.json", new TextEncoder().encode(JSON.stringify(rootManifest)));
@@ -62,7 +75,13 @@ function makeTestBundle(opts: {
   // mcp-server→README.md (the convention used across the codebase).
   const addPackage = (meta: ToolMeta, type: string, docFile: string): void => {
     const identity = `${meta.id}@1.0.0` as PackageIdentity;
-    const manifest = { name: meta.name, type, description: meta.description };
+    // `name` is the package id, as in a published manifest: members are found by it.
+    const manifest = {
+      name: meta.id,
+      display_name: meta.name,
+      type,
+      description: meta.description,
+    };
     const files = new Map<string, Uint8Array>();
     files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest)));
     const doc = docsById.get(meta.id);
@@ -109,11 +128,14 @@ interface PromptContext {
   availableTools?: ToolMeta[];
   availableSkills?: ToolMeta[];
   availableIntegrations?: ToolMeta[];
+  memberlessIntegrations?: string[];
   availableMcpServers?: ToolMeta[];
   packageDocs?: Array<{ id: string; content: string }>;
   runtimeTools?: string[];
   resources?: AppstrateRunPlan["resources"];
   droppedIntegrations?: AppstrateRunPlan["droppedIntegrations"];
+  /** Integration ids spawned for the run, one entry per connection. */
+  spawnedIntegrations?: string[];
 }
 
 function splitLegacy(ctx: PromptContext): {
@@ -136,6 +158,7 @@ function splitLegacy(ctx: PromptContext): {
     ...(ctx.timeout !== undefined ? { timeout: ctx.timeout } : {}),
     ...(ctx.availableSkills ? { skills: ctx.availableSkills } : {}),
     ...(ctx.availableIntegrations ? { integrations: ctx.availableIntegrations } : {}),
+    ...(ctx.memberlessIntegrations ? { memberlessIntegrations: ctx.memberlessIntegrations } : {}),
     ...(ctx.availableMcpServers ? { mcpServers: ctx.availableMcpServers } : {}),
     ...(ctx.packageDocs ? { packageDocs: ctx.packageDocs } : {}),
     ...(ctx.runtimeTools ? { runtimeTools: ctx.runtimeTools } : {}),
@@ -151,11 +174,19 @@ function splitLegacy(ctx: PromptContext): {
     resources: ctx.resources ?? defaultTestAgentResources(),
     files: ctx.files,
     ...(ctx.droppedIntegrations ? { droppedIntegrations: ctx.droppedIntegrations } : {}),
+    ...(ctx.spawnedIntegrations
+      ? {
+          integrations: ctx.spawnedIntegrations.map(
+            (integrationId) =>
+              ({ integrationId, namespace: integrationId }) as unknown as IntegrationSpawnSpec,
+          ),
+        }
+      : {}),
   };
   return { context, plan };
 }
 
-function buildEnrichedPrompt(ctx: PromptContext): Promise<string> {
+function buildEnrichedPrompt(ctx: PromptContext): string {
   const { context, plan } = splitLegacy(ctx);
   return buildPlatformSystemPrompt(context, plan);
 }
@@ -185,11 +216,11 @@ function baseContext(overrides?: Partial<PromptContext>): PromptContext {
 }
 
 /** Render a prompt under a given backend + tmpfs cap, then restore the env. */
-async function promptWithEnv(
+function promptWithEnv(
   adapter: string,
   tmpfsMb?: string,
   overrides?: Partial<PromptContext>,
-): Promise<string> {
+): string {
   const prevAdapter = process.env.RUN_ADAPTER;
   const prevTmpfs = process.env.WORKSPACE_TMPFS_SIZE_MB;
   process.env.RUN_ADAPTER = adapter;
@@ -197,7 +228,7 @@ async function promptWithEnv(
   else process.env.WORKSPACE_TMPFS_SIZE_MB = tmpfsMb;
   _resetCacheForTesting();
   try {
-    return await buildEnrichedPrompt(baseContext(overrides));
+    return buildEnrichedPrompt(baseContext(overrides));
   } finally {
     if (prevAdapter === undefined) delete process.env.RUN_ADAPTER;
     else process.env.RUN_ADAPTER = prevAdapter;
@@ -227,30 +258,30 @@ function contextWithSystemTools(overrides?: Partial<PromptContext>): PromptConte
 // ─── Core structure ─────────────────────────────────────────
 
 describe("buildEnrichedPrompt — core structure", () => {
-  it("includes system identity section", async () => {
-    const prompt = await buildEnrichedPrompt(baseContext());
+  it("includes system identity section", () => {
+    const prompt = buildEnrichedPrompt(baseContext());
     expect(prompt).toContain("## System");
     expect(prompt).toContain("Appstrate platform");
     expect(prompt).toContain("ephemeral container");
   });
 
-  it("appends raw prompt at the end after separator", async () => {
+  it("appends raw prompt at the end after separator", () => {
     const ctx = baseContext({ rawPrompt: "My custom task instruction." });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("---\n\nMy custom task instruction.");
     // Raw prompt should be at the very end
     expect(prompt.endsWith("My custom task instruction.")).toBe(true);
   });
 
-  it("includes timeout when specified", async () => {
+  it("includes timeout when specified", () => {
     const ctx = baseContext({ timeout: 120 });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("120 seconds");
   });
 
-  it("omits timeout when not specified", async () => {
+  it("omits timeout when not specified", () => {
     const ctx = baseContext({ timeout: undefined });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("**Timeout**");
   });
 });
@@ -258,32 +289,32 @@ describe("buildEnrichedPrompt — core structure", () => {
 // ─── Workspace disk cap (issue #1019) ──────────────────────
 
 describe("buildEnrichedPrompt — workspace disk cap", () => {
-  it("states the cap and points bulky work at /tmp on the docker backend", async () => {
+  it("states the cap and points bulky work at /tmp on the docker backend", () => {
     // The docker backend mounts the workspace as tmpfs, so an agent that
     // installs dependencies into it dies with ENOSPC unless the prompt says so.
-    const prompt = await promptWithEnv("docker");
+    const prompt = promptWithEnv("docker");
     expect(prompt).toContain("**Disk**: the workspace is a RAM-backed tmpfs capped at 512 MB");
     expect(prompt).toContain("`/tmp`");
   });
 
-  it("interpolates the operator's WORKSPACE_TMPFS_SIZE_MB, not a hardcoded default", async () => {
-    const prompt = await promptWithEnv("docker", "2048");
+  it("interpolates the operator's WORKSPACE_TMPFS_SIZE_MB, not a hardcoded default", () => {
+    const prompt = promptWithEnv("docker", "2048");
     expect(prompt).toContain("capped at 2048 MB");
     expect(prompt).not.toContain("512 MB");
   });
 
-  it("stays silent when the docker workspace cap does not apply", async () => {
+  it("stays silent when the docker workspace cap does not apply", () => {
     // WORKSPACE_TMPFS_SIZE_MB=0 disables the tmpfs even under docker, while
     // process and undeclared backends have no core-owned tmpfs contract. A
     // module id alone is never enough: the plan must carry the capability.
-    expect(await promptWithEnv("docker", "0")).not.toContain("**Disk**");
-    expect(await promptWithEnv("process")).not.toContain("**Disk**");
-    expect(await promptWithEnv("module-backend")).not.toContain("**Disk**");
-    expect(await promptWithEnv("firecracker")).not.toContain("**Disk**");
+    expect(promptWithEnv("docker", "0")).not.toContain("**Disk**");
+    expect(promptWithEnv("process")).not.toContain("**Disk**");
+    expect(promptWithEnv("module-backend")).not.toContain("**Disk**");
+    expect(promptWithEnv("firecracker")).not.toContain("**Disk**");
   });
 
-  it("states a backend-declared writable-root budget without suggesting /tmp as an escape", async () => {
-    const prompt = await promptWithEnv("module-backend", undefined, {
+  it("states a backend-declared writable-root budget without suggesting /tmp as an escape", () => {
+    const prompt = promptWithEnv("module-backend", undefined, {
       resources: {
         ...defaultTestAgentResources(),
         semantics: "sizing",
@@ -304,8 +335,8 @@ describe("buildEnrichedPrompt — workspace disk cap", () => {
 // ─── Effective agent resources ─────────────────────────────
 
 describe("buildEnrichedPrompt — effective agent resources", () => {
-  it("interpolates effective hard limits, never requested or default values", async () => {
-    const prompt = await buildEnrichedPrompt(
+  it("interpolates effective hard limits, never requested or default values", () => {
+    const prompt = buildEnrichedPrompt(
       baseContext({
         resources: {
           requested: { memoryMb: 8192, cpu: 8 },
@@ -324,8 +355,8 @@ describe("buildEnrichedPrompt — effective agent resources", () => {
     expect(prompt).not.toContain("1536 MiB");
   });
 
-  it("interpolates the effective microVM sizing budget", async () => {
-    const prompt = await promptWithEnv("module-backend", undefined, {
+  it("interpolates the effective microVM sizing budget", () => {
+    const prompt = promptWithEnv("module-backend", undefined, {
       resources: {
         requested: { memoryMb: 8192, cpu: 8 },
         effective: { memoryMb: 4096, cpu: 7 },
@@ -345,8 +376,8 @@ describe("buildEnrichedPrompt — effective agent resources", () => {
     expect(prompt).not.toContain("8 vCPU");
   });
 
-  it("stays silent when the resolved plan has no resource semantics", async () => {
-    const prompt = await buildEnrichedPrompt(
+  it("stays silent when the resolved plan has no resource semantics", () => {
+    const prompt = buildEnrichedPrompt(
       baseContext({
         resources: {
           requested: { memoryMb: 3072, cpu: 5 },
@@ -369,36 +400,71 @@ describe("buildEnrichedPrompt — effective agent resources", () => {
 describe("buildEnrichedPrompt — dependency doc companions", () => {
   // AFPS dependencies carry a doc companion at their archive root:
   // skill→SKILL.md, integration→INTEGRATION.md, mcp-server→README.md.
-  // None of these are rendered into the platform prompt — integrations
-  // and mcp-servers self-document via MCP `tools/list`, and a skill's
-  // SKILL.md is loaded only when the skill is activated in-container.
-  it("never renders INTEGRATION.md content in the prompt", async () => {
-    const ctx = baseContext({
-      availableIntegrations: [
-        { id: "@org/github-mcp", name: "GitHub", description: "GitHub integration" },
-      ],
-      packageDocs: [
-        { id: "@org/github-mcp", content: "## GitHub API\n\nCall `list_issues` to fetch issues." },
-      ],
-    });
-    const prompt = await buildEnrichedPrompt(ctx);
+  // None of their content is rendered into the platform prompt: an
+  // integration is listed with the location of its INTEGRATION.md, an
+  // mcp-server self-documents via MCP `tools/list`, and a skill's SKILL.md
+  // is loaded only when the skill is activated in-container.
+  it("lists spawned integrations with a location iff they ship INTEGRATION.md, never its content", () => {
+    const prompt = buildEnrichedPrompt(
+      baseContext({
+        availableIntegrations: [
+          { id: "@org/github", name: "GitHub", description: "GitHub integration" },
+          { id: "@org/slack", name: "Slack", description: "Slack integration" },
+          { id: "@org/drive", name: "Drive", description: "Drive integration" },
+        ],
+        packageDocs: [
+          { id: "@org/github", content: "## GitHub API\n\nCall `list_issues` to fetch issues." },
+          { id: "@org/drive", content: "## Drive API" },
+        ],
+        // Two connections of GitHub, and Drive declared but not spawned.
+        spawnedIntegrations: ["@org/github", "@org/github", "@org/slack"],
+      }),
+    );
+    expect(prompt).toContain("<available_integrations>");
+    expect(prompt.match(/<name>@org\/github<\/name>/g)).toHaveLength(1);
+    expect(prompt).toContain("<description>GitHub integration</description>");
+    expect(prompt).toContain("<location>.pi/integrations/@org/github/INTEGRATION.md</location>");
+    expect(prompt).toContain("<name>@org/slack</name>");
+    expect(prompt).not.toContain(".pi/integrations/@org/slack");
+    expect(prompt).not.toContain("@org/drive");
     expect(prompt).not.toContain("## GitHub API");
     expect(prompt).not.toContain("Call `list_issues` to fetch issues.");
   });
 
-  it("never renders mcp-server README.md content in the prompt", async () => {
+  it("lists a spawned integration whose bundle member was skipped by name, with no location", () => {
+    const prompt = buildEnrichedPrompt(
+      baseContext({
+        memberlessIntegrations: ["@org/unsigned"],
+        spawnedIntegrations: ["@org/unsigned"],
+      }),
+    );
+    expect(prompt).toContain("<available_integrations>");
+    expect(prompt).toContain("<name>@org/unsigned</name>");
+    expect(prompt).not.toContain(".pi/integrations/@org/unsigned");
+  });
+
+  it("lists no integration catalog when none is spawned", () => {
+    const prompt = buildEnrichedPrompt(
+      baseContext({
+        availableIntegrations: [{ id: "@org/github", name: "GitHub", description: "GitHub" }],
+      }),
+    );
+    expect(prompt).not.toContain("<available_integrations>");
+  });
+
+  it("never renders mcp-server README.md content in the prompt", () => {
     const ctx = baseContext({
       availableMcpServers: [
         { id: "@org/scraper", name: "Scraper", description: "Web scraper MCP server" },
       ],
       packageDocs: [{ id: "@org/scraper", content: "## Usage\n\nInvoke the `scrape` tool." }],
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Usage");
     expect(prompt).not.toContain("Invoke the `scrape` tool.");
   });
 
-  it("never renders skill SKILL.md body content in the prompt", async () => {
+  it("never renders skill SKILL.md body content in the prompt", () => {
     const ctx = baseContext({
       availableSkills: [
         { id: "@org/research", name: "Research", description: "Deep research capability" },
@@ -407,7 +473,7 @@ describe("buildEnrichedPrompt — dependency doc companions", () => {
         { id: "@org/research", content: "## Research procedure\n\nStep 1: gather sources." },
       ],
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Research procedure");
     expect(prompt).not.toContain("Step 1: gather sources.");
   });
@@ -416,8 +482,8 @@ describe("buildEnrichedPrompt — dependency doc companions", () => {
 // ─── Unavailable integrations ──────────────────────────────
 
 describe("buildEnrichedPrompt — unavailable integrations", () => {
-  it("names every dropped integration, telling absence apart from breakage", async () => {
-    const prompt = await buildEnrichedPrompt(
+  it("names every dropped integration, telling absence apart from breakage", () => {
+    const prompt = buildEnrichedPrompt(
       baseContext({
         droppedIntegrations: [
           { integrationId: "@org/gmail", reason: "unbound" },
@@ -440,8 +506,8 @@ describe("buildEnrichedPrompt — unavailable integrations", () => {
     expect(prompt).toContain("report them as unavailable in this run");
   });
 
-  it("renders no such section when nothing was dropped", async () => {
-    const prompt = await buildEnrichedPrompt(baseContext({ droppedIntegrations: [] }));
+  it("renders no such section when nothing was dropped", () => {
+    const prompt = buildEnrichedPrompt(baseContext({ droppedIntegrations: [] }));
     expect(prompt).not.toContain("## Unavailable Integrations");
   });
 });
@@ -449,11 +515,11 @@ describe("buildEnrichedPrompt — unavailable integrations", () => {
 // ─── User input ─────────────────────────────────────────────
 
 describe("buildEnrichedPrompt — user input", () => {
-  it("includes user input values", async () => {
+  it("includes user input values", () => {
     const ctx = baseContext({
       input: { topic: "AI safety", depth: "detailed" },
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## User Input");
     expect(prompt).toContain("topic");
     expect(prompt).toContain("AI safety");
@@ -461,7 +527,7 @@ describe("buildEnrichedPrompt — user input", () => {
     expect(prompt).toContain("detailed");
   });
 
-  it("includes schema descriptions for input fields", async () => {
+  it("includes schema descriptions for input fields", () => {
     const ctx = baseContext({
       input: { topic: "AI" },
       schemas: {
@@ -474,18 +540,18 @@ describe("buildEnrichedPrompt — user input", () => {
         },
       },
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("Main research topic");
     expect(prompt).toContain("required");
   });
 
-  it("omits input section when no input provided", async () => {
+  it("omits input section when no input provided", () => {
     const ctx = baseContext({ input: {} });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## User Input");
   });
 
-  it("excludes file-type input fields from user input section", async () => {
+  it("excludes file-type input fields from user input section", () => {
     const ctx = baseContext({
       input: { text: "hello", file: "file-ref" },
       schemas: {
@@ -502,7 +568,7 @@ describe("buildEnrichedPrompt — user input", () => {
         },
       },
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("text");
     // file type should be excluded from User Input
   });
@@ -511,9 +577,9 @@ describe("buildEnrichedPrompt — user input", () => {
 // ─── Configuration ──────────────────────────────────────────
 
 describe("buildEnrichedPrompt — configuration", () => {
-  it("never renders a Configuration section (config folded into input)", async () => {
+  it("never renders a Configuration section (config folded into input)", () => {
     const ctx = baseContext({ input: { language: "fr", maxResults: 10 } });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Configuration");
   });
 });
@@ -521,29 +587,29 @@ describe("buildEnrichedPrompt — configuration", () => {
 // ─── Previous state ─────────────────────────────────────────
 
 describe("buildEnrichedPrompt — checkpoint", () => {
-  it("includes checkpoint when set-checkpoint tool is available", async () => {
+  it("includes checkpoint when set-checkpoint tool is available", () => {
     const ctx = contextWithSystemTools({
       previousCheckpoint: { cursor: "abc123", processedCount: 42 },
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Checkpoint");
     expect(prompt).toContain("```json");
     expect(prompt).toContain('"cursor": "abc123"');
     expect(prompt).toContain('"processedCount": 42');
   });
 
-  it("omits checkpoint when null", async () => {
+  it("omits checkpoint when null", () => {
     const ctx = contextWithSystemTools({ previousCheckpoint: null });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Checkpoint");
   });
 
-  it("includes checkpoint regardless of available tools", async () => {
+  it("includes checkpoint regardless of available tools", () => {
     const ctx = baseContext({
       previousCheckpoint: { cursor: "abc123" },
       availableTools: [],
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Checkpoint");
     expect(prompt).toContain("abc123");
   });
@@ -552,38 +618,38 @@ describe("buildEnrichedPrompt — checkpoint", () => {
 // ─── Memories ───────────────────────────────────────────────
 
 describe("buildEnrichedPrompt — memories", () => {
-  it("includes memories section when add-memory tool is available", async () => {
+  it("includes memories section when add-memory tool is available", () => {
     const ctx = contextWithSystemTools({
       memories: [
         { id: 1, content: "Gmail API paginates at 100 results", createdAt: "2025-01-15" },
         { id: 2, content: "Use batch endpoint for efficiency", createdAt: "2025-01-16" },
       ],
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Memory");
     expect(prompt).toContain("Gmail API paginates at 100 results");
     expect(prompt).toContain("Use batch endpoint for efficiency");
     expect(prompt).toContain("2025-01-15");
   });
 
-  it("omits the Memory section with no memories — recall_memory is discoverable via tools/list", async () => {
+  it("omits the Memory section with no memories — recall_memory is discoverable via tools/list", () => {
     // With no pinned memories the `## Memory` header is suppressed
     // entirely. `recall_memory` is no longer named in the prompt at all:
     // the agent discovers it (and its calling convention) from the MCP
     // tool advertised via `tools/list`, not from any in-prompt listing.
     const ctx = contextWithSystemTools({ memories: [] });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Memory\n");
     expect(prompt).not.toContain("No memories are currently pinned");
     expect(prompt).not.toContain("recall_memory");
   });
 
-  it("includes memories regardless of available tools", async () => {
+  it("includes memories regardless of available tools", () => {
     const ctx = baseContext({
       memories: [{ id: 1, content: "Some memory", createdAt: "2025-01-15" }],
       availableTools: [],
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Memory");
     expect(prompt).toContain("Some memory");
   });
@@ -598,16 +664,16 @@ describe("buildEnrichedPrompt — run history is tool-wired, never in the prompt
   // Phase D); the prompt MUST NEVER mention the sidecar, regardless of
   // whether a signed `runToken` is present.
 
-  it("does not render a Run History section when runToken is present", async () => {
+  it("does not render a Run History section when runToken is present", () => {
     const ctx = baseContext({ runToken: "run_token_123" });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Run History");
     expect(prompt).not.toContain("$SIDECAR_URL");
   });
 
-  it("does not render a Run History section when runToken is absent", async () => {
+  it("does not render a Run History section when runToken is absent", () => {
     const ctx = baseContext({ runToken: undefined });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Run History");
     expect(prompt).not.toContain("$SIDECAR_URL");
   });
@@ -616,11 +682,11 @@ describe("buildEnrichedPrompt — run history is tool-wired, never in the prompt
 // ─── No provider prompt dimension ───────────────────────────
 
 describe("buildEnrichedPrompt — provider dimension fully removed", () => {
-  it("never emits a Connected Providers section or provider_call instructions", async () => {
+  it("never emits a Connected Providers section or provider_call instructions", () => {
     // Outbound API access is surfaced via integration MCP tools
     // (`{ns}__api_call`), self-documented through MCP tools/list — never
     // through the prompt. The provider prompt dimension is fully removed.
-    const prompt = await buildEnrichedPrompt(baseContext());
+    const prompt = buildEnrichedPrompt(baseContext());
     expect(prompt).not.toContain("## Connected Providers");
     expect(prompt).not.toContain("provider_call");
     expect(prompt).not.toContain("$SIDECAR_URL");
@@ -630,7 +696,7 @@ describe("buildEnrichedPrompt — provider dimension fully removed", () => {
 // ─── Files ──────────────────────────────────────────────────
 
 describe("buildEnrichedPrompt — files", () => {
-  it("includes files section when files provided", async () => {
+  it("includes files section when files provided", () => {
     const ctx = baseContext({
       files: [
         {
@@ -652,7 +718,7 @@ describe("buildEnrichedPrompt — files", () => {
       ],
     });
 
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Files");
     // Neutral wording: an input file can be a sibling run's deliverable
     // mounted by reference, not only a human upload.
@@ -667,7 +733,7 @@ describe("buildEnrichedPrompt — files", () => {
   // Fan-in by reference: a file mounted through the reserved
   // `_context_files` field is announced exactly like any other input
   // file. A file mounted but not announced is a file never read.
-  it("announces context files mounted through the reserved field", async () => {
+  it("announces context files mounted through the reserved field", () => {
     const ctx = baseContext({
       files: [
         {
@@ -680,14 +746,14 @@ describe("buildEnrichedPrompt — files", () => {
       ],
     });
 
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Files");
     expect(prompt).toContain("./files/research.json");
   });
 
-  it("omits files section when no files", async () => {
+  it("omits files section when no files", () => {
     const ctx = baseContext({ files: [] });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Files");
   });
 });
@@ -695,7 +761,7 @@ describe("buildEnrichedPrompt — files", () => {
 // ─── Tools and skills ───────────────────────────────────────
 
 describe("buildEnrichedPrompt — tools and skills", () => {
-  it("never renders a Tools section — tools are advertised via MCP tools/list", async () => {
+  it("never renders a Tools section — tools are advertised via MCP tools/list", () => {
     // The prompt no longer lists tools (a partial/stale in-prompt list
     // would contradict the live tool set). The agent discovers every tool
     // — bundle, integration, runtime (output/log/note/pin), and the
@@ -706,29 +772,22 @@ describe("buildEnrichedPrompt — tools and skills", () => {
       ],
       runtimeTools: ["note"],
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("### Tools");
     expect(prompt).not.toContain("Web Scraper");
     expect(prompt).not.toContain("run_history");
   });
 
-  it("includes available skills", async () => {
+  it("leaves the skills catalog to the runner (Pi announces them from SKILL.md)", () => {
     const ctx = baseContext({
       availableSkills: [
         { id: "@org/research", name: "Research", description: "Deep research capability" },
       ],
     });
 
-    const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("### Skills");
-    expect(prompt).toContain("Research");
-    expect(prompt).toContain(".pi/skills/");
-  });
-
-  it("omits skills section when no skills", async () => {
-    const ctx = baseContext({ availableSkills: [] });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("### Skills");
+    expect(prompt).not.toContain("Deep research capability");
   });
 });
 
@@ -741,15 +800,15 @@ describe("buildEnrichedPrompt — Output Format is engine-aware", () => {
     properties: { answer: { type: "string" as const } },
   };
 
-  it("mandates the terminal `output` tool call (single Pi-engine channel)", async () => {
-    const prompt = await buildEnrichedPrompt(baseContext({ schemas: { output: outputSchema } }));
+  it("mandates the terminal `output` tool call (single Pi-engine channel)", () => {
+    const prompt = buildEnrichedPrompt(baseContext({ schemas: { output: outputSchema } }));
     expect(prompt).toContain("## Output Format");
     expect(prompt).toContain("call the `output` tool");
     expect(prompt).not.toContain("StructuredOutput");
   });
 
-  it("renders no Output Format section when the agent declares no output schema", async () => {
-    const prompt = await buildEnrichedPrompt(baseContext());
+  it("renders no Output Format section when the agent declares no output schema", () => {
+    const prompt = buildEnrichedPrompt(baseContext());
     expect(prompt).not.toContain("## Output Format");
   });
 });
@@ -757,24 +816,24 @@ describe("buildEnrichedPrompt — Output Format is engine-aware", () => {
 // ─── Raw prompt template ──────────────────────
 
 describe("buildEnrichedPrompt — raw prompt template", () => {
-  it("does not interpolate {{…}} even when schemaVersion declares 1.1", async () => {
+  it("does not interpolate {{…}} even when schemaVersion declares 1.1", () => {
     const ctx = baseContext({
       schemaVersion: "1.1",
       runId: "run_abc",
       input: { topic: "quantum" },
       rawPrompt: "Investigate {{input.topic}} for {{runId}}.",
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("Investigate {{input.topic}} for {{runId}}.");
     expect(prompt).not.toContain("Investigate quantum for run_abc.");
   });
 
-  it("preserves the enrichment sections before the raw prompt", async () => {
+  it("preserves the enrichment sections before the raw prompt", () => {
     const ctx = baseContext({
       input: { task: "hello" },
       rawPrompt: "Run: {{input.task}}",
     });
-    const prompt = await buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## System");
     expect(prompt).toContain("Appstrate platform");
     expect(prompt).toMatch(/Run: \{\{input\.task\}\}$/);
