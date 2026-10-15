@@ -17,7 +17,7 @@ import { useTranslation } from "react-i18next";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { ToggleGroup, ToggleGroupItem } from "@appstrate/ui/components/toggle-group";
 import {
   type Frequency,

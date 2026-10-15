@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
-import { CheckboxField } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { WEBHOOK_EVENTS } from "../hooks/use-webhooks";
 

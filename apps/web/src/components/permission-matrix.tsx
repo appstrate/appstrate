@@ -49,7 +49,7 @@ export function PermissionMatrix<Column extends string>({
   }[];
 }) {
   return (
-    <div className="bg-card overflow-hidden rounded-lg border shadow-sm">
+    <div className="bg-card overflow-hidden rounded-lg border">
       <Table
         aria-label={ariaLabel}
         className="w-full"

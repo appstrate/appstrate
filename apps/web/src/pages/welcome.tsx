@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { client } from "../api/client";
 import { orgStore } from "../stores/org-store";
 import { AuthLayout } from "../components/auth-layout";
@@ -74,9 +75,9 @@ export function WelcomePage() {
 
             <FieldError>{serverError}</FieldError>
 
-            <Button className="w-full" type="submit" pending={loading}>
+            <PendingButton className="w-full" type="submit" pending={loading}>
               {t("welcome.save")}
-            </Button>
+            </PendingButton>
           </div>
         </form>
       </div>

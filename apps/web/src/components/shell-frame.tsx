@@ -40,8 +40,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarTrigger,
+  useSidebar,
 } from "@appstrate/ui/components/sidebar";
-import { useSidebar } from "@appstrate/ui/components/sidebar-context";
 
 /**
  * Where a page's own header controls land. The header belongs to the shell, and
@@ -194,7 +194,7 @@ export function ShellSidebar({
 
 export function ShellHeader() {
   const setActionsSlot = useContext(SetHeaderActionsSlot);
-  const { isMobile, openMobile, state, setPeeking } = useSidebar();
+  const { isMobile, openMobile, state } = useSidebar();
   const { data: unreadCount } = useUnreadCount();
   const collapsed = !isMobile && state === "collapsed";
 
@@ -221,15 +221,10 @@ export function ShellHeader() {
           <Menu className="size-4" />
         </SidebarTrigger>
         {/* Desktop, collapsed: nothing of the sidebar is left on screen, so its
-            way back is here. Hovering slides it over the page (as the screen's
-            left edge does), a click pins it open again. It carries the unread
+            way back is here. A click pins it open again. It carries the unread
             dot the hidden Runs entry cannot show. */}
         {collapsed && (
-          <SidebarTrigger
-            data-sidebar="peek-trigger"
-            className="relative hidden size-8 shrink-0 md:inline-flex"
-            onPointerEnter={() => setPeeking(true)}
-          >
+          <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
             <Menu className="size-4" />
             {(unreadCount ?? 0) > 0 && (
               <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />

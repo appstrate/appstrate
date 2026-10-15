@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useEffect, useState } from "react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -15,8 +16,8 @@ import {
   CarouselItem,
   CarouselNext,
   CarouselPrevious,
+  type CarouselApi,
 } from "@appstrate/ui/components/carousel";
-import { useCarousel } from "@appstrate/ui/components/carousel-context";
 import { PackageIcon } from "../components/package-icon";
 import { EmptyState } from "../components/page-states";
 import { ChoiceCard } from "../components/choice-card";
@@ -167,7 +168,7 @@ function MetricCard({
   return (
     <div
       className={cn(
-        "border-border bg-card rounded-xl border p-4 shadow-sm",
+        "border-border bg-card rounded-xl border p-4",
         "flex min-h-32 flex-col justify-between",
         className,
       )}
@@ -191,9 +192,21 @@ function RecentAgents({
   className?: string;
 }) {
   const { t } = useTranslation("agents");
+  const [api, setApi] = useState<CarouselApi>();
+  const [canScrollNext, setCanScrollNext] = useState(false);
+  useEffect(() => {
+    if (!api) return;
+    const read = () => setCanScrollNext(api.canScrollNext());
+    read();
+    api.on("select", read).on("reInit", read);
+    return () => {
+      api.off("select", read).off("reInit", read);
+    };
+  }, [api]);
 
   return (
     <Carousel
+      setApi={setApi}
       opts={{ align: "start", dragFree: true, slidesToScroll: "auto" }}
       className={className}
       aria-label={t("dashboard.recentAgents")}
@@ -212,7 +225,7 @@ function RecentAgents({
         className="left-2 z-20 disabled:hidden"
         aria-label={t("dashboard.previousAgents")}
       />
-      <RecentAgentsEndFade />
+      <RecentAgentsEndFade visible={canScrollNext} />
       <CarouselNext
         className="right-2 z-20 disabled:hidden"
         aria-label={t("dashboard.moreAgents")}
@@ -222,13 +235,12 @@ function RecentAgents({
 }
 
 /** Fades the last visible card while more agents sit past the edge. */
-function RecentAgentsEndFade() {
-  const { canScrollNext } = useCarousel();
+function RecentAgentsEndFade({ visible }: { visible: boolean }) {
   return (
     <div
       className={cn(
         "from-canvas pointer-events-none absolute inset-y-0 right-0 z-10 w-24 bg-gradient-to-l to-transparent transition-opacity",
-        canScrollNext ? "opacity-100" : "opacity-0",
+        visible ? "opacity-100" : "opacity-0",
       )}
       aria-hidden="true"
       data-carousel-end-fade

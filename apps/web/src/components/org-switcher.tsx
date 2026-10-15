@@ -31,7 +31,7 @@ import { useCanCreateOrg } from "../hooks/use-auth";
 import { spaceStore } from "../stores/space-store";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { useSidebar } from "@appstrate/ui/components/sidebar-context";
+import { useSidebar } from "@appstrate/ui/components/sidebar";
 import { cn } from "@appstrate/ui/cn";
 import { OrganizationAvatar } from "./organization-avatar";
 import { NEW_SPACE_PARAM } from "./space-create-modal";

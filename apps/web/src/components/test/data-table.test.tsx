@@ -82,10 +82,9 @@ describe("roles", () => {
 describe("surface", () => {
   it("keeps the card frame and lets the settings surface remove it", () => {
     const html = table();
-    expect(html).toContain("bg-card rounded-lg border shadow-sm");
+    expect(html).toContain("bg-card rounded-lg border");
     expect(html).toContain("data-settings-table-surface=integrated");
     expect(html).toContain(":border-0");
-    expect(html).toContain(":shadow-none");
   });
 });
 

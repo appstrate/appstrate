@@ -6,11 +6,13 @@
  * the footer, the write (`useApplyModelChoice`) and the refusals it can name.
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Modal } from "./modal";
 import { ErrorState } from "./page-states";
 import { TextSkeleton } from "./loading-skeletons";
@@ -132,14 +134,14 @@ function ChoiceDialog({
           <Button type="button" variant="outline" onClick={onClose}>
             {t("btn.cancel")}
           </Button>
-          <Button
+          <PendingButton
             type="button"
             onClick={() => void save()}
             pending={isPending}
             disabled={!tickAll && !choice.canSave}
           >
             {submitLabel}
-          </Button>
+          </PendingButton>
         </>
       }
     >

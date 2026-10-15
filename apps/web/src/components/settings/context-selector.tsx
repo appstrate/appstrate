@@ -5,7 +5,7 @@
  * workspace, which catalogue. One control, so a panel that switches context
  * always switches it the same way.
  */
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 
 /**
  * Transparent until it is a dialog's own surface, where the trigger has to

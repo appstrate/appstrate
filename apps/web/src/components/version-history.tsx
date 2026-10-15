@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -15,7 +16,6 @@ import { TableRowActions } from "./table-row-actions";
 import { rowActionsColumn } from "./row-actions-column";
 import { CellDate } from "./table-cells";
 import { ConfirmModal } from "./confirm-modal";
-import { Badge } from "@appstrate/ui/components/badge";
 import { Trash2, RotateCcw, History, GitCompareArrows } from "lucide-react";
 
 interface VersionHistoryProps {
@@ -130,9 +130,9 @@ export function VersionHistory({
             header: t("version.status"),
             width: "minmax(100px,1fr)",
             cell: (version) => (
-              <Badge variant={version.yanked ? "warning" : "secondary"}>
+              <ToneBadge variant={version.yanked ? "warning" : "secondary"}>
                 {t(version.yanked ? "version.yanked" : "version.published")}
-              </Badge>
+              </ToneBadge>
             ),
           },
           ...(onCompare || canRestore || canDelete

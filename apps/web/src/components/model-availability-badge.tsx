@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
-import { Badge } from "@appstrate/ui/components/badge";
 
 /**
  * "This model's credential can no longer serve inference" — the read-side
@@ -15,8 +15,8 @@ import { Badge } from "@appstrate/ui/components/badge";
 export function ModelUnavailableBadge({ className }: { className?: string }) {
   const { t } = useTranslation("settings");
   return (
-    <Badge variant="failed" className={className} title={t("models.credentialUnavailableHint")}>
+    <ToneBadge variant="failed" className={className} title={t("models.credentialUnavailableHint")}>
       {t("models.credentialUnavailable")}
-    </Badge>
+    </ToneBadge>
   );
 }

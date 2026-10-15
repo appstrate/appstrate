@@ -20,7 +20,7 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
 import { Switch } from "@appstrate/ui/components/switch";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { useModalParam } from "../../hooks/use-modal-param";

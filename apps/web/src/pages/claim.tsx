@@ -13,13 +13,13 @@
  * (which the next request rebuilds with `bootstrapTokenPending: false`).
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AuthLayout } from "../components/auth-layout";
-import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 import { client } from "../api/client";
 import { errorMessage } from "../lib/mutation-error";
@@ -122,9 +122,9 @@ export function ClaimPage() {
             </Alert>
           )}
 
-          <Button type="submit" pending={submitting}>
+          <PendingButton type="submit" pending={submitting}>
             {submitting ? t("claim.submitting") : t("claim.submit")}
-          </Button>
+          </PendingButton>
         </form>
 
         <p className="text-muted-foreground text-center text-xs">{t("claim.docs")}</p>

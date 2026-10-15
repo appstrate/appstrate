@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Badge as UIBadge } from "@appstrate/ui/components/badge";
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { CheckCircle2, Pause } from "lucide-react";
 import type { EnrichedSchedule, ScheduleWireDto } from "@appstrate/shared-types";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
@@ -22,19 +22,19 @@ export function ScheduleStatusBadge({ schedule }: ScheduleStatusBadgeProps) {
           schedule.disabled_reason ? t(`schedule.disabledReason.${schedule.disabled_reason}`) : null
         }
       >
-        <UIBadge variant="secondary" className="gap-1">
+        <ToneBadge variant="secondary" className="gap-1">
           <Pause className="size-3" />
           {t("schedule.statusDisabled")}
-        </UIBadge>
+        </ToneBadge>
       </DisabledReasonTooltip>
     );
   }
 
   return (
-    <UIBadge variant="success" className="gap-1">
+    <ToneBadge variant="success" className="gap-1">
       <CheckCircle2 className="size-3" />
       {t("schedule.statusActive")}
-    </UIBadge>
+    </ToneBadge>
   );
 }
 

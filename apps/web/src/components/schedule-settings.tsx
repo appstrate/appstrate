@@ -163,7 +163,11 @@ export function ScheduleActionsMenu({
       {can("schedules:delete") && (
         <>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={onDelete} disabled={deletePending} variant="destructive">
+          <DropdownMenuItem
+            onSelect={onDelete}
+            disabled={deletePending}
+            className="text-destructive focus:text-destructive"
+          >
             <Trash2 size={14} />
             {t("schedule.delete")}
           </DropdownMenuItem>

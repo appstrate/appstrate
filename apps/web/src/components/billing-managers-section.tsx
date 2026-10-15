@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Plus, UserCog } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import {
@@ -116,7 +117,7 @@ export function BillingManagersSection() {
                 <div className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium">{row.label}</span>
-                    {stale && <Badge variant="pending">{t(stale[0])}</Badge>}
+                    {stale && <ToneBadge variant="pending">{t(stale[0])}</ToneBadge>}
                   </span>
                   {row.email && (
                     <span className="text-muted-foreground block truncate text-sm">
@@ -169,7 +170,7 @@ export function BillingManagersSection() {
                     }}
                   >
                     <span className="min-w-0 flex-1 truncate">{memberLabel(member)}</span>
-                    <Badge variant="pending">{t(roleI18nKey(member.role))}</Badge>
+                    <ToneBadge variant="pending">{t(roleI18nKey(member.role))}</ToneBadge>
                   </CommandItem>
                 ))}
               </CommandList>
@@ -189,9 +190,9 @@ export function BillingManagersSection() {
             {t("btn.cancel", { ns: "common" })}
           </Button>
         )}
-        <Button size="sm" pending={replace.isPending} disabled={!dirty} onClick={handleSave}>
+        <PendingButton size="sm" pending={replace.isPending} disabled={!dirty} onClick={handleSave}>
           {t("btn.save", { ns: "common" })}
-        </Button>
+        </PendingButton>
       </div>
     </SectionCard>
   );

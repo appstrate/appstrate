@@ -78,7 +78,7 @@ export function ResourceErrorState({
  *
  * The rings are the whole point of the treatment. A 40px glyph at 40% opacity
  * over an empty card reads as a rendering failure; the same glyph on a card
- * with a border and a shadow, ringed, reads as a state someone designed.
+ * with a border, ringed, reads as a state someone designed.
  *
  * `compact` is for an empty state inside a frame that is already an answer
  * (a list card, a tab body); the full one is for a page that has nothing else
@@ -122,7 +122,7 @@ export function EmptyState({
         <Ring className={compact ? "size-44 opacity-35" : "size-52 opacity-35"} />
         <div
           className={cn(
-            "bg-card border-border relative grid place-items-center rounded-2xl border shadow-md",
+            "bg-card border-border relative grid place-items-center rounded-2xl border",
             compact ? "size-14" : "size-16",
           )}
         >

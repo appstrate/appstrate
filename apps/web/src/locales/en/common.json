@@ -53,8 +53,6 @@
   "btn.copyLink": "Copy link",
   "btn.copied": "Copied!",
   "btn.close": "Close",
-  "carousel.next": "Next item",
-  "carousel.previous": "Previous item",
   "btn.done": "Done",
   "btn.download": "Download",
   "error.generic": "An error occurred.",
@@ -432,8 +430,5 @@
   "library.chatEnforce.confirmDescription": "The SKILL.md of the latest published version of “{{package}}” will be injected into every conversation of space {{space}}. Its content, and the files it references, will be visible to every member who chats in this space, whatever their skill permissions.",
   "library.chatEnforce.confirm": "Require",
   "library.chatEnforce.error.noPublishedVersion": "This skill has no published version: publish one before requiring it in the chat.",
-  "nav.sidebar": "Sidebar",
-  "nav.sidebarDescription": "Displays the mobile sidebar.",
-  "nav.toggleSidebar": "Toggle sidebar",
   "switcher.spaceOnRequest": "On request"
 }

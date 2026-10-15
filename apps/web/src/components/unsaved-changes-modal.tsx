@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { UnsavedBlocker } from "../hooks/use-unsaved-changes";
@@ -46,9 +47,9 @@ export function UnsavedChangesModal({ blocker, onSaveDraft }: UnsavedChangesModa
             {t("unsaved.discard")}
           </Button>
           {onSaveDraft && (
-            <Button onClick={handleSave} pending={isSaving}>
+            <PendingButton onClick={handleSave} pending={isSaving}>
               {t("unsaved.saveDraft")}
-            </Button>
+            </PendingButton>
           )}
         </>
       }

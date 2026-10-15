@@ -10,8 +10,8 @@
  * org ») own their footer and apply the plan, so the same list serves all three.
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
 import { DiscoveryResult } from "./model-form/discovery-result";
 import { ManualModelEntry } from "./model-form/manual-model-entry";
 import { ModelPickList } from "./model-form/model-pick-list";
@@ -35,14 +35,14 @@ export function ModelChoiceList({
     <div className="space-y-3">
       {source === "discover" && (
         <div className="space-y-2">
-          <Button
+          <PendingButton
             type="button"
             variant="outline"
             onClick={choice.detect}
             pending={choice.detecting}
           >
             {t("models.form.discoverButton")}
-          </Button>
+          </PendingButton>
           {discovery && <DiscoveryResult discovery={discovery} />}
         </div>
       )}

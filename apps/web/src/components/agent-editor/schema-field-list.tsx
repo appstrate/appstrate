@@ -36,7 +36,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
-import { CheckboxField } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import {
   Table,
   TableBody,
@@ -46,8 +46,8 @@ import {
   TableRow,
 } from "@appstrate/ui/components/table";
 import { Input } from "@appstrate/ui/components/input";
-import { FormItem } from "@appstrate/ui/components/field";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { FormItem } from "@/components/app-ui/form-item";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { PageActionsMenu } from "../page-actions-menu";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import type { JSONSchema7, JSONSchema7TypeName } from "@appstrate/core/form";

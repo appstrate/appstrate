@@ -5,6 +5,7 @@
  * implicit: detection spends a request against an unknown host.
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import type { DiscoveryState } from "@/lib/model-discovery";
@@ -29,14 +30,14 @@ export function DiscoveryControls({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
-        <Button
+        <PendingButton
           type="button"
           variant={mode === "list" ? "default" : "outline"}
           onClick={onDiscover}
           pending={isPending}
         >
           {t("models.form.discoverButton")}
-        </Button>
+        </PendingButton>
         <Button
           type="button"
           variant={mode === "manual" ? "default" : "outline"}

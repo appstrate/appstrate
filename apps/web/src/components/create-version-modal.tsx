@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { Trans, useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import type { PackageType } from "@appstrate/core/validation";
 import { bumpVersion, planPublishVersion, type VersionBump } from "@appstrate/core/semver";
 import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
@@ -94,11 +94,15 @@ export function CreateVersionModal({
       onClose={onClose}
       title={t("version.createVersion")}
       actions={
-        <Button onClick={handleFormSubmit} pending={createVersion.isPending} disabled={!canCreate}>
+        <PendingButton
+          onClick={handleFormSubmit}
+          pending={createVersion.isPending}
+          disabled={!canCreate}
+        >
           {targetVersion && hasUnarchivedChanges
             ? t("version.createVersionX", { version: targetVersion })
             : t("version.createVersion")}
-        </Button>
+        </PendingButton>
       }
     >
       <div className="space-y-4">

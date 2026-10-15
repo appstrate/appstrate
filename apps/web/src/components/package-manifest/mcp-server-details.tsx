@@ -7,6 +7,7 @@
  * type, so without this block the type has no rendered view at all.
  */
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { ManifestFact, McpServerManifestDetails } from "../../lib/package-manifest";
@@ -61,7 +62,9 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
                 <code className="text-sm">{entry.key}</code>
                 {entry.type && <Badge variant="secondary">{entry.type}</Badge>}
                 {entry.required && <Badge variant="outline">{t("manifest.required")}</Badge>}
-                {entry.sensitive && <Badge variant="warning">{t("manifest.sensitive")}</Badge>}
+                {entry.sensitive && (
+                  <ToneBadge variant="warning">{t("manifest.sensitive")}</ToneBadge>
+                )}
               </div>
               {(entry.title ?? entry.description) && (
                 <p className="text-muted-foreground mt-0.5 text-xs">

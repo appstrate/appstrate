@@ -7,7 +7,7 @@ import { useModalParam } from "@/hooks/use-modal-param";
 import { FormModal } from "@/components/form-modal";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleValue } from "@/lib/toggle-value";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";

@@ -9,7 +9,7 @@
 import { useTranslation } from "react-i18next";
 import { useFormContext, useWatch, type UseFormRegisterReturn } from "react-hook-form";
 import { Input } from "@appstrate/ui/components/input";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import type { ManualRowFields } from "@/lib/model-form-payload";
 import { CapabilitiesSection } from "./capabilities-section";
 

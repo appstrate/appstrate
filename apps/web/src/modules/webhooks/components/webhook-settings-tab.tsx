@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
-import { CheckboxField } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleValue } from "@/lib/toggle-value";
@@ -124,9 +125,9 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
 
       {/* Save */}
       {canWrite && (
-        <Button onClick={handleSave} pending={updateMutation.isPending}>
+        <PendingButton onClick={handleSave} pending={updateMutation.isPending}>
           {t("settings:webhooks.saveSettings")}
-        </Button>
+        </PendingButton>
       )}
 
       {/* Secret section */}
@@ -170,9 +171,14 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       {/* Test — `POST /api/webhooks/:id/test` is guarded by `write`, not `read`. */}
       {canWrite && (
         <div className="border-border border-t pt-4">
-          <Button variant="outline" size="sm" onClick={handleTest} pending={testMutation.isPending}>
+          <PendingButton
+            variant="outline"
+            size="sm"
+            onClick={handleTest}
+            pending={testMutation.isPending}
+          >
             {t("settings:webhooks.sendTest")}
-          </Button>
+          </PendingButton>
         </div>
       )}
 
@@ -182,14 +188,14 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
           <h3 className="text-destructive text-sm font-semibold">
             {t("settings:webhooks.dangerZone")}
           </h3>
-          <Button
+          <PendingButton
             variant="destructive"
             size="sm"
             onClick={() => setDeleteConfirmOpen(true)}
             pending={deleteMutation.isPending}
           >
             {t("settings:webhooks.deleteBtn")}
-          </Button>
+          </PendingButton>
         </div>
       )}
 

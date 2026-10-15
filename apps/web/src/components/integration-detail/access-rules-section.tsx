@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { SettingsHeading } from "../settings/settings-heading";
 import { SaveFeedback } from "../settings/save-feedback";
 import { useUpdateIntegrationSettings } from "../../hooks/use-integrations";

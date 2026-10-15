@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneAlert } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Info } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
@@ -82,7 +83,7 @@ function ChoiceRequest({
   const hasCandidates = choice.candidates.length > 0;
   const Icon = hasCandidates ? Info : AlertTriangle;
   return (
-    <Alert
+    <ToneAlert
       variant={hasCandidates ? "info" : "warning"}
       data-testid={`schedule-connection-request-${choice.integrationId}`}
     >
@@ -101,6 +102,6 @@ function ChoiceRequest({
             })
           : t("schedule.connectionOverrides.noCandidateBody", { integration, actor })}
       </AlertDescription>
-    </Alert>
+    </ToneAlert>
   );
 }

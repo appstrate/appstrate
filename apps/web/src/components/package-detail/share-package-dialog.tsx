@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
 import {
-  OptionSelect,
   Select,
   SelectContent,
   SelectGroup,
@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
@@ -273,14 +274,14 @@ export function SharePackageDialog({
                 )}
               </SelectContent>
             </Select>
-            <Button
+            <PendingButton
               type="button"
               pending={share.isPending}
               disabled={!selected}
               onClick={() => selected && submit(selected)}
             >
               {t("packages.shareSubmit")}
-            </Button>
+            </PendingButton>
           </div>
           {/*
             One picker, two outcomes: what the recipient gets differs by KIND,
@@ -316,7 +317,7 @@ export function SharePackageDialog({
             >
               <p>{t("packages.shareNeedsVersion")}</p>
               {canPublish ? (
-                <Button
+                <PendingButton
                   type="button"
                   size="sm"
                   pending={publish.isPending}
@@ -324,7 +325,7 @@ export function SharePackageDialog({
                   onClick={() => void publishAndShare()}
                 >
                   {t("packages.sharePublishAndShare")}
-                </Button>
+                </PendingButton>
               ) : (
                 <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
               )}
@@ -509,9 +510,14 @@ function CoeditTab({
           ariaLabel={t("packages.coeditRoleLabel")}
           onValueChange={setRole}
         />
-        <Button type="button" pending={addMember.isPending} disabled={!member} onClick={submit}>
+        <PendingButton
+          type="button"
+          pending={addMember.isPending}
+          disabled={!member}
+          onClick={submit}
+        >
           {t("packages.coeditSubmit")}
-        </Button>
+        </PendingButton>
       </div>
       <p className="text-muted-foreground text-sm">
         {candidates.length === 0

@@ -7,7 +7,8 @@ import { Globe, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
-import { OptionSelect, SelectItem } from "@appstrate/ui/components/select";
+import { SelectItem } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import { useUploadClient } from "../../hooks/use-upload";
 import {

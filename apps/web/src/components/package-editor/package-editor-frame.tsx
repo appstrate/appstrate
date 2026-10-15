@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -132,14 +133,14 @@ export function PackageEditorFrame({
           >
             {t("editor.discardChanges")}
           </Button>
-          <Button
+          <PendingButton
             type="button"
             onClick={editor.submit}
             pending={isPending}
             className="max-lg:flex-1"
           >
             {t("btn.save")}
-          </Button>
+          </PendingButton>
         </div>
       </div>
     );
@@ -206,9 +207,9 @@ export function PackageEditorFrame({
           <Button variant="outline" type="button" onClick={() => navigate(listPath)}>
             {t("btn.cancel")}
           </Button>
-          <Button type="button" onClick={editor.submit} pending={isPending}>
+          <PendingButton type="button" onClick={editor.submit} pending={isPending}>
             {t("btn.create")}
-          </Button>
+          </PendingButton>
         </div>
       )}
     </div>

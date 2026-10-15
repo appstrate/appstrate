@@ -296,7 +296,7 @@ export function useProviderColumns({
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuSub>
-                  <DropdownMenuSubTrigger variant="destructive">
+                  <DropdownMenuSubTrigger className="text-destructive focus:text-destructive">
                     <Trash2 />
                     {t("btn.delete", { ns: "common" })}
                   </DropdownMenuSubTrigger>

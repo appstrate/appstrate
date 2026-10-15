@@ -9,6 +9,7 @@
  * ownership gates. The sections live in `components/integration-detail/`.
  */
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { lazy, Suspense } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
@@ -411,9 +412,9 @@ export function IntegrationDetailPage() {
         actionsLeft={
           <>
             {pkgLoading && <Skeleton className="h-5 w-16" />}
-            <Badge variant={active ? "success" : "warning"}>
+            <ToneBadge variant={active ? "success" : "warning"}>
               {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
-            </Badge>
+            </ToneBadge>
           </>
         }
         actionsRight={

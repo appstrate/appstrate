@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -63,14 +64,14 @@ export function ConfirmModal({
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button
+          <PendingButton
             variant={variant}
             onClick={confirm}
             pending={isPending}
             disabled={confirmDisabled}
           >
             {confirmLabel ?? t("btn.confirm")}
-          </Button>
+          </PendingButton>
         </>
       }
     >

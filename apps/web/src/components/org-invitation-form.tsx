@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useImperativeHandle, type Ref } from "react";
 import { toast } from "sonner";
 import { useAssignmentCatalog } from "../hooks/use-assignment-catalog";
@@ -10,7 +11,8 @@ import { Controller, useForm, useWatch } from "react-hook-form";
 import { ORG_ROLES } from "@appstrate/core/permissions";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
-import { FieldError, FieldGroup, FormItem } from "@appstrate/ui/components/field";
+import { FieldError, FieldGroup } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import type { components } from "../api/client";
 import { useInviteMember, useUpdateInvitation } from "../hooks/use-org";
@@ -218,13 +220,13 @@ export function OrgInvitationForm({
             {t("common:btn.cancel")}
           </Button>
         )}
-        <Button
+        <PendingButton
           type="submit"
           pending={isPending}
           className={invitation || onCancel ? "" : "sm:mr-auto"}
         >
           {t(invitation ? "common:btn.save" : "onboarding.invite")}
-        </Button>
+        </PendingButton>
       </div>
     </form>
   );

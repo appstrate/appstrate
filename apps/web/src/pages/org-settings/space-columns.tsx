@@ -14,6 +14,7 @@
  * because a row here carries one menu and no loose buttons.
  */
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { FolderInput, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -79,13 +80,13 @@ export function useSpaceColumns({
           // The one state that asks the reader for a decision, so it is said
           // in words a hover does not hide: since when it has been orphaned is
           // in the created column's neighbour, not in a tooltip.
-          <Badge variant="warning">{t("spaces.personal.orphanedBadge")}</Badge>
+          <ToneBadge variant="warning">{t("spaces.personal.orphanedBadge")}</ToneBadge>
         ) : space.personal ? (
           <Badge variant="secondary">{t("spaces.personal.badge")}</Badge>
         ) : (
           <span className="flex flex-wrap gap-1">
             <Badge variant="secondary">{t(`spaces.visibility.${space.visibility}`)}</Badge>
-            {space.isDefault && <Badge variant="running">{defaultLabel}</Badge>}
+            {space.isDefault && <ToneBadge variant="running">{defaultLabel}</ToneBadge>}
           </span>
         ),
     },

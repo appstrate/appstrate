@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm, Controller } from "react-hook-form";
@@ -7,10 +8,10 @@ import { FormModal } from "./form-modal";
 import { SecretRevealModal } from "./secret-reveal-modal";
 import { useModalParam } from "../hooks/use-modal-param";
 import { Badge } from "@appstrate/ui/components/badge";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { TextSkeleton } from "./loading-skeletons";
 import { ScopeMultiSelect } from "./scope-multi-select";
 import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
@@ -84,7 +85,7 @@ export function ApiKeyCreateModal() {
             {t("apiKeys.scopesGranted")}
           </p>
           {isFullAccess ? (
-            <Badge variant="success">{t("apiKeys.fullAccess")}</Badge>
+            <ToneBadge variant="success">{t("apiKeys.fullAccess")}</ToneBadge>
           ) : (
             <div className="flex flex-wrap gap-1">
               {summary.map((g) => (

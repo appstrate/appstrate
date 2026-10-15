@@ -108,7 +108,7 @@ export function InlineEditableLabel({
         className="h-7 w-full min-w-0 text-sm font-medium"
         data-testid={testId}
       />
-      {saving && <Spinner className="shrink-0" label={t("loading")} />}
+      {saving && <Spinner className="shrink-0" aria-label={t("loading")} />}
     </div>
   );
 }

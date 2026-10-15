@@ -943,7 +943,7 @@ function FileSelectionActions({
             <DropdownMenuItem
               disabled={gestures.busy}
               onSelect={gestures.onDelete}
-              variant="destructive"
+              className="text-destructive focus:text-destructive"
             >
               <Trash2 />
               {t("files.delete")}

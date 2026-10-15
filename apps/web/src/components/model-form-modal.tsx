@@ -8,6 +8,7 @@
  * which listing fills the model list is the derived `modelSource`.
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useEffect, useMemo, useState } from "react";
 import { FormProvider, useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
@@ -560,7 +561,7 @@ export function ModelFormModal({
           <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button
+          <PendingButton
             type="submit"
             form="model-form"
             pending={isPending}
@@ -569,7 +570,7 @@ export function ModelFormModal({
             {selectionCount !== null
               ? t("models.form.addModels", { count: selectionCount })
               : t("btn.save")}
-          </Button>
+          </PendingButton>
         </>
       }
     >

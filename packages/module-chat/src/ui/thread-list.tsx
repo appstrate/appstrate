@@ -286,7 +286,7 @@ function ConversationRow({
         {session.generating ? (
           <Spinner
             className="text-sidebar-foreground/70 size-3.5"
-            label={t("threads.generating")}
+            aria-label={t("threads.generating")}
           />
         ) : unread ? (
           <span

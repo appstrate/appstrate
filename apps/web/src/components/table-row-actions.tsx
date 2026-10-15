@@ -54,7 +54,7 @@ export function TableRowActions({
   const hasItems = plain.length > 0 || destructive.length > 0 || hasChildren;
   return (
     <div className="relative z-10 flex items-center justify-end gap-1">
-      {isPending && <Spinner label={t("loading")} />}
+      {isPending && <Spinner aria-label={t("loading")} />}
       {hasItems && menuLabel && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
