@@ -172,6 +172,32 @@ describe("t() keys", () => {
   );
 
   /**
+   * A key carried by a data field (`{ labelKey: "schedule.timezone" }`) reaches `t()` through a
+   * variable, which the scan above cannot follow: a locale merge that removes it leaves the
+   * key string on screen. Only fields named like a label are read, so `queryKey` and friends
+   * are never mistaken for one.
+   */
+  it(
+    "named by a label-like field all resolve to a declared locale key",
+    () => {
+      const FIELD =
+        /\b(?:label|title|description|hint|message|placeholder|empty|text|tooltip|heading)Key\s*:\s*(["'])([A-Za-z][\w-]*(?::[\w-]+)?(?:\.[\w-]+)+)\1/g;
+      const missing: string[] = [];
+      for (const file of SOURCES) {
+        const src = readFileSync(file, "utf8");
+        FIELD.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = FIELD.exec(src))) {
+          if (isDeclared(stripNamespace(match[2]!))) continue;
+          missing.push(`${relative(REPO_ROOT, file)}:${lineOf(src, match.index)} → "${match[2]}"`);
+        }
+      }
+      expect(missing).toEqual([]);
+    },
+    SCAN_TIMEOUT_MS,
+  );
+
+  /**
    * Declared somewhere is not enough: `useTranslation(["settings", "agents"])`
    * looks a bare key up in `settings`, then in the `common` fallback, and
    * nowhere else. A key that lives in `agents` renders as its own string
