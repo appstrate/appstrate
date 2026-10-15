@@ -110,6 +110,12 @@ describe("the integration index", () => {
     expect(html).not.toContain("Kestrel");
   });
 
+  it("heads a connections column, and says « — » while the account list is unknown", () => {
+    const html = page(READER, [integration("@acme/remote", "Zéphyr")]);
+    expect(html).toContain(settingsFr["integrations.col.connections"]);
+    expect(html).toContain("—");
+  });
+
   it("points at the space library when nothing is active here", () => {
     const html = page(READER, []);
     expect(html).toContain(settingsFr["integrations.empty.space"]);

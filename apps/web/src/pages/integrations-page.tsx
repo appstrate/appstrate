@@ -34,6 +34,7 @@ import {
 import { readList, useListParams } from "../lib/list-params";
 import { packageCardItem } from "../lib/package-card-item";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { useConnectionCounts } from "../hooks/use-me-connections";
 import { usePackageList } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
@@ -48,6 +49,7 @@ export function IntegrationsPage() {
   // The server answers the active set of this space: the index route every
   // type page asks, not the management listing.
   const { data: active = [], isLoading, error } = usePackageList("integration");
+  const connectionCounts = useConnectionCounts();
   const list = useListParams(["origin", "protocol"]);
   const [view, setView] = useListView("integrations");
   const visibility = useColumnVisibility("integrations");
@@ -92,7 +94,7 @@ export function IntegrationsPage() {
   const countOf = (value: IntegrationExecution) =>
     active.filter((row) => integrationExecution(row.source_kind) === value).length;
 
-  const allColumns = useIntegrationListColumns().filter((column) =>
+  const allColumns = useIntegrationListColumns(connectionCounts).filter((column) =>
     execution === "local" ? column.id !== "protocol" : column.id !== "server",
   );
   const columns = visibleColumns(allColumns, visibility.hidden);
@@ -207,6 +209,7 @@ export function IntegrationsPage() {
           renderCard={(integration) => (
             <PackageCard
               {...packageCardItem(integration, "integration")}
+              connectionCount={connectionCounts?.get(integration.id)}
               // A system integration already says so with the card's shield.
               meta={integrationOrigin(integration) === "system" ? undefined : orgName}
               showRun={false}
