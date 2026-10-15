@@ -8,8 +8,8 @@ the callee a question, then Vapi extracts the answer as JSON. Base URL:
 `status`).
 
 - Exactly one: use its `id`.
-- Several: use the `id` named in your prompt or input. None named: stop and ask
-  for it.
+- Several: use the `id` named in your prompt or input. None named: stop and
+  report which numbers exist.
 - None: stop and report that a phone number must be imported in Vapi first.
 
 #### 2. Place the call
@@ -71,8 +71,9 @@ The response is the call. Keep its `id`.
 
 #### 3. Wait for the end
 
-Do not call again right away: run `sleep 25`, then `GET /call/{id}`. Repeat
-until `status` is `"ended"`. Then branch on `endedReason`:
+Poll `GET /call/{id}` until `status` is `"ended"`, running `sleep 25` between
+two polls: each `api_call` must return within 30 s, so the wait cannot happen
+inside the request. Then branch on `endedReason`:
 
 - `customer-did-not-answer`, `customer-busy`, `voicemail`: nobody answered.
   Report it and stop polling.
@@ -96,15 +97,16 @@ until `status` is `"ended"`. Then branch on `endedReason`:
 - Call a number only when your prompt or input asks for that call. Never for
   cold prospecting.
 - The first message says that an AI is calling and that the call is recorded.
-- Placing a call needs `maxDurationSeconds` + 120 s of run time left.
+- Before placing a call, read the Timeout in the System section. If it is
+  missing or below `maxDurationSeconds` + 120 s, do not call: report that the
+  agent manifest needs a larger `timeout` (the 300 s default is too short;
+  platform ceiling: 1800 s).
 
 #### Setup (operator, once)
 
-- The agent manifest's `timeout` must be at least `maxDurationSeconds` + 120 s:
-  the 300 s default is too short (platform ceiling: 1800 s).
-- Free Vapi numbers are US-only and cannot call abroad. To call French numbers,
-  import a Twilio number into Vapi. A French Twilio number needs a regulatory
-  bundle (KBIS, SIRET, NAF code, a listed manager's ID), which takes several
-  business days. Since October 2024, French operators block calls whose caller
-  ID cannot be authenticated: a foreign number presenting as French will likely
-  not get through.
+Free Vapi numbers are US-only and cannot call abroad. To call French numbers,
+import a Twilio number into Vapi. A French Twilio number needs a regulatory
+bundle (KBIS, SIRET, NAF code, a listed manager's ID), which takes several
+business days. Since October 2024, French operators block calls whose caller ID
+cannot be authenticated: a foreign number presenting as French will likely not
+get through.
