@@ -318,7 +318,6 @@ export function OrgCatalogueModal({ type: active }: { type: PackageType }) {
           emptyHint={t("catalogue.emptyHint")}
           emptyIcon={PACKAGE_TYPE_ICON[active]}
           list={list}
-          view="table"
           header={<SettingsHeading className="mb-4" title={t(titleKey)} />}
           // The library says where a package is placed, not what uses it: an activity filter would match nothing.
           activityFilter={false}
