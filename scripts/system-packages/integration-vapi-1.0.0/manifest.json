@@ -23,7 +23,8 @@
             "api_key": {
               "type": "string",
               "writeOnly": true,
-              "description": "Vapi private API key (Dashboard → API Keys), not the public key"
+              "title": "Clé d'API privée",
+              "description": "Clé privée de l'organisation Vapi (https://dashboard.vapi.ai/org/api-keys → Private API Keys). Une clé publique est refusée. Les appels passés avec cette clé consomment les crédits de l'organisation Vapi."
             }
           },
           "required": ["api_key"]
