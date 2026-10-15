@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.68] - 2026-10-15
+
 ### Operators
 
 - **Runner daemon variables go in a systemd drop-in** (#1943). beta.67 said to
