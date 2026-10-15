@@ -256,7 +256,7 @@ export function OrgCatalogueModal({
   };
   /** The reader's verdict for one switch, in the direction it would go (`lib/catalogue-gates`). */
   const gateOf = (pkg: LibraryPackageItem, targetSpaceId: string, next: boolean): ActivationGate =>
-    activationGate(pkg, targetSpaceId, grantById.get(targetSpaceId), next);
+    activationGate(pkg, targetSpaceId, next);
   const mayActivateIn = (pkg: LibraryPackageItem, targetSpaceId: string) =>
     gateOf(pkg, targetSpaceId, true).allowed;
   const rowOf = (item: Pick<CardItem, "id">) => ofKind.find((row) => row.id === item.id);

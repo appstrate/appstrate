@@ -13,13 +13,14 @@ import {
 } from "@appstrate/db/schema";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import { packagePermission } from "@appstrate/core/permissions";
+import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { isActiveHere } from "./package-activation.ts";
 import { isPublished, latestTagJoin } from "./space-packages.ts";
 import { sharerView } from "./package-shares.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
+import { callerPersonalOwnerId } from "../lib/view-as.ts";
 
 const PACKAGE_TYPES = ["agent", "skill", "mcp-server", "integration"] as const;
 
@@ -48,6 +49,22 @@ interface Placement {
   shared_by: { user_id: string; name: string } | null;
 }
 
+/**
+ * Whether the caller may switch a package on (or off) in one space, as
+ * `POST /api/spaces/{id}/packages` and `DELETE …/packages/{scope}/{name}` judge it:
+ * `allowed`; `not_shareable` — not placed there, and its home grants no `<type>:share`, which
+ * the activation needs to create the offer; `forbidden` — the type's
+ * `activate`/`deactivate` grant is missing there (the owner of a personal space needs none).
+ */
+type ActivationVerdict = "allowed" | "not_shareable" | "forbidden";
+
+/** The two verdicts of one (package, space) pair, for every space the library lists. */
+interface ActivationCell {
+  space_id: string;
+  activate: ActivationVerdict;
+  deactivate: ActivationVerdict;
+}
+
 interface LibraryPackage {
   id: string;
   type: string;
@@ -61,6 +78,7 @@ interface LibraryPackage {
   /** A `latest` published version exists (or a system package) — what enforcing a skill needs. */
   published: boolean;
   placements: Placement[];
+  activation: ActivationCell[];
 }
 
 /**
@@ -94,6 +112,23 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   const orgId = c.get("orgId");
 
   const accessible = await packageAccessSpaces(c);
+  // The caller's own personal space takes no activation grant: ownership authorizes
+  // (`coarseSpacePackageGate`, `routes/spaces.ts`).
+  const personalOwnerId = callerPersonalOwnerId(c);
+  const activationVerdict = (
+    type: PackageType,
+    space: (typeof accessible)[number],
+    placed: boolean,
+    shareable: boolean,
+    next: boolean,
+  ): ActivationVerdict => {
+    if (!placed && !shareable) return "not_shareable";
+    const ownSpace = space.ownerUserId !== null && space.ownerUserId === personalOwnerId;
+    if (ownSpace) return "allowed";
+    return space.permissions.has(spacePackagePermission(type, next ? "activate" : "deactivate"))
+      ? "allowed"
+      : "forbidden";
+  };
   const target = spaceId ? accessible.find((space) => space.id === spaceId) : undefined;
   const visibleSpaces = spaceId ? accessible.filter((space) => space.id === spaceId) : accessible;
   const accessibleIds = accessible.map((space) => space.id);
@@ -273,6 +308,19 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     if (placements.length === 0 && !(!!spaceId && !target?.ownerUserId && home.home_shareable))
       continue;
 
+    const placedIn = new Set(placements.map((placement) => placement.space_id));
+    const activation = visibleSpaces.map((space): ActivationCell => ({
+      space_id: space.id,
+      activate: activationVerdict(type, space, placedIn.has(space.id), home.home_shareable, true),
+      deactivate: activationVerdict(
+        type,
+        space,
+        placedIn.has(space.id),
+        home.home_shareable,
+        false,
+      ),
+    }));
+
     const m = asRecord(row.draftManifest);
     grouped[row.type]?.push({
       id: row.id,
@@ -286,6 +334,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       description: typeof m.description === "string" ? m.description : "",
       published: isPublished(row),
       placements,
+      activation,
     });
   }
 

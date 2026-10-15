@@ -2000,6 +2000,7 @@ export const schemas = {
       "owner_name",
       "allowed_actions",
       "bindable",
+      "serves_model_ids",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -2050,6 +2051,12 @@ export const schemas = {
         type: "boolean",
         description:
           "Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one.",
+      },
+      serves_model_ids: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "On a personal credential, the ids of the organization models left to members' own credentials (`binding: user`) that it pays for — the same service, or a subscription offering the model on its API. `[]` on an organization or built-in credential: its models name it in `credentialId`.",
       },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
@@ -2914,6 +2921,7 @@ export const schemas = {
         "home_shareable",
         "published",
         "placements",
+        "activation",
       ],
       properties: {
         id: { type: "string", description: "Package id (`@scope/name`)." },
@@ -2938,6 +2946,20 @@ export const schemas = {
           type: "boolean",
           description:
             "Whether the package has a published version (a `latest` dist-tag), or is a system package. A skill can be enforced in a space's chat only when it is published.",
+        },
+        activation: {
+          type: "array",
+          description:
+            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the offer; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
+          items: {
+            type: "object",
+            required: ["space_id", "activate", "deactivate"],
+            properties: {
+              space_id: { type: "string" },
+              activate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
+              deactivate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
+            },
+          },
         },
         placements: {
           type: "array",

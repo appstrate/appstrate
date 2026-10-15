@@ -21,6 +21,7 @@ function row(id: string, placements: LibraryPackageItem["placements"]): LibraryP
     home_deletable: false,
     home_shareable: true,
     published: true,
+    activation: [],
     placements,
   };
 }

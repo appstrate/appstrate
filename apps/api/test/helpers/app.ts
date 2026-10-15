@@ -66,6 +66,7 @@ import { createModelProviderCredentialsRouter } from "../../src/routes/model-pro
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createSpacesRouter } from "../../src/routes/spaces.ts";
 import { createRolesRouter } from "../../src/routes/roles.ts";
+import { createOrgRolesRouter } from "../../src/routes/org-roles.ts";
 import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
@@ -273,6 +274,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/orgs", orgsRouter);
   app.route("/api/me", meRouter);
   app.route("/api/library", createLibraryRouter());
+  app.route("/api/org-roles", createOrgRolesRouter());
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());
   // HMAC-signed event ingestion. Must mount BEFORE runsRouter so the

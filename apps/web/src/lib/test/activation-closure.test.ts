@@ -26,6 +26,7 @@ function integration(
     home_deletable: true,
     home_shareable: true,
     published: true,
+    activation: [],
     placements: placements.map((p) => ({
       space_id: p.space_id,
       via: "home" as const,

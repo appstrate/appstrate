@@ -1073,6 +1073,12 @@ export interface ModelProviderCredentialInfo {
   allowed_actions: ModelProviderCredentialAction[];
   /** Whether an organization model may be bound to this credential: `true` for an organization one (API key or subscription), `false` for a personal or a built-in one. */
   bindable: boolean;
+  /**
+   * On a personal credential, the organization models left to members' own credentials that it
+   * pays for (`servesModel`: the same service, or a subscription offering the model on its
+   * API); `[]` on an organization or built-in one, whose models name it as their credential.
+   */
+  serves_model_ids: string[];
   created_by: string | null;
   createdAt: string;
   updatedAt: string;

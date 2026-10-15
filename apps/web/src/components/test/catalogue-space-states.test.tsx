@@ -43,6 +43,7 @@ const PACKAGE: LibraryPackageItem = {
   home_deletable: true,
   home_shareable: true,
   published: true,
+  activation: [],
   placements: [
     { space_id: "spc_on", via: "home", state: "active", chat_enforced: false, shared_by: null },
     {

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
+import { SPACE_ROLE_PRESETS, type OrgRole } from "@appstrate/core/permissions";
 import { $api, type components } from "../api/client";
 import { useInvalidatePaths } from "./use-invalidate-paths";
 import { useOrgOnlyScope } from "./use-org-scope";
@@ -194,4 +194,21 @@ export function useSpaceRoleOptions(spaceId?: string, enabled = true) {
     error: query.error,
     refetch: query.refetch,
   };
+}
+
+/**
+ * What each organization role grants (`GET /api/org-roles`, module contributions included), as
+ * `role → permissions`; `undefined` until it answers. The same for every caller.
+ */
+export function useOrgRoleGrants(): Map<OrgRole, Set<string>> | undefined {
+  const scope = useOrgOnlyScope();
+  const { data } = $api.useQuery(
+    "get",
+    "/api/org-roles",
+    { params: { header: scope.header } },
+    { enabled: scope.enabled, staleTime: Infinity },
+  );
+  return data
+    ? new Map(data.data.map((entry) => [entry.role, new Set(entry.permissions)]))
+    : undefined;
 }

@@ -85,6 +85,7 @@ function credential(over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
     created_by: "usr_admin",
     allowed_actions: ["edit", "delete", "test"],
     bindable: true,
+    serves_model_ids: [],
     needs_reconnection: false,
     createdAt: CREATED,
     updatedAt: CREATED,
@@ -101,6 +102,7 @@ const MY_KEY = credential({
   owner_id: "usr_me",
   owner_name: "Moi",
   bindable: false,
+  serves_model_ids: ["mdl_m"],
 });
 const BOB_SUBSCRIPTION = credential({
   id: "cred_bob",
@@ -112,6 +114,7 @@ const BOB_SUBSCRIPTION = credential({
   owner_id: "usr_bob",
   owner_name: "Bob",
   bindable: false,
+  serves_model_ids: ["mdl_m"],
   allowed_actions: ["test"],
 });
 const DEAD_KEY = credential({

@@ -230,6 +230,11 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   // Exact: every other route under `/api/orgs/…` IS guarded.
   { path: "/api/orgs", why: "the caller's own orgs, listed or created outside any org context" },
   { path: "/api/orgs/{orgId}", why: "membership (`orgRole`) is the gate, and every role reads" },
+  {
+    methods: ["GET"],
+    path: "/api/org-roles",
+    why: "membership is the gate: the four roles' grants, the same for every caller",
+  },
   { path: "/api/orgs/{orgId}/settings", why: "membership (`orgRole`) is the gate, every role" },
   {
     methods: ["GET"],
