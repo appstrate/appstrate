@@ -261,7 +261,6 @@ const authCallbackRoute = (
 const PAGES: Record<RoutePath, ReactNode> = {
   "/": <DashboardPage />,
   "/agents": <PackageIndexPage type="agent" />,
-  "/agents/new": <PackageEditorPage type="agent" />,
   "/agents/:scope/:name": <UnifiedPackageDetailPage type="agent" />,
   "/agents/:scope/:name/:version": <UnifiedPackageDetailPage type="agent" />,
   "/agents/:scope/:name/runs/:runId": <RunDetailPage />,

@@ -193,7 +193,7 @@ describe("routeOf", () => {
   });
 
   it("ranks a concrete URL the way the router does: static segments first", () => {
-    expect(routeOf("/agents/new")).toBe("/agents/new");
+    expect(routeOf("/skills/new")).toBe("/skills/new");
     expect(routeOf("/agents/@acme/triage")).toBe("/agents/:scope/:name");
     expect(routeOf("/agents/@acme/triage/1.2.0")).toBe("/agents/:scope/:name/:version");
     expect(routeOf("/agents/@acme/triage/runs/run_1?tab=logs#x")).toBe(

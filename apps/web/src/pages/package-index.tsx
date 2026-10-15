@@ -33,6 +33,7 @@ import { useModalParam } from "../hooks/use-modal-param";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePermissions } from "../hooks/use-permissions";
+import { CreateAgentModal } from "../components/create-agent-modal";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 
@@ -123,6 +124,7 @@ function PackageIndexBody({
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
   const importParam = useModalParam("import");
+  const createAgentParam = useModalParam("createAgent");
   const list = useListParams(["origin", "activity"]);
   const [view, setView] = useListView(type);
   // Creating is a write on the package type, as its route is.
@@ -189,6 +191,9 @@ function PackageIndexBody({
       {importParam.value !== null && canImport && (
         <ImportModal onClose={importParam.close} onLeave={importParam.leave} />
       )}
+      {createAgentParam.value !== null && canCreate && type === "agent" && (
+        <CreateAgentModal onClose={createAgentParam.close} onLeave={createAgentParam.leave} />
+      )}
       {creation.isOpen && (
         <CreationHandoffModal
           resource={type}
@@ -199,7 +204,9 @@ function PackageIndexBody({
               importParam.open("1", "create");
               return;
             }
-            creation.leave(packageNewPath(type));
+            // The chooser hands over to the agent dialog; other types have a page of their own.
+            if (type === "agent") createAgentParam.open("1", "create");
+            else creation.leave(packageNewPath(type));
           }}
           onChat={creation.openChat}
         />

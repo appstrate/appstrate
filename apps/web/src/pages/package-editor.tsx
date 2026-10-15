@@ -34,7 +34,6 @@ import { AuthsSection } from "../components/integration-editor/auths-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 
 import {
-  defaultEditorState,
   defaultSkillManifest,
   defaultIntegrationManifest,
   DEFAULT_SKILL_CONTENT,
@@ -62,19 +61,18 @@ function AgentEditorInner({
   onTabRequest,
 }: {
   initialState: EditorState;
-  packageId: string | undefined;
+  packageId: string;
   /**
    * Timeout this deployment will actually enforce (server-computed: declared
    * value clamped to `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`). Read off
-   * the agent detail the page already loaded — undefined when creating.
+   * the agent detail the page already loaded.
    */
   effectiveTimeoutSeconds?: number;
-  /** Editing: the section is the settings rail's, not the editor's. */
-  tab?: PackageEditorTab;
-  onTabRequest?: (tab: PackageEditorTab) => void;
+  /** The section is the settings rail's, not the editor's. */
+  tab: PackageEditorTab;
+  onTabRequest: (tab: PackageEditorTab) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const isEdit = packageId !== undefined;
 
   // Schema fields are stored in local state to preserve fields being edited (empty key).
   // Only complete fields are persisted to the manifest via fieldsToSchema.
@@ -88,10 +86,6 @@ function AgentEditorInner({
     packageId,
     tab,
     onTabRequest,
-    validate: (s) =>
-      !isEdit && !newPackageContent("agent", s.operations ?? []).trim()
-        ? { error: t("editor.errorPrompt"), tab: "files" }
-        : null,
     onManifestReplace: (manifest) => setSchemaFields(manifestToSchemaFields(manifest)),
   });
   const { state, setState, updateManifest, activeTab } = editor;
@@ -167,13 +161,11 @@ function AgentEditorInner({
       editor={editor}
       tabs={[
         { id: "general", label: t("editor.tabGeneral") },
-        { id: "files", label: t("files.tabLabel"), createOnly: true },
         { id: "schema", label: t("editor.tabSchema") },
         { id: "skills", label: t("common:nav.skills") },
         { id: "integrations", label: t("common:nav.integrations") },
         // The manifest's `runtime_tools`, not integration packages.
         { id: "tools", label: t("integrationEditor.tabTools") },
-        { id: "json", label: t("editor.tabJson"), createOnly: true },
       ]}
       descriptions={{
         general: t("editor.description.general"),
@@ -187,7 +179,7 @@ function AgentEditorInner({
         <MetadataSection
           value={editor.metadata}
           onChange={editor.onMetadataChange}
-          isEdit={isEdit}
+          isEdit
           identityChildren={
             <AgentAppearanceFields manifest={state.manifest} onChange={updateManifest} />
           }
@@ -507,19 +499,10 @@ export function PackageDefinitionEditor({
 
 // ─── Page Wrapper ───────────────────────────────────────────────────
 
-/** The creation route of a package type: an existing package is edited in its settings. */
-export function PackageEditorPage({ type }: { type: "agent" | "skill" | "integration" }) {
+/** The creation route of a skill or an integration: an existing package is edited in its settings; an agent is created from a dialog. */
+export function PackageEditorPage({ type }: { type: "skill" | "integration" }) {
   const { user } = useAuth();
   const { currentOrg } = useOrg();
-
-  if (type === "agent") {
-    return (
-      <AgentEditorInner
-        initialState={defaultEditorState(currentOrg?.slug, user?.email)}
-        packageId={undefined}
-      />
-    );
-  }
 
   if (type === "integration") {
     return (

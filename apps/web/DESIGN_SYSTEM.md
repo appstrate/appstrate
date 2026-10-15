@@ -639,7 +639,9 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
   (`components/new-schedule-modal.tsx` is the example to follow). **Creating a package**
   (agent, skill, integration, MCP server): the creation hand-off modal
   (`components/creation-handoff-modal.tsx`, `hooks/use-creation-handoff.ts`:
-  manual / chat / coding agent), then the editor page.
+  manual / chat / coding agent), then, for the manual way, the editor page: an agent
+  is created from `components/create-agent-modal.tsx` (name, identifier, description, prompt)
+  and edited on its own page; skills and integrations keep a creation page.
 
 ## 10. Feedback
 

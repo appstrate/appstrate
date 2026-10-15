@@ -43,7 +43,6 @@ export const ROUTE_ACCESS = {
   "/": { open: "the fallback route: renders for any principal, its sections gate themselves" },
 
   "/agents": { anyOf: AGENT_SIGHT, operations: ["listAgents"] },
-  "/agents/new": { anyOf: ["agents:write"], operations: ["createAgent"] },
   "/agents/:scope/:name": { anyOf: AGENT_SIGHT, operations: ["getAgentPackage"] },
   // A version is the full manifest; `agents:run` reads only the summary (RBAC spec §3.4).
   "/agents/:scope/:name/:version": {
