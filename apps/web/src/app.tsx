@@ -25,6 +25,7 @@ import {
   workspaceSettingsGeneralChunk,
 } from "./lib/overlay-chunks";
 import { chunkComponent } from "./lib/lazy-chunk";
+import { OverlayFrame } from "./components/overlay-frame";
 import { OverlayUnavailable } from "./components/overlay-unavailable";
 import { ShellFrameProvider, ShellHeader } from "./components/shell-frame";
 import {
@@ -348,7 +349,7 @@ function pageRoute(path: RoutePath) {
       key={path}
       path={path}
       element={
-        <RouteGate path={path} pending={skeleton}>
+        <RouteGate path={path} pending={skeleton} inPanel={isOverlayPath(path)}>
           <Suspense fallback={skeleton}>{PAGES[path]}</Suspense>
         </RouteGate>
       }
@@ -822,15 +823,19 @@ export function App() {
             {overlay && (
               <ErrorBoundary resetKey={location.pathname}>
                 <Routes>
-                  {flatPaths("overlay").map(pageRoute)}
-                  <Route
-                    element={
-                      <Suspense fallback={<OverlayPanelSkeleton />}>
-                        <UnifiedSettingsLayout />
-                      </Suspense>
-                    }
-                  >
-                    {LAYOUTS.map(layoutRoute)}
+                  {/* One dialog for every panel overlay: it opens once and its
+                      panes (skeleton, then page) change inside it. */}
+                  <Route element={<OverlayFrame />}>
+                    {flatPaths("overlay").map(pageRoute)}
+                    <Route
+                      element={
+                        <Suspense fallback={<OverlayPanelSkeleton />}>
+                          <UnifiedSettingsLayout />
+                        </Suspense>
+                      }
+                    >
+                      {LAYOUTS.map(layoutRoute)}
+                    </Route>
                   </Route>
                   {OVERLAY_NOT_FOUND_PATHS.map((path) => (
                     <Route key={path} path={path} element={<OverlayUnavailable />} />

@@ -94,7 +94,7 @@ import { CatalogueMenuItems } from "./catalogue-row";
 import { CatalogueShared } from "./catalogue-shared";
 import { CatalogueAddButton } from "./catalogue-add-button";
 import { PageActionsMenu } from "./page-actions-menu";
-import { PanelDialog } from "./panel-dialog";
+import { PanelLayout } from "./panel-layout";
 import { PackageCollection } from "./package-collection";
 import type { FilterSpec } from "./list-toolbar";
 import {
@@ -134,14 +134,12 @@ export function OrgCatalogueModal({
   reading,
   type: active,
   hrefOf,
-  onClose,
 }: {
   /** Both from the URL, so a link opens exactly one view. */
   reading: CatalogueReading;
   type: PackageType;
   /** The address of another reading or kind of the catalogue. */
   hrefOf: (reading: CatalogueReading, type: PackageType) => string;
-  onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const spaceId = useCurrentSpaceId();
@@ -629,7 +627,7 @@ export function OrgCatalogueModal({
   );
 
   return (
-    <PanelDialog
+    <PanelLayout
       title={t("catalogue.title")}
       rail={rail}
       // Where the reader is, kept in place while the pane scrolls: the kind
@@ -668,7 +666,6 @@ export function OrgCatalogueModal({
           </span>
         )
       }
-      onClose={onClose}
     >
       {reading === "shared" ? (
         <CatalogueShared
@@ -888,6 +885,6 @@ export function OrgCatalogueModal({
           canPublish={writableOf({ id: share.value })}
         />
       )}
-    </PanelDialog>
+    </PanelLayout>
   );
 }

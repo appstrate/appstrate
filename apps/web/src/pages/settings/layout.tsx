@@ -21,7 +21,7 @@ import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
 import { ContextSelector } from "../../components/settings/context-selector";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { PanelDialog } from "../../components/panel-dialog";
+import { PanelLayout } from "../../components/panel-layout";
 import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { useSpaces } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -31,7 +31,7 @@ import {
   useCurrentSpaceId,
 } from "../../hooks/use-current-space";
 import { useOrg } from "../../hooks/use-org";
-import { useCloseOverlay, useLandAfterOrgSwitch } from "../../lib/modal-route";
+import { useLandAfterOrgSwitch } from "../../lib/modal-route";
 import { SETTINGS_INDEX, type SettingsScope } from "../../lib/route-access";
 import { useOverlayBreadcrumb } from "../../hooks/use-overlay-breadcrumb";
 import {
@@ -86,7 +86,6 @@ function ScopeNavigation({
 export function UnifiedSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
   const location = useLocation();
-  const closeSettings = useCloseOverlay();
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
   const { currentOrg, orgs, switchOrg } = useOrg();
   const { data: spaces = [] } = useSpaces();
@@ -189,7 +188,7 @@ export function UnifiedSettingsLayout() {
   );
 
   return (
-    <PanelDialog
+    <PanelLayout
       title={label("unifiedSettings.title")}
       rail={rail}
       // The same band as the catalogue: invisible at rest, the section's name
@@ -207,7 +206,6 @@ export function UnifiedSettingsLayout() {
           </span>
         ) : null
       }
-      onClose={closeSettings}
     >
       {activeItem && (
         <div className="mb-6 flex min-h-9 items-center justify-between gap-3 md:gap-4">
@@ -229,7 +227,7 @@ export function UnifiedSettingsLayout() {
           <Outlet />
         </SettingsPageActionTargetProvider>
       </div>
-    </PanelDialog>
+    </PanelLayout>
   );
 }
 
