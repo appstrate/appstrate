@@ -94,6 +94,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     the package's files, so the versions published from it carry the doc.
     Before, it reached only the draft column, and a version published from
     such a draft had no `INTEGRATION.md`: republish one to give runs its doc.
+    An empty `content` now removes the stored `INTEGRATION.md`, so the next
+    version published carries no doc, instead of the previous one.
+  - **A run on an integration's draft** whose manifest is saved between the
+    freeze and the bundle starts the tools it froze without the doc (a
+    warning is logged), rather than with a doc written for other tools.
   - **An integration member is bundled alone**: the dependencies its own
     manifest declares (a `dependencies.skills` entry, say) are not bundled.
   - **Integrity**: a declared integration whose stored archive no longer

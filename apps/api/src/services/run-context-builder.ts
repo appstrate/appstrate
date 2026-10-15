@@ -200,6 +200,7 @@ export async function buildRunContext(params: {
       getCheckpoint(agent.id, spaceId, persistenceScope),
       buildAgentPackage(agent, orgId, {
         integrationVersions: params.resolvedIntegrationVersions,
+        ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
         dependencyOverrides: params.dependencyOverrides ?? null,
       }),
       params.overrideVersionLabel

@@ -53,6 +53,7 @@
  */
 
 import {
+  BundleError,
   extractRootFromAfps,
   formatPackageIdentity,
   type BundlePackage,
@@ -65,7 +66,9 @@ import { DbPackageCatalog } from "./db-package-catalog.ts";
 import { DraftPackageCatalog } from "./draft-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "../agent-version-resolver.ts";
 import {
+  parseIntegrationManifest,
   resolvedIntegrationVersionToDescriptor,
+  type IntegrationManifestCache,
   type ResolvedIntegrationVersionMap,
 } from "../integration-service.ts";
 import { getSystemPackages, type SystemPackageEntry } from "../system-packages.ts";
@@ -83,6 +86,13 @@ interface RunPackageCatalogOptions {
   dependencyOverrides?: Record<string, string> | null;
   /** The run's frozen integration versions — the only source for `integrations`. */
   integrationVersions: ResolvedIntegrationVersionMap;
+  /**
+   * The manifests the run's spawn reads (its kickoff cache, seeded by the
+   * freeze). A `draft` freeze names no version, so a save landing between the
+   * freeze and this read would otherwise bundle a document written for other
+   * tools than the ones started; such a member is refused instead.
+   */
+  spawnManifests?: IntegrationManifestCache;
   /** The bundle will run (AFPS signature policy on published fetches); false for an export. */
   forExecution: boolean;
   /**
@@ -107,6 +117,7 @@ export class RunPackageCatalog implements PackageCatalog {
   private draftCatalog: PackageCatalog | null = null;
   private readonly overrides: Map<string, string>;
   private readonly integrationVersions: ResolvedIntegrationVersionMap;
+  private readonly spawnManifests: IntegrationManifestCache | undefined;
   private readonly systemPackage: (packageId: string) => SystemArchive | undefined;
   /** identity → whatever resolved it (routes `fetch`). */
   private readonly owners = new Map<PackageIdentity, Pick<PackageCatalog, "fetch">>();
@@ -117,6 +128,7 @@ export class RunPackageCatalog implements PackageCatalog {
     this.makeDraft = opts.deps?.makeDraft ?? (() => new DraftPackageCatalog({ orgId: opts.orgId }));
     this.overrides = new Map(Object.entries(opts.dependencyOverrides ?? {}));
     this.integrationVersions = opts.integrationVersions;
+    this.spawnManifests = opts.spawnManifests;
     this.systemPackage = opts.deps?.systemPackage ?? ((id) => getSystemPackages().get(id));
   }
 
@@ -151,12 +163,42 @@ export class RunPackageCatalog implements PackageCatalog {
     const descriptor = resolvedIntegrationVersionToDescriptor(name, entry);
     switch (descriptor.kind) {
       case "draft":
-        return this.resolveVia(this.draft(), name, versionSpec, section);
+        return this.resolveDraftIntegration(name, versionSpec, section);
       case "version":
         return this.resolveVia(this.db, name, descriptor.version, section);
       case "system":
         return this.resolveSystem(name);
     }
+  }
+
+  /**
+   * The draft as the spawn read it, or a refusal: the bundle builder skips an
+   * optional member whose fetch fails, so the run starts without a document
+   * rather than with one that describes other tools.
+   */
+  private async resolveDraftIntegration(
+    name: string,
+    versionSpec: string,
+    section: DependencySection,
+  ): Promise<ResolvedPackage | null> {
+    const draft = this.draft();
+    const resolved = await this.resolveVia(draft, name, versionSpec, section);
+    const spawned = this.spawnManifests?.get(name);
+    if (!resolved || !spawned) return resolved;
+    this.owners.set(resolved.identity, {
+      fetch: async (identity) => {
+        const [pkg, atSpawn] = await Promise.all([draft.fetch(identity), spawned]);
+        const bundled = parseIntegrationManifest(pkg.manifest);
+        if (atSpawn.ok && bundled.ok && Bun.deepEquals(bundled.manifest, atSpawn.manifest))
+          return pkg;
+        throw new BundleError(
+          "DEPENDENCY_UNRESOLVED",
+          `${name}: the draft changed after the run froze it; its INTEGRATION.md is left out`,
+          { identity },
+        );
+      },
+    });
+    return resolved;
   }
 
   /**

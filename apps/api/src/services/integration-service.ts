@@ -94,7 +94,7 @@ export async function fetchIntegrationManifest(
   return promise;
 }
 
-function parseIntegrationManifest(raw: unknown): IntegrationManifestLoadResult {
+export function parseIntegrationManifest(raw: unknown): IntegrationManifestLoadResult {
   const parsed = integrationManifestSchema.safeParse(raw);
   if (!parsed.success)
     return {

@@ -408,6 +408,17 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       expect(await frozenDoc("1.1.0")).toBe(next);
     });
 
+    it("an emptied content removes the doc from the stored tree and the next version", async () => {
+      expect((await create()).status).toBe(201);
+      expect((await saveContent("", "1.1.0")).status).toBe(200);
+
+      expect(await draftContentOf(id)).toBe("");
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBeUndefined();
+      expect((await listFiles(ctx, id)).some((e) => e.path === "INTEGRATION.md")).toBe(false);
+      await publish("1.1.0");
+      expect(await frozenDoc("1.1.0")).toBeUndefined();
+    });
+
     it("writes no INTEGRATION.md for the manifest-text value the dashboard sends", async () => {
       const manifest = integrationManifest(id);
       const res = await app.request("/api/packages/integrations", {

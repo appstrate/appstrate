@@ -752,7 +752,8 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         ),
       };
       const contentEntryPath = optionalContentEntryPath(rcfg.cfg.type, content);
-      if (contentEntryPath) normalizedFiles[contentEntryPath] = new TextEncoder().encode(content);
+      if (contentEntryPath && content)
+        normalizedFiles[contentEntryPath] = new TextEncoder().encode(content);
       if (body.operations || rcfg.requireContent) {
         try {
           normalizedFiles = applyFileOperations(
@@ -1166,8 +1167,10 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
             const next = { ...files };
             if (body.content !== undefined || !body.operations)
               next[rcfg.storageFileName] = new TextEncoder().encode(storageContent);
-            if (contentEntryPath && draftContent)
-              next[contentEntryPath] = new TextEncoder().encode(draftContent);
+            if (contentEntryPath) {
+              if (draftContent) next[contentEntryPath] = new TextEncoder().encode(draftContent);
+              else delete next[contentEntryPath];
+            }
             return applyFileOperations(next, toDraftFileOperations(body.operations ?? []), {
               type: rcfg.cfg.type,
             });

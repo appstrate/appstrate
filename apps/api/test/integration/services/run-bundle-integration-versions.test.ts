@@ -7,8 +7,10 @@
  * Every case runs the pipeline's freeze (`freezeRunSpawnDependencies`), then
  * `buildAgentPackage` with the frozen map, and checks the integration member:
  * its identity version is the frozen one and its `INTEGRATION.md` is that
- * version's (or, for a draft override, the draft column). The spawn path and
- * the bundle therefore can never disagree on which integration a run used.
+ * version's (or, for a draft override, the draft column). Both share one
+ * kickoff manifest cache, as in the pipeline, so the manifest the spawn reads
+ * is the one the bundle is checked against: a draft saved between the two is
+ * left out of the bundle rather than documenting other tools.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -16,12 +18,20 @@ import { zipSync } from "fflate";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { httpHeaderDelivery } from "../../helpers/integration-manifests.ts";
+import { db } from "@appstrate/db/client";
+import { packages } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 import { readBundleFromBuffer, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { buildAgentPackage } from "../../../src/services/package-storage.ts";
 import { freezeRunSpawnDependencies } from "../../../src/services/run-pipeline.ts";
+import {
+  fetchIntegrationManifest,
+  type IntegrationManifestCache,
+} from "../../../src/services/integration-service.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
 import type { AgentManifest, LoadedPackage } from "../../../src/types/index.ts";
@@ -41,6 +51,24 @@ function integManifest(id: string, version: string): Record<string, unknown> {
     schema_version: "0.2",
     display_name: "Integ",
     source: { kind: "none" },
+    auths: {
+      api: {
+        type: "api_key",
+        authorized_uris: ["https://api.example.test/**"],
+        credentials: {
+          schema: {
+            type: "object",
+            properties: { api_key: { type: "string" } },
+            required: ["api_key"],
+          },
+        },
+        delivery: httpHeaderDelivery({
+          name: "Authorization",
+          prefix: "Bearer ",
+          field: "api_key",
+        }),
+      },
+    },
   };
 }
 
@@ -90,17 +118,26 @@ async function freezeAndBuild(
   ctx: TestContext,
   a: LoadedPackage,
   dependencyOverrides: Record<string, string> | null = null,
+  betweenFreezeAndBundle?: () => Promise<void>,
 ) {
+  const manifestCache: IntegrationManifestCache = new Map();
   const integrationVersions = await freezeRunSpawnDependencies({
     agent: a,
     orgId: ctx.orgId,
     dependencyOverrides,
+    manifestCache,
   });
+  await betweenFreezeAndBundle?.();
   const { zip } = await buildAgentPackage(a, ctx.orgId, {
     integrationVersions,
+    manifestCache,
     dependencyOverrides,
   });
-  return { integrationVersions, bundle: readBundleFromBuffer(new Uint8Array(zip)) };
+  return {
+    integrationVersions,
+    manifestCache,
+    bundle: readBundleFromBuffer(new Uint8Array(zip)),
+  };
 }
 
 function integrationMembers(bundle: Bundle) {
@@ -158,6 +195,26 @@ describe("run bundle — integration members at the frozen version (#2005)", () 
     const [member] = integrationMembers(bundle);
     expect(member?.identity).toBe(`${INTEG}@9.9.9`);
     expect(dec(member?.files.get("INTEGRATION.md"))).toBe("# Integ\n\nThe draft documentation.\n");
+  });
+
+  it("draft saved after the freeze → member left out, the spawn's manifest untouched", async () => {
+    const { manifestCache, bundle } = await freezeAndBuild(
+      ctx,
+      agent("~1.0.0"),
+      { [INTEG]: "draft" },
+      async () => {
+        await db
+          .update(packages)
+          .set({
+            draftManifest: integManifest(INTEG, "10.0.0"),
+            draftContent: "# Integ\n\nDocumentation of other tools.\n",
+          })
+          .where(eq(packages.id, INTEG));
+      },
+    );
+    const spawned = await fetchIntegrationManifest(INTEG, manifestCache);
+    expect(spawned.ok && spawned.manifest.version).toBe("9.9.9");
+    expect(integrationMembers(bundle)).toEqual([]);
   });
 
   it("system integration → the boot registry's archive, even when the stored copy drifted", async () => {

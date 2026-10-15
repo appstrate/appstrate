@@ -20,7 +20,10 @@ import { RunPackageCatalog } from "./run-launcher/run-package-catalog.ts";
 import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
 import { deleteUnlessReclaimed } from "./package-storage-deletion.ts";
-import type { ResolvedIntegrationVersionMap } from "./integration-service.ts";
+import type {
+  IntegrationManifestCache,
+  ResolvedIntegrationVersionMap,
+} from "./integration-service.ts";
 
 // Bucket + key layout live in a LEAF module so the deletion outbox and the
 // orphan scanner can derive the exact same keys without importing this file's
@@ -151,6 +154,8 @@ export async function assembleAgentBundle(
   opts: {
     orgId: string;
     integrationVersions: ResolvedIntegrationVersionMap;
+    /** The manifests the run's spawn reads — see `RunPackageCatalog`. A run passes it, an export has no spawn. */
+    spawnManifests?: IntegrationManifestCache;
     dependencyOverrides?: Record<string, string> | null;
     /** The bundle will run: apply the AFPS signature policy to every fetch. */
     forExecution: boolean;
@@ -164,6 +169,7 @@ export async function assembleAgentBundle(
       orgId: opts.orgId,
       dependencyOverrides: opts.dependencyOverrides ?? null,
       integrationVersions: opts.integrationVersions,
+      ...(opts.spawnManifests ? { spawnManifests: opts.spawnManifests } : {}),
       forExecution: opts.forExecution,
     }),
     {
@@ -211,6 +217,8 @@ export async function buildAgentPackage(
   deps: {
     /** The run's frozen integration versions (`runs.resolved_integration_versions`). */
     integrationVersions: ResolvedIntegrationVersionMap;
+    /** The run's kickoff manifest cache, which its spawn reads. */
+    manifestCache?: IntegrationManifestCache;
     /**
      * Per-run dependency overrides (`{ "@scope/name": "draft" | <spec> }`).
      * Run-scoped only — never read from the manifest. See {@link RunPackageCatalog}.
@@ -275,6 +283,7 @@ export async function buildAgentPackage(
   const bundle = await assembleAgentBundle(root, {
     orgId,
     integrationVersions: deps.integrationVersions,
+    ...(deps.manifestCache ? { spawnManifests: deps.manifestCache } : {}),
     dependencyOverrides: deps.dependencyOverrides ?? null,
     forExecution: true,
     onWarn: (message) => {
