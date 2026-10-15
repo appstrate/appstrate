@@ -66,3 +66,5 @@ void i18nReady
       </StrictMode>,
     );
   });
+
+// e2e path-trigger probe (throwaway, do not merge)
