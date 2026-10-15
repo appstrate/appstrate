@@ -431,7 +431,7 @@ export function DataTable<T>({
                               to={href}
                               state={rowState?.(row)}
                               aria-label={rowLabel?.(row)}
-                              className="block min-w-0"
+                              className="relative block min-w-0"
                             >
                               {content}
                             </Link>
