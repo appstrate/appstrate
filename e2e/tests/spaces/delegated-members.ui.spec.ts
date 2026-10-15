@@ -105,7 +105,7 @@ test("resetting an explicit viewer explains and confirms the default operator ac
   await expect(row.getByRole("combobox")).toContainText(/Lecteur|Viewer/);
   // The row's « … » menu holds the deed; it opens its own confirmation.
   await openRowMenuItem(page, target.email, "Rétablir le rôle par défaut");
-  const dialog = page.getByRole("dialog", {
+  const dialog = page.getByRole("alertdialog", {
     name: /Rétablir le rôle par défaut|Restore default role/i,
   });
   await expect(dialog).toContainText(/Opérateur|Operator/);

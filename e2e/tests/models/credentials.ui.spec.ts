@@ -89,7 +89,7 @@ test.describe("Provider keys — UI", () => {
 
     await openKeysTab(page);
     await openRowMenuItem(page, key.label, DELETE);
-    const dialog = page.getByRole("dialog", { name: "Supprimer la clé ?" });
+    const dialog = page.getByRole("alertdialog", { name: "Supprimer la clé ?" });
     await expect(dialog).toBeVisible();
     // The page names the models on the key itself, so the operator learns
     // what to do first instead of a refusal after the click.

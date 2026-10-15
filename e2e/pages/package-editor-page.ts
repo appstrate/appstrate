@@ -64,9 +64,17 @@ export class PackageEditorPage {
     return this.tree.getByRole("treeitem").filter({ hasText: leaf });
   }
 
-  /** The dialog currently open, whichever gesture opened it. */
+  /** The form dialog currently open (new file, rename). */
   get dialog(): Locator {
     return this.page.getByRole("dialog");
+  }
+
+  /**
+   * The confirmation currently open (deleting a file, leaving with staged changes): an alert
+   * dialog, which ARIA names apart from `dialog` and which an outside click does not dismiss.
+   */
+  get confirmDialog(): Locator {
+    return this.page.getByRole("alertdialog");
   }
 
   get saveButton(): Locator {
@@ -92,8 +100,8 @@ export class PackageEditorPage {
   /** Delete through the row's *Supprimer* button and confirm. Staged until Save. */
   async deleteFile(path: string) {
     await this.fileRow(path).getByRole("button", { name: "Supprimer" }).click();
-    await this.dialog.getByRole("button", { name: "Supprimer" }).click();
-    await expect(this.dialog).toHaveCount(0);
+    await this.confirmDialog.getByRole("button", { name: "Supprimer" }).click();
+    await expect(this.confirmDialog).toHaveCount(0);
   }
 
   /** Select `path` in the tree and open one item of its « Actions » menu (detail page). */

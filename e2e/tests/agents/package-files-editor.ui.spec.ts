@@ -110,8 +110,8 @@ test("rename, delete and discard leave server files unchanged until Save", async
   await editor.deleteFile("main.py");
   expect((await listFiles(apiClient, id)).map((entry) => entry.path)).toContain("run.py");
   await page.getByRole("link", { name: "Agents", exact: true }).click();
-  await expect(editor.dialog).toContainText("Modifications non enregistrées");
-  await editor.dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
+  await expect(editor.confirmDialog).toContainText("Modifications non enregistrées");
+  await editor.confirmDialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
   await expect(page).toHaveURL("/agents");
   expect((await listFiles(apiClient, id)).map((entry) => entry.path)).toContain("run.py");
   await editor.goto();
@@ -221,7 +221,7 @@ test("Save draft in the navigation guard uses the same save", async ({
   await editor.createFile("notes.txt");
   await editor.editFile("notes.txt", "Saved via guard");
   await page.getByRole("link", { name: "Agents", exact: true }).click();
-  await editor.dialog.getByRole("button", { name: "Enregistrer le brouillon" }).click();
+  await editor.confirmDialog.getByRole("button", { name: "Enregistrer le brouillon" }).click();
   await expect(page).toHaveURL("/agents");
   expect((await listFiles(apiClient, id)).find((entry) => entry.path === "notes.txt")?.inline).toBe(
     "Saved via guard",
@@ -352,7 +352,7 @@ for (const nonInline of [false, true]) {
   });
 }
 
-for (const type of ["skills", "agents", "integrations"]) {
+for (const type of ["skills", "integrations"]) {
   test(`${type}: authors files before creation and keeps them after a failed create`, async ({
     authedPage: page,
     apiClient,
@@ -446,6 +446,59 @@ for (const type of ["skills", "agents", "integrations"]) {
   });
 }
 
+// An agent is created from a short dialog (name, id, description, prompt), not from the editor's
+// pages: its files are authored on the saved agent, the first one being `prompt.md`.
+test("agents: the creation dialog keeps what was typed after a failed create", async ({
+  authedPage: page,
+  apiClient,
+  browserCtx,
+}) => {
+  const scope = `@${browserCtx.org.orgSlug}`;
+  const name = `new-agent-${Date.now()}`;
+  const id = `${scope}/${name}`;
+  const instructions = "Agent instructions.";
+  await page.goto("/agents");
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Nouvel agent" }).click();
+  await page.getByRole("button", { name: /Créer manuellement/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Nouvel agent" });
+  await dialog.getByLabel("Nom d'affichage").fill(name);
+  await expect(dialog.getByLabel("Identifiant (slug)")).toHaveValue(name);
+  await dialog.getByLabel("Description").fill("Created from its dialog");
+  await dialog.getByLabel("Prompt").fill(instructions);
+
+  const writes: Record<string, unknown>[] = [];
+  await page.route("**/api/packages/agents", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    writes.push(route.request().postDataJSON());
+    if (writes.length === 1)
+      return route.fulfill({
+        status: 400,
+        contentType: "application/problem+json",
+        body: JSON.stringify({
+          type: "about:blank",
+          title: "Invalid Request",
+          status: 400,
+          code: "invalid_request",
+          detail: "Retry creation",
+        }),
+      });
+    await route.continue();
+  });
+  const create = dialog.getByRole("button", { name: "Créer l'agent", exact: true });
+  await create.click();
+  await expect(dialog.getByText("Retry creation")).toBeVisible();
+  expect((await apiClient.get(`/packages/${id}/files`)).status()).toBe(404);
+  await expect(dialog.getByLabel("Prompt")).toHaveValue(instructions);
+  await create.click();
+  await expect(page).toHaveURL(`/agents/${id}`);
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toEqual(writes[0]);
+  expect(writes[1]?.content).toBe(instructions);
+  const files = await listFiles(apiClient, id);
+  expect(files.find((file) => file.path === "prompt.md")?.inline).toBe(instructions);
+});
+
 test("discarding a new package's files creates nothing on the server", async ({
   authedPage: page,
 }) => {
@@ -459,8 +512,8 @@ test("discarding a new package's files creates nothing on the server", async ({
   await editor.openFilesTab();
   await editor.createFile("unsaved.txt");
   await page.getByRole("link", { name: "Agents", exact: true }).click();
-  await expect(editor.dialog).toContainText("Modifications non enregistrées");
-  await editor.dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
+  await expect(editor.confirmDialog).toContainText("Modifications non enregistrées");
+  await editor.confirmDialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
   await expect(page).toHaveURL("/agents");
   expect(writes).toEqual([]);
 });
