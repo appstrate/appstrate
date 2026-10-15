@@ -168,9 +168,13 @@ The set that should gate a merge. Names are the GitHub check-run names, verbatim
 | `Analyze`                                               | `codeql.yml`   |
 
 Deliberately **not** required, because a required check that does not report blocks the PR forever:
-`Integration tests`, `Runtime container e2e` and `E2E tests` are label-gated
-(`if: contains(github.event.pull_request.labels.*.name, …) || github.ref == 'refs/heads/main'`), so
-they are absent from an unlabelled PR, and `Scorecard Analysis` has no `pull_request` trigger at all.
+`Scorecard Analysis` has no `pull_request` trigger at all.
+`Integration tests`, `Runtime container e2e` and `E2E tests` are gated by an `if:` on the job, not on
+the workflow, so they always report: `skipped` satisfies a required check, a job that is never created
+does not. `Integration tests` and `Runtime container e2e` run on the `integration` / `e2e` label or on
+`main`. `E2E tests` runs on those too, and also **automatically on any PR that changes `apps/web/**`,
+`packages/ui/**` or `e2e/**`** (the `Detect E2E-relevant changes` job in `test.yml`); add the `e2e` label
+for a change outside those paths that the Playwright suite exercises (API, runtime).
 The same rule applies to any check added later: require it only once it is observed reporting on an
 ordinary PR. `Dependency Audit` meets it: it triggers on `pull_request` like `Secret Scanning`, so it
 reports on every PR — confirm it appears in the `check-runs` listing above before applying.

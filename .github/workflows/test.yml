@@ -221,7 +221,7 @@ jobs:
     # `integration` (opt-in pre-merge). Without the main-branch arm,
     # code could land on main via a never-labeled PR and reach production
     # without the integration suite ever having been exercised in CI —
-    # the e2e job below is label-OR-main for the same reason, keeping
+    # the e2e job below is label-or-paths-OR-main for the same reason, keeping
     # both jobs aligned on post-merge validation.
     if: contains(github.event.pull_request.labels.*.name, 'integration') || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -458,9 +458,52 @@ jobs:
       - name: Run runtime container e2e suites
         run: bun test --timeout=15000 runtime-pi/test/provision-container.e2e.test.ts runtime-pi/test/inference-container.e2e.test.ts runtime-pi/test/runtime-secrets-container.e2e.test.ts
 
+  # Decides whether a PR touches what the Playwright suite exercises. `E2E tests`
+  # is a required check, and a job skipped by its own `if:` satisfies it, so the
+  # job must exist on every PR and be gated — a workflow-level `paths:` filter
+  # would leave the check unreported instead. The `e2e` label stays an opt-in
+  # for changes elsewhere (API, runtime) that the paths below do not cover.
+  #
+  # The PR checkout is the merge commit of the head into the base tip, so its
+  # first parent is the base: `HEAD^1..HEAD` is exactly what the PR adds.
+  # Detection failing must not silently skip the suite — the `e2e` job runs
+  # whenever this one did not succeed.
+  e2e-changes:
+    name: Detect E2E-relevant changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Diff against the base
+        id: detect
+        run: |
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          printf 'Changed files:\n%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -qE '^(apps/web|packages/ui|e2e)/'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   e2e:
     name: E2E tests
-    if: contains(github.event.pull_request.labels.*.name, 'e2e') || github.ref == 'refs/heads/main'
+    needs: e2e-changes
+    # Label-OR-main like the other heavy jobs, plus every PR touching the web
+    # app, the UI package or the specs themselves (a UI change broke 16 specs on
+    # main while this ran on the label alone). `!cancelled()` so the job still
+    # evaluates when `e2e-changes` is skipped (push) or failed (run anyway).
+    if: >-
+      ${{ !cancelled() && (
+      github.ref == 'refs/heads/main'
+      || contains(github.event.pull_request.labels.*.name, 'e2e')
+      || needs.e2e-changes.result != 'success'
+      || needs.e2e-changes.outputs.relevant == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
