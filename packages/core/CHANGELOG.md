@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusal unwrapped
   server-side — and the category vocabulary as a runtime tuple.
 - **`ValidateManifestResult.issues`** (`@appstrate/core/validation`): on an invalid
-  manifest, the failures structured as `{ path, message, code? }` beside the `errors`
+  manifest, the failures structured as **`ManifestIssue`** `{ path, message, code? }` beside the `errors`
   strings; `code` is set on a rule that carries its own — today
   **`OUTPUT_TOOL_REQUIRED`** (`"output_tool_required"`, an output schema without the
   `output` runtime tool). **`ValidationFieldError.line` / `.column`**
