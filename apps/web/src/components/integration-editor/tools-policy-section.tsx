@@ -6,7 +6,7 @@ import { Trash2, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
+import { FormItem } from "@appstrate/ui/components/field";
 import { EditorSection, type EditorSurface } from "./editor-section";
 import { RequiredScopesField } from "./required-scopes-field";
 import {
@@ -108,23 +108,23 @@ export function ToolsPolicySection({
       {rows.map((policy, idx) => (
         <div key={idx} className="border-border space-y-3 rounded-md border p-3">
           <div className="flex items-center gap-2">
-            <div className="flex-1">
-              <Label htmlFor={`tp-name-${idx}`}>
-                {t("integrationEditor.toolsPolicy.toolName")}
-              </Label>
+            <FormItem
+              id={`tp-name-${idx}`}
+              label={t("integrationEditor.toolsPolicy.toolName")}
+              className="flex-1"
+            >
               <Input
-                id={`tp-name-${idx}`}
                 value={policy.name}
                 onChange={(e) => update(idx, { name: e.target.value })}
                 placeholder="list_issues"
-                className="mt-1 font-mono"
+                className="font-mono"
               />
-            </div>
+            </FormItem>
             <Button
               type="button"
               size="icon"
               variant="ghost"
-              className="mt-5"
+              className="mt-7"
               onClick={() => commit(rows.filter((_, i) => i !== idx))}
             >
               <Trash2 size={14} className="text-destructive" />

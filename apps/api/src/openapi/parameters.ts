@@ -3,8 +3,6 @@
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import { runStatusValues } from "@appstrate/core/run-status";
 
-const RUN_STATUS = `(${runStatusValues.join("|")})`;
-
 /**
  * Reusable OpenAPI parameter definitions.
  */
@@ -21,11 +19,13 @@ export const parameters = {
     name: "status",
     in: "query" as const,
     required: false,
-    description: `Filter runs by lifecycle status: one of ${runStatusValues.map((s) => `\`${s}\``).join(", ")}, or several separated by commas (\`failed,timeout\` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with \`400\` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.`,
+    description: `Filter runs by lifecycle status: one or several of ${runStatusValues.map((s) => `\`${s}\``).join(", ")}, comma-separated on the wire (\`status=failed,timeout\` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with \`400\` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.`,
+    style: "form" as const,
+    explode: false,
     schema: {
-      type: "string",
-      pattern: `^(\\s*${RUN_STATUS}\\s*(,\\s*${RUN_STATUS}\\s*)*)?$`,
-      example: "failed,timeout",
+      type: "array",
+      items: { type: "string", enum: [...runStatusValues] },
+      example: ["failed", "timeout"],
     },
   },
   RunSearch: {

@@ -39,7 +39,7 @@ const { orgStore } = await import("../org-store.ts");
 const { spaceStore } = await import("../space-store.ts");
 const { queryClient } = await import("../../lib/query-client.ts");
 const { $api } = await import("../../api/client.ts");
-const { buildScopingHeaders, withViewAsParam } = await import("../../lib/scoping-headers.ts");
+const { buildScopingHeaders } = await import("../../lib/scoping-headers.ts");
 const { endPreviewIfRefused, noteViewAsRefusal, viewAsRefusalCode } =
   await import("../../lib/view-as-refusal.ts");
 const { ApiError } = await import("../../api/errors.ts");
@@ -255,26 +255,6 @@ describe("cache reset", () => {
     await Bun.sleep(0);
 
     expect(queryClient.getQueryData<Organization[]>(orgKeys.all)).toEqual(ORGS_AS_PERSONA);
-  });
-});
-
-describe("realtime carrier", () => {
-  it("appends `view_as` to the stream URL — those routes refuse the header", () => {
-    enterViewAs(PERSONA, ORGS_AS_PERSONA);
-    expect(withViewAsParam("/api/realtime/runs?orgId=org_a", getViewAsHeader())).toBe(
-      "/api/realtime/runs?orgId=org_a&view_as=org_role%3Dmember%3B%20space%3Dspc_1%3B%20role%3Dpreset%3Aviewer",
-    );
-  });
-
-  it("uses the value it is handed, so an effect can depend on it", () => {
-    // The reactive callers pass `useViewAsHeader()`; a stream reads its URL
-    // once, so the value cannot be read from the store inside the builder.
-    expect(withViewAsParam("/api/realtime/runs?orgId=org_a", "org_role=guest")).toBe(
-      "/api/realtime/runs?orgId=org_a&view_as=org_role%3Dguest",
-    );
-    expect(withViewAsParam("/api/realtime/runs?orgId=org_a", null)).toBe(
-      "/api/realtime/runs?orgId=org_a",
-    );
   });
 });
 

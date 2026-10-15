@@ -255,7 +255,7 @@ describe("permission gating on the roles page", () => {
     expect(rolesPageDeeds({ canWrite: true, canPreview: true })).toEqual(["create", "view-as"]);
     expect(html).toContain("Responsable assistance");
     // The row opens the role (editable for this caller), and deleting is in its menu.
-    expect(html).toContain("role=support");
+    expect(html).toContain(`aria-label="Responsable assistance"`);
     expect(html).toContain("Plus d’actions pour Responsable assistance");
   });
 

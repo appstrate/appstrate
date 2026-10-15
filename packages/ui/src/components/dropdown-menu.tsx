@@ -85,13 +85,18 @@ DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
 
 const DropdownMenuSubTrigger = React.forwardRef<
   React.ComponentRef<typeof DropdownMenuPrimitive.SubTrigger>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & { inset?: boolean }
->(({ className, inset, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
+    inset?: boolean;
+    /** A sub-menu of deeds that destroy or revoke: drawn in the destructive tone. */
+    variant?: "default" | "destructive";
+  }
+>(({ className, inset, variant = "default", children, ...props }, ref) => (
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
       "focus:bg-accent data-[state=open]:bg-accent flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none [&>svg]:size-4 [&>svg]:shrink-0",
       inset && "pl-8",
+      variant === "destructive" && "text-destructive focus:text-destructive",
       className,
     )}
     {...props}

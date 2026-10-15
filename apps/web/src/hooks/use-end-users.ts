@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient } from "@tanstack/react-query";
-import { $api, type components } from "../api/client";
+import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { $api, client, type components } from "../api/client";
+import { keysetPaging } from "../lib/keyset-paging";
+import { invalidatePaths } from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 
@@ -10,7 +12,6 @@ export type EndUserInfo = components["schemas"]["EndUserObject"];
 
 interface EndUserListParams {
   limit?: number;
-  startingAfter?: string;
   search?: string;
 }
 
@@ -30,7 +31,6 @@ export function useEndUsers(params?: EndUserListParams) {
       params: {
         query: {
           limit: params?.limit,
-          startingAfter: params?.startingAfter,
           search: params?.search,
         },
         header: scope.header,
@@ -38,6 +38,30 @@ export function useEndUsers(params?: EndUserListParams) {
     },
     { enabled: scope.enabled },
   );
+}
+
+/**
+ * The end-users, keyset-paged (`startingAfter` = last id seen) and searched server-side. The key
+ * keeps the `[method, path]` prefix so the write invalidations reach it, and the extra segment
+ * keeps it apart from `useEndUsers`'s plain pages; a refetch re-reads every loaded page.
+ */
+export function useEndUsersPaged({ search }: { search?: string } = {}) {
+  const scope = useEndUsersReadScope();
+  const query = { limit: 25, search: search?.trim() || undefined };
+  return useInfiniteQuery({
+    queryKey: ["get", "/api/end-users", "paged", { header: scope.header, query }] as const,
+    queryFn: async ({ pageParam, signal }) => {
+      const { data } = await client.GET("/api/end-users", {
+        params: { query: { ...query, startingAfter: pageParam }, header: scope.header },
+        signal,
+      });
+      if (!data) throw new Error("empty response");
+      return data;
+    },
+    ...keysetPaging,
+    placeholderData: keepPreviousData,
+    enabled: scope.enabled,
+  });
 }
 
 export function useEndUser(endUserId: string) {
@@ -57,11 +81,7 @@ export function useEndUser(endUserId: string) {
  */
 function useInvalidateEndUsers() {
   const qc = useQueryClient();
-  return () =>
-    Promise.all([
-      qc.invalidateQueries({ queryKey: ["get", "/api/end-users"] }),
-      qc.invalidateQueries({ queryKey: ["get", "/api/end-users/{id}"] }),
-    ]);
+  return () => invalidatePaths(qc, ["/api/end-users", "/api/end-users/{id}"]);
 }
 
 export function useCreateEndUser() {

@@ -137,12 +137,21 @@ const problemDetailErrors: Middleware = {
 };
 
 /**
+ * How an array query parameter goes on the wire: comma-separated under one key
+ * (`status=failed,timeout`), the `style: form, explode: false` every array query
+ * parameter of the spec declares. openapi-fetch does not read the spec at run
+ * time and defaults to repeated keys.
+ */
+export const QUERY_SERIALIZER = { array: { style: "form", explode: false } } as const;
+
+/**
  * Raw typed fetch client. Spec paths already include the `/api` prefix, so
  * no baseUrl is needed — requests stay same-origin.
  */
 export const client = createFetchClient<paths>({
   credentials: "include",
   pathSerializer,
+  querySerializer: QUERY_SERIALIZER,
 });
 client.use(orgContext, problemDetailErrors);
 

@@ -26,7 +26,7 @@ export interface SpaceMembership {
 
 export function useSpaceMembershipsByUser(enabled: boolean) {
   const scope = useOrgOnlyScope();
-  const { data: spaces } = useSpaces(enabled);
+  const { data: spaces, isLoading: spacesLoading } = useSpaces(enabled);
   const queries = useQueries({
     queries: (enabled ? (spaces ?? []) : []).map((space) => ({
       ...$api.queryOptions("get", "/api/spaces/{id}/members", {
@@ -47,5 +47,8 @@ export function useSpaceMembershipsByUser(enabled: boolean) {
       ]);
     }
   }
-  return { byUser, isLoading: queries.some((query) => query.isLoading) };
+  return {
+    byUser,
+    isLoading: (enabled && spacesLoading) || queries.some((query) => query.isLoading),
+  };
 }

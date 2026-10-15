@@ -11,7 +11,6 @@
 
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
@@ -26,7 +25,8 @@ import { useDocumentColumns } from "./document-columns";
 import { DocumentRowActions } from "./document-row-actions";
 import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
-import { filePreviewHref, runFileDirection } from "../lib/files";
+import { runFileDirection } from "../lib/files";
+import { useModalParam } from "../hooks/use-modal-param";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 
 export function DocumentListPanel({
@@ -37,8 +37,6 @@ export function DocumentListPanel({
   showRunLink,
   runId,
   footer,
-  onDeleted,
-  onKept,
   display = "cards",
   toolbar,
   tableLabel,
@@ -60,14 +58,6 @@ export function DocumentListPanel({
   runId?: string;
   /** Rendered after the list: the gallery's "Load more", a run's truncation notice. */
   footer?: ReactNode;
-  /** Let the caller prune its own list (e.g. the gallery's page accumulator). */
-  onDeleted?: (id: string) => void;
-  /**
-   * Let the caller patch its own list after a "keep" (e.g. the gallery's page
-   * accumulator, whose older pages the query invalidation does not refetch) so
-   * the pinned row loses its expiry badge without a full remount.
-   */
-  onKept?: (id: string) => void;
   /** The main Documents page offers cards and table; the run overview lists compactly. */
   display?: "cards" | "table" | "compact";
   /** Apparatus owned by the caller, built from the table's real columns. */
@@ -82,29 +72,15 @@ export function DocumentListPanel({
   const download = useFileDownload();
   const deleteDoc = useDeleteFile();
   const keepDoc = useKeepFile();
-  const location = useLocation();
-  const navigate = useNavigate();
   const [pendingDelete, setPendingDelete] = useState<FileDto | null>(null);
   const visibility = useColumnVisibility("documents");
 
-  // Preview is URL-addressable via a `?preview=<doc_id>` param so it can be
-  // deep-linked and shared, and the browser back button closes it. A deep-linked
-  // doc may be outside the currently loaded page, so an empty name is fine — the
-  // preview modal falls back to the fetched DTO's name.
-  const previewId = new URLSearchParams(location.search).get("preview");
-  const previewDoc = previewId
-    ? { id: previewId, name: documents.find((d) => d.id === previewId)?.name ?? "" }
+  // A deep-linked doc may be outside the currently loaded page, so an empty name
+  // is fine — the preview modal falls back to the fetched DTO's name.
+  const preview = useModalParam("preview");
+  const previewDoc = preview.value
+    ? { id: preview.value, name: documents.find((d) => d.id === preview.value)?.name ?? "" }
     : null;
-
-  // `filePreviewHref` keeps the hash (the run page's active tab — react-router's
-  // setSearchParams would drop it) and the other search params.
-  //
-  // Opening PUSHES (so the back button closes the preview); closing REPLACES.
-  // Pushing on close too would stack `[page, page?preview=x, page]`, and then
-  // "back" from the closed state would REOPEN the preview instead of leaving
-  // the page — worse with every document consulted.
-  const setPreviewParam = (id: string | null) =>
-    navigate(filePreviewHref(location, id), { replace: id === null });
 
   // Wire the delete/keep handlers unconditionally — per-document visibility is
   // driven by the server-computed `capabilities` (delete/keep) inside the tile,
@@ -118,7 +94,6 @@ export function DocumentListPanel({
       {
         onSuccess: () => {
           toast.success(t("keep.success"));
-          onKept?.(doc.id);
         },
       },
     );
@@ -131,7 +106,6 @@ export function DocumentListPanel({
       {
         onSuccess: () => {
           toast.success(t("delete.success"));
-          onDeleted?.(id);
           setPendingDelete(null);
         },
       },
@@ -161,7 +135,7 @@ export function DocumentListPanel({
           <ItemList
             items={documents}
             itemKey={(doc) => doc.id}
-            isLoading={isLoading}
+            isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
             renderItem={(doc) => (
@@ -173,7 +147,7 @@ export function DocumentListPanel({
                   doc={doc}
                   isPending={pendingKeepId === doc.id}
                   showRunLink={showRunLink}
-                  onPreview={(d) => setPreviewParam(d.id)}
+                  onPreview={(d) => preview.open(d.id)}
                   onDownload={onDownload}
                   onKeep={onKeep}
                   onDelete={onDelete}
@@ -190,11 +164,10 @@ export function DocumentListPanel({
             surface={tableSurface}
             rows={documents}
             rowKey={(doc) => doc.id}
-            rowHref={(doc) =>
-              doc.capabilities.preview ? filePreviewHref(location, doc.id) : undefined
-            }
+            rowAction={(doc) => preview.open(doc.id)}
+            rowActionable={(doc) => doc.capabilities.preview}
             rowLabel={(doc) => doc.name}
-            isLoading={isLoading}
+            isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
           />
@@ -204,16 +177,17 @@ export function DocumentListPanel({
             items={documents}
             min="10rem"
             itemKey={(doc) => doc.id}
-            isLoading={isLoading}
+            isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
             renderCard={(doc) => (
               <FileTile
                 file={doc}
-                onDownload={download}
+                isKeepPending={pendingKeepId === doc.id}
+                onDownload={onDownload}
                 onDelete={onDelete}
                 onKeep={onKeep}
-                onPreview={(d) => setPreviewParam(d.id)}
+                onPreview={(d) => preview.open(d.id)}
                 showRunLink={showRunLink}
                 direction={runId ? runFileDirection(doc, runId) : undefined}
               />
@@ -233,7 +207,7 @@ export function DocumentListPanel({
         isPending={deleteDoc.isPending}
       />
 
-      {previewDoc && <FilePreview file={previewDoc} onClose={() => setPreviewParam(null)} />}
+      {previewDoc && <FilePreview file={previewDoc} onClose={preview.close} />}
     </>
   );
 }

@@ -2865,7 +2865,7 @@ describe("Packages API", () => {
       });
     });
 
-    // The dashboard's resource-section ".afps import" (useUploadPackage) routes
+    // The dashboard's resource-section ".afps import" (useImportPackage) routes
     // skill/integration/agent ZIPs here — the per-type create endpoints are
     // JSON-only. Cover a non-agent type so type-detection on this path is
     // guarded.

@@ -4,8 +4,8 @@ import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
-import { LoadingState } from "./page-states";
 import type { RunLauncher } from "../hooks/use-mutations";
+import { TextSkeleton } from "./loading-skeletons";
 
 /**
  * 409 recovery surface — lazy because it is a modal that only ever opens on a
@@ -39,7 +39,7 @@ export function RunLaunchRecovery({
     <Suspense
       fallback={
         <Modal open onClose={launcher.dismiss} title={t("missingConnections.title")}>
-          <LoadingState />
+          <TextSkeleton className="py-2" />
         </Modal>
       }
     >

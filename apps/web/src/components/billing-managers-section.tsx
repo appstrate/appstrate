@@ -27,13 +27,13 @@ import {
   billingManagerRows,
   billingManagersBody,
   eligibleBillingManagers,
-  memberLabel,
   sameBillingManagers,
   type BillingManagerStatus,
 } from "../lib/billing-managers";
-import { LoadingState, ErrorState } from "./page-states";
+import { memberLabel } from "../lib/members";
+import { ErrorState } from "./page-states";
+import { SettingsSkeleton } from "./loading-skeletons";
 import { SectionCard } from "./section-card";
-import { Spinner } from "./spinner";
 
 /** What a row the server would now refuse says about itself. */
 const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, string]> = {
@@ -67,7 +67,7 @@ export function BillingManagersSection() {
   // an effect, so a refetch cannot silently overwrite an unsaved edit.
   const [draft, setDraft] = useState<string[] | null>(null);
 
-  if (managersQuery.isLoading || orgQuery.isLoading) return <LoadingState />;
+  if (managersQuery.isLoading || orgQuery.isLoading) return <SettingsSkeleton rows={1} />;
   if (managersQuery.error) return <ErrorState error={managersQuery.error} />;
   // Without the roster every saved manager reads as gone, so Save would PUT {}.
   if (orgQuery.error) return <ErrorState error={orgQuery.error} />;
@@ -189,8 +189,7 @@ export function BillingManagersSection() {
             {t("btn.cancel", { ns: "common" })}
           </Button>
         )}
-        <Button size="sm" disabled={!dirty || replace.isPending} onClick={handleSave}>
-          {replace.isPending && <Spinner />}
+        <Button size="sm" pending={replace.isPending} disabled={!dirty} onClick={handleSave}>
           {t("btn.save", { ns: "common" })}
         </Button>
       </div>

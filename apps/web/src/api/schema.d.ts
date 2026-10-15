@@ -3076,7 +3076,7 @@ export interface paths {
         head?: never;
         /**
          * Update organization
-         * @description Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         * @description Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes `{ kind: "emoji", emoji }` or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.
          */
         patch: operations["updateOrganization"];
         trace?: never;
@@ -3161,6 +3161,30 @@ export interface paths {
          * @description The caller leaves the organization. Any member may leave, whatever their role; the last owner is refused with `409 last_owner` and must first promote another member to owner, or delete the organization. The decision reads the caller's real membership, so an active `X-View-As` preview changes nothing. Leaving has the effects of a removal: the caller's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window (a re-invitation inside it gives the space back; revoked keys and opaque tokens stay revoked). A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile. Leaving requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403, as is a caller who is not a member.
          */
         post: operations["leaveOrganization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get organization logo image
+         * @description The organization's logo image, for any member. Its `ETag` is the image's version, the `v` of `logo.url`; a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.
+         */
+        get: operations["getOrganizationLogo"];
+        /**
+         * Upload organization logo image
+         * @description Replace the organization logo with a WebP image sent as the raw request body (`Content-Type: image/webp`, at most 36000 bytes, a RIFF container of form type `WEBP`). Requires `org:update`. `logo` becomes `{ kind: "image", url }`.
+         */
+        put: operations["uploadOrganizationLogo"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5501,7 +5525,7 @@ export interface components {
         };
         AgentDetail: {
             id: string;
-            /** @description AFPS manifest icon used for the Agent identity tile. */
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none. */
             icon?: string;
             /** @description Presentation token from `_meta["dev.appstrate/ui"].color`. */
             color?: string;
@@ -5627,7 +5651,7 @@ export interface components {
         };
         AgentListItem: {
             id: string;
-            /** @description AFPS manifest icon used for the Agent identity tile. */
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none. */
             icon?: string;
             /** @description Presentation token from `_meta["dev.appstrate/ui"].color`. */
             color?: string;
@@ -6119,7 +6143,7 @@ export interface components {
             orgId?: string | null;
             name: string;
             description: string | null;
-            /** @description The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`, e.g. `logos:slack-icon`, `lucide:bot`) or an image URL, `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
             icon: string | null;
             /** @description The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description. */
             keywords: string[];
@@ -6332,8 +6356,18 @@ export interface components {
             id?: string;
             name?: string;
             slug?: string;
-            /** @description Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial. */
-            logo?: string | null;
+            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+            logo?: {
+                /** @constant */
+                kind: "emoji";
+                /** @description Exactly one emoji. */
+                emoji: string;
+            } | {
+                /** @constant */
+                kind: "image";
+                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                url: string;
+            } | null;
             /** Format: date-time */
             createdAt?: string;
             /**
@@ -6444,7 +6478,7 @@ export interface components {
             orgId?: string | null;
             name: string;
             description: string | null;
-            /** @description The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`, e.g. `logos:slack-icon`, `lucide:bot`) or an image URL, `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
             icon: string | null;
             /** @description The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description. */
             keywords: string[];
@@ -6549,8 +6583,18 @@ export interface components {
             id: string;
             name: string;
             slug: string;
-            /** @description Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial. */
-            logo: string | null;
+            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+            logo: {
+                /** @constant */
+                kind: "emoji";
+                /** @description Exactly one emoji. */
+                emoji: string;
+            } | {
+                /** @constant */
+                kind: "image";
+                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                url: string;
+            } | null;
             /** @enum {string} */
             role: "owner" | "admin" | "member" | "guest";
             /** @description The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces. */
@@ -7699,8 +7743,8 @@ export interface components {
     parameters: {
         /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
         Offset: number;
-        /** @description Filter runs by lifecycle status: one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
-        RunStatusFilter: string;
+        /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+        RunStatusFilter: ("pending" | "running" | "success" | "failed" | "timeout" | "cancelled")[];
         /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
         RunSearch: string;
         /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
@@ -9059,7 +9103,7 @@ export interface operations {
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
-                /** @description Filter runs by lifecycle status: one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+                /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
                 status?: components["parameters"]["RunStatusFilter"];
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
                 q?: components["parameters"]["RunSearch"];
@@ -16992,8 +17036,18 @@ export interface operations {
                             id: string;
                             name: string;
                             slug: string;
-                            /** @description Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial. */
-                            logo: string | null;
+                            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+                            logo: {
+                                /** @constant */
+                                kind: "emoji";
+                                /** @description Exactly one emoji. */
+                                emoji: string;
+                            } | {
+                                /** @constant */
+                                kind: "image";
+                                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                                url: string;
+                            } | null;
                             /**
                              * @description Org role for member callers; `end_user` for OIDC end-user JWTs.
                              * @enum {string}
@@ -19319,7 +19373,18 @@ export interface operations {
                         id: string;
                         name: string;
                         slug: string;
-                        logo: string | null;
+                        /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+                        logo: {
+                            /** @constant */
+                            kind: "emoji";
+                            /** @description Exactly one emoji. */
+                            emoji: string;
+                        } | {
+                            /** @constant */
+                            kind: "image";
+                            /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                            url: string;
+                        } | null;
                         /** @enum {string} */
                         role: "owner";
                         /** Format: date-time */
@@ -19424,8 +19489,13 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     slug?: string;
-                    /** @description Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial. */
-                    logo?: string | null;
+                    /** @description `{ "kind": "emoji", "emoji": "<one emoji>" }`, or `null` to clear the logo. */
+                    logo?: {
+                        /** @constant */
+                        kind: "emoji";
+                        /** @description Exactly one emoji. */
+                        emoji: string;
+                    } | null;
                 };
             };
         };
@@ -19632,6 +19702,85 @@ export interface operations {
                 };
             };
             409: components["responses"]["LastOwner"];
+        };
+    };
+    getOrganizationLogo: {
+        parameters: {
+            query?: {
+                /** @description The logo version the caller expects: the `v` of `logo.url`. */
+                v?: string;
+            };
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The logo image. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description The quoted logo version. */
+                    ETag?: string;
+                    /** @description `private, max-age=31536000, immutable` when `v` names the current version, `private, no-cache` otherwise. */
+                    "Cache-Control"?: string;
+                    "X-Content-Type-Options"?: "nosniff";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/webp": Blob;
+                };
+            };
+            /** @description Cached copy is still current (`If-None-Match` matched). No body. */
+            304: {
+                headers: {
+                    /** @description The quoted logo version. */
+                    ETag?: string;
+                    /** @description As on the `200`. */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The organization's logo is not an image. */
+            404: components["responses"]["NotFound"];
+        };
+    };
+    uploadOrganizationLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/webp": Blob;
+            };
+        };
+        responses: {
+            /** @description Updated organization — same OrgDetail shape as GET /api/orgs/{orgId} */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgDetail"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     inviteMember: {
@@ -23411,7 +23560,7 @@ export interface operations {
                 offset?: components["parameters"]["Offset"];
                 /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 kind?: "all" | "package" | "inline";
-                /** @description Filter runs by lifecycle status: one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+                /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
                 status?: components["parameters"]["RunStatusFilter"];
                 start_date?: string;
                 end_date?: string;
@@ -24967,7 +25116,7 @@ export interface operations {
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
-                /** @description Filter runs by lifecycle status: one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+                /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
                 status?: components["parameters"]["RunStatusFilter"];
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
                 q?: components["parameters"]["RunSearch"];

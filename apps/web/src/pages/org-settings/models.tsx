@@ -23,7 +23,6 @@ import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { cn } from "@appstrate/ui/cn";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
@@ -40,7 +39,6 @@ import {
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
 import { useOrgSettings } from "../../hooks/use-org-settings";
-import { NoAccessState } from "../../components/route-gate";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
@@ -56,7 +54,8 @@ import { PersonalModelsModal, ProviderModelsModal } from "../../components/model
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { SettingsGroup } from "../../components/settings/setting-row";
-import { PageActionsMenu } from "../../components/page-actions-menu";
+import type { MenuAction } from "../../lib/menu-action";
+import { TextSkeleton } from "../../components/loading-skeletons";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
 import {
   isSystemModel,
@@ -85,7 +84,7 @@ export function OrgSettingsModelsPage() {
   // A row is a key and its models: either read failing leaves the table wrong, so both surface.
   const tableError = modelsError ?? pkError;
   const { data: registry } = useProvidersRegistry();
-  const { data: orgSettings } = useOrgSettings();
+  const { data: orgSettings, isLoading: settingsLoading } = useOrgSettings();
 
   const addProvider = useModalParam("newCredential");
   const editKey = useModalTarget("editCredential", credentials);
@@ -137,8 +136,6 @@ export function OrgSettingsModelsPage() {
   // Known off: the table stays, greyed. Unknown (the setting did not load) is not off.
   const personalOff = orgSettings?.personal_model_credentials === false;
 
-  if (!can("models:read")) return <NoAccessState />;
-
   /** A key's menu, the organization's or a person's: the row offers what the server allows. */
   const keyDeeds = {
     onRename: async (pk: ModelProviderCredentialInfo, label: string) => {
@@ -150,43 +147,31 @@ export function OrgSettingsModelsPage() {
     onDelete: setConfirmDelete,
   };
 
+  const addCredential: MenuAction = {
+    id: "create-credential",
+    icon: Plus,
+    label: t("credentials.add"),
+    onSelect: () => addProvider.open(),
+    hidden: !canWriteCredentials,
+  };
+  // The deed of the tab in view; a member who may write nothing has no menu.
+  const allowPersonalModels: MenuAction = {
+    id: "open-personal-service",
+    icon: Plus,
+    label: t("providers.allowPersonalModels"),
+    onSelect: () => nextService && personalModels.open(nextService),
+    hidden: !canWriteModels || !nextService,
+  };
+
   const emptyOrg = {
     message: t("providers.empty"),
     hint: canWriteCredentials ? undefined : t("providers.emptyAskAdmin"),
-    action: canWriteCredentials ? (
-      <EmptyStateAction label={t("credentials.add")} onClick={() => addProvider.open()} />
-    ) : undefined,
+    action: <EmptyStateAction action={addCredential} />,
   };
 
   return (
     <>
-      {/* The deed of the tab in view; a member who may write nothing has no menu. */}
-      {tab === "org" && canWriteCredentials && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            <DropdownMenuItem
-              data-page-action="create-credential"
-              onSelect={() => addProvider.open()}
-            >
-              <Plus />
-              {t("credentials.add")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
-      {tab === "personal" && canWriteModels && nextService && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            <DropdownMenuItem
-              data-page-action="open-personal-service"
-              onSelect={() => personalModels.open(nextService)}
-            >
-              <Plus />
-              {t("providers.allowPersonalModels")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
+      <SettingsPageActions actions={[tab === "org" ? addCredential : allowPersonalModels]} />
 
       <div className="mb-6">
         <CollectionTabs
@@ -230,40 +215,46 @@ export function OrgSettingsModelsPage() {
               <PersonalCredentialsSetting />
             </SettingsGroup>
           )}
-          {personalOff && (
-            <p className="text-muted-foreground mb-3 text-sm">{t("providers.personalOff")}</p>
-          )}
-          <div inert={personalOff} className={cn("mb-6", personalOff && "opacity-50")}>
-            <PersonalServicesTable
-              rows={serviceRows}
-              isLoading={modelsLoading || (canReadCredentials && pkLoading)}
-              error={tableError}
-              canWriteModels={canWriteModels}
-              onChooseModels={(row) => personalModels.open(row.id)}
-            />
-          </div>
-          {/* Outside the greyed table: a key already held is deleted whatever the setting says. */}
-          {canReadCredentials && personalRows.length > 0 && (
-            <section className="mb-6">
-              <h3 className="mb-3 text-sm font-semibold">{t("providers.memberKeys")}</h3>
-              <ProvidersTable
-                label={t("providers.memberKeys")}
-                tableId="member-providers"
-                rows={personalRows}
-                showType
-                isLoading={false}
-                error={null}
-                empty={{ message: t("modelCredentials.empty") }}
-                canWriteModels={false}
-                {...keyDeeds}
-              />
-            </section>
-          )}
-          {canConnect && personalAllowed && (
-            <p className="text-muted-foreground text-sm">
-              {t("providers.personalFooter")}{" "}
-              <PreferencesModelsLink>{t("providers.personalFooterLink")}</PreferencesModelsLink>
-            </p>
+          {settingsLoading ? (
+            <TextSkeleton lines={4} />
+          ) : (
+            <>
+              {personalOff && (
+                <p className="text-muted-foreground mb-3 text-sm">{t("providers.personalOff")}</p>
+              )}
+              <div inert={personalOff} className={cn("mb-6", personalOff && "opacity-50")}>
+                <PersonalServicesTable
+                  rows={serviceRows}
+                  isLoading={modelsLoading || (canReadCredentials && pkLoading)}
+                  error={tableError}
+                  canWriteModels={canWriteModels}
+                  onChooseModels={(row) => personalModels.open(row.id)}
+                />
+              </div>
+              {/* Outside the greyed table: a key already held is deleted whatever the setting says. */}
+              {canReadCredentials && personalRows.length > 0 && (
+                <section className="mb-6">
+                  <h3 className="mb-3 text-sm font-semibold">{t("providers.memberKeys")}</h3>
+                  <ProvidersTable
+                    label={t("providers.memberKeys")}
+                    tableId="member-providers"
+                    rows={personalRows}
+                    showType
+                    isLoading={false}
+                    error={null}
+                    empty={{ message: t("modelCredentials.empty") }}
+                    canWriteModels={false}
+                    {...keyDeeds}
+                  />
+                </section>
+              )}
+              {canConnect && personalAllowed && (
+                <p className="text-muted-foreground text-sm">
+                  {t("providers.personalFooter")}{" "}
+                  <PreferencesModelsLink>{t("providers.personalFooterLink")}</PreferencesModelsLink>
+                </p>
+              )}
+            </>
           )}
         </>
       )}
@@ -272,22 +263,25 @@ export function OrgSettingsModelsPage() {
         <ProviderAddFlow credentials={credentials ?? []} onClose={addProvider.close} />
       )}
 
-      <CredentialFormModal
-        open={editKey.target !== undefined}
-        onClose={editKey.close}
-        credential={editKey.target ?? null}
-        isPending={updateCredential.isPending}
-        onSubmit={(data) => {
-          const target = editKey.target;
-          if (!target) return;
-          // The PATCH body only accepts mutable fields: the protocol and endpoint are pinned
-          // by `providerId` at create time.
-          updateCredential.mutate(
-            { params: { path: { id: target.id } }, body: credentialUpdateBody(target, data) },
-            { onSuccess: editKey.close },
-          );
-        }}
-      />
+      {editKey.target && (
+        <CredentialFormModal
+          key={editKey.target.id}
+          onClose={editKey.close}
+          credential={editKey.target}
+          isPending={updateCredential.isPending}
+          onSubmit={(data) => {
+            // The PATCH body only accepts mutable fields: the protocol and endpoint are pinned
+            // by `providerId` at create time.
+            updateCredential.mutate(
+              {
+                params: { path: { id: editKey.target!.id } },
+                body: credentialUpdateBody(editKey.target!, data),
+              },
+              { onSuccess: editKey.close },
+            );
+          }}
+        />
+      )}
 
       {chooseModels.target && (
         <ProviderModelsModal
@@ -308,14 +302,15 @@ export function OrgSettingsModelsPage() {
         />
       )}
 
-      <ModelFormModal
-        open={editModel.target !== undefined}
-        onClose={editModel.close}
-        model={editModel.target ?? null}
-        isPending={modelForm.isPending}
-        onSubmit={modelForm.onSubmit}
-        onDelete={canDeleteModels ? () => setDeletingModel(editModel.target ?? null) : undefined}
-      />
+      {editModel.target && (
+        <ModelFormModal
+          onClose={editModel.close}
+          model={editModel.target}
+          isPending={modelForm.isPending}
+          onSubmit={modelForm.onSubmit}
+          onDelete={canDeleteModels ? () => setDeletingModel(editModel.target ?? null) : undefined}
+        />
+      )}
 
       {/* Over the model form (or the instance's row), which closes with it once the model is gone. */}
       <ConfirmModal

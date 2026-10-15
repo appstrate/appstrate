@@ -14,13 +14,9 @@ import { sessionExpected } from "./lib/session-read";
 import { primeOrgList } from "./hooks/use-org";
 import { primeSpaceList } from "./hooks/use-spaces";
 import { clearChunkReloadFlag, reloadOnceForChunkError } from "./lib/chunk-reload";
+import { warmChunk, warmupPending } from "./lib/chunk-warmup";
 import "./stores/theme-store";
 import "./styles.css";
-
-// True only while the speculative chat warm-up below is in flight. Vite
-// dispatches `vite:preloadError` for EVERY failed dynamic import, including one
-// nobody asked for, so the listener needs to tell the two cases apart.
-let chatWarmupPending = false;
 
 // Vite fires this when a dynamic-import preload fails — typically a stale
 // hashed chunk after a redeploy. Hard-reload once to pick up the fresh chunk
@@ -28,15 +24,12 @@ let chatWarmupPending = false;
 // loops, and when it has already fired we let the rejection propagate to the
 // ErrorBoundary instead.
 window.addEventListener("vite:preloadError", (event) => {
-  // A failed WARM-UP is not a failed navigation. The user never asked for that
-  // chunk and is not looking at a broken screen, so there is nothing to
-  // recover: reloading would turn a background miss into a visible
-  // interruption. It would also loop without bound — the one-shot guard is
-  // cleared on every successful boot (below), which lands BEFORE this rejection
-  // does, so each reload would clear the flag that was meant to stop the next
-  // one. `lazy()` re-imports and surfaces a real error if the user ever
-  // navigates there, which is the only moment the failure actually matters.
-  if (chatWarmupPending) {
+  // A failed WARM-UP (`lib/chunk-warmup.ts`) is not a failed navigation:
+  // reloading would turn a background miss into a visible interruption. It
+  // would also loop without bound — the one-shot guard is cleared on every
+  // successful boot (below), which lands BEFORE this rejection does, so each
+  // reload would clear the flag that was meant to stop the next one.
+  if (warmupPending()) {
     event.preventDefault();
     return;
   }
@@ -73,18 +66,8 @@ if (sessionExpected(localStorage)) primeSpaceList(primeOrgList());
 // the route renders nowhere, and warming its chunk would download and compile
 // the single largest asset on the page for a screen that does not exist. The
 // config is injected synchronously by the server, so it is readable here.
-//
-// Failure is ignored — but NOT by the `.catch()` alone. `import()` compiles to
-// Vite's `__vitePreload`, which dispatches `vite:preloadError` from its own
-// `baseModule().catch(handlePreloadError)` BEFORE any userland handler runs;
-// the marker above is what actually keeps that event from reloading the tab.
 if (window.__APP_CONFIG__?.features?.chat) {
-  chatWarmupPending = true;
-  void import("./modules/chat/chat-page")
-    .catch(() => undefined)
-    .finally(() => {
-      chatWarmupPending = false;
-    });
+  warmChunk(() => import("./modules/chat/chat-page"));
 }
 
 // Wait for the active language's namespaces to load before the first render

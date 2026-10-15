@@ -5,10 +5,11 @@ import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
-import { ErrorState, LoadingState } from "../components/page-states";
+import { ErrorState } from "../components/page-states";
+import { DashboardBodySkeleton } from "../components/loading-skeletons";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
-import { DashboardContent } from "./dashboard-content";
+import { DashboardContent, DashboardHeader } from "./dashboard-content";
 
 export function DashboardPage() {
   const { profile, user } = useAuth();
@@ -27,15 +28,24 @@ export function DashboardPage() {
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents();
   const agentName = useRunAgentName();
   const { data: unreadCounts } = useUnreadCountsByAgent();
-  // The schedules feed one section, drawn once they arrive: their failure is
-  // not the dashboard's.
-  const { data: schedules } = useAllSchedules();
+  // The schedules feed one section and one figure; their failure is not the
+  // dashboard's, but the body waits for them so neither is drawn as « none »
+  // first and then reflowed.
+  const { data: schedules, isLoading: schedulesLoading } = useAllSchedules();
+  const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0] ?? "";
 
   // A disabled query is not loading, so an unresolved permission set must be.
-  const isLoading = !ready || runsLoading || agentsLoading;
+  const isLoading = !ready || runsLoading || agentsLoading || schedulesLoading;
   const error = runsError || agentsError;
 
-  if (isLoading) return <LoadingState />;
+  // The greeting is known before any read: only the body waits.
+  if (isLoading)
+    return (
+      <div className="mx-auto w-full max-w-[1300px] space-y-8">
+        <DashboardHeader firstName={firstName} />
+        <DashboardBodySkeleton />
+      </div>
+    );
   if (error) return <ErrorState error={error} />;
 
   const runs = runsData?.data ?? [];
@@ -65,8 +75,6 @@ export function DashboardPage() {
   for (const agent of agents ?? []) {
     if (!seen.has(agent.id)) orderedAgents.push(agent);
   }
-
-  const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0] ?? "";
 
   return (
     <div className="mx-auto w-full max-w-[1300px]">

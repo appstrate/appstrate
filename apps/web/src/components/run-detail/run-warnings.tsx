@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import type { To } from "react-router-dom";
 import type { EnrichedRun } from "@appstrate/shared-types";
-import { useIntegrationDetail } from "../../hooks/use-integrations";
+import { useIntegrationName } from "../../hooks/use-integration-name";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { useModels } from "../../hooks/use-models";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -27,12 +27,12 @@ function parseDegradedIntegrations(metadata: unknown): string[] {
 
 function DegradedIntegrationItem({ integrationId }: { integrationId: string }) {
   const { t } = useTranslation("common");
-  const { data } = useIntegrationDetail(integrationId);
+  const displayName = useIntegrationName(integrationId);
   const canReach = useCanReach();
   const integrationPath = `/integrations/${integrationId}`;
   return (
     <HealthCardItem
-      title={data?.manifest.display_name ?? integrationId}
+      title={displayName}
       actions={
         canReach(integrationPath) ? (
           <HealthAction to={integrationPath}>{t("btn.reconnect")}</HealthAction>

@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
 import type { DataColumn } from "../components/data-table";
-import { IntegrationIcon } from "../components/integration-icon";
+import { PackageIcon } from "../components/package-icon";
 import {
   useCatalogueOriginColumn,
   useCatalogueProtocolColumn,
@@ -27,7 +27,7 @@ export function useIntegrationListColumns(): DataColumn<IntegrationIndexItem>[] 
       width: "minmax(132px,1.6fr)",
       cell: (integration) => (
         <div className="flex min-w-0 items-center gap-2">
-          <IntegrationIcon src={integration.icon ?? undefined} size="sm" />
+          <PackageIcon type="integration" icon={integration.icon} size="sm" />
           <span className="truncate font-medium">{integration.name}</span>
         </div>
       ),

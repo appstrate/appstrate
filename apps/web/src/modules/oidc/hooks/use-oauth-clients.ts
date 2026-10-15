@@ -5,10 +5,11 @@
  * Mirrors the backend `/api/oauth/clients*` routes shipped in Stage 4.
  */
 
-import { useMutation, useQueryClient, type MutationMeta } from "@tanstack/react-query";
+import { useMutation, type MutationMeta } from "@tanstack/react-query";
 import { $api, client, type components, type paths } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentSpaceId } from "@/hooks/use-current-space";
+import { useInvalidatePaths } from "@/hooks/use-invalidate-paths";
 import { useOrgOnlyScope } from "@/hooks/use-org-scope";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 
@@ -60,15 +61,8 @@ export function useOAuthScopes() {
   );
 }
 
-function useInvalidateOAuthClients() {
-  const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/oauth/clients"] });
-  };
-}
-
 export function useCreateOAuthClient(level?: "org" | "space") {
-  const invalidate = useInvalidateOAuthClients();
+  const invalidate = useInvalidatePaths("/api/oauth/clients");
   const spaceId = useCurrentSpaceId();
   const orgId = useCurrentOrgId();
   const isOrg = level === "org";
@@ -101,7 +95,7 @@ export function useCreateOAuthClient(level?: "org" | "space") {
 
 /** `meta`: the edit form shows a refusal on itself; the list's toggles leave it to the cache. */
 export function useUpdateOAuthClient(meta?: MutationMeta) {
-  const invalidate = useInvalidateOAuthClients();
+  const invalidate = useInvalidatePaths("/api/oauth/clients");
   return $api.useMutation("patch", "/api/oauth/clients/{clientId}", {
     meta,
     onSuccess: invalidate,
@@ -109,12 +103,12 @@ export function useUpdateOAuthClient(meta?: MutationMeta) {
 }
 
 export function useDeleteOAuthClient() {
-  const invalidate = useInvalidateOAuthClients();
+  const invalidate = useInvalidatePaths("/api/oauth/clients");
   return $api.useMutation("delete", "/api/oauth/clients/{clientId}", { onSuccess: invalidate });
 }
 
 export function useRotateOAuthClientSecret() {
-  const invalidate = useInvalidateOAuthClients();
+  const invalidate = useInvalidatePaths("/api/oauth/clients");
   return $api.useMutation("post", "/api/oauth/clients/{clientId}/rotate", {
     onSuccess: invalidate,
   });

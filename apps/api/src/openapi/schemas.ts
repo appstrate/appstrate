@@ -112,17 +112,45 @@ const PACKAGE_HOME_PROPERTIES = {
   },
 } as const;
 
+/** An organization logo that is one emoji: the write form, and one of the read forms. */
+export const ORG_LOGO_EMOJI_SCHEMA = {
+  type: "object",
+  required: ["kind", "emoji"],
+  properties: {
+    kind: { type: "string", const: "emoji" },
+    emoji: { type: "string", description: "Exactly one emoji." },
+  },
+  additionalProperties: false,
+} as const;
+
 export const ORG_LOGO_PROPERTY = {
-  type: ["string", "null"],
+  oneOf: [
+    ORG_LOGO_EMOJI_SCHEMA,
+    {
+      type: "object",
+      required: ["kind", "url"],
+      properties: {
+        kind: { type: "string", const: "image" },
+        url: {
+          type: "string",
+          description:
+            "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good.",
+        },
+      },
+      additionalProperties: false,
+    },
+    { type: "null" },
+  ],
   description:
-    "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial.",
+    "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial.",
 } as const;
 
 /** The agent's identity tile, on the list item and on the detail. */
 const AGENT_IDENTITY_PROPERTIES = {
   icon: {
     type: "string",
-    description: "AFPS manifest icon used for the Agent identity tile.",
+    description:
+      "The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none.",
   },
   color: {
     type: "string",
@@ -243,7 +271,7 @@ const ORG_PACKAGE_ITEM_SCHEMA = {
     icon: {
       type: ["string", "null"],
       description:
-        "The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone.",
+        "The manifest's `icon`: an Iconify id (`<prefix>:<name>`, e.g. `logos:slack-icon`, `lucide:bot`) or an image URL, `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone.",
     },
     keywords: {
       type: "array",

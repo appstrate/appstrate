@@ -12,7 +12,7 @@ import { useNavigate } from "react-router-dom";
 import { handleOidcCallback } from "../lib/oidc";
 import { refreshAuth, AuthRefreshError } from "../../../hooks/use-auth";
 import { authStore } from "../../../stores/auth-store";
-import { Spinner } from "../../../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { errorMessage } from "../../../lib/mutation-error";
 import { FieldError } from "@appstrate/ui/components/field";
 

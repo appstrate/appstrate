@@ -10,11 +10,14 @@ import type { ExecutionEntry } from "../log-utils";
 export function RunExecutionView({
   run,
   logs,
+  logsLoading = false,
   headerActions,
   initialFilter,
 }: {
   run: EnrichedRun;
   logs: ExecutionEntry[];
+  /** The journal is still being read: the viewer draws rows on their way, not "no log". */
+  logsLoading?: boolean;
   headerActions?: ReactNode;
   initialFilter?: JournalOverviewFilter;
 }) {
@@ -36,6 +39,7 @@ export function RunExecutionView({
           <LogViewer
             key={initialFilter ?? "all"}
             entries={logs}
+            isLoading={logsLoading}
             focusError={run.status === "failed"}
             headerActions={headerActions}
             selectedEntryId={selectedId}

@@ -37,6 +37,11 @@ export function scheduleVersionOptions(t: TFunction, { draftOffered }: { draftOf
   ];
 }
 
+/** What a schedule is called wherever it is listed; a nameless one says so. */
+export function scheduleLabel(schedule: Pick<ScheduleWireDto, "name">, t: TFunction): string {
+  return schedule.name || t("schedule.unnamed", { ns: "agents" });
+}
+
 /**
  * When the schedule fires next; `null` when it does not. A disabled schedule keeps a
  * `next_run_at` in the database: saying it would promise a run that is not coming.

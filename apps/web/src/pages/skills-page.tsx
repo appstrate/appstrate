@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ItemTab } from "./item-tab";
+import { PackageIndexPage } from "./package-index";
 
 export function SkillsPage() {
-  return <ItemTab />;
+  return <PackageIndexPage type="skill" />;
 }

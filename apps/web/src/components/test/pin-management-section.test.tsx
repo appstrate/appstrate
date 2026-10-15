@@ -159,7 +159,7 @@ describe("PinManagementSection, 'Aucune connexion'", () => {
       pins: [{ agent_package_id: "@acme/mailer", connection_ids: [] }],
       connections: [SHARED],
     });
-    const row = html.match(/data-testid="pin-row-@acme\/mailer".*?<\/tr>/s)?.[0] ?? "";
+    const row = html.match(/<tr[^>]*>(?:(?!<\/tr>).)*Mailer.*?<\/tr>/s)?.[0] ?? "";
     expect(row).toContain(i18n.t("agents:detail.integrationMemberPicker.none"));
   });
 });

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Mail } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { AuthLayout } from "../components/auth-layout";
+import { AuthMessage } from "../components/auth-message";
 
 /** Where a magic-link email lands without the OIDC module: inert until the button is pressed. */
 export function MagicLinkConfirmPage() {
@@ -15,21 +16,18 @@ export function MagicLinkConfirmPage() {
 
   return (
     <AuthLayout>
-      <div className="flex flex-col items-center gap-6 text-center">
-        <div className="bg-primary/10 flex h-16 w-16 items-center justify-center rounded-full">
-          <Mail className="text-primary h-8 w-8" />
-        </div>
-        <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold">{t("magicLink.confirmTitle")}</h1>
-          <p className="text-muted-foreground text-sm">{t("magicLink.confirmDescription")}</p>
-        </div>
+      <AuthMessage
+        icon={Mail}
+        title={t("magicLink.confirmTitle")}
+        description={t("magicLink.confirmDescription")}
+      >
         <Button
           className="w-full max-w-sm"
           onClick={() => window.location.assign(`/api/auth/magic-link/verify${search}`)}
         >
           {t("magicLink.confirmButton")}
         </Button>
-      </div>
+      </AuthMessage>
     </AuthLayout>
   );
 }

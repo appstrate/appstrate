@@ -231,10 +231,14 @@
     @apply text-muted-foreground mb-1 block text-sm;
   }
 
-  /* Base button styling for unstyled buttons */
+  /* Base button styling for unstyled buttons. No hover background and no
+     padding: a raw <button> is a row, a chip, a title or an icon inside a
+     surface that draws its own hover, and a base fill lit up a second block
+     inside it. A button that wants a surface says so (`<Button>`, or its own
+     `hover:bg-*` and `p-*`). */
   button {
-    @apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors;
-    @apply text-muted-foreground hover:text-foreground hover:bg-accent;
+    @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors;
+    @apply text-muted-foreground hover:text-foreground;
   }
   button:disabled {
     @apply pointer-events-none opacity-50;
@@ -243,13 +247,6 @@
   /* Checkbox reset — don't apply full-width input styles */
   input[type="checkbox"] {
     @apply w-auto;
-  }
-
-  /* Radix Checkbox/Switch/Radio renders as <button> — reset global button padding */
-  button[role="checkbox"],
-  button[role="switch"],
-  button[role="radio"] {
-    @apply p-0;
   }
 
   /* Links */
@@ -304,4 +301,14 @@
 .monaco-editor,
 .monaco-editor .overflow-guard {
   border-radius: 0.5rem;
+}
+
+/* Dialogs and sheets stack: settings and the catalogue are overlays, and their
+   pages open dialogs of their own. Each portal is a child of `body`, so a later
+   overlay is a sibling of the first one. Dimming twice turns the margin nearly
+   black and leaves the dialog underneath as a lighter, rounded block, so only
+   the first overlay dims. Unlayered on purpose: it must beat the overlay's
+   `bg-black/80` utility. */
+[data-slot="dialog-overlay"] ~ [data-slot="dialog-overlay"] {
+  background-color: transparent;
 }

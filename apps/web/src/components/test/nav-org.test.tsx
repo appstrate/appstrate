@@ -3,7 +3,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
-import type { components } from "../../api/client.ts";
+import { $api, type components } from "../../api/client.ts";
 import { NavOrg } from "../nav-org.tsx";
 import { orgStore } from "../../stores/org-store.ts";
 import { render } from "../../test/render.tsx";
@@ -35,6 +35,12 @@ function navFor(permissions: string[]): string {
     id: org.id,
   });
   queryClient.setQueryData(["orgs"], [org]);
+  // No space to enter: the permission set is the org's, and the navigation answers at once.
+  queryClient.setQueryData(
+    $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": org.id } } })
+      .queryKey,
+    { object: "list", hasMore: false, data: [] },
+  );
   try {
     return render(
       <SidebarProvider>

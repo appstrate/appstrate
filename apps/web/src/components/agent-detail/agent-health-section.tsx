@@ -100,7 +100,7 @@ export function AgentHealthSection({
           )}
         </div>
         {result && result.diagnostics.length > 3 && (
-          <OverviewCardAction onClick={() => issues.open()}>
+          <OverviewCardAction target={{ onClick: () => issues.open() }}>
             {t("detail.diagnostics.seeAll")}
           </OverviewCardAction>
         )}

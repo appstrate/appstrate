@@ -25,7 +25,7 @@ export const ALIAS_PI_PROVIDER_KEY = "appstrate";
  * {@link PI_SDK_VERSION_HEADER}. A proxy for `pi-messages` compatibility, not a
  * protocol version.
  */
-export const PI_SDK_VERSION = "1.0.4";
+export const PI_SDK_VERSION = "1.1.0";
 /* Pinned against every manifest in the repo by `test/pi-sdk-version.test.ts`. */
 
 /** Container → sidecar only; never forwarded to a backing. */

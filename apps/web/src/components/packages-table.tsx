@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { CollectionState } from "./collection";
 import { DataTable, type DataColumn } from "./data-table";
 import { packageDetailPath } from "../lib/package-paths";
-import type { CardItem } from "../pages/package-list";
+import type { CardItem } from "../lib/package-card-item";
 
 export function PackagesTable({
   items,

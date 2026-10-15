@@ -15,10 +15,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`readAgentAppearance(manifest)`** (`@appstrate/core/validation`): an
   agent's identity tile, `{ icon?, color? }` — the manifest `icon` and the
   `color` under `_meta[AGENT_UI_META_KEY]`, each only when it is a string.
-- **`ORG_LOGO_EMOJI_PREFIX`**, **`ORG_LOGO_WEBP_PREFIX`** and
-  **`ORG_LOGO_MAX_LENGTH`** (`@appstrate/core/validation`): the organization
-  logo's wire form — `emoji:<grapheme>` or a `data:image/webp;base64,` URL —
-  and its longest accepted value, 48 000 characters.
+- **`@appstrate/core/manifest-icon`**: the grammar of a manifest `icon` —
+  **`parseManifestIcon(value)`** reads it as a `ManifestIcon` (`lucide` name,
+  other Iconify id, or image URL), `null` when no surface can draw it;
+  **`LUCIDE_ICON_PREFIX`** is `"lucide:"`, the prefix of an agent's icon.
+- **`ORG_LOGO_MAX_BYTES`** (`@appstrate/core/validation`): the largest
+  organization logo image `PUT /api/orgs/{orgId}/logo` accepts, 36 000 bytes.
+- **`unwrapMcpResult(value)`** (`@appstrate/core/mcp-result`): the payload inside
+  an MCP tool result — a `CallToolResult`, a bare content array or a JSON
+  string — recovered even when a prose text part (the turn-budget note) follows
+  it.
+- **`realtimeRunsUrl({ orgId, spaceId, runId?, channels?, verbose?, viewAs? })`**
+  (`@appstrate/core/realtime-url`): the URL of the realtime SSE stream, org-wide
+  or one run's, scope and role preview carried in the query.
+- **`isModelSelectable(model)`** (`@appstrate/core/model-selectable`): whether a
+  listed model can be picked — enabled, and its credential not flagged for
+  reconnection.
+- **`relativeAge(iso, now)`** and **`RelativeAgeUnit`** (`@appstrate/core/format`):
+  how long ago a timestamp was, as a rounded `{ unit, count }` the caller words
+  in its own language.
+- **`listenConnectCompletion(target, onCompletion, host)`**, **`connectPopupName(packageId)`**
+  and **`CONNECT_POPUP_FEATURES`** (`@appstrate/core/connect-handshake`): the
+  completion listener both connect surfaces share (origin-checked `postMessage`
+  plus `BroadcastChannel`), the per-integration popup window name, and the one
+  popup size.
 - **`resolveIntegrationToolSurface`**, **`IntegrationToolInspection`** and
   **`IntegrationToolInspectionEntry`** (`@appstrate/core/integration`): the
   catalog `resolveIntegrationToolCatalog` returns, plus an explanatory
@@ -31,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `connection` (a connection, the set binding one, or the integration's
   activation) or `agent` (the agent's own `auth_key` or tool selection).
   Exhaustive over the codes.
+
+### Changed
+
+- **`acceptsCompletionMessage`** (`@appstrate/core/connect-handshake`) is now a
+  type guard: a `true` narrows `event.data` to `IntegrationConnectCompletion`.
 
 ## [16.0.0] — 2026-10-14
 

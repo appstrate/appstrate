@@ -133,7 +133,7 @@ function pageFor(
     queryClient.setQueryData(membersKey, { object: "list", data: [member], hasMore: false });
   try {
     const html = render(
-      <RouteGate path="/workspace-settings/members">
+      <RouteGate path="/workspace-settings/members" pending={null}>
         <WorkspaceSettingsMembersPage />
       </RouteGate>,
       { queryClient },

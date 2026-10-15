@@ -24,10 +24,12 @@ import {
   AGENT_ICON_NAMES,
   type AgentColorKey,
   type AgentIconName,
+  agentIconRef,
   isAgentColorKey,
+  isLucideIconName,
   resolveAgentIdentity,
 } from "../agent-identity-options";
-import { AgentIdentityTile } from "../agent-identity";
+import { PackageIcon } from "../package-icon";
 
 const COLOR_KEYS = Object.keys(AGENT_COLOR_CATALOG) as AgentColorKey[];
 const FEATURED_ICONS: AgentIconName[] = [
@@ -63,6 +65,12 @@ export function AgentAppearanceFields({
   const { t } = useTranslation("agents");
   const { icon, color } = readAgentAppearance(manifest);
   const resolved = resolveAgentIdentity(icon, color);
+  // The Lucide icon picked for this agent; `null` when its manifest names one
+  // from elsewhere (an Iconify id, an image URL), which the tile still draws.
+  const pickedIcon =
+    resolved.icon.kind === "lucide" && isLucideIconName(resolved.icon.name)
+      ? resolved.icon.name
+      : null;
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [iconQuery, setIconQuery] = useState("");
   const customColor = resolved.customColor ?? "#2563eb";
@@ -91,9 +99,9 @@ export function AgentAppearanceFields({
       <div>
         <Label>{t("editor.appearancePreview")}</Label>
         <div className="border-border bg-muted/20 mt-2 flex items-center gap-3 rounded-lg border p-3">
-          <AgentIdentityTile
-            agentId={typeof manifest.name === "string" ? manifest.name : "agent"}
-            icon={resolved.icon}
+          <PackageIcon
+            type="agent"
+            icon={icon}
             color={resolved.color}
             className="size-11 rounded-xl"
             iconClassName="size-5"
@@ -120,8 +128,8 @@ export function AgentAppearanceFields({
               className="w-full justify-between font-normal"
             >
               <span className="flex min-w-0 items-center gap-2">
-                <DynamicIcon name={resolved.icon} className="size-4 shrink-0" />
-                <span className="truncate">{iconLabel(resolved.icon)}</span>
+                {pickedIcon && <DynamicIcon name={pickedIcon} className="size-4 shrink-0" />}
+                <span className="truncate">{pickedIcon ? iconLabel(pickedIcon) : icon}</span>
               </span>
               <ChevronsUpDown className="text-muted-foreground size-4 shrink-0" />
             </Button>
@@ -148,7 +156,7 @@ export function AgentAppearanceFields({
                         key={name}
                         value={name}
                         onSelect={() => {
-                          onChange({ icon: name });
+                          onChange({ icon: agentIconRef(name) });
                           setIconPickerOpen(false);
                         }}
                         className="min-w-0 gap-2"
@@ -158,7 +166,7 @@ export function AgentAppearanceFields({
                         <Check
                           className={cn(
                             "ml-auto size-3.5 shrink-0",
-                            resolved.icon === name ? "opacity-100" : "opacity-0",
+                            pickedIcon === name ? "opacity-100" : "opacity-0",
                           )}
                         />
                       </CommandItem>

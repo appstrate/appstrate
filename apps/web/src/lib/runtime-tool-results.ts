@@ -11,6 +11,9 @@
  * `null` means "not a shape this knows", and the caller keeps the raw JSON.
  */
 
+import { asRecordOrNull } from "@appstrate/core/safe-json";
+import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+
 export interface RecalledMemory {
   id: string;
   content: string;
@@ -24,48 +27,23 @@ export interface HistoryRun {
   duration?: number;
 }
 
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-/** The JSON payload behind an MCP content array, a JSON string, or a plain object. */
-function payload(result: unknown): unknown {
-  if (typeof result === "string") {
-    try {
-      return JSON.parse(result);
-    } catch {
-      return null;
-    }
-  }
-  const content = record(result)?.content ?? (Array.isArray(result) ? result : null);
-  if (Array.isArray(content)) {
-    const text = content.find(
-      (part) => record(part)?.type === "text" && typeof record(part)?.text === "string",
-    );
-    return text ? payload((text as { text: string }).text) : null;
-  }
-  return result;
-}
-
 const str = (value: unknown) => (typeof value === "string" ? value : undefined);
 
 export function recalledMemories(result: unknown): RecalledMemory[] | null {
-  const memories = record(payload(result))?.memories;
+  const memories = asRecordOrNull(unwrapMcpResult(result))?.memories;
   if (!Array.isArray(memories)) return null;
   return memories.flatMap((raw) => {
-    const memory = record(raw);
+    const memory = asRecordOrNull(raw);
     if (!memory || typeof memory.content !== "string") return [];
     return [{ id: String(memory.id), content: memory.content, createdAt: str(memory.createdAt) }];
   });
 }
 
 export function historyRuns(result: unknown): HistoryRun[] | null {
-  const runs = record(payload(result))?.data;
+  const runs = asRecordOrNull(unwrapMcpResult(result))?.data;
   if (!Array.isArray(runs)) return null;
   return runs.flatMap((raw) => {
-    const run = record(raw);
+    const run = asRecordOrNull(raw);
     if (!run || typeof run.id !== "string") return [];
     return [
       {

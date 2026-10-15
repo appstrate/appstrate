@@ -13,7 +13,8 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@appstrate/ui/com
  * A rail of sections on a phone: a Menu button opening it in a sheet, where two
  * panes do not fit and the whole rail would otherwise come before the content.
  * Remounted on every navigation (a section can live in the query or the hash),
- * so picking an entry closes it.
+ * so picking an entry closes it. The caller says from which width it steps
+ * aside: the window's for a dialog, the frame's own for a split in a page.
  */
 export function PhoneNavigation({
   title,
@@ -33,10 +34,7 @@ export function PhoneNavigation({
         <Button
           type="button"
           variant="outline"
-          className={cn(
-            "mb-6 h-11 w-full justify-between bg-transparent px-3 md:hidden",
-            className,
-          )}
+          className={cn("mb-6 h-11 w-full justify-between bg-transparent px-3", className)}
         >
           <span className="truncate">{t("panelDialog.menu")}</span>
           <ChevronDown className="size-4 shrink-0" />

@@ -10,7 +10,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { useSpace, useUpdateSpace, useDeleteSpace } from "../../hooks/use-spaces";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState } from "../../components/page-states";
+import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { SaveFeedback } from "../../components/settings/save-feedback";
 import { fieldWriteState } from "../../lib/field-write-state";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
@@ -39,7 +40,7 @@ export function WorkspaceSettingsGeneralPage() {
   const { data: space, isLoading, error } = useSpace(spaceId ?? "");
 
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={AppWindow} />;
-  if (isLoading) return <LoadingState />;
+  if (isLoading) return <SettingsSkeleton />;
   if (error) return <ErrorState error={error} />;
   if (!space) return <ErrorState />;
 
@@ -275,12 +276,14 @@ function GeneralForm({
                     options={presetOptions}
                     fallbackLabel={t(`roles.preset.${activeDefaultRole}`)}
                     disabled={updateMutation.isPending}
+                    loading={rolesLoading || !rolesKnown}
                     onValueChange={(value) => commitDefaultRole(value as SpaceRolePreset)}
                   />
                   <p className="text-muted-foreground text-xs">
                     {t(`roles.presetDesc.${activeDefaultRole}`)}
                   </p>
                   <RoleCatalogState
+                    pending={null}
                     isLoading={rolesLoading}
                     rolesKnown={rolesKnown}
                     error={rolesError}

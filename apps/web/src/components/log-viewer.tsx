@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { DropdownMenuCheckboxItem, DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "./page-actions-menu";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
@@ -35,12 +36,12 @@ import {
 } from "./log-utils";
 import { ItemList } from "./item-list";
 import { EmptyState } from "./page-states";
-import { Fact, FactGrid } from "./fact-grid";
+import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { Badge } from "./status-badge";
 import { formatDateField } from "../lib/format-date";
 import { historyRuns, recalledMemories } from "../lib/runtime-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 
 const levelIconConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
   debug: { icon: Bug, className: "text-muted-foreground", label: "DEBUG" },
@@ -201,6 +202,8 @@ function ToolResult({ tool, result }: { tool: string; result: unknown }) {
 
 interface LogViewerProps {
   entries: ExecutionEntry[];
+  /** The entries are still being read: rows on their way replace the empty state. */
+  isLoading?: boolean;
   /** Terminal failures open with the causal event near the middle of the journal. */
   focusError?: boolean;
   headerActions?: ReactNode;
@@ -241,6 +244,7 @@ function journalSearchText(entry: ExecutionEntry): string {
 
 export function LogViewer({
   entries,
+  isLoading = false,
   focusError = false,
   headerActions,
   selectedEntryId,
@@ -460,22 +464,32 @@ export function LogViewer({
           </div>
 
           <div className="h-[400px] overflow-y-auto" ref={scrollRef}>
-            {entries.length === 0 ? (
+            {isLoading && entries.length === 0 ? (
+              <div role="status" aria-busy="true" aria-label={t("loading", { ns: "common" })}>
+                <div aria-hidden className="space-y-2 p-4">
+                  {Array.from({ length: 8 }, (_, i) => (
+                    <Skeleton key={i} className="h-8 w-full" />
+                  ))}
+                </div>
+              </div>
+            ) : entries.length === 0 ? (
               <div className="flex h-full items-center justify-center">
                 <EmptyState compact icon={ScrollText} message={t("log.empty")} />
               </div>
             ) : visibleEntries.length === 0 ? (
-              <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-                <SearchX className="text-muted-foreground mb-3 size-7" />
-                <p className="text-sm font-medium">{t("log.noMatches")}</p>
-                <p className="text-muted-foreground mt-1 max-w-sm text-xs">
-                  {t("log.noMatchesHint")}
-                </p>
-                {hasActiveQueryOrFilters && (
-                  <Button variant="ghost" size="sm" className="mt-2" onClick={clearJournalFilters}>
-                    {t("log.clearAll")}
-                  </Button>
-                )}
+              <div className="flex h-full items-center justify-center">
+                <EmptyState
+                  compact
+                  icon={SearchX}
+                  message={t("log.noMatches")}
+                  hint={t("log.noMatchesHint")}
+                >
+                  {hasActiveQueryOrFilters && (
+                    <Button variant="ghost" size="sm" onClick={clearJournalFilters}>
+                      {t("log.clearAll")}
+                    </Button>
+                  )}
+                </EmptyState>
               </div>
             ) : (
               <div

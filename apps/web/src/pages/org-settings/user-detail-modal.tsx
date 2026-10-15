@@ -6,25 +6,23 @@
  * The table says which spaces; the question it cannot hold in a cell is "as
  * what", and changing that meant opening each space's Members page in turn.
  * Both live here: the org role at the top, then one row per space with its own
- * role control. Two routes, as on the space page — an explicit seat is
- * PATCHed, an implicit member (open space) gets one created.
+ * role control (`useAssignSpaceRole` does the write).
  */
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { AppWindow } from "lucide-react";
-import { OptionSelect } from "@appstrate/ui/components/select";
 import type { OrgRole } from "@appstrate/shared-types";
 import type { components } from "../../api/client";
 import { DataTable } from "../../components/data-table";
 import { Modal } from "../../components/modal";
 import { EmptyState } from "../../components/page-states";
 import { SettingRow } from "../../components/settings/setting-row";
+import { OrgRoleSelect } from "../../components/org-role-select";
 import { roleI18nKey } from "../../hooks/use-permissions";
-import { memberRoleValue, spaceRoleAssignment, useSpaceRoleOptions } from "../../hooks/use-roles";
-import { useAddSpaceMember, useUpdateSpaceMember } from "../../hooks/use-space-members";
+import { useSpaceRoleOptions } from "../../hooks/use-roles";
+import { useAssignSpaceRole } from "../../hooks/use-space-members";
 import type { SpaceMembership } from "../../hooks/use-space-memberships";
 import { formatDateField } from "../../lib/format-date";
-import { memberLabel } from "../../lib/billing-managers";
+import { memberLabel } from "../../lib/members";
 import { useUserSpaceColumns } from "./user-space-columns";
 
 type OrgMember = components["schemas"]["OrgMember"];
@@ -33,6 +31,7 @@ export function UserDetailModal({
   member,
   memberships,
   showSpaces,
+  spacesLoading,
   assignableRoles,
   isChangingOrgRole,
   onChangeOrgRole,
@@ -42,6 +41,8 @@ export function UserDetailModal({
   memberships: SpaceMembership[];
   /** Only an owner or admin reads every space's member list. */
   showSpaces: boolean;
+  /** The memberships are still being read: the table draws rows, not its empty state. */
+  spacesLoading: boolean;
   assignableRoles: readonly OrgRole[];
   isChangingOrgRole: boolean;
   onChangeOrgRole: (role: OrgRole) => void;
@@ -49,45 +50,18 @@ export function UserDetailModal({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const { options: roleOptions, roles } = useSpaceRoleOptions();
-  const addMember = useAddSpaceMember();
-  const updateMember = useUpdateSpaceMember();
-  const isChangingSpaceRole = addMember.isPending || updateMember.isPending;
-
-  const changeSpaceRole = (membership: SpaceMembership, value: string) => {
-    const body = spaceRoleAssignment(value);
-    const onSuccess = () =>
-      toast.success(
-        t("spaceMembers.roleUpdated", {
-          name: membership.space.name,
-          role: roleOptions.find((option) => option.value === value)?.label ?? value,
-        }),
-      );
-    if (membership.member.source === "explicit") {
-      updateMember.mutate(
-        { params: { path: { id: membership.space.id, userId: member.userId } }, body },
-        { onSuccess },
-      );
-      return;
-    }
-    addMember.mutate(
-      {
-        params: { path: { id: membership.space.id } },
-        body: { userId: member.userId, ...body },
-      },
-      { onSuccess },
-    );
-  };
+  const { assign, isPending: isChangingSpaceRole } = useAssignSpaceRole(roleOptions);
 
   const columns = useUserSpaceColumns({
     // Owners and admins reach every space through their org role, so there is
     // no seat to edit; everyone else's is the caller's to change, this caller
     // being an admin everywhere.
     editable: (membership) => membership.member.source !== "org_role" && roleOptions.length > 0,
-    roleValue: (membership) =>
-      memberRoleValue(membership.member.role, roles) ?? `current:${membership.member.role?.key}`,
+    roles,
     roleOptions,
     isChangingRole: isChangingSpaceRole,
-    onChangeRole: changeSpaceRole,
+    onChangeRole: ({ space, member }, value) =>
+      assign({ spaceId: space.id, member, name: space.name }, value),
   });
 
   return (
@@ -115,16 +89,13 @@ export function UserDetailModal({
         >
           {(labelId) =>
             assignableRoles.length > 0 ? (
-              <OptionSelect
+              <OrgRoleSelect
                 value={member.role}
-                onValueChange={(value) => onChangeOrgRole(value as OrgRole)}
+                roles={assignableRoles}
+                onValueChange={onChangeOrgRole}
                 disabled={isChangingOrgRole}
                 aria-labelledby={labelId}
                 className="w-56"
-                options={assignableRoles.map((role) => ({
-                  value: role,
-                  label: t(roleI18nKey(role)),
-                }))}
               />
             ) : (
               <span className="text-sm">{t(roleI18nKey(member.role))}</span>
@@ -141,7 +112,7 @@ export function UserDetailModal({
               columns={columns}
               rows={memberships}
               rowKey={(membership) => membership.space.id}
-              isLoading={false}
+              isLoading={spacesLoading}
               empty={
                 <EmptyState
                   message={t("userDetail.noSpaces")}

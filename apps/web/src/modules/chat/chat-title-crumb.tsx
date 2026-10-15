@@ -8,19 +8,21 @@
  * than re-implementing a breadcrumb inside its own header, where the two
  * products' trails would drift apart.
  *
- * The segment is published only when the conversation is KNOWN. A cold load, or
- * a URL naming a conversation that was deleted, then costs no segment at all —
- * better than a segment carrying a made-up name. `ShellBreadcrumb` draws the
- * separator with the segment, so nothing is left dangling either way.
+ * The segment is a slot: the title (with its rename) is rendered HERE, below the
+ * chat's context providers it reads, and portalled into the header. Rendered by
+ * the header itself it would sit outside them, with no headers to fetch with.
  *
- * A component rather than a hook call inside `ChatSidebar` because it must sit
- * BELOW the chat's context providers, and `ChatSidebar` is what puts them up.
+ * While the sessions are being read the segment is reserved with a bar, so the
+ * trail does not grow when they land. Once read, the segment is published only
+ * when the conversation is KNOWN: a URL naming a conversation that was deleted
+ * costs no segment at all — better than a segment carrying a made-up name.
  */
 
-import { useMemo } from "react";
 import { ChatConversationTitle, type ChatCan, type ChatTranslate } from "@appstrate/module-chat/ui";
 import { useSessions } from "@appstrate/module-chat/unread";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
+import { ShellTrailContent } from "@/components/shell-breadcrumb";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 export function ChatTitleCrumb({
   conversationId,
@@ -31,18 +33,26 @@ export function ChatTitleCrumb({
   t: ChatTranslate;
   can: ChatCan;
 }) {
-  const { data: sessions } = useSessions();
+  const { data: sessions, isPending } = useSessions();
   const session = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
   const title = session ? (session.title ?? t("threads.new")) : null;
-  // One element per conversation: the store keeps a trail whose node is the
-  // same object, so a fresh element each render would rewrite it every render.
-  const node = useMemo(
-    () =>
-      conversationId ? <ChatConversationTitle activeId={conversationId} t={t} can={can} /> : null,
-    [conversationId, t, can],
+
+  const loading = conversationId !== null && isPending;
+
+  usePageBreadcrumb(
+    title !== null ? [{ label: title, slot: true }] : loading ? [{ label: "", slot: true }] : [],
   );
 
-  usePageBreadcrumb(node && title !== null ? [{ label: title, node }] : []);
-
-  return null;
+  if (loading) {
+    return (
+      <ShellTrailContent>
+        <Skeleton className="mx-1.5 h-4 w-40" />
+      </ShellTrailContent>
+    );
+  }
+  return conversationId && title !== null ? (
+    <ShellTrailContent>
+      <ChatConversationTitle activeId={conversationId} t={t} can={can} />
+    </ShellTrailContent>
+  ) : null;
 }

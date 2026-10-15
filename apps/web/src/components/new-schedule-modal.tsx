@@ -36,8 +36,10 @@ import { AgentVersionField } from "./package-version-select";
 import { RunOverridesPanel } from "./run-overrides-panel";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
-import { ErrorState, LoadingState } from "./page-states";
-import { Spinner } from "./spinner";
+import { ErrorState } from "./page-states";
+import { SettingsSkeleton } from "./loading-skeletons";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { isQueryInFlight } from "../lib/query-state";
 import { useActorName } from "../hooks/use-actor-name";
 import { useAuth } from "../hooks/use-auth";
 import { useModalParam } from "../hooks/use-modal-param";
@@ -108,23 +110,31 @@ function NewScheduleForm({
   onLeave?: (to: string) => void;
 }) {
   const { t } = useTranslation(["agents"]);
-  const { data: agents } = useAgents();
+  const agentsQuery = useAgents();
+  const { data: agents } = agentsQuery;
+  const agentsPending = isQueryInFlight(agentsQuery);
   const [picked, setPicked] = useState<string | undefined>(initialAgentId);
   const agentId = picked ?? agents?.[0]?.id;
 
   return (
     <div className="space-y-5">
       <FormItem id="new-schedule-agent" label={t("schedule.agent")}>
-        <OptionSelect
-          value={agentId ?? ""}
-          onValueChange={setPicked}
-          options={(agents ?? []).map((agent) => ({
-            value: agent.id,
-            label: agent.display_name ?? agent.id,
-          }))}
-        />
+        {agentsPending ? (
+          <Skeleton className="h-9 w-full" />
+        ) : (
+          <OptionSelect
+            value={agentId ?? ""}
+            onValueChange={setPicked}
+            options={(agents ?? []).map((agent) => ({
+              value: agent.id,
+              label: agent.display_name ?? agent.id,
+            }))}
+          />
+        )}
       </FormItem>
-      {agentId ? (
+      {agentsPending ? (
+        <SettingsSkeleton />
+      ) : agentId ? (
         // A new agent, a new form: its inputs and connections are another agent's.
         <ScheduleFields
           key={agentId}
@@ -155,7 +165,7 @@ function ScheduleFields({
   // locked since would be seeded and refused (400 `locked_input_field`).
   const { deps, error } = useScheduleFormDeps(agentId);
   if (error) return <ErrorState error={error} />;
-  if (!deps) return <LoadingState />;
+  if (!deps) return <SettingsSkeleton />;
   return (
     <ScheduleFieldsReady
       deps={deps}
@@ -374,12 +384,14 @@ export function ScheduleFieldsReady({
         />
       )}
       <p className="text-muted-foreground text-xs">{t("schedule.newHint")}</p>
-      <div className="flex justify-end gap-2">
+      {/* Held at the bottom of the scrolling dialog: on a laptop the form is
+          taller than the window, and Créer should not wait below the fold. */}
+      <div className="bg-background border-border sticky -bottom-6 z-10 -mx-6 -mb-6 flex justify-end gap-2 border-t px-6 py-4">
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>
-        <Button type="submit" disabled={!cron || create.isPending || readinessLoading}>
-          {create.isPending ? <Spinner /> : t("btn.create")}
+        <Button type="submit" pending={create.isPending} disabled={!cron || readinessLoading}>
+          {t("btn.create")}
         </Button>
       </div>
     </form>

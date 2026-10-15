@@ -5,15 +5,17 @@ import { useMutation, useQueries, useQueryClient, type QueryClient } from "@tans
 import { toast } from "sonner";
 import i18n from "../i18n";
 import { parseScopedName } from "@appstrate/core/naming";
+import type { PackageType } from "@appstrate/core/validation";
 import { $api, client, type paths } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
-import { agentsKeys, packageKeys } from "../lib/query-keys";
+import { agentsKeys, invalidatePaths, packageKeys } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
-import { usePermissions } from "./use-permissions";
+import { useCurrentSpaceGrant, usePermissions } from "./use-permissions";
 import { useSpaces } from "./use-spaces";
 import { mergeSpaceLibraries, readableLibrarySpaces } from "../lib/merge-space-libraries";
 import { hasFullOrgAccess } from "../lib/org-role";
+import { maySetPackageActive } from "../lib/package-permissions";
 
 /**
  * Wire shape from the OpenAPI spec (`GET /api/library`) — the organization
@@ -251,10 +253,7 @@ export function activationStateOf(
  * leaves the other's reader on a stale list.
  */
 export function invalidateLibraries(qc: QueryClient) {
-  return Promise.all([
-    qc.invalidateQueries({ queryKey: ["get", "/api/library"] }),
-    qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/library"] }),
-  ]);
+  return invalidatePaths(qc, ["/api/library", "/api/spaces/{spaceId}/library"]);
 }
 
 /** Activation changes affect the library and every space's package/agent cache. */
@@ -383,4 +382,26 @@ export function useSetPackageActive() {
       ),
     onSettled: invalidate,
   });
+}
+
+/**
+ * One package's switch in the current space: the caller's two verdicts
+ * (`maySetPackageActive`, the tree's one activation rule) and the two acts.
+ * Every control that flips it asks this instead of wiring the mutation, the
+ * space id and the grant by hand.
+ */
+export function usePackageActivation(type: PackageType, packageId: string) {
+  const setActive = useSetPackageActive();
+  const spaceId = useCurrentSpaceId();
+  const grant = useCurrentSpaceGrant();
+  const set = (active: boolean, options?: { onSuccess?: () => void }) => {
+    if (spaceId) setActive.mutate({ spaceId, packageId, active }, options);
+  };
+  return {
+    mayActivate: !!spaceId && maySetPackageActive(grant, type, true),
+    mayDeactivate: !!spaceId && maySetPackageActive(grant, type, false),
+    activate: (options?: { onSuccess?: () => void }) => set(true, options),
+    deactivate: (options?: { onSuccess?: () => void }) => set(false, options),
+    pending: setActive.isPending,
+  };
 }

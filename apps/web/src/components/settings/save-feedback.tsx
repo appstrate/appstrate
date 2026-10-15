@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Check, Loader2 } from "lucide-react";
+import { Check } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { Spinner } from "@appstrate/ui/components/spinner";
 
 /**
  * What a self-saving setting says about its write: Enregistrement… / Enregistré /
@@ -31,7 +32,7 @@ export function SaveFeedback({
     >
       {pending ? (
         <>
-          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          <Spinner className="size-3.5" />
           {t("saveFeedback.saving")}
         </>
       ) : error ? (

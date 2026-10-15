@@ -121,8 +121,11 @@ describe("Me API (/api/me)", () => {
       const res = await app.request("/api/me/orgs", { headers: { Cookie: ctx.cookie } });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: Array<{ id: string; logo: string | null }> };
-      expect(body.data.find((o) => o.id === ctx.orgId)?.logo).toBe("emoji:🧠");
+      const body = (await res.json()) as { data: Array<{ id: string; logo: unknown }> };
+      expect(body.data.find((o) => o.id === ctx.orgId)?.logo).toEqual({
+        kind: "emoji",
+        emoji: "🧠",
+      });
     });
 
     it("returns every org the user is a member of", async () => {

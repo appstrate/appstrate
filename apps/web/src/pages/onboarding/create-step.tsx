@@ -17,6 +17,7 @@ import { toSlug, toLiveSlug } from "../../lib/strings";
 import { OnboardingLayout, useOnboardingNav } from "../../components/onboarding-layout";
 import { orgKeys } from "../../lib/query-keys";
 import { errorMessage, errorField } from "../../lib/mutation-error";
+import { TextSkeleton } from "../../components/loading-skeletons";
 
 function suggestOrgDefaults(
   user: { email: string; name?: string },
@@ -118,7 +119,16 @@ export function OnboardingCreateStep() {
     ? null
     : createStepRedirect({ canCreateOrg, hasOrg: orgs.length > 0, fromSwitcher: !!fromSwitcher });
   if (redirect) return <Navigate to={redirect} replace />;
-  if (!canCreateOrg && loading) return null;
+  if (!canCreateOrg && loading)
+    return (
+      <OnboardingLayout
+        step="create"
+        title={t("onboarding.createTitle")}
+        subtitle={t("onboarding.createSubtitle")}
+      >
+        <TextSkeleton lines={3} className="py-4" />
+      </OnboardingLayout>
+    );
 
   return (
     <OnboardingLayout

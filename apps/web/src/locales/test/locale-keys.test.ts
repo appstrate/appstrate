@@ -170,6 +170,49 @@ describe("t() keys", () => {
     },
     SCAN_TIMEOUT_MS,
   );
+
+  /**
+   * Declared somewhere is not enough: `useTranslation(["settings", "agents"])`
+   * looks a bare key up in `settings`, then in the `common` fallback, and
+   * nowhere else. A key that lives in `agents` renders as its own string
+   * ("schedule.unnamed" in a schedule list). The namespace a call reads is the
+   * nearest `useTranslation` above it, unless the call names one (`{ ns }`,
+   * `ns:key`). The SPA's own tree only: the chat module's `t` is injected.
+   */
+  it(
+    "resolve in the namespace the call reads",
+    () => {
+      const HOOK = /\buseTranslation\(\s*(\[[^\]]*\]|["'][^"']+["'])?/g;
+      const CALL = /\bt\(\s*"([\w.-]+)"\s*(,\s*\{[^)]*\})?\)/g;
+      const has = (ns: string, key: string) => {
+        const keys = en.get(ns) ?? {};
+        return key in keys || `${key}_one` in keys || `${key}_other` in keys;
+      };
+      const wrong: string[] = [];
+
+      for (const file of SOURCES.filter((f) => f.startsWith(WEB_SRC))) {
+        const src = readFileSync(file, "utf8");
+        const hooks = [...src.matchAll(HOOK)].map((m) => ({
+          at: m.index,
+          ns: m[1] ? (/["']([^"']+)["']/.exec(m[1])?.[1] ?? "common") : "common",
+        }));
+        if (hooks.length === 0) continue;
+        for (const call of src.matchAll(CALL)) {
+          const key = call[1]!;
+          const named = /\bns:\s*["']([^"']+)["']/.exec(call[2] ?? "")?.[1];
+          const hook = [...hooks].reverse().find((h) => h.at < call.index) ?? hooks[0]!;
+          const ns = named ?? hook.ns;
+          if (has(ns, key) || has("common", key) || !isDeclared(key)) continue;
+          wrong.push(
+            `${relative(REPO_ROOT, file)}:${lineOf(src, call.index)} → "${key}" read in ${ns}`,
+          );
+        }
+      }
+
+      expect(wrong).toEqual([]);
+    },
+    SCAN_TIMEOUT_MS,
+  );
 });
 
 /**
@@ -223,7 +266,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
   "run.triggerType.", // components/run-trigger.tsx, components/run-detail/run-header-summary.tsx + run-snapshot-inspector.tsx
   "schedule.disabledReason.", // components/schedule-status-badge.tsx, pages/schedule-detail.tsx
-  "spaceMembers.source.", // pages/workspace-settings/space-member-columns.tsx, pages/org-settings/user-space-columns.tsx
+  "spaceMembers.source.", // components/space-seat-columns.tsx
   "spaces.visibility.", // pages/workspace-settings/general.tsx — t(`spaces.visibility.${value}`)
   "spaces.visibilityDesc.", // pages/workspace-settings/general.tsx — t(`spaces.visibilityDesc.${value}`)
   "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)

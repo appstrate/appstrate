@@ -20,8 +20,9 @@ import { RailLink } from "../../components/settings/rail-link";
 import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
 import { ContextSelector } from "../../components/settings/context-selector";
 import { cn } from "@appstrate/ui/cn";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { PanelDialog } from "../../components/panel-dialog";
-import { LoadingState } from "../../components/page-states";
+import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { useSpaces } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
@@ -42,6 +43,13 @@ import {
   type UnifiedSettingsSection,
 } from "./navigation";
 import { useSettingsSections } from "./use-settings-sections";
+
+/** The rail's groups, as they stand before the caller's permissions say which entries exist. */
+const RAIL_PLACEHOLDER: { scope: SettingsScope; labelKey: string; rows: number }[] = [
+  { scope: "organization", labelKey: "orgSettings.sectionOrganization", rows: 6 },
+  { scope: "workspace", labelKey: "workspaceSettings.sectionGeneral", rows: 5 },
+  { scope: "account", labelKey: "preferences.sectionAccount", rows: 5 },
+];
 
 interface ScopeNavigationProps {
   section: UnifiedSettingsSection;
@@ -87,6 +95,7 @@ export function UnifiedSettingsLayout() {
   const [actionTarget, setActionTarget] = useState<HTMLDivElement | null>(null);
 
   const sections = useSettingsSections();
+  const { ready } = usePermissions();
 
   const activeItem = activeSettingsItem(sections, location.pathname);
   const activeScope = settingsScopeFromPath(location.pathname);
@@ -146,16 +155,32 @@ export function UnifiedSettingsLayout() {
     <div className="flex h-full flex-col">
       <RailHeader icon={Settings} title={label("unifiedSettings.title")} />
       <div className="flex-1">
-        {sections.map((section, index) => (
-          <ScopeNavigation
-            key={section.scope}
-            section={section}
-            separated={index > 0}
-            activeItem={activeItem}
-            contextSelector={selectors[section.scope]}
-            label={label}
-          />
-        ))}
+        {ready
+          ? sections.map((section, index) => (
+              <ScopeNavigation
+                key={section.scope}
+                section={section}
+                separated={index > 0}
+                activeItem={activeItem}
+                contextSelector={selectors[section.scope]}
+                label={label}
+              />
+            ))
+          : // Entries are gated per space, so none exists until the permissions
+            // land: hold each group's place rather than insert rows later.
+            RAIL_PLACEHOLDER.map((group, index) => (
+              <RailGroup key={group.scope} title={label(group.labelKey)} separated={index > 0}>
+                {selectors[group.scope]}
+                <div className="mt-1.5 flex flex-col gap-0.5" aria-hidden>
+                  {Array.from({ length: group.rows }, (_, i) => (
+                    <div key={i} className="flex h-8 items-center gap-2 px-2">
+                      <Skeleton className="size-4 shrink-0 rounded-sm" />
+                      <Skeleton className="h-3.5 w-3/5" />
+                    </div>
+                  ))}
+                </div>
+              </RailGroup>
+            ))}
       </div>
       <div className="px-4 py-3">
         <AppVersion />
@@ -217,6 +242,6 @@ export function SettingsIndexRedirect() {
   const { ready } = usePermissions();
   const { pathname } = useLocation();
   // Until the permissions load every entry reads as refused.
-  if (!ready) return <LoadingState />;
+  if (!ready) return <SettingsSkeleton />;
   return <Navigate to={firstSettingsPath(sections, settingsScopeFromPath(pathname))} replace />;
 }

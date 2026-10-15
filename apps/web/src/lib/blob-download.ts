@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { toast } from "sonner";
+import i18n from "../i18n";
+
 /**
  * Hand a fetched response body to the browser as a file download.
  *
  * THE single place the SPA turns bytes into a download. Every
  * `client.GET(…, { parseAs: "blob" })` call site funnels its body through here
- * so the two non-obvious guards below hold on every path instead of on
- * whichever copy happened to be written last. Callers keep their own request,
- * their own filename derivation and their own error handling — this neither
- * throws nor catches, so a failure still lands in the caller's `catch`.
+ * (via {@link downloadOrToast}) so the two non-obvious guards below hold on
+ * every path instead of on whichever copy happened to be written last. Callers
+ * keep their own request and filename derivation; this neither throws nor
+ * catches, so a failure still lands in `downloadOrToast`'s `catch`.
  *
  * ## Guard 1 — `data ?? ""`
  *
@@ -43,4 +46,19 @@ export function triggerBlobDownload(data: BlobPart | undefined, filename: string
   anchor.click();
   document.body.removeChild(anchor);
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Read a blob with the caller's request, then download it as `filename`. Any
+ * failure, from the request or the DOM, is one `error.downloadFailed` toast.
+ */
+export async function downloadOrToast(
+  read: () => Promise<{ data?: BlobPart }>,
+  filename: string,
+): Promise<void> {
+  try {
+    triggerBlobDownload((await read()).data, filename);
+  } catch {
+    toast.error(i18n.t("common:error.downloadFailed"));
+  }
 }

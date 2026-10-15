@@ -16,6 +16,7 @@ import {
   OrgInvitationForm,
   type OrgInvitationFormHandle,
 } from "../../components/org-invitation-form";
+import { TextSkeleton } from "../../components/loading-skeletons";
 
 export function OnboardingMembersStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -38,7 +39,16 @@ export function OnboardingMembersStep() {
     if (sent && nextRoute) navigate(nextRoute);
   };
 
-  if (!orgId) return null;
+  if (!orgId)
+    return (
+      <OnboardingLayout
+        step="members"
+        title={t("onboarding.membersTitle")}
+        subtitle={t("onboarding.membersSubtitle")}
+      >
+        <TextSkeleton lines={3} className="py-4" />
+      </OnboardingLayout>
+    );
 
   return (
     <OnboardingLayout

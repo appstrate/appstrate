@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback } from "react";
-import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { $api, client } from "../../api/client";
 import { useOrgScope } from "../../hooks/use-org-scope";
-import { triggerBlobDownload } from "../../lib/blob-download";
+import { downloadOrToast } from "../../lib/blob-download";
 import { splitPackageRef } from "../../lib/package-paths";
 import { baseName, previewBlockReason, type PackageFileEntry } from "../../lib/package-file-tree";
 
@@ -16,7 +14,7 @@ import { baseName, previewBlockReason, type PackageFileEntry } from "../../lib/p
  * `Content-Length: "0"` before `parseAs` is honoured and returns
  * `{ data: undefined }` — on a fully successful 200. So `data` alone cannot
  * tell a zero-byte file apart from a file that was never fetched, and
- * `file-preview` treats `text === undefined` as "still loading": an infinite
+ * `package-file-source` treats `text === undefined` as "still loading": an infinite
  * spinner on every empty file in an artifact.
  *
  * The success flag is what separates the two cases, and it has to be consulted:
@@ -98,32 +96,26 @@ export function usePackageFile(
 /**
  * Download one file from the artifact. The route serves
  * `Content-Disposition: attachment`, but the blob still has to be handed to an
- * `<a download>` to name it — `triggerBlobDownload` is that step, shared with
+ * `<a download>` to name it — `downloadOrToast` is that step, shared with
  * every other download in the SPA so its empty-body and inert-type
- * guards apply here too. A non-2xx throws in the client middleware and lands in
- * the catch below.
+ * guards apply here too. A non-2xx throws in the client middleware and becomes
+ * its failure toast.
  */
 export function usePackageFileDownload(packageId: string | undefined, version: string | undefined) {
-  const { t } = useTranslation("common");
   const scope = useOrgScope();
   const header = scope.header;
   return useCallback(
     async (path: string) => {
       if (!packageId) return;
-      try {
-        const { data } = await client.GET("/api/packages/{scope}/{name}/files/content", {
-          params: {
-            path: splitPackageRef(packageId),
-            query: { path, version },
-            header,
-          },
-          parseAs: "blob",
-        });
-        triggerBlobDownload(data, baseName(path));
-      } catch {
-        toast.error(t("error.downloadFailed"));
-      }
+      await downloadOrToast(
+        () =>
+          client.GET("/api/packages/{scope}/{name}/files/content", {
+            params: { path: splitPackageRef(packageId), query: { path, version }, header },
+            parseAs: "blob",
+          }),
+        baseName(path),
+      );
     },
-    [packageId, version, header, t],
+    [packageId, version, header],
   );
 }

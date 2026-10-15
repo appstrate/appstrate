@@ -388,6 +388,10 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "self",
     reason: "bound org's own non-secret identity; members/invitations gated in-handler",
   },
+  getOrganizationLogo: {
+    category: "self",
+    reason: "bound org's own logo image, the identity getOrganization already exposes",
+  },
   getOrgSettings: {
     category: "self",
     reason: "bound org's own non-secret config (api_version, sso, copy policy)",

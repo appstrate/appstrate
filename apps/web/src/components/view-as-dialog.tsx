@@ -5,15 +5,15 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
-import { Button } from "@appstrate/ui/components/button";
 import { Field, FieldGroup, FormItem } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
 import { OptionSelect, SelectItem } from "@appstrate/ui/components/select";
-import { Modal } from "./modal";
+import { FormModal } from "./form-modal";
 import { OrgRoleOptions } from "./org-role-options";
 import { RoleCatalogState } from "./role-catalog-state";
 import { fetchOrgsAs, useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
+import { spaceLabel } from "../lib/space-label";
 import { useSpaces } from "../hooks/use-spaces";
 import { useSpaceRoleOptions } from "../hooks/use-roles";
 import { useCloseOverlay } from "../lib/modal-route";
@@ -33,7 +33,7 @@ interface ViewAsDialogProps {
   onClose: () => void;
   /** Space the trigger is about. Defaults to the space the user is in. */
   spaceId?: string;
-  /** The role whose row opened the dialog: it arrives chosen (`?view-as=<kind>:<key>`). */
+  /** The role whose row opened the dialog: it arrives chosen (`?viewAs=<kind>:<key>`). */
   preset?: ViewAsPreset | null;
 }
 
@@ -153,24 +153,17 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   };
 
   return (
-    <Modal
-      open
+    <FormModal
       onClose={close}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit();
+      }}
       title={t("viewAs.title")}
-      actions={
-        <>
-          <Button variant="ghost" onClick={close}>
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-          <Button
-            data-testid="view-as-submit"
-            disabled={!ready || entering}
-            onClick={() => void submit()}
-          >
-            {t("viewAs.submit")}
-          </Button>
-        </>
-      }
+      submitLabel={t("viewAs.submit")}
+      // Not `isPending`: Cancel must stay live while the preview loads, to abandon it.
+      submitDisabled={!ready || entering}
+      submitTestId="view-as-submit"
     >
       <div className="flex flex-col gap-4">
         <p className="text-muted-foreground text-sm">{t("viewAs.explain")}</p>
@@ -193,7 +186,7 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
               }}
               className={CHOSEN_VALUE}
               leading={<SelectItem value={VIEW_AS_NO_SPACE}>{t("viewAs.noSpace")}</SelectItem>}
-              options={(spaces ?? []).map((s) => ({ value: s.id, label: s.name }))}
+              options={(spaces ?? []).map((s) => ({ value: s.id, label: spaceLabel(s, t) }))}
             />
           </FormItem>
 
@@ -222,6 +215,6 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
           )}
         </FieldGroup>
       </div>
-    </Modal>
+    </FormModal>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@appstrate/ui/components/checkbox";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { WEBHOOK_EVENTS } from "../hooks/use-webhooks";
 
@@ -29,19 +29,13 @@ export function WebhookFormFields({
         <Label>{t("webhooks.eventsLabel")}</Label>
         <div className="space-y-2">
           {WEBHOOK_EVENTS.map((event) => (
-            <div key={event} className="flex items-center gap-2">
-              <Checkbox
-                id={`${idPrefix}event-${event}`}
-                checked={selectedEvents.includes(event)}
-                onCheckedChange={() => onToggleEvent(event)}
-              />
-              <Label
-                htmlFor={`${idPrefix}event-${event}`}
-                className="cursor-pointer font-mono font-normal"
-              >
-                {event}
-              </Label>
-            </div>
+            <CheckboxField
+              key={event}
+              id={`${idPrefix}event-${event}`}
+              checked={selectedEvents.includes(event)}
+              onCheckedChange={() => onToggleEvent(event)}
+              label={<span className="font-mono font-normal">{event}</span>}
+            />
           ))}
         </div>
       </div>

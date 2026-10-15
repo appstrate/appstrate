@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Mail } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { AuthLayout } from "../components/auth-layout";
-import { AuthSuccessState } from "../components/auth-success-state";
+import { AuthLink, AuthMessage } from "../components/auth-message";
 import { useAuth } from "../hooks/use-auth";
 
 export function MagicLinkPage() {
@@ -40,7 +40,7 @@ export function MagicLinkPage() {
   if (state === "sent") {
     return (
       <AuthLayout>
-        <AuthSuccessState
+        <AuthMessage
           icon={Mail}
           title={t("magicLink.sentTitle")}
           description={t("magicLink.sentDescription")}
@@ -75,12 +75,9 @@ export function MagicLinkPage() {
             {state === "submitting" ? t("loading") : t("magicLink.submit")}
           </Button>
         </form>
-        <Link
-          to="/login"
-          className="text-muted-foreground hover:text-primary text-center text-sm underline underline-offset-4"
-        >
+        <AuthLink to="/login" className="text-center">
           {t("magicLink.backToLogin")}
-        </Link>
+        </AuthLink>
       </div>
     </AuthLayout>
   );

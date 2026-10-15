@@ -23,7 +23,6 @@ import type {
 } from "@appstrate/core/integration";
 import { Button } from "@appstrate/ui/components/button";
 import { Switch } from "@appstrate/ui/components/switch";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
@@ -114,12 +113,16 @@ export function IntegrationToolsSection({
         showBasis={showBasis}
         actions={
           edit && (
-            <PageActionsMenu>
-              <DropdownMenuItem onSelect={() => policyModal.open("new")}>
-                <Plus />
-                {t("integrationEditor.toolsPolicy.addTool")}
-              </DropdownMenuItem>
-            </PageActionsMenu>
+            <PageActionsMenu
+              actions={[
+                {
+                  id: "add-tool",
+                  label: t("integrationEditor.toolsPolicy.addTool"),
+                  icon: Plus,
+                  onSelect: () => policyModal.open("new"),
+                },
+              ]}
+            />
           )
         }
         rowActions={

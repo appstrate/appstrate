@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Dispatch, SetStateAction } from "react";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { WebhookDelivery } from "@appstrate/shared-types";
 import { $api, client, type components, type paths } from "@/api/client";
-import { useCurrentOrgId } from "@/hooks/use-org";
+import { invalidatePaths } from "@/lib/query-keys";
+import { keysetPaging } from "@/lib/keyset-paging";
+import { useInvalidatePaths } from "@/hooks/use-invalidate-paths";
+import { useOrgOnlyScope } from "@/hooks/use-org-scope";
 import { useCurrentSpaceId } from "@/hooks/use-current-space";
 import { usePermissions } from "@/hooks/use-permissions";
 
@@ -17,11 +19,6 @@ type CreateWebhookBody =
 
 /** Wire enum for webhook events, derived from the create body. */
 export type WebhookEvent = Extract<CreateWebhookBody, { level: "space" }>["events"][number];
-
-/** Toggle an event in a state setter — shared by create and edit forms. */
-export function toggleEvent(event: string, setter: Dispatch<SetStateAction<string[]>>) {
-  setter((prev) => (prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]));
-}
 
 /** Keyed by the wire enum: a list that falls behind the API's does not compile. */
 const WEBHOOK_EVENT_SET: Record<WebhookEvent, true> = {
@@ -40,13 +37,9 @@ export const WEBHOOK_EVENTS = Object.keys(WEBHOOK_EVENT_SET) as WebhookEvent[];
  * instead of serving another org's cached page.
  */
 function useWebhookScope() {
-  const orgId = useCurrentOrgId();
+  const org = useOrgOnlyScope();
   const spaceId = useCurrentSpaceId();
-  return {
-    enabled: !!orgId && !!spaceId,
-    header: { "X-Org-Id": orgId ?? undefined },
-    spaceId,
-  };
+  return { enabled: org.enabled && !!spaceId, header: org.header, spaceId };
 }
 
 /**
@@ -81,19 +74,8 @@ export function useWebhook(webhookId: string) {
   );
 }
 
-/**
- * openapi-react-query keys are [method, path, init] with the literal spec
- * path — list, detail, and deliveries live under different path strings, so
- * all need invalidating after a write.
- */
-function useInvalidateWebhooks() {
-  const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/webhooks"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/webhooks/{id}"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/webhooks/{id}/deliveries"] });
-  };
-}
+const useInvalidateWebhooks = () =>
+  useInvalidatePaths("/api/webhooks", "/api/webhooks/{id}", "/api/webhooks/{id}/deliveries");
 
 export function useCreateWebhook() {
   const invalidate = useInvalidateWebhooks();
@@ -135,13 +117,9 @@ export function useDeleteWebhook() {
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/webhooks/{id}", {
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/webhooks"] });
+      void invalidatePaths(qc, ["/api/webhooks"]);
       // The page still showing the deleted webhook would re-read it, a 404: stale only.
-      void qc.invalidateQueries({ queryKey: ["get", "/api/webhooks/{id}"], refetchType: "none" });
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/webhooks/{id}/deliveries"],
-        refetchType: "none",
-      });
+      void invalidatePaths(qc, ["/api/webhooks/{id}", "/api/webhooks/{id}/deliveries"], "none");
     },
   });
 }
@@ -177,8 +155,7 @@ export function useWebhookDeliveries(webhookId: string) {
       if (!data) throw new Error("empty response");
       return data;
     },
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => (last.hasMore ? last.data[last.data.length - 1]?.id : undefined),
+    ...keysetPaging,
     enabled: scope.enabled && !!webhookId,
   });
 }

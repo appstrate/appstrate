@@ -288,27 +288,27 @@ describe("AgentIntegrationsBlock — the integration's own detail does not land"
     );
   }
 
-  it("spins while the detail is being fetched", () => {
-    expect(renderWith({ fetching: true })).toContain("animate-spin");
+  it("holds the cell's place while the detail is being fetched", () => {
+    expect(renderWith({ fetching: true })).toContain("animate-pulse");
   });
 
-  it("never spins on a read that does not run: the card shows without a picker", () => {
+  it("never waits on a read that does not run: the card shows without a picker", () => {
     const html = renderWith(null);
-    expect(html).not.toContain("animate-spin");
+    expect(html).not.toContain("animate-pulse");
     expect(html).toContain(GMAIL);
     expect(html).not.toContain(`member-picker-${GMAIL}`);
   });
 
   it("offers the activation when the detail answers 404: not placed in this space", () => {
     const html = renderWith({ error: new ApiError("not_found", "no such integration", 404) });
-    expect(html).not.toContain("animate-spin");
+    expect(html).not.toContain("animate-pulse");
     expect(html).toContain(`integration-activate-${GMAIL}`);
   });
 
   it("names any other failure, in the warning tone, and claims no inactivity", () => {
     const failure = new ApiError("internal_error", "boom", 500);
     const html = renderWith({ error: failure });
-    expect(html).not.toContain("animate-spin");
+    expect(html).not.toContain("animate-pulse");
     expect(html).not.toContain(`integration-activate-${GMAIL}`);
     expect(html).toContain(errorMessage(failure));
     expect(html).toContain(`${AMBER_TEXT} text-xs`);

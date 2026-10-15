@@ -272,26 +272,19 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
   // regenerated client stops producing the hit and `deadExclusions` reports
   // this line. Delete it then — do not edit the generated file.
   { path: "apps/web/src/api/schema.d.ts", keys: ["iconUrl"], reason: WIRE_DTO },
-  { path: "apps/web/src/components/editor-shell.tsx", keys: ["displayName"], reason: WIRE_DTO },
   { path: "apps/web/src/components/package-detail/", keys: ["displayName"], reason: WIRE_DTO },
   {
     path: "apps/web/src/pages/unified-package-detail.tsx",
     keys: ["displayName"],
     reason: WIRE_DTO,
   },
-  { path: "apps/web/src/pages/package-list.tsx", keys: ["displayName"], reason: WIRE_DTO },
-  { path: "apps/web/src/pages/item-tab.tsx", keys: ["displayName"], reason: WIRE_DTO },
+  { path: "apps/web/src/lib/package-card-item.ts", keys: ["displayName"], reason: WIRE_DTO },
   {
     path: "apps/web/src/components/org-catalogue-modal.tsx",
     keys: ["displayName"],
     reason: WIRE_DTO,
   },
   { path: "apps/web/src/pages/integration-detail.tsx", keys: ["displayName"], reason: WIRE_DTO },
-  {
-    path: "apps/web/src/pages/preferences/connections.tsx",
-    keys: ["displayName"],
-    reason: WIRE_DTO,
-  },
 
   // ── Group 4: `maxSize` as a byte cap ──
   { path: "apps/api/src/middleware/body-limit.ts", keys: ["maxSize"], reason: BYTE_LIMIT },
