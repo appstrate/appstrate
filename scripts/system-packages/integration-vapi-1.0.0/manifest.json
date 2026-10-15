@@ -7,6 +7,7 @@
   "description": "Voice AI platform — place outbound phone calls run by a voice assistant and read back the answers",
   "keywords": ["voice", "phone-calls", "ai"],
   "license": "Apache-2.0",
+  "icon": "logos:vapi-icon",
   "source": {
     "kind": "none"
   },
