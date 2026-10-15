@@ -24,13 +24,8 @@ function overview(run: EnrichedRun, turns: RunTurnRow[] = []): string {
       run={run}
       turns={turns}
       logs={[]}
-      structuredOutput={null}
       logsLoading={false}
-      memoryChangeCount={0}
-      memoryLoading={false}
       modelFallback={null}
-      onOpenJournal={() => {}}
-      onOpenResults={() => {}}
     />,
   );
 }

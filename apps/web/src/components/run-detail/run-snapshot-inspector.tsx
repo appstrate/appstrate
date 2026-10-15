@@ -13,14 +13,11 @@ import {
   FileInput,
   Link2,
   Tags,
-  Trophy,
 } from "lucide-react";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import { extractFileIds } from "@appstrate/core/file-uri";
-import { RunTurnsDetail } from "./run-turns-detail";
 import { journalLevel, type RunTurnRow } from "../log-utils";
 import { RunCostReadout } from "../run-cost-readout";
-import { Modal } from "../modal";
 import { useFiles, type FileDto } from "../../hooks/use-files";
 import { usePermissions } from "../../hooks/use-permissions";
 import { DocumentListPanel } from "../document-list-panel";
@@ -31,12 +28,9 @@ import { runConnectionRows } from "../../lib/run-connections";
 import { runErrorText } from "../../lib/run-error";
 import { getRunTriggerActor, getRunTriggerType } from "../../lib/run-trigger";
 import type { ExecutionEntry } from "../log-utils";
-import { OverviewCardAction } from "../overview-card-action";
-import type { JournalOverviewFilter } from "../log-viewer";
 import { RunDuration } from "../run-duration";
 import { DetailSectionCard } from "../detail-section-card";
-import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
-import { useUrlModal } from "../../hooks/use-url-modal";
+import { HealthCard, HealthCardItem } from "../health-card";
 import type { RunModelFallback } from "../../lib/run-model-fallback";
 import { RunWarnings } from "./run-warnings";
 import { formatNumber } from "../../lib/format-number";
@@ -44,37 +38,23 @@ import { scheduleDetailPath } from "../../lib/package-paths";
 import { readRunContext } from "../run-context";
 import { ContextGaugeReadout } from "./run-context-gauge";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
-import { OperationalStat } from "../operational-stat";
-import { cn } from "@appstrate/ui/cn";
 
 export function RunSnapshotInspector({
   run,
   turns,
   logs,
-  structuredOutput,
   logsLoading,
-  memoryChangeCount,
-  memoryLoading,
   modelFallback,
-  onOpenJournal,
-  onOpenResults,
 }: {
   run: EnrichedRun;
   turns: RunTurnRow[];
   logs: ExecutionEntry[];
-  structuredOutput: Record<string, unknown> | null;
   /** The journal is still being read: what is counted from it is not known yet. */
   logsLoading: boolean;
-  memoryChangeCount: number;
-  /** The run's memory rows are still being read. */
-  memoryLoading: boolean;
   /** The `model_fallback` marker of the run's journal, when it has one. */
   modelFallback: RunModelFallback | null;
-  onOpenJournal: (filter?: JournalOverviewFilter) => void;
-  onOpenResults: () => void;
 }) {
   const { t } = useTranslation("agents");
-  const turnsParam = useUrlModal("turns");
   // The run's whole file container (the query the Results tab reads too): its
   // inputs are what it consumed, uploads and files chained in from earlier runs.
   const filesQuery = useFiles({ runId: run.id, limit: 100 });
@@ -91,10 +71,9 @@ export function RunSnapshotInspector({
     run.runner_name ??
     (run.runOrigin === "remote" ? t("run.infoRunnerRemote") : t("run.infoRunnerPlatform"));
   const toolCallCount = logs.filter((entry) => entry.kind === "tool").length;
-  // Counted by the journal's own levels: each count opens its filter there.
+  // Counted by the journal's own levels.
   const warningCount = logs.filter((entry) => journalLevel(entry) === "warn").length;
   const errorCount = logs.filter((entry) => journalLevel(entry) === "error").length;
-  const structuredFieldCount = Object.keys(structuredOutput ?? {}).length;
   // What ended the run, and what it lost on the way (`RunWarnings`), is part of
   // its story, so it is told here, not in a banner over every tab: a failure or a timeout opens the overview as its
   // problem card (the agent page's Diagnostic card); a cancellation is no
@@ -113,11 +92,7 @@ export function RunSnapshotInspector({
         title: t("run.overview.problem"),
         tone: "blocking",
         itemTitle: runErrorText(run, t),
-        actions: (
-          <HealthAction onClick={() => onOpenJournal("errors")}>
-            {t("run.overview.problemJournal")}
-          </HealthAction>
-        ),
+        description: undefined,
       }
     : cancelled
       ? {
@@ -126,7 +101,6 @@ export function RunSnapshotInspector({
           // The run keeps no name for who stopped it: the platform's reason and the time do.
           itemTitle: run.error ? runErrorText(run, t) : t("run.cancelledByUser"),
           description: run.completed_at ? formatDateField(run.completed_at, "datetime") : undefined,
-          actions: null,
         }
       : null;
 
@@ -140,7 +114,7 @@ export function RunSnapshotInspector({
                 <HealthCardItem
                   title={ending.itemTitle}
                   description={ending.description}
-                  actions={ending.actions}
+                  actions={null}
                 />
               </ul>
             </HealthCard>
@@ -201,116 +175,58 @@ export function RunSnapshotInspector({
               </FactGrid>
             </DetailSectionCard>
 
-            <DetailSectionCard
-              title={t("run.overview.activity")}
-              icon={Activity}
-              bodyClassName="p-0"
-              headerAction={
-                logs.length > 0
-                  ? {
-                      label: t("run.overview.openJournal"),
-                      onClick: () => onOpenJournal(),
-                    }
-                  : undefined
-              }
-            >
-              <StatGrid
-                loading={logsLoading}
-                stats={[
-                  [t("run.overview.logEvents"), logs.length, () => onOpenJournal()],
-                  [t("run.overview.toolCalls"), toolCallCount, () => onOpenJournal("tools")],
-                  [t("run.overview.warnings"), warningCount, () => onOpenJournal("warnings")],
-                  [t("run.overview.errors"), errorCount, () => onOpenJournal("errors")],
-                ]}
-              />
-            </DetailSectionCard>
-
-            <DetailSectionCard
-              title={t("run.overview.results")}
-              icon={Trophy}
-              bodyClassName="p-0"
-              headerAction={
-                run.file_counts.output + structuredFieldCount + memoryChangeCount > 0
-                  ? {
-                      label: t("run.overview.openResults"),
-                      onClick: onOpenResults,
-                    }
-                  : undefined
-              }
-            >
-              <StatGrid
-                stats={[
-                  [t("run.overview.outputFiles"), run.file_counts.output, onOpenResults],
-                  [
-                    t("run.overview.structuredFields"),
-                    structuredFieldCount,
-                    onOpenResults,
-                    logsLoading,
-                  ],
-                  [
-                    t("run.overview.memoryChanges"),
-                    memoryChangeCount,
-                    onOpenResults,
-                    memoryLoading,
-                  ],
-                ]}
-              />
+            <DetailSectionCard title={t("run.overview.activity")} icon={Activity}>
+              <FactGrid columns={4}>
+                {[
+                  [t("run.overview.logEvents"), logs.length],
+                  [t("run.overview.toolCalls"), toolCallCount],
+                  [t("run.overview.warnings"), warningCount],
+                  [t("run.overview.errors"), errorCount],
+                ].map(([label, count]) => (
+                  <Fact key={label} label={label as string}>
+                    {logsLoading ? <Skeleton className="h-4 w-8" /> : formatNumber(count as number)}
+                  </Fact>
+                ))}
+              </FactGrid>
             </DetailSectionCard>
           </div>
 
           <div className="grid min-w-0 content-start gap-6">
-            <DetailSectionCard
-              title={t("run.infoUsage")}
-              icon={ChartNoAxesCombined}
-              bodyClassName="flex flex-col p-0"
-            >
-              <div className="flex-1 p-4">
-                {/* Live metrics patch the totals until the run settles. */}
-                {(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(run.status) && (
-                  <p className="bg-primary/15 text-primary mb-3 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-                    <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
-                    {t("run.usageLive")}
-                  </p>
-                )}
-                <FactGrid columns={2}>
-                  {(run.cost != null || run.cost_pricing_status != null) && (
-                    <Fact label={t("run.usageEstimatedApiCost")}>
-                      <RunCostReadout cost={run.cost} pricingStatus={run.cost_pricing_status} />
-                    </Fact>
-                  )}
-                  {run.model_label && <Fact label={t("run.usageModel")}>{run.model_label}</Fact>}
-                  {tokenFacts.map(
-                    ({ label, count }) =>
-                      count != null && (
-                        <Fact key={label} label={label}>
-                          {formatNumber(count)}
-                        </Fact>
-                      ),
-                  )}
-                  {logsLoading ? (
-                    <Fact label={t("run.usageContext")}>
-                      <Skeleton className="h-4 w-24" />
-                    </Fact>
-                  ) : (
-                    readRunContext(turns) && (
-                      <Fact label={t("run.usageContext")}>
-                        <ContextGaugeReadout turns={turns} status={run.status} />
-                      </Fact>
-                    )
-                  )}
-                </FactGrid>
-              </div>
-              {logsLoading ? (
-                <div className="flex min-h-9 w-full items-center border-t px-4 py-2">
-                  <Skeleton className="h-4 w-32" />
-                </div>
-              ) : (
-                turns.length > 0 && (
-                  <OverviewCardAction target={{ onClick: () => turnsParam.open() }}>
-                    {t("run.viewTurnDetails")}
-                  </OverviewCardAction>
-                )
+            <DetailSectionCard title={t("run.infoUsage")} icon={ChartNoAxesCombined}>
+              {/* Live metrics patch the totals until the run settles. */}
+              {(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(run.status) && (
+                <p className="bg-primary/15 text-primary mb-3 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
+                  <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
+                  {t("run.usageLive")}
+                </p>
               )}
+              <FactGrid columns={2}>
+                {(run.cost != null || run.cost_pricing_status != null) && (
+                  <Fact label={t("run.usageEstimatedApiCost")}>
+                    <RunCostReadout cost={run.cost} pricingStatus={run.cost_pricing_status} />
+                  </Fact>
+                )}
+                {run.model_label && <Fact label={t("run.usageModel")}>{run.model_label}</Fact>}
+                {tokenFacts.map(
+                  ({ label, count }) =>
+                    count != null && (
+                      <Fact key={label} label={label}>
+                        {formatNumber(count)}
+                      </Fact>
+                    ),
+                )}
+                {logsLoading ? (
+                  <Fact label={t("run.usageContext")}>
+                    <Skeleton className="h-4 w-24" />
+                  </Fact>
+                ) : (
+                  readRunContext(turns) && (
+                    <Fact label={t("run.usageContext")}>
+                      <ContextGaugeReadout turns={turns} status={run.status} />
+                    </Fact>
+                  )
+                )}
+              </FactGrid>
             </DetailSectionCard>
 
             <DetailSectionCard title={t("run.infoInput")} icon={FileInput}>
@@ -396,40 +312,7 @@ export function RunSnapshotInspector({
           </div>
         </div>
       </div>
-
-      {turnsParam.value !== null && (
-        <Modal
-          onClose={turnsParam.close}
-          title={t("run.turnsTitle")}
-          className="max-h-[85vh] max-w-4xl overflow-y-auto"
-        >
-          <RunTurnsDetail turns={turns} />
-        </Modal>
-      )}
     </>
-  );
-}
-
-/** A figure and where it leads; `loading` overrides the grid's own while its source is read. */
-type Stat = [label: string, count: number, onClick: () => void, loading?: boolean];
-
-function StatGrid({ stats, loading = false }: { stats: Stat[]; loading?: boolean }) {
-  return (
-    <dl className="grid grid-cols-2">
-      {stats.map(([label, count, onClick, busy = loading], i) => (
-        <OperationalStat
-          key={label}
-          className={cn(
-            i % 2 === 0 && i + 1 < stats.length && "border-border border-r",
-            Math.floor(i / 2) < Math.floor((stats.length - 1) / 2) && "border-border border-b",
-            i % 2 === 0 && i === stats.length - 1 && "col-span-2",
-          )}
-          label={label}
-          value={busy ? <Skeleton className="h-6 w-10" /> : formatNumber(count)}
-          target={count > 0 ? { onClick } : undefined}
-        />
-      ))}
-    </dl>
   );
 }
 

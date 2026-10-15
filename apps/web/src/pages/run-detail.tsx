@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useMemo, useEffect, useState } from "react";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePackageDetail } from "../hooks/use-packages";
@@ -24,7 +24,6 @@ import { ACTIVE_RUN_STATUSES, type AgentListItem, type EnrichedRun } from "@apps
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/format-date";
 import { isPublishedFileLogEvent } from "../lib/files";
-import { searchOf } from "../lib/url-search";
 import { replayVersion } from "../lib/version-selector";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import {
@@ -37,15 +36,13 @@ import {
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { RunHeaderActions, RunHeaderSummary } from "../components/run-detail/run-header-summary";
-import { RunExecutionView } from "../components/run-detail/run-execution-view";
 import { RunResultsView } from "../components/run-detail/run-results-view";
 import { RunSnapshotInspector } from "../components/run-detail/run-snapshot-inspector";
-import { Button } from "@appstrate/ui/components/button";
-import { ArrowRight, LayoutGrid, FileText, ScrollText } from "lucide-react";
+import { LayoutGrid, FileText, ScrollText } from "lucide-react";
 import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
 import { RunStatusBadge } from "../components/status-badge";
 import { RunProvenanceBadges } from "../components/run-cells";
-import type { JournalOverviewFilter } from "../components/log-viewer";
+import { LogViewer } from "../components/log-viewer";
 import { isQueryInFlight } from "../lib/query-state";
 import { findModelFallback } from "../lib/run-model-fallback";
 
@@ -69,7 +66,6 @@ function RunDetailBody() {
   // filtered from catalog endpoints so the query would 404 on every view.
   const isInlinePath = packageId.startsWith("@inline/");
   const location = useLocation();
-  const navigate = useNavigate();
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -86,20 +82,6 @@ function RunDetailBody() {
   const [tab, setTab] = useTabWithHash(RUN_DETAIL_TABS, "overview");
   const { data: run, error } = runQuery;
   const runNumber = run?.runNumber ?? stateNumber;
-  const requestedJournalFilter = new URLSearchParams(location.search).get("journalFilter");
-  const journalFilter: JournalOverviewFilter | undefined =
-    requestedJournalFilter === "tools" ||
-    requestedJournalFilter === "warnings" ||
-    requestedJournalFilter === "errors"
-      ? requestedJournalFilter
-      : undefined;
-  // A tab of this run, the journal on `filter`; the rest of the query stays.
-  const openTab = (hash: "#journal" | "#results", filter?: JournalOverviewFilter) => {
-    const search = new URLSearchParams(location.search);
-    if (filter) search.set("journalFilter", filter);
-    else search.delete("journalFilter");
-    navigate({ pathname: location.pathname, search: searchOf(search), hash });
-  };
 
   // `useGlobalRunSync` (mounted in MainLayout) patches `run.status` directly
   // into the React Query cache from the LISTEN/NOTIFY stream, so reading
@@ -142,8 +124,7 @@ function RunDetailBody() {
     }
     const { entries, output } = buildLogEntries(logs, { isRunTerminal: isTerminal });
     // Turn breadcrumbs are filtered OUT of the log stream by `buildLogEntries`
-    // and projected here into the per-turn table instead (`TurnsTable` in
-    // `run-detail/run-turns-detail.tsx`, opened from the overview's Usage card).
+    // and projected here instead: the overview's context gauge reads them.
     return { historicalLogs: entries, structuredOutput: output, turnRows: buildTurnRows(logs) };
   }, [logs, isTerminal]);
 
@@ -154,16 +135,13 @@ function RunDetailBody() {
   const execResult = run?.result as components["schemas"]["Run"]["result"];
   const finalOutput =
     structuredOutput || (execResult?.output as Record<string, unknown> | undefined) || null;
-  const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
   const modelFallback = useMemo(() => findModelFallback(logs), [logs]);
   // Run-level memory rows (only those touched during this run).
   const { data: runMemories, isLoading: memoriesLoading } = useRunMemories(packageId, runId);
   const { data: runPinned, isLoading: pinnedLoading } = useRunPinned(packageId, runId);
   const memoryLoading = memoriesLoading || pinnedLoading;
-  const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
-  const hasRunMemory = runMemoryCount > 0;
-  const hasDurableResults = hasOutput || (run?.file_counts.output ?? 0) > 0 || hasRunMemory;
+  const hasRunMemory = (runMemories?.length ?? 0) + (runPinned?.length ?? 0) > 0;
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
@@ -351,31 +329,19 @@ function RunDetailBody() {
             run={enrichedRun}
             turns={turnRows}
             logs={allLogs}
-            structuredOutput={finalOutput}
-            memoryChangeCount={runMemoryCount}
             logsLoading={logsQuery.isLoading}
-            memoryLoading={memoryLoading}
             modelFallback={modelFallback}
-            onOpenJournal={(filter) => openTab("#journal", filter)}
-            onOpenResults={() => openTab("#results")}
           />
         </DetailTabPanel>
 
         <DetailTabPanel value="journal" flush>
-          <RunExecutionView
-            run={enrichedRun}
-            logs={allLogs}
-            logsLoading={logsQuery.isLoading}
-            initialFilter={journalFilter}
-            headerActions={
-              run.status === "success" && hasDurableResults ? (
-                <Button variant="outline" size="sm" onClick={() => setTab("results")}>
-                  {t("run.viewResults")}
-                  <ArrowRight className="size-3.5" />
-                </Button>
-              ) : undefined
-            }
-          />
+          <div className="p-4 md:p-6">
+            <LogViewer
+              entries={allLogs}
+              isLoading={logsQuery.isLoading}
+              focusError={run.status === "failed"}
+            />
+          </div>
         </DetailTabPanel>
 
         <DetailTabPanel value="results" flush>
