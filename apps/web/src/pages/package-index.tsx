@@ -28,6 +28,7 @@ import { PackageCollection } from "../components/package-collection";
 import { EmptyStateAction } from "../components/page-states";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
+import { useListView } from "../stores/list-view-store";
 import { useModalParam } from "../hooks/use-modal-param";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
@@ -123,6 +124,7 @@ function PackageIndexBody({
   const { can } = usePermissions();
   const importParam = useModalParam("import");
   const list = useListParams(["origin", "activity"]);
+  const [view, setView] = useListView(type);
   // Creating is a write on the package type, as its route is.
   const canCreate = can(packagePermission(type, "write"));
   // An import may carry any package type, so any authoring grant opens it;
@@ -181,7 +183,8 @@ function PackageIndexBody({
         emptyIcon={PACKAGE_TYPE_ICON[type]}
         emptyAction={<EmptyStateAction action={createAction} />}
         list={list}
-        view="cards"
+        view={view}
+        onViewChange={setView}
       />
       {importParam.value !== null && canImport && (
         <ImportModal onClose={importParam.close} onLeave={importParam.leave} />
