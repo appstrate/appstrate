@@ -16,6 +16,7 @@ import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
 import { invalidateLibraries } from "./use-library";
 import { invalidateIntegrationQueries } from "./use-integrations";
+import { invalidateAgentDiagnostics } from "./use-agent-diagnostics";
 import { packagePermission, packageSightPermissions } from "@appstrate/core/permissions";
 import { ApiError } from "../api/errors";
 import {
@@ -475,6 +476,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
     },
     onSuccess: () => {
       invalidateVersionCaches(qc);
+      void invalidateAgentDiagnostics(qc);
     },
     // A refusal that moved or settled the draft (`precondition_failed`: someone
     // wrote it; `no_changes`: the server cleared its dirty marker) leaves the page stale.
@@ -501,6 +503,7 @@ export function useDeleteVersion(type: PackageType, packageId: string) {
     },
     onSuccess: () => {
       invalidateVersionCaches(qc);
+      void invalidateAgentDiagnostics(qc);
     },
   });
 }
@@ -527,6 +530,7 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
     onSuccess: () => {
       // A restore overwrites the DRAFT artifact wholesale.
       invalidatePackageCaches(qc);
+      void invalidateAgentDiagnostics(qc);
     },
   });
 }

@@ -194,7 +194,7 @@ function IntegrationSettings({
                 const railId = DEFINITION_RAIL.find(([, section]) => section === next)?.[0];
                 if (railId) void navigate(href(railId));
               }}
-              toolCatalog={detail.tool_catalog ?? []}
+              toolInspection={detail.tool_catalog_inspection}
             />
           </Suspense>
         ) : isPackageCommonSection(active) ? (
@@ -220,8 +220,10 @@ function IntegrationSettings({
               description={t("integrationEditor.description.tools", { ns: "agents" })}
             />
             <IntegrationToolsSection
-              tools={detail.tool_catalog ?? []}
+              integrationId={packageId}
+              inspection={detail.tool_catalog_inspection}
               allowUndeclaredTools={detail.allow_undeclared_tools}
+              showBasis={false}
             />
           </div>
         ) : !detail.active ? (

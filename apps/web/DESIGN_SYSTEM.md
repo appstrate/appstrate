@@ -128,10 +128,13 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    `HealthIssueBadge`), with a link to where it is fixed or read. A cancelled run
    is a neutral one (« Run annulé »: who stopped it as the platform records it,
    and when), never a fact among the Exécution facts.
-   **A run served by another model than the one chosen** is told after the launch, never as
-   a band (the run starts anyway): a `warning` `HealthCard` « Modèle remplacé » on the run's
-   overview (the chosen model, the one that served, a link to the agent's model setting),
-   read off the `model_fallback` row of the journal the page already holds.
+   **A run served by another model than the one chosen** is told on both sides of the
+   launch, never as a band (the run starts anyway): before it, a `warning` diagnostic of
+   the agent (`pinned_model_unavailable`, from the same cascade as the launch, worded by
+   its code in `agentDiagnosticText` because the server's text is English, with a
+   « Corriger » to the model setting); after it, a `warning` `HealthCard` « Modèle remplacé »
+   on the run's overview (the chosen model, the one that served, a link to the agent's model
+   setting), read off the `model_fallback` row of the journal the page already holds.
 6. **Paramètres**: `AgentDetailSplit`
    (`components/agent-detail/agent-detail-split.tsx`) with a `SectionRail`
    (`components/settings/section-rail.tsx`, one `RailLink` per section, a lock
@@ -566,6 +569,10 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     away as the secret appears (`ApiKeyCreateModal`, `WebhookCreateModal`,
     `OAuthClientFormModal`): the secret has no address and does not survive a
     reload.
+  - **A modal repeated on a page** is named by what the repeated thing already
+    has that is stable: a tool of a catalog by
+    `?inspectTool=<integrationId>:<tool name>` (the catalog answers only for its
+    own integration).
   - **A pairing in progress** (`?connectProvider=<providerId>` in the
     onboarding) is a place too: its token lives in memory, so a reload reopens
     the modal and mints a new pairing instead of resuming the old one (which

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
+import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { TriangleAlert } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
@@ -26,6 +27,7 @@ import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { isQueryInFlight } from "../lib/query-state";
 import { packageDetailPath } from "../lib/package-paths";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 
 // Shared components
 import { SharedHeader } from "../components/package-detail/shared-header";
@@ -53,6 +55,8 @@ import { AgentRunButton } from "../components/package-detail/agent-run-button";
 import { PackageUsage } from "../components/package-detail/package-usage";
 import { PackageSettingsView } from "../components/package-detail/package-settings-view";
 import { RoleLimitNotice } from "../components/role-limit-notice";
+import { useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
+import { agentDiagnosticText, agentDiagnosticsTitle } from "../lib/agent-diagnostics";
 import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
 import { EditorDirtyReportContext } from "../hooks/use-editor-state";
 
@@ -61,6 +65,59 @@ type PackageTab = "overview" | "runs" | "settings" | "memory" | "usedBy";
 const AGENT_DETAIL_TABS = ["overview", "runs", "memory", "settings"] as const;
 
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
+
+function AgentReadinessBadge({
+  packageId,
+  versionLabel,
+}: {
+  packageId: string;
+  versionLabel: string | undefined;
+}) {
+  const { t } = useTranslation("agents");
+  const diagnostics = useAgentDiagnostics(packageId, versionLabel);
+  const result = diagnostics.data;
+  const status = diagnostics.isLoading ? "loading" : (result?.status ?? "warning");
+  const statusLabel = diagnostics.isLoading
+    ? t("detail.diagnostics.assessing")
+    : result?.status === "healthy"
+      ? t("detail.diagnostics.readyBadge")
+      : result
+        ? agentDiagnosticsTitle(result, t)
+        : t("detail.diagnostics.unknownTitle");
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "focus:ring-ring inline-flex items-center rounded-md border border-transparent px-2.5 py-0.5 text-xs font-medium transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none",
+            status === "healthy"
+              ? "bg-success/20 text-success hover:bg-success/25"
+              : status === "blocking"
+                ? "bg-destructive/20 text-destructive hover:bg-destructive/25"
+                : "bg-warning/20 text-warning hover:bg-warning/25",
+          )}
+        >
+          {statusLabel}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 p-4">
+        <p className="text-sm font-semibold">{t("detail.diagnostics.title")}</p>
+        <p className="text-muted-foreground mt-1 text-xs">{statusLabel}</p>
+        {result && result.diagnostics.length > 0 && (
+          <ul className="mt-3 space-y-2">
+            {result.diagnostics.slice(0, 4).map((item) => (
+              <li key={`${item.code}:${item.field}`} className="text-xs">
+                {agentDiagnosticText(item, t).title}
+              </li>
+            ))}
+          </ul>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /** No model a run could use: said where it can be acted on, graded by who may act. */
 function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentModelBlocker> }) {
@@ -363,6 +420,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           activeSubpage={{
             label: tabDefs.find((item) => item.value === tab)?.label ?? overviewTab.label,
           }}
+          statusBadges={
+            // The readiness verdict reads the agent's content: shown to whoever may read it.
+            type === "agent" && fullRead ? (
+              <AgentReadinessBadge packageId={packageId} versionLabel={versionLabel} />
+            ) : undefined
+          }
           actionsLeft={
             type === "agent" ? (
               // The page's one launch verdict, shared with the empty runs list.
@@ -441,6 +504,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   <AgentOverviewTab
                     packageId={packageId}
                     detail={agentDetail}
+                    version={versionLabel}
                     isHistorical={isHistoricalVersion}
                   />
                 ) : (

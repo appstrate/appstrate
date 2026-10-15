@@ -3,11 +3,8 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { Versioned } from "../hooks/use-packages";
-import type {
-  AgentDetail,
-  IntegrationToolCatalogEntry,
-  OrgPackageItemDetail,
-} from "@appstrate/shared-types";
+import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
+import type { IntegrationToolInspection } from "@appstrate/core/integration";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
@@ -413,7 +410,7 @@ function IntegrationEditorInner({
   presentation = "page",
   tab,
   onTabRequest,
-  toolCatalog,
+  toolInspection,
 }: {
   initialState: EditorState;
   packageId: string | undefined;
@@ -421,8 +418,8 @@ function IntegrationEditorInner({
   presentation?: Presentation;
   tab?: PackageEditorTab;
   onTabRequest?: (tab: PackageEditorTab) => void;
-  /** Embedded: the saved package's tool catalog, shown with the draft's policy. */
-  toolCatalog?: IntegrationToolCatalogEntry[];
+  /** Embedded: the server's reading of the saved tool catalog, shown with its policy. */
+  toolInspection?: IntegrationToolInspection;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const embedded = presentation === "embedded";
@@ -498,10 +495,12 @@ function IntegrationEditorInner({
       )}
 
       {activeTab === "tools" &&
-        (toolCatalog ? (
+        (toolInspection ? (
           <IntegrationToolsSection
-            tools={toolCatalog}
+            integrationId={packageId ?? "new"}
+            inspection={toolInspection}
             edit={{ manifest: state.manifest, onChange: onManifestChange }}
+            showBasis={false}
           />
         ) : (
           <ToolsPolicySection
@@ -521,12 +520,12 @@ export function IntegrationDefinitionEditor({
   detail,
   section,
   onSection,
-  toolCatalog,
+  toolInspection,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
   onSection: (section: IntegrationDefinitionSection) => void;
-  toolCatalog: IntegrationToolCatalogEntry[];
+  toolInspection: IntegrationToolInspection;
 }) {
   return (
     <IntegrationEditorInner
@@ -536,7 +535,7 @@ export function IntegrationDefinitionEditor({
       presentation="embedded"
       tab={section}
       onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
-      toolCatalog={toolCatalog}
+      toolInspection={toolInspection}
     />
   );
 }

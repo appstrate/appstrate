@@ -135,12 +135,13 @@ import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import type { Actor, ResolvedOAuthClient } from "@appstrate/connect";
 import {
-  resolveIntegrationToolCatalog,
+  resolveIntegrationToolSurface,
   readDefaultTools,
   type ConnectionCandidate,
   type ConnectionOverrides,
   type ConnectionResolutionError,
   type IntegrationManifest,
+  type IntegrationToolInspection,
 } from "@appstrate/core/integration";
 import type { ConnectionReach, IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
@@ -4006,10 +4007,11 @@ export async function getIntegrationAuthStatuses(
   /**
    * Effective agent-facing tool catalog — what the agent editor's picker
    * should display. Resolved server-side via
-   * {@link resolveIntegrationToolCatalog} so the UI doesn't need a second
+   * {@link resolveIntegrationToolSurface} so the UI doesn't need a second
    * fetch for the referenced mcp-server's MCPB tool advertisement.
    */
   tool_catalog: IntegrationToolCatalogEntry[];
+  tool_catalog_inspection: IntegrationToolInspection;
   /**
    * AFPS §4.4 — the tool(s) an agent inherits when it declares the
    * integration without an `integrations_configuration.<id>.tools`
@@ -4066,7 +4068,7 @@ export async function getIntegrationAuthStatuses(
   const mcpServerTools = mcpServer ? readMcpServerTools(mcpServer) : undefined;
   // The resolver already emits the snake_case wire shape
   // (`policy.required_scopes`), so the catalog passes through verbatim.
-  const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
+  const toolSurface = resolveIntegrationToolSurface({
     integration: manifest,
     mcpServerTools,
   });
@@ -4129,7 +4131,8 @@ export async function getIntegrationAuthStatuses(
   return {
     manifest,
     auths,
-    tool_catalog: toolCatalog,
+    tool_catalog: toolSurface.catalog,
+    tool_catalog_inspection: toolSurface.inspection,
     default_tools: readDefaultTools(manifest),
     allow_undeclared_tools:
       (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools === true,

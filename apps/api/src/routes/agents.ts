@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 import { connectionPrincipal } from "../lib/connection-principal.ts";
 import { Hono } from "hono";
 import type { Context } from "hono";
@@ -41,6 +42,7 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getSpaceScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
+import { getAgentDiagnostics } from "../services/agent-diagnostics.ts";
 import {
   assertExplicitModelExists,
   resolveModel,
@@ -391,6 +393,34 @@ export function createAgentsRouter() {
           // badge came to 404 a page that had just rendered. The service takes
           // the answer and never re-derives it.
           version: c.req.query("version") || (await defaultDefinitionSelector(c, agent)).selector,
+        }),
+      );
+    },
+  );
+
+  // GET /api/agents/:scope/:name/diagnostics — shared readiness and warning
+  // projection for Overview and the header.
+  router.get(
+    `/${SCOPED_PACKAGE_ROUTE}/diagnostics`,
+    requirePermission("agents", "read"),
+    requireAgent(),
+    async (c) => {
+      const agent = c.get("package");
+      // The same door as `connection-readiness`: a `draft` selector only for a
+      // caller who may write the agent, else the definition the detail page renders.
+      await assertDraftSelectorAllowed(c, agent.id, c.req.query("version"));
+      return c.json(
+        await getAgentDiagnostics({
+          scope: getSpaceScope(c),
+          agent,
+          principal: connectionPrincipal(c),
+          canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
+          canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
+          payerUserId: requestPayerUserId(c),
+          version: c.req.query("version") || (await defaultDefinitionSelector(c, agent)).selector,
+          // The doors of `connection-readiness` and of the schedule list.
+          canReadIntegrations: c.get("permissions")?.has("integrations:read") ?? false,
+          canReadSchedules: c.get("permissions")?.has("schedules:read") ?? false,
         }),
       );
     },

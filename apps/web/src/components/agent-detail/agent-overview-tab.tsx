@@ -3,26 +3,31 @@
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChartNoAxesCombined, Database, PlayCircle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { useSchedules } from "../../hooks/use-schedules";
+import { useAgentRunActivity } from "../../hooks/use-paginated-runs";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { Badge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
-import { latestMemoryDate } from "../../lib/agent-overview";
+import { latestMemoryDate, runSuccessRate } from "../../lib/agent-overview";
 import { runDetailPath } from "../../lib/package-paths";
 import { agentSettingsHref } from "../../lib/settings-section-href";
 import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
 import { DetailSectionCard } from "../detail-section-card";
+import { AgentHealthSection } from "./agent-health-section";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 export function AgentOverviewTab({
   packageId,
   detail,
+  version,
   isHistorical,
 }: {
   packageId: string;
   detail: AgentDetail;
+  version: string | undefined;
   isHistorical: boolean;
 }) {
   const { t } = useTranslation("agents");
@@ -35,12 +40,20 @@ export function AgentOverviewTab({
       </div>
     );
   }
-  return <OperationalSummary packageId={packageId} detail={detail} />;
+  return <OperationalSummary packageId={packageId} detail={detail} version={version} />;
 }
 
 /** The live counters, read only where they are shown. */
-function OperationalSummary({ packageId, detail }: { packageId: string; detail: AgentDetail }) {
-  const { t } = useTranslation("agents");
+function OperationalSummary({
+  packageId,
+  detail,
+  version,
+}: {
+  packageId: string;
+  detail: AgentDetail;
+  version: string | undefined;
+}) {
+  const { t, i18n } = useTranslation("agents");
   const location = useLocation();
   const {
     data: schedules,
@@ -48,6 +61,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
     isError: schedulesError,
     isSuccess: schedulesSuccess,
   } = useSchedules(packageId);
+  const runActivity = useAgentRunActivity(packageId);
   const {
     data: memories,
     isLoading: memoriesLoading,
@@ -63,6 +77,16 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
   const unknown = t("detail.overview.unknown");
   const latestMemory = pinned && memories ? latestMemoryDate(pinned, memories) : undefined;
 
+  const activity = runActivity.data;
+  const failedRunCount = activity ? activity.failed + activity.timeout : undefined;
+  const successRate = activity ? runSuccessRate(activity) : null;
+  const successRateLabel =
+    successRate === null
+      ? "—"
+      : new Intl.NumberFormat(i18n.language, {
+          style: "percent",
+          maximumFractionDigits: 1,
+        }).format(successRate);
   const destination = (hash: string, key?: string, value?: string) => {
     const search = new URLSearchParams(location.search);
     if (hash === "#runs") search.delete("agentRunStatus");
@@ -75,6 +99,8 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
 
   return (
     <div className="space-y-8" data-agent-operational-overview>
+      <AgentHealthSection packageId={packageId} version={version} />
+
       <div className="grid gap-6 xl:grid-cols-3">
         <DetailSectionCard title={t("detail.overview.runs")} icon={PlayCircle} bodyClassName="p-0">
           <dl className="grid h-full divide-y">
@@ -121,12 +147,69 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
         </DetailSectionCard>
 
         <DetailSectionCard
-          title={t("detail.overview.activity")}
+          title={`${t("detail.overview.activity")} · ${t("detail.overview.lastThirtyDays")}`}
           icon={ChartNoAxesCombined}
           bodyClassName="p-0"
+          headerAction={
+            activity && activity.total > 0
+              ? { label: t("detail.overview.openRuns"), to: destination("#runs") }
+              : undefined
+          }
         >
-          <dl className="grid h-full grid-cols-2 divide-x xl:grid-cols-1 xl:divide-x-0 xl:divide-y">
+          <dl className="grid h-full grid-cols-2 divide-x md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0">
             <OperationalStat
+              className="xl:border-border xl:border-r xl:border-b"
+              label={t("detail.overview.totalRuns")}
+              value={
+                runActivity.isLoading
+                  ? "…"
+                  : runActivity.isError || !activity
+                    ? unknown
+                    : String(activity.total)
+              }
+              target={activity && activity.total > 0 ? { to: destination("#runs") } : undefined}
+            />
+            <OperationalStat
+              className="xl:border-border xl:border-b"
+              label={t("detail.overview.successRate")}
+              value={
+                runActivity.isLoading ? (
+                  "…"
+                ) : runActivity.isError || !activity ? (
+                  unknown
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        tabIndex={0}
+                        className="focus-visible:ring-ring cursor-help border-b border-dotted outline-none focus-visible:ring-2"
+                      >
+                        {successRateLabel}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("detail.overview.successRateHelp")}</TooltipContent>
+                  </Tooltip>
+                )
+              }
+            />
+            <OperationalStat
+              className="xl:border-border xl:border-r xl:border-b"
+              label={t("detail.overview.failedRuns")}
+              value={
+                runActivity.isLoading
+                  ? "…"
+                  : runActivity.isError || failedRunCount === undefined
+                    ? unknown
+                    : String(failedRunCount)
+              }
+              target={
+                failedRunCount && failedRunCount > 0
+                  ? { to: destination("#runs", "agentRunStatus", "failed,timeout") }
+                  : undefined
+              }
+            />
+            <OperationalStat
+              className="xl:border-border xl:border-b"
               label={t("detail.overview.runningRuns")}
               value={String(detail.running_runs)}
               target={
@@ -136,6 +219,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
               }
             />
             <OperationalStat
+              className="xl:col-span-2"
               label={t("detail.overview.activeSchedules")}
               value={
                 schedulesLoading ? (

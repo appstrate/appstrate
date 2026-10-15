@@ -39,6 +39,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   completion listener both connect surfaces share (origin-checked `postMessage`
   plus `BroadcastChannel`), the per-integration popup window name, and the one
   popup size.
+- **`resolveIntegrationToolSurface`**, **`IntegrationToolInspection`** and
+  **`IntegrationToolInspectionEntry`** (`@appstrate/core/integration`): the
+  catalog `resolveIntegrationToolCatalog` returns, plus an explanatory
+  inventory of every tool the integration names, each with its `origin`
+  (`mcp_package`, `manifest`, `appstrate`), its `exposure` (`available`,
+  `hidden`, `not_in_catalog`) and why it is hidden. Read by an integration's
+  Outils tab; never an agent allowlist.
+- **`CONNECTION_RESOLUTION_ERROR_REMEDY`** (`@appstrate/core/integration`):
+  where each `CONNECTION_RESOLUTION_ERROR_CODES` code is cleared —
+  `connection` (a connection, the set binding one, or the integration's
+  activation) or `agent` (the agent's own `auth_key` or tool selection).
+  Exhaustive over the codes.
 
 ### Changed
 

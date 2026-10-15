@@ -288,13 +288,12 @@ export async function getExactVersionManifest(
   return asRecordOrNull(row?.manifest);
 }
 
-/** 3-step version resolution: exact → dist-tag → semver range. */
-export async function resolveVersion(
+/** A package's versions and dist-tags: what `resolveVersionFromCatalog` resolves against. */
+export async function loadVersionCatalog(
   packageId: string,
-  query: string,
   executor: DbOrTx = db,
-): Promise<number | null> {
-  const allVersions: CatalogVersion[] = await executor
+): Promise<{ versions: CatalogVersion[]; distTags: DistTagEntry[] }> {
+  const versions = await executor
     .select({
       id: packageVersions.id,
       version: packageVersions.version,
@@ -302,13 +301,21 @@ export async function resolveVersion(
     })
     .from(packageVersions)
     .where(eq(packageVersions.packageId, packageId));
-
-  const allDistTags: DistTagEntry[] = await executor
+  const distTags = await executor
     .select({ tag: packageDistTags.tag, versionId: packageDistTags.versionId })
     .from(packageDistTags)
     .where(eq(packageDistTags.packageId, packageId));
+  return { versions, distTags };
+}
 
-  return resolveVersionFromCatalog(query, allVersions, allDistTags);
+/** 3-step version resolution: exact → dist-tag → semver range. */
+export async function resolveVersion(
+  packageId: string,
+  query: string,
+  executor: DbOrTx = db,
+): Promise<number | null> {
+  const { versions, distTags } = await loadVersionCatalog(packageId, executor);
+  return resolveVersionFromCatalog(query, versions, distTags);
 }
 
 /** Get a version row suitable for download (via 3-step resolution). Returns null if not found. */

@@ -2461,6 +2461,48 @@ export const schemas = {
       },
     },
   },
+  AgentDiagnostics: {
+    type: "object",
+    description:
+      "Shared, ordered diagnostics for one agent installation and definition. An empty diagnostics array with status healthy is a successful result.",
+    required: ["status", "blocking_count", "warning_count", "diagnostics"],
+    properties: {
+      status: { type: "string", enum: ["healthy", "warning", "blocking"] },
+      blocking_count: { type: "integer", minimum: 0 },
+      warning_count: { type: "integer", minimum: 0 },
+      diagnostics: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["code", "severity", "title", "explanation", "field", "correction"],
+          properties: {
+            code: { type: "string" },
+            severity: { type: "string", enum: ["blocking", "warning"] },
+            title: { type: "string" },
+            explanation: { type: "string" },
+            field: { type: "string" },
+            correction: {
+              type: "object",
+              required: ["destination", "section", "params"],
+              properties: {
+                destination: {
+                  type: "string",
+                  enum: ["bundle", "configuration", "schedule"],
+                },
+                section: { type: ["string", "null"] },
+                params: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  description:
+                    "The values the diagnostic names, keyed so a client can word it by `code`: `integration`, `skill`, `model`, `default_model`, `scheduleId`, `schedule`, `schedule_version`, `inspected_version` — each only where it applies.",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
   // A block to run on the target.
   HandoffCommandStep: {
     type: "object",

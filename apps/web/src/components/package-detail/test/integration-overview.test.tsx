@@ -31,6 +31,13 @@ const DETAIL = {
   active: true,
   auths: [],
   tool_catalog: [{ name: "send" }, { name: "read" }],
+  tool_catalog_inspection: {
+    basis: "manifest",
+    entries: [
+      { name: "send", exposure: "visible" },
+      { name: "read", exposure: "hidden" },
+    ],
+  },
 } as unknown as IntegrationDetailWire;
 
 function renderOverview(dependentIds: string[]): string {

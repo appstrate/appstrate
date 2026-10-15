@@ -169,6 +169,7 @@
   "apiError.personal_space_takes_no_keys": "A personal space takes no API key. Create the key in a team space.",
   "apiError.personal_space_takes_no_end_users": "A personal space takes no end-user. Create it in a team space.",
   "apiError.personal_space_takes_no_oauth_clients": "A personal space takes no OAuth client. Register it in a team space.",
+  "apiError.personal_space_takes_no_end_user_sign_in": "A personal space takes no end-user sign-in configuration (SMTP, social providers). Configure it in a team space.",
   "apiError.personal_space_has_no_members": "A personal space belongs to one member. Convert it to a team space first.",
   "apiError.personal_space_immutable": "A personal space is always private: only its name can be changed.",
   "apiError.personal_space_not_deletable": "A personal space is deleted when its owner leaves. Convert it to a team space to keep its contents.",

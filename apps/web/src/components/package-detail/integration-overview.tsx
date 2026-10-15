@@ -42,6 +42,9 @@ export function IntegrationOverview({
   ];
   const reconnect = connections.filter((connection) => connection.needs_reconnection).length;
   const available = detail.tool_catalog?.length ?? 0;
+  const hidden = detail.tool_catalog_inspection.entries.filter(
+    (tool) => tool.exposure === "hidden",
+  ).length;
   const connectionsTo = { pathname: location.pathname, hash: "#connections" };
   const toolsTo = integrationSettingsHref(location.pathname, "tools");
   const labelFor = (auth: IntegrationAuthStatus) =>
@@ -153,6 +156,11 @@ export function IntegrationOverview({
               label={t("integration.summary.availableTools")}
               value={available}
               target={available ? { to: toolsTo } : undefined}
+            />
+            <OperationalStat
+              label={t("integration.summary.hiddenTools")}
+              value={hidden}
+              target={hidden ? { to: toolsTo } : undefined}
             />
           </dl>
         </DetailSectionCard>

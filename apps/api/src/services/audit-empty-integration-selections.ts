@@ -32,7 +32,8 @@ import { spacePackages, packageVersions, packages, schedules } from "@appstrate/
 import { eq, and } from "drizzle-orm";
 
 import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
-import { getLatestVersionInfo, getVersionRow } from "./package-versions.ts";
+import { getLatestVersionInfo } from "./package-versions.ts";
+import { resolveVersionRefs } from "./agent-version-resolver.ts";
 import { isPackageActiveHere } from "./space-packages.ts";
 
 interface Finding {
@@ -92,41 +93,6 @@ async function emptySelections(
             ? "explicit empty tool selection"
             : "selected tools are unavailable or hidden",
     }));
-}
-
-/**
- * Walk every org-owned agent artifact (draft + each published version) and
- * return the empty-selection findings, annotated with what reaches them.
- */
-/**
- * Resolve a schedule's `version_override` the way the run trigger resolves it
- * (`resolveAgentRunVersion` in `./agent-version-resolver.ts`): absent or
- * `"published"` means the LATEST PUBLISHED version — never the draft — `"draft"`
- * means the working copy, and anything else is an exact version, a dist-tag, or
- * a semver range resolved through `getVersionRow`.
- *
- * Getting this backwards is what made the first version of this audit
- * untrustworthy: it read an absent override as "draft", so a schedule that in
- * fact runs the latest published version was attributed to the draft artifact.
- * A deploy gate that mis-attributes findings is worse than no gate.
- *
- * Returns the artifact label to attribute the schedule to, or `null` when the
- * selector resolves to nothing (a never-published agent with no override — that
- * schedule already fails at fire time with `no_published_version`).
- */
-async function scheduleArtifactLabel(
-  packageId: string,
-  versionOverride: string | null,
-): Promise<string | null> {
-  const sel = versionOverride?.trim() || undefined;
-  if (sel === "draft") return "draft";
-  if (sel === undefined || sel === "published") {
-    const latest = await getLatestVersionInfo(packageId);
-    return latest?.version ?? null;
-  }
-  // Exact version, dist-tag, or semver range — one resolver, same as the run.
-  const row = await getVersionRow(packageId, sel);
-  return row?.version ?? null;
 }
 
 /**
@@ -225,8 +191,12 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
         });
       }
     }
-    for (const sc of agentSchedules) {
-      const label = await scheduleArtifactLabel(agent.id, sc.versionOverride);
+    const scheduleLabels = await resolveVersionRefs(
+      agent.id,
+      agentSchedules.map((sc) => sc.versionOverride),
+    );
+    for (const [i, sc] of agentSchedules.entries()) {
+      const label = scheduleLabels[i];
       if (!label) continue;
       consumers.push({
         label,
