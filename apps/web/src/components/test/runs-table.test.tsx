@@ -23,6 +23,7 @@ await i18n.changeLanguage("fr");
 
 const STARTED_AT_LABEL = formatDateField(STARTED_AT);
 const agentName = () => "Rapport trimestriel";
+const agentIdentity = () => ({ icon: "lucide:chart-bar", color: "#2563eb" });
 
 /**
  * The column set is a hook — the toolbar's column menu and the table have
@@ -37,7 +38,7 @@ function Harness({
   runs: EnrichedRun[];
   hideAgentName?: boolean;
 } & Omit<Parameters<typeof RunsTable>[0], "runs" | "columns" | "agentName" | "empty">) {
-  const columns = useRunColumns({ agentName, hideAgentName });
+  const columns = useRunColumns({ agentName, agentIdentity, hideAgentName });
   return <RunsTable runs={runs} columns={columns} agentName={agentName} empty={null} {...props} />;
 }
 
@@ -65,6 +66,11 @@ describe("the runs column set", () => {
     expect(html).toContain('aria-label="eu-proxy"'); // the egress it went through
     expect(html).toContain("4,2\u202fs"); // duration
     expect(html).toContain(STARTED_AT_LABEL);
+  });
+
+  it("draws the agent's tile before its name", () => {
+    // `#2563eb` is the agent's custom colour: the tile is tinted with it.
+    expect(html).toContain("#2563eb1f");
   });
 
   it("leads to the run, under a name that says which run", () => {
@@ -121,6 +127,7 @@ describe("what a surface subtracts", () => {
     const html = table([makeRun()], { hideAgentName: true });
     expect(html).not.toContain(agentsFr["schedule.agent"]);
     expect(html).not.toContain(">Rapport trimestriel<");
+    expect(html).not.toContain("#2563eb1f");
     // The row's accessible NAME keeps it, though: a link has to say which run
     // it leads to even when the column that showed it is gone.
     expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');

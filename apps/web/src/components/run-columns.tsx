@@ -23,7 +23,9 @@
 import { useTranslation } from "react-i18next";
 import { Shield } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
+import type { RunAgentIdentity } from "../hooks/use-run-agent-identity";
 import type { DataColumn } from "./data-table";
+import { PackageIcon } from "./package-icon";
 import { RunStatusBadge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { RunDuration } from "./run-duration";
@@ -40,10 +42,13 @@ import { CellDate } from "./table-cells";
  */
 export function useRunColumns({
   agentName,
+  agentIdentity,
   hideAgentName = false,
 }: {
   /** What to call the agent a run executed — see `use-run-agent-name.ts`. */
   agentName: (run: EnrichedRun) => string;
+  /** Its tile, drawn before the name — see `use-run-agent-identity.ts`. */
+  agentIdentity: (run: EnrichedRun) => RunAgentIdentity;
   /**
    * Inside an agent — or a schedule, which fixes one — the agent column repeats
    * the page title on every row, so the set drops it. The NAME is still
@@ -71,6 +76,13 @@ export function useRunColumns({
       elastic: true,
       cell: (run) => (
         <>
+          <PackageIcon
+            type="agent"
+            size="sm"
+            className="size-6 rounded-md"
+            iconClassName="size-3.5"
+            {...agentIdentity(run)}
+          />
           <span className="truncate font-medium">{agentName(run)}</span>
           <RunProvenanceBadges run={run} />
         </>
