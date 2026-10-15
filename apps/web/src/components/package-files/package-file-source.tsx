@@ -19,8 +19,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { formatBytes } from "../../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
-import { MonacoEditor } from "../monaco";
-import { useTheme } from "../../stores/theme-store";
+import { CodeEditor } from "../monaco";
 import { ErrorState } from "../page-states";
 import { TextSkeleton } from "../loading-skeletons";
 import {
@@ -56,7 +55,6 @@ export function PackageFileSource({
   downloadPath = entry.path,
 }: PackageFileSourceProps) {
   const { t } = useTranslation("agents");
-  const { resolvedTheme } = useTheme();
   const { text, isLoading, isError } = usePackageFile(packageId, version, entry);
   const download = usePackageFileDownload(packageId, version);
   // The whole verdict comes from the lib — this component holds no rule of its own.
@@ -124,22 +122,17 @@ export function PackageFileSource({
       ) : (
         // No `path` prop on purpose: it creates one Monaco model per URI, and the singleton only
         // disposes the current one, so browsing a 200-file artifact would retain 200 models.
-        <MonacoEditor
+        <CodeEditor
           height="520px"
           language={languageForPath(entry.path)}
           value={text}
-          theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
           options={{
             readOnly: true,
             ariaLabel: entry.path,
-            minimap: { enabled: false },
             quickSuggestions: false,
             suggestOnTriggerCharacters: false,
             wordBasedSuggestions: "off",
             largeFileOptimizations: true,
-            fontSize: 13,
-            fontFamily: "'SF Mono', 'Fira Code', monospace",
-            scrollBeyondLastLine: false,
             wordWrap: "on",
             padding: { top: 16, bottom: 16 },
           }}

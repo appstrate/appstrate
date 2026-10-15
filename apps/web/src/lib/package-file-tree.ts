@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Pure logic of the package file explorer: the web test runner has no DOM and the tree is virtualized, so shape, ARIA and keyboard model live here to be testable. */
+/** Pure logic of the package file explorer: the web test runner has no DOM, so shape, ARIA and keyboard model live here to be testable. */
 
 import {
   PACKAGE_FILE_INLINE_MAX_BYTES,
@@ -56,10 +56,7 @@ interface TreeRow {
 }
 
 /** Builds the nested tree from the flat index; directories are synthesized (no entry of their own), sorted dirs-first then by name regardless of input order. */
-export function buildFileTree(
-  entries: readonly PackageFileEntry[],
-  explicitDirectories: readonly string[] = [],
-): TreeNode[] {
+export function buildFileTree(entries: readonly PackageFileEntry[]): TreeNode[] {
   const roots: TreeNode[] = [];
   // Directory path → children, reused on a repeated segment: dir paths are unique, so valid keys for the collapsed set.
   const dirs = new Map<string, TreeNode[]>();
@@ -103,8 +100,6 @@ export function buildFileTree(
     }
   };
 
-  for (const path of explicitDirectories) ensureDirectory(path);
-
   for (const entry of entries) {
     const segments = entry.path.split("/").filter((s) => s.length > 0);
     const fileName = segments.pop();
@@ -132,9 +127,8 @@ function sortChildren(nodes: TreeNode[]): void {
 }
 
 /**
- * Flattens the tree for a virtualizer; `aria-setsize` / `aria-posinset` MUST be computed here (the
- * browser cannot infer them from a window of rows). Takes the COLLAPSED directories so a new
- * directory is open by default. Iterative, not recursive: path depth is attacker-controlled (crafted
+ * Flattens the tree into its visible rows, with the `aria-setsize` / `aria-posinset` of each. Takes
+ * the COLLAPSED directories so a new directory is open by default. Iterative, not recursive: path depth is attacker-controlled (crafted
  * ZIP entry name) and would overflow the stack.
  */
 export function flattenVisibleRows(

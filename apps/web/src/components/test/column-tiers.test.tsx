@@ -47,7 +47,6 @@ import { useDocumentColumns } from "../document-columns.tsx";
 import { useIntegrationListColumns } from "../../pages/integration-list-columns.tsx";
 import { useApiKeyColumns } from "../../pages/api-key-columns.tsx";
 import { useMemoryColumns } from "../persistence/memory-columns.tsx";
-import { usePackageFileColumns } from "../package-files/package-files-columns.tsx";
 import { useCatalogueSharedColumns } from "../catalogue-shared-columns.tsx";
 import { usePinColumns } from "../integration-detail/pin-columns.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
@@ -313,7 +312,6 @@ const SETS = {
     columnsFrom(() =>
       useMemoryColumns({ isDeleting: () => false, onCopy: () => {}, onDelete: () => {} }),
     ),
-  packageFiles: () => columnsFrom(() => usePackageFileColumns("agent", {})),
   catalogueShared: () =>
     columnsFrom(() =>
       useCatalogueSharedColumns({

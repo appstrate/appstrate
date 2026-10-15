@@ -4,8 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
-import { MonacoEditor as Editor } from "./monaco";
-import { useTheme } from "../stores/theme-store";
+import { CodeEditor } from "./monaco";
 
 /** The file this pane edits — announced by Monaco, not a translated string. */
 const MANIFEST_FILENAME = "manifest.json";
@@ -18,7 +17,6 @@ interface JsonEditorProps {
 
 export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
   const { t } = useTranslation(["agents", "common"]);
-  const { resolvedTheme } = useTheme();
 
   // The seed Monaco mounts on, and nothing more: the editor owns its text from
   // then on (`ContentEditor` carries the full reasoning — a controlled `value`
@@ -45,11 +43,10 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      <Editor
+      <CodeEditor
         // Same rule as the file editor: never taller than the window allows.
         height="min(60vh, 600px)"
         language="json"
-        theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
         defaultValue={initialJson}
         onChange={(v) => {
           setJsonValue(v ?? "");
@@ -88,10 +85,6 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
           // Monaco announces "Editor content" and nothing else; this pane
           // edits one named file, so it says which.
           ariaLabel: MANIFEST_FILENAME,
-          minimap: { enabled: false },
-          fontSize: 13,
-          fontFamily: "'SF Mono', 'Fira Code', monospace",
-          scrollBeyondLastLine: false,
           padding: { top: 12, bottom: 12 },
           tabSize: 2,
           formatOnPaste: true,

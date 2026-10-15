@@ -3,14 +3,12 @@
 /**
  * WAI-ARIA `tree` over a package artifact's file index. Shape, ARIA bookkeeping and keyboard model
  * are pure functions in `lib/package-file-tree.ts`; this owns state, DOM focus and markup.
- * Rows are virtualized, so `aria-level` / `aria-setsize` / `aria-posinset` are computed by hand.
- * `actions` turns the reader into the authoring surface (rename/delete on unpinned rows, plus
- * whole-tree gestures) without forking the virtualizer and focus logic.
+ * An artifact holds tens of files, so every row is rendered. `actions` turns the reader into the
+ * authoring surface (rename/delete on unpinned rows, plus whole-tree gestures).
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ChevronDown,
   ChevronRight,
@@ -30,12 +28,7 @@ import {
   flattenVisibleRows,
   nextTreeFocus,
   type PackageFileEntry,
-  type TreeNode,
 } from "../../lib/package-file-tree";
-
-const ROW_HEIGHT = 26;
-const NO_DIRECTORIES: readonly string[] = [];
-const NO_COLLAPSED_PATHS: readonly string[] = [];
 
 /** What an editable tree can do, supplied by the surface that owns the writes. */
 interface FileTreeActions {
@@ -51,17 +44,9 @@ interface FileTreeActions {
 
 interface FileTreeProps {
   entries: readonly PackageFileEntry[];
-  /** Directories that must remain visible even when they contain no file. */
-  directories?: readonly string[];
-  /** Directories collapsed on first mount without changing the shared default. */
-  initialCollapsedPaths?: readonly string[];
-  /** Displayed name of a directory, by path, when its path is a stable key rather than a word. */
-  directoryLabels?: Readonly<Record<string, string>>;
-  /** Path of the node (file or directory) whose preview is showing, or `null`. */
+  /** Path of the file whose preview is showing, or `null`. */
   selectedPath: string | null;
   onSelect: (path: string) => void;
-  /** Optional richer selection for explorers that also preview directories. */
-  onSelectNode?: (node: TreeNode) => void;
   /** Accessible name of the tree (translated by the caller). */
   label: string;
   /** `id` of the panel this tree drives — announced as `aria-controls`. */
@@ -75,12 +60,8 @@ interface FileTreeProps {
 
 export function FileTree({
   entries,
-  directories = NO_DIRECTORIES,
-  initialCollapsedPaths = NO_COLLAPSED_PATHS,
-  directoryLabels,
   selectedPath,
   onSelect,
-  onSelectNode,
   label,
   controlsId,
   actions,
@@ -88,36 +69,14 @@ export function FileTree({
   className,
 }: FileTreeProps) {
   const { t } = useTranslation("agents");
-  const tree = useMemo(() => buildFileTree(entries, directories), [directories, entries]);
+  const tree = useMemo(() => buildFileTree(entries), [entries]);
   // The user's CLOSED directories, so a directory appearing in a later refetch is open by default.
-  const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(
-    () => new Set(initialCollapsedPaths),
-  );
+  const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(() => new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
 
   const rows = useMemo(() => flattenVisibleRows(tree, collapsedDirs), [tree, collapsedDirs]);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  // Armed by the key handler, cleared once the focused row is actually mounted.
-  const pendingFocusRef = useRef(false);
-
-  // eslint-disable-next-line react-hooks/incompatible-library
-  const virtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
-    overscan: 12,
-  });
-
-  // Runs after every render on purpose: `scrollToIndex` acts through a scroll event, so a far row
-  // is not mounted on the render that changed `focusedId`; the flag survives until it is.
-  useEffect(() => {
-    if (!pendingFocusRef.current) return;
-    const el = scrollRef.current?.querySelector<HTMLElement>('[data-tree-focused="true"]');
-    if (!el) return;
-    pendingFocusRef.current = false;
-    el.focus();
-  });
+  const treeRef = useRef<HTMLDivElement>(null);
 
   const setCollapsed = (path: string, collapsed: boolean) => {
     setCollapsedDirs((current) => {
@@ -129,13 +88,7 @@ export function FileTree({
   };
 
   const moveFocus = (id: string) => {
-    const index = rows.findIndex((row) => row.node.id === id);
-    if (index >= 0) virtualizer.scrollToIndex(index);
-    // Already focused: React bails out of an identical update, so arming the flag would leave it
-    // set until an unrelated re-render yanked focus away from the editor.
-    if (id === focusedId) return;
-    pendingFocusRef.current = true;
-    setFocusedId(id);
+    treeRef.current?.querySelector<HTMLElement>(`[data-tree-id="${CSS.escape(id)}"]`)?.focus();
   };
 
   /** The structural gesture a key asks of the focused row, applied or refused. */
@@ -164,7 +117,6 @@ export function FileTree({
       // The entry's OWN path, so the preview fetches exactly this file.
       if (row.node.kind === "file") onSelect(row.node.entry.path);
       else setCollapsed(row.node.path, row.expanded);
-      onSelectNode?.(row.node);
       return;
     }
 
@@ -214,19 +166,17 @@ export function FileTree({
           </Button>
         </div>
       )}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto p-1">
+      <div className="min-h-0 flex-1 overflow-auto p-1">
         <div
+          ref={treeRef}
           role="tree"
           aria-label={label}
           aria-controls={controlsId}
           onKeyDown={handleKeyDown}
-          style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}
         >
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const row = rows[virtualRow.index]!;
+          {rows.map((row) => {
             const node = row.node;
             const isSelected = node.path === selectedPath;
-            const isFocused = node.id === focusedId;
             const Icon = node.kind === "file" ? FileIcon : row.expanded ? FolderOpen : Folder;
             const editable =
               actions !== undefined && node.kind === "file" && !actions.isPinned(node.entry.path);
@@ -240,28 +190,19 @@ export function FileTree({
                 aria-expanded={node.kind === "dir" ? row.expanded : undefined}
                 aria-selected={isSelected}
                 tabIndex={node.id === tabbableId ? 0 : -1}
-                data-tree-focused={isFocused ? "true" : undefined}
+                data-tree-id={node.id}
                 onFocus={() => setFocusedId(node.id)}
                 onClick={() => {
                   setFocusedId(node.id);
                   if (node.kind === "file") onSelect(node.entry.path);
                   else setCollapsed(node.path, row.expanded);
-                  onSelectNode?.(node);
                 }}
                 className={cn(
-                  "hover:bg-muted/60 focus-visible:ring-ring group flex cursor-pointer items-center justify-start gap-1.5 rounded-sm pr-1 text-left text-sm outline-none focus-visible:ring-2",
+                  "hover:bg-muted/60 focus-visible:ring-ring group flex h-[26px] cursor-pointer items-center justify-start gap-1.5 rounded-sm pr-1 text-left text-sm outline-none focus-visible:ring-2",
                   isSelected ? "bg-muted text-foreground font-medium" : "text-muted-foreground",
                 )}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  height: ROW_HEIGHT,
-                  // Indent from the row's own start so the whole row stays clickable.
-                  paddingLeft: 4 + row.depth * 12,
-                  transform: `translateY(${virtualRow.start}px)`,
-                }}
+                // Indent from the row's own start so the whole row stays clickable.
+                style={{ paddingLeft: 4 + row.depth * 12 }}
               >
                 {node.kind === "dir" ? (
                   row.expanded ? (
@@ -273,9 +214,7 @@ export function FileTree({
                   <span className="w-3 shrink-0" aria-hidden />
                 )}
                 <Icon size={13} className="shrink-0 opacity-70" aria-hidden />
-                <span className="min-w-0 flex-1 truncate">
-                  {(node.kind === "dir" && directoryLabels?.[node.path]) || node.name}
-                </span>
+                <span className="min-w-0 flex-1 truncate">{node.name}</span>
                 {editable && node.kind === "file" && (
                   // `tabIndex={-1}`: the roving tabindex is the treeitem's one tab stop; the keyboard
                   // path is F2/Delete (`fileActionForKey`), these buttons are the pointer path.

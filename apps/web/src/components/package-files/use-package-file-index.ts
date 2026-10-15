@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueries } from "@tanstack/react-query";
 import { $api } from "../../api/client";
 import { useOrgScope } from "../../hooks/use-org-scope";
 import { splitPackageRef } from "../../lib/package-paths";
-
-const FILES_PATH = "/api/packages/{scope}/{name}/files";
 
 /**
  * The file index of a package (`version` undefined = the draft).
@@ -22,7 +19,7 @@ export function usePackageFileIndex(
   const scope = useOrgScope();
   return $api.useQuery(
     "get",
-    FILES_PATH,
+    "/api/packages/{scope}/{name}/files",
     {
       params: {
         path: splitPackageRef(packageId ?? ""),
@@ -35,21 +32,4 @@ export function usePackageFileIndex(
       ...(fresh ? { staleTime: 0, gcTime: 0, refetchOnMount: "always" as const } : {}),
     },
   );
-}
-
-/**
- * The draft file index of several packages at once, in the order of `packageIds`.
- * An `undefined` id is skipped (its query stays disabled), so a caller can fetch
- * only the packages it has a reason to read.
- */
-export function usePackageFileIndexes(packageIds: readonly (string | undefined)[]) {
-  const scope = useOrgScope();
-  return useQueries({
-    queries: packageIds.map((packageId) => ({
-      ...$api.queryOptions("get", FILES_PATH, {
-        params: { path: splitPackageRef(packageId ?? ""), header: scope.header },
-      }),
-      enabled: scope.enabled && !!packageId,
-    })),
-  });
 }
