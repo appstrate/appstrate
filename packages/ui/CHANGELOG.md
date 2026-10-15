@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `schema-form` select widgets render `Combobox` / `MultiCombobox` (Popover + Command)
-  instead of `react-select`; `Combobox` gains `placeholder` and `clearable`, options
-  gain `keywords`. `react-select` is no longer a peer dependency.
+- `schema-form`: the select widget renders `Combobox` and the multi-select a checkbox
+  per option, instead of `react-select` (no longer a peer dependency). `Combobox`
+  gains `placeholder`, `clearable` and option `keywords`.
 
 ### Removed
 

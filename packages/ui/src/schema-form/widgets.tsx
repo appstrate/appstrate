@@ -1,12 +1,12 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-// Custom RJSF widgets. Single- and multi-selects are searchable comboboxes (Popover + Command).
+// Custom RJSF widgets. The single select is a searchable combobox, the multi-select a checkbox list.
 
 import { deepEquals, type WidgetProps } from "@rjsf/utils";
 import { cn } from "../cn.ts";
 import { Checkbox } from "../components/checkbox.tsx";
-import { Combobox, MultiCombobox } from "../components/combobox.tsx";
+import { Combobox } from "../components/combobox.tsx";
 import { Label } from "../components/label.tsx";
 import { Textarea } from "../components/textarea.tsx";
 import type { SchemaFormContext } from "./context.ts";
@@ -95,31 +95,34 @@ export function SelectWidget(props: WidgetProps) {
   );
 }
 
-/** Array of enums → multi-select dropdown. */
+/** Array of enums → one checkbox per option. */
 export function MultiSelectWidget(props: WidgetProps) {
   const { id, value, onChange, disabled, options } = props;
   const enumOptions = (options.enumOptions as EnumOption[] | undefined) ?? [];
-
   const raw = Array.isArray(value) ? value : [];
-  const picked = enumOptions.flatMap((o, index) =>
-    raw.some((v) => sameOptionValue(v, o.value)) ? [String(index)] : [],
-  );
+  const isPicked = (option: EnumOption) => raw.some((v) => sameOptionValue(v, option.value));
 
   return (
-    <MultiCombobox
-      id={id}
-      disabled={disabled}
-      options={comboboxOptions(enumOptions)}
-      value={picked}
-      onValueChange={(keys) =>
-        onChange(
-          [...keys]
-            .sort((a, b) => Number(a) - Number(b))
-            .map((key) => enumOptions[Number(key)]!.value),
-        )
-      }
-      searchPlaceholder=""
-      emptyText={noOptionsText(props)}
-    />
+    <div id={id} className="flex flex-col gap-2">
+      {enumOptions.map((option, index) => (
+        <div key={index} className="flex items-center gap-2">
+          <Checkbox
+            id={`${id}-${index}`}
+            checked={isPicked(option)}
+            disabled={disabled}
+            onCheckedChange={(on) =>
+              onChange(
+                enumOptions
+                  .filter((o, i) => (i === index ? on === true : isPicked(o)))
+                  .map((o) => o.value),
+              )
+            }
+          />
+          <Label htmlFor={`${id}-${index}`} className="cursor-pointer font-normal">
+            {option.label}
+          </Label>
+        </div>
+      ))}
+    </div>
   );
 }
