@@ -804,6 +804,7 @@
   "integrations.count_other": "{{count}} intégrations",
   "integrations.col.name": "Nom",
   "integrations.col.version": "Version",
+  "integrations.col.connections": "Connexions",
   "integrations.filter.origin": "Origine",
   "integrations.empty.space": "Aucune intégration active dans cet espace.",
   "integrations.empty.filtered": "Aucune intégration ne correspond à ces filtres.",

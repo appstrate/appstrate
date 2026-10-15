@@ -295,7 +295,9 @@ export function DataTable<T>({
     "--dt-floor-2": floorOf(tiered ? columns.filter((c) => !c.tier || c.tier === 2) : columns),
     "--dt-floor-3": floorOf(columns),
   } as CSSProperties;
-  const cellClass = (column: DataColumn<T>) => cn(tiered && tierClass(column), "px-3");
+  // An end-aligned column keeps clear of the resize handle: its text sits a little in from the edge.
+  const cellClass = (column: DataColumn<T>) =>
+    cn(tiered && tierClass(column), "px-3", column.align === "end" && "pr-5");
   const heldClass = (hold: Hold | undefined, body: boolean, hover = false) =>
     hold && cn(HELD, body && HELD_RULE, hover && HELD_HOVER);
 
