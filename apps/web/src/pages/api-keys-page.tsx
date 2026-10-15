@@ -16,8 +16,7 @@ import { EmptyState, EmptyStateAction } from "../components/page-states";
 import { DataTable } from "../components/data-table";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
 import type { MenuAction } from "../lib/menu-action";
-import { useModalParam } from "../hooks/use-modal-param";
-import { ApiKeyCreateModal, NEW_API_KEY_PARAM } from "../components/api-key-create-modal";
+import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { useApiKeyColumns } from "./api-key-columns";
 
 export function ApiKeysPage() {
@@ -28,14 +27,14 @@ export function ApiKeysPage() {
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const { data: availableScopes } = useAvailableScopes();
   const revokeApiKeyMutation = useRevokeApiKey();
-  const newApiKey = useModalParam(NEW_API_KEY_PARAM);
+  const [creating, setCreating] = useState(false);
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
   const create: MenuAction = {
     id: "create",
     icon: Plus,
     label: t("settings:apiKeys.createBtn"),
-    onSelect: () => newApiKey.open(),
+    onSelect: () => setCreating(true),
     hidden: !canCreate,
   };
 
@@ -83,7 +82,7 @@ export function ApiKeysPage() {
         }
       />
 
-      {canCreate && <ApiKeyCreateModal />}
+      {creating && canCreate && <ApiKeyCreateModal onClose={() => setCreating(false)} />}
 
       <ConfirmModal
         open={!!confirmState}

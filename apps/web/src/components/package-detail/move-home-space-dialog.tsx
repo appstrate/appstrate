@@ -13,9 +13,6 @@ import { useSpaces } from "../../hooks/use-spaces";
 import { useMovePackageHome } from "../../hooks/use-packages";
 import { writableDestinations } from "../../lib/package-home";
 
-/** The URL parameter that opens the dialog; its value is the package. */
-export const MOVE_HOME_PARAM = "moveHome";
-
 /** `PUT /api/packages/{scope}/{name}/home`; the only way out of the 409 a space deletion answers while it homes packages. */
 export function MoveHomeSpaceDialog({
   onClose,

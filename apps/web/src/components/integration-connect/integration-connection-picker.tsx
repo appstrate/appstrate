@@ -57,15 +57,9 @@ export function IntegrationConnectionPicker({
 
 type LoadedPickerProps = Omit<ConnectionPickerOptions, "persistence"> & {
   persistence?: ConnectionPickerPersistence;
-  /** Inside a URL-param modal: the way out to the integration page leaves it (`useModalParam.leave`). */
-  onLeave?: (to: string) => void;
 };
 
-function LoadedPicker({
-  persistence = DEFAULT_PERSISTENCE,
-  onLeave,
-  ...options
-}: LoadedPickerProps) {
+function LoadedPicker({ persistence = DEFAULT_PERSISTENCE, ...options }: LoadedPickerProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { integrationId, agentPackageId, version } = options;
   const picker = useConnectionPicker({ ...options, persistence });
@@ -119,7 +113,7 @@ function LoadedPicker({
 
   return (
     <div data-testid={`member-picker-${integrationId}`}>
-      <PickerMenu integrationId={integrationId} picker={picker} onLeave={onLeave} />
+      <PickerMenu integrationId={integrationId} picker={picker} />
       {unavailableIds.length > 0 && (
         <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
           {t(

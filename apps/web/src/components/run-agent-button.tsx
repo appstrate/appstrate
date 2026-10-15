@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { defaultRunVersion } from "../lib/version-selector";
 import { useTranslation } from "react-i18next";
@@ -10,7 +11,6 @@ import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
-import { useModalParam } from "../hooks/use-modal-param";
 import { usePackageDetail } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { isNeverPublishedForReader } from "../hooks/use-agent-readiness";
@@ -36,12 +36,6 @@ interface RunAgentButtonProps {
    * still click Run and recover through the modal.
    */
   connectionWarning?: boolean;
-  /**
-   * False for a second button of the same agent on one page (the agent page's
-   * empty runs list): it opens `?run=<agent>` and the page's other button
-   * answers it, so a click never opens two forms.
-   */
-  inputDialog?: boolean;
 }
 
 export function RunAgentButton({
@@ -55,25 +49,21 @@ export function RunAgentButton({
   className,
   showLabel = false,
   connectionWarning = false,
-  inputDialog = true,
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
   const { can } = usePermissions();
   const launcher = useRunLauncher(packageId);
-  // The input form's address: `?run=<agent>`, so the agent's own button answers it.
-  const runParam = useModalParam("run");
-  const inputRequested = inputDialog && runParam.value === packageId;
+  const [inputOpen, setInputOpen] = useState(false);
 
   // Skip the fetch when the parent already provided the detail (detail page
-  // case). Otherwise it runs only for the agent `?run=` names: list pages
-  // render N of these buttons, and fetching every detail on mount is an N+1.
-  // A click fetches on demand via `refetch()` in `handleClick`.
+  // case). Otherwise a click fetches on demand via `refetch()` in `handleClick`:
+  // list pages render N of these buttons, and fetching every detail on mount is an N+1.
   const {
     data: fetchedDetail,
     isFetching,
     refetch,
   } = usePackageDetail("agent", providedDetail ? undefined : packageId, {
-    enabled: inputRequested,
+    enabled: false,
   });
 
   const detail: AgentDetail | undefined = providedDetail ?? fetchedDetail;
@@ -94,7 +84,7 @@ export function RunAgentButton({
       launcher.launch({ version: version ?? defaultRunVersion(agentDetail.home_writable) });
       return;
     }
-    runParam.open(packageId);
+    setInputOpen(true);
   };
 
   const handleClick = (e: React.MouseEvent) => {
@@ -118,8 +108,8 @@ export function RunAgentButton({
   };
 
   const neverPublished = isNeverPublishedForReader(detail);
-  const inputOpen = runInputOpens({
-    requested: inputRequested,
+  const inputShown = runInputOpens({
+    requested: inputOpen,
     disabled: !!disabled,
     canRun: can("agents:run"),
     detail,
@@ -168,14 +158,12 @@ export function RunAgentButton({
         </PendingButton>
       </DisabledReasonTooltip>
 
-      {inputDialog && detail && (
+      {detail && (
         <RunModal
-          open={inputOpen}
-          onClose={runParam.close}
+          open={inputShown}
+          onClose={() => setInputOpen(false)}
           agent={detail}
-          onSubmit={(input) =>
-            launcher.launch({ input, version: runVersion }, { leave: runParam.leave })
-          }
+          onSubmit={(input) => launcher.launch({ input, version: runVersion })}
           isPending={launcher.isPending}
         />
       )}

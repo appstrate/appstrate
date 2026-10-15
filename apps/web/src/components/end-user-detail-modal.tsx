@@ -21,7 +21,7 @@ import { errorMessage } from "../lib/mutation-error";
 interface Props {
   onClose: () => void;
   endUser: EndUserInfo | null;
-  /** The edition is its own address (`?editEndUser=<id>`); the host owns both. */
+  /** The edition is a state of the page; the host owns both. */
   editing: boolean;
   onEdit: () => void;
   /** Leaves the edition for the detail it was entered from. */

@@ -4,7 +4,6 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { FormModal } from "./form-modal";
 import { SecretRevealModal } from "./secret-reveal-modal";
-import { useModalParam } from "../hooks/use-modal-param";
 import { Badge } from "@appstrate/ui/components/badge";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
@@ -15,17 +14,13 @@ import { ScopeMultiSelect, ScopeSummaryBadges } from "./scope-multi-select";
 import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
 import { errorMessage } from "../lib/mutation-error";
 
-/** The URL parameter that opens the modal. The created key has no URL of its own. */
-export const NEW_API_KEY_PARAM = "newApiKey";
-
 function computeExpiresAt(expiresIn: string): string | null {
   if (expiresIn === "never") return null;
   return new Date(Date.now() + parseInt(expiresIn, 10) * 24 * 60 * 60 * 1000).toISOString();
 }
 
-export function ApiKeyCreateModal() {
+export function ApiKeyCreateModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
-  const param = useModalParam(NEW_API_KEY_PARAM);
   const { data: availableScopes } = useAvailableScopes();
   const [created, setCreated] = useState<{ key: string; scopes: string[] } | null>(null);
 
@@ -34,7 +29,7 @@ export function ApiKeyCreateModal() {
 
     return (
       <SecretRevealModal
-        onClose={() => setCreated(null)}
+        onClose={onClose}
         title={t("apiKeys.created")}
         className="sm:max-w-lg"
         secret={created.key}
@@ -55,17 +50,11 @@ export function ApiKeyCreateModal() {
     );
   }
 
-  // The form exists only while the modal is open, so any way of closing it (Annuler, a click
-  // outside, Escape, Back) abandons what was typed.
-  if (param.value === null) return null;
   return (
     <ApiKeyCreateForm
       availableScopes={availableScopes}
-      onClose={param.close}
-      onCreated={(key, scopes) => {
-        setCreated({ key, scopes });
-        param.close();
-      }}
+      onClose={onClose}
+      onCreated={(key, scopes) => setCreated({ key, scopes })}
     />
   );
 }

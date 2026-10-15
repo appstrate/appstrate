@@ -518,7 +518,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 - **An empty collection you can add to always offers the add button**
   (`EmptyStateAction`, `components/page-states.tsx`, a white outline button with a
   `+`, as `children` of the `EmptyState`), and only to someone who may add: the same
-  condition, label and handler (`useModalParam(...).open`, `creation.open`) as the entry
+  condition, label and handler (`useUrlModal(...).open`, `creation.open`) as the entry
   in the page's Actions menu (`SettingsPageActions`, `PageActionsMenu`), written once and
   reused, never a second implementation. The Actions entry stays: the empty button
   repeats it, it does not replace it. The button repeats a MENU entry, which is
@@ -571,70 +571,31 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   click does not dismiss it); the
   two-pane overlay is `PanelLayout` inside `OverlayFrame`. A popover that needs the whole width on a
   phone becomes a bottom `Sheet` there (`notification-bell.tsx`).
-- **A real modal has a URL; only the confirmations, the secrets shown once and
-  the chat have none** (`useModalParam`, `hooks/use-modal-param.ts`). A
-  creation, an edition, a detail, a setting, a choice of an element, a form, an
-  explanation, a full-screen view, a pairing: all of them. It can be linked,
-  reloads onto the same modal on the same object, Back closes it, the hash and
-  the router state ride along. Opening pushes, closing replaces. Never
-  `useState` for it, and no exception of convenience (« it is only a help
-  text », « there are many of them on the page », « it is a display mode »): the
-  value names what is open (a card's stable key, `<integrationId>:<tool>`), and
-  never a position.
-  - **Naming**: the param is named by the act and the object, in camelCase.
-    `?newWebhook=1` creates, `?editModel=<id>` edits, `?endUser=<id>` shows, `?models=<credentialId>` chooses the models of a key. A
-    value is `1` when there is no object, the object's id otherwise (a composite
-    value when a page holds several of them: `?editOauthClient=<authKey>:<ref>`).
-    A param read by several components of one page must differ per component.
-    Export the name when several entry points open the same modal
-    (`NEW_SCHEDULE_PARAM`, `NEW_API_KEY_PARAM`, `SHARE_PARAM`).
-  - **An object that may not exist**: `useModalTarget(name, items)` resolves the
-    id against the loaded list and drops the param for an unknown id, so a stale
-    link never leaves a modal on nothing. Pass `undefined` while the list loads,
-    never `[]`, or a deep link is dropped before it resolves. Never `find` the
-    object by `param.value` by hand.
-  - **One mechanism**: a modal's address is read and written by `useModalParam`
-    only, never by hand from `location.search`: it alone closes by going back
-    over the entry its opening pushed. A table row opens it with
-    `rowAction={(row) => param.open(row.id)}`, not with a `rowHref` to its URL. Create and edit are two params
-    (`newProxy`, `editProxy`) sharing one form component; the host closes only
-    the one that is open.
-  - **Handing over** to another modal (`share` to `moveHome`): one navigation,
-    `open(value, closing)`, never two modals stacked.
-  - **After a creation** that shows a secret once, the creation's param goes
-    away as the secret appears (`ApiKeyCreateModal`, `WebhookCreateModal`,
-    `OAuthClientFormModal`): the secret has no address and does not survive a
-    reload.
-  - **A pairing in progress** (`?connectProvider=<providerId>` in the
-    onboarding) is a place too: its token lives in memory, so a reload reopens
-    the modal and mints a new pairing instead of resuming the old one (which
-    expires on its own). A link to the pairing of a provider that is already
-    connected has nothing to pair: the modal closes. This is judged once, when it
-    opens; a connection that arrives during the pairing is `onConnected`'s to finish.
-  - **Without a URL, and only these**: (1) the confirmation of an act
-    (`ConfirmModal`, the re-authentication that confirms one, the activation
-    closure, the deletion of a chat thread): reopening « Supprimer X » from a
-    link would be a trap; (2) what exists only in memory after an act: the
-    single display of a secret (`SecretRevealModal`, the key
-    just created), the connections a refused launch asks for
-    (`RunLaunchRecovery`), the models step of a provider whose key was just
-    typed (`ProviderAddFlow`): none of it is there after a reload; (3) the chat (`packages/module-chat`), whose message cards have no
-    stable address; (4) what is not a modal, such as the notification bell, a
-    popover that becomes a sheet on a phone. Each one is listed.
-  - **The guard**: `components/test/modals-have-urls.test.ts` reads the sources
-    and fails on a `Modal`, `Sheet` or `…Dialog` whose `open`,
-    `onClose` or guarding `cond &&` reads a `useState` of its file, directly or
-    through a component-level `const` derived from it (`const closure =
-closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
-    its case, one of the four above (`confirmation`, `secret`, `chat` — only in
-    `packages/module-chat` — or `not-a-modal`), and one line of reason. The list
-    also fails when an entry matches no code. A modal mounted only while its
-    `useModalParam` is set has its address, whatever local condition narrows it.
-    Port the modal to `useModalParam` first; add an exception only for the four
-    cases above. The same test fails on a parameter name that is not camelCase.
+- **Two kinds of modal, nothing in between.**
+  - **State** (the default): a `useState` in the component that offers it, mounted
+    while open (`{open && <FooModal onClose={() => setOpen(false)} />}`). Creations,
+    confirmations, one-off gestures, a secret shown once, pairings, the chat: none
+    has an address, none survives a reload, Back does not close it. A creation
+    modal that several pages offer is mounted by each of them.
+  - **URL** (`useUrlModal` / `useUrlModalTarget`, `hooks/use-url-modal.ts`): only a
+    detail, the edition of an existing object, a share, a view worth a link, or a
+    creation another page sends the user to (`?newSpace=1` from the organization
+    switcher, `?create` hand-off). It can be linked, reloads onto the same modal,
+    Back closes it; opening pushes an entry, closing goes back over it (or
+    replaces it when the address opened it).
+  - **Naming** of a URL param: the act and the object, camelCase (`?editModel=<id>`,
+    `?endUser=<id>`, `?models=<credentialId>`); `1` when there is no object, the
+    object's id otherwise. Export the name when several entry points open the same
+    modal (`SHARE_PARAM`).
+  - **An object that may not exist**: `useUrlModalTarget(name, items)` resolves the
+    id against the loaded list and drops the param for an unknown id. Pass
+    `undefined` while the list loads, never `[]`. Never `find` by `param.value` by hand.
+  - **Handing over** from a URL modal to another modal: close the first, open the
+    second (`share.close(); setMovingHome(true)`); two never stack.
+  - **Leaving** for another page from a state modal: `navigate(to)`; from a URL
+    modal: `navigate(to, { replace: true })`.
 - **Closing a form modal abandons its input**, whichever way (Annuler, a click outside,
-  Escape, Back): the form is mounted only while its param is set (`{param.value !== null && <Form />}`,
-  or the host returns `null`), so it reopens empty on a creation and on the stored values on an
+  Escape, Back): the form is mounted only while the modal is open (`{open && <Form />}`), so it reopens empty on a creation and on the stored values on an
   edition. Never keep a draft in a component that stays mounted while the modal is closed.
 - Destructive acts: `ConfirmModal` (`components/confirm-modal.tsx`). Its title
   names the act (« Supprimer la planification ? »), its body says what changes,
@@ -643,7 +604,7 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
   the refusal inline. A delete hook never refetches the page being left (a 404
   GET): it invalidates the list, and the item's detail with `refetchType: "none"`.
 - **Creating a small object** (schedule, model, webhook, key): a modal asking
-  only what it needs to exist, opened by a URL param from every entry point
+  only what it needs to exist, opened from every entry point
   with the context preselected, then the object's page takes the rest
   (`components/new-schedule-modal.tsx` is the example to follow). **Creating a package**
   (agent, skill, integration, MCP server): the creation hand-off modal

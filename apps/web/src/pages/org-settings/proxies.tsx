@@ -17,7 +17,7 @@ import {
   type OrgProxyInfo,
 } from "../../hooks/use-proxies";
 import { useConnectionTest } from "../../hooks/use-connection-test";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModal, useUrlModalTarget } from "../../hooks/use-url-modal";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
@@ -32,8 +32,8 @@ export function OrgSettingsProxiesPage() {
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
 
   const { data: proxies, isLoading, error } = useProxies();
-  const newProxy = useModalParam("newProxy");
-  const editParam = useModalTarget("editProxy", proxies);
+  const newProxy = useUrlModal("newProxy");
+  const editParam = useUrlModalTarget("editProxy", proxies);
   const editProxy = editParam.target ?? null;
   // Opened by its trigger's rule too, not just by the URL: a built-in proxy is not editable.
   const proxyModalOpen =

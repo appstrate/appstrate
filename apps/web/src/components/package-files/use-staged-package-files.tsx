@@ -3,15 +3,13 @@
 /**
  * The file gestures of a package draft: new file, import, replace, rename,
  * delete. Each one only stages an operation (`lib/package-file-drafts`); the
- * caller's Save sends them. Naming a file has an address (`?newFile=1`,
- * `?renameFile=<path>`); deleting one is a confirmation.
+ * caller's Save sends them. Naming a file and deleting one are dialogs this hook mounts.
  */
 import { useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
-import { useModalParam } from "../../hooks/use-modal-param";
 import { formatBytes } from "../../lib/format-bytes";
 import { packageFilesErrorKey } from "../../lib/package-files";
 import {
@@ -51,8 +49,8 @@ export function useStagedPackageFiles({
   onBusyChange,
 }: Options) {
   const { t } = useTranslation(["agents", "common"]);
-  const newFile = useModalParam("newFile");
-  const renameFile = useModalParam("renameFile");
+  const [naming, setNaming] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   // Counts imports, so an editor open on a replaced file remounts on its new bytes.
@@ -71,8 +69,8 @@ export function useStagedPackageFiles({
       onChange(next);
       if (select !== undefined) onSelect(select);
       setDeleting(null);
-      if (newFile.value !== null) newFile.close();
-      else if (renameFile.value !== null) renameFile.close();
+      setNaming(false);
+      setRenaming(null);
       return true;
     } catch (error) {
       toast.error(t(packageFilesErrorKey(error) ?? "files.errorGeneric", { limit }));
@@ -124,24 +122,24 @@ export function useStagedPackageFiles({
           if (files.length) void upload(files);
         }}
       />
-      {newFile.value !== null && (
+      {naming && (
         <FilePathDialog
           title={t("files.newFile")}
           confirmLabel={t("btn.create", { ns: "common" })}
           initialPath=""
           entries={entries}
-          onClose={newFile.close}
+          onClose={() => setNaming(false)}
           onSubmit={(path) => stage([fileTextOperation(path, "")], path)}
         />
       )}
-      {renameFile.value !== null && (
+      {renaming !== null && (
         <FilePathDialog
           title={t("files.newName")}
           confirmLabel={t("files.rename")}
-          initialPath={renameFile.value}
-          entries={entries.filter((entry) => entry.path !== renameFile.value)}
-          onClose={renameFile.close}
-          onSubmit={(to) => stage([{ op: "move", from: renameFile.value!, to }], to)}
+          initialPath={renaming}
+          entries={entries.filter((entry) => entry.path !== renaming)}
+          onClose={() => setRenaming(null)}
+          onSubmit={(to) => stage([{ op: "move", from: renaming, to }], to)}
         />
       )}
       {deleting !== null && (
@@ -163,8 +161,8 @@ export function useStagedPackageFiles({
     imports,
     stage,
     pickUpload,
-    openNewFile: () => newFile.open(),
-    openRename: (path: string) => renameFile.open(path),
+    openNewFile: () => setNaming(true),
+    openRename: (path: string) => setRenaming(path),
     openDelete: (path: string) => setDeleting(path),
     /** The hidden file input and the gestures' dialogs; render it once. */
     dialogs,

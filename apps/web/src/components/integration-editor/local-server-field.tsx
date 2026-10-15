@@ -12,6 +12,7 @@
  * lets one be imported without leaving the form, and says both of those
  * failures out loud before anyone publishes.
  */
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Upload } from "lucide-react";
 import { matchVersion } from "@appstrate/core/semver";
@@ -28,7 +29,6 @@ import {
 } from "@appstrate/ui/components/select";
 import { useCatalogueLibrary } from "../../hooks/use-library";
 import { usePackageVersions } from "../../hooks/use-packages";
-import { useModalParam } from "../../hooks/use-modal-param";
 import { ImportModal } from "../import-modal";
 
 /** The picker's own item for importing; never written to the manifest. */
@@ -45,7 +45,7 @@ export function LocalServerField({
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { data: library, isLoading } = useCatalogueLibrary();
-  const importParam = useModalParam("importServer");
+  const [importing, setImporting] = useState(false);
   const servers = library?.packages["mcp-server"] ?? [];
   const known = servers.find((server) => server.id === name);
   // Readable only where the caller can reach the server; an unreachable list
@@ -70,7 +70,7 @@ export function LocalServerField({
           <Select
             value={known ? name : ""}
             onValueChange={(next) => {
-              if (next === IMPORT_ITEM) importParam.open();
+              if (next === IMPORT_ITEM) setImporting(true);
               else onChange({ serverName: next });
             }}
           >
@@ -135,9 +135,9 @@ export function LocalServerField({
         )}
       </div>
 
-      {importParam.value !== null && (
+      {importing && (
         <ImportModal
-          onClose={importParam.close}
+          onClose={() => setImporting(false)}
           onImported={(result) => {
             if (result.type === "mcp-server") onChange({ serverName: result.packageId });
           }}

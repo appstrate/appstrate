@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Calendar, Plus } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
@@ -18,8 +18,7 @@ import { useListParams } from "../lib/list-params";
 import { matchesSearch } from "../lib/strings";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
-import { useModalParam } from "../hooks/use-modal-param";
-import { NEW_SCHEDULE_PARAM } from "../components/new-schedule-modal";
+import { NewScheduleModal } from "../components/new-schedule-modal";
 
 /** The values the state dimension accepts — a URL is user input. */
 const STATES = ["enabled", "disabled"] as const;
@@ -27,7 +26,7 @@ const STATES = ["enabled", "disabled"] as const;
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { can } = usePermissions();
-  const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
+  const [newScheduleOpen, setNewScheduleOpen] = useState(false);
   const { data: schedules, isLoading, isError, error } = useAllSchedules();
   const agentsQuery = useAgents();
   const { data: agents } = agentsQuery;
@@ -38,7 +37,7 @@ export function SchedulesListPage() {
     id: "create",
     label: t("schedules.create"),
     icon: Plus,
-    onSelect: () => newSchedule.open(),
+    onSelect: () => setNewScheduleOpen(true),
     hidden: !can("schedules:write"),
   };
 
@@ -130,6 +129,7 @@ export function SchedulesListPage() {
       <ListFooter
         count={isLoading || isError ? undefined : t("schedules.count", { count: shown.length })}
       />
+      {newScheduleOpen && <NewScheduleModal onClose={() => setNewScheduleOpen(false)} />}
     </div>
   );
 }

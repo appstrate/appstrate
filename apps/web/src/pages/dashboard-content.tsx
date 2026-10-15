@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { usePermissions } from "../hooks/use-permissions";
-import { Link } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import i18n from "../i18n";
@@ -13,7 +14,6 @@ import { PackageIcon } from "../components/package-icon";
 import { EmptyState } from "../components/page-states";
 import { ChoiceCard } from "../components/choice-card";
 import { Modal } from "../components/modal";
-import { useModalParam } from "../hooks/use-modal-param";
 import { PageHeader } from "../components/page-header";
 import { ScheduleStateBadges } from "../components/schedule-status-badge";
 import { PackageCard } from "../components/package-card";
@@ -71,7 +71,8 @@ export function DashboardHeader({
   const { t, i18n } = useTranslation("agents");
   const canChat = useCanReach()("/chat");
   const { copy } = useCopyToClipboard();
-  const assist = useModalParam("assist");
+  const navigate = useNavigate();
+  const [assistOpen, setAssistOpen] = useState(false);
   const date = new Intl.DateTimeFormat(i18n.language, {
     weekday: "long",
     day: "numeric",
@@ -79,7 +80,7 @@ export function DashboardHeader({
   }).format(new Date());
 
   const openChat = () => {
-    assist.leave("/chat", chatDraftNavigationState(t("dashboard.askAi.draft")));
+    navigate("/chat", { state: chatDraftNavigationState(t("dashboard.askAi.draft")) });
   };
 
   const copyCodingAgentSetup = async () => {
@@ -98,7 +99,7 @@ export function DashboardHeader({
         titleClassName="text-3xl font-bold tracking-tight"
         breadcrumbs={[{ label: t("common:nav.dashboard") }]}
         actions={
-          <Button type="button" variant="outline" onClick={() => assist.open()}>
+          <Button type="button" variant="outline" onClick={() => setAssistOpen(true)}>
             <Sparkles />
             {t("dashboard.askAi.title")}
           </Button>
@@ -113,8 +114,12 @@ export function DashboardHeader({
         )}
       </PageHeader>
 
-      {assist.value !== null && (
-        <Modal onClose={assist.close} title={t("dashboard.askAi.title")} className="sm:max-w-xl">
+      {assistOpen && (
+        <Modal
+          onClose={() => setAssistOpen(false)}
+          title={t("dashboard.askAi.title")}
+          className="sm:max-w-xl"
+        >
           <p className="text-muted-foreground text-sm">{t("dashboard.askAi.description")}</p>
           <div className="flex flex-col gap-2">
             {/* Offered where `/chat` opens: the module loaded AND the caller's grants. */}

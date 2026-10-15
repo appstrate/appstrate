@@ -2,6 +2,7 @@
 
 import { useRef, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { FormModal } from "./form-modal";
 import { cn } from "@appstrate/ui/cn";
 import { Field, FieldError, FieldLabel, FieldSeparator } from "@appstrate/ui/components/field";
@@ -11,23 +12,16 @@ import { ApiError } from "../api/errors";
 import { packageDetailPath } from "../lib/package-paths";
 import { errorMessage, onMutationError } from "../lib/mutation-error";
 
-type ImportModalProps = { onClose: () => void } & (
-  | {
-      /** Leaves the modal for the imported package's page. */
-      onLeave: (to: string) => void;
-      onImported?: never;
-    }
-  | {
-      /**
-       * Stay where you are and hand the result back, instead of opening the
-       * imported package. For an import made from inside another form — the
-       * integration editor importing its local server — navigating would throw
-       * away the form.
-       */
-      onImported: (result: { packageId: string; type: string }) => void;
-      onLeave?: never;
-    }
-);
+interface ImportModalProps {
+  onClose: () => void;
+  /**
+   * Stay where you are and hand the result back, instead of opening the
+   * imported package. For an import made from inside another form — the
+   * integration editor importing its local server — navigating would throw
+   * away the form.
+   */
+  onImported?: (result: { packageId: string; type: string }) => void;
+}
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -39,7 +33,7 @@ function fileRefusal(f: File): "import.errZip" | "import.errSize" | null {
   return f.size > MAX_SIZE ? "import.errSize" : null;
 }
 
-export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) {
+export function ImportModal({ onClose, onImported }: ImportModalProps) {
   const { t } = useTranslation(["agents", "common"]);
   const [file, setFile] = useState<File | null>(null);
   const [githubUrl, setGithubUrl] = useState("");
@@ -50,6 +44,7 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
   } | null>(null);
   const [confirmIntegrity, setConfirmIntegrity] = useState<{ version: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
   const importPackage = useImportPackage({ errorHandledByCaller: true });
   const importGithub = useImportFromGithub();
 
@@ -91,7 +86,7 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
       onImported(result);
       onClose();
     } else {
-      onLeave(packageDetailPath(result.type, result.packageId));
+      navigate(packageDetailPath(result.type, result.packageId));
     }
   };
 

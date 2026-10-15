@@ -33,9 +33,9 @@ import { splitPackageRef } from "../../lib/package-paths";
 import { ConfirmModal } from "../confirm-modal";
 import { ForkPackageModal } from "../fork-package-modal";
 import { isOwnedSource } from "./owned-source";
-import { MoveHomeSpaceDialog, MOVE_HOME_PARAM } from "./move-home-space-dialog";
+import { MoveHomeSpaceDialog } from "./move-home-space-dialog";
 import { SharePackageDialog, SHARE_PARAM } from "./share-package-dialog";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useUrlModal } from "../../hooks/use-url-modal";
 import { menuSections, type PackageMenuEntry, type PackageMenuGroup } from "./package-menu";
 
 const GROUP_LABELS: Record<PackageMenuGroup, string> = {
@@ -119,9 +119,9 @@ export function PackageActionsDropdown({
   const { can } = usePermissions();
   const activation = usePackageActivation(packageId);
   const deletePkg = useDeletePackage(type);
-  const moveHome = useModalParam(MOVE_HOME_PARAM);
-  const share = useModalParam(SHARE_PARAM);
-  const fork = useModalParam("fork");
+  const [movingHome, setMovingHome] = useState(false);
+  const [forking, setForking] = useState(false);
+  const share = useUrlModal(SHARE_PARAM);
   // `confirm` keeps its value while the dialog fades out, so the wording does not change under it.
   const [confirm, setConfirm] = useState<"delete" | "deactivate">("delete");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -177,7 +177,7 @@ export function PackageActionsDropdown({
       icon: GitFork,
       label: t("fork.button"),
       hidden: !showFork,
-      onSelect: () => fork.open(),
+      onSelect: () => setForking(true),
     },
     {
       id: "run-options",
@@ -250,7 +250,7 @@ export function PackageActionsDropdown({
       icon: FolderInput,
       label: t("packages.moveHome", { ns: "settings" }),
       hidden: !isMutable,
-      onSelect: () => moveHome.open(packageId),
+      onSelect: () => setMovingHome(true),
     },
     {
       id: "share",
@@ -297,9 +297,9 @@ export function PackageActionsDropdown({
       </PageActionsMenu>
 
       {/* Mounted only while open: any way of closing a form modal abandons its input. */}
-      {moveHome.value === packageId && isMutable && (
+      {movingHome && isMutable && (
         <MoveHomeSpaceDialog
-          onClose={moveHome.close}
+          onClose={() => setMovingHome(false)}
           packageId={packageId}
           type={type}
           homeSpaceId={detail?.home_space_id}
@@ -313,14 +313,14 @@ export function PackageActionsDropdown({
           homeSpaceId={detail?.home_space_id}
           canPublish={canWrite}
           onMoveHome={() => {
-            moveHome.open(packageId, SHARE_PARAM);
+            share.close();
+            setMovingHome(true);
           }}
         />
       )}
-      {fork.value !== null && showFork && (
+      {forking && showFork && (
         <ForkPackageModal
-          onClose={fork.close}
-          onLeave={fork.leave}
+          onClose={() => setForking(false)}
           packageId={packageId}
           defaultName={splitPackageRef(packageId).name}
           type={type}

@@ -25,7 +25,6 @@ import { Switch } from "@appstrate/ui/components/switch";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { useModalParam } from "../../hooks/use-modal-param";
 import { Modal } from "../modal";
 import { SettingRow, SettingsGroup } from "../settings/setting-row";
 import { PageActionsMenu } from "../page-actions-menu";
@@ -54,7 +53,8 @@ export function IntegrationToolsSection({
   edit?: { manifest: Record<string, unknown>; onChange: (next: Record<string, unknown>) => void };
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-  const policyModal = useModalParam("toolPolicy");
+  // The tool being edited, or "new" for a tool added by name.
+  const [policyTarget, setPolicyTarget] = useState<string | null>(null);
   const policies = edit ? getToolsPolicy(edit.manifest) : null;
 
   // The saved catalog, its scopes replaced by the draft's, then the tools the
@@ -102,7 +102,7 @@ export function IntegrationToolsSection({
                     id: "add-tool",
                     label: t("integrationEditor.toolsPolicy.addTool"),
                     icon: Plus,
-                    onSelect: () => policyModal.open("new"),
+                    onSelect: () => setPolicyTarget("new"),
                   },
                 ]}
               />
@@ -118,7 +118,7 @@ export function IntegrationToolsSection({
                         id: "edit",
                         label: t("integrationEditor.toolsPolicy.editScopes"),
                         icon: Pencil,
-                        onSelect: () => policyModal.open(tool.name),
+                        onSelect: () => setPolicyTarget(tool.name),
                       },
                       {
                         id: "remove",
@@ -136,29 +136,29 @@ export function IntegrationToolsSection({
         />
       </div>
 
-      {edit && policies && policyModal.value !== null && (
+      {edit && policies && policyTarget !== null && (
         <Modal
-          onClose={policyModal.close}
+          onClose={() => setPolicyTarget(null)}
           title={
-            policyModal.value === "new"
+            policyTarget === "new"
               ? t("integrationEditor.toolsPolicy.addTool")
-              : t("integrationEditor.toolsPolicy.editTitle", { name: policyModal.value })
+              : t("integrationEditor.toolsPolicy.editTitle", { name: policyTarget })
           }
         >
           <ToolPolicyForm
             authKeys={getAuths(edit.manifest).map((auth) => auth.key)}
             initial={
-              policies.find((policy) => policy.name === policyModal.value) ?? {
-                name: policyModal.value === "new" ? "" : policyModal.value,
+              policies.find((policy) => policy.name === policyTarget) ?? {
+                name: policyTarget === "new" ? "" : policyTarget,
                 requiredScopes: {},
               }
             }
-            isNew={policyModal.value === "new"}
+            isNew={policyTarget === "new"}
             takenNames={entries.map((entry) => entry.name)}
             onApply={(policy) => {
               const others = policies.filter((candidate) => candidate.name !== policy.name);
               commit([...others, policy]);
-              policyModal.close();
+              setPolicyTarget(null);
             }}
           />
         </Modal>

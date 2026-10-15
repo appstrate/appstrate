@@ -41,7 +41,6 @@ import {
 } from "./components/loading-skeletons";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 import { ViewAsBanner } from "./components/view-as-banner";
-import { NewScheduleModalHost } from "./components/new-schedule-modal";
 
 import { useAuth, useCanCreateOrg } from "./hooks/use-auth";
 import { signedOutDestination } from "./lib/auth-flow";
@@ -421,8 +420,6 @@ function MainLayout() {
           <ShellHeader />
           {/* Must stay visible on every route, permission-denied pages included. */}
           <ViewAsBanner />
-          {/* Opened by `?newSchedule=` from any page. */}
-          <NewScheduleModalHost />
           {/* Full-bleed surfaces opt out with `data-full-bleed` on their root. */}
           <div
             className={

@@ -41,8 +41,6 @@ interface RunWithOptionsModalProps {
   agent: AgentDetail;
   onSubmit: (payload: RunWithOptionsSubmit) => void;
   isPending?: boolean;
-  /** A connection picker's way out to the integration page leaves this modal. */
-  onLeave?: (to: string) => void;
 }
 
 /**
@@ -63,7 +61,6 @@ function RunWithOptionsForm({
   agent,
   onSubmit,
   isPending,
-  onLeave,
 }: Omit<RunWithOptionsModalProps, "open">) {
   const { t } = useTranslation(["agents"]);
   const inputRef = useRef<AgentInputFormHandle>(null);
@@ -162,7 +159,6 @@ function RunWithOptionsForm({
             setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds))
           }
           version={version}
-          onLeave={onLeave}
         />
       )}
 

@@ -102,11 +102,6 @@ function useRunAgent(packageId: string) {
   });
 }
 
-interface LaunchOptions {
-  /** For a launch from a URL-addressed modal (`?run=`, `?rerun=`): `leave` goes to the run page so Back does not reopen it. */
-  leave?: (to: string) => void;
-}
-
 /**
  * The one way the SPA launches a run. A `409 missing_integration_connection` is a question: the
  * launcher keeps the refused launch and errors for `RunLaunchRecovery`, and `retry` replays it
@@ -116,18 +111,15 @@ export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
   const navigate = useNavigate();
   const [refusal, setRefusal] = useState<LaunchRefusal | null>(null);
-  const replay = useRef<{ launch: RunLaunch; options: LaunchOptions }>({
-    launch: {},
-    options: {},
-  });
+  const replay = useRef<RunLaunch>({});
   const [isPending, setIsPending] = useState(false);
   const [flight] = useState(() => launchFlight(setIsPending));
 
-  const send = (launch: RunLaunch, options: LaunchOptions = {}) => {
+  const send = (launch: RunLaunch) => {
     flight.run(
       () =>
         runAgent.mutateAsync(launch).then((run) => {
-          (options.leave ?? navigate)(runDetailPath(packageId, run.id));
+          navigate(runDetailPath(packageId, run.id));
         }),
       {
         onSuccess: () => setRefusal(null),
@@ -136,7 +128,7 @@ export function useRunLauncher(packageId: string) {
           const refused = launchRefusal(err);
           if (!refused) return;
           setRefusal(refused);
-          replay.current = { launch: retryLaunch(launch, refused.errors), options };
+          replay.current = retryLaunch(launch, refused.errors);
         },
       },
     );
@@ -146,9 +138,8 @@ export function useRunLauncher(packageId: string) {
     isPending,
     missingErrors: refusal?.errors ?? null,
     missingVersion: refusal?.version,
-    /** `options` also apply when the recovery retry of this launch succeeds. */
     launch: send,
-    retry: () => send(replay.current.launch, replay.current.options),
+    retry: () => send(replay.current),
     dismiss: () => {
       // A retry still in flight must not reopen the modal.
       flight.forget();

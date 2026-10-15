@@ -7,7 +7,7 @@
  */
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
-import type { useModalParam } from "../../hooks/use-modal-param";
+import type { useUrlModal } from "../../hooks/use-url-modal";
 import { usePackageDetail, useVersionDetail } from "../../hooks/use-packages";
 import { DiffTab } from "../diff-tab";
 import { Modal } from "../modal";
@@ -21,7 +21,7 @@ export function CompareWithDraftModal({
 }: {
   type: PackageType;
   packageId: string;
-  compare: ReturnType<typeof useModalParam>;
+  compare: ReturnType<typeof useUrlModal>;
   /** The latest version when the page already holds it: comparing it reads nothing more. */
   latestVersion?: ReturnType<typeof useVersionDetail>["data"];
 }) {

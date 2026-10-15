@@ -18,7 +18,7 @@ import {
   withRequiredReads,
 } from "../../lib/role-permission-dependencies";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import {
   spaceRoleDescription,
   spaceRoleLabel,
@@ -52,7 +52,7 @@ import {
 } from "../../lib/permission-labels";
 import { rolesPageDeeds } from "./rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
-import { parseViewAsPreset, viewAsPresetParam } from "../../lib/view-as-preset";
+import type { ViewAsPreset } from "../../lib/view-as-preset";
 
 type RoleView = "list" | "matrix";
 type RoleTab = "org" | "space";
@@ -63,11 +63,11 @@ export function OrgSettingsRolesPage() {
   const { data: roles, isLoading, error } = useRoles();
   const deleteRole = useDeleteRole();
   const canPreview = useCanPreviewRole();
-  // Both modals have an address: `?role=<key>` (or `new`) and `?view-as`.
   // `?role=<key>` is only ever an existing role: `new` is a valid role key.
-  const roleParam = useModalTarget("role", roles, (role) => role.key);
-  const newRole = useModalParam("newRole");
-  const viewAsParam = useModalParam("viewAs");
+  const roleParam = useUrlModalTarget("role", roles, (role) => role.key);
+  const [creating, setCreating] = useState(false);
+  // The preview dialog, open on a preset or on none.
+  const [preview, setPreview] = useState<{ preset?: ViewAsPreset } | null>(null);
   // Tab and view are places too: `?tab=space&view=matrix` opens exactly that,
   // and Back undoes a switch. Each defaults to its first option, which is
   // then left out of the URL.
@@ -93,12 +93,12 @@ export function OrgSettingsRolesPage() {
   const presets = (roles ?? []).filter((r) => r.kind === "preset");
   const custom = (roles ?? []).filter((r) => r.kind === "custom");
 
-  // A row previews its own role: the dialog opens pre-filled, at an address.
+  // A row previews its own role: the dialog opens pre-filled.
   const previewSpaceRole = deeds.includes("view-as")
-    ? (role: RoleObject) => viewAsParam.open(viewAsPresetParam({ kind: "space", key: role.key }))
+    ? (role: RoleObject) => setPreview({ preset: { kind: "space", key: role.key } })
     : undefined;
   const previewOrgRole = deeds.includes("view-as")
-    ? (role: ViewAsOrgRole) => viewAsParam.open(viewAsPresetParam({ kind: "org", role }))
+    ? (role: ViewAsOrgRole) => setPreview({ preset: { kind: "org", role } })
     : undefined;
   const presetColumns = useRoleColumns({
     onPreview: previewSpaceRole,
@@ -160,7 +160,7 @@ export function OrgSettingsRolesPage() {
     icon: Plus,
     testId: "create-role-button",
     label: t("roles.create"),
-    onSelect: () => newRole.open(),
+    onSelect: () => setCreating(true),
     hidden: !deeds.includes("create"),
   };
   const viewAs: MenuAction = {
@@ -168,7 +168,7 @@ export function OrgSettingsRolesPage() {
     icon: Eye,
     testId: "view-as-button",
     label: t("viewAs.trigger"),
-    onSelect: () => viewAsParam.open(),
+    onSelect: () => setPreview({}),
     hidden: !deeds.includes("view-as"),
   };
   const tableState = {
@@ -253,16 +253,16 @@ export function OrgSettingsRolesPage() {
         </>
       )}
 
-      {newRole.value !== null && canWrite && (
-        <RoleFormModal key="new" role={null} onClose={newRole.close} />
+      {creating && canWrite && (
+        <RoleFormModal key="new" role={null} onClose={() => setCreating(false)} />
       )}
       {target && editable && (
         <RoleFormModal key={target.key} role={target} onClose={roleParam.close} />
       )}
       {target && !editable && <RoleViewModal role={target} onClose={roleParam.close} />}
 
-      {viewAsParam.value !== null && canPreview && (
-        <ViewAsDialog preset={parseViewAsPreset(viewAsParam.value)} onClose={viewAsParam.close} />
+      {preview && canPreview && (
+        <ViewAsDialog preset={preview.preset} onClose={() => setPreview(null)} />
       )}
 
       <ConfirmModal

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge } from "@appstrate/ui/components/badge";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
@@ -10,7 +11,6 @@ import {
   useOnboardingGuard,
   useOnboardingNav,
 } from "../../components/onboarding-layout";
-import { useModalParam } from "../../hooks/use-modal-param";
 import { ProviderAddFlow } from "../../components/provider-add-flow";
 import { OnboardingQuickConnect } from "../../components/onboarding-quick-connect";
 import { quickConnectProviders } from "../../lib/provider-registry-helpers";
@@ -29,7 +29,7 @@ export function OnboardingModelStep() {
   const orgId = useOnboardingGuard();
   const { nextRoute } = useOnboardingNav("model");
 
-  const newModel = useModalParam("newModel");
+  const [adding, setAdding] = useState(false);
   const { data: models } = useModels();
   const { data: registry } = useProvidersRegistry();
   const { data: credentials } = useModelProviderCredentials();
@@ -118,14 +118,14 @@ export function OnboardingModelStep() {
           </div>
         )}
 
-        <Button variant="outline" size="sm" className="self-center" onClick={() => newModel.open()}>
+        <Button variant="outline" size="sm" className="self-center" onClick={() => setAdding(true)}>
           <Plus className="mr-1.5" />
           {hasModels ? t("onboarding.modelSeed.addAnother") : t("models.add")}
         </Button>
       </div>
 
-      {newModel.value !== null && (
-        <ProviderAddFlow credentials={credentials ?? []} onClose={newModel.close} />
+      {adding && (
+        <ProviderAddFlow credentials={credentials ?? []} onClose={() => setAdding(false)} />
       )}
     </OnboardingLayout>
   );

@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { GitCompareArrows } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useUrlModal } from "../../hooks/use-url-modal";
 import { useVersionDetail } from "../../hooks/use-packages";
 import { VersionHistory } from "../version-history";
 import { CompareWithDraftModal } from "./compare-with-draft-modal";
@@ -27,7 +27,7 @@ export function PackageVersionsSection({
 }) {
   const { t } = useTranslation("agents");
   // `?compare=<version>`: the comparison with the draft has an address.
-  const compare = useModalParam("compare");
+  const compare = useUrlModal("compare");
   const { data: latestVersion } = useVersionDetail(
     type,
     packageId,

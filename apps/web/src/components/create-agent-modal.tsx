@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { SLUG_REGEX } from "@appstrate/core/naming";
 import { FormModal } from "./form-modal";
 import { FormField } from "./form-field";
@@ -19,17 +20,11 @@ import { toLiveSlug, toSlug } from "../lib/strings";
  * prompt. Everything else (schema, skills, integrations, timeout, appearance) is set in its
  * settings, where the agent is edited. Mounted by the caller while open.
  */
-export function CreateAgentModal({
-  onClose,
-  onLeave,
-}: {
-  onClose: () => void;
-  /** Leaves the modal for the new agent's page. */
-  onLeave: (to: string) => void;
-}) {
+export function CreateAgentModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation(["agents", "common"]);
   const { user } = useAuth();
   const { currentOrg } = useOrg();
+  const navigate = useNavigate();
   const create = useCreatePackage("agent");
   const [displayName, setDisplayName] = useState("");
   const [id, setId] = useState("");
@@ -57,7 +52,7 @@ export function CreateAgentModal({
         "agent",
       ),
       {
-        onSuccess: (created) => onLeave(packageDetailPath("agent", created.id)),
+        onSuccess: (created) => navigate(packageDetailPath("agent", created.id)),
         onError: (err) => setError(errorMessage(err)),
       },
     );

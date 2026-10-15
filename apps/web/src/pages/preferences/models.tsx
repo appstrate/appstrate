@@ -13,7 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AlertDescription } from "@appstrate/ui/components/alert";
 import { AlertTriangle, Plus } from "lucide-react";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { ProvidersTable } from "../../components/providers-table";
 import type { MenuAction } from "../../lib/menu-action";
@@ -60,12 +60,11 @@ export function PreferencesModelsPage() {
   const updateCredential = useUpdateModelProviderCredential();
   const deleteCredential = useDeleteModelProviderCredential();
 
-  const newParam = useModalParam("newCredential");
+  const [creating, setCreating] = useState(false);
   const credentials = ownPersonalCredentials(credentialsQuery.data ?? [], userId);
-  const editParam = useModalTarget("editCredential", credentialsQuery.data && credentials);
+  const editParam = useUrlModalTarget("editCredential", credentialsQuery.data && credentials);
   const editCredential = editParam.target ?? null;
-  // `?newCredential` opens only for a caller the add action is offered to.
-  const formOpen = (newParam.value !== null && canAdd) || editCredential !== null;
+  const formOpen = (creating && canAdd) || editCredential !== null;
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
 
   const rows = providerRows(modelsQuery.data ?? [], credentials, registry ?? [], userId).filter(
@@ -78,11 +77,11 @@ export function PreferencesModelsPage() {
   };
 
   const closeForm = () => {
-    (editCredential ? editParam : newParam).close();
+    (editCredential ? editParam.close : () => setCreating(false))();
     refreshModels();
   };
 
-  const openCreate = () => newParam.open();
+  const openCreate = () => setCreating(true);
 
   const openEdit = (credential: ModelProviderCredentialInfo) => editParam.open(credential.id);
 

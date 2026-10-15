@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useMemo, useEffect } from "react";
+import { useCallback, useMemo, useEffect, useState } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -14,7 +14,6 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
-import { useModalParam } from "../hooks/use-modal-param";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { DetailBar } from "../components/detail-bar";
 import { ResourceErrorState } from "../components/page-states";
@@ -129,7 +128,9 @@ export function RunDetailPage() {
 
   const launcher = useRunLauncher(packageId);
   const cancelRun = useCancelRun();
-  const rerun = useModalParam("rerun");
+  // Keyed by run: the page stays mounted when a re-run leaves for /runs/<new>, and the form must not follow it.
+  const [rerunFor, setRerunFor] = useState<string | null>(null);
+  const rerunRequested = rerunFor === runId;
   const { historicalLogs, structuredOutput, turnRows } = useMemo(() => {
     if (!logs) {
       return { historicalLogs: [], structuredOutput: null, turnRows: [] };
@@ -242,8 +243,7 @@ export function RunDetailPage() {
   const date = run.started_at ? formatDateField(run.started_at) : "";
   const isInline = enrichedRun.package_ephemeral;
   const canRerun = !isRunning && !isInline && !!agent && permissionsReady && can("agents:run");
-  // `?rerun=1` opens the form only where the Re-run button itself would.
-  const rerunOpen = rerun.value !== null && canRerun && !rerunRefusal;
+  const rerunOpen = rerunRequested && canRerun && !rerunRefusal;
   const inlineName = inlineRunDisplayName(enrichedRun.agent_name, t("runs.inlineBadge"));
 
   // The list this run belongs to, in the header's small line: its agent's runs,
@@ -295,7 +295,7 @@ export function RunDetailPage() {
             rerunPending={launcher.isPending}
             cancelPending={cancelRun.isPending}
             onRerun={() => {
-              if (canReadAgent) rerun.open();
+              if (canReadAgent) setRerunFor(runId ?? null);
               // The API conceals resolved input from runners: replay that
               // snapshot server-side, keeping its parameters.
               else
@@ -312,16 +312,16 @@ export function RunDetailPage() {
       {agent && canReadAgent && (
         <RunModal
           open={rerunOpen}
-          onClose={rerun.close}
+          onClose={() => setRerunFor(null)}
           agent={agent}
           onSubmit={(input) => {
             // Re-run the SAME definition the original run executed, as far as
             // this caller may: `version_ref` is "draft" or a concrete semver,
             // and only an author replays a draft (see `replayVersion`).
-            launcher.launch(
-              { input, version: replayVersion(run.version_ref, agent.home_writable) },
-              { leave: rerun.leave },
-            );
+            launcher.launch({
+              input,
+              version: replayVersion(run.version_ref, agent.home_writable),
+            });
           }}
           isPending={launcher.isPending}
           initialInput={(run.input as Record<string, unknown>) ?? undefined}

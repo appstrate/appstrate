@@ -16,8 +16,7 @@ import { ConfirmModal } from "../confirm-modal";
 import { RunWithOptionsModal } from "../run-with-options-modal";
 import { RunLaunchRecovery } from "../run-launch-recovery";
 import { launchFromOptions } from "../../lib/run-launch";
-import { useModalParam } from "../../hooks/use-modal-param";
-import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
+import { NewScheduleModal } from "../new-schedule-modal";
 
 type Confirmation = "deleteAgent" | "clearRuns" | "clearMemories";
 
@@ -52,8 +51,6 @@ export function AgentActions({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const { can } = usePermissions();
-  const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
-  const runOptions = useModalParam("runOptions");
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: memories } = useAgentMemories(packageId);
   const deleteAgent = useDeletePackage("agent");
@@ -61,6 +58,8 @@ export function AgentActions({
   const deleteAllMemories = useDeleteAllMemories(packageId);
   const launcher = useRunLauncher(packageId);
   const [confirming, setConfirming] = useState<Confirmation | null>(null);
+  const [newScheduleOpen, setNewScheduleOpen] = useState(false);
+  const [runOptionsOpen, setRunOptionsOpen] = useState(false);
 
   if (!detail) return null;
 
@@ -99,21 +98,21 @@ export function AgentActions({
           onDeleteAgent: () => setConfirming("deleteAgent"),
           onDeleteRuns: () => setConfirming("clearRuns"),
           onDeleteMemories: () => setConfirming("clearMemories"),
-          onAddSchedule: () => newSchedule.open(packageId),
-          onRunWithOptions: () => runOptions.open(),
+          onAddSchedule: () => setNewScheduleOpen(true),
+          onRunWithOptions: () => setRunOptionsOpen(true),
           runBlockedReason,
         }}
       />
       <RunWithOptionsModal
-        open={runOptions.value !== null && canRunWithOptions}
-        onClose={runOptions.close}
-        onLeave={runOptions.leave}
+        open={runOptionsOpen && canRunWithOptions}
+        onClose={() => setRunOptionsOpen(false)}
         agent={detail}
         isPending={launcher.isPending}
-        onSubmit={(submit) =>
-          launcher.launch(launchFromOptions(submit), { leave: runOptions.leave })
-        }
+        onSubmit={(submit) => launcher.launch(launchFromOptions(submit))}
       />
+      {newScheduleOpen && (
+        <NewScheduleModal initialAgentId={packageId} onClose={() => setNewScheduleOpen(false)} />
+      )}
       <RunLaunchRecovery
         launcher={launcher}
         packageId={packageId}

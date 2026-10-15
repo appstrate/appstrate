@@ -49,7 +49,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { FormItem } from "@/components/app-ui/form-item";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { PageActionsMenu } from "../page-actions-menu";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import type { JSONSchema7, JSONSchema7TypeName } from "@appstrate/core/form";
 import { toLiveSlug } from "../../lib/strings";
 import { fieldKeyVerdict } from "../../lib/schema-field-key";
@@ -78,11 +78,11 @@ import {
 
 type SchemaMode = "input" | "output";
 
-/** Each list's two addresses: both lists can sit on one page. */
-const FIELD_PARAMS = {
-  input: { add: "newInputField", edit: "editInputField" },
-  output: { add: "newOutputField", edit: "editOutputField" },
-} as const satisfies Record<SchemaMode, { add: string; edit: string }>;
+/** Each list's edit address: both lists can sit on one page. */
+const EDIT_PARAMS = {
+  input: "editInputField",
+  output: "editOutputField",
+} as const satisfies Record<SchemaMode, string>;
 
 const TYPE_OPTIONS: JSONSchema7TypeName[] = [
   "string",
@@ -106,9 +106,9 @@ export function SchemaFieldList({
   onChange: (fields: SchemaField[]) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  // Addresses like every modal: a field by its key, which survives a reload.
-  const adding = useModalParam(FIELD_PARAMS[mode].add);
-  const editing = useModalTarget(FIELD_PARAMS[mode].edit, fields, (field) => field.key);
+  const [adding, setAdding] = useState(false);
+  // A field's edit has an address: its key, which survives a reload.
+  const editing = useUrlModalTarget(EDIT_PARAMS[mode], fields, (field) => field.key);
   const target = editing.target;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -133,7 +133,7 @@ export function SchemaFieldList({
             skills and integrations sections have it. */}
         <PageActionsMenu
           actions={[
-            { id: "add", label: t("editor.fieldAdd"), icon: Plus, onSelect: () => adding.open() },
+            { id: "add", label: t("editor.fieldAdd"), icon: Plus, onSelect: () => setAdding(true) },
           ]}
         />
       </div>
@@ -141,7 +141,7 @@ export function SchemaFieldList({
       {fields.length === 0 ? (
         <EmptyState message={t("editor.fieldEmpty")} icon={Braces} compact>
           <EmptyStateAction
-            action={{ label: t("editor.fieldAdd"), onSelect: () => adding.open() }}
+            action={{ label: t("editor.fieldAdd"), onSelect: () => setAdding(true) }}
           />
         </EmptyState>
       ) : (
@@ -180,14 +180,14 @@ export function SchemaFieldList({
         </div>
       )}
 
-      {adding.value !== null ? (
+      {adding ? (
         <FieldModal
           mode={mode}
           takenKeys={fields.map((f) => f.key)}
-          onClose={adding.close}
+          onClose={() => setAdding(false)}
           onSave={(next) => {
             onChange([...fields, next]);
-            adding.close();
+            setAdding(false);
           }}
         />
       ) : (

@@ -20,7 +20,7 @@ import { Modal } from "../modal";
 import { DataTable } from "../data-table";
 import { EmptyState } from "../page-states";
 import { usePermissions } from "../../hooks/use-permissions";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useUrlModal } from "../../hooks/use-url-modal";
 import { clientDeeds, clientLevelKey, useIntegrationClientColumns } from "./integration-columns";
 import { mergeClientTiers, type ClientRow } from "../../lib/integration-clients";
 import {
@@ -285,11 +285,10 @@ export function ClientsTable({
   const deleteSpaceClient = useDeleteIntegrationOAuthClient("space");
   const deleteOrgClient = useDeleteIntegrationOAuthClient("org");
   const promote = usePromoteIntegrationOAuthClient();
-  // Several tables can share a page (one per auth): each answers only the parameters
-  // scoped to its own `authKey` (`?newOauthClient=<authKey>:<tier>`,
-  // `?editOauthClient=<authKey>:<client_ref>`).
-  const newClient = useModalParam("newOauthClient");
-  const editClient = useModalParam("editOauthClient");
+  const [newTier, setNewTier] = useState<IntegrationClientTier | null>(null);
+  // Several tables can share a page (one per auth): each answers only the parameter
+  // scoped to its own `authKey` (`?editOauthClient=<authKey>:<client_ref>`).
+  const editClient = useUrlModal("editOauthClient");
   const scopedValue = (value: string | null) =>
     value?.startsWith(`${authKey}:`) ? value.slice(authKey.length + 1) : null;
   const [confirmDelete, setConfirmDelete] = useState<ClientRow | null>(null);
@@ -316,13 +315,12 @@ export function ClientsTable({
       row.client.client_ref === scopedValue(editClient.value) &&
       clientDeeds(row, canManageOrg).editable,
   );
-  const newTier = scopedValue(newClient.value);
   const modal: ModalState = editedRow
     ? { mode: "edit", tier: tierOf(editedRow), client: editedRow.client }
     : canRegister && (newTier === "space" || (newTier === "org" && canManageOrg))
       ? { mode: "create", tier: newTier }
       : null;
-  const closeModal = editedRow ? editClient.close : newClient.close;
+  const closeModal = editedRow ? editClient.close : () => setNewTier(null);
   const pendingDefault = [setSpaceDefault, setOrgDefault].find((mutation) => mutation.isPending);
   const pendingRemoval = [deleteSpaceClient, deleteOrgClient, promote].find(
     (mutation) => mutation.isPending,
@@ -364,7 +362,7 @@ export function ClientsTable({
         variant="outline"
         className={inEmpty ? undefined : "h-7 text-xs"}
         data-testid={inEmpty ? undefined : `oauth-client-register-${authKey}`}
-        onClick={canManageOrg ? undefined : () => newClient.open(`${authKey}:space`)}
+        onClick={canManageOrg ? undefined : () => setNewTier("space")}
       >
         <Plus />
         {t("integration.clients.register")}
@@ -378,11 +376,11 @@ export function ClientsTable({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => newClient.open(`${authKey}:space`)}>
+          <DropdownMenuItem onSelect={() => setNewTier("space")}>
             {t("integration.clients.registerSpace")}
           </DropdownMenuItem>
           <DropdownMenuItem
-            onSelect={() => newClient.open(`${authKey}:org`)}
+            onSelect={() => setNewTier("org")}
             data-testid={inEmpty ? undefined : `org-oauth-client-register-${authKey}`}
           >
             {t("integration.clients.registerOrg")}
@@ -453,7 +451,7 @@ export function ClientsTable({
         </Button>
       )}
 
-      {modal && (newClient.value || editClient.value) && (
+      {modal && (
         <OAuthClientModal
           key={modal.mode === "edit" ? modal.client.client_ref : `create-${modal.tier}`}
           tier={modal.tier}

@@ -3,26 +3,17 @@
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { FormModal } from "./form-modal";
-import { useModalParam } from "../hooks/use-modal-param";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { useCreateSpace } from "../hooks/use-spaces";
 import { errorMessage } from "../lib/mutation-error";
 
-/** The URL parameter that opens the modal. */
+/** Opened from the organization switcher as well as from the spaces page. */
 export const NEW_SPACE_PARAM = "newSpace";
 
 type FormData = { name: string };
 
-export function SpaceCreateModal() {
-  const param = useModalParam(NEW_SPACE_PARAM);
-  // The form exists only while the modal is open, so any way of closing it (Annuler, a click
-  // outside, Escape, Back) abandons what was typed.
-  if (param.value === null) return null;
-  return <SpaceCreateForm onClose={param.close} />;
-}
-
-function SpaceCreateForm({ onClose }: { onClose: () => void }) {
+export function SpaceCreateModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateSpace();
 
