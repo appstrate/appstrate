@@ -19,8 +19,9 @@ import { SettingsPageActionTargetProvider } from "../../components/settings/sett
 import { RailLink } from "../../components/settings/rail-link";
 import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
 import { ContextSelector } from "../../components/settings/context-selector";
+import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { PanelDialog } from "../../components/panel-dialog";
+import { PanelLayout } from "../../components/panel-layout";
 import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { useSpaces } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -30,7 +31,7 @@ import {
   useCurrentSpaceId,
 } from "../../hooks/use-current-space";
 import { useOrg } from "../../hooks/use-org";
-import { useCloseOverlay, useLandAfterOrgSwitch } from "../../lib/modal-route";
+import { useLandAfterOrgSwitch } from "../../lib/modal-route";
 import { SETTINGS_INDEX, type SettingsScope } from "../../lib/route-access";
 import { useOverlayBreadcrumb } from "../../hooks/use-overlay-breadcrumb";
 import {
@@ -85,7 +86,6 @@ function ScopeNavigation({
 export function UnifiedSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
   const location = useLocation();
-  const closeSettings = useCloseOverlay();
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
   const { currentOrg, orgs, switchOrg } = useOrg();
   const { data: spaces = [] } = useSpaces();
@@ -188,11 +188,24 @@ export function UnifiedSettingsLayout() {
   );
 
   return (
-    <PanelDialog
-      title={label("common:nav.settings")}
+    <PanelLayout
+      title={label("unifiedSettings.title")}
       rail={rail}
-      contentHeader={null}
-      onClose={closeSettings}
+      // The same band as the catalogue: invisible at rest, the section's name
+      // once the page has scrolled past its own heading — and an opaque surface
+      // under the close control, so the page does not scroll beneath it.
+      contentHeader={(stuck) =>
+        activeItem ? (
+          <span
+            className={cn(
+              "duration-fast truncate text-sm font-semibold transition-opacity",
+              stuck ? "opacity-100" : "opacity-0",
+            )}
+          >
+            {label(activeItem.labelKey)}
+          </span>
+        ) : null
+      }
     >
       {activeItem && (
         <div className="mb-6 flex min-h-9 items-center justify-between gap-3 md:gap-4">
@@ -214,7 +227,7 @@ export function UnifiedSettingsLayout() {
           <Outlet />
         </SettingsPageActionTargetProvider>
       </div>
-    </PanelDialog>
+    </PanelLayout>
   );
 }
 

@@ -71,7 +71,7 @@ import { CatalogueMenuItems } from "./catalogue-row";
 import { CatalogueShared } from "./catalogue-shared";
 import { CatalogueAddButton } from "./catalogue-add-button";
 import { PageActionsMenu } from "./page-actions-menu";
-import { PanelDialog } from "./panel-dialog";
+import { PanelLayout } from "./panel-layout";
 import { PackageCollection } from "./package-collection";
 import type { FilterSpec } from "./list-toolbar";
 import {
@@ -111,14 +111,12 @@ export function OrgCatalogueModal({
   reading,
   type: active,
   hrefOf,
-  onClose,
 }: {
   /** Both from the URL, so a link opens exactly one view. */
   reading: CatalogueReading;
   type: PackageType;
   /** The address of another reading or kind of the catalogue. */
   hrefOf: (reading: CatalogueReading, type: PackageType) => string;
-  onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const spaceId = useCurrentSpaceId();
@@ -507,23 +505,45 @@ export function OrgCatalogueModal({
   );
 
   return (
-    <PanelDialog
+    <PanelLayout
       title={t("common:nav.catalogue")}
       rail={rail}
-      contentHeader={
+      // Where the reader is, kept in place while the pane scrolls: the kind
+      // they are browsing, or the package they opened, with the way back.
+      contentHeader={(stuck) =>
         previewed ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="-ml-2 shrink-0 gap-1.5"
-            onClick={preview.close}
+          <div className="flex min-w-0 items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-2 shrink-0 gap-1.5"
+              onClick={preview.close}
+            >
+              <ArrowLeft />
+              {t("catalogue.back")}
+            </Button>
+            {/* The package's name belongs to the page below; the band borrows
+                it only once that page has scrolled past its own title. */}
+            <span
+              className={cn(
+                "duration-fast truncate text-sm font-medium transition-opacity",
+                stuck ? "opacity-100" : "opacity-0",
+              )}
+            >
+              {previewed.name || previewed.id}
+            </span>
+          </div>
+        ) : (
+          <span
+            className={cn(
+              "duration-fast text-sm font-semibold transition-opacity",
+              stuck ? "opacity-100" : "opacity-0",
+            )}
           >
-            <ArrowLeft />
-            {t("catalogue.back")}
-          </Button>
-        ) : null
+            {t(kind.titleKey)}
+          </span>
+        )
       }
-      onClose={onClose}
     >
       {reading === "shared" ? (
         <CatalogueShared
@@ -729,6 +749,6 @@ export function OrgCatalogueModal({
           canPublish={writableOf({ id: share.value })}
         />
       )}
-    </PanelDialog>
+    </PanelLayout>
   );
 }

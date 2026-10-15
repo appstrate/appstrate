@@ -11,7 +11,6 @@ import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import type { PackageType } from "@appstrate/core/validation";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
 import { cn } from "@appstrate/ui/cn";
 import { usePageBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import type { BreadcrumbEntry } from "../stores/breadcrumb-store";
@@ -263,29 +262,25 @@ export function DashboardSkeleton() {
 }
 
 /**
- * A routed overlay (settings, catalogue) whose code is not loaded yet: the
- * `PanelDialog` frame, its rail and its page as blocks. Reached only on a
- * cold address, since the shell preloads the overlays on intent.
+ * The panes of a routed overlay (settings, catalogue) whose code is not loaded
+ * yet: `PanelLayout`'s rail and page as blocks. Content only — the dialog around
+ * it is `OverlayFrame`'s and is already open, so the page replaces this inside
+ * the same box instead of opening a second one. Reached only on a cold address,
+ * since the shell preloads the overlays on intent.
  */
 export function OverlayPanelSkeleton({ list }: { list?: boolean }) {
   return (
-    <Dialog open>
-      <DialogContent
-        className="flex h-[min(720px,calc(100dvh-6rem))] w-[min(1080px,calc(100vw-4rem))] max-w-none gap-0 overflow-hidden p-0 max-sm:-m-4 max-sm:h-[100dvh] max-sm:w-[100vw] max-sm:rounded-none max-sm:border-0"
-        closeClassName="hidden"
-      >
-        <DialogTitle className="sr-only">…</DialogTitle>
-        <aside className="bg-sidebar border-sidebar-border flex w-56 shrink-0 flex-col gap-2 border-r p-3 max-md:hidden">
-          {Array.from({ length: 8 }, (_, i) => (
-            <Skeleton key={i} className="h-7 w-full" />
-          ))}
-        </aside>
-        <div className="min-w-0 flex-1 p-6 pt-12">
-          <Skeleton className="mb-6 h-7 w-48" />
-          {list ? <TextSkeleton lines={6} /> : <SettingsSkeleton />}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <>
+      <aside className="bg-sidebar border-sidebar-border flex w-56 shrink-0 flex-col gap-2 border-r p-3 max-md:hidden">
+        {Array.from({ length: 8 }, (_, i) => (
+          <Skeleton key={i} className="h-7 w-full" />
+        ))}
+      </aside>
+      <div className="min-w-0 flex-1 p-6 pt-12">
+        <Skeleton className="mb-6 h-7 w-48" />
+        {list ? <TextSkeleton lines={6} /> : <SettingsSkeleton />}
+      </div>
+    </>
   );
 }
 
