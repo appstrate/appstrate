@@ -103,7 +103,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    in the shell header (section 2). What the old header said under the title
    opens the overview tab: an agent's description, home space and origin
    (`AgentIdentity`), a package's description, a run's trigger, start, cost and
-   duration (`RunHeaderSummary`). The package editor still uses `PageHeader`.
+   duration (`RunHeaderSummary`). A settings overlay's sub-page (a webhook) has no shell header behind its panel: it keeps the section heading and draws its tabs with `UnderlineTabList`.
 1. **`PageHeader`** (`components/page-header.tsx`): title with its identity tile
    in `icon` (`PackageIcon`), a one-line summary and the object's id as `children`, and in
    `actions` the status and version badges (`components/status-badge.tsx`, see
