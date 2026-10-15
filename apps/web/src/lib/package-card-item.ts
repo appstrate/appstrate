@@ -22,6 +22,8 @@ export interface CardItem {
   runningRuns?: number;
   keywords?: string[];
   usedByAgents?: number;
+  /** An integration's connections of the caller here; the card says nothing at 0 or unknown. */
+  connectionCount?: number;
   unreadCount?: number;
   actions?: ReactNode;
   autoInstalled?: boolean;

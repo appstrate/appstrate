@@ -63,7 +63,7 @@ export function useDocumentColumns({
     {
       id: "created",
       header: t("column.created"),
-      width: "112px",
+      width: "120px",
       tier: 3,
       align: "end",
       cell: (doc) => <CellDate value={doc.createdAt} granularity="datetime" />,

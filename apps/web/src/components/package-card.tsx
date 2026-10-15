@@ -29,6 +29,7 @@ export function PackageCard({
   runningRuns,
   keywords,
   usedByAgents,
+  connectionCount,
   unreadCount,
   actions,
   autoInstalled,
@@ -139,7 +140,7 @@ export function PackageCard({
             sits: the text wraps before it instead of running underneath. */}
         {status && <div className="relative z-10 shrink-0 self-start">{status}</div>}
       </div>
-      {keywords?.length || (type !== "agent" && (usedByAgents ?? 0) > 0) ? (
+      {keywords?.length || (type !== "agent" && (usedByAgents ?? 0) > 0) || connectionCount ? (
         <ScrollArea className="relative z-10 mt-2 w-full">
           <div className="flex gap-1">
             {keywords?.map((kw) => (
@@ -150,6 +151,11 @@ export function PackageCard({
                 {kw}
               </span>
             ))}
+            {connectionCount !== undefined && connectionCount > 0 && (
+              <span className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]">
+                {t("integrations.connectionCount", { count: connectionCount, ns: "settings" })}
+              </span>
+            )}
             {type !== "agent" && usedByAgents !== undefined && usedByAgents > 0 && (
               <span className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]">
                 {t("list.usedByAgents", { count: usedByAgents, ns: "agents" })}
