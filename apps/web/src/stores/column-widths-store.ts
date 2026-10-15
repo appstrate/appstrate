@@ -4,7 +4,7 @@ import { createKeyedLocalStore } from "./local-storage";
 
 /** Column widths per table, persisted like `column-visibility-store.ts`; no account identifier in storage. */
 
-export type ColumnWidths = Readonly<Record<string, number>>;
+type ColumnWidths = Readonly<Record<string, number>>;
 
 const NONE: ColumnWidths = {};
 
