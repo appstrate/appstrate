@@ -17,7 +17,6 @@ import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../ho
 import { EmptyState } from "./page-states";
 import { ItemList } from "./item-list";
 import { DataTable } from "./data-table";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import type { ColumnMenuSpec } from "./list-toolbar";
 import { useDocumentColumns } from "./document-columns";
 import { DocumentRowActions } from "./document-row-actions";
@@ -62,7 +61,6 @@ export function DocumentListPanel({
   const deleteDoc = useDeleteFile();
   const keepDoc = useKeepFile();
   const [pendingDelete, setPendingDelete] = useState<FileDto | null>(null);
-  const visibility = useColumnVisibility("documents");
 
   // A deep-linked doc may be outside the currently loaded page, so an empty name
   // is fine — the preview modal falls back to the fetched DTO's name.
@@ -110,14 +108,14 @@ export function DocumentListPanel({
     onKeep,
     onDelete,
   });
-  const columns = visibleColumns(allColumns, visibility.hidden);
+  const { columns, menu } = useColumnVisibility("documents", allColumns);
   const emptyState = (
     <EmptyState message={empty.message} hint={empty.hint} compact={empty.compact} icon={FileText} />
   );
 
   return (
     <>
-      {toolbar?.({ columns: columnMenu(allColumns, visibility) })}
+      {toolbar?.({ columns: menu })}
 
       <div className="flex flex-col gap-3">
         {display === "compact" ? (

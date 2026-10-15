@@ -11,7 +11,6 @@ import { PageHeader } from "../components/page-header";
 import { EmptyState, EmptyStateAction, ErrorState, NoMatchState } from "../components/page-states";
 import { SchedulesTable } from "../components/schedules-table";
 import { useScheduleColumns } from "../components/schedule-columns";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
@@ -56,8 +55,7 @@ export function SchedulesListPage() {
     agentName: (schedule) => agentName(schedule.packageId),
     agentPending: agentsPending,
   });
-  const visibility = useColumnVisibility("schedules");
-  const columns = visibleColumns(allColumns, visibility.hidden);
+  const { columns, menu } = useColumnVisibility("schedules", allColumns);
 
   // Client-side, and honestly so: `GET /api/schedules` returns the list whole,
   // with no paging and no query parameters, so the box searches every schedule
@@ -116,7 +114,7 @@ export function SchedulesListPage() {
           },
         ]}
         onReset={list.reset}
-        columns={columnMenu(allColumns, visibility)}
+        columns={menu}
       />
 
       <SchedulesTable

@@ -210,10 +210,12 @@ export function DataTable<T>({
   // leads with `#131`, a tier-two column that a phone does not draw, and a
   // catalogue leads with a tick, which a link would turn into navigation.
   const linkColumn = columns.findIndex(isIdentityColumn);
-  // The cover sits in the first cell that is neither held nor tiered: a `sticky` cell
-  // would become its containing block, and a cell that may be hidden takes it with it.
-  // A static cell leaves the row (`relative`) as the block it stretches over.
-  const coverColumn = columns.findIndex((c) => !held.has(c.id) && !c.tier);
+  // The cover sits in the first cell that is neither held nor tiered: a `sticky` cell would
+  // be its containing block, and a cell that may be hidden takes it with it. A static cell
+  // leaves the row (`relative`) as the block it stretches over. When every drawn column is held
+  // it falls back to the first one: it then covers that cell only, the row's own click does the rest.
+  const coverable = columns.filter((c) => !c.tier);
+  const coverColumn = columns.indexOf((coverable.find((c) => !held.has(c.id)) ?? coverable[0])!);
   // The least room the table needs at each tier: under it, it scrolls sideways.
   const floors = {
     "--dt-floor": floorOf(tiered ? columns.filter((c) => !c.tier) : columns),

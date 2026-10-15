@@ -16,7 +16,6 @@ import { useDebouncedValue } from "../hooks/use-debounced-value";
 import { RunsTable } from "./runs-table";
 import { useRunColumns } from "./run-columns";
 import { EmptyState, ErrorState } from "./page-states";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
@@ -88,8 +87,7 @@ export function RunList({
   const allColumns = useRunColumns({ agentName, hideAgentName });
   // Per TABLE, not per screen: the run list keeps its columns wherever it is
   // shown — the runs page, an agent's tab, a schedule's history.
-  const visibility = useColumnVisibility("runs");
-  const columns = visibleColumns(allColumns, visibility.hidden);
+  const { columns, menu } = useColumnVisibility("runs", allColumns);
 
   // Paging resets when the filters change — WITHOUT remounting this component.
   // A `key` at the call site is the idiomatic way to reset state, but the
@@ -134,7 +132,7 @@ export function RunList({
 
   return (
     <div>
-      {toolbar?.({ columns: columnMenu(allColumns, visibility) })}
+      {toolbar?.({ columns: menu })}
 
       <RunsTable
         runs={runs}

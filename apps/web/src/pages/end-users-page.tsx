@@ -21,7 +21,6 @@ import { EndUserDetailModal } from "../components/end-user-detail-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
 import { DataTable } from "../components/data-table";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { ListToolbar } from "../components/list-toolbar";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
 import type { MenuAction } from "../lib/menu-action";
@@ -78,8 +77,7 @@ function EndUsersPageContent() {
     onEdit: (user) => editParam.open(user.id),
     onDelete: setPendingDelete,
   });
-  const visibility = useColumnVisibility("end-users");
-  const columns = visibleColumns(allColumns, visibility.hidden);
+  const { columns, menu } = useColumnVisibility("end-users", allColumns);
 
   const create: MenuAction = {
     id: "create",
@@ -103,7 +101,7 @@ function EndUsersPageContent() {
           onChange: setSearch,
           placeholder: t("spaces.searchEndUsers"),
         }}
-        columns={columnMenu(allColumns, visibility)}
+        columns={menu}
       />
 
       <DataTable

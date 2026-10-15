@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { DataColumn } from "../components/data-table";
+import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { toggleValue } from "../lib/toggle-value";
 import { createKeyedLocalStore } from "./local-storage";
 
@@ -14,13 +16,14 @@ const hiddenColumns = createKeyedLocalStore<string[]>(
   NONE,
 );
 
-export interface ColumnVisibility {
-  hidden: string[];
-  toggle: (id: string) => void;
-}
-
-/** `key` names the TABLE, not the screen: the same table keeps its columns wherever it is shown. */
-export function useColumnVisibility(key: string): ColumnVisibility {
+/**
+ * The columns the reader keeps, and the menu that lets them choose. `key` names the TABLE, not
+ * the screen: the same table keeps its columns wherever it is shown.
+ */
+export function useColumnVisibility<T>(key: string, all: DataColumn<T>[]) {
   const [hidden, setHidden] = hiddenColumns.useValue(key);
-  return { hidden, toggle: (id) => setHidden(toggleValue(hidden, id)) };
+  return {
+    columns: visibleColumns(all, hidden),
+    menu: columnMenu(all, { hidden, toggle: (id) => setHidden(toggleValue(hidden, id)) }),
+  };
 }

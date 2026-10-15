@@ -12,7 +12,6 @@ import { Boxes, LibraryBig, Plus } from "lucide-react";
 import { PageHeader } from "../components/page-header";
 import { CollectionTabs } from "../components/detail-tabs";
 import { DataTable } from "../components/data-table";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
 import { PageActionsMenu } from "../components/page-actions-menu";
@@ -44,7 +43,6 @@ export function IntegrationsPage() {
   // type page asks, not the management listing.
   const { data: active = [], isLoading, error } = usePackageList("integration");
   const list = useListParams(["origin", "protocol"]);
-  const visibility = useColumnVisibility("integrations");
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
   const canCreate = can("integrations:write");
   const canBrowse = can("integrations:install");
@@ -89,7 +87,7 @@ export function IntegrationsPage() {
   const allColumns = useIntegrationListColumns().filter((column) =>
     execution === "local" ? column.id !== "protocol" : column.id !== "server",
   );
-  const columns = visibleColumns(allColumns, visibility.hidden);
+  const { columns, menu } = useColumnVisibility("integrations", allColumns);
   const empty = filtering ? (
     <NoMatchState message={t("integrations.empty.filtered")} />
   ) : (
@@ -175,7 +173,7 @@ export function IntegrationsPage() {
             : []),
         ]}
         onReset={list.reset}
-        columns={columnMenu(allColumns, visibility)}
+        columns={menu}
       />
 
       <DataTable

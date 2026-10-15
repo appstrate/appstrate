@@ -18,7 +18,6 @@ import { useTranslation } from "react-i18next";
 import type { LucideIcon } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import type { DataColumn } from "./data-table";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { CardGrid } from "./card-grid";
 import { PackageCard } from "./package-card";
 import { PackagesTable } from "./packages-table";
@@ -146,7 +145,7 @@ export function PackageCollection({
   const activities = activityFilter ? list.values("activity", PACKAGE_ACTIVITIES) : [];
   const baseColumns = usePackageColumns(holds).filter((c) => !dropColumns.includes(c.id));
   const searchPlaceholder = useSearchPlaceholder(entity);
-  const visibility = useColumnVisibility(tableId);
+  const { columns: shownColumns, menu } = useColumnVisibility(tableId, baseColumns);
 
   const shown = narrowPackages(items ?? [], {
     query,
@@ -217,18 +216,14 @@ export function PackageCollection({
         onReset={list.reset}
         // Only the table view has columns to choose from, and only the set the
         // list owns: a tick and a deed are not columns anyone hides.
-        columns={view === "table" ? columnMenu(baseColumns, visibility) : undefined}
+        columns={view === "table" ? menu : undefined}
         actions={actions}
       />
       {view === "table" ? (
         <PackagesTable
           items={shown}
           rowAction={rowAction}
-          columns={[
-            ...leadingColumns,
-            ...visibleColumns(baseColumns, visibility.hidden),
-            ...trailingColumns,
-          ]}
+          columns={[...leadingColumns, ...shownColumns, ...trailingColumns]}
           isLoading={isLoading}
           failure={error}
           empty={emptyBody}
