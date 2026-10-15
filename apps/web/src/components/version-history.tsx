@@ -82,12 +82,10 @@ export function VersionHistory({
         onReset={list.reset}
       />
       <DataTable
-        tableId="versions"
         label={t("version.history")}
         rows={rows}
         rowKey={(version) => String(version.id)}
         surface="integrated"
-        columnMode="scroll"
         isLoading={isLoading}
         failure={error}
         empty={
@@ -107,7 +105,8 @@ export function VersionHistory({
           {
             id: "version",
             header: t("run.infoVersion"),
-            width: "minmax(80px,1fr)",
+            width: 80,
+            elastic: true,
             cell: (version) =>
               type === "integration" ? (
                 <span className="font-mono text-sm">{version.version}</span>
@@ -123,14 +122,16 @@ export function VersionHistory({
           {
             id: "date",
             header: t("version.created"),
-            width: "minmax(120px,1fr)",
+            width: 120,
+            elastic: true,
             align: "end",
             cell: (version) => <CellDate value={version.createdAt} />,
           },
           {
             id: "status",
             header: t("version.status"),
-            width: "minmax(100px,1fr)",
+            width: 100,
+            elastic: true,
             cell: (version) => (
               <Badge variant={version.yanked ? "warning" : "secondary"}>
                 {t(version.yanked ? "version.yanked" : "version.published")}

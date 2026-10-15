@@ -6,8 +6,7 @@
  * Everything the agents, skills and MCP-server pages draw below their title,
  * and everything the organization's catalogue draws inside its panel. They are
  * the SAME list of the same objects, so they are one component: the same
- * search, the same faceted filters, the same column set, the same view toggle,
- * the same empty states. The catalogue adds a tick per row and one action in
+ * search, the same faceted filters, the same column set, the same empty states. The catalogue adds a tick per row and one action in
  * the bar; it does not get a table of its own.
  *
  * What the caller decides is where the state lives (the URL on a page, the
@@ -18,7 +17,6 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { LucideIcon } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
-import type { ListView } from "@/stores/list-view-store";
 import type { DataColumn } from "./data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { CardGrid } from "./card-grid";
@@ -63,9 +61,11 @@ export interface PackageCollectionProps {
   /** The page's creation button, when the caller may create: the empty list offers it. */
   emptyAction?: ReactNode;
   list: ListState;
-  view: ListView;
-  /** Absent when the view is the surface's decision, not the reader's. */
-  onViewChange?: (view: ListView) => void;
+  /**
+   * How this surface draws the list: the index pages draw cards, the catalogue's management view
+   * a table.
+   */
+  view: "cards" | "table";
   /**
    * Whether the list can say what is running or what uses this package. The
    * catalogue reads the library, which knows neither, so it offers origin only
@@ -124,7 +124,6 @@ export function PackageCollection({
   emptyAction,
   list,
   view,
-  onViewChange,
   activityFilter = true,
   originLabels,
   extraFilters = NO_FILTERS,
@@ -219,14 +218,11 @@ export function PackageCollection({
         // Only the table view has columns to choose from, and only the set the
         // list owns: a tick and a deed are not columns anyone hides.
         columns={view === "table" ? columnMenu(baseColumns, visibility) : undefined}
-        view={view}
-        onViewChange={onViewChange}
         actions={actions}
       />
       {view === "table" ? (
         <PackagesTable
           items={shown}
-          tableId={tableId}
           rowAction={rowAction}
           columns={[
             ...leadingColumns,

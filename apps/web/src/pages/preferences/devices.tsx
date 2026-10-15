@@ -72,7 +72,6 @@ export function PreferencesDevicesPage() {
       </div>
 
       <DataTable
-        tableId="cli-sessions-me"
         columns={columns}
         rows={sessions}
         rowKey={(s) => s.familyId}

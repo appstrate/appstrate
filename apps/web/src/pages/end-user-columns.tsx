@@ -32,7 +32,8 @@ export function useEndUserColumns({
     {
       id: "name",
       header: t("spaces.nameLabel"),
-      width: "minmax(100px,1.2fr)",
+      width: 100,
+      elastic: true,
       cell: (user) => (
         <div className="flex min-w-0 items-center gap-2">
           <EndUserAvatar user={user} />
@@ -45,21 +46,23 @@ export function useEndUserColumns({
     {
       id: "email",
       header: t("login.email"),
-      width: "minmax(100px,1.2fr)",
+      width: 100,
+      elastic: true,
       tier: 2,
       cell: (user) => <CellText>{user.email ?? ""}</CellText>,
     },
     {
       id: "externalId",
       header: t("spaces.endUserExternalId"),
-      width: "minmax(80px,1fr)",
+      width: 80,
+      elastic: true,
       tier: 2,
       cell: (user) => <CellText mono>{user.externalId ?? ""}</CellText>,
     },
     {
       id: "createdAt",
       header: t("spaces.createdAtLabel"),
-      width: "104px",
+      width: 104,
       tier: 2,
       align: "end",
       cell: (user) => <CellDate value={user.createdAt} granularity="date" />,

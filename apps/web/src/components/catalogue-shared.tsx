@@ -45,7 +45,7 @@ export function CatalogueShared({
         description={t("catalogue.shared.description")}
       />
       <DataTable
-        tableId="catalogue-shared"
+        tiered
         label={t("catalogue.shared.title")}
         columns={columns}
         rows={shares}

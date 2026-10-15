@@ -113,7 +113,7 @@ export function UserDetailModal({
           <section>
             <h3 className="mb-3 text-base font-semibold">{t("orgSettings.inviteSpacesLabel")}</h3>
             <DataTable
-              tableId="user-spaces"
+              tiered
               label={t("orgSettings.inviteSpacesLabel")}
               columns={columns}
               rows={member.spaces}

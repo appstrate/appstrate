@@ -94,7 +94,6 @@ export function InvitationsTable({
     <SettingsGroup title={t("orgSettings.pendingInvitations")} className="mt-8">
       <DataTable
         label={t("orgSettings.pendingInvitations")}
-        tableId="invitations"
         columns={columns}
         rows={visible}
         rowKey={(invitation) => invitation.id}

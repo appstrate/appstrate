@@ -43,7 +43,7 @@ import { TextSkeleton } from "../../components/loading-skeletons";
 import { useRoleColumns } from "./role-columns";
 import { RoleMatrix } from "./role-matrix";
 import { CollectionTabs } from "../../components/detail-tabs";
-import { ViewToggle } from "../../components/view-toggle";
+import { ToggleGroup, ToggleGroupItem } from "@appstrate/ui/components/toggle-group";
 import { OrgRolesList, OrgRolesMatrix } from "./org-roles";
 import {
   groupPermissionsByResource,
@@ -190,14 +190,20 @@ export function OrgSettingsRolesPage() {
             { value: "space", label: t("roles.tabSpace") },
           ]}
         />
-        <ViewToggle
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
           value={view}
-          onChange={(next) => setParam("view", next, "list")}
-          options={[
-            { id: "list", icon: Rows3, label: t("roles.viewList") },
-            { id: "matrix", icon: Grid3x3, label: t("roles.viewMatrix") },
-          ]}
-        />
+          onValueChange={(next) => next && setParam("view", next, "list")}
+        >
+          <ToggleGroupItem value="list" aria-label={t("roles.viewList")}>
+            <Rows3 />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="matrix" aria-label={t("roles.viewMatrix")}>
+            <Grid3x3 />
+          </ToggleGroupItem>
+        </ToggleGroup>
       </div>
       {tab === "org" &&
         (view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList onPreview={previewOrgRole} />)}
@@ -215,7 +221,6 @@ export function OrgSettingsRolesPage() {
             <>
               <SettingsGroup title={t("roles.presetsSection")}>
                 <DataTable
-                  tableId="preset-roles"
                   label={t("roles.presetsSection")}
                   columns={presetColumns}
                   rows={presets}
@@ -228,7 +233,6 @@ export function OrgSettingsRolesPage() {
 
               <SettingsGroup title={t("roles.customSection")}>
                 <DataTable
-                  tableId="custom-roles"
                   label={t("roles.customSection")}
                   columns={customColumns}
                   rows={custom}

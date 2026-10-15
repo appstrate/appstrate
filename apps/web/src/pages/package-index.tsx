@@ -18,7 +18,6 @@ import {
 } from "@appstrate/core/permissions";
 import { useAgents, usePackageList } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
-import { useListView } from "../stores/list-view-store";
 import { useListParams } from "../lib/list-params";
 import { catalogueHref } from "../lib/catalogue-link";
 import { packageNewPath } from "../lib/package-paths";
@@ -123,7 +122,6 @@ function PackageIndexBody({
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
   const importParam = useModalParam("import");
-  const [view, setView] = useListView(type);
   const list = useListParams(["origin", "activity"]);
   // Creating is a write on the package type, as its route is.
   const canCreate = can(packagePermission(type, "write"));
@@ -183,8 +181,7 @@ function PackageIndexBody({
         emptyIcon={PACKAGE_TYPE_ICON[type]}
         emptyAction={<EmptyStateAction action={createAction} />}
         list={list}
-        view={view}
-        onViewChange={setView}
+        view="cards"
       />
       {importParam.value !== null && canImport && (
         <ImportModal onClose={importParam.close} onLeave={importParam.leave} />

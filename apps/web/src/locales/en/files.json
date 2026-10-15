@@ -37,8 +37,6 @@
   "retention.permanent": "Permanent",
   "keep.success": "File kept.",
   "row.openRun": "Open the run page",
-  "row.inputFile": "Used as input",
-  "row.outputFile": "Produced as output",
   "delete.title": "Delete file",
   "delete.description": "Delete “{{name}}”? This cannot be undone.",
   "delete.success": "File deleted.",

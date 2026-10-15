@@ -24,7 +24,8 @@ export function useIntegrationListColumns(): DataColumn<IntegrationIndexItem>[] 
     {
       id: "name",
       header: t("integrations.col.name"),
-      width: "minmax(132px,1.6fr)",
+      width: 132,
+      elastic: true,
       cell: (integration) => (
         <div className="flex min-w-0 items-center gap-2">
           <PackageIcon type="integration" icon={integration.icon} size="sm" />
@@ -38,7 +39,8 @@ export function useIntegrationListColumns(): DataColumn<IntegrationIndexItem>[] 
       // Local tab only: the server package the sandbox runs.
       id: "server",
       header: t("integrations.col.server"),
-      width: "minmax(140px,1fr)",
+      width: 140,
+      elastic: true,
       tier: 3,
       cell: ({ server }) => (
         <span className="text-muted-foreground truncate font-mono text-xs">
@@ -49,7 +51,7 @@ export function useIntegrationListColumns(): DataColumn<IntegrationIndexItem>[] 
     {
       id: "version",
       header: t("integrations.col.version"),
-      width: "88px",
+      width: 88,
       tier: 3,
       cell: (integration) => (
         <span className="text-muted-foreground truncate font-mono text-xs">

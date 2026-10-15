@@ -46,7 +46,8 @@ export function useScheduleColumns({
     {
       id: "name",
       header: t("schedules.column.name"),
-      width: "minmax(160px,1.4fr)",
+      width: 160,
+      elastic: true,
       cell: (schedule) => (
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
@@ -72,7 +73,8 @@ export function useScheduleColumns({
     {
       id: "cron",
       header: t("schedules.column.cron"),
-      width: "minmax(140px,1.2fr)",
+      width: 140,
+      elastic: true,
       tier: 2,
       cell: (schedule) => {
         const recurrence = describeSchedule(schedule);
@@ -89,7 +91,7 @@ export function useScheduleColumns({
     {
       id: "state",
       header: t("providers.col.state"),
-      width: "116px",
+      width: 116,
       cell: (schedule) => (
         <>
           <ScheduleStatusBadge schedule={schedule} />
@@ -105,7 +107,8 @@ export function useScheduleColumns({
     {
       id: "next",
       header: t("schedules.column.next"),
-      width: "minmax(110px,1fr)",
+      width: 110,
+      elastic: true,
       align: "end",
       tier: 3,
       cell: (schedule) => (
@@ -115,7 +118,8 @@ export function useScheduleColumns({
     {
       id: "last",
       header: t("schedules.column.last"),
-      width: "minmax(110px,1fr)",
+      width: 110,
+      elastic: true,
       tier: 3,
       cell: (schedule) =>
         schedule.last_run_at ? (
@@ -132,7 +136,7 @@ export function useScheduleColumns({
     {
       id: "actor",
       header: t("schedules.column.actor"),
-      width: "132px",
+      width: 132,
       tier: 3,
       cell: (schedule) => (
         <ActorLabel

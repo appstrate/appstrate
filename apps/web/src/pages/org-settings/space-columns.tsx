@@ -56,7 +56,8 @@ export function useSpaceColumns({
     {
       id: "workspace",
       header: t("spaces.nameLabel"),
-      width: "minmax(160px,1.6fr)",
+      width: 160,
+      elastic: true,
       cell: (space) => (
         <CellText
           strong
@@ -72,7 +73,8 @@ export function useSpaceColumns({
     {
       id: "kind",
       header: t("spaces.visibilityLabel"),
-      width: "minmax(150px,0.9fr)",
+      width: 150,
+      elastic: true,
       tier: 2,
       cell: (space) =>
         space.orphaned_at ? (
@@ -92,7 +94,7 @@ export function useSpaceColumns({
     {
       id: "created",
       header: t("spaces.createdAtLabel"),
-      width: "132px",
+      width: 132,
       align: "end",
       // Tier 2, not 3: the settings dialog tops out around 800px and never
       // crosses the 56rem threshold, so tier 3 there means never drawn.

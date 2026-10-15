@@ -11,12 +11,10 @@ import { useTranslation } from "react-i18next";
 import { Boxes, LibraryBig, Plus } from "lucide-react";
 import { PageHeader } from "../components/page-header";
 import { CollectionTabs } from "../components/detail-tabs";
-import { CardGrid } from "../components/card-grid";
 import { DataTable } from "../components/data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
-import { PackageCard } from "../components/package-card";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
@@ -29,16 +27,13 @@ import {
   integrationExecution,
   type IntegrationExecution,
   filterIntegrations,
-  integrationOrigin,
 } from "../lib/integration-collection";
 import { readList, useListParams } from "../lib/list-params";
-import { packageCardItem } from "../lib/package-card-item";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { usePackageList } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
-import { useListView } from "../stores/list-view-store";
 import { useIntegrationListColumns } from "./integration-list-columns";
 
 export function IntegrationsPage() {
@@ -49,7 +44,6 @@ export function IntegrationsPage() {
   // type page asks, not the management listing.
   const { data: active = [], isLoading, error } = usePackageList("integration");
   const list = useListParams(["origin", "protocol"]);
-  const [view, setView] = useListView("integrations");
   const visibility = useColumnVisibility("integrations");
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
   const canCreate = can("integrations:write");
@@ -181,42 +175,20 @@ export function IntegrationsPage() {
             : []),
         ]}
         onReset={list.reset}
-        columns={view === "table" ? columnMenu(allColumns, visibility) : undefined}
-        view={view}
-        onViewChange={setView}
+        columns={columnMenu(allColumns, visibility)}
       />
 
-      {view === "table" ? (
-        <DataTable
-          tableId="integrations"
-          label={t("integrations.tableLabel")}
-          columns={columns}
-          columnMode="scroll"
-          rows={shown}
-          rowKey={(integration) => integration.id}
-          rowHref={(integration) => `/integrations/${integration.id}`}
-          rowLabel={(integration) => integration.name}
-          isLoading={isLoading}
-          failure={error}
-          empty={empty}
-        />
-      ) : (
-        <CardGrid
-          items={shown}
-          itemKey={(integration) => integration.id}
-          renderCard={(integration) => (
-            <PackageCard
-              {...packageCardItem(integration, "integration")}
-              // A system integration already says so with the card's shield.
-              meta={integrationOrigin(integration) === "system" ? undefined : orgName}
-              showRun={false}
-            />
-          )}
-          isLoading={isLoading}
-          failure={error}
-          empty={empty}
-        />
-      )}
+      <DataTable
+        label={t("integrations.tableLabel")}
+        columns={columns}
+        rows={shown}
+        rowKey={(integration) => integration.id}
+        rowHref={(integration) => `/integrations/${integration.id}`}
+        rowLabel={(integration) => integration.name}
+        isLoading={isLoading}
+        failure={error}
+        empty={empty}
+      />
       <ListFooter
         count={isLoading || error ? undefined : t("integrations.count", { count: shown.length })}
       />

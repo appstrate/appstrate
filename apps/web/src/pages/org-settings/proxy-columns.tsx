@@ -40,7 +40,8 @@ export function useProxyColumns({
     {
       id: "proxy",
       header: t("spaces.nameLabel"),
-      width: "minmax(80px,1.3fr)",
+      width: 80,
+      elastic: true,
       cell: (p) => (
         <div className="min-w-0">
           <CellText strong>{p.label}</CellText>
@@ -59,7 +60,8 @@ export function useProxyColumns({
     {
       id: "url",
       header: t("proxies.col.url"),
-      width: "minmax(72px,1.5fr)",
+      width: 72,
+      elastic: true,
       tier: 2,
       cell: (p) => (
         <span className="text-muted-foreground block truncate font-mono text-[0.65rem]">
@@ -70,7 +72,7 @@ export function useProxyColumns({
     {
       id: "type",
       header: t("proxies.col.type"),
-      width: "72px",
+      width: 72,
       tier: 2,
       cell: (p) => (
         <CellText>{p.source === "built-in" ? t("source.builtIn") : t("source.custom")}</CellText>
@@ -79,7 +81,8 @@ export function useProxyColumns({
     {
       id: "status",
       header: t("proxies.col.status"),
-      width: "minmax(56px,0.8fr)",
+      width: 56,
+      elastic: true,
       tier: 2,
       cell: (p) =>
         testResults[p.id] ? (
@@ -97,7 +100,7 @@ export function useProxyColumns({
     {
       id: "default",
       header: t("proxies.col.default"),
-      width: "96px",
+      width: 96,
       tier: 2,
       cell: (p) =>
         p.is_default ? <Badge variant="success">{t("models.default")}</Badge> : <CellEmpty />,

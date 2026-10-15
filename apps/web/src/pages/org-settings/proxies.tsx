@@ -77,7 +77,6 @@ export function OrgSettingsProxiesPage() {
       <SettingsPageActions actions={[create]} />
 
       <DataTable
-        tableId="proxies"
         label={t("proxies.tabTitle")}
         columns={columns}
         rows={proxies ?? []}

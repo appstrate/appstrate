@@ -59,7 +59,7 @@ export function useCatalogueSelectColumn({
         aria-label={t("models.form.discoverSelectAll")}
       />
     ),
-    width: "36px",
+    width: 36,
     control: true,
     cell: (item) =>
       selectable(item) ? (
@@ -87,7 +87,7 @@ export function useCatalogueOriginColumn<
   return {
     id: "origin",
     header: t("catalogue.origin"),
-    width: "128px",
+    width: 128,
     tier: 3,
     cell: (item) => {
       const home = item.source === "system" ? null : homeNameOf?.(item);
@@ -155,7 +155,7 @@ export function useCatalogueProtocolColumn<T = CardItem>(
   return {
     id: "protocol",
     header: t("catalogue.column.protocol"),
-    width: "88px",
+    width: 88,
     tier: 2,
     cell: (item) => {
       const protocol = protocolOf(item);
@@ -207,7 +207,8 @@ export function useCatalogueSpaceColumns({
       ) : undefined,
     control: true,
     // The pinned first column also carries the "ici" pill.
-    width: index === 0 ? "minmax(140px,1fr)" : "minmax(104px,1fr)",
+    width: index === 0 ? 140 : 104,
+    elastic: true,
     cell: (item) => {
       const placement = placementOf(item);
       if (!placement) return <CellEmpty />;

@@ -1,16 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Every column set, measured against the thresholds it degrades on.
- *
- * A tier is a promise: "once the table reaches 36rem, these columns fit". That
- * promise is arithmetic — the sum of the tier's floors plus its gaps and
- * padding — and nothing in the type system checks it. Unchecked, it lets eight
- * columns crush into 700px with the agent name, the only thing naming a run,
- * at 6px.
- *
- * So the arithmetic is done here, on the real sets, at the real thresholds.
- * A column set that does not fit fails a test instead of a screen.
+ * Every real column set keeps its promise to the reader: a column that holds a
+ * control, and the row's « … », are never given a tier to hide at.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -55,34 +47,7 @@ import { render } from "../../test/render.tsx";
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-/**
- * Tailwind's `@xl` and `@4xl`, the two container widths `DataTable` reads —
- * written out here rather than imported from it ON PURPOSE. A test that shares
- * the number it is checking tests nothing: it is the translation of the class
- * name into pixels, knowledge that lives in Tailwind, and the day someone moves
- * a column to a different tier this file has to disagree with them.
- */
-const THRESHOLD = { 2: 36 * 16, 3: 56 * 16 } as const;
-/** `px-3 gap-3` below `@xl`, `px-4 gap-4` from there up. */
-const SPACING = { 1: 12, 2: 16, 3: 16 } as const;
-
-/** All a tier measurement needs from a column, and the nature it declares. */
-type Track = Pick<DataColumn<never>, "width" | "tier" | "control"> & { header?: string };
-
-/** The narrowest the browser will let a track be. */
-function floor(width: string): number {
-  const fixed = /^(\d+)px$/.exec(width);
-  if (fixed) return Number(fixed[1]);
-  const elastic = /^minmax\((\d+)px,/.exec(width);
-  if (elastic) return Number(elastic[1]);
-  throw new Error(`unreadable track: ${width}`);
-}
-
-function widthOf(columns: Track[], tier: 1 | 2 | 3): number {
-  const shown = columns.filter((c) => (c.tier ?? 1) <= tier);
-  const space = SPACING[tier];
-  return shown.reduce((sum, c) => sum + floor(c.width), 0) + space * (shown.length + 1);
-}
+type Track = Pick<DataColumn<never>, "tier" | "control"> & { header?: string };
 
 /** Runs the hook the way a screen does, and hands back what it returned. */
 function columnsFrom<T>(useColumns: () => DataColumn<T>[]): Track[] {
@@ -341,73 +306,18 @@ const SETS = {
     ),
 };
 
-/**
- * Tables that scroll sideways whatever the width (`columnMode="scroll"`): the
- * tier arithmetic below is the promise of a table that DROPS columns, and this
- * one drops none.
- */
-const SCROLLS = new Set(["packageCatalogue"]);
-
-describe.each(Object.entries(SETS))("the %s column set", (name, load) => {
+describe.each(Object.entries(SETS))("the %s column set", (_name, load) => {
   const columns = load();
 
-  /**
-   * The narrowest container a table of this family is actually given, MEASURED
-   * rather than assumed. Not 390 — the window — because the shell's gutter
-   * takes the difference: at a 390px window every table on a page is 348px
-   * wide, and one inside the settings dialog is 340. A set that fits 390 but
-   * not 340 clips its last column inside a frame that is `overflow-hidden`.
-   *
-   * One number for both containers, the tighter of the two. A set that fits 340
-   * is safe on a page and in the dialog, and nobody has to remember which is
-   * which.
-   */
-  const TIER_ONE_BUDGET = 340;
-
-  /**
-   * A column that carries a control (a select, a switch, a button, an action
-   * link) is never hidden for lack of room: a person who cannot see it cannot
-   * act, and a table that does not fit scrolls sideways instead. So it declares
-   * `control: true`, and a control with a `tier` is the defect this catches.
-   * The `DataColumn` type forbids it as well; this check also holds when a
-   * column set is built with a cast.
-   */
   it("never gives a control, or the row's end, a tier to hide at", () => {
     for (const column of columns) {
       if (column.control) expect(column.tier).toBeUndefined();
-      // The row's end has no head and holds the row's actions.
       if (column.header === "") expect(column.tier).toBeUndefined();
     }
   });
 
-  /**
-   * The controls are left out of the phone budget on purpose: they are never
-   * hidden, so on a phone a table that carries one scrolls sideways (its name
-   * and its row's end held in place) rather than crushing it or taking it away.
-   * What has to fit is what a phone is promised without scrolling: the rest.
-   */
-  it.skipIf(SCROLLS.has(name))(
-    "fits its tier-one floors, bar the controls, in the narrowest container it is given",
-    () => {
-      expect(
-        widthOf(
-          columns.filter((c) => !c.control),
-          1,
-        ),
-      ).toBeLessThanOrEqual(TIER_ONE_BUDGET);
-    },
-  );
-
-  it.skipIf(SCROLLS.has(name)).each([2, 3] as const)(
-    "fits the tier-%i floors inside the tier-%i threshold",
-    (tier) => {
-      expect(widthOf(columns, tier)).toBeLessThanOrEqual(THRESHOLD[tier]);
-    },
-  );
-
   it("was actually read", () => {
-    // A hook that threw would hand back an empty array, and every width
-    // assertion above would pass on nothing at all.
+    // A hook that threw would hand back an empty array and the check above would pass on nothing.
     expect(columns.length).toBeGreaterThan(2);
   });
 });

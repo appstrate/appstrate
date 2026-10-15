@@ -183,36 +183,21 @@ describe("the footer", () => {
   });
 });
 
-describe("the view toggle", () => {
-  it("appears only for a list that is drawn both ways", () => {
-    expect(render(<ListToolbar filters={filters()} />)).not.toContain("aria-pressed");
-  });
-
-  it("marks the view in use", () => {
-    const html = render(<ListToolbar filters={filters()} view="table" onViewChange={() => {}} />);
-    expect(html).toContain('aria-label="Vue tableau" aria-pressed="true"');
-    expect(html).toContain('aria-label="Vue cartes" aria-pressed="false"');
-  });
-
-  it("puts the table view before the card view", () => {
-    const html = render(<ListToolbar filters={filters()} view="table" onViewChange={() => {}} />);
-    expect(html.indexOf('aria-label="Vue tableau"')).toBeLessThan(
-      html.indexOf('aria-label="Vue cartes"'),
-    );
-  });
-
-  it("keeps search and utilities left, and the representation at the far right", () => {
+describe("the bar's line", () => {
+  it("keeps search and utilities left, and the page's action at the far right", () => {
     const html = render(
       <ListToolbar
         filters={filters()}
-        view="table"
-        onViewChange={() => {}}
         search={{ value: "", onChange: () => {}, placeholder: "Rechercher…" }}
         actions={<button>Nouvel agent</button>}
       />,
     );
-    expect(html.indexOf("Rechercher…")).toBeLessThan(html.indexOf("Nouvel agent"));
-    expect(html.indexOf("Nouvel agent")).toBeLessThan(html.indexOf("aria-pressed"));
+    expect(html.indexOf("Rechercher…")).toBeLessThan(html.indexOf("Filtres"));
+    expect(html.indexOf("Filtres")).toBeLessThan(html.indexOf("Nouvel agent"));
+  });
+
+  it("offers no table-or-cards switch", () => {
+    expect(render(<ListToolbar filters={filters()} />)).not.toContain("aria-pressed");
   });
 });
 

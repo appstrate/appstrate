@@ -37,6 +37,7 @@ export function ScopedRunList({
 
   return (
     <RunList
+      tiered
       {...("packageId" in scope
         ? { packageId: scope.packageId, hideAgentName: true }
         : { scheduleId: scope.scheduleId, fixedAgentName: scope.agentName })}

@@ -57,7 +57,8 @@ export function PackageToolCatalog({
     {
       id: "name",
       header: t("log.tool"),
-      width: "minmax(160px,1fr)",
+      width: 160,
+      elastic: true,
       cell: (tool) => (
         <div className="flex items-start gap-2">
           {selection && (
@@ -75,7 +76,8 @@ export function PackageToolCatalog({
     {
       id: "description",
       header: t("editor.fieldDescLabel"),
-      width: "minmax(220px,2fr)",
+      width: 220,
+      elastic: true,
       cell: (tool) =>
         tool.description ? (
           <span className="text-muted-foreground text-sm break-words">{tool.description}</span>
@@ -88,7 +90,8 @@ export function PackageToolCatalog({
           {
             id: "permissions",
             header: t("packageTools.permissions"),
-            width: "minmax(180px,1fr)" as const,
+            width: 180,
+            elastic: true as const,
             cell: (tool: PackageTool) => (
               <div className="flex flex-wrap gap-1.5">
                 {Object.entries(tool.permissions ?? {}).flatMap(([auth, scopes]) =>
@@ -137,13 +140,11 @@ export function PackageToolCatalog({
         onReset={list.reset}
       />
       <DataTable
-        tableId="package-tools"
         label={t("manifest.tools")}
         columns={columns}
         rows={rows}
         rowKey={(tool) => tool.name}
         surface="integrated"
-        columnMode="scroll"
         empty={
           <EmptyState
             icon={Wrench}

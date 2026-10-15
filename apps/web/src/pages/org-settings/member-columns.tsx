@@ -56,7 +56,8 @@ export function useMemberColumns({
     {
       id: "member",
       header: t("spaceMembers.colMember"),
-      width: "minmax(130px,1.4fr)",
+      width: 130,
+      elastic: true,
       cell: (member) => {
         const name = memberLabel(member);
         return (
@@ -69,7 +70,8 @@ export function useMemberColumns({
     {
       id: "email",
       header: t("orgSettings.emailColumn"),
-      width: "minmax(150px,1.3fr)",
+      width: 150,
+      elastic: true,
       tier: 2,
       cell: (member) =>
         member.email ? <CellText title={member.email}>{member.email}</CellText> : <CellEmpty />,
@@ -77,7 +79,8 @@ export function useMemberColumns({
     {
       id: "role",
       header: t("orgSettings.roleColumn"),
-      width: "minmax(140px,1fr)",
+      width: 140,
+      elastic: true,
       // A select: it scrolls into reach rather than waiting for room.
       control: true,
       cell: (member) => {
@@ -106,7 +109,8 @@ export function useMemberColumns({
           {
             id: "spaces",
             header: t("orgSettings.inviteSpacesLabel"),
-            width: "minmax(100px,1.2fr)" as const,
+            width: 100,
+            elastic: true as const,
             tier: 3 as const,
             cell: (member: OrgMember) => <CellList items={spaces(member)} />,
           },
@@ -115,7 +119,7 @@ export function useMemberColumns({
     {
       id: "joined",
       header: t("orgSettings.joinedColumn"),
-      width: "92px",
+      width: 92,
       align: "end",
       tier: 3,
       cell: (member) => <CellDate value={member.joinedAt} granularity="date" />,

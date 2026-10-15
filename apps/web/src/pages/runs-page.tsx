@@ -11,7 +11,6 @@ import { useListParams } from "../lib/list-params";
 import { RunList } from "../components/run-list";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
-import { useListView } from "../stores/list-view-store";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 
@@ -41,7 +40,6 @@ export function RunsPage() {
   const kinds = list.values("kind", KINDS);
   const { statuses, filter: statusFilter } = useRunStatusFilter(list);
   const search = list.search;
-  const [view, setView] = useListView("runs");
 
   const filters: FilterSpec[] = [
     ...(canSeeEveryRun
@@ -100,8 +98,6 @@ export function RunsPage() {
         kind={kind}
         status={statuses}
         search={search}
-        view={view}
-        tableColumnMode="scroll"
         countLabel={(total) => t("runs.count", { count: total })}
         toolbar={({ columns }) => (
           <ListToolbar
@@ -112,9 +108,7 @@ export function RunsPage() {
             }}
             filters={filters}
             onReset={list.reset}
-            columns={view === "table" ? columns : undefined}
-            view={view}
-            onViewChange={setView}
+            columns={columns}
           />
         )}
         // A filtered list that finds nothing ran out of matches: the way out is the filter.

@@ -37,8 +37,6 @@
   "retention.permanent": "Permanent",
   "keep.success": "Fichier conservé.",
   "row.openRun": "Ouvrir la page du run",
-  "row.inputFile": "Utilisé en entrée",
-  "row.outputFile": "Produit en sortie",
   "delete.title": "Supprimer le fichier",
   "delete.description": "Supprimer « {{name}} » ? Cette action est irréversible.",
   "delete.success": "Fichier supprimé.",

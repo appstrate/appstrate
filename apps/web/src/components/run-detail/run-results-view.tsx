@@ -202,6 +202,7 @@ export function RunResultsContent({
         <>
           {featured && <RunDeliverable fileId={featured.id} />}
           <DocumentListPanel
+            tiered
             documents={outputDocuments}
             isLoading={isLoading}
             error={error}
@@ -209,7 +210,6 @@ export function RunResultsContent({
               message: filesDenied ? t("run.noAccess", { ns: "files" }) : t("run.resultsNoFiles"),
               compact: true,
             }}
-            display="table"
             tableSurface="integrated"
             footer={
               producedCut && (

@@ -62,7 +62,8 @@ export function useSpaceMemberColumns({
     {
       id: "member",
       header: t("spaceMembers.colMember"),
-      width: "minmax(100px,1.4fr)",
+      width: 100,
+      elastic: true,
       cell: (member) => (
         <CellText strong title={memberLabel(member)}>
           {memberLabel(member)}
@@ -72,7 +73,8 @@ export function useSpaceMemberColumns({
     {
       id: "email",
       header: t("orgSettings.emailColumn"),
-      width: "minmax(100px,1.3fr)",
+      width: 100,
+      elastic: true,
       tier: 2,
       cell: (member) =>
         member.email ? <CellText title={member.email}>{member.email}</CellText> : <CellEmpty />,

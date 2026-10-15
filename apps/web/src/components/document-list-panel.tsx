@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared documents panel — loading/error/empty states, the three bodies
- * (cards, table, compact list), and the delete + preview modals. Used by the
+ * Shared documents panel — loading/error/empty states, the two bodies
+ * (table, compact list), and the delete + preview modals. Used by the
  * gallery page and the run page. Data fetching and pagination stay with the
  * caller; this component is fed an already-resolved list and owns only the
  * delete/preview interaction (download + delete gating live here since they
@@ -15,17 +15,14 @@ import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
 import { EmptyState } from "./page-states";
-import { CardGrid } from "./card-grid";
 import { ItemList } from "./item-list";
 import { DataTable } from "./data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import type { ColumnMenuSpec } from "./list-toolbar";
-import { FileTile } from "./file-tile";
 import { useDocumentColumns } from "./document-columns";
 import { DocumentRowActions } from "./document-row-actions";
 import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
-import { runFileDirection } from "../lib/files";
 import { useModalParam } from "../hooks/use-modal-param";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 
@@ -35,12 +32,11 @@ export function DocumentListPanel({
   error,
   empty,
   showRunLink,
-  runId,
   footer,
-  display = "cards",
+  display = "table",
   toolbar,
   tableLabel,
-  tableColumnMode = "tiered",
+  tiered,
   tableSurface = "framed",
 }: {
   documents: FileDto[];
@@ -49,22 +45,15 @@ export function DocumentListPanel({
   empty: { message: string; hint?: string; compact?: boolean };
   /** Gallery tiles link to the producing run. */
   showRunLink?: boolean;
-  /**
-   * Run-tab only: the run this panel belongs to. When set, each tile shows an
-   * input/output badge, read through `runFileDirection`: only this run's own
-   * `agent_output` is an output; an upload made for it or a file chained in
-   * from an earlier run is an input the run consumed.
-   */
-  runId?: string;
   /** Rendered after the list: the gallery's "Load more", a run's truncation notice. */
   footer?: ReactNode;
-  /** The main Documents page offers cards and table; the run overview lists compactly. */
-  display?: "cards" | "table" | "compact";
+  /** The Documents page and a run's results draw a table; a run's inputs list compactly. */
+  display?: "table" | "compact";
   /** Apparatus owned by the caller, built from the table's real columns. */
   toolbar?: (context: { columns: ColumnMenuSpec }) => ReactNode;
   tableLabel?: string;
-  /** Level-one collections keep every reader-selected column reachable. */
-  tableColumnMode?: "tiered" | "scroll";
+  /** Read columns wait for room by their tier (a narrow panel); see `DataTable`. */
+  tiered?: boolean;
   /** Integrated rails already provide the surrounding surface. */
   tableSurface?: "framed" | "integrated";
 }) {
@@ -155,12 +144,11 @@ export function DocumentListPanel({
               </div>
             )}
           />
-        ) : display === "table" ? (
+        ) : (
           <DataTable
-            tableId="documents"
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
-            columnMode={tableColumnMode}
+            tiered={tiered}
             surface={tableSurface}
             rows={documents}
             rowKey={(doc) => doc.id}
@@ -170,28 +158,6 @@ export function DocumentListPanel({
             isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
-          />
-        ) : (
-          /* The same real tiles serve the main card view and compact run tabs. */
-          <CardGrid
-            items={documents}
-            min="10rem"
-            itemKey={(doc) => doc.id}
-            isLoading={isLoading && documents.length === 0}
-            failure={error}
-            empty={emptyState}
-            renderCard={(doc) => (
-              <FileTile
-                file={doc}
-                isKeepPending={pendingKeepId === doc.id}
-                onDownload={onDownload}
-                onDelete={onDelete}
-                onKeep={onKeep}
-                onPreview={(d) => preview.open(d.id)}
-                showRunLink={showRunLink}
-                direction={runId ? runFileDirection(doc, runId) : undefined}
-              />
-            )}
           />
         )}
         {footer}

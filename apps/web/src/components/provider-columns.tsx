@@ -121,7 +121,8 @@ export function useProviderColumns({
     {
       id: "provider",
       header: t("spaces.nameLabel"),
-      width: "minmax(110px,1.7fr)",
+      width: 110,
+      elastic: true,
       cell: (row) => {
         const pk = row.credential;
         const Icon =
@@ -192,7 +193,8 @@ export function useProviderColumns({
     {
       id: "service",
       header: t("providers.col.provider"),
-      width: "minmax(90px,0.9fr)",
+      width: 90,
+      elastic: true,
       tier: 2,
       cell: (row) => {
         // The instance spans several services: its row says where its models come from.
@@ -207,7 +209,8 @@ export function useProviderColumns({
     {
       id: "models",
       header: t("providers.col.models"),
-      width: "minmax(100px,1.8fr)",
+      width: 100,
+      elastic: true,
       cell: (row) => (
         <ModelsCell
           models={row.models}
@@ -220,7 +223,8 @@ export function useProviderColumns({
       id: "state",
       header: t("providers.col.state"),
       // A badge or two: the room it does not need goes to the name and models.
-      width: "minmax(100px,0.6fr)",
+      width: 100,
+      elastic: true,
       tier: 2,
       cell: (row) => (
         <RowStateCell

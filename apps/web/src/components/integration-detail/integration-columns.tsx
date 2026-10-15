@@ -107,7 +107,8 @@ export function useIntegrationClientColumns({
     {
       id: "client",
       header: t("oauthClients.clientIdColumn"),
-      width: "minmax(200px,2fr)",
+      width: 200,
+      elastic: true,
       cell: ({ client }) => (
         <CellText title={client.client_id} className="text-sm">
           {client.client_id}
@@ -117,14 +118,14 @@ export function useIntegrationClientColumns({
     {
       id: "level",
       header: t("integration.clients.col.level"),
-      width: "104px",
+      width: 104,
       tier: 3,
       cell: (row) => <CellText>{t(clientLevelKey(row))}</CellText>,
     },
     {
       id: "use",
       header: t("integration.clients.col.use"),
-      width: "168px",
+      width: 168,
       tier: 2,
       cell: (row) =>
         row.usedHere ? (
@@ -239,7 +240,8 @@ export function useConnectionColumns({
     {
       id: "account",
       header: t("preferences.sectionAccount"),
-      width: "minmax(100px,1.5fr)",
+      width: 100,
+      elastic: true,
       cell: (c) => (
         <AccountCell
           connection={c}
@@ -253,21 +255,24 @@ export function useConnectionColumns({
     {
       id: "method",
       header: t("integration.presentation.method"),
-      width: "minmax(84px,1fr)",
+      width: 84,
+      elastic: true,
       tier: 3,
       cell: (c) => <CellText title={methodLabel(c)}>{methodLabel(c)}</CellText>,
     },
     {
       id: "status",
       header: t("proxies.col.status"),
-      width: "minmax(104px,1fr)",
+      width: 104,
+      elastic: true,
       tier: 2,
       cell: (c) => <StatusCell connection={c} />,
     },
     {
       id: "owner",
       header: t("integration.connection.col.owner"),
-      width: "minmax(88px,1fr)",
+      width: 88,
+      elastic: true,
       tier: 3,
       cell: (c) => {
         const owner = c.owner_name ?? t("integration.connection.ownerUnknown");
@@ -277,7 +282,8 @@ export function useConnectionColumns({
     {
       id: "scopes",
       header: t("roles.permissionsLabel"),
-      width: "minmax(80px,1.5fr)",
+      width: 80,
+      elastic: true,
       tier: 3,
       cell: (c) =>
         c.scopes_granted.length > 0 ? (
@@ -294,7 +300,7 @@ export function useConnectionColumns({
     {
       id: "expires",
       header: t("apiKeys.expirationColumn"),
-      width: "84px",
+      width: 84,
       tier: 3,
       align: "end",
       cell: (c) => <CellDate value={c.expiresAt} granularity="date" />,
@@ -302,7 +308,8 @@ export function useConnectionColumns({
     {
       id: "shared",
       header: t("integration.connection.col.shared"),
-      width: "minmax(128px,1fr)",
+      width: 128,
+      elastic: true,
       // Share menus: the column scrolls into reach rather than waiting for room.
       control: true,
       cell: (c) => <ScopeCell connection={c} packageId={packageId} isAdmin={isAdmin} />,

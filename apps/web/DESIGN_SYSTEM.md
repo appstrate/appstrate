@@ -323,47 +323,36 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   or a narrow tab). A settings list is a table, not cards (except a list that never exceeds a handful of
   rows, such as an agent's connections: plain rows). A matrix (packages by
   workspace) is the one raw shadcn `Table`.
-- `DataTable` (`components/data-table.tsx`) under a `ListToolbar`
-  (`components/list-toolbar.tsx`: search, filters behind one button, column menu,
-  view toggle; `ListFooter` for the count). Grid tracks are
-  `minmax(<floor>px,1fr)`, never `minmax(0,…)`. A header that truncates at 1440
-  px is a column too narrow, fix the width. Text a cell truncates carries its
-  full value in `title` (a name, an email, a list); a column that holds a name
-  has a floor that fits a usual one. `columnMode="scroll"` makes the
-  reader's selected columns authoritative and scrolls them sideways instead of
-  dropping tiers.
+- `DataTable` (`components/data-table.tsx`, the shadcn `Table`) under a `ListToolbar`
+  (`components/list-toolbar.tsx`: search, filters behind one button, column menu;
+  `ListFooter` for the count). A column's `width` is a number of pixels: fixed,
+  or with `elastic` the floor of a column that shares what is left. A header that
+  truncates at 1440 px is a column too narrow, fix the width. Text a cell truncates
+  carries its full value in `title` (a name, an email, a list); a column that holds
+  a name has a floor that fits a usual one. Every column is drawn and the table
+  scrolls sideways, unless the table is `tiered` (a narrow panel, a modal, a detail
+  tab): then a READ column waits for room by its `tier`.
 - **Two rules for every table** (both live in `DataTable`, no caller opts in):
   1. **A column that can be acted on never disappears.** A column declares what it
      is in its definition: a READ column (text, badge, date) may carry a `tier`
-     and wait for room on a narrow screen (tier `2` for a 36rem table, `3` for a
-     56rem one; `column-tiers.test.tsx` checks the arithmetic of every set); a CONTROL column (`control: true`: a
-     select, a switch, a tick, a button, a link that does something) has no tier
-     and is always drawn. The type forbids a `tier` on a control, and
-     `components/test/column-tiers.test.tsx` fails on one in any real column
-     set (add your set to it, and mark every column that holds a control). When a
-     table does not fit, it scrolls sideways and holds its name column (the
-     first read column, with the ticks before it) and its row's end (the
-     headerless « … » column) in place (`sticky`), so a row is always named and
-     its actions are always in reach. When the held columns would take more than
-     half the table's width (a phone, a side panel), they let go and the whole
-     table scrolls as one: a strip of a few pixels between them reads nothing.
-     A scroll is better than a lost control, and
-     a « … » menu is not the place for a dropdown: a control that is the setting
-     (role, share, default) stays in its own column.
-  2. **Columns resize.** Every column with a head has a handle on its right edge
-     (cursor `col-resize`): drag it, double-click it to fit the column to its
-     longest content (one click to see the full names), or focus it and use the
-     arrows (Shift for a bigger step, Enter to fit). A column never goes below
-     its track's floor. The width is kept per table (its `label`) in
-     `localStorage`, like the hidden columns: no account identifier is written
-     to storage (`stores/column-widths-store.ts`, a phone keeps its own), and the table
-     works without it. The row's end and fixed-size ticks have no handle.
+     and wait for room in a `tiered` table (tier `2` for a 36rem table, `3` for a
+     56rem one); a CONTROL column (`control: true`: a select, a switch, a tick, a
+     button, a link that does something) has no tier and is always drawn. The type
+     forbids a `tier` on a control, and `components/test/column-tiers.test.tsx`
+     fails on one in any real column set (add your set to it, and mark every
+     column that holds a control). When a table does not fit, it scrolls sideways
+     and holds its name column (the first read column, with the ticks before it)
+     and its row's end (the headerless « … » column) in place (`sticky`), so a row
+     is always named and its actions are always in reach. A scroll is better than
+     a lost control, and a « … » menu is not the place for a dropdown: a control
+     that is the setting (role, share, default) stays in its own column.
+  2. **A row is a link.** The cover link stretches over the row; the named link
+     lives in the first read cell.
 - **List state lives in the URL** (`lib/list-params.ts`: `useListParams` on a
   page, `useLocalListParams` in a panel that floats over a page): filters are
-  pushed, the search is replaced, a reset is one update. Table or cards is a
-  preference, not a location (`ViewToggle`, `stores/list-view-store.ts`, one
-  store per family of list); hidden columns are in
-  `stores/column-visibility-store.ts`.
+  pushed, the search is replaced, a reset is one update. Runs, schedules, files
+  and integrations are tables; the package index is a card grid. Hidden columns
+  are in `stores/column-visibility-store.ts`.
 - Toolbar buttons have two treatments (`lib/toolbar-button.ts`): `TOOLBAR_UTILITY`
   adjusts the view (filters, columns), `TOOLBAR_ACTION` acts on the data.
   `CollectionTabs` splits one collection into parts at the head of the bar; it is
@@ -499,7 +488,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   own column; it is not an action of the row. `row-actions-one-way.test.ts`
   fails on a direct action beside the menu. A row is a link through the first
   cell (`rowHref`), a titled element inside it needs `relative z-10`. Whatever is raised and is not a
-  control (a name, a held first column's wrapper) hands its click to the row (`handOver` in
+  control (a name, a held cell) hands its click to the row (`handOver` in
   `data-table.tsx`: a plain click, on anything that is not a link, button, field or tab stop), so a click
   on a name opens the row like a click anywhere else. A menu deed that opens the page's own modal pre-filled
   on the row says so in the modal's URL value (`?view-as=space:viewer`, the
@@ -550,7 +539,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   pane is `SectionCard` (`components/section-card.tsx`, a real `<h3>`); a figure with a label is `OperationalStat` (a `dl` row) with
   `OverviewCardAction` as its quiet footer action; a label and value fact grid is
   not a collection. Entity cards in lists: `PackageCard` (every package
-  type, the dashboard's agents included), `ScheduleCard`, `RunCard`; a run as
+  type, the dashboard's agents included), a run as
   a dense list row is `RunRow` (the dashboard, the chat's context panel).
 - Cards are `bg-card` with a `border` on the canvas; a clickable card is one
   stretched link (`absolute inset-0`), never a link around a button.
@@ -717,7 +706,7 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
   `packages/ui/src/components/artifact.tsx`) around `FileViewer`
   (`components/file-viewer.tsx`, by the server's `preview_kind`; its HTML sandbox
   is `allow-scripts` only, never loosen it). A file list is `DocumentListPanel`
-  (table or `FileTile` grid), a preview is addressable as `?preview=<id>`.
+  (a table), a preview is addressable as `?preview=<id>`.
 - **A package's files** are one explorer in Paramètres › Explorer
   (`components/package-files/`: `FileTree` is a virtualised WAI-ARIA tree,
   `PackageFilesView` the editor). Edits stay in the package draft until the save

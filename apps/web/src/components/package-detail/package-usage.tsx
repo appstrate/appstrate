@@ -27,7 +27,6 @@ export function PackageUsage({ agentIds }: { agentIds: string[] }) {
         search={{ value: search, onChange: setSearch, placeholder: t("packages.usageSearch") }}
       />
       <PackagesTable
-        tableId="package-usage"
         label={t("packages.usedBy")}
         columns={columns}
         items={items.filter((item) =>

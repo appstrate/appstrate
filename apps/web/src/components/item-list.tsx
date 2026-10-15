@@ -8,7 +8,7 @@
 import type { ReactNode } from "react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { collectionVerdict, type CollectionState } from "./collection";
-import { CollectionStates } from "./collection-frame";
+import { CollectionStates } from "./collection-states";
 
 const SKELETON_ITEMS = 3;
 

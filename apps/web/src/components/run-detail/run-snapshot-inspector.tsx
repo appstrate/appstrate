@@ -487,6 +487,7 @@ export function RunInputFacts({
         <Fact label={inputDocumentLabel}>
           <div className="min-w-0">
             <DocumentListPanel
+              tiered
               documents={inputDocuments}
               isLoading={isLoading}
               error={error}

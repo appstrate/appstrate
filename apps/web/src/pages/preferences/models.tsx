@@ -141,7 +141,6 @@ export function PreferencesModelsPage() {
 
       <ProvidersTable
         label={t("preferences.tabModels")}
-        tableId="my-providers"
         rows={rows}
         showType
         isLoading={credentialsQuery.isLoading || modelsQuery.isLoading}

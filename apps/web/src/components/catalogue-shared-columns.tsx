@@ -26,7 +26,8 @@ export function useCatalogueSharedColumns({
     {
       id: "item",
       header: t("catalogue.shared.item"),
-      width: "minmax(160px,2fr)",
+      width: 160,
+      elastic: true,
       cell: (share) => (
         <span className="min-w-0">
           <CellText strong>{share.pkg.name || share.pkg.id}</CellText>
@@ -37,14 +38,16 @@ export function useCatalogueSharedColumns({
     {
       id: "type",
       header: t("proxies.col.type"),
-      width: "minmax(80px,0.7fr)",
+      width: 80,
+      elastic: true,
       tier: 2,
       cell: (share) => <CellText>{t(CATALOGUE_TYPE_LABEL_KEY[share.pkg.type])}</CellText>,
     },
     {
       id: "by",
       header: t("catalogue.shared.by"),
-      width: "minmax(80px,1fr)",
+      width: 80,
+      elastic: true,
       tier: 2,
       cell: (share) =>
         share.sharedBy ? (
@@ -56,14 +59,16 @@ export function useCatalogueSharedColumns({
     {
       id: "with",
       header: t("catalogue.shared.with"),
-      width: "minmax(80px,1fr)",
+      width: 80,
+      elastic: true,
       tier: 3,
       cell: (share) => <CellText strong>{spaceNameOf(share.spaceId)}</CellText>,
     },
     {
       id: "action",
       header: t("catalogue.shared.action"),
-      width: "minmax(160px,1.2fr)",
+      width: 160,
+      elastic: true,
       align: "end",
       control: true,
       cell: (share) => {

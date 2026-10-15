@@ -38,7 +38,8 @@ export function usePersonalServiceColumns({
     {
       id: "service",
       header: t("providers.col.provider"),
-      width: "minmax(110px,1.2fr)",
+      width: 110,
+      elastic: true,
       cell: (row) => {
         const Icon = getProviderIcon(row.service) ?? KeyRound;
         return (
@@ -54,13 +55,15 @@ export function usePersonalServiceColumns({
     {
       id: "models",
       header: t("providers.col.models"),
-      width: "minmax(100px,1.4fr)",
+      width: 100,
+      elastic: true,
       cell: (row) => <ModelsCell models={row.models} />,
     },
     {
       id: "keys",
       header: t("providers.col.keys"),
-      width: "minmax(100px,1.8fr)",
+      width: 100,
+      elastic: true,
       tier: 2,
       cell: (row) => {
         const text = row.holders.length > 0 ? holdersText(row, t("credentials.you")) : null;
@@ -78,7 +81,8 @@ export function usePersonalServiceColumns({
     {
       id: "state",
       header: t("providers.col.state"),
-      width: "minmax(100px,1.5fr)",
+      width: 100,
+      elastic: true,
       tier: 2,
       cell: (row) => (
         <RowStateCell

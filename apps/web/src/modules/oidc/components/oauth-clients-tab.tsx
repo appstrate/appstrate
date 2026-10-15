@@ -65,7 +65,6 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
 
       <DataTable
         label={t("settings:oauthClients.tableLabel")}
-        tableId="oauth-clients"
         columns={columns}
         rows={data ?? []}
         rowKey={(client) => client.clientId}

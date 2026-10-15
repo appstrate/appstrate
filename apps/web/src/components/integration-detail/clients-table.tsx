@@ -413,9 +413,7 @@ export function ClientsTable({
       )}
 
       <DataTable
-        tableId="integration-clients"
         surface="integrated"
-        columnMode="scroll"
         label={t("integration.clients.title")}
         columns={columns}
         rows={rows}

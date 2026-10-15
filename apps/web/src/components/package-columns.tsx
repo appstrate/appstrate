@@ -4,15 +4,9 @@
  * The packages column set — agents, skills and MCP servers, which are the
  * same catalogue rendered three times.
  *
- * CARDS stay the default for this family, with the table beside them
- * (`view-toggle`): a card carries a description at a length you can actually
- * read, which is what you need when you are choosing an agent rather than
- * scanning a run. The table is for the other moment — twenty of them, and you
- * want to know which ones are system, which are running, and at what version,
- * in one glance down a column.
- *
- * It reads the same {@link CardItem} the cards do, so a screen switches views
- * without either side knowing anything the other does not.
+ * The index pages draw cards; the table serves the catalogue's management view and the
+ * "used by" panel, where you scan twenty packages down a column. It reads the same
+ * {@link CardItem} the cards do.
  */
 
 import { useTranslation } from "react-i18next";
@@ -45,7 +39,8 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
     {
       id: "name",
       header: t("list.column.name"),
-      width: "minmax(188px,1.6fr)",
+      width: 188,
+      elastic: true,
       cell: (item) => (
         <div className="flex min-w-0 items-center gap-3">
           {item.identity && (
@@ -80,7 +75,8 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
     {
       id: "keywords",
       header: t("manifest.keywords"),
-      width: "minmax(140px,1fr)",
+      width: 140,
+      elastic: true,
       tier: 3,
       cell: (item) => {
         const used =
@@ -95,7 +91,7 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
     {
       id: "state",
       header: t("list.column.state"),
-      width: "104px",
+      width: 104,
       // Waits for a 36rem table. It carries a badge only while a run is in
       // flight and an em dash the rest of the time, so at tier one it would be
       // a column of dashes taking 104px from the two things a phone needs here:

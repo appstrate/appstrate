@@ -184,7 +184,6 @@ export function OrgSettingsModelsPage() {
         <div className="mb-8">
           <ProvidersTable
             label={t("providers.tabOrg")}
-            tableId="org-providers"
             rows={orgRows}
             isLoading={modelsLoading || (canReadCredentials && pkLoading)}
             error={tableError}
@@ -232,7 +231,6 @@ export function OrgSettingsModelsPage() {
                   <h3 className="mb-3 text-sm font-semibold">{t("providers.memberKeys")}</h3>
                   <ProvidersTable
                     label={t("providers.memberKeys")}
-                    tableId="member-providers"
                     rows={personalRows}
                     showType
                     isLoading={false}

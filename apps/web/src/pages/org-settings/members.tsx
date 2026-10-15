@@ -147,7 +147,6 @@ export function OrgSettingsMembersPage() {
           per-list empty sentence here would fire while invitations are pending
           and say the page is empty when it is not. */}
       <DataTable
-        tableId="members"
         label={t("orgSettings.tabMembers")}
         columns={memberColumns}
         rows={members}

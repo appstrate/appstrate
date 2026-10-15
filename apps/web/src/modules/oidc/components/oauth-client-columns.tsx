@@ -19,13 +19,15 @@ export function useOAuthClientColumns({
     {
       id: "client",
       header: t("spaces.nameLabel"),
-      width: "minmax(72px,1.3fr)",
+      width: 72,
+      elastic: true,
       cell: (client) => <CellText strong>{client.name ?? client.clientId}</CellText>,
     },
     {
       id: "clientId",
       header: t("oauthClients.clientIdColumn"),
-      width: "minmax(88px,1.3fr)",
+      width: 88,
+      elastic: true,
       tier: 2,
       cell: (client) => (
         <span className="text-muted-foreground block truncate text-sm" title={client.clientId}>
@@ -36,7 +38,7 @@ export function useOAuthClientColumns({
     {
       id: "type",
       header: t("proxies.col.type"),
-      width: "60px",
+      width: 60,
       tier: 2,
       cell: (client) => (
         <CellText>
@@ -49,7 +51,7 @@ export function useOAuthClientColumns({
     {
       id: "status",
       header: t("proxies.col.status"),
-      width: "56px",
+      width: 56,
       tier: 2,
       cell: (client) => (
         <Badge variant={client.disabled ? "secondary" : "success"}>
@@ -60,7 +62,8 @@ export function useOAuthClientColumns({
     {
       id: "redirectUris",
       header: t("oauthClients.redirectUris"),
-      width: "minmax(88px,1.4fr)",
+      width: 88,
+      elastic: true,
       tier: 2,
       cell: (client) => {
         const label = client.redirectUris.join(", ");

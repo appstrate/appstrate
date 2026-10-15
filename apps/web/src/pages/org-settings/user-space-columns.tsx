@@ -54,7 +54,8 @@ export function useUserSpaceColumns({
     {
       id: "space",
       header: t("source.space"),
-      width: "minmax(120px,1.4fr)",
+      width: 120,
+      elastic: true,
       cell: (space) => (
         <CellText strong title={space.name}>
           {space.name}

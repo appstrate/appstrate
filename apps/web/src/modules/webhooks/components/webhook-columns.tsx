@@ -27,7 +27,8 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     {
       id: "endpoint",
       header: t("settings:webhooks.urlColumn"),
-      width: "minmax(100px,2fr)",
+      width: 100,
+      elastic: true,
       cell: (wh) => (
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate font-mono text-xs" title={wh.url}>
@@ -44,7 +45,7 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     {
       id: "state",
       header: t("settings:providers.col.state"),
-      width: "72px",
+      width: 72,
       cell: (wh) => (
         <Badge variant={wh.enabled ? "success" : "secondary"}>
           {wh.enabled ? t("settings:catalogue.filter.active") : t("settings:webhooks.inactive")}
@@ -54,7 +55,8 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     {
       id: "events",
       header: t("settings:webhooks.eventsColumn"),
-      width: "minmax(100px,1.4fr)",
+      width: 100,
+      elastic: true,
       // Tier 2, not 3: this list is a full page, but it is also reachable in
       // the settings dialog, which never crosses the 56rem threshold.
       tier: 2,
@@ -70,14 +72,15 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     {
       id: "agent",
       header: t("settings:integration.admin.pinManagement.colAgent"),
-      width: "minmax(80px,1fr)",
+      width: 80,
+      elastic: true,
       tier: 2,
       cell: (wh) => <CellText>{wh.packageId || t("settings:webhooks.allAgents")}</CellText>,
     },
     {
       id: "payload",
       header: t("settings:webhooks.payloadColumn"),
-      width: "88px",
+      width: 88,
       tier: 2,
       // The mode's short name; the sentence that says what it carries on hover.
       cell: (wh) => {
