@@ -272,7 +272,6 @@ const DYNAMIC_KEY_PREFIXES = [
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
   "orgRolesGuide.access.", // pages/org-settings/org-roles.tsx — space reach per org role
-  "orgRolesGuide.can.", // pages/org-settings/org-roles.tsx — one key per capability row
   "orgSettings.roleHint.", // components/org-invitation-form.tsx + OAuth signup form
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx
   "permissions.label.", // lib/permission-labels.ts — permissionLabel()
