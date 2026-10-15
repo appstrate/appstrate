@@ -2,6 +2,10 @@ Vapi places an outbound phone call: a voice assistant defined in the request ask
 the callee a question, then Vapi extracts the answer as JSON. Base URL:
 `https://api.vapi.ai`.
 
+A 401 or 403 from Vapi means the connection's key is wrong or is the public
+key. Do not retry and do not try other URLs: stop and report that the Vapi
+connection must be fixed with the private key.
+
 #### 1. Pick the caller number
 
 `GET /phone-number` returns an array of numbers (`id`, `number`, `provider`,
