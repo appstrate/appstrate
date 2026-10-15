@@ -109,7 +109,9 @@ export function useCatalogueOriginColumn<
     cell: (item) => {
       const home = item.source === "system" ? null : homeNameOf?.(item);
       return (
-        <span className="flex min-w-0 flex-col items-start">
+        // `items-start` sizes each child to its content, so a long name would never meet
+        // the track's edge and `truncate` would not engage: cap them at the column.
+        <span className="flex min-w-0 flex-col items-start [&>*]:max-w-full">
           <CellText>{item.source === "system" ? t("catalogue.sourceSystem") : orgName}</CellText>
           {item.autoInstalled && <MetaBadge label={t("agents:list.badgeAutoInstalled")} />}
           {home && (

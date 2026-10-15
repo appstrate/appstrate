@@ -57,3 +57,10 @@ describe("the origin column", () => {
     expect(render(<>{packageOrigin.cell(auto)}</>)).toContain(agentsFr["list.badgeAutoInstalled"]);
   });
 });
+
+describe("the origin column's width", () => {
+  it("caps its lines at the column, so a long organization name truncates instead of spilling over its neighbour", () => {
+    const html = render(<>{packageOrigin.cell({ id: "@acme/x", source: "local" } as CardItem)}</>);
+    expect(html).toContain("[&amp;&gt;*]:max-w-full");
+  });
+});
