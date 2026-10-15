@@ -74,7 +74,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   prompt lists them in an `<available_integrations>` catalog (name,
   description, path of the doc) and the agent reads the doc before its first
   call. The doc is no longer cut at 50 KB, and it is the one of the version the
-  run executes, not the integration's draft.
+  run executes, not the integration's draft. The prompt's own `### Skills`
+  list is removed: Pi already lists the skills from their `SKILL.md`
+  frontmatter, so the agent saw each skill twice, with two descriptions.
   - **Agent export** (`GET /api/agents/{scope}/{name}/bundle`) carries the same
     integration members, frozen as a run freezes them: an integration pin no
     version satisfies answers `422 dependency_unresolved`, and an export of an
@@ -95,7 +97,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     Before, it reached only the draft column, and a version published from
     such a draft had no `INTEGRATION.md`: republish one to give runs its doc.
     An empty `content` now removes the stored `INTEGRATION.md`, so the next
-    version published carries no doc, instead of the previous one.
+    version published carries no doc, instead of the previous one. Saved with
+    `operations`, `content` is applied first and they apply on top, as for a
+    skill's `SKILL.md`; before, it was ignored.
   - **A run on an integration's draft** whose manifest is saved between the
     freeze and the bundle starts the tools it froze without the doc (a
     warning is logged), rather than with a doc written for other tools.

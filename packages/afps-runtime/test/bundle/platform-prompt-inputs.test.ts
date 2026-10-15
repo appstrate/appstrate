@@ -100,7 +100,8 @@ describe("buildPlatformPromptInputs", () => {
     );
     const skill = pkg("@acme/s1@1.0.0", { type: "skill", name: "skill-one" });
     const inputs = buildPlatformPromptInputs(bundleOf(root, mcp, skill), ctx());
-    expect(inputs.availableSkills).toEqual([{ id: "@acme/s1", name: "skill-one" }]);
+    // Skills are announced by the runner from SKILL.md, never by this prompt.
+    expect(renderPlatformPrompt(inputs)).not.toContain("skill-one");
   });
 
   it("applies scalar overrides verbatim (platformName, timeoutSeconds)", () => {
@@ -150,7 +151,6 @@ describe("buildPlatformPromptInputs", () => {
   it("omits section-driving fields when the bundle has none", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
-    expect(inputs.availableSkills).toEqual([]);
     expect(inputs.integrations).toEqual([]);
     expect(inputs.inputSchema).toBeUndefined();
     expect(inputs.outputSchema).toBeUndefined();

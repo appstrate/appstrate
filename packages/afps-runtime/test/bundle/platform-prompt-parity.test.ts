@@ -175,8 +175,9 @@ describe("cross-path prompt parity", () => {
       // Tools are advertised via MCP tools/list, never listed in the prompt.
       expect(prompt).not.toContain("### Tools");
       expect(prompt).not.toContain("**search**: Search the web");
-      expect(prompt).toContain("### Skills");
-      expect(prompt).toContain("**writing**: Write clear prose");
+      // Skills are announced by Pi from SKILL.md, never by this prompt.
+      expect(prompt).not.toContain("### Skills");
+      expect(prompt).not.toContain("Write clear prose");
       expect(prompt).toContain("<name>@fixture/crm</name>");
       expect(prompt).toContain("<location>.pi/integrations/@fixture/crm/INTEGRATION.md</location>");
       expect(prompt).not.toContain("# CRM API");

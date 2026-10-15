@@ -86,7 +86,6 @@ export {
   CONTEXT_FREE_FILENAMES_PHRASE,
   UNAVAILABLE_INTEGRATION_REASONS,
   type PlatformPromptOptions,
-  type PlatformPromptTool,
   type PlatformPromptIntegration,
   type PlatformPromptSchema,
 } from "./platform-prompt.ts";

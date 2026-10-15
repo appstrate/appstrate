@@ -23,15 +23,13 @@
  * container runner produce byte-identical prompts from the same inputs.
  */
 
-import type { Bundle, BundlePackage } from "./types.ts";
+import type { Bundle } from "./types.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
 import type {
   PlatformPromptIntegration,
   PlatformPromptOptions,
   PlatformPromptSchema,
-  PlatformPromptTool,
 } from "./platform-prompt.ts";
-import { parsePackageIdentity } from "./types.ts";
 import { PI_INTEGRATIONS_DIR } from "./workspace-layout.ts";
 import { readIntegrationRefs } from "../resolvers/integration-api-call.ts";
 import { resolvePackageRef } from "../resolvers/bundle-adapter.ts";
@@ -85,45 +83,6 @@ function asPromptSchema(
     );
   }
   return out;
-}
-
-/**
- * Build `PlatformPromptTool` from a skill package's manifest.
- *
- * Skills are workspace files, not LLM-facing tools, so the package
- * display `manifest.name`/`description` are the only inputs. Falls back
- * to the parsed package id when `name` is absent.
- */
-function skillFromPackage(pkg: BundlePackage): PlatformPromptTool {
-  const manifest = pkg.manifest as Record<string, unknown>;
-  const parsed = parsePackageIdentity(pkg.identity);
-  const id = parsed ? parsed.packageId : pkg.identity;
-  const out: PlatformPromptTool = { id };
-  if (typeof manifest["name"] === "string") {
-    out.name = manifest["name"];
-  }
-  if (typeof manifest["description"] === "string") {
-    out.description = manifest["description"];
-  }
-  return out;
-}
-
-/**
- * Walk all non-root packages once and collect the skill references.
- * Tools are NOT collected: every agent tool (runtime, integration,
- * first-party) is advertised to the model via MCP `tools/list`, so the
- * prompt does not list them or their docs (see `renderPlatformPrompt`).
- * Skills are not MCP tools — they are workspace files — so they keep
- * their prompt section.
- */
-function walkDependencies(bundle: Bundle): { skills: PlatformPromptTool[] } {
-  const skills: PlatformPromptTool[] = [];
-  for (const [identity, pkg] of bundle.packages) {
-    if (identity === bundle.root) continue;
-    const type = (pkg.manifest as Record<string, unknown>)["type"];
-    if (type === "skill") skills.push(skillFromPackage(pkg));
-  }
-  return { skills };
 }
 
 /**
@@ -182,7 +141,6 @@ export function buildPlatformPromptInputs(
   const root = bundle.packages.get(bundle.root);
   const rootManifest = root?.manifest as Record<string, unknown> | undefined;
 
-  const { skills } = walkDependencies(bundle);
   const { availableIntegrationIds, ...promptOverrides } = overrides;
   const available = new Set(availableIntegrationIds ?? []);
 
@@ -195,7 +153,6 @@ export function buildPlatformPromptInputs(
     ...(readTimeoutSeconds(bundle) !== undefined
       ? { timeoutSeconds: readTimeoutSeconds(bundle)! }
       : {}),
-    availableSkills: skills,
     integrations: integrationsFromBundle(bundle).filter((integ) => available.has(integ.id)),
     ...(inputSchema ? { inputSchema } : {}),
     ...(outputSchema ? { outputSchema } : {}),

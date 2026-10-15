@@ -214,17 +214,6 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("hard container limits");
   });
 
-  it("lists skills (tools come from MCP tools/list, never the prompt)", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      availableSkills: [{ id: "@x/skill", name: "x-skill" }],
-    });
-    expect(out).not.toContain("### Tools");
-    expect(out).toContain("### Skills");
-    expect(out).toContain("**x-skill**");
-  });
-
   it("renders the integrations catalog with name, description and location", () => {
     const out = renderPlatformPrompt({
       template: "T",
@@ -266,20 +255,17 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("    <location>");
   });
 
-  it("places the integrations catalog right after the skills catalog", () => {
+  it("places the integrations catalog before the unavailable integrations", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
-      availableSkills: [{ id: "@x/skill", name: "x-skill" }],
       integrations: [{ id: "@org/github-mcp" }],
       unavailableIntegrations: [{ id: "@org/gmail", reason: "it is switched off" }],
     });
-    const skills = out.indexOf("### Skills");
     const integrations = out.indexOf("### Integrations");
-    expect(skills).toBeGreaterThan(-1);
-    expect(integrations).toBeGreaterThan(skills);
+    expect(integrations).toBeGreaterThan(-1);
     expect(out.indexOf("## Unavailable Integrations")).toBeGreaterThan(integrations);
-    expect(out).toContain("available in your workspace at `.pi/skills/`");
+    expect(out).not.toContain("### Skills");
   });
 
   it("XML-escapes name, description and location", () => {

@@ -778,7 +778,7 @@ describe("buildEnrichedPrompt — tools and skills", () => {
     expect(prompt).not.toContain("run_history");
   });
 
-  it("includes available skills", () => {
+  it("leaves the skills catalog to the runner (Pi announces them from SKILL.md)", () => {
     const ctx = baseContext({
       availableSkills: [
         { id: "@org/research", name: "Research", description: "Deep research capability" },
@@ -786,15 +786,8 @@ describe("buildEnrichedPrompt — tools and skills", () => {
     });
 
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("### Skills");
-    expect(prompt).toContain("- **@org/research**: Deep research capability");
-    expect(prompt).toContain(".pi/skills/");
-  });
-
-  it("omits skills section when no skills", () => {
-    const ctx = baseContext({ availableSkills: [] });
-    const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("### Skills");
+    expect(prompt).not.toContain("Deep research capability");
   });
 });
 

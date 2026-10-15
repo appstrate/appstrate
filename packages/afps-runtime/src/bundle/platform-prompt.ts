@@ -18,7 +18,6 @@ import type { ExecutionContext } from "../types/execution-context.ts";
 import { isFileField } from "@appstrate/afps-shared/file-field";
 import type { PromptViewUpload } from "./prompt-renderer.ts";
 import { jsonText } from "@appstrate/afps-shared/json-text";
-import { PI_SKILLS_DIR } from "./workspace-layout.ts";
 
 /**
  * CommonMark inline code span: the fence is one backtick longer than the
@@ -48,12 +47,6 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-export interface PlatformPromptTool {
-  id: string;
-  name?: string;
-  description?: string;
 }
 
 /**
@@ -126,16 +119,10 @@ export interface PlatformPromptOptions {
   };
 
   /**
-   * Bundled skills catalogue. Skills are workspace file references, not
-   * MCP tools, so they keep a prompt section (tools are advertised via
-   * MCP `tools/list` and are deliberately NOT listed in the prompt).
-   */
-  availableSkills?: ReadonlyArray<PlatformPromptTool>;
-
-  /**
-   * Integrations available in this run, rendered as a catalog next to the
-   * skills. Their tools come through MCP `tools/list`; each entry only
-   * points at its `INTEGRATION.md`, which the agent reads on demand.
+   * Integrations available in this run, rendered as a catalog shaped like
+   * the runner's own `<available_skills>`. Their tools come through MCP
+   * `tools/list`; each entry only points at its `INTEGRATION.md`, which the
+   * agent reads on demand.
    */
   integrations?: ReadonlyArray<PlatformPromptIntegration>;
 
@@ -318,26 +305,15 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // description + input schema). The prompt deliberately does NOT list
   // them: a partial/stale in-prompt list would contradict the live tool
   // set, and the Communication contract above already states the only
-  // platform invariant the model can't infer from `tools/list`. Skills
-  // (below) are NOT MCP tools — they're workspace files — so they keep
-  // their own section.
-
-  if (opts.availableSkills && opts.availableSkills.length > 0) {
-    sections.push("### Skills");
-    sections.push(
-      `The following skill references are available in your workspace at \`${PI_SKILLS_DIR}/\`:\n`,
-    );
-    for (const skill of opts.availableSkills) {
-      const desc = skill.description ? `: ${skill.description}` : "";
-      sections.push(`- **${skill.name || skill.id}**${desc}`);
-    }
-    sections.push("");
-  }
+  // platform invariant the model can't infer from `tools/list`. Skills are
+  // not listed either: Pi announces them itself (`<available_skills>`, from
+  // each SKILL.md frontmatter), and a second list could only disagree.
 
   // --- Integrations ---
-  // Sibling catalog of the skills: tools are advertised via MCP
-  // `tools/list` under `{ns}__*`, and `<location>` discloses the
-  // integration's `INTEGRATION.md` for the agent to read on demand.
+  // The runner has no catalog of its own for these, so this one mirrors
+  // Pi's skills catalog: tools are advertised via MCP `tools/list` under
+  // `{ns}__*`, and `<location>` discloses the integration's
+  // `INTEGRATION.md` for the agent to read on demand.
   if (opts.integrations && opts.integrations.length > 0) {
     sections.push("### Integrations");
     sections.push(

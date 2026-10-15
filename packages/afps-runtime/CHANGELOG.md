@@ -29,9 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `renderPlatformPrompt` renders the integrations as a `### Integrations`
   catalog (`<available_integrations>`, one `<integration>` with `<name>`,
-  optional `<description>` and `<location>`) right after `### Skills`, instead
-  of one `## Integration: <id>` section with the `INTEGRATION.md` text inlined
-  under `### API Documentation`. The agent reads the file on demand (AFPS §3.5).
+  optional `<description>` and `<location>`), instead of one
+  `## Integration: <id>` section with the `INTEGRATION.md` text inlined under
+  `### API Documentation`. The agent reads the file on demand (AFPS §3.5).
+- The `### Skills` section is gone: Pi announces the bundled skills itself
+  (`<available_skills>`, from each `SKILL.md` frontmatter), and the second list,
+  built from the manifests, could describe them differently.
+  `PlatformPromptOptions.availableSkills` and the `PlatformPromptTool` type are
+  removed.
 - `PlatformPromptIntegration.doc` is removed; pass `location` (the
   workspace-relative path of `INTEGRATION.md`) instead.
 - `buildPlatformPromptInputs` derives `integrations` from the bundle: one
