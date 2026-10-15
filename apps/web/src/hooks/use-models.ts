@@ -33,7 +33,7 @@ export function useModels(enabled = true) {
   );
 }
 
-export function useCreateModel() {
+function useCreateModel() {
   const invalidate = useInvalidatePaths("/api/models");
   return $api.useMutation("post", "/api/models", {
     meta: { errorHandledByCaller: true },
@@ -41,7 +41,7 @@ export function useCreateModel() {
   });
 }
 
-export function useUpdateModel() {
+function useUpdateModel() {
   const invalidate = useInvalidatePaths("/api/models");
   return $api.useMutation("patch", "/api/models/{id}", {
     meta: { errorHandledByCaller: true },

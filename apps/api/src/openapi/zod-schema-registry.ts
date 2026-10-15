@@ -27,6 +27,7 @@ import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts
 
 // --- Model schemas (routes/models.ts) ---
 import {
+  applyModelChoiceSchema,
   createModelSchema,
   seedModelsSchema,
   updateModelSchema,
@@ -182,6 +183,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/models/{id}",
     jsonSchema: toJsonSchema(updateModelSchema),
     description: "Update model",
+  },
+  {
+    method: "POST",
+    path: "/api/models/apply",
+    jsonSchema: toJsonSchema(applyModelChoiceSchema),
+    description: "Apply a model-provider choice",
   },
   {
     method: "PUT",

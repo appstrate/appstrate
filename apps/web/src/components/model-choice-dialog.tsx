@@ -19,7 +19,7 @@ import { TextSkeleton } from "./loading-skeletons";
 import { ModelChoiceList } from "./model-choice";
 import { useModelChoice, type DiscoverWith } from "../hooks/use-model-choice";
 import {
-  attemptTarget,
+  choiceRefusal,
   useApplyModelChoice,
   type NewProviderCredential,
 } from "../hooks/use-apply-model-choice";
@@ -30,7 +30,6 @@ import {
 } from "../hooks/use-model-provider-credentials";
 import { useModels, type OrgModelInfo } from "../hooks/use-models";
 import { errorMessage } from "../lib/mutation-error";
-import { knownModels } from "@/lib/model-choice";
 import { isSystemModel, memberModels } from "@/lib/model-providers";
 import { resolveProviderEntry } from "@/lib/provider-registry-helpers";
 
@@ -76,9 +75,7 @@ function ChoiceDialog({
   header,
 }: ChoiceDialogProps) {
   const { t } = useTranslation(["settings", "common"]);
-  // What a refused submission already created is known to the retry, which asks only for the rest.
-  const [created, setCreated] = useState<OrgModelInfo[]>([]);
-  const existing = knownModels(given, created);
+  const existing = given;
   const choice = useModelChoice({
     provider,
     existing,
@@ -87,8 +84,6 @@ function ChoiceDialog({
     hasDefault,
   });
   const { apply, isPending } = useApplyModelChoice();
-  // The key a refused submission already minted (`attemptTarget`).
-  const [minted, setMinted] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ ids: string[]; refusal: string | null } | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
 
@@ -96,18 +91,17 @@ function ChoiceDialog({
     setFailed(null);
     setRefusal(null);
     try {
-      const outcome = await apply({
+      await apply({
         plan: choice.plan,
-        existing,
-        ...attemptTarget(minted, { credentialId, providerId: provider.providerId, newCredential }),
+        target: { credentialId, providerId: provider.providerId },
+        ...(newCredential ? { newCredential } : {}),
       });
-      if (outcome.credentialId) setMinted(outcome.credentialId);
-      setCreated((models) => [...models, ...outcome.createdModels]);
-      if (outcome.failedModelIds.length === 0) onClose();
-      else setFailed({ ids: outcome.failedModelIds, refusal: outcome.refusal });
+      onClose();
     } catch (err) {
-      // The key was refused: nothing was written.
-      setRefusal(errorMessage(err));
+      // Refused as a whole or entry by entry: either way nothing was written.
+      const refused = choiceRefusal(err, choice.plan);
+      if (refused) setFailed({ ids: refused.failedModelIds, refusal: refused.refusal });
+      else setRefusal(errorMessage(err));
     }
   };
 

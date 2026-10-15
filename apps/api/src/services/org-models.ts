@@ -56,6 +56,9 @@ import {
   createDefaultPointer,
   isInvalidTextRepresentation,
   isUniqueViolation,
+  inTransaction,
+  type DbOrTx,
+  type Tx,
 } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
@@ -507,6 +510,7 @@ export async function getOrgModel(
 export async function getOrgModelRow(
   orgId: string,
   id: string,
+  executor: DbOrTx = db,
 ): Promise<
   | {
       label: string;
@@ -519,7 +523,7 @@ export async function getOrgModelRow(
     }
   | undefined
 > {
-  const [row] = await db
+  const [row] = await executor
     .select({
       label: orgModels.label,
       providerId: orgModels.providerId,
@@ -545,6 +549,8 @@ export async function deriveModelLabel(
   orgId: string,
   providerId: string,
   modelId: string,
+  /** Labels a batch already picked, not yet written: deduped against like stored ones. */
+  pending: readonly string[] = [],
 ): Promise<string> {
   const defaults = resolveCatalogDefaults(providerId, modelId);
   const base = defaults.label ?? modelId;
@@ -552,10 +558,7 @@ export async function deriveModelLabel(
     .select({ label: orgModels.label })
     .from(orgModels)
     .where(scopedWhere(orgModels, { orgId }));
-  return dedupeLabel(
-    base,
-    rows.map((r) => r.label),
-  );
+  return dedupeLabel(base, [...rows.map((r) => r.label), ...pending]);
 }
 
 // --- CRUD (DB models only) ---
@@ -572,6 +575,7 @@ async function asDuplicateBinding(
   orgId: string,
   binding: { credentialId: string | null; providerId: string },
   modelId: string,
+  executor: DbOrTx = db,
 ): Promise<never> {
   if (!isUniqueViolation(err)) throw err;
   // One row per binding: an organization credential, or each member's own
@@ -580,7 +584,7 @@ async function asDuplicateBinding(
     binding.credentialId === null
       ? [isNull(orgModels.credentialId), eq(orgModels.providerId, binding.providerId)]
       : [eq(orgModels.credentialId, binding.credentialId)];
-  const [existing] = await db
+  const [existing] = await executor
     .select({ id: orgModels.id })
     .from(orgModels)
     .where(
@@ -625,6 +629,7 @@ interface ModelBindingInput {
 async function resolveOrgBinding(
   orgId: string,
   input: ModelBindingInput,
+  executor: DbOrTx = db,
 ): Promise<{ credentialId: string | null; providerId: string }> {
   if (input.credentialId === null) {
     if (!input.providerId) {
@@ -639,7 +644,7 @@ async function resolveOrgBinding(
     }
     return { credentialId: null, providerId: input.providerId };
   }
-  const credential = await loadCredentialBinding(orgId, input.credentialId);
+  const credential = await loadCredentialBinding(orgId, input.credentialId, executor);
   if (!credential) throw invalidRequest("credentialId is unknown", "credentialId");
   if (!isBindableCredential(credential)) throw personalCredentialNotBindable();
   if (input.providerId !== undefined && input.providerId !== credential.providerId) {
@@ -675,13 +680,14 @@ export async function createOrgModel(
     cost?: ModelCost;
     aliased?: boolean;
   },
+  executor: DbOrTx = db,
 ): Promise<string> {
-  const { credentialId, providerId } = await resolveOrgBinding(orgId, binding);
+  const { credentialId, providerId } = await resolveOrgBinding(orgId, binding, executor);
   refuseUnboundAlias(capabilities?.aliased === true, credentialId);
   // The catch sits OUTSIDE the transaction on purpose: a failed statement
   // aborts it, so `asDuplicateBinding`'s lookup could not run inside.
   try {
-    return await db.transaction(async (tx) => {
+    return await inTransaction(executor, async (tx) => {
       const [row] = await tx
         .insert(orgModels)
         .values({
@@ -706,7 +712,7 @@ export async function createOrgModel(
       return row!.id;
     });
   } catch (err) {
-    return await asDuplicateBinding(err, orgId, { credentialId, providerId }, modelId);
+    return await asDuplicateBinding(err, orgId, { credentialId, providerId }, modelId, executor);
   }
 }
 
@@ -726,21 +732,27 @@ export async function updateOrgModel(
     credentialId?: string | null;
     aliased?: boolean;
   },
+  executor: DbOrTx = db,
 ): Promise<void> {
   if (isSystemModel(modelDbId)) {
     throw new Error("Cannot modify built-in model");
   }
-  const current = await getOrgModelRow(orgId, modelDbId);
+  const current = await getOrgModelRow(orgId, modelDbId, executor);
   if (!current) throw notFound("Model not found");
 
   const binding =
     data.credentialId !== undefined || data.providerId !== undefined
-      ? await resolveOrgBinding(orgId, {
-          credentialId: data.credentialId === undefined ? current.credentialId : data.credentialId,
-          // A new org credential names its own provider; otherwise the row keeps its provider,
-          // which an unbinding also keeps.
-          providerId: data.providerId ?? (data.credentialId ? undefined : current.providerId),
-        })
+      ? await resolveOrgBinding(
+          orgId,
+          {
+            credentialId:
+              data.credentialId === undefined ? current.credentialId : data.credentialId,
+            // A new org credential names its own provider; otherwise the row keeps its provider,
+            // which an unbinding also keeps.
+            providerId: data.providerId ?? (data.credentialId ? undefined : current.providerId),
+          },
+          executor,
+        )
       : null;
 
   // Keys of `updateModelSchema` (routes/models.ts).
@@ -761,7 +773,7 @@ export async function updateOrgModel(
 
   const rowWhere = scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] });
   try {
-    await db.transaction(async (tx) => {
+    await inTransaction(executor, async (tx) => {
       // The invariants are checked on the row as locked, so two concurrent
       // patches cannot each pass on the state the other one is changing.
       const [locked] = await tx
@@ -819,6 +831,7 @@ export async function updateOrgModel(
       orgId,
       binding ?? { credentialId: current.credentialId, providerId: current.providerId },
       data.modelId ?? current.modelId,
+      executor,
     );
   }
   clearResolvedModelCache();
@@ -951,28 +964,41 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
       "This model's provider credential must be reconnected before it can be the default model. Reconnect the credential, or pick another model.",
     );
   }
-  await db.transaction(async (tx) => {
-    // `resolveModel` skips a switched-off row. `enabled` is read under the row
-    // lock `updateOrgModel` takes before checking the pointer, so a concurrent
-    // disable is either seen here or sees this pointer.
-    if (row && modelDbId !== null) {
-      const [locked] = await tx
-        .select({ enabled: orgModels.enabled })
-        .from(orgModels)
-        .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
-        .for("update");
-      if (locked && !locked.enabled) {
-        throw conflict(
-          "model_disabled",
-          "A disabled model cannot be the default model. Enable it, or pick another model.",
-        );
-      }
+  await db.transaction((tx) => writeDefaultModel(tx, orgId, modelDbId, !!row));
+}
+
+/**
+ * The write half of {@link setDefaultModel}, inside the caller's transaction: refuses a disabled
+ * row (read under its lock), then stores the pointer. `custom` says the id is one of the org's
+ * rows (a system id is trusted via the registry). The dead-credential check is the caller's,
+ * made before the transaction — it decrypts, which no transaction should wait on.
+ */
+export async function writeDefaultModel(
+  tx: Tx,
+  orgId: string,
+  modelDbId: string | null,
+  custom: boolean,
+): Promise<void> {
+  // `resolveModel` skips a switched-off row. `enabled` is read under the row
+  // lock `updateOrgModel` takes before checking the pointer, so a concurrent
+  // disable is either seen here or sees this pointer.
+  if (custom && modelDbId !== null) {
+    const [locked] = await tx
+      .select({ enabled: orgModels.enabled })
+      .from(orgModels)
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
+      .for("update");
+    if (locked && !locked.enabled) {
+      throw conflict(
+        "model_disabled",
+        "A disabled model cannot be the default model. Enable it, or pick another model.",
+      );
     }
-    // Validate the target before storing it (mirrors the integration set-default
-    // guard). A system id is trusted via the registry; a custom id must be a row
-    // the org owns.
-    await defaultModel.setDefault(orgId, modelDbId, tx);
-  });
+  }
+  // Validate the target before storing it (mirrors the integration set-default
+  // guard). A system id is trusted via the registry; a custom id must be a row
+  // the org owns.
+  await defaultModel.setDefault(orgId, modelDbId, tx);
 }
 
 // --- Resolution ---

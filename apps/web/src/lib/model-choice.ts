@@ -44,16 +44,3 @@ export function planModelChoice(input: {
       starred !== null && picked.has(starred) && starred !== currentDefault ? starred : null,
   };
 }
-
-/**
- * What the organization already holds for a provider: the rows the dialog was given, plus the ones
- * its own submissions created. A new key's models are in no list the dialog was given, so a retry
- * after a partly refused batch would create them a second time (`model_already_added`).
- */
-export function knownModels(
-  existing: readonly OrgModelInfo[],
-  created: readonly OrgModelInfo[],
-): OrgModelInfo[] {
-  const have = new Set(existing.map((m) => m.id));
-  return [...existing, ...created.filter((m) => !have.has(m.id))];
-}

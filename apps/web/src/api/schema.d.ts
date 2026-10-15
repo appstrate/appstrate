@@ -2541,6 +2541,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply a model-provider choice in one transaction
+         * @description One write for a provider choice: the credential its models run on (an existing organization credential `{ id }`, a new organization API key — the `POST /api/model-provider-credentials` body without `owner_type` —, or `null` for models each member serves with their own credential, `providerId` then naming the service), the models to create (`add`), the ones to switch on (`enable`) and off (`disable`), and the default (`default_model_id`, the `modelId` of a model of this choice). Applied in that order — the key, the models, the switches on, the default, the switches off — inside ONE transaction: either all of it is written or none. Every entry is checked as its own route would check it (`POST /api/models`, `PATCH /api/models/{id}`, `PUT /api/models/default`); refusals come back together as `400 validation_failed` with one `errors[]` item per entry (`field`: `add.<i>`, `enable.<i>`, `disable.<i>`, `default_model_id`; `code`: that route's own, or `model_not_in_choice` for a model that does not run on the choice's credential), and nothing is written. Requires `models:write`, and `model-provider-credentials:write` (or `:connect`) to mint a key. Accepts `Idempotency-Key`.
+         */
+        post: operations["applyModelChoice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models/default": {
         parameters: {
             query?: never;
@@ -17797,6 +17817,77 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["ModelAlreadyAdded"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
+        };
+    };
+    applyModelChoice: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    credential: {
+                        /** Format: uuid */
+                        id: string;
+                    } | {
+                        label?: string;
+                        providerId: string;
+                        api_key: string;
+                        /** Format: uri */
+                        base_url_override?: string | null;
+                    } | null;
+                    /** @description The service of a choice without a credential (`credential: null`). */
+                    providerId?: string;
+                    add?: {
+                        label?: string;
+                        modelId: string;
+                        input?: ("text" | "image")[];
+                        contextWindow?: number;
+                        maxTokens?: number;
+                        reasoning?: boolean;
+                        cost?: {
+                            input?: number;
+                            output?: number;
+                            cacheRead?: number;
+                            cacheWrite?: number;
+                            tiers?: components["schemas"]["ModelCostTier"][];
+                        };
+                    }[];
+                    enable?: string[];
+                    disable?: string[];
+                    /** @description The `modelId` of a model of this choice, created or existing. */
+                    default_model_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The choice was applied: the credential the models run on (`null` for each member's own), the models created or switched (same shape as `GET`/`list`), and the default set, if any. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "model_choice";
+                        credential_id: string | null;
+                        models: components["schemas"]["OrgModel"][];
+                        default_model_id: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };

@@ -242,6 +242,7 @@
   "apiError.model_disabled": "Le modèle par défaut doit rester accessible à l'organisation. Choisissez d'abord un autre modèle par défaut, ou redonnez l'accès à celui-ci.",
   "apiError.model_provider_unregistered": "Le fournisseur de ce modèle n'est pas disponible sur cette instance : {{message}}",
   "apiError.model_already_added": "Ce modèle est déjà ajouté avec cette clé.",
+  "apiError.model_not_in_choice": "Ce modèle ne relève pas de la clé choisie.",
   "apiError.model_not_offered": "Ce modèle n'est pas proposé par ce fournisseur : {{message}}",
   "apiError.credential_in_use": "Des modèles utilisent encore cette clé : réessayez la suppression.",
   "apiError.model_scheduled": "Des planifications activées exécuteraient un modèle servi uniquement par des clés perso ; changez leur modèle ou liez-le à une clé org.",
