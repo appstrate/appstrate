@@ -10,6 +10,7 @@ import { useAppConfig } from "../hooks/use-app-config";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
 import { EmptyState } from "./page-states";
+import { PanelMessage } from "./panel-layout";
 
 /**
  * Route-level gate, read off the route's declaration in `lib/route-access.ts`:
@@ -22,11 +23,14 @@ import { EmptyState } from "./page-states";
 export function RouteGate({
   path,
   pending,
+  inPanel = false,
   children,
 }: {
   path: RoutePath;
   /** Drawn while the permissions load: the page's own skeleton. */
   pending: ReactNode;
+  /** The route is a panel overlay's: a refusal is said inside the panel's box, in the width of its panes. */
+  inPanel?: boolean;
   children: ReactNode;
 }) {
   const { can, ready, inPersonalSpace } = usePermissions();
@@ -40,13 +44,15 @@ export function RouteGate({
         ? landing
         : null;
 
+  const said = (state: ReactNode) => (inPanel ? <PanelMessage>{state}</PanelMessage> : state);
+
   if (absent) {
-    return <UnavailableState />;
+    return said(<UnavailableState />);
   }
   if (verdict === "granted") return <>{children}</>;
   // An unloaded permission set answers `false` for everything.
   if (!ready) return <>{pending}</>;
-  return <NoAccessState />;
+  return said(<NoAccessState />);
 }
 
 /**

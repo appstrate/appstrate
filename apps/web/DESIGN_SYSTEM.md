@@ -69,12 +69,18 @@ they start with `packages/` or `e2e/`.
   state is not duplicated: the header's trail is not drawn by the page, a
   `PageHeader` publishes its `breadcrumbs` to `stores/breadcrumb-store.ts` and
   `ShellBreadcrumb` draws them.
-- Settings and the catalogue are **routed overlays**: `PanelDialog`
-  (`components/panel-dialog.tsx`, a rail on the left, one scroll per pane) opened
-  by a plain navigation to a path under `OVERLAY_PREFIXES` (`lib/route-access.ts`).
+- Settings and the catalogue are **routed overlays**: one dialog, `OverlayFrame`
+  (`components/overlay-frame.tsx`, a layout route of the overlay tree), around
+  `PanelLayout` (`components/panel-layout.tsx`, a rail on the left, one scroll
+  per pane), opened by a plain navigation to a path under `OVERLAY_PREFIXES` (`lib/route-access.ts`).
   `App` remembers the last page shown and keeps it rendered underneath (the
   dashboard when the app opened on the overlay); closing returns to it
-  (`lib/modal-route.ts`). Nothing rides in the history state. Rail pieces:
+  (`lib/modal-route.ts`). Nothing rides in the history state. **The dialog opens
+  once.** Everything an overlay goes through on a cold address — the skeleton while
+  its chunk or the permissions load (`OverlayPanelSkeleton`), a refusal
+  (`PanelMessage`), then the page — happens inside that one box; a skeleton or a
+  page that drew a `Dialog` of its own would be unmounted and mounted in turn,
+  and the backdrop and the zoom would play twice (#2008). Rail pieces:
   `RailHeader`, `RailGroup`, `RailLink`, `ContextSelector`
   (`components/settings/`). Settings are ONE shell (`pages/settings/layout.tsx`)
   whose rail lists three sections — Organisation, Espace de travail, Compte
@@ -530,7 +536,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 ## 9. Dialogs and creation
 
 - Always `<Modal>` (`components/modal.tsx`), never `Dialog` directly; the
-  two-pane overlay is `PanelDialog`. A popover that needs the whole width on a
+  two-pane overlay is `PanelLayout` inside `OverlayFrame`. A popover that needs the whole width on a
   phone becomes a bottom `Sheet` there (`notification-bell.tsx`).
 - **A real modal has a URL; only the confirmations, the secrets shown once and
   the chat have none** (`useModalParam`, `hooks/use-modal-param.ts`). A
@@ -583,7 +589,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     stable address; (4) what is not a modal, such as the notification bell, a
     popover that becomes a sheet on a phone. Each one is listed.
   - **The guard**: `components/test/modals-have-urls.test.ts` reads the sources
-    and fails on a `Modal`, `PanelDialog`, `Sheet` or `…Dialog` whose `open`,
+    and fails on a `Modal`, `Sheet` or `…Dialog` whose `open`,
     `onClose` or guarding `cond &&` reads a `useState` of its file, directly or
     through a component-level `const` derived from it (`const closure =
 closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
@@ -755,9 +761,8 @@ Every screen at 390 px: no horizontal page scroll, a grid has a single-column
 variant (`max-md:grid-cols-1`, `lg:grid-cols-…`; a card grid is `CardGrid`),
 header actions wrap (`PageHeader wrapActions`: the group of badges and buttons
 wraps under the title as a whole), the sidebar becomes a sheet, a panel's rail
-becomes a select (`PanelDialog mobileNav`). A surface that covers the page on a
-phone (`PanelDialog mobileAsSurface`) sits at `z-30`, above the `z-10` / `z-20`
-stretched links and action clusters of the cards under it. Tabs tighten to `px-2`
+becomes a menu sheet (`PhoneNavigation`), and a panel overlay covers the page
+(`OverlayFrame` goes full screen below `sm`). Tabs tighten to `px-2`
 below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
 
 ## Checklist before handing UI work over

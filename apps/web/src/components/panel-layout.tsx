@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Two-pane overlay: a rail of sections on the left, content on the right.
+ * The two panes of a panel overlay: a rail of sections on the left, content on
+ * the right.
  *
- * The shell for surfaces that are EXCURSIONS rather than destinations — you go
+ * The layout for surfaces that are EXCURSIONS rather than destinations — you go
  * in, change or pick one thing, and come back to where you were. Settings and
  * library browsing are both that. A route navigation would throw away the
  * screen underneath (its scroll, its filters, the page you were reading);
- * floating over it keeps them.
+ * floating over it keeps them. The dialog itself is `OverlayFrame`'s, mounted
+ * once above whatever these panes (or their skeleton) are.
  *
  * Both panes scroll on their own and the dialog itself never does. That is the
  * whole rule: nested scrolling is what makes these surfaces confusing, not
@@ -16,15 +18,13 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
-import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
-import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 import { ErrorBoundary } from "./error-boundary";
 import { PhoneNavigation } from "./phone-navigation";
 import { ViewAsBanner } from "./view-as-banner";
 
-interface PanelDialogProps {
-  /** Announced to screen readers; the visible heading lives in `rail`. */
+interface PanelLayoutProps {
+  /** Announced to screen readers as the phone menu's title; the visible heading lives in `rail`. */
   title: string;
   /**
    * The sections. Below `md` two panes do not fit: the rail moves into a sheet
@@ -43,10 +43,9 @@ interface PanelDialogProps {
    */
   contentHeader: (stuck: boolean) => ReactNode;
   children: ReactNode;
-  onClose: () => void;
 }
 
-export function PanelDialog({ title, rail, contentHeader, children, onClose }: PanelDialogProps) {
+export function PanelLayout({ title, rail, contentHeader, children }: PanelLayoutProps) {
   const { pathname } = useLocation();
   // Whether the pane has scrolled past its own top. Read off the scroll
   // container itself — the `ScrollArea` viewport, which is not reachable from
@@ -97,35 +96,30 @@ export function PanelDialog({ title, rail, contentHeader, children, onClose }: P
   );
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        onEscapeKeyDown={keepOpenWhileRenaming}
-        className={[
-          "flex h-[min(720px,calc(100dvh-6rem))] w-[min(1080px,calc(100vw-4rem))] max-w-none gap-0 overflow-hidden p-0",
-          // Full screen on a phone: two panes side by side do not survive
-          // 390px. The shared dialog's height cap is lifted with it.
-          "max-sm:h-[100dvh] max-sm:max-h-none max-sm:w-[100vw] max-sm:rounded-none max-sm:border-0",
-          // The header band owns the close control at every width.
-          "[&>button]:top-1.5 [&>button]:right-1.5 [&>button]:z-30 [&>button]:flex [&>button]:size-11 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-md",
-        ].join(" ")}
-      >
-        <DialogTitle className="sr-only">{title}</DialogTitle>
-        {/* The rail steps aside below `md`, not below `sm`.
-            At `sm` exactly, the dialog is `100vw - 4rem` = 576px and a 224px
-            rail took 39% of it: the content pane was left 304px, LESS than the
-            342px the same pane gets at a 390px window where the dialog goes
-            full screen and the rail is gone. A settings table was therefore at
-            its most cramped on a tablet rather than on a phone, and clipped 72
-            pixels there — the widest overflow measured anywhere in the app.
-            Below `md` the rail moves into the phone's sheet. */}
-        <aside className="bg-sidebar border-sidebar-border w-56 shrink-0 overflow-y-auto border-r max-md:hidden">
-          {rail}
-        </aside>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <ViewAsBanner inOverlay />
-          <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <>
+      {/* The rail steps aside below `md`, not below `sm`.
+          At `sm` exactly, the dialog is `100vw - 4rem` = 576px and a 224px
+          rail took 39% of it: the content pane was left 304px, LESS than the
+          342px the same pane gets at a 390px window where the dialog goes
+          full screen and the rail is gone. A settings table was therefore at
+          its most cramped on a tablet rather than on a phone, and clipped 72
+          pixels there — the widest overflow measured anywhere in the app.
+          Below `md` the rail moves into the phone's sheet. */}
+      <aside className="bg-sidebar border-sidebar-border w-56 shrink-0 overflow-y-auto border-r max-md:hidden">
+        {rail}
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <ViewAsBanner inOverlay />
+        <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
+      </div>
+    </>
   );
+}
+
+/**
+ * A message that stands in for the panes (access refused, address unknown): the
+ * frame's box is a row, so it takes the width the panes would have had.
+ */
+export function PanelMessage({ children }: { children: ReactNode }) {
+  return <div className="flex min-w-0 flex-1 items-center justify-center">{children}</div>;
 }

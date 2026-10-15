@@ -24,10 +24,9 @@ import {
   isCatalogueReading,
   type CatalogueReading,
 } from "../lib/catalogue-link";
-import { useCloseOverlay } from "../lib/modal-route";
 import { searchOf } from "../lib/url-search";
 import { useOverlayBreadcrumb } from "../hooks/use-overlay-breadcrumb";
-import { OverlayUnavailable } from "../components/overlay-unavailable";
+import { PanelUnavailable } from "../components/overlay-unavailable";
 
 /**
  * `/catalogue` names no view: it lands on the first kind of Découvrir, the
@@ -45,12 +44,11 @@ export function CatalogueIndexRedirect() {
 export function CataloguePage() {
   const { reading = "", type = "" } = useParams();
   const location = useLocation();
-  const close = useCloseOverlay();
   const { t } = useTranslation("common");
   useOverlayBreadcrumb([{ label: t("nav.catalogue") }]);
 
   // A reading or a kind the catalogue does not have is an address that does not exist.
-  if (!isCatalogueReading(reading) || !isCatalogueKind(type)) return <OverlayUnavailable />;
+  if (!isCatalogueReading(reading) || !isCatalogueKind(type)) return <PanelUnavailable />;
 
   return (
     <OrgCatalogueModal
@@ -65,7 +63,6 @@ export function CataloguePage() {
         if (nextReading !== reading) query.delete("state");
         return `/catalogue/${nextReading}/${nextType}${searchOf(query)}`;
       }}
-      onClose={close}
     />
   );
 }
