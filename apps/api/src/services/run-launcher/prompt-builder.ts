@@ -16,8 +16,8 @@
  *   - `agentResources`: the effective allocation and semantics already
  *     resolved onto the run plan
  *
- *   - `integrations`: the bundle's integration catalog narrowed to the
- *     integrations actually spawned for this run
+ *   - `availableIntegrationIds`: the integrations actually spawned for this
+ *     run, which narrow the root manifest's declared integrations
  *
  * Every other field flows straight from the bundle — the same code
  * path used by the `appstrate run` CLI. Outbound API access is surfaced
@@ -34,7 +34,6 @@ import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   buildPlatformPromptInputs,
-  integrationsFromBundle,
   renderPlatformPrompt,
   UNAVAILABLE_INTEGRATION_REASONS,
 } from "@appstrate/afps-runtime/bundle";
@@ -82,10 +81,9 @@ export function buildPlatformSystemPrompt(
 
   // Only the integrations spawned for this run: a declared one that is
   // inactive or unbound is not spawned, and a dropped one is listed under
-  // `unavailableIntegrations` instead. The bundle yields one entry per id,
-  // however many connections it binds.
+  // `unavailableIntegrations` instead. One id per integration, however many
+  // connections it binds.
   const spawnedIds = new Set(plan.integrations?.map((spec) => spec.integrationId));
-  const integrations = integrationsFromBundle(plan.bundle).filter((i) => spawnedIds.has(i.id));
   const unavailableIntegrations = unavailableIntegrationsOf(plan.droppedIntegrations ?? []);
 
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
@@ -109,7 +107,7 @@ export function buildPlatformSystemPrompt(
     // (see renderPlatformPrompt) so the raw user prompt stays strictly last.
     deliverables: true,
     ...(uploads ? { uploads } : {}),
-    integrations,
+    availableIntegrationIds: spawnedIds,
     ...(unavailableIntegrations.length > 0 ? { unavailableIntegrations } : {}),
   });
 

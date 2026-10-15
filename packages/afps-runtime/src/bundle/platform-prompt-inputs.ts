@@ -33,6 +33,8 @@ import type {
 } from "./platform-prompt.ts";
 import { parsePackageIdentity } from "./types.ts";
 import { PI_INTEGRATIONS_DIR } from "./workspace-layout.ts";
+import { readIntegrationRefs } from "../resolvers/integration-api-call.ts";
+import { resolvePackageRef } from "../resolvers/bundle-adapter.ts";
 
 /** Plain-object narrowing used throughout the helper. */
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -125,43 +127,38 @@ function walkDependencies(bundle: Bundle): { skills: PlatformPromptTool[] } {
 }
 
 /**
- * Catalog entries for the integrations the ROOT manifest declares, in
- * declaration order. A member pulled in by a skill is not the agent's, so
- * it is not listed. `location` points at the member's `INTEGRATION.md` as
- * the runner materialises it under {@link PI_INTEGRATIONS_DIR}.
+ * One catalog entry per integration the ROOT manifest declares, in
+ * declaration order: a member pulled in by a skill is not the agent's.
+ * The member is found by the rule the `api_call` wiring uses; when the
+ * bundle carries it, it adds `description` and the `location` of its
+ * `INTEGRATION.md` as the runner materialises it under
+ * {@link PI_INTEGRATIONS_DIR}. A declared integration without a member
+ * (skipped as optional) still yields `{ id }`, so a host can list an
+ * integration it started even when its doc is not in the bundle.
  */
 export function integrationsFromBundle(bundle: Bundle): PlatformPromptIntegration[] {
-  const rootManifest = bundle.packages.get(bundle.root)?.manifest as
-    Record<string, unknown> | undefined;
-  const deps = rootManifest?.["dependencies"];
-  const declared = isPlainObject(deps) ? deps["integrations"] : undefined;
-  if (!isPlainObject(declared)) return [];
-
-  const members = new Map<string, BundlePackage>();
-  for (const [identity, pkg] of bundle.packages) {
-    if (identity === bundle.root) continue;
-    if ((pkg.manifest as Record<string, unknown>)["type"] !== "integration") continue;
-    const parsed = parsePackageIdentity(pkg.identity);
-    const id = parsed ? parsed.packageId : pkg.identity;
-    if (!members.has(id)) members.set(id, pkg);
-  }
-
-  const out: PlatformPromptIntegration[] = [];
-  for (const id of Object.keys(declared)) {
-    const pkg = members.get(id);
-    if (!pkg) continue;
-    const entry: PlatformPromptIntegration = { id };
+  return readIntegrationRefs(bundle).map((ref) => {
+    const entry: PlatformPromptIntegration = { id: ref.name };
+    const pkg = resolvePackageRef(bundle, ref);
+    if (!pkg) return entry;
     const description = (pkg.manifest as Record<string, unknown>)["description"];
     if (typeof description === "string") entry.description = description;
     if (pkg.files.has("INTEGRATION.md")) {
-      entry.location = `${PI_INTEGRATIONS_DIR}/${id}/INTEGRATION.md`;
+      entry.location = `${PI_INTEGRATIONS_DIR}/${ref.name}/INTEGRATION.md`;
     }
-    out.push(entry);
-  }
-  return out;
+    return entry;
+  });
 }
 
-export type BuildPlatformPromptInputsOverrides = Partial<Omit<PlatformPromptOptions, "context">>;
+export type BuildPlatformPromptInputsOverrides = Partial<
+  Omit<PlatformPromptOptions, "context" | "integrations">
+> & {
+  /**
+   * Ids of the integrations this run actually starts. The catalog lists
+   * the bundle's integrations whose id is in this set; absent, it lists none.
+   */
+  availableIntegrationIds?: Iterable<string>;
+};
 
 /**
  * Derive a fully-populated {@link PlatformPromptOptions} from a bundle
@@ -173,8 +170,8 @@ export type BuildPlatformPromptInputsOverrides = Partial<Omit<PlatformPromptOpti
  *   - Bundle-derived fields are overridden **verbatim** when present in
  *     `overrides`.
  *   - `context` is always the caller's; the bundle never overrides it.
- *   - `integrations` defaults to {@link integrationsFromBundle} minus the
- *     ids in `overrides.unavailableIntegrations`.
+ *   - `integrations` is {@link integrationsFromBundle} restricted to
+ *     `overrides.availableIntegrationIds` (none when absent).
  *   - Absent overrides leave bundle-derived defaults in place.
  */
 export function buildPlatformPromptInputs(
@@ -186,7 +183,8 @@ export function buildPlatformPromptInputs(
   const rootManifest = root?.manifest as Record<string, unknown> | undefined;
 
   const { skills } = walkDependencies(bundle);
-  const unavailable = new Set((overrides.unavailableIntegrations ?? []).map((u) => u.id));
+  const { availableIntegrationIds, ...promptOverrides } = overrides;
+  const available = new Set(availableIntegrationIds ?? []);
 
   const inputSchema = asPromptSchema(readSchemaSection(rootManifest, "input"));
   const outputSchema = readSchemaSection(rootManifest, "output");
@@ -198,7 +196,7 @@ export function buildPlatformPromptInputs(
       ? { timeoutSeconds: readTimeoutSeconds(bundle)! }
       : {}),
     availableSkills: skills,
-    integrations: integrationsFromBundle(bundle).filter((integ) => !unavailable.has(integ.id)),
+    integrations: integrationsFromBundle(bundle).filter((integ) => available.has(integ.id)),
     ...(inputSchema ? { inputSchema } : {}),
     ...(outputSchema ? { outputSchema } : {}),
   };
@@ -206,7 +204,7 @@ export function buildPlatformPromptInputs(
   // Apply overrides verbatim. Undefined override values are ignored so
   // callers can opt into "use derived" by simply omitting the key.
   const merged: PlatformPromptOptions = { ...derived };
-  for (const [key, value] of Object.entries(overrides) as Array<
+  for (const [key, value] of Object.entries(promptOverrides) as Array<
     [keyof PlatformPromptOptions, unknown]
   >) {
     if (value === undefined) continue;

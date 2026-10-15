@@ -175,14 +175,24 @@ function agentDeclaring(...ids: string[]): BundlePackage {
   );
 }
 
+/** An integration member, named like the platform names it (`manifest.name`). */
+function integration(
+  identity: PackageIdentity,
+  manifest: Record<string, unknown> = {},
+  files: Record<string, string> = {},
+): BundlePackage {
+  const name = identity.slice(0, identity.lastIndexOf("@"));
+  return pkg(identity, { name, type: "integration", ...manifest }, files);
+}
+
 describe("integrationsFromBundle", () => {
   it("lists the root's declared integrations in declaration order, with description and location", () => {
     const bundle = bundleOf(
       agentDeclaring("@appstrate/vapi", "@appstrate/gmail"),
-      pkg("@appstrate/gmail@1.2.0", { type: "integration" }, { "INTEGRATION.md": "# Gmail" }),
-      pkg(
+      integration("@appstrate/gmail@1.2.0", {}, { "INTEGRATION.md": "# Gmail" }),
+      integration(
         "@appstrate/vapi@1.0.0",
-        { type: "integration", description: "Voice calls" },
+        { description: "Voice calls" },
         { "INTEGRATION.md": "# Vapi" },
       ),
     );
@@ -199,19 +209,28 @@ describe("integrationsFromBundle", () => {
   it("sets location only when the member ships INTEGRATION.md", () => {
     const bundle = bundleOf(
       agentDeclaring("@appstrate/vapi"),
-      pkg("@appstrate/vapi@1.0.0", { type: "integration" }),
+      integration("@appstrate/vapi@1.0.0"),
     );
     expect(integrationsFromBundle(bundle)).toEqual([{ id: "@appstrate/vapi" }]);
   });
 
-  it("ignores integration members the root does not declare and members of other types", () => {
+  it("still lists a declared integration the bundle carries no member for", () => {
     const bundle = bundleOf(
-      agentDeclaring("@appstrate/vapi", "@acme/helper"),
-      pkg("@appstrate/vapi@1.0.0", { type: "integration" }),
+      agentDeclaring("@appstrate/vapi", "@appstrate/gmail"),
+      integration("@appstrate/gmail@1.0.0", {}, { "INTEGRATION.md": "# Gmail" }),
+    );
+    expect(integrationsFromBundle(bundle)).toEqual([
+      { id: "@appstrate/vapi" },
+      { id: "@appstrate/gmail", location: ".pi/integrations/@appstrate/gmail/INTEGRATION.md" },
+    ]);
+  });
+
+  it("ignores integration members the root does not declare", () => {
+    const bundle = bundleOf(
+      agentDeclaring("@appstrate/vapi"),
+      integration("@appstrate/vapi@1.0.0"),
       // Pulled in by a skill, not declared by the agent.
-      pkg("@appstrate/drive@1.0.0", { type: "integration" }, { "INTEGRATION.md": "# Drive" }),
-      // Declared id, but not an integration.
-      pkg("@acme/helper@1.0.0", { type: "skill" }, { "SKILL.md": "x" }),
+      integration("@appstrate/drive@1.0.0", {}, { "INTEGRATION.md": "# Drive" }),
     );
     expect(integrationsFromBundle(bundle)).toEqual([{ id: "@appstrate/vapi" }]);
   });
@@ -219,7 +238,7 @@ describe("integrationsFromBundle", () => {
   it("returns nothing when the root declares no integrations", () => {
     const bundle = bundleOf(
       pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "T" }),
-      pkg("@appstrate/vapi@1.0.0", { type: "integration" }),
+      integration("@appstrate/vapi@1.0.0"),
     );
     expect(integrationsFromBundle(bundle)).toEqual([]);
   });
@@ -228,25 +247,27 @@ describe("integrationsFromBundle", () => {
 describe("buildPlatformPromptInputs integrations", () => {
   const bundle = bundleOf(
     agentDeclaring("@appstrate/vapi", "@appstrate/gmail"),
-    pkg("@appstrate/vapi@1.0.0", { type: "integration" }, { "INTEGRATION.md": "# Vapi" }),
-    pkg("@appstrate/gmail@1.0.0", { type: "integration" }),
+    integration("@appstrate/vapi@1.0.0", {}, { "INTEGRATION.md": "# Vapi" }),
+    integration("@appstrate/gmail@1.0.0"),
   );
 
-  it("defaults to the bundle's integrations minus the unavailable ones", () => {
+  it("lists only the bundle's integrations in availableIntegrationIds", () => {
     const inputs = buildPlatformPromptInputs(bundle, ctx(), {
+      availableIntegrationIds: new Set(["@appstrate/vapi", "@appstrate/unknown"]),
       unavailableIntegrations: [{ id: "@appstrate/gmail", reason: "it is switched off" }],
     });
     expect(inputs.integrations).toEqual([
       { id: "@appstrate/vapi", location: ".pi/integrations/@appstrate/vapi/INTEGRATION.md" },
     ]);
+    expect("availableIntegrationIds" in inputs).toBe(false);
     const prompt = renderPlatformPrompt(inputs);
     expect(prompt).toContain("<name>@appstrate/vapi</name>");
     expect(prompt).not.toContain("<name>@appstrate/gmail</name>");
     expect(prompt).toContain("- **@appstrate/gmail**: it is switched off");
   });
 
-  it("lets an explicit integrations override win", () => {
-    const inputs = buildPlatformPromptInputs(bundle, ctx(), { integrations: [] });
+  it("lists no integration when availableIntegrationIds is absent", () => {
+    const inputs = buildPlatformPromptInputs(bundle, ctx());
     expect(inputs.integrations).toEqual([]);
     expect(renderPlatformPrompt(inputs)).not.toContain("### Integrations");
   });
@@ -256,9 +277,11 @@ describe("buildPlatformPromptInputs integrations", () => {
     const doc = `# Big\n${marker}\n${"x".repeat(60 * 1024)}`;
     const big = bundleOf(
       agentDeclaring("@appstrate/vapi"),
-      pkg("@appstrate/vapi@1.0.0", { type: "integration" }, { "INTEGRATION.md": doc }),
+      integration("@appstrate/vapi@1.0.0", {}, { "INTEGRATION.md": doc }),
     );
-    const prompt = renderPlatformPrompt(buildPlatformPromptInputs(big, ctx()));
+    const prompt = renderPlatformPrompt(
+      buildPlatformPromptInputs(big, ctx(), { availableIntegrationIds: ["@appstrate/vapi"] }),
+    );
     expect(prompt).not.toContain(marker);
     expect(prompt).toContain(
       "<location>.pi/integrations/@appstrate/vapi/INTEGRATION.md</location>",

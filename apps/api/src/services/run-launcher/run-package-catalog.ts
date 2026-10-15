@@ -15,7 +15,8 @@
  * Reproducibility contract:
  *   - A draft OR published agent run resolves `dependencies.skills`
  *     against the registry. The same manifest pin means the same bytes
- *     on every run, matching the export/import path (`buildBundleFromDb`).
+ *     on every run, matching the export path (`assembleAgentBundle` in
+ *     package-storage.ts).
  *   - An unsatisfiable skill pin (including a never-published dependency)
  *     surfaces as a `DEPENDENCY_UNRESOLVED` BundleError from the bundle
  *     builder — never a silent draft fallback.
@@ -23,7 +24,11 @@
  *     already froze one per integration (`integrationVersions`, persisted as
  *     `runs.resolved_integration_versions`) and the bundle carries exactly
  *     that — a published version, the draft, or the system registry's
- *     version. An integration absent from the freeze resolves to `null`.
+ *     entry. A `system` member is served from the boot registry's in-memory
+ *     archive, the same bytes the spawn resolver reads, never a stored copy
+ *     that could drift without a version bump (system packages are exempt
+ *     from the signature policy, so nothing is skipped). An integration
+ *     absent from the freeze resolves to `null`.
  *
  * Escape hatch — per-run dependency overrides:
  *   The `dependencyOverrides` map (`{ "@scope/name": "draft" | <spec> }`)
@@ -48,6 +53,8 @@
  */
 
 import {
+  extractRootFromAfps,
+  formatPackageIdentity,
   type BundlePackage,
   type DependencySection,
   type PackageCatalog,
@@ -61,7 +68,9 @@ import {
   resolvedIntegrationVersionToDescriptor,
   type ResolvedIntegrationVersionMap,
 } from "../integration-service.ts";
-import { getSystemPackages } from "../system-packages.ts";
+import { getSystemPackages, type SystemPackageEntry } from "../system-packages.ts";
+
+type SystemArchive = Pick<SystemPackageEntry, "version" | "zipBuffer">;
 
 interface RunPackageCatalogOptions {
   /** Org whose packages are visible (plus system packages, `orgId IS NULL`). */
@@ -86,8 +95,8 @@ interface RunPackageCatalogOptions {
   deps?: {
     db?: PackageCatalog;
     makeDraft?: () => PackageCatalog;
-    /** Version the system registry holds for a package id (boot registry by default). */
-    systemVersion?: (packageId: string) => string | undefined;
+    /** The system registry's entry for a package id (boot registry by default). */
+    systemPackage?: (packageId: string) => SystemArchive | undefined;
   };
 }
 
@@ -98,9 +107,9 @@ export class RunPackageCatalog implements PackageCatalog {
   private draftCatalog: PackageCatalog | null = null;
   private readonly overrides: Map<string, string>;
   private readonly integrationVersions: ResolvedIntegrationVersionMap;
-  private readonly systemVersion: (packageId: string) => string | undefined;
-  /** identity → the backing catalog that resolved it (routes `fetch`). */
-  private readonly owners = new Map<PackageIdentity, PackageCatalog>();
+  private readonly systemPackage: (packageId: string) => SystemArchive | undefined;
+  /** identity → whatever resolved it (routes `fetch`). */
+  private readonly owners = new Map<PackageIdentity, Pick<PackageCatalog, "fetch">>();
 
   constructor(opts: RunPackageCatalogOptions) {
     this.db =
@@ -108,7 +117,7 @@ export class RunPackageCatalog implements PackageCatalog {
     this.makeDraft = opts.deps?.makeDraft ?? (() => new DraftPackageCatalog({ orgId: opts.orgId }));
     this.overrides = new Map(Object.entries(opts.dependencyOverrides ?? {}));
     this.integrationVersions = opts.integrationVersions;
-    this.systemVersion = opts.deps?.systemVersion ?? ((id) => getSystemPackages().get(id)?.version);
+    this.systemPackage = opts.deps?.systemPackage ?? ((id) => getSystemPackages().get(id));
   }
 
   private draft(): PackageCatalog {
@@ -118,45 +127,60 @@ export class RunPackageCatalog implements PackageCatalog {
   async resolve(
     name: string,
     versionSpec: string,
-    section?: DependencySection,
+    section: DependencySection,
   ): Promise<ResolvedPackage | null> {
-    if (section === "integrations") return this.resolveIntegration(name, versionSpec);
+    if (section === "integrations") return this.resolveIntegration(name, versionSpec, section);
 
     const override = this.overrides.get(name);
     if (override === VERSION_SELECTOR_DRAFT)
-      return this.resolveVia(this.draft(), name, versionSpec);
+      return this.resolveVia(this.draft(), name, versionSpec, section);
 
     // No override → manifest pin; explicit spec override → replaces the pin.
     // Both resolve against published versions via the DB catalog.
-    return this.resolveVia(this.db, name, override ?? versionSpec);
+    return this.resolveVia(this.db, name, override ?? versionSpec, section);
   }
 
   /** Answer from the run's freeze only — the manifest pin was already applied by it. */
   private async resolveIntegration(
     name: string,
     versionSpec: string,
+    section: DependencySection,
   ): Promise<ResolvedPackage | null> {
     const entry = this.integrationVersions[name];
     if (!entry) return null;
     const descriptor = resolvedIntegrationVersionToDescriptor(name, entry);
     switch (descriptor.kind) {
       case "draft":
-        return this.resolveVia(this.draft(), name, versionSpec);
+        return this.resolveVia(this.draft(), name, versionSpec, section);
       case "version":
-        return this.resolveVia(this.db, name, descriptor.version);
-      case "system": {
-        const version = this.systemVersion(name);
-        return version ? this.resolveVia(this.db, name, version) : null;
-      }
+        return this.resolveVia(this.db, name, descriptor.version, section);
+      case "system":
+        return this.resolveSystem(name);
     }
+  }
+
+  /**
+   * Serve the registry's archive as-is. Unzipping a system integration (a
+   * manifest and a markdown file) in memory is negligible next to the DB +
+   * storage round-trips it replaces, so nothing is cached across runs.
+   */
+  private resolveSystem(name: string): ResolvedPackage | null {
+    const system = this.systemPackage(name);
+    if (!system) return null;
+    const identity = formatPackageIdentity(name as `@${string}/${string}`, system.version);
+    this.owners.set(identity, {
+      fetch: async () => extractRootFromAfps(new Uint8Array(system.zipBuffer)),
+    });
+    return { identity, integrity: null };
   }
 
   private async resolveVia(
     cat: PackageCatalog,
     name: string,
     spec: string,
+    section: DependencySection,
   ): Promise<ResolvedPackage | null> {
-    const resolved = await cat.resolve(name, spec);
+    const resolved = await cat.resolve(name, spec, section);
     if (resolved) this.owners.set(resolved.identity, cat);
     return resolved;
   }

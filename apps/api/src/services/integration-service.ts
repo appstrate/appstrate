@@ -15,6 +15,7 @@ import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { mcpServerManifestSchema, type McpServerManifest } from "@appstrate/core/mcp-server";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { BundleError } from "@appstrate/afps-runtime/bundle";
 import { getSystemPackages } from "./system-packages.ts";
 import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
@@ -570,6 +571,22 @@ export async function resolveRunIntegrationVersions(params: {
 
   if (unresolved.length > 0) return { ok: false, unresolved };
   return { ok: true, versions };
+}
+
+/**
+ * The frozen map, or the `DEPENDENCY_UNRESOLVED` BundleError (`details.missing`)
+ * that `toBundleApiError` renders as `422 dependency_unresolved` — the one
+ * place an unresolved integration pin becomes a refusal, for runs and exports.
+ */
+export function assertIntegrationVersionsResolved(
+  result: RunIntegrationVersionsResult,
+): ResolvedIntegrationVersionMap {
+  if (result.ok) return result.versions;
+  throw new BundleError(
+    "DEPENDENCY_UNRESOLVED",
+    `${result.unresolved.length} integration pin(s) resolved to no published version`,
+    { missing: result.unresolved },
+  );
 }
 
 // ---------------------------------------------------------------------------

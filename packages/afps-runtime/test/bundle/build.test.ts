@@ -323,9 +323,9 @@ describe("buildBundleFromCatalog", () => {
       },
       { "prompt.md": enc("p") },
     );
-    const calls: Array<[string, string, string | undefined]> = [];
+    const calls: Array<[string, string, string]> = [];
     const recordingCatalog = {
-      resolve: async (name: string, versionSpec: string, section?: string) => {
+      resolve: async (name: string, versionSpec: string, section: string) => {
         calls.push([name, versionSpec, section]);
         return null;
       },
@@ -393,6 +393,67 @@ describe("buildBundleFromCatalog", () => {
     expect((err as BundleError).code).toBe("DEPENDENCY_UNRESOLVED");
     const { missing } = (err as BundleError).details as { missing: Array<{ name: string }> };
     expect(missing.map((m) => m.name)).toEqual(["@me/skill-a"]);
+  });
+
+  describe("optionalDepTypes: fetch failures", () => {
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      {
+        ...ROOT,
+        dependencies: {
+          skills: { "@me/skill-a": "^1.0.0" },
+          integrations: { "@me/integ-y": "^1.0.0" },
+        },
+      },
+      { "prompt.md": enc("p") },
+    );
+    const skill = makePkg(
+      "@me/skill-a@1.3.0" as PackageIdentity,
+      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "0.1" },
+      { "SKILL.md": enc("s") },
+    );
+    const integ = makePkg("@me/integ-y@1.0.0" as PackageIdentity, {
+      name: "@me/integ-y",
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "0.1",
+    });
+    /** Resolves both members; `fetch` throws for `failing`. */
+    function catalogFailingFetchOf(failing: PackageIdentity) {
+      const inner = new InMemoryPackageCatalog([skill, integ]);
+      return {
+        resolve: inner.resolve.bind(inner),
+        fetch: async (identity: PackageIdentity) => {
+          if (identity === failing) throw new Error("storage unreachable");
+          return inner.fetch(identity);
+        },
+      };
+    }
+
+    it("skips an optional member whose fetch throws and warns with section, identity and error", async () => {
+      const warnings: string[] = [];
+      const bundle = await buildBundleFromCatalog(root, catalogFailingFetchOf(integ.identity), {
+        depTypes: ["skills", "integrations"],
+        optionalDepTypes: ["integrations"],
+        onWarn: (m) => warnings.push(m),
+      });
+      expect([...bundle.packages.keys()].sort()).toEqual(["@me/root@1.0.0", "@me/skill-a@1.3.0"]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("integrations");
+      expect(warnings[0]).toContain("@me/integ-y@1.0.0");
+      expect(warnings[0]).toContain("storage unreachable");
+    });
+
+    it("still fails when the fetch of a non-optional member throws", async () => {
+      const err = await buildBundleFromCatalog(root, catalogFailingFetchOf(skill.identity), {
+        depTypes: ["skills", "integrations"],
+        optionalDepTypes: ["integrations"],
+      }).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect((err as Error).message).toBe("storage unreachable");
+    });
   });
 
   it("enforces maxPackages limit", async () => {

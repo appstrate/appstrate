@@ -46,13 +46,17 @@ function integManifest(id: string, version: string): Record<string, unknown> {
 
 const docFor = (version: string) => `# Integ\n\nDocumentation of ${version}.\n`;
 
-/** Publish `version` of `id` with its own INTEGRATION.md (row + version row + stored AFPS). */
-async function publishIntegration(id: string, version: string): Promise<void> {
-  const manifest = integManifest(id, version);
-  const afps = zipSync({
-    "manifest.json": enc(JSON.stringify(manifest, null, 2)),
-    "INTEGRATION.md": enc(docFor(version)),
+function integAfps(id: string, version: string, doc = docFor(version)): Uint8Array {
+  return zipSync({
+    "manifest.json": enc(JSON.stringify(integManifest(id, version), null, 2)),
+    "INTEGRATION.md": enc(doc),
   });
+}
+
+/** Publish `version` of `id` with its own INTEGRATION.md (row + version row + stored AFPS). */
+async function publishIntegration(id: string, version: string, doc?: string): Promise<void> {
+  const manifest = integManifest(id, version);
+  const afps = integAfps(id, version, doc);
   await storage.uploadFile(BUCKET, `${id}/${version}.afps`, Buffer.from(afps));
   await seedPackageVersion({
     packageId: id,
@@ -156,7 +160,7 @@ describe("run bundle — integration members at the frozen version (#2005)", () 
     expect(dec(member?.files.get("INTEGRATION.md"))).toBe("# Integ\n\nThe draft documentation.\n");
   });
 
-  it("system integration → member at the system registry's version", async () => {
+  it("system integration → the boot registry's archive, even when the stored copy drifted", async () => {
     const manifest = integManifest(SYS_INTEG, "2.0.0");
     await seedPackage({
       id: SYS_INTEG,
@@ -165,7 +169,9 @@ describe("run bundle — integration members at the frozen version (#2005)", () 
       source: "system",
       draftManifest: manifest,
     });
-    await publishIntegration(SYS_INTEG, "2.0.0");
+    // Same version, different bytes in storage: the registry must win.
+    await publishIntegration(SYS_INTEG, "2.0.0", "# Integ\n\nStale stored copy.\n");
+    const registryAfps = integAfps(SYS_INTEG, "2.0.0");
     const restore = _setSystemPackagesForTesting(
       new Map([
         [
@@ -177,7 +183,7 @@ describe("run bundle — integration members at the frozen version (#2005)", () 
             type: "integration",
             version: "2.0.0",
             manifest,
-            zipBuffer: Buffer.alloc(0),
+            zipBuffer: Buffer.from(registryAfps),
             content: docFor("2.0.0"),
             files: {},
           } satisfies SystemPackageEntry,

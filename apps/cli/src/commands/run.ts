@@ -34,13 +34,11 @@ import {
   readBundleFromBuffer,
   readBundleFromFile,
   buildPlatformPromptInputs,
-  integrationsFromBundle,
   renderPlatformPrompt,
   type Bundle,
   type PlatformPromptOptions,
 } from "@appstrate/afps-runtime/bundle";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
-import type { IntegrationApiCallResolver } from "@appstrate/afps-runtime/resolvers";
 import { resolveActiveProfileOrNull } from "../lib/config.ts";
 import { resolveAuthContext, explicitApiKey, resolveApiKeyTarget, AuthError } from "../lib/api.ts";
 import { exitWithError } from "../lib/ui.ts";
@@ -350,25 +348,25 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // `{ns}__api_call` MCP tool, so prompts are identical regardless of
   // execution mode. Pure MCP-server integrations are skipped here (no
   // generic call surface in-process).
-  const wiring = recordWiredIntegrations(integrationResolver);
-  const apiCallFactories = await buildApiCallExtensionFactory({
-    bundle: withoutIntegrations(
-      bundle,
-      unavailable.map((entry) => entry.id),
-    ),
-    integrationResolver: wiring.resolver,
-    runId,
-    workspace: workspaceDir,
-    emitEvent: () => {
-      // Events are swallowed in the CLI — the run-result aggregate is
-      // assembled from stdout CloudEvents, not from these telemetry hooks.
-    },
-  });
+  const { factories: apiCallFactories, integrationIds: wiredIntegrationIds } =
+    await buildApiCallExtensionFactory({
+      bundle: withoutIntegrations(
+        bundle,
+        unavailable.map((entry) => entry.id),
+      ),
+      integrationResolver,
+      runId,
+      workspace: workspaceDir,
+      emitEvent: () => {
+        // Events are swallowed in the CLI — the run-result aggregate is
+        // assembled from stdout CloudEvents, not from these telemetry hooks.
+      },
+    });
   if (!opts.json && apiCallFactories.length > 0) {
     process.stderr.write(`→ wired ${apiCallFactories.length} integration api_call tool(s)\n`);
   }
   // Built once the tools are wired: the catalog lists only integrations the agent can call.
-  const promptInputs = cliPromptInputs(bundle, context, unavailable, wiring.wired);
+  const promptInputs = cliPromptInputs(bundle, context, unavailable, wiredIntegrationIds);
   const systemPrompt = renderPlatformPrompt(promptInputs);
 
   // ─── 7b. Platform runtime tools (output/log/note/pin) ──────────
@@ -860,28 +858,6 @@ async function resolveProfileNameForPreset(opts: RunCommandOptions): Promise<str
 }
 
 /**
- * Wraps `resolver` to record the integrations it yields tools for. The bridge
- * hands it only the refs with a selected api_call surface, so a ref that gets
- * tools back is one the run wired; MCP-only integrations never reach it.
- */
-export function recordWiredIntegrations(resolver: IntegrationApiCallResolver): {
-  resolver: IntegrationApiCallResolver;
-  wired: ReadonlySet<string>;
-} {
-  const wired = new Set<string>();
-  return {
-    wired,
-    resolver: {
-      resolve: async (refs, bundle) => {
-        const tools = await resolver.resolve(refs, bundle);
-        if (tools.length > 0) for (const ref of refs) wired.add(ref.name);
-        return tools;
-      },
-    },
-  };
-}
-
-/**
  * Prompt inputs of a local run. The integrations catalog lists only the ones
  * the run wired tools for (none under `--integrations none`), so the agent is
  * never pointed at the doc of an integration it cannot call.
@@ -895,9 +871,7 @@ export function cliPromptInputs(
   return buildPlatformPromptInputs(bundle, context, {
     platformName: "Appstrate CLI",
     ...(unavailable.length > 0 ? { unavailableIntegrations: unavailable } : {}),
-    integrations: integrationsFromBundle(bundle).filter((integ) =>
-      wiredIntegrationIds.has(integ.id),
-    ),
+    availableIntegrationIds: wiredIntegrationIds,
   });
 }
 

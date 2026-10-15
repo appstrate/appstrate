@@ -16,7 +16,7 @@ import {
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import { parseLaunchItems } from "../src/commands/run/launch-warnings.ts";
 import { unavailableIntegrations, withoutIntegrations } from "../src/commands/run/report.ts";
-import { cliPromptInputs, recordWiredIntegrations } from "../src/commands/run.ts";
+import { cliPromptInputs } from "../src/commands/run.ts";
 import { buildIntegrationResolver } from "../src/commands/run/resolver.ts";
 import type { IntegrationApiCallResolver } from "@appstrate/afps-runtime/resolvers";
 
@@ -117,7 +117,7 @@ function bridge(bundle: Bundle, integrationResolver: IntegrationApiCallResolver)
 /** Tool names the bridge registers for `bundle`. */
 async function exposedTools(bundle: Bundle): Promise<string[]> {
   const names: string[] = [];
-  for (const factory of await bridge(bundle, fakeResolver)) {
+  for (const factory of (await bridge(bundle, fakeResolver)).factories) {
     factory({ registerTool: (t: { name: string }) => names.push(t.name) } as never);
   }
   return names;
@@ -129,20 +129,19 @@ async function cliPrompt(
   resolver: IntegrationApiCallResolver,
   unavailable: ReturnType<typeof unavailableIntegrations> = [],
 ): Promise<string> {
-  const wiring = recordWiredIntegrations(resolver);
-  await bridge(
+  const { integrationIds } = await bridge(
     withoutIntegrations(
       bundle,
       unavailable.map((entry) => entry.id),
     ),
-    wiring.resolver,
+    resolver,
   );
   return renderPlatformPrompt(
     cliPromptInputs(
       bundle,
       { runId: "run_test", input: {}, memories: [] },
       unavailable,
-      wiring.wired,
+      integrationIds,
     ),
   );
 }

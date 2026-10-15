@@ -83,9 +83,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     Each integration member must also be readable by the caller in one of its
     spaces: one confined to a space the caller cannot read fails the export
     with `404 not_found`.
-  - **`AFPS_SIGNATURE_POLICY=required`** now checks the signature of an
-    organization's own published integration version when a run fetches it;
-    an unsigned one fails the run. System integrations stay exempt.
+    The export applies no dependency override, so `appstrate run @draft
+--local` on an agent that depends on a never-published integration now
+    answers that same 422, as a server-side run without
+    `dependency_overrides` does.
+  - **System integrations** are served into the bundle from the registry
+    loaded at boot, at the version that registry holds.
+  - **`AFPS_SIGNATURE_POLICY`** applies to an organization's published
+    integration when a run fetches it. Under `required`, an unsigned or
+    unverifiable one is left out of the bundle with a warning: its doc is
+    withheld from the agent, and the run is not failed for it.
   - **`appstrate run`** on an exported agent wires the integrations'
     `{ns}__api_call` tools, since the bundle now carries their manifests, and
     shows the same catalog for the integrations it wired.

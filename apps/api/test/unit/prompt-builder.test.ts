@@ -24,6 +24,8 @@ function makeTestBundle(opts: {
   schemas?: TestSchemas;
   timeout?: number;
   integrations?: ToolMeta[];
+  /** Declared by the root, with no bundle member (the build skipped it). */
+  memberlessIntegrations?: string[];
   mcpServers?: ToolMeta[];
   skills?: ToolMeta[];
   /**
@@ -44,10 +46,13 @@ function makeTestBundle(opts: {
     ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
     ...(opts.schemas?.input ? { input: { schema: opts.schemas.input } } : {}),
     ...(opts.schemas?.output ? { output: { schema: opts.schemas.output } } : {}),
-    ...(opts.integrations?.length
+    ...(opts.integrations?.length || opts.memberlessIntegrations?.length
       ? {
           dependencies: {
-            integrations: Object.fromEntries(opts.integrations.map((i) => [i.id, "1.0.0"])),
+            integrations: Object.fromEntries([
+              ...(opts.integrations ?? []).map((i) => [i.id, "1.0.0"]),
+              ...(opts.memberlessIntegrations ?? []).map((id) => [id, "1.0.0"]),
+            ]),
           },
         }
       : {}),
@@ -70,7 +75,13 @@ function makeTestBundle(opts: {
   // mcp-server→README.md (the convention used across the codebase).
   const addPackage = (meta: ToolMeta, type: string, docFile: string): void => {
     const identity = `${meta.id}@1.0.0` as PackageIdentity;
-    const manifest = { name: meta.name, type, description: meta.description };
+    // `name` is the package id, as in a published manifest: members are found by it.
+    const manifest = {
+      name: meta.id,
+      display_name: meta.name,
+      type,
+      description: meta.description,
+    };
     const files = new Map<string, Uint8Array>();
     files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest)));
     const doc = docsById.get(meta.id);
@@ -117,6 +128,7 @@ interface PromptContext {
   availableTools?: ToolMeta[];
   availableSkills?: ToolMeta[];
   availableIntegrations?: ToolMeta[];
+  memberlessIntegrations?: string[];
   availableMcpServers?: ToolMeta[];
   packageDocs?: Array<{ id: string; content: string }>;
   runtimeTools?: string[];
@@ -146,6 +158,7 @@ function splitLegacy(ctx: PromptContext): {
     ...(ctx.timeout !== undefined ? { timeout: ctx.timeout } : {}),
     ...(ctx.availableSkills ? { skills: ctx.availableSkills } : {}),
     ...(ctx.availableIntegrations ? { integrations: ctx.availableIntegrations } : {}),
+    ...(ctx.memberlessIntegrations ? { memberlessIntegrations: ctx.memberlessIntegrations } : {}),
     ...(ctx.availableMcpServers ? { mcpServers: ctx.availableMcpServers } : {}),
     ...(ctx.packageDocs ? { packageDocs: ctx.packageDocs } : {}),
     ...(ctx.runtimeTools ? { runtimeTools: ctx.runtimeTools } : {}),
@@ -416,6 +429,18 @@ describe("buildEnrichedPrompt — dependency doc companions", () => {
     expect(prompt).not.toContain("@org/drive");
     expect(prompt).not.toContain("## GitHub API");
     expect(prompt).not.toContain("Call `list_issues` to fetch issues.");
+  });
+
+  it("lists a spawned integration whose bundle member was skipped by name, with no location", () => {
+    const prompt = buildEnrichedPrompt(
+      baseContext({
+        memberlessIntegrations: ["@org/unsigned"],
+        spawnedIntegrations: ["@org/unsigned"],
+      }),
+    );
+    expect(prompt).toContain("<available_integrations>");
+    expect(prompt).toContain("<name>@org/unsigned</name>");
+    expect(prompt).not.toContain(".pi/integrations/@org/unsigned");
   });
 
   it("lists no integration catalog when none is spawned", () => {
@@ -762,7 +787,7 @@ describe("buildEnrichedPrompt — tools and skills", () => {
 
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("### Skills");
-    expect(prompt).toContain("Research");
+    expect(prompt).toContain("- **@org/research**: Deep research capability");
     expect(prompt).toContain(".pi/skills/");
   });
 

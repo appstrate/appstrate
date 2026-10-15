@@ -15,23 +15,29 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { zipSync } from "fflate";
 import { RunPackageCatalog } from "../../src/services/run-launcher/run-package-catalog.ts";
 import type { ResolvedIntegrationVersionMap } from "../../src/services/integration-service.ts";
 import type {
   BundlePackage,
+  DependencySection,
   PackageCatalog,
   PackageIdentity,
   ResolvedPackage,
 } from "@appstrate/afps-runtime/bundle";
 
-/** A recording fake catalog: notes the (name, spec) it was asked to resolve. */
+/** A recording fake catalog: notes the (name, spec, section) it was asked to resolve. */
 class FakeCatalog implements PackageCatalog {
-  readonly resolveCalls: Array<{ name: string; spec: string }> = [];
+  readonly resolveCalls: Array<{ name: string; spec: string; section: DependencySection }> = [];
   readonly fetchCalls: PackageIdentity[] = [];
   constructor(private readonly label: string) {}
 
-  async resolve(name: string, versionSpec: string): Promise<ResolvedPackage | null> {
-    this.resolveCalls.push({ name, spec: versionSpec });
+  async resolve(
+    name: string,
+    versionSpec: string,
+    section: DependencySection,
+  ): Promise<ResolvedPackage | null> {
+    this.resolveCalls.push({ name, spec: versionSpec, section });
     // Encode the resolving catalog into the identity version so fetch routing
     // is observable: `@s/n@<label>`.
     return {
@@ -51,10 +57,22 @@ class FakeCatalog implements PackageCatalog {
   }
 }
 
+type SystemArchive = { version: string; zipBuffer: Buffer };
+
+/** A system integration archive as the boot registry holds it. */
+function systemArchive(id: string, version: string): SystemArchive {
+  const manifest = { name: id, version, type: "integration", schema_version: "0.2" };
+  const zip = zipSync({
+    "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+    "INTEGRATION.md": new TextEncoder().encode(`# ${id} ${version}\n`),
+  });
+  return { version, zipBuffer: Buffer.from(zip) };
+}
+
 function make(
   overrides?: Record<string, string>,
   integrationVersions: ResolvedIntegrationVersionMap = {},
-  systemRegistry: Record<string, string> = {},
+  systemRegistry: Record<string, SystemArchive> = {},
 ) {
   const db = new FakeCatalog("db");
   const draft = new FakeCatalog("draft");
@@ -70,7 +88,7 @@ function make(
         draftConstructed++;
         return draft;
       },
-      systemVersion: (id) => systemRegistry[id],
+      systemPackage: (id) => systemRegistry[id],
     },
   });
   return { catalog, db, draft, draftConstructed: () => draftConstructed };
@@ -79,41 +97,41 @@ function make(
 describe("RunPackageCatalog — routing", () => {
   it("resolves with no override via the DB catalog using the manifest pin", async () => {
     const { catalog, db, draft } = make();
-    const r = await catalog.resolve("@s/skill", "^1.0.0");
+    const r = await catalog.resolve("@s/skill", "^1.0.0", "skills");
     expect(r?.identity).toBe("@s/skill@db");
-    expect(db.resolveCalls).toEqual([{ name: "@s/skill", spec: "^1.0.0" }]);
+    expect(db.resolveCalls).toEqual([{ name: "@s/skill", spec: "^1.0.0", section: "skills" }]);
     expect(draft.resolveCalls).toEqual([]);
   });
 
   it("an explicit spec override REPLACES the manifest pin (still DB/published)", async () => {
     const { catalog, db } = make({ "@s/skill": "2.3.4" });
-    await catalog.resolve("@s/skill", "^1.0.0");
+    await catalog.resolve("@s/skill", "^1.0.0", "skills");
     // The DB catalog sees the override spec, not the manifest's `^1.0.0`.
-    expect(db.resolveCalls).toEqual([{ name: "@s/skill", spec: "2.3.4" }]);
+    expect(db.resolveCalls).toEqual([{ name: "@s/skill", spec: "2.3.4", section: "skills" }]);
   });
 
   it("a `draft` override routes the dep to the draft catalog", async () => {
     const { catalog, db, draft } = make({ "@s/skill": "draft" });
-    const r = await catalog.resolve("@s/skill", "^1.0.0");
+    const r = await catalog.resolve("@s/skill", "^1.0.0", "skills");
     expect(r?.identity).toBe("@s/skill@draft");
-    expect(draft.resolveCalls).toEqual([{ name: "@s/skill", spec: "^1.0.0" }]);
+    expect(draft.resolveCalls).toEqual([{ name: "@s/skill", spec: "^1.0.0", section: "skills" }]);
     expect(db.resolveCalls).toEqual([]);
   });
 
   it("only constructs the draft catalog when a `draft` override is actually used", async () => {
     const noDraft = make({ "@s/skill": "^1.0.0" });
-    await noDraft.catalog.resolve("@s/skill", "^1.0.0");
+    await noDraft.catalog.resolve("@s/skill", "^1.0.0", "skills");
     expect(noDraft.draftConstructed()).toBe(0);
 
     const withDraft = make({ "@s/skill": "draft" });
-    await withDraft.catalog.resolve("@s/skill", "^1.0.0");
+    await withDraft.catalog.resolve("@s/skill", "^1.0.0", "skills");
     expect(withDraft.draftConstructed()).toBe(1);
   });
 
   it("fetch routes to whichever catalog resolved the identity", async () => {
     const { catalog, db, draft } = make({ "@s/drafted": "draft" });
-    const dbResolved = await catalog.resolve("@s/published", "^1.0.0");
-    const draftResolved = await catalog.resolve("@s/drafted", "^1.0.0");
+    const dbResolved = await catalog.resolve("@s/published", "^1.0.0", "skills");
+    const draftResolved = await catalog.resolve("@s/drafted", "^1.0.0", "skills");
 
     await catalog.fetch(dbResolved!.identity);
     await catalog.fetch(draftResolved!.identity);
@@ -148,7 +166,7 @@ describe("RunPackageCatalog — routing", () => {
       forExecution: true,
       deps: { db },
     });
-    expect(await catalog.resolve("@s/ghost", "^1.0.0")).toBeNull();
+    expect(await catalog.resolve("@s/ghost", "^1.0.0", "skills")).toBeNull();
   });
 });
 
@@ -159,7 +177,7 @@ describe("RunPackageCatalog — integrations section", () => {
     });
     const r = await catalog.resolve("@s/int", "^1.0.0", "integrations");
     expect(r?.identity).toBe("@s/int@db");
-    expect(db.resolveCalls).toEqual([{ name: "@s/int", spec: "1.2.3" }]);
+    expect(db.resolveCalls).toEqual([{ name: "@s/int", spec: "1.2.3", section: "integrations" }]);
     expect(draft.resolveCalls).toEqual([]);
   });
 
@@ -176,15 +194,25 @@ describe("RunPackageCatalog — integrations section", () => {
     expect(draft.fetchCalls).toEqual(["@s/int@draft"]);
   });
 
-  it("resolves a frozen `system` entry at the system registry's version", async () => {
-    const { catalog, db } = make(
+  it("serves a frozen `system` entry from the registry archive, never the DB", async () => {
+    const archive = systemArchive("@system/int", "4.5.6");
+    const { catalog, db, draftConstructed } = make(
       undefined,
       { "@system/int": { version: null, source: "system" } },
-      { "@system/int": "4.5.6" },
+      { "@system/int": archive },
     );
     const r = await catalog.resolve("@system/int", "*", "integrations");
-    expect(r?.identity).toBe("@system/int@db");
-    expect(db.resolveCalls).toEqual([{ name: "@system/int", spec: "4.5.6" }]);
+    expect(r?.identity).toBe("@system/int@4.5.6");
+
+    const member = await catalog.fetch(r!.identity);
+    expect(member.identity).toBe("@system/int@4.5.6");
+    expect(new TextDecoder().decode(member.files.get("INTEGRATION.md"))).toBe(
+      "# @system/int 4.5.6\n",
+    );
+    expect(member.manifest).toMatchObject({ name: "@system/int", version: "4.5.6" });
+    expect(db.resolveCalls).toEqual([]);
+    expect(db.fetchCalls).toEqual([]);
+    expect(draftConstructed()).toBe(0);
   });
 
   it("returns null for a `system` entry the registry no longer holds", async () => {
@@ -208,7 +236,9 @@ describe("RunPackageCatalog — integrations section", () => {
       { "@s/int": { version: "1.0.0", source: "version" } },
     );
     await pinned.catalog.resolve("@s/int", "^1.0.0", "integrations");
-    expect(pinned.db.resolveCalls).toEqual([{ name: "@s/int", spec: "1.0.0" }]);
+    expect(pinned.db.resolveCalls).toEqual([
+      { name: "@s/int", spec: "1.0.0", section: "integrations" },
+    ]);
     expect(pinned.draftConstructed()).toBe(0);
 
     const absent = make({ "@s/int": "2.0.0" });
@@ -228,10 +258,10 @@ describe("RunPackageCatalog — integrations section", () => {
       "@s/skill": { version: "9.9.9", source: "version" },
     });
     await catalog.resolve("@s/skill", "^1.0.0", "skills");
-    await catalog.resolve("@s/skill", "^1.0.0");
+    await catalog.resolve("@s/skill", "^1.0.0", "skills");
     expect(db.resolveCalls).toEqual([
-      { name: "@s/skill", spec: "^1.0.0" },
-      { name: "@s/skill", spec: "^1.0.0" },
+      { name: "@s/skill", spec: "^1.0.0", section: "skills" },
+      { name: "@s/skill", spec: "^1.0.0", section: "skills" },
     ]);
   });
 

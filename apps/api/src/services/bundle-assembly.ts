@@ -3,10 +3,9 @@
 /**
  * Platform-side bundle assembly helpers.
  *
- * These are thin wrappers over the runtime primitives — the only
- * platform-specific concern is plumbing the right catalog through each entry
- * point (import, export endpoint). The run bundle and the export share one
- * assembly, {@link assembleAgentBundle}.
+ * Thin wrappers over the runtime primitives. The export delegates to
+ * {@link assembleAgentBundle}, the assembly the run bundle uses; only the
+ * import plumbs a catalog of its own.
  *
  * Runtime primitives are in `@appstrate/afps-runtime/bundle`:
  *   - `buildBundleFromCatalog` — transitive walk
@@ -17,14 +16,16 @@
 import {
   buildBundleFromAfps,
   extractRootFromAfps,
-  BundleError,
   type Bundle,
   type BundleMetadata,
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
 import { DbPackageCatalog } from "./run-launcher/db-package-catalog.ts";
 import { assembleAgentBundle, downloadVersionZip } from "./package-storage.ts";
-import { resolveRunIntegrationVersions } from "./integration-service.ts";
+import {
+  assertIntegrationVersionsResolved,
+  resolveRunIntegrationVersions,
+} from "./integration-service.ts";
 import { resolveVersion, versionArtifactUnavailable } from "./package-versions.ts";
 import { db } from "@appstrate/db/client";
 import { packageVersions } from "@appstrate/db/schema";
@@ -52,20 +53,15 @@ async function buildExportBundle(
   scope: BundleAssemblyScope,
   metadata?: BundleMetadata,
 ): Promise<Bundle> {
-  const frozen = await resolveRunIntegrationVersions({
-    agentManifest: root.manifest as Record<string, unknown>,
-    orgId: scope.orgId,
-  });
-  if (!frozen.ok) {
-    throw new BundleError(
-      "DEPENDENCY_UNRESOLVED",
-      `bundle graph has ${frozen.unresolved.length} unresolved dependency(ies)`,
-      { missing: frozen.unresolved },
-    );
-  }
+  const integrationVersions = assertIntegrationVersionsResolved(
+    await resolveRunIntegrationVersions({
+      agentManifest: root.manifest as Record<string, unknown>,
+      orgId: scope.orgId,
+    }),
+  );
   return assembleAgentBundle(root, {
     orgId: scope.orgId,
-    integrationVersions: frozen.versions,
+    integrationVersions,
     forExecution: false,
     ...(metadata ? { metadata } : {}),
   });

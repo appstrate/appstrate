@@ -448,7 +448,29 @@ describe("GET /api/agents/:scope/:name/bundle — integration dependency read sc
     });
 
     expect(res.status).toBe(403);
-    expect(await res.text()).not.toContain(INTEG_SECRET);
+    const body = await res.text();
+    expect(body).not.toContain(INTEG_SECRET);
+    // The integration's own guard answered, not the fail-closed branch for a
+    // type with no read scope (which names no permission).
+    const { detail } = JSON.parse(body) as { detail: string };
+    expect(detail).toBe("Insufficient permissions: integrations:read required");
+    expect(detail).not.toContain("no read scope is defined");
+  });
+
+  it("hides an integration confined to a private space", async () => {
+    const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
+    await db.update(packages).set({ homeSpaceId: hidden.id }).where(eq(packages.id, INTEG_ID));
+    await seedSpacePackage(hidden.id, INTEG_ID);
+    const rawKey = await keyWithScopes(ctx, ["agents:read", "skills:read", "integrations:read"]);
+
+    const res = await app.request(`/api/agents/${INTEG_AGENT_ID}/bundle`, {
+      headers: bearer(rawKey),
+    });
+
+    expect(res.status, await res.clone().text()).toBe(404);
+    const body = await res.text();
+    expect(body).not.toContain(INTEG_SECRET);
+    expect((JSON.parse(body) as { code: string }).code).toBe("not_found");
   });
 
   it("serves the integration once the key also holds integrations:read", async () => {

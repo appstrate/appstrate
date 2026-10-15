@@ -9,21 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added — dependency sections a bundle may skip (#2005)
 
-- `PackageCatalog.resolve(name, versionSpec, section?)` receives the
+- `PackageCatalog.resolve(name, versionSpec, section)` receives the
   `dependencies.*` section the request comes from, typed by the new exported
   `DependencySection` (`"skills" | "mcp_servers" | "integrations"`), so a
-  catalog can resolve each package type from its own source of truth. The
-  parameter is optional: existing catalogs keep compiling.
+  catalog can resolve each package type from its own source of truth.
 - `BuildBundleOptions.optionalDepTypes`: an entry of one of these sections that
-  `resolve` returns `null` for is reported through `onWarn` and left out of the
-  bundle instead of failing with `DEPENDENCY_UNRESOLVED`. A `fetch` failure
-  stays fatal.
-- `integrationsFromBundle(bundle)` (`./bundle`): one catalog entry per
-  integration member the root manifest declares in `dependencies.integrations`,
-  in declaration order, with `location` set to
-  `.pi/integrations/<packageId>/INTEGRATION.md` when the member ships that
-  file. `buildPlatformPromptInputs` derives `integrations` from it, minus the
-  ids of `unavailableIntegrations`; an explicit `integrations` override wins.
+  `resolve` returns `null` for, or whose `fetch` throws, is reported through
+  `onWarn` and left out of the bundle instead of failing the build.
 
 ### Changed — integrations disclosed as a catalog, not inlined (#2005, BREAKING)
 
@@ -34,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `### API Documentation`. The agent reads the file on demand (AFPS §3.5).
 - `PlatformPromptIntegration.doc` is removed; pass `location` (the
   workspace-relative path of `INTEGRATION.md`) instead.
+- `buildPlatformPromptInputs` derives `integrations` from the bundle: one
+  entry per integration the root manifest declares in
+  `dependencies.integrations`, in declaration order, with the member's
+  `description` and `location` (`.pi/integrations/<packageId>/INTEGRATION.md`)
+  when the bundle carries it. The new override `availableIntegrationIds`
+  keeps only the integrations the run starts (none when absent); the
+  `integrations` override is removed.
 
 ### Changed — `api_call` values encoded for their place (#1915, BREAKING)
 

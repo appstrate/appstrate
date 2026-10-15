@@ -19,10 +19,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  buildPlatformPromptInputs,
-  integrationsFromBundle,
-} from "../../src/bundle/platform-prompt-inputs.ts";
+import { buildPlatformPromptInputs } from "../../src/bundle/platform-prompt-inputs.ts";
 import { renderPlatformPrompt } from "../../src/bundle/platform-prompt.ts";
 import type { Bundle, BundlePackage, PackageIdentity } from "../../src/bundle/types.ts";
 import type { ExecutionContext } from "../../src/types/execution-context.ts";
@@ -140,12 +137,13 @@ function canonicalize(prompt: string): string {
 describe("cross-path prompt parity", () => {
   const bundle = makeFixtureBundle();
   const context = makeContext();
+  // Every host passes the ids it started (platform: spawned, CLI: wired).
+  const availableIntegrationIds = new Set(["@fixture/crm"]);
 
   const platformPrompt = renderPlatformPrompt(
     buildPlatformPromptInputs(bundle, context, {
       platformName: "Appstrate",
-      // The platform passes its own filtered list; the CLI paths derive it.
-      integrations: integrationsFromBundle(bundle),
+      availableIntegrationIds,
       // Platform-specific: DB-backed uploads. Run history used to be
       // rendered as a `## Run History` section here; it is now surfaced
       // via the runtime-wired `run_history` tool instead so the prompt
@@ -157,11 +155,17 @@ describe("cross-path prompt parity", () => {
   );
 
   const externalRunPrompt = renderPlatformPrompt(
-    buildPlatformPromptInputs(bundle, context, { platformName: "External Runner" }),
+    buildPlatformPromptInputs(bundle, context, {
+      platformName: "External Runner",
+      availableIntegrationIds,
+    }),
   );
 
   const appstrateRunPrompt = renderPlatformPrompt(
-    buildPlatformPromptInputs(bundle, context, { platformName: "Appstrate CLI" }),
+    buildPlatformPromptInputs(bundle, context, {
+      platformName: "Appstrate CLI",
+      availableIntegrationIds,
+    }),
   );
 
   it("all three paths render every bundle-derived section", () => {

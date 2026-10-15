@@ -108,7 +108,7 @@ export interface PackageCatalog {
   resolve(
     name: string,
     versionSpec: string,
-    section?: DependencySection,
+    section: DependencySection,
   ): Promise<ResolvedPackage | null>;
 
   /**

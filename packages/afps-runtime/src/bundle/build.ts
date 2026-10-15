@@ -62,9 +62,9 @@ export interface BuildBundleOptions {
    */
   depTypes?: DependencySection[];
   /**
-   * Sections whose unresolved entries are skipped with an `onWarn` message
-   * instead of failing the build with `DEPENDENCY_UNRESOLVED`. Only a `null`
-   * from `catalog.resolve` is tolerated: a `fetch` failure stays fatal.
+   * Sections whose entries may be left out: an entry that `catalog.resolve`
+   * returns `null` for, or whose `catalog.fetch` throws, is skipped with an
+   * `onWarn` message instead of failing the build.
    */
   optionalDepTypes?: DependencySection[];
 }
@@ -77,7 +77,8 @@ export interface BuildBundleOptions {
  * Cycles are tolerated (each identity is fetched once); the caller gets
  * a warning via `opts.onWarn`. Dep resolution failures outside
  * `opts.optionalDepTypes` are collected and surfaced as a single
- * `DEPENDENCY_UNRESOLVED` with `details.missing`.
+ * `DEPENDENCY_UNRESOLVED` with `details.missing`; resolution and fetch
+ * failures inside them are warned about and skipped.
  */
 export async function buildBundleFromCatalog(
   root: BundlePackage,
@@ -127,7 +128,7 @@ export async function buildBundleFromCatalog(
     // Dedupe synchronously against the already-loaded set AND within this
     // level (two siblings may declare the same dep), so the parallel fetch
     // below never fetches one identity twice.
-    const toFetch: ResolvedPackage[] = [];
+    const toFetch: Array<{ resolved: ResolvedPackage; section: DependencySection }> = [];
     const claimedThisLevel = new Set<PackageIdentity>();
     for (let i = 0; i < deps.length; i++) {
       const { name, versionSpec, type } = deps[i]!;
@@ -151,7 +152,7 @@ export async function buildBundleFromCatalog(
         continue;
       }
       claimedThisLevel.add(resolved.identity);
-      toFetch.push(resolved);
+      toFetch.push({ resolved, section: type });
     }
 
     // Fetch the deduped level in parallel — fetch is read-only against the
@@ -165,7 +166,7 @@ export async function buildBundleFromCatalog(
     // are folded back in declaration order, and integrity failures are
     // aggregated so one error names every corrupted package at once.
     const settled = await Promise.allSettled(
-      toFetch.map(async (resolved) => {
+      toFetch.map(async ({ resolved }) => {
         const depPkg = await catalog.fetch(resolved.identity);
         if (depPkg.identity !== resolved.identity) {
           throw new BundleError(
@@ -182,10 +183,17 @@ export async function buildBundleFromCatalog(
     const fetched: BundlePackage[] = [];
     for (let i = 0; i < settled.length; i++) {
       const outcome = settled[i]!;
+      const { resolved, section } = toFetch[i]!;
       if (outcome.status === "fulfilled") {
         fetched.push(outcome.value);
+      } else if (optionalDepTypes.has(section)) {
+        const reason =
+          outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+        onWarn(
+          `optional ${section} dependency ${resolved.identity} of ${pkg.identity} failed to fetch (${reason}) — skipped`,
+        );
       } else {
-        failures.push({ identity: toFetch[i]!.identity, reason: outcome.reason });
+        failures.push({ identity: resolved.identity, reason: outcome.reason });
       }
     }
     if (failures.length > 0) {
