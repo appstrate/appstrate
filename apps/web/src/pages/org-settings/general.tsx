@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneAlert } from "@/components/app-ui/status-variants";
 import { useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Building, HardDrive, Smile, Trash2, Upload } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { AlertDescription } from "@appstrate/ui/components/alert";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api } from "../../api/client";
@@ -309,10 +310,10 @@ export function OrgSettingsGeneralPage() {
                   {t("orgStorage.percentUsed", { percent: storagePercent ?? 0 })}
                 </div>
                 {storageNearLimit && (
-                  <Alert variant="warning" className="mt-3">
+                  <ToneAlert variant="warning" className="mt-3">
                     <AlertTriangle size={16} />
                     <AlertDescription>{t("orgStorage.nearLimitWarning")}</AlertDescription>
-                  </Alert>
+                  </ToneAlert>
                 )}
               </div>
             )}

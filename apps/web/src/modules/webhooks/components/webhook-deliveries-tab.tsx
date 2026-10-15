@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Send } from "lucide-react";
 import { relativeAge } from "@appstrate/core/format";
-import { Badge } from "@appstrate/ui/components/badge";
-import { Button } from "@appstrate/ui/components/button";
 import { ErrorState, EmptyState } from "@/components/page-states";
 import { ItemList } from "@/components/item-list";
 import { ListFooter } from "@/components/list-toolbar";
@@ -79,7 +79,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
                 <span className="font-mono text-sm">{d.eventType}</span>
               </div>
               <div className="text-muted-foreground flex items-center gap-2 text-xs">
-                <Badge variant={variant}>{deliveryStatusLabel(d)}</Badge>
+                <ToneBadge variant={variant}>{deliveryStatusLabel(d)}</ToneBadge>
                 {d.latency != null && <span>{d.latency}ms</span>}
                 <span>{t("settings:webhooks.deliveryAttempt", { attempt: d.attempt })}</span>
                 <span>{formatRelativeTime(d.createdAt, t)}</span>
@@ -99,7 +99,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
         }
       >
         {hasNextPage && !failed && (
-          <Button
+          <PendingButton
             variant="outline"
             size="sm"
             pending={isFetchingNextPage}
@@ -108,7 +108,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
             {isFetchNextPageError
               ? t("common:btn.retry")
               : t("settings:webhooks.loadMoreDeliveries")}
-          </Button>
+          </PendingButton>
         )}
       </ListFooter>
     </>

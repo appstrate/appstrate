@@ -3,8 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
 import { RunStatusIcon } from "@appstrate/ui/components/run-status";
-import { Badge as UIBadge } from "@appstrate/ui/components/badge";
-import type { BadgeProps } from "@appstrate/ui/components/badge";
+import { ToneBadge, type ToneBadgeVariant } from "@/components/app-ui/status-variants";
 
 /**
  * The outline counterpart to {@link Badge}: it qualifies WHAT a row is
@@ -40,7 +39,7 @@ export function MetaBadge({
   );
 }
 
-const statusVariantMap: Record<string, BadgeProps["variant"]> = {
+const statusVariantMap: Record<string, ToneBadgeVariant> = {
   success: "success",
   failed: "failed",
   running: "running",
@@ -68,10 +67,10 @@ export function Badge({
   if (!compact) {
     return (
       <span className="relative shrink-0">
-        <UIBadge variant={variant} className="gap-1">
+        <ToneBadge variant={variant} className="gap-1">
           {icon}
           {t(`status.${status}`, status)}
-        </UIBadge>
+        </ToneBadge>
         {dot}
       </span>
     );
@@ -82,10 +81,10 @@ export function Badge({
       {/* Mobile: bare icon, toned by its status */}
       <span className="sm:hidden [&_svg]:h-4 [&_svg]:w-4">{icon}</span>
       {/* Desktop: full badge */}
-      <UIBadge variant={variant} className="hidden gap-1 sm:inline-flex">
+      <ToneBadge variant={variant} className="hidden gap-1 sm:inline-flex">
         {icon}
         {t(`status.${status}`, status)}
-      </UIBadge>
+      </ToneBadge>
       {dot}
     </span>
   );

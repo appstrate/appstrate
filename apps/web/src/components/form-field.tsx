@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Textarea } from "@appstrate/ui/components/textarea";
 
 type FormFieldType =

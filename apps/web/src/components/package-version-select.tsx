@@ -2,7 +2,7 @@
 
 import { Label } from "@appstrate/ui/components/label";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { usePackageVersions } from "../hooks/use-packages";
 import type { PackageType } from "@appstrate/shared-types";
 

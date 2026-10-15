@@ -14,7 +14,8 @@ import type { UseFormRegisterReturn } from "react-hook-form";
 import { KeyRound, Users, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {

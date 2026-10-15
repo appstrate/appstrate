@@ -23,14 +23,14 @@
  * No key is ever sent for an OAuth row.
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
 import { FormModal } from "./form-modal";
-import { Button } from "@appstrate/ui/components/button";
 import { TestResultSpan } from "./test-result-span";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -354,7 +354,7 @@ export function CredentialFormModal({
       formProps={{ noValidate: true }}
       secondaryActions={
         <div className="mr-auto flex items-center gap-2">
-          <Button
+          <PendingButton
             type="button"
             variant="outline"
             onClick={handleTest}
@@ -362,7 +362,7 @@ export function CredentialFormModal({
             disabled={!canTest}
           >
             {t("credentials.test")}
-          </Button>
+          </PendingButton>
           {testResult && (
             <TestResultSpan
               result={testResult}

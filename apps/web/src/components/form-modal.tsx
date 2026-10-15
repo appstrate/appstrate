@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useId, type ComponentProps, type FormEventHandler, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
@@ -61,7 +62,7 @@ export function FormModal({
           <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button
+          <PendingButton
             type="submit"
             form={formId}
             data-testid={submitTestId}
@@ -69,7 +70,7 @@ export function FormModal({
             disabled={submitDisabled}
           >
             {submitLabel ?? t("btn.save")}
-          </Button>
+          </PendingButton>
         </>
       }
     >

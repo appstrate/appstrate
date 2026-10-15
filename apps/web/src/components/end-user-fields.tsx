@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { RowsEditor } from "./rows-editor";
 import type { MetadataEntry } from "../lib/end-user-metadata";

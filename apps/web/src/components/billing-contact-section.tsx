@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -7,13 +8,8 @@ import { X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FormItem,
-} from "@appstrate/ui/components/field";
+import { Field, FieldDescription, FieldError, FieldGroup } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -230,14 +226,14 @@ export function BillingContactSection() {
             {t("btn.cancel", { ns: "common" })}
           </Button>
         )}
-        <Button
+        <PendingButton
           size="sm"
           pending={update.isPending}
           disabled={!dirty || emailInvalid}
           onClick={handleSave}
         >
           {t("btn.save", { ns: "common" })}
-        </Button>
+        </PendingButton>
       </div>
     </SectionCard>
   );

@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { FormModal } from "./form-modal";
 import { useModalParam } from "../hooks/use-modal-param";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { useCreateSpace } from "../hooks/use-spaces";
 import { errorMessage } from "../lib/mutation-error";

@@ -27,7 +27,8 @@ import {
   type UseFormRegister,
 } from "react-hook-form";
 import { cn } from "@appstrate/ui/cn";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";

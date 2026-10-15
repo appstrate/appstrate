@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
-import { Button } from "@appstrate/ui/components/button";
 import {
   useDeleteEndUser,
   useEndUser,
@@ -137,14 +137,14 @@ function EndUsersPageContent() {
       />
 
       {hasNextPage && !isLoading && !error && (
-        <Button
+        <PendingButton
           variant="outline"
           pending={isFetchingNextPage}
           onClick={() => void fetchNextPage()}
           className="mt-3 w-full"
         >
           {t("spaces.loadMore")}
-        </Button>
+        </PendingButton>
       )}
 
       {canWrite && newEndUser.value !== null && <EndUserCreateModal onClose={newEndUser.close} />}

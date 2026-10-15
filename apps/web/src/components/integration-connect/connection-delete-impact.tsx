@@ -6,8 +6,9 @@
  * query and keeps its button disabled while it is in flight.
  */
 
+import { ToneAlert } from "@/components/app-ui/status-variants";
 import { Trans, useTranslation } from "react-i18next";
-import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
+import { AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import type { useConnectionDeleteImpact } from "../../hooks/use-me-connections";
 import { errorDetail } from "../../lib/mutation-error";
 import { TextSkeleton } from "../loading-skeletons";
@@ -40,7 +41,7 @@ export function ConnectionDeleteImpact({
   if (data.pins.length === 0 && data.schedules.length === 0 && othersDisabled === 0) return null;
 
   return (
-    <Alert variant="warning" className="mt-4" data-testid="connection-delete-impact">
+    <ToneAlert variant="warning" className="mt-4" data-testid="connection-delete-impact">
       <AlertTitle>{t("connections.impact.title")}</AlertTitle>
       <AlertDescription>
         {(data.pins.length > 0 || data.schedules.length > 0) && (
@@ -110,6 +111,6 @@ export function ConnectionDeleteImpact({
           </p>
         )}
       </AlertDescription>
-    </Alert>
+    </ToneAlert>
   );
 }

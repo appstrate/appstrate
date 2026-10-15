@@ -7,11 +7,12 @@
  * files, end-users see only their own.
  */
 
+import { ToneAlert } from "@/components/app-ui/status-variants";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { AlertDescription } from "@appstrate/ui/components/alert";
 import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useFilesPaged } from "../hooks/use-files";
@@ -100,10 +101,10 @@ function DocumentsCollection({
       />
 
       {overLimit && (
-        <Alert variant="warning" className="mb-4">
+        <ToneAlert variant="warning" className="mb-4">
           <AlertTriangle size={16} />
           <AlertDescription>{t("storage.limitReached")}</AlertDescription>
-        </Alert>
+        </ToneAlert>
       )}
 
       <DocumentListPanel
@@ -147,14 +148,14 @@ function DocumentsCollection({
         footer={
           <ListFooter count={isLoading || error ? undefined : footerLabel}>
             {hasNextPage && (
-              <Button
+              <PendingButton
                 variant="outline"
                 size="sm"
                 pending={isFetchingNextPage}
                 onClick={() => void fetchNextPage()}
               >
                 {t("page.loadMore")}
-              </Button>
+              </PendingButton>
             )}
           </ListFooter>
         }

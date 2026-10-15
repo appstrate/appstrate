@@ -6,7 +6,7 @@ import { Trash2, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { EditorSection, type EditorSurface } from "./editor-section";
 import { RequiredScopesField } from "./required-scopes-field";
 import {

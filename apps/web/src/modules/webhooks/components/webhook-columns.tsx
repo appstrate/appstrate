@@ -12,6 +12,7 @@
  * so middle-click and ⌘-click keep working.
  */
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { DataColumn } from "@/components/data-table";
@@ -46,9 +47,9 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
       header: t("settings:webhooks.stateColumn"),
       width: "72px",
       cell: (wh) => (
-        <Badge variant={wh.enabled ? "success" : "secondary"}>
+        <ToneBadge variant={wh.enabled ? "success" : "secondary"}>
           {wh.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
-        </Badge>
+        </ToneBadge>
       ),
     },
     {

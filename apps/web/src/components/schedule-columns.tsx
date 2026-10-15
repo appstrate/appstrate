@@ -96,7 +96,7 @@ export function useScheduleColumns({
           {schedule.running_runs > 0 && (
             <Spinner
               className="text-primary size-3.5 shrink-0"
-              label={t("status.running", { ns: "common" })}
+              aria-label={t("status.running", { ns: "common" })}
             />
           )}
         </>

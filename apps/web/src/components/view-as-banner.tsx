@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Alert } from "@appstrate/ui/components/alert";
+import { ToneAlert } from "@/components/app-ui/status-variants";
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
@@ -90,7 +90,7 @@ export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}
   };
 
   return (
-    <Alert
+    <ToneAlert
       variant="warning"
       data-testid="view-as-banner"
       className={cn(
@@ -134,6 +134,6 @@ export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}
       <Button variant="outline" size="sm" onClick={exit}>
         {t("viewAs.exit")}
       </Button>
-    </Alert>
+    </ToneAlert>
   );
 }

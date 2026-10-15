@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import { SLUG_REGEX } from "@appstrate/core/naming";
 import { FormModal } from "./form-modal";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { useForkPackage } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";

@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Loader2 } from "lucide-react";
+import { Loader2Icon } from "lucide-react";
+
 import { cn } from "../cn.ts";
 
-export function Spinner({ className, label }: { className?: string; label?: string }) {
+function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
   return (
-    <Loader2
-      className={cn("h-4 w-4 animate-spin", className)}
-      {...(label ? { role: "status", "aria-label": label } : { "aria-hidden": true })}
+    <Loader2Icon
+      role="status"
+      aria-label="Loading"
+      className={cn("size-4 animate-spin", className)}
+      {...props}
     />
   );
 }
+
+export { Spinner };

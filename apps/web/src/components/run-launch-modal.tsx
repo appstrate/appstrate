@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useRef, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
@@ -38,9 +39,9 @@ export function RunLaunchModal({
             <Button variant="outline" onClick={onClose} disabled={isPending}>
               {t("btn.cancel")}
             </Button>
-            <Button onClick={() => formRef.current?.submit()} pending={isPending}>
+            <PendingButton onClick={() => formRef.current?.submit()} pending={isPending}>
               {t("input.run")}
-            </Button>
+            </PendingButton>
           </div>
         </div>
       )}

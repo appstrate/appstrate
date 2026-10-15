@@ -15,6 +15,7 @@
  * refuse it.
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "./modal";
@@ -55,9 +56,9 @@ export function ActivationClosureDialog({
             {t("catalogue.closureAgentOnly")}
           </Button>
           {canActivateAll && (
-            <Button onClick={onActivateAll} pending={isPending}>
+            <PendingButton onClick={onActivateAll} pending={isPending}>
               {t("catalogue.closureActivateAll")}
-            </Button>
+            </PendingButton>
           )}
         </>
       }

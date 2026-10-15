@@ -5,11 +5,12 @@
  * organization's providers narrowed to them, with the kind of each. The Models column says what each lets them use.
  */
 
+import { ToneAlert } from "@/components/app-ui/status-variants";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { useQueryClient } from "@tanstack/react-query";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { AlertDescription } from "@appstrate/ui/components/alert";
 import { AlertTriangle, Plus } from "lucide-react";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
@@ -128,10 +129,10 @@ export function PreferencesModelsPage() {
   return (
     <>
       {personalModelCredentialsDisabled && (
-        <Alert variant="warning" className="mb-4">
+        <ToneAlert variant="warning" className="mb-4">
           <AlertTriangle size={16} />
           <AlertDescription>{t("modelCredentials.policyDisabled")}</AlertDescription>
-        </Alert>
+        </ToneAlert>
       )}
 
       <SettingsPageActions actions={[addCredential]} />

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { defaultRunVersion } from "../lib/version-selector";
 import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { RunModal } from "./run-modal";
@@ -150,7 +150,7 @@ export function RunAgentButton({
   return (
     <>
       <DisabledReasonTooltip reason={blockedTitle}>
-        <Button
+        <PendingButton
           variant={variant}
           size={size}
           className={cn("relative", className)}
@@ -167,7 +167,7 @@ export function RunAgentButton({
           )}
           {showLabel && t("detail.run")}
           {warningDot}
-        </Button>
+        </PendingButton>
       </DisabledReasonTooltip>
 
       {inputDialog && detail && (

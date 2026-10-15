@@ -13,6 +13,7 @@
  * agent's page and its settings all open the same modal.
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
@@ -24,10 +25,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
-import { Field, FieldDescription, FieldGroup, FormItem } from "@appstrate/ui/components/field";
+import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Modal } from "./modal";
 import { ActorSelect } from "./actor-select";
 import { AgentInputForm } from "./agent-input-form";
@@ -390,9 +392,13 @@ export function ScheduleFieldsReady({
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>
-        <Button type="submit" pending={create.isPending} disabled={!cron || readinessLoading}>
+        <PendingButton
+          type="submit"
+          pending={create.isPending}
+          disabled={!cron || readinessLoading}
+        >
           {t("btn.create")}
-        </Button>
+        </PendingButton>
       </div>
     </form>
   );

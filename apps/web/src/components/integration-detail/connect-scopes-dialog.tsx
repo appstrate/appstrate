@@ -4,7 +4,7 @@ import { toggleValue } from "../../lib/toggle-value";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { CheckboxField } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { Modal } from "../modal";
 import { useHostedConnectPopup } from "../integration-connect/use-hosted-connect-popup";
 import { scopeLabels } from "../integration-connect/scope-labels";

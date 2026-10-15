@@ -36,6 +36,7 @@
  * panel and the list, and its breadcrumb would claim the current space for a
  * package that is not in it.
  */
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -825,7 +826,7 @@ export function OrgCatalogueModal({
             <>
               {readingSwitcher}
               {view === "table" && picked.length > 0 ? (
-                <Button
+                <PendingButton
                   type="button"
                   size="sm"
                   pending={activate.isPending}
@@ -833,7 +834,7 @@ export function OrgCatalogueModal({
                   onClick={activatePicked}
                 >
                   {t("catalogue.activateSelection", { count: picked.length })}
-                </Button>
+                </PendingButton>
               ) : null}
             </>
           }

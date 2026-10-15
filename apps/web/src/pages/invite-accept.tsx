@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -221,9 +222,9 @@ export function InviteAcceptPage() {
         <div className="flex flex-col gap-6">
           {inviteBanner}
           <FieldError>{serverError}</FieldError>
-          <Button className="w-full" onClick={handleAcceptAuthenticated} pending={accepting}>
+          <PendingButton className="w-full" onClick={handleAcceptAuthenticated} pending={accepting}>
             {t("invite.joinOrg", { org: info.org_name })}
-          </Button>
+          </PendingButton>
         </div>
       </AuthLayout>
     );

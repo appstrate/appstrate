@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
-import { Badge } from "@appstrate/ui/components/badge";
 import type { DataColumn } from "../../../components/data-table";
 import { rowActionsColumn } from "../../../components/row-actions-column";
 import { CellText } from "../../../components/table-cells";
@@ -52,9 +52,9 @@ export function useOAuthClientColumns({
       width: "56px",
       tier: 2,
       cell: (client) => (
-        <Badge variant={client.disabled ? "secondary" : "success"}>
+        <ToneBadge variant={client.disabled ? "secondary" : "success"}>
           {client.disabled ? t("oauthClients.disabledBadge") : t("oauthClients.activeBadge")}
-        </Badge>
+        </ToneBadge>
       ),
     },
     {

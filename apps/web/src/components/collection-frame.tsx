@@ -9,7 +9,7 @@ import { ErrorState } from "./page-states";
  * canvas: an empty grid or list then occupies the place its items would have.
  */
 function CollectionFrame({ children }: { children: ReactNode }) {
-  return <div className="bg-card overflow-hidden rounded-lg border shadow-sm">{children}</div>;
+  return <div className="bg-card overflow-hidden rounded-lg border">{children}</div>;
 }
 
 /** Every verdict but `"items"`, for a card grid or an item list. */

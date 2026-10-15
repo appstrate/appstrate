@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { Puzzle } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -417,16 +418,16 @@ function IntegrationStatusCell({
   const { t } = useTranslation("agents");
   const { data: entry, isPending } = useIntegrationReadinessEntry(packageId, agentPackageId);
   if (!spaceActive) {
-    return <Badge variant="pending">{t("detail.connectionsTable.inactive")}</Badge>;
+    return <ToneBadge variant="pending">{t("detail.connectionsTable.inactive")}</ToneBadge>;
   }
   if (isPending || !entry) {
-    return <Badge variant="pending">{t("detail.connectionsTable.checking")}</Badge>;
+    return <ToneBadge variant="pending">{t("detail.connectionsTable.checking")}</ToneBadge>;
   }
   if (describeResolution(entry.resolution).resolved) {
-    return <Badge variant="success">{t("detail.connectionsTable.ready")}</Badge>;
+    return <ToneBadge variant="success">{t("detail.connectionsTable.ready")}</ToneBadge>;
   }
   return entry.run_blocking ? (
-    <Badge variant="warning">{t("detail.connectionsTable.required")}</Badge>
+    <ToneBadge variant="warning">{t("detail.connectionsTable.required")}</ToneBadge>
   ) : (
     <Badge variant="secondary">{t("detail.connectionsTable.unbound")}</Badge>
   );

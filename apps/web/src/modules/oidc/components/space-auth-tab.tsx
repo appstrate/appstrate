@@ -17,6 +17,8 @@
  * so there a row that exists is shown only to be deleted.
  */
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, type ReactNode } from "react";
 import { useModalParam } from "@/hooks/use-modal-param";
 import { useTranslation } from "react-i18next";
@@ -24,8 +26,8 @@ import { toast } from "sonner";
 import { Mail, Trash2, Send } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { FormItem } from "@appstrate/ui/components/field";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { FormItem } from "@/components/app-ui/form-item";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SettingsSkeleton } from "@/components/loading-skeletons";
@@ -198,9 +200,9 @@ function SmtpSection({ personal }: { personal: boolean }) {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" pending={upsert.isPending}>
+              <PendingButton type="submit" pending={upsert.isPending}>
                 {t("common:btn.save")}
-              </Button>
+              </PendingButton>
               {initial && (
                 <Button type="button" variant="outline" onClick={() => smtpTest.open()}>
                   <Send className="h-4 w-4" />
@@ -255,9 +257,9 @@ function SmtpTestModal({
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             {t("common:btn.cancel")}
           </Button>
-          <Button onClick={() => onSend(to)} pending={isPending} disabled={!to}>
+          <PendingButton onClick={() => onSend(to)} pending={isPending} disabled={!to}>
             {t("settings:spaceAuth.smtpTest")}
-          </Button>
+          </PendingButton>
         </>
       }
     >
@@ -357,9 +359,9 @@ function SocialSection({
           </FormItem>
 
           <div className="flex gap-2">
-            <Button type="submit" pending={upsert.isPending}>
+            <PendingButton type="submit" pending={upsert.isPending}>
               {t("common:btn.save")}
-            </Button>
+            </PendingButton>
             {deleteButton}
           </div>
         </form>
@@ -441,7 +443,7 @@ function ProviderConfigSection({
           {loading ? (
             <Skeleton className="h-5 w-20" />
           ) : configured ? (
-            <Badge variant="running">{t("spaceAuth.configured")}</Badge>
+            <ToneBadge variant="running">{t("spaceAuth.configured")}</ToneBadge>
           ) : (
             <Badge variant="secondary">{t("spaceAuth.notConfigured")}</Badge>
           )}

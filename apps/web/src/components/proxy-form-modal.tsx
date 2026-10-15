@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { FormModal } from "./form-modal";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import type { OrgProxyInfo } from "../hooks/use-proxies";
 

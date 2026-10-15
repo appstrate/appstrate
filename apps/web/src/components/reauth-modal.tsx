@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
@@ -79,9 +80,9 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
                   />
                 </div>
                 <FieldError>{error}</FieldError>
-                <Button type="submit" pending={submitting}>
+                <PendingButton type="submit" pending={submitting}>
                   {t("preferences.reauthConfirm")}
-                </Button>
+                </PendingButton>
               </form>
             )}
 

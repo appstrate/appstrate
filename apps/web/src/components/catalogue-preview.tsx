@@ -26,6 +26,7 @@
  * Runs, versions, files and settings stay on the package's own page, one link
  * away.
  */
+import { ToneAlert } from "@/components/app-ui/status-variants";
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -46,7 +47,7 @@ import {
 } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
-import { Alert, AlertTitle } from "@appstrate/ui/components/alert";
+import { AlertTitle } from "@appstrate/ui/components/alert";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -328,7 +329,7 @@ export function CataloguePreview({
           goes through the catalogue's own activation, which asks about the
           agent's integrations before writing. */}
       {offers.map((offer) => (
-        <Alert key={offer.id} variant="info" className="mb-5">
+        <ToneAlert key={offer.id} variant="info" className="mb-5">
           <Inbox className="h-4 w-4" />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
@@ -347,7 +348,7 @@ export function CataloguePreview({
               </Button>
             )}
           </div>
-        </Alert>
+        </ToneAlert>
       ))}
 
       {/* The title's line carries the one Actions menu, the same items as the

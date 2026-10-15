@@ -20,10 +20,10 @@
  * rather than one row component holding both.
  */
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowUpFromLine, Building2, CircleCheck, Pencil, Trash2 } from "lucide-react";
-import { Badge } from "@appstrate/ui/components/badge";
 import type { DataColumn } from "../data-table";
 import { TableRowActions } from "../table-row-actions";
 import { rowActionsColumn } from "../row-actions-column";
@@ -128,7 +128,7 @@ export function useIntegrationClientColumns({
       tier: 2,
       cell: (row) =>
         row.usedHere ? (
-          <Badge variant="success">{t("integration.clients.usedHere")}</Badge>
+          <ToneBadge variant="success">{t("integration.clients.usedHere")}</ToneBadge>
         ) : row.orgDefault ? (
           <CellText>{t("integration.clients.orgDefault")}</CellText>
         ) : null,

@@ -3,9 +3,9 @@
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { OptionSelect } from "@appstrate/ui/components/select";
-import { CheckboxField } from "@appstrate/ui/components/checkbox";
-import { FormItem } from "@appstrate/ui/components/field";
+import { OptionSelect } from "@/components/app-ui/option-select";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
+import { FormItem } from "@/components/app-ui/form-item";
 import type { PackageType } from "@appstrate/core/validation";
 import { FormModal } from "../form-modal";
 import { spaceLabel } from "../../lib/space-label";

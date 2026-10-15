@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 
 /**
  * A time of day (`"HH:mm"`), written in the clock of the APP's language, not of

@@ -6,8 +6,8 @@
  * applies; this draws it.
  */
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
-import { Badge } from "@appstrate/ui/components/badge";
 import type { RowState } from "../lib/model-providers";
 
 export function RowStateCell({
@@ -24,21 +24,21 @@ export function RowStateCell({
     <div className="flex min-w-0 flex-wrap items-center gap-1">
       {states.map((state) =>
         state === "unavailable" ? (
-          <Badge key={state} variant="failed" title={unavailableHint}>
+          <ToneBadge key={state} variant="failed" title={unavailableHint}>
             {t("models.credentialUnavailable")}
-          </Badge>
+          </ToneBadge>
         ) : state === "default" ? (
-          <Badge key={state} variant="success">
+          <ToneBadge key={state} variant="success">
             {t("models.default")}
-          </Badge>
+          </ToneBadge>
         ) : state === "disabled" ? (
-          <Badge key={state} variant="pending">
+          <ToneBadge key={state} variant="pending">
             {t("providers.state.disabled")}
-          </Badge>
+          </ToneBadge>
         ) : (
-          <Badge key={state} variant="pending">
+          <ToneBadge key={state} variant="pending">
             {t("providers.state.noKey")}
-          </Badge>
+          </ToneBadge>
         ),
       )}
     </div>

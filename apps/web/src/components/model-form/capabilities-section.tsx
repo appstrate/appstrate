@@ -9,8 +9,8 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { CheckboxField } from "@appstrate/ui/components/checkbox";
-import { FormItem } from "@appstrate/ui/components/field";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import type { UseFormRegisterReturn } from "react-hook-form";

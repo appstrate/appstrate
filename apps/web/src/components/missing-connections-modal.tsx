@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, XCircle, Puzzle, Check } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { unboundLabel } from "./integration-connect/integration-run-readiness";
@@ -72,14 +72,14 @@ export function MissingConnectionsModal({
       actions={
         <div className="flex items-center gap-2">
           {showRetry && (
-            <Button
+            <PendingButton
               onClick={onRetry}
               pending={retrying}
               disabled={!canRetry}
               data-testid="missing-connections-retry"
             >
               {t("missingConnections.retry")}
-            </Button>
+            </PendingButton>
           )}
         </div>
       }

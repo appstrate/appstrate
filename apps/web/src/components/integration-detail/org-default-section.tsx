@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneAlert } from "@/components/app-ui/status-variants";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { AlertDescription } from "@appstrate/ui/components/alert";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { keepAvailable, unavailableConnectionIds } from "../../lib/connection-set";
 import {
   useIntegrationOrgDefault,
@@ -85,7 +86,7 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   return (
     <div className="space-y-4" data-testid="org-default-section">
       {unavailableIds.length > 0 && (
-        <Alert variant="warning" data-testid="org-default-unavailable-warning">
+        <ToneAlert variant="warning" data-testid="org-default-unavailable-warning">
           <AlertTriangle className="size-4" />
           <AlertDescription className="flex flex-wrap items-start justify-between gap-3">
             <span>
@@ -106,7 +107,7 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
               })}
             </Button>
           </AlertDescription>
-        </Alert>
+        </ToneAlert>
       )}
       {isLoading || connectionsLoading ? (
         <SettingsSkeleton rows={2} />

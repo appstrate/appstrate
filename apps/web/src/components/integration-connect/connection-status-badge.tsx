@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
-import { Badge } from "@appstrate/ui/components/badge";
 
 /**
  * Connection-state pill shared across every surface that flags a connection's
@@ -13,8 +13,8 @@ import { Badge } from "@appstrate/ui/components/badge";
 export function ConnectionStatusBadge({ needsReconnection }: { needsReconnection: boolean }) {
   const { t } = useTranslation("settings");
   return needsReconnection ? (
-    <Badge variant="warning">{t("integration.auth.needsReconnection")}</Badge>
+    <ToneBadge variant="warning">{t("integration.auth.needsReconnection")}</ToneBadge>
   ) : (
-    <Badge variant="success">{t("integration.connection.statusConnected")}</Badge>
+    <ToneBadge variant="success">{t("integration.connection.statusConnected")}</ToneBadge>
   );
 }
