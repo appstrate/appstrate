@@ -164,42 +164,40 @@ export function useIntegrationNames(): (
   return (integrationIds) => loadIntegrationNames(qc, scope, integrationIds);
 }
 
-/**
- * Fetch the complete integration corpus for list surfaces that search and
- * filter client-side. The endpoint is paginated at 100 rows, so treating its
- * default first page as a complete catalogue would make the toolbar lie as
- * soon as an organization crosses that boundary.
- */
-export function useAllIntegrations(options?: { enabled?: boolean }) {
-  const scope = useIntegrationsReadScope();
-  return useQuery({
-    queryKey: [
-      "get",
-      "/api/integrations",
-      { params: { query: { limit: 100, offset: 0 }, header: scope.header } },
-    ],
-    // Off by default for callers that only need it in one of their states —
-    // the catalogue asks only while its integrations tab is the one on screen.
-    enabled: scope.enabled && (options?.enabled ?? true),
-    queryFn: async (): Promise<IntegrationSummaryWire[]> => {
-      const all: IntegrationSummaryWire[] = [];
-      const limit = 100;
-      let offset = 0;
+/** `GET /api/integrations` answers at most this many ids per request (its `id` filter's bound). */
+const IDS_PER_REQUEST = 100;
 
-      for (;;) {
-        const { data: page } = await client.GET("/api/integrations", {
-          params: {
-            query: { limit, offset },
-            header: scope.header,
-          },
-        });
-        if (!page) throw new Error("Integration catalogue returned no response body");
-        const rows = page.data as IntegrationSummaryWire[];
-        all.push(...rows);
-        if (!page.hasMore || rows.length === 0) return all;
-        offset += rows.length;
-      }
-    },
+/**
+ * The list rows of `ids` — `active`, `block_user_connections` and the manifest,
+ * for the current space — in as many requests as {@link IDS_PER_REQUEST}
+ * allows, instead of the whole corpus. An id not placed here has no row.
+ * `undefined` until every request answered.
+ */
+export function useIntegrationsById(
+  ids: readonly string[],
+  options?: { enabled?: boolean },
+): { data: IntegrationSummaryWire[] | undefined; isLoading: boolean; error: unknown } {
+  const scope = useIntegrationsReadScope();
+  // Sorted and unique, so the same set is the same keys whatever order it came in.
+  const unique = [...new Set(ids)].sort();
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += IDS_PER_REQUEST) {
+    chunks.push(unique.slice(i, i + IDS_PER_REQUEST));
+  }
+  return useQueries({
+    queries: chunks.map((chunk) => ({
+      ...$api.queryOptions("get", "/api/integrations", {
+        params: { query: { id: chunk, limit: IDS_PER_REQUEST }, header: scope.header },
+      }),
+      enabled: scope.enabled && (options?.enabled ?? true),
+    })),
+    combine: (results) => ({
+      data: results.every((result) => result.data)
+        ? results.flatMap((result) => result.data!.data as IntegrationSummaryWire[])
+        : undefined,
+      isLoading: results.some((result) => result.isLoading),
+      error: results.find((result) => result.error)?.error ?? null,
+    }),
   });
 }
 

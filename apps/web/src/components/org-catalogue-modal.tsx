@@ -61,7 +61,7 @@ import { missingIntegrations, type MissingDependency } from "../lib/activation-c
 import { mayConfigurePackage, maySetPackageActive } from "../lib/package-permissions";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useRevokePackageShare } from "../hooks/use-package-shares";
-import { useAllIntegrations } from "../hooks/use-integrations";
+import { useIntegrationsById } from "../hooks/use-integrations";
 import { PackageIcon } from "./package-icon";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 import {
@@ -172,8 +172,11 @@ export function OrgCatalogueModal({
   const orgName = currentOrg?.name ?? "";
 
   // Integrations resolve their activation server-side, and only their view
-  // pays for the request.
-  const integrationsQuery = useAllIntegrations({ enabled: active === "integration" });
+  // pays for the request: the rows of the library's own integrations, nothing more.
+  const integrationsQuery = useIntegrationsById(
+    (library?.packages.integration ?? []).map((item) => item.id),
+    { enabled: active === "integration" },
+  );
   const { data: integrations } = integrationsQuery;
   // The library carries no icon. The agents this space runs do (their index
   // reads the manifest), and so do integrations (`/api/integrations`); any
