@@ -537,6 +537,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         proxyId,
         overrideVersionLabel,
         dependencyOverrides: params.dependencyOverrides ?? null,
+        resolvedIntegrationVersions,
         traceparent: params.traceparent,
         resolvedConnections,
         manifestCache,

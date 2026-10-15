@@ -22,6 +22,7 @@ export {
   type BundleFormatVersion,
   type BundleMetadata,
   type BundlePackage,
+  type DependencySection,
   type PackageCatalog,
   type PackageIdentity,
   type ParsedPackageIdentity,

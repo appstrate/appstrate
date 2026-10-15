@@ -16,9 +16,14 @@
  *   - A draft OR published agent run resolves `dependencies.skills`
  *     against the registry. The same manifest pin means the same bytes
  *     on every run, matching the export/import path (`buildBundleFromDb`).
- *   - An unsatisfiable pin (including a never-published dependency)
+ *   - An unsatisfiable skill pin (including a never-published dependency)
  *     surfaces as a `DEPENDENCY_UNRESOLVED` BundleError from the bundle
  *     builder — never a silent draft fallback.
+ *   - `dependencies.integrations` never resolves a version here: the run
+ *     already froze one per integration (`integrationVersions`, persisted as
+ *     `runs.resolved_integration_versions`) and the bundle carries exactly
+ *     that — a published version, the draft, or the system registry's
+ *     version. An integration absent from the freeze resolves to `null`.
  *
  * Escape hatch — per-run dependency overrides:
  *   The `dependencyOverrides` map (`{ "@scope/name": "draft" | <spec> }`)
@@ -31,17 +36,20 @@
  *       dependency, still resolved against published versions.
  *   Overrides are run-scoped only — never stored in the manifest — and are
  *   persisted on the run row (`runs.dependency_overrides`) so a run that
- *   consumed draft bytes is never mistaken for a reproducible one.
+ *   consumed draft bytes is never mistaken for a reproducible one. They do
+ *   not apply to integrations here: the freeze has already folded them in.
  *
  * `fetch` is routed to whichever backing catalog produced the identity
  * during `resolve` (the bundle builder always resolves before fetching).
  * A fetch for an un-resolved identity falls back to the DB catalog — EXCEPT
  * for a dependency the caller pinned to `draft`: serving published bytes for
- * a draft override would silently break the override, so an owner-miss on a draft-overridden dep throws loud instead.
+ * a draft override would silently break the override, so an owner-miss on a
+ * draft-overridden dep (or an integration frozen as `draft`) throws loud instead.
  */
 
 import {
   type BundlePackage,
+  type DependencySection,
   type PackageCatalog,
   type PackageIdentity,
   type ResolvedPackage,
@@ -49,6 +57,11 @@ import {
 import { DbPackageCatalog } from "./db-package-catalog.ts";
 import { DraftPackageCatalog } from "./draft-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "../agent-version-resolver.ts";
+import {
+  resolvedIntegrationVersionToDescriptor,
+  type ResolvedIntegrationVersionMap,
+} from "../integration-service.ts";
+import { getSystemPackages } from "../system-packages.ts";
 
 interface RunPackageCatalogOptions {
   /** Org whose packages are visible (plus system packages, `orgId IS NULL`). */
@@ -59,6 +72,10 @@ interface RunPackageCatalogOptions {
    * replaces the manifest pin with that spec against published versions.
    */
   dependencyOverrides?: Record<string, string> | null;
+  /** The run's frozen integration versions — the only source for `integrations`. */
+  integrationVersions: ResolvedIntegrationVersionMap;
+  /** The bundle will run (AFPS signature policy on published fetches); false for an export. */
+  forExecution: boolean;
   /**
    * Injection seam for tests (the repo's no-`mock.module` DI policy). Supply
    * stand-in catalogs to exercise the routing logic without DB/storage. The
@@ -69,6 +86,8 @@ interface RunPackageCatalogOptions {
   deps?: {
     db?: PackageCatalog;
     makeDraft?: () => PackageCatalog;
+    /** Version the system registry holds for a package id (boot registry by default). */
+    systemVersion?: (packageId: string) => string | undefined;
   };
 }
 
@@ -78,34 +97,67 @@ export class RunPackageCatalog implements PackageCatalog {
   /** Created lazily — most runs declare no `draft` override at all. */
   private draftCatalog: PackageCatalog | null = null;
   private readonly overrides: Map<string, string>;
+  private readonly integrationVersions: ResolvedIntegrationVersionMap;
+  private readonly systemVersion: (packageId: string) => string | undefined;
   /** identity → the backing catalog that resolved it (routes `fetch`). */
   private readonly owners = new Map<PackageIdentity, PackageCatalog>();
 
   constructor(opts: RunPackageCatalogOptions) {
-    this.db = opts.deps?.db ?? new DbPackageCatalog({ orgId: opts.orgId, forExecution: true });
+    this.db =
+      opts.deps?.db ?? new DbPackageCatalog({ orgId: opts.orgId, forExecution: opts.forExecution });
     this.makeDraft = opts.deps?.makeDraft ?? (() => new DraftPackageCatalog({ orgId: opts.orgId }));
     this.overrides = new Map(Object.entries(opts.dependencyOverrides ?? {}));
+    this.integrationVersions = opts.integrationVersions;
+    this.systemVersion = opts.deps?.systemVersion ?? ((id) => getSystemPackages().get(id)?.version);
   }
 
   private draft(): PackageCatalog {
     return (this.draftCatalog ??= this.makeDraft());
   }
 
-  async resolve(name: string, versionSpec: string): Promise<ResolvedPackage | null> {
-    const override = this.overrides.get(name);
+  async resolve(
+    name: string,
+    versionSpec: string,
+    section?: DependencySection,
+  ): Promise<ResolvedPackage | null> {
+    if (section === "integrations") return this.resolveIntegration(name, versionSpec);
 
-    if (override === VERSION_SELECTOR_DRAFT) {
-      const cat = this.draft();
-      const resolved = await cat.resolve(name, versionSpec);
-      if (resolved) this.owners.set(resolved.identity, cat);
-      return resolved;
-    }
+    const override = this.overrides.get(name);
+    if (override === VERSION_SELECTOR_DRAFT)
+      return this.resolveVia(this.draft(), name, versionSpec);
 
     // No override → manifest pin; explicit spec override → replaces the pin.
     // Both resolve against published versions via the DB catalog.
-    const effectiveSpec = override ?? versionSpec;
-    const resolved = await this.db.resolve(name, effectiveSpec);
-    if (resolved) this.owners.set(resolved.identity, this.db);
+    return this.resolveVia(this.db, name, override ?? versionSpec);
+  }
+
+  /** Answer from the run's freeze only — the manifest pin was already applied by it. */
+  private async resolveIntegration(
+    name: string,
+    versionSpec: string,
+  ): Promise<ResolvedPackage | null> {
+    const entry = this.integrationVersions[name];
+    if (!entry) return null;
+    const descriptor = resolvedIntegrationVersionToDescriptor(name, entry);
+    switch (descriptor.kind) {
+      case "draft":
+        return this.resolveVia(this.draft(), name, versionSpec);
+      case "version":
+        return this.resolveVia(this.db, name, descriptor.version);
+      case "system": {
+        const version = this.systemVersion(name);
+        return version ? this.resolveVia(this.db, name, version) : null;
+      }
+    }
+  }
+
+  private async resolveVia(
+    cat: PackageCatalog,
+    name: string,
+    spec: string,
+  ): Promise<ResolvedPackage | null> {
+    const resolved = await cat.resolve(name, spec);
+    if (resolved) this.owners.set(resolved.identity, cat);
     return resolved;
   }
 
@@ -120,7 +172,10 @@ export class RunPackageCatalog implements PackageCatalog {
     // draft" loud rather than quietly swapping bytes. Identity shape is
     // `@scope/name@version`, so the name is everything before the last `@`.
     const name = identity.slice(0, identity.lastIndexOf("@"));
-    if (this.overrides.get(name) === VERSION_SELECTOR_DRAFT) {
+    if (
+      this.overrides.get(name) === VERSION_SELECTOR_DRAFT ||
+      this.integrationVersions[name]?.source === "draft"
+    ) {
       throw new Error(
         `RunPackageCatalog: draft-overridden dependency '${name}' fetched without a recorded resolver — refusing to serve published bytes for a draft override`,
       );

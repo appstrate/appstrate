@@ -11,6 +11,7 @@ import {
   writeBundleToBuffer,
   BundleError,
   type Bundle,
+  type BundleMetadata,
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -19,6 +20,7 @@ import { RunPackageCatalog } from "./run-launcher/run-package-catalog.ts";
 import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
 import { deleteUnlessReclaimed } from "./package-storage-deletion.ts";
+import type { ResolvedIntegrationVersionMap } from "./integration-service.ts";
 
 // Bucket + key layout live in a LEAF module so the deletion outbox and the
 // orphan scanner can derive the exact same keys without importing this file's
@@ -132,6 +134,48 @@ export async function uploadPackageZip(
   }
 }
 
+/**
+ * The one assembly of an agent bundle, shared by the run hot path
+ * ({@link buildAgentPackage}) and the export (`bundle-assembly.ts`), so both
+ * hand over the same members for the same frozen versions.
+ *
+ * Members are the skills (pins resolved against published versions, per-run
+ * `dependencyOverrides` applied) and the integrations at the version the
+ * caller FROZE in `integrationVersions` — the bundle never resolves an
+ * integration version itself. An integration absent from that map (soft miss:
+ * not found, wrong type, invalid) is skipped with a warning, the same set the
+ * spawn resolver drops.
+ */
+export async function assembleAgentBundle(
+  root: BundlePackage,
+  opts: {
+    orgId: string;
+    integrationVersions: ResolvedIntegrationVersionMap;
+    dependencyOverrides?: Record<string, string> | null;
+    /** The bundle will run: apply the AFPS signature policy to every fetch. */
+    forExecution: boolean;
+    metadata?: BundleMetadata;
+    onWarn?: (message: string) => void;
+  },
+): Promise<Bundle> {
+  return buildBundleFromCatalog(
+    root,
+    new RunPackageCatalog({
+      orgId: opts.orgId,
+      dependencyOverrides: opts.dependencyOverrides ?? null,
+      integrationVersions: opts.integrationVersions,
+      forExecution: opts.forExecution,
+    }),
+    {
+      ...(opts.metadata ? { metadata: opts.metadata } : {}),
+      // mcp-servers are spawned and fetched by the sidecar, never bundled.
+      depTypes: ["skills", "integrations"],
+      optionalDepTypes: ["integrations"],
+      ...(opts.onWarn ? { onWarn: opts.onWarn } : {}),
+    },
+  );
+}
+
 interface AgentPackageResult {
   zip: Buffer;
   /**
@@ -148,27 +192,31 @@ interface AgentPackageResult {
  * The returned ZIP is the canonical bundle format (bundle.json root +
  * per-package dirs under `packages/@scope/name/version/`). The
  * container-side loader (`readBundleFromFile` in runtime-pi) parses
- * it directly into a {@link Bundle} the PiRunner + resolvers consume —
- * including each dependency's doc companion (`SKILL.md` for skills,
- * `INTEGRATION.md` for integrations, `README.md` for mcp-servers).
+ * it directly into a {@link Bundle} the PiRunner + resolvers consume.
+ * Members are the agent, its skills (`SKILL.md`) and its integrations
+ * (`INTEGRATION.md`); see {@link assembleAgentBundle}.
  *
- * Dependency resolution uses {@link RunPackageCatalog}, which resolves
- * `dependencies.skills` against PUBLISHED versions honoring each pin
+ * Skills resolve against PUBLISHED versions honoring each pin
  * (exact → dist-tag → semver range) — what makes a run reproducible.
  * A dependency's mutable draft never leaks into a consumer's run unless
  * the caller explicitly opts that dependency in via `dependencyOverrides`
  * (the skill-development edit loop). An unsatisfiable pin (including a
  * never-published dependency) throws `DEPENDENCY_UNRESOLVED` rather than
- * silently falling back to the draft.
+ * silently falling back to the draft. Integrations come from the run's
+ * frozen `integrationVersions` (`freezeRunSpawnDependencies`).
  */
 export async function buildAgentPackage(
   agent: LoadedPackage,
   orgId: string,
-  /**
-   * Per-run dependency overrides (`{ "@scope/name": "draft" | <spec> }`).
-   * Run-scoped only — never read from the manifest. See {@link RunPackageCatalog}.
-   */
-  dependencyOverrides?: Record<string, string> | null,
+  deps: {
+    /** The run's frozen integration versions (`runs.resolved_integration_versions`). */
+    integrationVersions: ResolvedIntegrationVersionMap;
+    /**
+     * Per-run dependency overrides (`{ "@scope/name": "draft" | <spec> }`).
+     * Run-scoped only — never read from the manifest. See {@link RunPackageCatalog}.
+     */
+    dependencyOverrides?: Record<string, string> | null;
+  },
 ): Promise<AgentPackageResult> {
   // Canonicalize the persisted `runtime_tools` ids BEFORE they are serialized
   // into the bundle the container loads. `runtime-pi/entrypoint.ts` gates the
@@ -217,35 +265,25 @@ export async function buildAgentPackage(
     integrity: "",
   };
 
-  // Timing instrumentation: skill dependencies are fetched here one storage
-  // round-trip at a time (RunPackageCatalog → downloadVersionZip per skill).
+  // Timing instrumentation: dependency members are fetched here one storage
+  // round-trip at a time (RunPackageCatalog → downloadVersionZip per member).
   // For an inline run this is the per-run critical-path cost a persisted
   // agent avoids (it pulls one pre-built versioned ZIP), and the prime
   // suspect for the inline-vs-persisted latency gap. Logging the duration +
-  // skill count makes that measurable in prod instead of guessed.
-  const depsRecord =
-    manifest.dependencies && typeof manifest.dependencies === "object"
-      ? (manifest.dependencies as { skills?: unknown }).skills
-      : undefined;
-  const skillCount =
-    depsRecord && typeof depsRecord === "object" ? Object.keys(depsRecord).length : 0;
-
+  // member count makes that measurable in prod instead of guessed.
   const buildStart = performance.now();
-  const bundle = await buildBundleFromCatalog(
-    root,
-    new RunPackageCatalog({ orgId, dependencyOverrides }),
-    {
-      // Run bundle = agent + skills. Integrations/mcp-servers are spawned and
-      // fetched separately by the sidecar, not bundled into the agent.
-      depTypes: ["skills"],
-      onWarn: (message) => {
-        logger.warn("buildAgentPackage: bundle builder warning", { agentId: agent.id, message });
-      },
+  const bundle = await assembleAgentBundle(root, {
+    orgId,
+    integrationVersions: deps.integrationVersions,
+    dependencyOverrides: deps.dependencyOverrides ?? null,
+    forExecution: true,
+    onWarn: (message) => {
+      logger.warn("buildAgentPackage: bundle builder warning", { agentId: agent.id, message });
     },
-  );
+  });
   logger.info("buildAgentPackage: bundle assembled", {
     agentId: agent.id,
-    skillCount,
+    memberCount: bundle.packages.size - 1,
     durationMs: Math.round(performance.now() - buildStart),
   });
 

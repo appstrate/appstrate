@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — dependency sections a bundle may skip (#2005)
+
+- `PackageCatalog.resolve(name, versionSpec, section?)` receives the
+  `dependencies.*` section the request comes from, typed by the new exported
+  `DependencySection` (`"skills" | "mcp_servers" | "integrations"`), so a
+  catalog can resolve each package type from its own source of truth. The
+  parameter is optional: existing catalogs keep compiling.
+- `BuildBundleOptions.optionalDepTypes`: an entry of one of these sections that
+  `resolve` returns `null` for is reported through `onWarn` and left out of the
+  bundle instead of failing with `DEPENDENCY_UNRESOLVED`. A `fetch` failure
+  stays fatal.
+
 ### Changed — `api_call` values encoded for their place (#1915, BREAKING)
 
 - `prepareApiCallRequest` (`./resolvers`) renders the target, the headers and

@@ -27,7 +27,10 @@ import {
   getPlatformRunLimits,
   resolveAgentResources,
 } from "./run-limits.ts";
-import type { IntegrationManifestCache } from "./integration-service.ts";
+import type {
+  IntegrationManifestCache,
+  ResolvedIntegrationVersionMap,
+} from "./integration-service.ts";
 import type { ResolvedConnectionMap, RunIntegrationUnbound } from "@appstrate/core/integration";
 import type { ModelCost } from "@appstrate/core/module";
 import { getAgentResourceHints } from "@appstrate/core/validation";
@@ -110,6 +113,11 @@ export async function buildRunContext(params: {
    */
   dependencyOverrides?: Record<string, string> | null;
   /**
+   * The integration versions this run FROZE (`freezeRunSpawnDependencies`).
+   * The bundle carries each integration at exactly this version.
+   */
+  resolvedIntegrationVersions: ResolvedIntegrationVersionMap;
+  /**
    * W3C `traceparent` of the spawning request — forwarded into the
    * runtime so its outbound HTTP traffic becomes child spans of the
    * platform's trace. Optional: callers from background workers
@@ -190,7 +198,10 @@ export async function buildRunContext(params: {
     await Promise.all([
       skipSettingsFetch ? null : getSpacePackageSettings({ orgId, spaceId }, agent.id),
       getCheckpoint(agent.id, spaceId, persistenceScope),
-      buildAgentPackage(agent, orgId, params.dependencyOverrides ?? null),
+      buildAgentPackage(agent, orgId, {
+        integrationVersions: params.resolvedIntegrationVersions,
+        dependencyOverrides: params.dependencyOverrides ?? null,
+      }),
       params.overrideVersionLabel
         ? null
         : agent.source !== "system"

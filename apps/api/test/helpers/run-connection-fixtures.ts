@@ -21,7 +21,7 @@ import { db } from "./db.ts";
 import { integrationConnections, runs } from "@appstrate/db/schema";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { seedPackage, seedPackageVersion } from "./seed.ts";
+import { seedPackage, seedPublishedVersion } from "./seed.ts";
 import { localIntegrationManifest, httpHeaderDelivery } from "./integration-manifests.ts";
 import type { TestContext } from "./auth.ts";
 import { activatePackage } from "../../src/services/space-packages.ts";
@@ -146,9 +146,10 @@ function connectionTestIntegrationManifest(id: string) {
 /**
  * Seed the integration package + a PUBLISHED 1.0.0 version + install it in the
  * context's default space. The published version is what the run's
- * dependency freeze resolves the agent's `^1.0.0` pin against — without it
- * kickoff aborts with 422 `dependency_unresolved` long before the connection
- * snapshot.
+ * dependency freeze resolves the agent's `^1.0.0` pin against, and its
+ * stored archive is what the run bundle fetches at that frozen version —
+ * without either, kickoff aborts with 422 `dependency_unresolved` long before
+ * the connection snapshot.
  */
 export async function seedConnectionTestIntegration(ctx: TestContext, id: string): Promise<void> {
   await seedPackage({
@@ -162,9 +163,7 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
     source: "local",
     draftManifest: connectionTestIntegrationManifest(id),
   });
-  await seedPackageVersion({
-    packageId: id,
-    version: "1.0.0",
+  await seedPublishedVersion(id, "1.0.0", {
     manifest: connectionTestIntegrationManifest(id) as unknown as Record<string, unknown>,
   });
   await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);

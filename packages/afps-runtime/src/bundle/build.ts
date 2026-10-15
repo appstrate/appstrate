@@ -41,6 +41,7 @@ import {
   type Bundle,
   type BundleMetadata,
   type BundlePackage,
+  type DependencySection,
   type PackageCatalog,
   type PackageIdentity,
   type ResolvedPackage,
@@ -49,16 +50,23 @@ import {
 export interface BuildBundleOptions {
   metadata?: BundleMetadata;
   limits?: Partial<BundleLimits>;
-  /** Called with a human-readable message for non-fatal conditions (cycles). */
+  /**
+   * Called with a human-readable message for non-fatal conditions (cycles,
+   * skipped optional dependencies).
+   */
   onWarn?: (msg: string) => void;
   /**
    * Which `dependencies.*` sections to walk into the bundle graph. Defaults to
-   * all bundleable sections. Run-bundle builders pass `["skills"]`: an agent's
-   * integrations and mcp-servers are not bundle members — they are spawned /
-   * fetched separately by the sidecar at runtime — so they must not be walked
-   * into (and fetched for) the agent bundle.
+   * every section. A section left out is neither resolved nor fetched, so the
+   * caller decides which package types are bundle members.
    */
-  depTypes?: DepRequest["type"][];
+  depTypes?: DependencySection[];
+  /**
+   * Sections whose unresolved entries are skipped with an `onWarn` message
+   * instead of failing the build with `DEPENDENCY_UNRESOLVED`. Only a `null`
+   * from `catalog.resolve` is tolerated: a `fetch` failure stays fatal.
+   */
+  optionalDepTypes?: DependencySection[];
 }
 
 /**
@@ -67,8 +75,9 @@ export interface BuildBundleOptions {
  *
  * Walks `manifest.dependencies.{skills, mcp_servers, integrations}` recursively.
  * Cycles are tolerated (each identity is fetched once); the caller gets
- * a warning via `opts.onWarn`. Dep resolution failures are collected
- * and surfaced as a single `DEPENDENCY_UNRESOLVED` with `details.missing`.
+ * a warning via `opts.onWarn`. Dep resolution failures outside
+ * `opts.optionalDepTypes` are collected and surfaced as a single
+ * `DEPENDENCY_UNRESOLVED` with `details.missing`.
  */
 export async function buildBundleFromCatalog(
   root: BundlePackage,
@@ -78,6 +87,7 @@ export async function buildBundleFromCatalog(
   const limits = resolveBundleLimits(opts.limits);
   const onWarn = opts.onWarn ?? (() => {});
   const depTypes = opts.depTypes ?? ["skills", "mcp_servers", "integrations"];
+  const optionalDepTypes = new Set(opts.optionalDepTypes ?? []);
   const packages = new Map<PackageIdentity, BundlePackage>();
   const visiting = new Set<PackageIdentity>();
   const missing: Array<{ from: PackageIdentity; name: string; versionSpec: string }> = [];
@@ -111,7 +121,7 @@ export async function buildBundleFromCatalog(
     // folded back in declaration order so `missing` keeps a deterministic
     // order regardless of resolution completion order.
     const resolutions = await Promise.all(
-      deps.map(({ name, versionSpec }) => catalog.resolve(name, versionSpec)),
+      deps.map(({ name, versionSpec, type }) => catalog.resolve(name, versionSpec, type)),
     );
 
     // Dedupe synchronously against the already-loaded set AND within this
@@ -120,9 +130,15 @@ export async function buildBundleFromCatalog(
     const toFetch: ResolvedPackage[] = [];
     const claimedThisLevel = new Set<PackageIdentity>();
     for (let i = 0; i < deps.length; i++) {
-      const { name, versionSpec } = deps[i]!;
+      const { name, versionSpec, type } = deps[i]!;
       const resolved = resolutions[i];
       if (!resolved) {
+        if (optionalDepTypes.has(type)) {
+          onWarn(
+            `optional ${type} dependency ${name}@${versionSpec} of ${pkg.identity} is unresolved — skipped`,
+          );
+          continue;
+        }
         missing.push({ from: pkg.identity, name, versionSpec });
         continue;
       }
@@ -379,10 +395,10 @@ export function extractRootFromAfps(
 interface DepRequest {
   name: string;
   versionSpec: string;
-  type: "skills" | "mcp_servers" | "integrations";
+  type: DependencySection;
 }
 
-function extractDependencies(manifest: AfpsManifest, depTypes: DepRequest["type"][]): DepRequest[] {
+function extractDependencies(manifest: AfpsManifest, depTypes: DependencySection[]): DepRequest[] {
   const out: DepRequest[] = [];
   const deps = manifest.dependencies;
   if (!deps || typeof deps !== "object") return out;

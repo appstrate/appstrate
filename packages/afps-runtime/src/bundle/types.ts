@@ -84,6 +84,9 @@ export interface ResolvedPackage {
   readonly integrity?: string | null;
 }
 
+/** A `manifest.dependencies.*` section the bundle builder can walk. */
+export type DependencySection = "skills" | "mcp_servers" | "integrations";
+
 /**
  * Abstract catalog contract used by builders to resolve+fetch packages.
  *
@@ -98,8 +101,15 @@ export interface PackageCatalog {
    *
    * `versionSpec` accepts exact versions (`"1.2.3"`, `"=1.2.3"`), semver
    * ranges (`"^1.2"`, `">=1.0 <2.0"`, `"*"`), and dist-tags (`"latest"`).
+   *
+   * `section` names the dependency section the request comes from, so a
+   * catalog can resolve each package type from its own source of truth.
    */
-  resolve(name: string, versionSpec: string): Promise<ResolvedPackage | null>;
+  resolve(
+    name: string,
+    versionSpec: string,
+    section?: DependencySection,
+  ): Promise<ResolvedPackage | null>;
 
   /**
    * Fetch the full package content for an already-resolved identity.

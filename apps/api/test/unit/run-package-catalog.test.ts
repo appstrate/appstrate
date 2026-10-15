@@ -10,11 +10,13 @@
  *   - no override → manifest pin against the DB (published) catalog;
  *   - explicit spec override → replaces the pin, still DB;
  *   - `draft` override → the draft catalog, lazily constructed;
- *   - `fetch` routes to whichever catalog `resolve` used.
+ *   - `fetch` routes to whichever catalog `resolve` used;
+ *   - the `integrations` section answers only from the run's frozen versions.
  */
 
 import { describe, it, expect } from "bun:test";
 import { RunPackageCatalog } from "../../src/services/run-launcher/run-package-catalog.ts";
+import type { ResolvedIntegrationVersionMap } from "../../src/services/integration-service.ts";
 import type {
   BundlePackage,
   PackageCatalog,
@@ -49,19 +51,26 @@ class FakeCatalog implements PackageCatalog {
   }
 }
 
-function make(overrides?: Record<string, string>) {
+function make(
+  overrides?: Record<string, string>,
+  integrationVersions: ResolvedIntegrationVersionMap = {},
+  systemRegistry: Record<string, string> = {},
+) {
   const db = new FakeCatalog("db");
   const draft = new FakeCatalog("draft");
   let draftConstructed = 0;
   const catalog = new RunPackageCatalog({
     orgId: "00000000-0000-0000-0000-000000000000",
     ...(overrides ? { dependencyOverrides: overrides } : {}),
+    integrationVersions,
+    forExecution: true,
     deps: {
       db,
       makeDraft: () => {
         draftConstructed++;
         return draft;
       },
+      systemVersion: (id) => systemRegistry[id],
     },
   });
   return { catalog, db, draft, draftConstructed: () => draftConstructed };
@@ -135,8 +144,102 @@ describe("RunPackageCatalog — routing", () => {
     db.resolve = async () => null;
     const catalog = new RunPackageCatalog({
       orgId: "00000000-0000-0000-0000-000000000000",
+      integrationVersions: {},
+      forExecution: true,
       deps: { db },
     });
     expect(await catalog.resolve("@s/ghost", "^1.0.0")).toBeNull();
+  });
+});
+
+describe("RunPackageCatalog — integrations section", () => {
+  it("resolves a frozen `version` entry at that exact version, not the manifest pin", async () => {
+    const { catalog, db, draft } = make(undefined, {
+      "@s/int": { version: "1.2.3", source: "version" },
+    });
+    const r = await catalog.resolve("@s/int", "^1.0.0", "integrations");
+    expect(r?.identity).toBe("@s/int@db");
+    expect(db.resolveCalls).toEqual([{ name: "@s/int", spec: "1.2.3" }]);
+    expect(draft.resolveCalls).toEqual([]);
+  });
+
+  it("routes a frozen `draft` entry to the draft catalog", async () => {
+    const { catalog, db, draft } = make(undefined, {
+      "@s/int": { version: null, source: "draft" },
+    });
+    const r = await catalog.resolve("@s/int", "^1.0.0", "integrations");
+    expect(r?.identity).toBe("@s/int@draft");
+    expect(draft.resolveCalls).toHaveLength(1);
+    expect(db.resolveCalls).toEqual([]);
+
+    await catalog.fetch(r!.identity);
+    expect(draft.fetchCalls).toEqual(["@s/int@draft"]);
+  });
+
+  it("resolves a frozen `system` entry at the system registry's version", async () => {
+    const { catalog, db } = make(
+      undefined,
+      { "@system/int": { version: null, source: "system" } },
+      { "@system/int": "4.5.6" },
+    );
+    const r = await catalog.resolve("@system/int", "*", "integrations");
+    expect(r?.identity).toBe("@system/int@db");
+    expect(db.resolveCalls).toEqual([{ name: "@system/int", spec: "4.5.6" }]);
+  });
+
+  it("returns null for a `system` entry the registry no longer holds", async () => {
+    const { catalog, db } = make(undefined, {
+      "@system/int": { version: null, source: "system" },
+    });
+    expect(await catalog.resolve("@system/int", "*", "integrations")).toBeNull();
+    expect(db.resolveCalls).toEqual([]);
+  });
+
+  it("returns null for an integration absent from the freeze", async () => {
+    const { catalog, db, draft } = make();
+    expect(await catalog.resolve("@s/int", "^1.0.0", "integrations")).toBeNull();
+    expect(db.resolveCalls).toEqual([]);
+    expect(draft.resolveCalls).toEqual([]);
+  });
+
+  it("ignores dependencyOverrides for integrations (the freeze already applied them)", async () => {
+    const pinned = make(
+      { "@s/int": "draft" },
+      { "@s/int": { version: "1.0.0", source: "version" } },
+    );
+    await pinned.catalog.resolve("@s/int", "^1.0.0", "integrations");
+    expect(pinned.db.resolveCalls).toEqual([{ name: "@s/int", spec: "1.0.0" }]);
+    expect(pinned.draftConstructed()).toBe(0);
+
+    const absent = make({ "@s/int": "2.0.0" });
+    expect(await absent.catalog.resolve("@s/int", "^1.0.0", "integrations")).toBeNull();
+    expect(absent.db.resolveCalls).toEqual([]);
+  });
+
+  it("throws on a corrupt frozen `version` entry with no version", async () => {
+    const { catalog } = make(undefined, { "@s/int": { version: null, source: "version" } });
+    await expect(catalog.resolve("@s/int", "^1.0.0", "integrations")).rejects.toThrow(
+      /Corrupt frozen integration version/,
+    );
+  });
+
+  it("leaves skills on the manifest pin even when the freeze names the same id", async () => {
+    const { catalog, db } = make(undefined, {
+      "@s/skill": { version: "9.9.9", source: "version" },
+    });
+    await catalog.resolve("@s/skill", "^1.0.0", "skills");
+    await catalog.resolve("@s/skill", "^1.0.0");
+    expect(db.resolveCalls).toEqual([
+      { name: "@s/skill", spec: "^1.0.0" },
+      { name: "@s/skill", spec: "^1.0.0" },
+    ]);
+  });
+
+  it("fetch THROWS on an owner-miss for an integration frozen as draft", async () => {
+    const { catalog, db } = make(undefined, { "@s/int": { version: null, source: "draft" } });
+    await expect(catalog.fetch("@s/int@1.0.0" as PackageIdentity)).rejects.toThrow(
+      /draft-overridden/,
+    );
+    expect(db.fetchCalls).toEqual([]);
   });
 });

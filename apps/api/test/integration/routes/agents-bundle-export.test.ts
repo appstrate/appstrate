@@ -12,6 +12,8 @@
  *   - RBAC: 404 when agent is not accessible to the space
  *   - Bundle-layer failures over stored dependency artifacts surface as coded
  *     RFC 9457 422s naming the dependency, not as an opaque 500
+ *   - Integration dependencies ride along at the version a run resolves
+ *     (published pin, system), and an unsatisfiable pin is a 422
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -25,8 +27,10 @@ import { activatePackage } from "../../../src/services/space-packages.ts";
 import { packageDistTags } from "@appstrate/db/schema";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
+import { readBundleFromBuffer, type PackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "../../../src/services/package-storage.ts";
+import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
+import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 
@@ -47,6 +51,8 @@ function buildAfps(manifest: Record<string, unknown>, content: string): Uint8Arr
     files["SKILL.md"] = enc(
       `---\nname: ${slug}\ndescription: Test skill ${slug}.\n---\n\n${content}`,
     );
+  } else if (manifest.type === "integration") {
+    files["INTEGRATION.md"] = enc(content);
   } else {
     files["prompt.md"] = enc(content);
   }
@@ -55,9 +61,11 @@ function buildAfps(manifest: Record<string, unknown>, content: string): Uint8Arr
 
 async function seedVersionedPackage(opts: {
   id: `@${string}/${string}`;
-  type: "agent" | "skill";
+  type: "agent" | "skill" | "integration";
   version: string;
-  orgId: string;
+  /** `null` with `source: "system"` seeds a system package row. */
+  orgId: string | null;
+  source?: "local" | "system";
   manifest: Record<string, unknown>;
   content?: string;
   setLatest?: boolean;
@@ -77,13 +85,18 @@ async function seedVersionedPackage(opts: {
   absentArtifact?: boolean;
   /** Where the package LIVES — a home is what places it in a space (§6.9). */
   homeSpaceId?: string;
+  /** Add a version to a package row an earlier call seeded. */
+  packageExists?: boolean;
 }): Promise<{ versionId: number; version: string }> {
-  await seedPackage({
-    id: opts.id,
-    type: opts.type,
-    orgId: opts.orgId,
-    homeSpaceId: opts.homeSpaceId ?? null,
-  });
+  if (!opts.packageExists) {
+    await seedPackage({
+      id: opts.id,
+      type: opts.type,
+      orgId: opts.orgId,
+      source: opts.source ?? "local",
+      homeSpaceId: opts.homeSpaceId ?? null,
+    });
+  }
   const afps = opts.artifact ?? buildAfps(opts.manifest, opts.content ?? "content");
   const integrity = computeIntegrity(afps);
   const key = versionZipKey(opts.id, opts.version);
@@ -538,5 +551,144 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/agents/:scope/:name/bundle — integration dependencies", () => {
+  const ROOT_ID = "@exportorg/integ-agent" as const;
+  const INTEG_ID = "@exportorg/integ" as const;
+  const SYSTEM_INTEG_ID = "@appstrate/export-sys-integ" as const;
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "exportorg" });
+  });
+
+  function integManifest(id: string, version: string): Record<string, unknown> {
+    return apiIntegrationManifest({
+      name: id,
+      version,
+      apiCall: { authKey: "key" },
+      auths: { key: { type: "api_key" } },
+    }) as unknown as Record<string, unknown>;
+  }
+
+  async function seedRoot(integrations: Record<string, string>): Promise<void> {
+    await seedVersionedPackage({
+      id: ROOT_ID,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "agent",
+      version: "1.0.0",
+      orgId: ctx.orgId,
+      manifest: {
+        name: ROOT_ID,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Integ Agent",
+        author: "tester",
+        dependencies: { integrations: integrations },
+      },
+      content: "Root prompt",
+      setLatest: true,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, ROOT_ID);
+  }
+
+  async function seedIntegVersion(
+    version: string,
+    opts: { setLatest?: boolean; packageExists?: boolean } = {},
+  ): Promise<void> {
+    await seedVersionedPackage({
+      id: INTEG_ID,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "integration",
+      version,
+      orgId: ctx.orgId,
+      manifest: integManifest(INTEG_ID, version),
+      content: `Integration doc ${version}`,
+      ...opts,
+    });
+  }
+
+  it("carries the integration at the version its pin resolves, with its INTEGRATION.md", async () => {
+    await seedRoot({ [INTEG_ID]: "^1.0.0" });
+    await seedIntegVersion("1.0.0");
+    await seedIntegVersion("1.2.0", { packageExists: true });
+    // `latest` points out of range: a member at 2.0.0 would mean the export
+    // resolved on its own instead of the way a run does.
+    await seedIntegVersion("2.0.0", { setLatest: true, packageExists: true });
+
+    const res = await app.request(`/api/agents/${ROOT_ID}/bundle`, { headers: authHeaders(ctx) });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    const bundle = readBundleFromBuffer(new Uint8Array(await res.arrayBuffer()));
+    const expected: PackageIdentity[] = [`${ROOT_ID}@1.0.0`, `${INTEG_ID}@1.2.0`];
+    expect([...bundle.packages.keys()].sort()).toEqual(expected.sort());
+    const integ = bundle.packages.get(`${INTEG_ID}@1.2.0`)!;
+    expect(new TextDecoder().decode(integ.files.get("INTEGRATION.md"))).toBe(
+      "Integration doc 1.2.0",
+    );
+  });
+
+  it("answers 422 dependency_unresolved for an unsatisfiable integration pin", async () => {
+    await seedRoot({ [INTEG_ID]: "^3.0.0" });
+    await seedIntegVersion("1.0.0", { setLatest: true });
+
+    const res = await app.request(`/api/agents/${ROOT_ID}/bundle`, { headers: authHeaders(ctx) });
+
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("dependency_unresolved");
+    expect(body.detail).toContain(INTEG_ID);
+  });
+
+  it("carries a system integration at the system registry's version", async () => {
+    await seedRoot({ [SYSTEM_INTEG_ID]: "^1.0.0" });
+    const manifest = integManifest(SYSTEM_INTEG_ID, "1.0.0");
+    await seedVersionedPackage({
+      id: SYSTEM_INTEG_ID,
+      type: "integration",
+      version: "1.0.0",
+      orgId: null,
+      source: "system",
+      manifest,
+      content: "System integration doc",
+      setLatest: true,
+    });
+    const restore = _setSystemPackagesForTesting(
+      new Map([
+        [
+          SYSTEM_INTEG_ID,
+          {
+            packageId: SYSTEM_INTEG_ID,
+            scope: "@appstrate",
+            name: "export-sys-integ",
+            type: "integration",
+            version: "1.0.0",
+            manifest,
+            zipBuffer: Buffer.from(buildAfps(manifest, "System integration doc")),
+            content: "System integration doc",
+            files: {},
+          },
+        ],
+      ]),
+    );
+    try {
+      const res = await app.request(`/api/agents/${ROOT_ID}/bundle`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      const bundle = readBundleFromBuffer(new Uint8Array(await res.arrayBuffer()));
+      const integ = bundle.packages.get(`${SYSTEM_INTEG_ID}@1.0.0`);
+      expect(integ).toBeDefined();
+      expect(new TextDecoder().decode(integ!.files.get("INTEGRATION.md"))).toBe(
+        "System integration doc",
+      );
+    } finally {
+      restore();
+    }
   });
 });
