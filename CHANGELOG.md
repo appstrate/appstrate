@@ -85,10 +85,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     with `404 not_found`. Under `restrict_package_copy`, each integration
     member also needs `integrations:share` in its home space, as its own
     `download` does (`403 package_copy_restricted`).
-    The export applies no dependency override, so `appstrate run @draft
---local` on an agent that depends on a never-published integration now
-    answers that same 422, as a server-side run without
-    `dependency_overrides` does.
+    The export applies no dependency override, so
+    `appstrate run <agent>@draft --local` on an agent that depends on a
+    never-published integration now answers that same 422, as a server-side
+    run without `dependency_overrides` does.
+  - **`INTEGRATION.md` sent as the JSON `content` field** of
+    `POST /api/packages/integrations` or of an editor save is now stored with
+    the package's files, so the versions published from it carry the doc.
+    Before, it reached only the draft column, and a version published from
+    such a draft had no `INTEGRATION.md`: republish one to give runs its doc.
   - **An integration member is bundled alone**: the dependencies its own
     manifest declares (a `dependencies.skills` entry, say) are not bundled.
   - **Integrity**: a declared integration whose stored archive no longer
