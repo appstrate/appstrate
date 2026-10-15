@@ -37,6 +37,7 @@ import {
   Clock,
   Hammer,
   Hash,
+  History,
   House,
   Inbox,
   Layers,
@@ -66,7 +67,8 @@ import {
   type LibraryPackageItem,
   type LibrarySpace,
 } from "../hooks/use-library";
-import { fetchPackageDetail } from "../hooks/use-packages";
+import { ApiError } from "../api/errors";
+import { fetchPackageDetail, useVersionInfo } from "../hooks/use-packages";
 import { TextSkeleton } from "./loading-skeletons";
 import { useCurrentOrgId, useOrg } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
@@ -77,6 +79,7 @@ import { detailSpace, type CataloguePlacement } from "../lib/catalogue-placement
 import { ACTIVATION_REFUSAL_KEY, type ActivationGate } from "../lib/catalogue-gates";
 import { CATALOGUE_TYPE_LABEL_KEY } from "../lib/catalogue-link";
 import {
+  pinnedVersionState,
   sheetChatEnforce,
   sheetOffers,
   sheetSpaceMode,
@@ -88,6 +91,18 @@ import { packageKeys } from "../lib/query-keys";
 import { ConfirmModal } from "./confirm-modal";
 import { SettingsGroup } from "./settings/setting-row";
 import { SettingsHeading } from "./settings/settings-heading";
+
+/** The alert's words per state, spelled out so the locale test sees every key. */
+const PINNED_ALERT_KEYS = {
+  missing: {
+    title: "catalogue.sheet.pinned.missingTitle",
+    body: "catalogue.sheet.pinned.missingBody",
+  },
+  behind: {
+    title: "catalogue.sheet.pinned.behindTitle",
+    body: "catalogue.sheet.pinned.behindBody",
+  },
+} as const;
 
 /** The input fields an agent asks for, by the title a launch form shows. */
 function inputNames(detail: AgentDetail): string[] {
@@ -154,6 +169,8 @@ export function CataloguePreview({
   agents,
   protocol,
   actionsMenu,
+  pinnedVersion,
+  onUnpin,
   busy,
   onSetActive,
 }: {
@@ -178,6 +195,14 @@ export function CataloguePreview({
   protocol?: string;
   /** The package's Actions menu, built by the catalogue that owns its dialogs. */
   actionsMenu?: ReactNode;
+  /**
+   * The published version the address asked to read. The sheet then draws that
+   * version's content; its spaces and switches are the package's, which run the
+   * latest published version whatever is read here.
+   */
+  pinnedVersion?: string;
+  /** Reads the package as the reader would see it again (drops the pinned version). */
+  onUnpin?: () => void;
   busy: boolean;
   /** Goes through the catalogue's own activation, which asks about integrations first. */
   onSetActive: (spaceId: string, next: boolean) => void;
@@ -187,18 +212,29 @@ export function CataloguePreview({
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
   const from = detailSpace(placement, spaces, currentSpaceId);
-  const { data: detail, isLoading: detailLoading } = useQuery({
+  const {
+    data: detail,
+    isLoading: detailLoading,
+    error: detailError,
+  } = useQuery({
     queryKey: packageKeys.detail(
       PACKAGE_TYPE_ROUTE_SEGMENT[type],
       orgId,
       from ?? null,
       item.id,
-      null,
+      pinnedVersion ?? null,
     ),
-    queryFn: () => fetchPackageDetail(type, item.id, undefined, from),
+    queryFn: () => fetchPackageDetail(type, item.id, pinnedVersion, from),
     enabled: !!orgId && !!from,
     // The sheet reads without the detail; a refusal is not worth a retry.
     retry: false,
+  });
+  // A pinned version the server answers 404 for was deleted since the link was made.
+  const { data: versionInfo } = useVersionInfo(type, pinnedVersion ? item.id : undefined);
+  const pinState = pinnedVersionState({
+    pinned: pinnedVersion,
+    missing: detailError instanceof ApiError && detailError.status === 404,
+    latestPublished: versionInfo?.latest_published_version,
   });
   const agent = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
   const other = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
@@ -220,8 +256,11 @@ export function CataloguePreview({
     item.source === "system"
       ? t("catalogue.sourceSystem")
       : t("catalogue.sourceOrg", { name: currentOrg?.name ?? "" });
-  const version = detail?.version;
-  const updatedAt = agent?.updatedAt ?? other?.updatedAt;
+  const version = detail?.version ?? pinnedVersion;
+  // The package's own timestamp: it dates no version, so a pinned sheet shows none.
+  const updatedAt = pinnedVersion ? undefined : (agent?.updatedAt ?? other?.updatedAt);
+  // A version carries its own description; the row's is the current one's.
+  const description = (pinnedVersion ? detail?.description : undefined) || item.description;
 
   const stateLabel = (row: SheetSpaceRow) => {
     const base =
@@ -367,13 +406,45 @@ export function CataloguePreview({
             v{version}
           </Badge>
         )}
+        {pinState && (
+          <Badge variant="secondary" className="gap-1.5">
+            <History className="size-3" aria-hidden />
+            {t("catalogue.sheet.pinned.badge")}
+          </Badge>
+        )}
         <Badge variant="secondary" className="gap-1.5">
           {item.source === "system" && <ShieldCheck className="size-3" aria-hidden />}
           {provenance}
         </Badge>
       </div>
 
-      {item.description && <p className="mt-4 text-sm">{item.description}</p>}
+      {/* A version read by address is not the one the spaces run: say so, and
+          offer the way back, rather than leave the reader to infer it from a badge. */}
+      {(pinState === "missing" || pinState === "behind") && (
+        <ToneAlert variant={pinState === "missing" ? "warning" : "info"} className="mt-4">
+          <History className="h-4 w-4" />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <AlertTitle>
+                {t(PINNED_ALERT_KEYS[pinState].title, { version: pinnedVersion })}
+              </AlertTitle>
+              <p className="text-muted-foreground mt-0.5 text-xs">
+                {t(PINNED_ALERT_KEYS[pinState].body, {
+                  version: pinnedVersion,
+                  latest: versionInfo?.latest_published_version,
+                })}
+              </p>
+            </div>
+            {onUnpin && (
+              <Button variant="outline" size="sm" onClick={onUnpin}>
+                {t("catalogue.sheet.pinned.unpin")}
+              </Button>
+            )}
+          </div>
+        </ToneAlert>
+      )}
+
+      {description && <p className="mt-4 text-sm">{description}</p>}
       {/* The package's properties, in blocks each under a heading of its own —
           the same heading "Espaces" carries below. A gap alone had to carry the
           split and read as an accident of spacing instead. A list rather than

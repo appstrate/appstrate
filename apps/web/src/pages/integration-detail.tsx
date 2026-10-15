@@ -51,6 +51,7 @@ import {
 import { PackageDetailBar } from "../components/package-detail/package-detail-bar";
 import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
+import { CatalogueLink } from "../components/package-detail/catalogue-link";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { PackageCommonSection } from "../components/package-detail/package-common-section";
 import { isOwnedSource } from "../components/package-detail/owned-source";
@@ -425,6 +426,8 @@ export function IntegrationDetailPage() {
         }
         actions={
           <div className="flex items-center gap-2">
+            {/* No version route here: the sheet opens on the integration as read. */}
+            <CatalogueLink type="integration" packageId={packageId} />
             {!active && activation.mayActivate && (
               <Button
                 size="sm"

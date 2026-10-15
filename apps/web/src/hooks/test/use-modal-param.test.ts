@@ -66,6 +66,70 @@ describe("modal open state in the URL", () => {
   });
 });
 
+describe("a parameter that qualifies the modal's value", () => {
+  const companions = ["version"];
+
+  it("goes when the modal closes", () => {
+    expect(
+      modalParamStep(
+        at("?q=mail&package=p_1&version=1.2.0"),
+        "package",
+        null,
+        undefined,
+        companions,
+      ),
+    ).toEqual({ back: false, search: "?q=mail", replace: true, state: null });
+  });
+
+  it("goes when the modal names another object", () => {
+    expect(
+      modalParamStep(
+        at("?package=p_1&version=1.2.0", { openedModal: "package" }),
+        "package",
+        "p_2",
+        undefined,
+        companions,
+      ),
+    ).toEqual({
+      back: false,
+      search: "?package=p_2",
+      replace: true,
+      state: { openedModal: "package" },
+    });
+  });
+
+  it("stays when the modal is set to the value it already has", () => {
+    expect(
+      modalParamStep(at("?package=p_1&version=1.2.0"), "package", "p_1", undefined, companions),
+    ).toMatchObject({ search: "?package=p_1&version=1.2.0" });
+  });
+
+  it("is left alone by a modal that declares none", () => {
+    expect(modalParamStep(at("?package=p_1&version=1.2.0"), "package", null)).toEqual({
+      back: false,
+      search: "?version=1.2.0",
+      replace: true,
+      state: null,
+    });
+  });
+
+  it("never reaches the destination a leave goes to, nor the entry it closes", () => {
+    const steps = modalLeaveSteps(
+      {
+        pathname: "/catalogue/discover/skill",
+        search: "?package=p_1&version=1.2.0",
+        hash: "",
+        state: null,
+      },
+      "package",
+      resolvePath("/skills/@acme/mail?package=p_1&version=1.2.0"),
+      undefined,
+      companions,
+    );
+    expect(steps.map((step) => step.to.search)).toEqual(["", ""]);
+  });
+});
+
 describe("leaving a modal for where its act took the user", () => {
   const page = (search: string, state: unknown = null) => ({
     pathname: "/integrations/@appstrate/slack",
