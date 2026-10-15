@@ -36,11 +36,11 @@ type RouteAccess = {
 
 const OWN_ACCOUNT: RouteAccess = { open: "the caller's own account; no org or space permission" };
 /**
- * One screen graded inside by what the caller may do. Its floor is the space's
- * own library read; the organization-wide `/api/library` an owner or admin also
- * reads is a role rule in its handler, not a guard.
+ * One screen graded inside by what the caller may do. It reads the
+ * organization-wide `/api/library`, which the server grades to the spaces where
+ * the caller holds `spaces:read` — the floor here.
  */
-const CATALOGUE: RouteAccess = { anyOf: ["spaces:read"], operations: ["getSpaceLibrary"] };
+const CATALOGUE: RouteAccess = { anyOf: ["spaces:read"], operations: ["getLibrary"] };
 const WEBHOOKS_READ = ["webhooks:read", "org-webhooks:read"] as const;
 const AGENT_SIGHT = packageSightPermissions("agent");
 

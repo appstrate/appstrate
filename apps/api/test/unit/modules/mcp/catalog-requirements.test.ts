@@ -243,7 +243,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
 
   // ── The row the handler loads decides, and refuses with the route's own error.
   // Method-precise: the other methods at these paths carry a mounted guard.
-  ...rowDecided("the caller's own org role (owner/admin), read in the handler", [
+  ...rowDecided("the caller's own credential, then each space's own guards, read in the handler", [
     [["GET"], "/api/library"],
   ]),
   ...rowDecided("`gateSpacePackageWrite`: the per-type permission in the path's space", [
