@@ -54,8 +54,8 @@ import { getTestApp } from "../../helpers/app.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { buildAgentPackage } from "../../../src/services/package-storage.ts";
-import { eq } from "drizzle-orm";
-import { packageDistTags, packages, spacePackages } from "@appstrate/db/schema";
+import { eq, sql } from "drizzle-orm";
+import { organizations, packageDistTags, packages, spacePackages } from "@appstrate/db/schema";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
@@ -484,6 +484,37 @@ describe("GET /api/agents/:scope/:name/bundle — integration dependency read sc
     const bundle = readBundleFromBuffer(new Uint8Array(await res.arrayBuffer()));
     const integ = bundle.packages.get(`${INTEG_ID}@1.0.0`);
     expect(integ).toBeDefined();
+    expect(new TextDecoder().decode(integ!.files.get("INTEGRATION.md"))).toBe(INTEG_SECRET);
+  });
+  it("applies the org's copy restriction to the integration, not only to the root agent", async () => {
+    // `restrict_package_copy` narrows copying a package out to `<type>:share`
+    // in its home. The root agent passes on `agents:share`; the integration
+    // member is a copy of its own, which its `download` would refuse without
+    // `integrations:share`, so the bundle must refuse it too.
+    await db
+      .update(organizations)
+      .set({
+        orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify({ restrict_package_copy: true })}::jsonb`,
+      })
+      .where(eq(organizations.id, ctx.orgId));
+    const readScopes = ["agents:read", "agents:share", "skills:read", "integrations:read"];
+
+    const refused = await app.request(`/api/agents/${INTEG_AGENT_ID}/bundle`, {
+      headers: bearer(await keyWithScopes(ctx, readScopes)),
+    });
+    expect(refused.status, await refused.clone().text()).toBe(403);
+    const body = await refused.text();
+    expect(body).not.toContain(INTEG_SECRET);
+    const problem = JSON.parse(body) as { code: string; detail: string };
+    expect(problem.code).toBe("package_copy_restricted");
+    expect(problem.detail).toContain(INTEG_ID);
+
+    const allowed = await app.request(`/api/agents/${INTEG_AGENT_ID}/bundle`, {
+      headers: bearer(await keyWithScopes(ctx, [...readScopes, "integrations:share"])),
+    });
+    expect(allowed.status, await allowed.clone().text()).toBe(200);
+    const bundle = readBundleFromBuffer(new Uint8Array(await allowed.arrayBuffer()));
+    const integ = bundle.packages.get(`${INTEG_ID}@1.0.0`);
     expect(new TextDecoder().decode(integ!.files.get("INTEGRATION.md"))).toBe(INTEG_SECRET);
   });
 });

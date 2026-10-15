@@ -7,15 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — catalogs resolve per dependency section (#2005, BREAKING)
+
+- `PackageCatalog.resolve(name, versionSpec, section)` takes a required third
+  parameter, the `dependencies.*` section the request comes from, typed by the
+  new exported `DependencySection` (`"skills" | "mcp_servers" |
+"integrations"`), so a catalog can resolve each package type from its own
+  source of truth. Every `PackageCatalog` implementation must accept it.
+
 ### Added — dependency sections a bundle may skip (#2005)
 
-- `PackageCatalog.resolve(name, versionSpec, section)` receives the
-  `dependencies.*` section the request comes from, typed by the new exported
-  `DependencySection` (`"skills" | "mcp_servers" | "integrations"`), so a
-  catalog can resolve each package type from its own source of truth.
 - `BuildBundleOptions.optionalDepTypes`: an entry of one of these sections that
   `resolve` returns `null` for, or whose `fetch` throws, is reported through
-  `onWarn` and left out of the bundle instead of failing the build.
+  `onWarn` and left out of the bundle instead of failing the build. An
+  `INTEGRITY_MISMATCH` from `fetch` is the exception: it fails the build as it
+  does for any other section, aggregated with the others into one error.
 
 ### Changed — integrations disclosed as a catalog, not inlined (#2005, BREAKING)
 

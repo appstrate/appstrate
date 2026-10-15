@@ -64,7 +64,9 @@ export interface BuildBundleOptions {
   /**
    * Sections whose entries may be left out: an entry that `catalog.resolve`
    * returns `null` for, or whose `catalog.fetch` throws, is skipped with an
-   * `onWarn` message instead of failing the build.
+   * `onWarn` message instead of failing the build. An `INTEGRITY_MISMATCH`
+   * from `fetch` stays fatal: stored bytes that no longer match their
+   * published hash are tampering or corruption, not an absent member.
    */
   optionalDepTypes?: DependencySection[];
 }
@@ -78,7 +80,8 @@ export interface BuildBundleOptions {
  * a warning via `opts.onWarn`. Dep resolution failures outside
  * `opts.optionalDepTypes` are collected and surfaced as a single
  * `DEPENDENCY_UNRESOLVED` with `details.missing`; resolution and fetch
- * failures inside them are warned about and skipped.
+ * failures inside them are warned about and skipped, except an integrity
+ * mismatch, which fails the build in every section.
  */
 export async function buildBundleFromCatalog(
   root: BundlePackage,
@@ -186,7 +189,7 @@ export async function buildBundleFromCatalog(
       const { resolved, section } = toFetch[i]!;
       if (outcome.status === "fulfilled") {
         fetched.push(outcome.value);
-      } else if (optionalDepTypes.has(section)) {
+      } else if (optionalDepTypes.has(section) && !isIntegrityMismatch(outcome.reason)) {
         const reason =
           outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
         onWarn(
@@ -197,9 +200,7 @@ export async function buildBundleFromCatalog(
       }
     }
     if (failures.length > 0) {
-      const mismatches = failures.filter(
-        (f) => f.reason instanceof BundleError && f.reason.code === "INTEGRITY_MISMATCH",
-      );
+      const mismatches = failures.filter((f) => isIntegrityMismatch(f.reason));
       if (mismatches.length > 0) {
         const identities = mismatches.map((f) => f.identity);
         throw new BundleError(
@@ -425,4 +426,8 @@ function extractDependencies(manifest: AfpsManifest, depTypes: DependencySection
     }
   }
   return out;
+}
+
+function isIntegrityMismatch(reason: unknown): boolean {
+  return reason instanceof BundleError && reason.code === "INTEGRITY_MISMATCH";
 }

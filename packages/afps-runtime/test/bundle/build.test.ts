@@ -418,17 +418,44 @@ describe("buildBundleFromCatalog", () => {
       type: "integration",
       schema_version: "0.1",
     });
-    /** Resolves both members; `fetch` throws for `failing`. */
-    function catalogFailingFetchOf(failing: PackageIdentity) {
+    /** Resolves both members; `fetch` throws `error` for `failing`. */
+    function catalogFailingFetchOf(
+      failing: PackageIdentity,
+      error: Error = new Error("storage unreachable"),
+    ) {
       const inner = new InMemoryPackageCatalog([skill, integ]);
       return {
         resolve: inner.resolve.bind(inner),
         fetch: async (identity: PackageIdentity) => {
-          if (identity === failing) throw new Error("storage unreachable");
+          if (identity === failing) throw error;
           return inner.fetch(identity);
         },
       };
     }
+
+    it("still fails on an INTEGRITY_MISMATCH of an optional member, like a skill's", async () => {
+      const build = (failing: PackageIdentity) =>
+        buildBundleFromCatalog(
+          root,
+          catalogFailingFetchOf(
+            failing,
+            new BundleError("INTEGRITY_MISMATCH", `Integrity check failed for ${failing}`),
+          ),
+          { depTypes: ["skills", "integrations"], optionalDepTypes: ["integrations"] },
+        ).then(
+          () => null,
+          (e: unknown) => e,
+        );
+      const integErr = await build(integ.identity);
+      expect(integErr).toBeInstanceOf(BundleError);
+      expect((integErr as BundleError).code).toBe("INTEGRITY_MISMATCH");
+      expect((integErr as BundleError).details).toEqual({ packages: [integ.identity] });
+      const skillErr = await build(skill.identity);
+      expect((skillErr as BundleError).details).toEqual({ packages: [skill.identity] });
+      expect((integErr as BundleError).message).toBe(
+        `Integrity check failed for ${integ.identity}`,
+      );
+    });
 
     it("skips an optional member whose fetch throws and warns with section, identity and error", async () => {
       const warnings: string[] = [];

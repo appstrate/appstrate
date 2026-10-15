@@ -82,7 +82,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     minted without that scope now gets a 403 on such an export.
     Each integration member must also be readable by the caller in one of its
     spaces: one confined to a space the caller cannot read fails the export
-    with `404 not_found`.
+    with `404 not_found`. Under `restrict_package_copy`, each integration
+    member also needs `integrations:share` in its home space, as its own
+    `download` does (`403 package_copy_restricted`).
     The export applies no dependency override, so `appstrate run @draft
 --local` on an agent that depends on a never-published integration now
     answers that same 422, as a server-side run without
@@ -95,7 +97,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     withheld from the agent, and the run is not failed for it.
   - **`appstrate run`** on an exported agent wires the integrations'
     `{ns}__api_call` tools, since the bundle now carries their manifests, and
-    shows the same catalog for the integrations it wired.
+    shows the same catalog for the integrations it wired. With
+    `--local --integrations local` it therefore needs credentials for every
+    `api_call` integration the exported agent declares, as a local bundle
+    read from disk already did.
 
 ## [1.0.0-beta.68] - 2026-10-15
 
