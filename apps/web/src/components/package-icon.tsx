@@ -1,98 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Icon, loadIcon } from "@iconify/react";
 import { Puzzle } from "lucide-react";
 import { DynamicIcon } from "lucide-react/dynamic";
-import { parseManifestIcon, type ManifestIcon } from "@appstrate/core/manifest-icon";
+import { parseManifestIcon } from "@appstrate/core/manifest-icon";
 import type { PackageType } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
-import { isLucideIconName, resolveAgentIdentity } from "./agent-identity-options";
+import { ManifestGlyph } from "@appstrate/ui/components/manifest-glyph";
+import { resolveAgentIdentity } from "./agent-identity-options";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 
 const BOX = { sm: "size-7 rounded-md", md: "size-10 rounded-[10px]" } as const;
 
 type PackageIconSize = keyof typeof BOX;
-
-function Skeleton({ className }: { className: string }) {
-  return <span className={cn("bg-muted block animate-pulse", className)} aria-hidden />;
-}
-
-/**
- * An Iconify id other than a Lucide one. The SVG is fetched from the Iconify
- * API the first time an id is seen; React Query dedupes that fetch across every
- * tile and keeps it for the session.
- */
-function IconifyGlyph({
-  id,
-  className,
-  fallback,
-}: {
-  id: string;
-  className: string;
-  fallback: ReactNode;
-}) {
-  const { isPending, isError } = useQuery({
-    queryKey: ["iconify-icon", id],
-    queryFn: () => loadIcon(id),
-    staleTime: Infinity,
-    gcTime: Infinity,
-    retry: false,
-  });
-  if (isPending) return <Skeleton className={className} />;
-  if (isError) return fallback;
-  return <Icon icon={id} className={className} />;
-}
-
-function UrlGlyph({
-  src,
-  className,
-  fallback,
-}: {
-  src: string;
-  className: string;
-  fallback: ReactNode;
-}) {
-  const [state, setState] = useState<"loading" | "ok" | "error">("loading");
-  if (state === "error") return fallback;
-  return (
-    <>
-      {state === "loading" && <Skeleton className={className} />}
-      <img
-        src={src}
-        alt=""
-        className={cn(className, "object-contain", state !== "ok" && "hidden")}
-        onLoad={() => setState("ok")}
-        onError={() => setState("error")}
-      />
-    </>
-  );
-}
-
-/** A manifest icon: Lucide from the bundle, any other Iconify id from the API, an URL as an image. */
-function ManifestGlyph({
-  icon,
-  className,
-  fallback,
-  strokeWidth,
-}: {
-  icon: ManifestIcon;
-  className: string;
-  fallback: ReactNode;
-  strokeWidth?: number;
-}) {
-  if (icon.kind === "lucide") {
-    return isLucideIconName(icon.name) ? (
-      <DynamicIcon name={icon.name} className={className} strokeWidth={strokeWidth} />
-    ) : (
-      fallback
-    );
-  }
-  if (icon.kind === "iconify")
-    return <IconifyGlyph id={icon.id} className={className} fallback={fallback} />;
-  return <UrlGlyph src={icon.src} className={className} fallback={fallback} />;
-}
 
 /**
  * A package's identity tile, the same for every type and surface. Its manifest

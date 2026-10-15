@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
@@ -42,7 +43,7 @@ import { formatNumber } from "../../lib/format-number";
 import { scheduleDetailPath } from "../../lib/package-paths";
 import { readRunContext } from "../run-context";
 import { ContextGaugeReadout } from "./run-context-gauge";
-import { Fact, FactGrid } from "../fact-grid";
+import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { OperationalStat } from "../operational-stat";
 
 export function RunSnapshotInspector({
@@ -50,7 +51,9 @@ export function RunSnapshotInspector({
   turns,
   logs,
   structuredOutput,
+  logsLoading,
   memoryChangeCount,
+  memoryLoading,
   modelFallback,
   onOpenJournal,
   onOpenResults,
@@ -59,7 +62,11 @@ export function RunSnapshotInspector({
   turns: RunTurnRow[];
   logs: ExecutionEntry[];
   structuredOutput: Record<string, unknown> | null;
+  /** The journal is still being read: what is counted from it is not known yet. */
+  logsLoading: boolean;
   memoryChangeCount: number;
+  /** The run's memory rows are still being read. */
+  memoryLoading: boolean;
   /** The `model_fallback` marker of the run's journal, when it has one. */
   modelFallback: RunModelFallback | null;
   onOpenJournal: (filter?: JournalOverviewFilter) => void;
@@ -93,6 +100,7 @@ export function RunSnapshotInspector({
   // problem, so it opens the overview as a neutral card of its own.
   const problem = run.error && (run.status === "failed" || run.status === "timeout");
   const cancelled = run.status === "cancelled";
+  const statSkeleton = <Skeleton className="h-6 w-10" />;
 
   return (
     <>
@@ -201,25 +209,27 @@ export function RunSnapshotInspector({
                 <OperationalStat
                   className="border-border border-r border-b"
                   label={t("run.overview.logEvents")}
-                  value={formatNumber(logs.length)}
-                  onClick={logs.length > 0 ? () => onOpenJournal() : undefined}
+                  value={logsLoading ? statSkeleton : formatNumber(logs.length)}
+                  target={logs.length > 0 ? { onClick: () => onOpenJournal() } : undefined}
                 />
                 <OperationalStat
                   className="border-border border-b"
                   label={t("run.overview.toolCalls")}
-                  value={formatNumber(toolCallCount)}
-                  onClick={toolCallCount > 0 ? () => onOpenJournal("tools") : undefined}
+                  value={logsLoading ? statSkeleton : formatNumber(toolCallCount)}
+                  target={toolCallCount > 0 ? { onClick: () => onOpenJournal("tools") } : undefined}
                 />
                 <OperationalStat
                   className="border-border border-r"
                   label={t("run.overview.warnings")}
-                  value={formatNumber(warningCount)}
-                  onClick={warningCount > 0 ? () => onOpenJournal("warnings") : undefined}
+                  value={logsLoading ? statSkeleton : formatNumber(warningCount)}
+                  target={
+                    warningCount > 0 ? { onClick: () => onOpenJournal("warnings") } : undefined
+                  }
                 />
                 <OperationalStat
                   label={t("run.overview.errors")}
-                  value={formatNumber(errorCount)}
-                  onClick={errorCount > 0 ? () => onOpenJournal("errors") : undefined}
+                  value={logsLoading ? statSkeleton : formatNumber(errorCount)}
+                  target={errorCount > 0 ? { onClick: () => onOpenJournal("errors") } : undefined}
                 />
               </dl>
             </DetailSectionCard>
@@ -242,19 +252,19 @@ export function RunSnapshotInspector({
                   className="border-border border-r border-b"
                   label={t("run.overview.outputFiles")}
                   value={formatNumber(run.file_counts.output)}
-                  onClick={run.file_counts.output > 0 ? onOpenResults : undefined}
+                  target={run.file_counts.output > 0 ? { onClick: onOpenResults } : undefined}
                 />
                 <OperationalStat
                   className="border-border border-b"
                   label={t("run.overview.structuredFields")}
-                  value={formatNumber(structuredFieldCount)}
-                  onClick={structuredFieldCount > 0 ? onOpenResults : undefined}
+                  value={logsLoading ? statSkeleton : formatNumber(structuredFieldCount)}
+                  target={structuredFieldCount > 0 ? { onClick: onOpenResults } : undefined}
                 />
                 <OperationalStat
                   className="col-span-2"
                   label={t("run.overview.memoryChanges")}
-                  value={formatNumber(memoryChangeCount)}
-                  onClick={memoryChangeCount > 0 ? onOpenResults : undefined}
+                  value={memoryLoading ? statSkeleton : formatNumber(memoryChangeCount)}
+                  target={memoryChangeCount > 0 ? { onClick: onOpenResults } : undefined}
                 />
               </dl>
             </DetailSectionCard>
@@ -301,17 +311,29 @@ export function RunSnapshotInspector({
                       {formatNumber(usage.cache_read_input_tokens)}
                     </Fact>
                   )}
-                  {readRunContext(turns) && (
+                  {logsLoading ? (
                     <Fact label={t("run.usageContext")}>
-                      <ContextGaugeReadout turns={turns} status={run.status} />
+                      <Skeleton className="h-4 w-24" />
                     </Fact>
+                  ) : (
+                    readRunContext(turns) && (
+                      <Fact label={t("run.usageContext")}>
+                        <ContextGaugeReadout turns={turns} status={run.status} />
+                      </Fact>
+                    )
                   )}
                 </FactGrid>
               </div>
-              {turns.length > 0 && (
-                <OverviewCardAction onClick={() => turnsParam.open()}>
-                  {t("run.viewTurnDetails")}
-                </OverviewCardAction>
+              {logsLoading ? (
+                <div className="flex min-h-9 w-full items-center border-t px-4 py-2">
+                  <Skeleton className="h-4 w-32" />
+                </div>
+              ) : (
+                turns.length > 0 && (
+                  <OverviewCardAction target={{ onClick: () => turnsParam.open() }}>
+                    {t("run.viewTurnDetails")}
+                  </OverviewCardAction>
+                )
               )}
             </DetailSectionCard>
 

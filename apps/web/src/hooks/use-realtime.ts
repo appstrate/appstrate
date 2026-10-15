@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { realtimeRunsUrl } from "@appstrate/core/realtime-url";
 import {
   runLogEventSchema,
   runMetricEventSchema,
@@ -11,7 +12,6 @@ import {
 } from "@appstrate/shared-types";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
-import { withViewAsParam } from "../lib/scoping-headers";
 import { useViewAsHeader } from "../stores/view-as-store";
 import { patchRunDetail } from "./use-global-run-sync";
 
@@ -60,13 +60,17 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
     // Only the three run channels dispatched below are declared: the per-run
     // stream would otherwise also carry `connection_update` (every connection
     // row the caller owns) and `chat_session_update` for a page that listens
-    // to neither. `verbose=true` is still required — it is what keeps
+    // to neither. `verbose` is still required — it is what keeps
     // `run_log.data` in the payload.
     const es = new EventSource(
-      withViewAsParam(
-        `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&verbose=true&channels=run_update,run_log,run_metric`,
+      realtimeRunsUrl({
+        orgId,
+        spaceId,
+        runId,
+        verbose: true,
+        channels: ["run_update", "run_log", "run_metric"],
         viewAs,
-      ),
+      }),
       { withCredentials: true },
     );
 

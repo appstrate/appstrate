@@ -11,11 +11,12 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { deriveLabel } from "../../lib/cli-sessions";
+import { invalidatePaths } from "../../lib/query-keys";
 import {
   cliSessionUserLabel,
   useCliSessionColumns,
-  type AdminCliSession,
-} from "./cli-session-columns";
+  type CliSessionRow,
+} from "../../components/cli-session-columns";
 
 export function OrgSettingsCliSessionsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -37,13 +38,11 @@ export function OrgSettingsCliSessionsPage() {
 
   const revoke = $api.useMutation("delete", "/api/orgs/{orgId}/cli-sessions/{familyId}", {
     onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ["get", "/api/orgs/{orgId}/cli-sessions"],
-      });
+      void invalidatePaths(queryClient, ["/api/orgs/{orgId}/cli-sessions"]);
     },
   });
 
-  const [pendingRevoke, setPendingRevoke] = useState<AdminCliSession | null>(null);
+  const [pendingRevoke, setPendingRevoke] = useState<CliSessionRow | null>(null);
   const columns = useCliSessionColumns({
     revokingFamilyId: revoke.isPending ? (revoke.variables?.params.path.familyId ?? null) : null,
     onRevoke: can("cli-sessions:delete") ? setPendingRevoke : undefined,

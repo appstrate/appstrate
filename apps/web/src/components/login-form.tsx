@@ -13,6 +13,7 @@ import { useAppConfig } from "../hooks/use-app-config";
 import { Mail } from "lucide-react";
 import { SocialSignInButton } from "./social-sign-in-button";
 import { EmailField, PasswordField } from "./auth-fields";
+import { AuthLink } from "./auth-message";
 import { LegalFooter } from "./legal-footer";
 import { EmailNotVerifiedError } from "../lib/auth-errors";
 import { errorMessage } from "../lib/mutation-error";
@@ -87,10 +88,7 @@ export function LoginForm({
             <span>{t("login.signupDisabled")}</span>
           ) : (
             <>
-              {t("login.noAccount")}{" "}
-              <Link to="/register" className="hover:text-primary underline underline-offset-4">
-                {t("login.signup")}
-              </Link>
+              {t("login.noAccount")} <AuthLink to="/register">{t("login.signup")}</AuthLink>
             </>
           ))}
       </div>

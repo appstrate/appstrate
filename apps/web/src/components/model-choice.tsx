@@ -12,7 +12,6 @@
 
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
 import { DiscoveryResult } from "./model-form/discovery-result";
 import { ManualModelEntry } from "./model-form/manual-model-entry";
 import { ModelPickList } from "./model-form/model-pick-list";
@@ -40,9 +39,9 @@ export function ModelChoiceList({
             type="button"
             variant="outline"
             onClick={choice.detect}
-            disabled={choice.detecting}
+            pending={choice.detecting}
           >
-            {choice.detecting ? <Spinner /> : t("models.form.discoverButton")}
+            {t("models.form.discoverButton")}
           </Button>
           {discovery && <DiscoveryResult discovery={discovery} />}
         </div>

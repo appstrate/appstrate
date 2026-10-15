@@ -5,11 +5,12 @@ import { ShieldCheck } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import { packageDetailPath, packageListPath } from "../../lib/package-paths";
+import { packageDetailPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
-import { PageHeader, type BreadcrumbEntry } from "../page-header";
-import { DetailPageSkeleton } from "../loading-skeletons";
+import { PageHeader } from "../page-header";
+import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 import { PackageIcon } from "../package-icon";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 interface SharedHeaderDetail {
   id: string;
@@ -35,25 +36,11 @@ interface SharedHeaderDetail {
   homeSpaceName?: string | null;
 }
 
-/** The first crumb of a package's page: its family's list. */
-function usePackageListCrumb(type: PackageType): BreadcrumbEntry {
-  const { t } = useTranslation(["agents", "settings"]);
-  return {
-    label:
-      type === "agent" ? t("detail.breadcrumb") : t(`packages.type.${type}s`, { ns: "settings" }),
-    href: packageListPath(type),
-  };
-}
-
-/** A package's page while its detail loads, under its family's crumb. */
-export function PackageDetailSkeleton({ type }: { type: PackageType }) {
-  return <DetailPageSkeleton breadcrumbs={[usePackageListCrumb(type)]} subtitle />;
-}
-
 export function SharedHeader({
   detail,
   isHistoricalVersion,
   hasUnarchivedChanges,
+  draftVerdictPending,
   latestPublishedVersion,
   activeSubpage,
   actionsLeft,
@@ -62,6 +49,8 @@ export function SharedHeader({
   detail: SharedHeaderDetail;
   isHistoricalVersion: boolean;
   hasUnarchivedChanges?: boolean;
+  /** The draft-vs-published comparison is still being read: the badge holds its place. */
+  draftVerdictPending?: boolean;
   latestPublishedVersion?: string | null;
   activeSubpage?: { label: string };
   actionsLeft?: React.ReactNode;
@@ -140,7 +129,9 @@ export function SharedHeader({
               detail.source !== "system" &&
               !detail.readsPublished &&
               !isHistoricalVersion &&
-              (hasUnarchivedChanges || !detail.version ? (
+              (draftVerdictPending ? (
+                <Skeleton className="h-5 w-14" />
+              ) : hasUnarchivedChanges || !detail.version ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span tabIndex={0}>

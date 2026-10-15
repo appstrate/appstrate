@@ -3,6 +3,7 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { ScheduleStateBadges } from "./schedule-status-badge";
 import { ActorLabel } from "./actor-label";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
@@ -14,10 +15,12 @@ import { describeSchedule } from "../lib/frequency-summary";
 interface ScheduleCardProps {
   schedule: EnrichedSchedule;
   agentName?: string;
+  /** The agents list is still loading: the name is not known yet, only the id. */
+  agentPending?: boolean;
 }
 
 /** A schedule in the schedules collection: a vertical card of comparable facts. */
-export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
+export function ScheduleCard({ schedule, agentName, agentPending = false }: ScheduleCardProps) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   // The counters are served with the schedule list (`enrichSchedules` in
   // services/scheduler.ts) as whole-history counts: the card fetches nothing.
@@ -32,9 +35,13 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-sm font-medium">{scheduleLabel(schedule, t)}</h2>
-          <p className="text-muted-foreground mt-1 truncate text-xs">
-            {agentName ?? schedule.packageId}
-          </p>
+          {agentPending ? (
+            <Skeleton className="mt-1 h-4 w-24" />
+          ) : (
+            <p className="text-muted-foreground mt-1 truncate text-xs">
+              {agentName ?? schedule.packageId}
+            </p>
+          )}
         </div>
         <ScheduleStateBadges schedule={schedule} />
       </div>

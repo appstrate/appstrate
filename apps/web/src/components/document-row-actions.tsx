@@ -54,7 +54,7 @@ export function DocumentRowActions({
           id: "run",
           label: t("row.openRun"),
           icon: ExternalLink,
-          href: runHref,
+          to: runHref,
           hidden: !runHref,
         },
         {

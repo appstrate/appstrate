@@ -9,17 +9,17 @@ import {
   Activity,
   Calendar,
   Wrench,
-  Loader2,
   Boxes,
   FileText,
   type LucideIcon,
 } from "lucide-react";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { CountBadge } from "./count-badge";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import type { RoutePath } from "../lib/route-access";
-import { useCanReach } from "../hooks/use-can-reach";
+import { useCanReach, useReachReady } from "../hooks/use-can-reach";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
@@ -28,7 +28,9 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSkeleton,
 } from "@appstrate/ui/components/sidebar";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 type NavItem = {
   path: RoutePath;
@@ -46,6 +48,7 @@ export function NavOrg() {
   const { data: unreadCount } = useUnreadCount();
   const { data: agents } = useAgents();
   const canReach = useCanReach();
+  const ready = useReachReady();
 
   // Inline runs live on ephemeral shadow packages that are not in `agents`,
   // so they don't contribute to `runningRuns`. Check them separately.
@@ -104,6 +107,29 @@ export function NavOrg() {
 
   const canReachRuns = canReach("/runs");
 
+  // `canReach` answers false until the permission sets land, so the groups would
+  // assemble entry by entry. Draw their frame and rows meanwhile.
+  if (!ready) {
+    return (
+      <>
+        {[3, 4].map((rows) => (
+          <SidebarGroup key={rows}>
+            <div className="flex h-8 items-center px-2">
+              <Skeleton className="h-3 w-20" />
+            </div>
+            <SidebarMenu>
+              {Array.from({ length: rows }, (_, i) => (
+                <SidebarMenuItem key={i}>
+                  <SidebarMenuSkeleton showIcon />
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        ))}
+      </>
+    );
+  }
+
   // A group whose entries are all closed to the caller is not drawn: its label
   // would head nothing.
   return (
@@ -123,11 +149,7 @@ export function NavOrg() {
                 >
                   <Link to="/runs">
                     <span className="flex size-4 shrink-0 items-center justify-center">
-                      {hasRunning ? (
-                        <Loader2 size={16} className="animate-spin" />
-                      ) : (
-                        <Activity size={16} />
-                      )}
+                      {hasRunning ? <Spinner /> : <Activity size={16} />}
                     </span>
                     <span>{t("nav.runs")}</span>
                   </Link>

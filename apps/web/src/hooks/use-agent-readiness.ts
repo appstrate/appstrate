@@ -3,7 +3,7 @@
 import type { AgentDetail } from "@appstrate/shared-types";
 import { useAgentModel, useModels, type OrgModelInfo } from "./use-models";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
-import { isModelSelectable } from "../lib/model-selectability";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
 
 /**
  * Will a run get a model? Mirrors the server cascade (`resolveModel`): the
@@ -90,8 +90,9 @@ export function agentRunBlocker(
   return modelBlocker;
 }
 
-export function useAgentModelBlocker(packageId: string): AgentModelBlocker | null {
-  const { data: orgModels } = useModels();
+/** `undefined` for a page that is not an agent's: neither read is made. */
+export function useAgentModelBlocker(packageId: string | undefined): AgentModelBlocker | null {
+  const { data: orgModels } = useModels(packageId !== undefined);
   const { data: agentModel } = useAgentModel(packageId);
   return agentModelBlocker(orgModels, agentModel?.modelId);
 }

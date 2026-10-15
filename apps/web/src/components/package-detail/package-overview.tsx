@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { BookOpen, FileCode, FolderOpen, Layers, Server, Tags, Wrench } from "lucide-react";
 import { DetailSectionCard } from "../detail-section-card";
-import { Fact, FactGrid } from "../fact-grid";
+import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { Markdown } from "../markdown";
 import { ManifestOverview } from "../package-manifest/manifest-overview";
 import { McpServerDetails } from "../package-manifest/mcp-server-details";

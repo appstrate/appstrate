@@ -165,7 +165,6 @@
   "threads.actions.rename": "Rename",
   "threads.actions.delete": "Delete",
   "threads.title": "Conversations",
-  "threads.loadingMore": "Loading…",
   "threads.showMore": "Show more",
   "threads.generating": "In progress",
   "threads.unread": "Unread reply",
@@ -182,5 +181,7 @@
   "threads.empty": "Send a message! Your conversation history will show up here.",
   "threads.emptyReadOnly": "You have no conversation to reread.",
   "turn.error.needsReconnectionOwn": "The subscription serving the selected model expired or was revoked. If it is yours, reconnect it in your preferences, then try again; otherwise, ask an organization administrator to reconnect it.",
-  "turn.error.needsReconnectionMember": "The subscription serving the selected model expired or was revoked. Ask an organization administrator to reconnect it."
+  "turn.error.needsReconnectionMember": "The subscription serving the selected model expired or was revoked. Ask an organization administrator to reconnect it.",
+  "threads.error": "Conversations could not be loaded.",
+  "model.loadFailed": "Models unavailable"
 }

@@ -8,6 +8,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { cn } from "@appstrate/ui/cn";
 import type { SpaceRoleOption } from "../hooks/use-roles";
 
 /**
@@ -18,6 +20,9 @@ import type { SpaceRoleOption } from "../hooks/use-roles";
  * grantable set — would read as "no role at all". It is listed under
  * `fallbackLabel` as a disabled item instead, which keeps the row honest and
  * unpickable.
+ *
+ * While the catalog loads (`loading`) a block of the trigger's size stands in:
+ * a disabled trigger would claim "no assignable role" for a list not yet read.
  */
 export function SpaceRoleSelect({
   value,
@@ -25,6 +30,7 @@ export function SpaceRoleSelect({
   fallbackLabel,
   onValueChange,
   disabled,
+  loading,
   id,
   ariaLabel,
   placeholder,
@@ -35,11 +41,14 @@ export function SpaceRoleSelect({
   fallbackLabel: string;
   onValueChange: (value: string) => void;
   disabled?: boolean;
+  loading?: boolean;
   id?: string;
   ariaLabel?: string;
   placeholder?: string;
   className?: string;
 }) {
+  if (loading) return <Skeleton className={cn("h-9 w-full", className)} />;
+
   return (
     <Select value={value || undefined} onValueChange={onValueChange} disabled={disabled}>
       <SelectTrigger id={id} aria-label={ariaLabel} className={className}>

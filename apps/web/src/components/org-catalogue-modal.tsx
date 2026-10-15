@@ -43,6 +43,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ArrowLeft, Check, ExternalLink, Inbox, LibraryBig, type LucideIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import type { PackageType } from "@appstrate/core/validation";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
@@ -106,7 +107,6 @@ import {
 import { RailLink } from "./settings/rail-link";
 import { RailGroup, RailHeader } from "./settings/rail-shell";
 import { SettingsHeading } from "./settings/settings-heading";
-import { Spinner } from "./spinner";
 
 const KIND: Record<PackageType, { icon: LucideIcon; titleKey: string }> = {
   agent: { icon: PACKAGE_TYPE_ICON.agent, titleKey: "packages.type.agents" },
@@ -172,11 +172,12 @@ export function OrgCatalogueModal({
 
   // Integrations resolve their activation server-side, and only their view
   // pays for the request.
-  const { data: integrations } = useAllIntegrations({ enabled: active === "integration" });
+  const integrationsQuery = useAllIntegrations({ enabled: active === "integration" });
+  const { data: integrations } = integrationsQuery;
   // The library carries no icon. The agents this space runs do (their index
   // reads the manifest), and so do integrations (`/api/integrations`); any
   // other package gets its kind's tile, the way the package page draws one.
-  const { data: agentsHere } = useAgents();
+  const { data: agentsHere, isLoading: agentsHerePending } = useAgents();
   const agentLook = new Map((agentsHere ?? []).map((agent) => [agent.id, agent] as const));
   const integrationById = new Map((integrations ?? []).map((row) => [row.id, row] as const));
   const librarySpaces = library?.spaces ?? [];
@@ -361,7 +362,13 @@ export function OrgCatalogueModal({
     // other spaces?") is the matrix, one tab away.
     const placement = placementById.get(item.id);
     const activeHere = placement?.here === "active";
-    const icon = (
+    // The tile waits for the read that carries the icon, in its own box.
+    const iconPending =
+      (active === "agent" && agentsHerePending) ||
+      (active === "integration" && integrationsQuery.isLoading);
+    const icon = iconPending ? (
+      <Skeleton className="size-10 rounded-[10px]" />
+    ) : (
       <PackageIcon
         type={active}
         icon={active === "agent" ? look?.icon : integrationById.get(item.id)?.manifest.icon}
@@ -734,8 +741,14 @@ export function OrgCatalogueModal({
       ) : (
         <PackageCollection
           items={offered}
-          isLoading={isLoading}
-          error={error instanceof Error ? error : null}
+          isLoading={isLoading || (active === "integration" && integrationsQuery.isLoading)}
+          error={
+            error instanceof Error
+              ? error
+              : active === "integration" && integrationsQuery.error instanceof Error
+                ? integrationsQuery.error
+                : null
+          }
           holds={active}
           tableId={`catalogue-${active}`}
           entity={t(kind.titleKey)}
@@ -815,10 +828,10 @@ export function OrgCatalogueModal({
                 <Button
                   type="button"
                   size="sm"
-                  disabled={activate.isPending || !spaceId}
+                  pending={activate.isPending}
+                  disabled={!spaceId}
                   onClick={activatePicked}
                 >
-                  {activate.isPending && <Spinner />}
                   {t("catalogue.activateSelection", { count: picked.length })}
                 </Button>
               ) : null}

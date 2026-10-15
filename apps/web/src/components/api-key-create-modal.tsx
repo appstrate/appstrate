@@ -3,16 +3,15 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm, Controller } from "react-hook-form";
-import { Modal } from "./modal";
+import { FormModal } from "./form-modal";
+import { SecretRevealModal } from "./secret-reveal-modal";
 import { useModalParam } from "../hooks/use-modal-param";
-import { RevealedSecret } from "./revealed-secret";
-import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { OptionSelect } from "@appstrate/ui/components/select";
-import { Spinner } from "./spinner";
+import { TextSkeleton } from "./loading-skeletons";
 import { ScopeMultiSelect } from "./scope-multi-select";
 import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
 import { errorMessage } from "../lib/mutation-error";
@@ -64,21 +63,23 @@ export function ApiKeyCreateModal() {
   const { data: availableScopes } = useAvailableScopes();
   const [created, setCreated] = useState<{ key: string; scopes: string[] } | null>(null);
 
-  // ── Success state ──
   if (created) {
     const summary =
       availableScopes && created.scopes.length > 0
         ? buildResourceSummary(created.scopes, availableScopes)
         : [];
     const isFullAccess = availableScopes ? created.scopes.length === availableScopes.length : true;
-    const done = () => setCreated(null);
 
     return (
-      <Modal open onClose={done} title={t("apiKeys.created")} className="sm:max-w-lg">
-        <RevealedSecret secret={created.key} warning={t("apiKeys.createdWarning")} />
-
+      <SecretRevealModal
+        onClose={() => setCreated(null)}
+        title={t("apiKeys.created")}
+        className="sm:max-w-lg"
+        secret={created.key}
+        warning={t("apiKeys.createdWarning")}
+      >
         {/* Scopes granted */}
-        <div className="border-border mt-4 border-t pt-3">
+        <div className="border-border border-t pt-3">
           <p className="text-muted-foreground mb-2 text-xs font-medium">
             {t("apiKeys.scopesGranted")}
           </p>
@@ -99,11 +100,7 @@ export function ApiKeyCreateModal() {
             </div>
           )}
         </div>
-
-        <div className="border-border mt-4 flex justify-end gap-2 border-t pt-4">
-          <Button onClick={done}>{t("btn.done")}</Button>
-        </div>
-      </Modal>
+      </SecretRevealModal>
     );
   }
 
@@ -170,78 +167,63 @@ function ApiKeyCreateForm({
     );
   }
 
-  const onSubmit = handleSubmit(onFormSubmit);
-
-  // ── Creation form ──
   return (
-    <Modal
-      open
+    <FormModal
       onClose={onClose}
       title={t("apiKeys.createTitle")}
       className="sm:max-w-lg"
-      actions={
-        <>
-          <Button variant="outline" type="button" onClick={onClose}>
-            {t("btn.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            form="create-api-key-form"
-            disabled={createMutation.isPending || effectiveScopes.length === 0}
-          >
-            {createMutation.isPending ? <Spinner /> : t("btn.create", { ns: "common" })}
-          </Button>
-        </>
-      }
+      onSubmit={handleSubmit(onFormSubmit)}
+      isPending={createMutation.isPending}
+      submitLabel={t("btn.create", { ns: "common" })}
+      submitDisabled={effectiveScopes.length === 0}
+      error={errors.root?.message}
     >
-      <form id="create-api-key-form" onSubmit={onSubmit} className="space-y-4">
-        {/* Name */}
-        <FormItem id="api-key-name" label={t("apiKeys.nameLabel")}>
-          <Input
-            type="text"
-            {...register("name", { required: true })}
-            placeholder={t("apiKeys.namePlaceholder")}
-            maxLength={100}
-            required
-            autoFocus
-          />
-        </FormItem>
-
-        {/* Expiration */}
-        <Controller
-          name="expiresIn"
-          control={control}
-          render={({ field }) => (
-            <FormItem id="api-key-expires" label={t("apiKeys.expiresLabel")}>
-              <OptionSelect
-                value={field.value}
-                onValueChange={field.onChange}
-                options={[
-                  { value: "30", label: t("apiKeys.expires30") },
-                  { value: "90", label: t("apiKeys.expires90") },
-                  { value: "180", label: t("apiKeys.expires180") },
-                  { value: "365", label: t("apiKeys.expires365") },
-                  { value: "never", label: t("apiKeys.expiresNever") },
-                ]}
-              />
-            </FormItem>
-          )}
+      {/* Name */}
+      <FormItem id="api-key-name" label={t("apiKeys.nameLabel")}>
+        <Input
+          type="text"
+          {...register("name", { required: true })}
+          placeholder={t("apiKeys.namePlaceholder")}
+          maxLength={100}
+          required
+          autoFocus
         />
+      </FormItem>
 
-        {/* Permissions */}
-        {availableScopes && (
-          <div className="space-y-2">
-            <Label>{t("apiKeys.permissionSummary")}</Label>
-            <ScopeMultiSelect
-              available={availableScopes}
-              selected={effectiveScopes}
-              onChange={setSelectedScopes}
+      {/* Expiration */}
+      <Controller
+        name="expiresIn"
+        control={control}
+        render={({ field }) => (
+          <FormItem id="api-key-expires" label={t("apiKeys.expiresLabel")}>
+            <OptionSelect
+              value={field.value}
+              onValueChange={field.onChange}
+              options={[
+                { value: "30", label: t("apiKeys.expires30") },
+                { value: "90", label: t("apiKeys.expires90") },
+                { value: "180", label: t("apiKeys.expires180") },
+                { value: "365", label: t("apiKeys.expires365") },
+                { value: "never", label: t("apiKeys.expiresNever") },
+              ]}
             />
-          </div>
+          </FormItem>
         )}
+      />
 
-        {errors.root?.message && <FieldError>{errors.root.message}</FieldError>}
-      </form>
-    </Modal>
+      {/* Permissions */}
+      <div className="space-y-2">
+        <Label>{t("apiKeys.permissionSummary")}</Label>
+        {availableScopes ? (
+          <ScopeMultiSelect
+            available={availableScopes}
+            selected={effectiveScopes}
+            onChange={setSelectedScopes}
+          />
+        ) : (
+          <TextSkeleton lines={4} />
+        )}
+      </div>
+    </FormModal>
   );
 }

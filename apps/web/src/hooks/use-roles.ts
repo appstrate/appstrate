@@ -2,9 +2,9 @@
 
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import { $api, type components } from "../api/client";
+import { useInvalidatePaths } from "./use-invalidate-paths";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions, useSpaceGrant } from "./use-permissions";
 
@@ -39,17 +39,15 @@ export function useRoleVocabulary() {
  * member editing their own row sees it change), and the member lists' role
  * names.
  */
-export function useInvalidateRoles() {
-  const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/roles"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/roles"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/members"] });
+export const useInvalidateRoles = () =>
+  useInvalidatePaths(
+    "/api/roles",
+    "/api/spaces/{id}/roles",
+    "/api/spaces",
+    "/api/spaces/{id}/members",
     // Each org member carries the spaces they reach and their role there.
-    void qc.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
-  };
-}
+    "/api/orgs/{orgId}",
+  );
 
 export function useCreateRole() {
   const invalidate = useInvalidateRoles();

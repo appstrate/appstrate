@@ -12,7 +12,6 @@ import { Button } from "@appstrate/ui/components/button";
 import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { OptionSelect } from "@appstrate/ui/components/select";
 import { Modal } from "./modal";
-import { Spinner } from "./spinner";
 import { ErrorState } from "./page-states";
 import { TextSkeleton } from "./loading-skeletons";
 import { ModelChoiceList } from "./model-choice";
@@ -136,9 +135,10 @@ function ChoiceDialog({
           <Button
             type="button"
             onClick={() => void save()}
-            disabled={isPending || (!tickAll && !choice.canSave)}
+            pending={isPending}
+            disabled={!tickAll && !choice.canSave}
           >
-            {isPending ? <Spinner /> : submitLabel}
+            {submitLabel}
           </Button>
         </>
       }
@@ -163,10 +163,12 @@ function ChoiceDialog({
         />
         {refusal && <FieldError>{refusal}</FieldError>}
         {failed && (
-          <div className="text-destructive space-y-1 text-sm">
-            <p>{t("models.choice.failed", { ids: failed.ids.join(", ") })}</p>
-            {failed.refusal && <p>{failed.refusal}</p>}
-          </div>
+          <FieldError>
+            <span className="block">
+              {t("models.choice.failed", { ids: failed.ids.join(", ") })}
+            </span>
+            {failed.refusal && <span className="mt-1 block">{failed.refusal}</span>}
+          </FieldError>
         )}
       </fieldset>
     </Modal>

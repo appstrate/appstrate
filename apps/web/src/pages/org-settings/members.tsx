@@ -2,10 +2,8 @@
 
 import { useTranslation } from "react-i18next";
 import { Plus, Users } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
-import { useQueryClient } from "@tanstack/react-query";
-import { $api, type components } from "../../api/client";
-import { useOrg, useOrgDetail } from "../../hooks/use-org";
+import type { components } from "../../api/client";
+import { useChangeMemberRole, useOrg, useOrgDetail, useRemoveMember } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
@@ -14,7 +12,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
-import { PageActionsMenu } from "../../components/page-actions-menu";
+import type { MenuAction } from "../../lib/menu-action";
 import { InvitationsTable } from "../../components/invitations-table";
 import { OrgInvitationForm } from "../../components/org-invitation-form";
 import { useMemberColumns } from "./member-columns";
@@ -22,23 +20,15 @@ import { UserDetailModal } from "./user-detail-modal";
 import { useState } from "react";
 import { hasFullOrgAccess } from "../../lib/org-role";
 import { memberLabel } from "../../lib/members";
-import { invalidateMemberWrite } from "../../lib/member-write";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
-
-/**
- * Implicit space reach per role: a drop ends access, and the server then unshares connections.
- * Exhaustive, so a new role must be placed here rather than read as one that revokes access.
- */
-const ROLE_REACH = { owner: 2, admin: 2, member: 1, guest: 0 } satisfies Record<OrgRole, number>;
 
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
   const { user } = useAuth();
   const { can, orgRole } = usePermissions();
-  const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
   const invite = useModalParam("invite");
 
@@ -61,13 +51,8 @@ export function OrgSettingsMembersPage() {
   const memberParam = useModalTarget("member", orgData?.members, (member) => member.userId);
   const invitations = orgData?.invitations ?? [];
 
-  const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
-    onSuccess: () => invalidateMemberWrite(queryClient),
-  });
-
-  const changeRoleMutation = $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}", {
-    onSuccess: () => invalidateMemberWrite(queryClient),
-  });
+  const removeMemberMutation = useRemoveMember();
+  const changeRoleMutation = useChangeMemberRole();
 
   const handleRemove = (member: OrgMember) => {
     const label = memberLabel(member);
@@ -99,15 +84,17 @@ export function OrgSettingsMembersPage() {
   // the column and the detail read the same rows.
   const seesEverySpace = hasFullOrgAccess(orgRole);
 
+  const assignableRoles = (member: OrgMember) =>
+    orgRole && canChangeRole
+      ? assignableRolesForMember({
+          actorRole: orgRole,
+          targetRole: member.role,
+          isSelf: member.userId === user?.id,
+        })
+      : [];
+
   const memberColumns = useMemberColumns({
-    assignableRoles: (member) =>
-      orgRole && canChangeRole
-        ? assignableRolesForMember({
-            actorRole: orgRole,
-            targetRole: member.role,
-            isSelf: member.userId === user?.id,
-          })
-        : [],
+    assignableRoles,
     canRemove: (member) =>
       orgRole && can("members:remove")
         ? canRemoveMember({
@@ -124,19 +111,17 @@ export function OrgSettingsMembersPage() {
   });
 
   const openedUser = memberParam.target;
+  const inviteAction: MenuAction = {
+    id: "invite",
+    icon: Plus,
+    label: t("orgSettings.inviteMember"),
+    onSelect: () => invite.open(),
+    hidden: !canInvite,
+  };
 
   return (
     <>
-      {canInvite && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            <DropdownMenuItem data-page-action="invite" onSelect={() => invite.open()}>
-              <Plus />
-              {t("orgSettings.inviteMember")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
+      <SettingsPageActions actions={[inviteAction]} />
 
       {/* The invitation is one form wherever it is made: the org role, then the
           spaces it opens and the role in each — which is what a guest needs,
@@ -179,15 +164,7 @@ export function OrgSettingsMembersPage() {
           key={openedUser.userId}
           member={openedUser}
           showSpaces={seesEverySpace}
-          assignableRoles={
-            orgRole && canChangeRole
-              ? assignableRolesForMember({
-                  actorRole: orgRole,
-                  targetRole: openedUser.role,
-                  isSelf: openedUser.userId === user?.id,
-                })
-              : []
-          }
+          assignableRoles={assignableRoles(openedUser)}
           isChangingOrgRole={changeRoleMutation.isPending}
           onChangeOrgRole={(role) => handleRoleChange(openedUser, role)}
           onClose={memberParam.close}
@@ -196,16 +173,14 @@ export function OrgSettingsMembersPage() {
 
       {orgId && <InvitationsTable orgId={orgId} invitations={invitations} />}
 
-      {members.length === 0 && invitations.length === 0 && (
+      {!isLoading && !error && members.length === 0 && invitations.length === 0 && (
         <EmptyState
           message={t("orgSettings.noMembers")}
           hint={t("orgSettings.noMembersHint")}
           icon={Users}
           compact
         >
-          {canInvite && (
-            <EmptyStateAction label={t("orgSettings.inviteMember")} onClick={() => invite.open()} />
-          )}
+          <EmptyStateAction action={inviteAction} />
         </EmptyState>
       )}
 
@@ -279,6 +254,15 @@ export function OrgSettingsMembersPage() {
   );
 }
 
+/** How far each role reaches into spaces on its own; owner and admin reach every one. */
+const ROLE_REACH = {
+  owner: 2,
+  admin: 2,
+  member: 1,
+  guest: 0,
+} satisfies Record<OrgRole, number>;
+
+/** A drop ends implicit space access, and the server then unshares connections. */
 function revokesAccess(from: OrgRole, to: OrgRole): boolean {
   return ROLE_REACH[to] < ROLE_REACH[from];
 }

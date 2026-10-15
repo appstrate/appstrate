@@ -12,18 +12,10 @@
  */
 import { useTranslation } from "react-i18next";
 import { Inbox } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@appstrate/ui/components/table";
 import type { LibraryPackageItem } from "../hooks/use-library";
 import type { PendingShare } from "../lib/catalogue-placement";
-import { CATALOGUE_TYPE_LABEL_KEY } from "../lib/catalogue-link";
+import { useCatalogueSharedColumns } from "./catalogue-shared-columns";
+import { DataTable } from "./data-table";
 import { EmptyState } from "./page-states";
 import { SettingsHeading } from "./settings/settings-heading";
 
@@ -44,6 +36,7 @@ export function CatalogueShared({
   onOpen: (pkg: LibraryPackageItem) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  const columns = useCatalogueSharedColumns({ spaceNameOf, mayActivateIn, busy, onActivate });
 
   return (
     <div>
@@ -51,76 +44,23 @@ export function CatalogueShared({
         title={t("catalogue.shared.title")}
         description={t("catalogue.shared.description")}
       />
-      {shares.length === 0 ? (
-        <EmptyState
-          message={t("catalogue.shared.empty")}
-          hint={t("catalogue.shared.emptyHint")}
-          icon={Inbox}
-          compact
-        />
-      ) : (
-        <div className="overflow-hidden rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("catalogue.shared.item")}</TableHead>
-                <TableHead>{t("catalogue.shared.type")}</TableHead>
-                <TableHead>{t("catalogue.shared.by")}</TableHead>
-                <TableHead>{t("catalogue.shared.with")}</TableHead>
-                <TableHead className="text-right">
-                  <span className="sr-only">{t("catalogue.shared.action")}</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {shares.map((share) => {
-                const space = spaceNameOf(share.spaceId);
-                return (
-                  <TableRow key={`${share.pkg.id}:${share.spaceId}`}>
-                    <TableCell className="max-w-64">
-                      {/* The name opens the sheet, for whoever wants to read
-                          before deciding. */}
-                      <button
-                        type="button"
-                        className="block max-w-full truncate p-0 text-left font-medium hover:underline"
-                        onClick={() => onOpen(share.pkg)}
-                      >
-                        {share.pkg.name || share.pkg.id}
-                      </button>
-                      {share.pkg.description && (
-                        <span className="text-muted-foreground block truncate text-xs">
-                          {share.pkg.description}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {t(CATALOGUE_TYPE_LABEL_KEY[share.pkg.type])}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{share.sharedBy ?? "—"}</TableCell>
-                    <TableCell>{space}</TableCell>
-                    <TableCell className="text-right">
-                      {mayActivateIn(share.pkg, share.spaceId) ? (
-                        <Button
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => onActivate(share.pkg, share.spaceId)}
-                        >
-                          {t("catalogue.sheet.activateIn", { space })}
-                        </Button>
-                      ) : (
-                        // No refused button: the reader is told who can act.
-                        <span className="text-muted-foreground text-xs">
-                          {t("catalogue.shared.noRight", { space })}
-                        </span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+      <DataTable
+        tableId="catalogue-shared"
+        label={t("catalogue.shared.title")}
+        columns={columns}
+        rows={shares}
+        rowKey={(share) => `${share.pkg.id}:${share.spaceId}`}
+        rowAction={(share) => onOpen(share.pkg)}
+        rowLabel={(share) => share.pkg.name || share.pkg.id}
+        empty={
+          <EmptyState
+            message={t("catalogue.shared.empty")}
+            hint={t("catalogue.shared.emptyHint")}
+            icon={Inbox}
+            compact
+          />
+        }
+      />
     </div>
   );
 }

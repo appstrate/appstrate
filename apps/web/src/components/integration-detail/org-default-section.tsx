@@ -13,6 +13,7 @@ import {
   useUpsertIntegrationOrgDefault,
   useDeleteIntegrationOrgDefault,
 } from "../../hooks/use-integrations";
+import { SettingsSkeleton } from "../loading-skeletons";
 import { SaveFeedback } from "../settings/save-feedback";
 import { ConnectionSetPicker } from "../integration-connect/connection-choice-menu";
 import { connectionSetOption } from "../integration-connect/connection-set-option";
@@ -30,7 +31,7 @@ import { connectionSetOption } from "../integration-connect/connection-set-optio
 export function OrgDefaultSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
   const { data: orgDefault, isLoading, isError, refetch } = useIntegrationOrgDefault(packageId);
-  const { data: connections } = useIntegrationConnections(packageId);
+  const { data: connections, isLoading: connectionsLoading } = useIntegrationConnections(packageId);
   const upsert = useUpsertIntegrationOrgDefault();
   const remove = useDeleteIntegrationOrgDefault();
 
@@ -107,58 +108,62 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
           </AlertDescription>
         </Alert>
       )}
-      <div className="grid items-start gap-6 md:grid-cols-2">
-        <div className="min-w-0">
-          <div className="mb-3">
-            <p className="text-sm font-medium">{t("integration.admin.usage.title")}</p>
-          </div>
+      {isLoading || connectionsLoading ? (
+        <SettingsSkeleton rows={2} />
+      ) : (
+        <div className="grid items-start gap-6 md:grid-cols-2">
+          <div className="min-w-0">
+            <div className="mb-3">
+              <p className="text-sm font-medium">{t("integration.admin.usage.title")}</p>
+            </div>
 
-          <OptionSelect
-            value={mode}
-            disabled={isLoading || isError || pendingValue !== null}
-            onValueChange={(value) => {
-              if (value === "choice") {
-                setDraftMode(null);
-                if (orgDefault) void save([], false);
-              } else if (connectionIds.length > 0) void save(connectionIds, value === "forced");
-              else setDraftMode(value);
-            }}
-            aria-label={t("integration.admin.usage.title")}
-            options={(["choice", "default", "forced"] as const).map((value) => ({
-              value,
-              label: t(`integration.admin.usage.${value}`),
-              disabled:
-                value !== "choice" && (shared.length === 0 || (modeLocked && value !== mode)),
-            }))}
-          />
-          <p className="text-muted-foreground mt-2 text-sm">
-            {t(`integration.admin.usage.${mode}Help`)}
-          </p>
-          {shared.length === 0 ? (
-            <p className="text-muted-foreground text-xs italic">
-              {t("integration.admin.orgDefault.noPinnableConnections")}
+            <OptionSelect
+              value={mode}
+              disabled={isLoading || isError || pendingValue !== null}
+              onValueChange={(value) => {
+                if (value === "choice") {
+                  setDraftMode(null);
+                  if (orgDefault) void save([], false);
+                } else if (connectionIds.length > 0) void save(connectionIds, value === "forced");
+                else setDraftMode(value);
+              }}
+              aria-label={t("integration.admin.usage.title")}
+              options={(["choice", "default", "forced"] as const).map((value) => ({
+                value,
+                label: t(`integration.admin.usage.${value}`),
+                disabled:
+                  value !== "choice" && (shared.length === 0 || (modeLocked && value !== mode)),
+              }))}
+            />
+            <p className="text-muted-foreground mt-2 text-sm">
+              {t(`integration.admin.usage.${mode}Help`)}
             </p>
-          ) : modeLocked ? (
-            <p className="text-muted-foreground text-xs" data-testid="org-default-mode-locked">
-              {t("integration.admin.orgDefault.pickBeforeMode")}
-            </p>
+            {shared.length === 0 ? (
+              <p className="text-muted-foreground text-xs italic">
+                {t("integration.admin.orgDefault.noPinnableConnections")}
+              </p>
+            ) : modeLocked ? (
+              <p className="text-muted-foreground text-xs" data-testid="org-default-mode-locked">
+                {t("integration.admin.orgDefault.pickBeforeMode")}
+              </p>
+            ) : null}
+          </div>
+          {shared.length > 0 && mode !== "choice" ? (
+            <div className="min-w-0">
+              <p className="mb-3 text-sm font-medium">{connectionsLabel}</p>
+              <ConnectionSetPicker
+                options={shared.map(connectionSetOption)}
+                value={connectionIds.length > 0 ? connectionIds : null}
+                onChange={(next) => void save(next ?? [], mode === "forced", mode)}
+                testPrefix="org-default-pick"
+                testKey="connections"
+                unavailableIds={unavailableIds}
+                disabled={isLoading || isError || pendingValue !== null}
+              />
+            </div>
           ) : null}
         </div>
-        {shared.length > 0 && mode !== "choice" ? (
-          <div className="min-w-0">
-            <p className="mb-3 text-sm font-medium">{connectionsLabel}</p>
-            <ConnectionSetPicker
-              options={shared.map(connectionSetOption)}
-              value={connectionIds.length > 0 ? connectionIds : null}
-              onChange={(next) => void save(next ?? [], mode === "forced", mode)}
-              testPrefix="org-default-pick"
-              testKey="connections"
-              unavailableIds={unavailableIds}
-              disabled={isLoading || isError || pendingValue !== null}
-            />
-          </div>
-        ) : null}
-      </div>
+      )}
       <SaveFeedback
         pending={pendingValue !== null}
         success={outcome === "success"}

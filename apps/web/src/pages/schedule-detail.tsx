@@ -8,24 +8,26 @@ import { useCanReach } from "../hooks/use-can-reach";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
-import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
+import {
+  DetailTabs,
+  DetailTabBar,
+  DetailTabPanel,
+  type DetailTab,
+} from "../components/detail-tabs";
 import { DetailSectionCard } from "../components/detail-section-card";
-import { Fact, FactGrid } from "../components/fact-grid";
+import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { ManifestFacts } from "../components/package-manifest/manifest-fact";
-import { ListToolbar } from "../components/list-toolbar";
-import { useLocalListParams } from "../lib/list-params";
-import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { PageHeader } from "../components/page-header";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { ResourceErrorState, EmptyState } from "../components/page-states";
-import { DetailPageSkeleton } from "../components/loading-skeletons";
+import { ScheduleDetailSkeleton, SettingsSkeleton } from "../components/loading-skeletons";
 import { JsonView } from "../components/json-view";
 import { ActorLabel } from "../components/actor-label";
 import { Badge } from "@appstrate/ui/components/badge";
-import { RunList } from "../components/run-list";
+import { ScopedRunList } from "../components/scoped-run-list";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
@@ -36,7 +38,11 @@ import { isQueryInFlight } from "../lib/query-state";
 import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { ScheduleActionsMenu, ScheduleSettings } from "../components/schedule-settings";
-import { scheduleSettingsHref, type ScheduleSettingsSection } from "../lib/schedule-options";
+import {
+  scheduleNextRunAt,
+  scheduleSettingsHref,
+  type ScheduleSettingsSection,
+} from "../lib/schedule-options";
 import { formatDateField } from "../lib/format-date";
 import { parseCron } from "../lib/cron-frequency";
 import { describeFrequency } from "../lib/frequency-summary";
@@ -63,20 +69,20 @@ export function ScheduleDetailPage() {
   const [activeTab, setActiveTab] = useTabWithHash(SCHEDULE_TABS, "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  if (isQueryInFlight(scheduleQuery))
-    return (
-      <DetailPageSkeleton
-        breadcrumbs={[{ label: t("schedule.breadcrumbList"), href: "/schedules" }]}
-      />
-    );
+  if (isQueryInFlight(scheduleQuery)) return <ScheduleDetailSkeleton />;
   if (error || !schedule) return <ResourceErrorState error={error} />;
+  const tabs: DetailTab<ScheduleTab>[] = [
+    { value: "details", label: t("detail.overview.summary") },
+    { value: "runs", label: t("schedule.tabRuns") },
+    { value: "settings", label: t("schedule.tabSettings") },
+  ];
   const disabledReason = schedule.disabled_reason
     ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
     : null;
 
   return (
     <div>
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScheduleTab)}>
+      <DetailTabs value={activeTab} onChange={setActiveTab}>
         <PageHeader
           title={schedule.name || t("schedule.unnamed")}
           titleClassName="text-xl"
@@ -92,14 +98,7 @@ export function ScheduleDetailPage() {
               label: schedule.name || t("schedule.unnamed"),
               href: scheduleDetailPath(schedule.id),
             },
-            {
-              label:
-                activeTab === "details"
-                  ? t("detail.overview.summary")
-                  : activeTab === "runs"
-                    ? t("schedule.tabRuns")
-                    : t("schedule.tabSettings"),
-            },
+            { label: tabs.find((item) => item.value === activeTab)?.label ?? activeTab },
           ]}
           actions={
             <>
@@ -144,31 +143,31 @@ export function ScheduleDetailPage() {
             </AlertDescription>
           </Alert>
         )}
-        <DetailTabsList>
-          <DetailTabsTrigger value="details">{t("detail.overview.summary")}</DetailTabsTrigger>
-          <DetailTabsTrigger value="runs">{t("schedule.tabRuns")}</DetailTabsTrigger>
-          <DetailTabsTrigger value="settings">{t("schedule.tabSettings")}</DetailTabsTrigger>
-        </DetailTabsList>
+        <DetailTabBar tabs={tabs} />
 
-        <TabsContent value="runs" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+        <DetailTabPanel value="runs">
           {readsRuns ? (
             <ScheduleHistory schedule={schedule} />
           ) : (
             <RoleLimitNotice>{t("schedule.roleLimit.runs")}</RoleLimitNotice>
           )}
-        </TabsContent>
+        </DetailTabPanel>
 
-        <TabsContent value="details" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+        <DetailTabPanel value="details">
           <ScheduleParams schedule={schedule} />
-        </TabsContent>
+        </DetailTabPanel>
 
-        <TabsContent
-          value="settings"
-          className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
-        >
-          <ScheduleSettings schedule={schedule} />
-        </TabsContent>
-      </Tabs>
+        <DetailTabPanel value="settings" flush>
+          {/* The settings seed their fields once: never from a list row that may be stale. */}
+          {scheduleQuery.isPlaceholderData ? (
+            <div className="p-6">
+              <SettingsSkeleton />
+            </div>
+          ) : (
+            <ScheduleSettings schedule={schedule} />
+          )}
+        </DetailTabPanel>
+      </DetailTabs>
 
       <ConfirmModal
         open={confirmOpen}
@@ -198,9 +197,12 @@ function ScheduleParams({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["agents"]);
-  const { data: agents } = useAgents();
+  const agentsQuery = useAgents();
+  const { data: agents } = agentsQuery;
+  const agentsPending = isQueryInFlight(agentsQuery);
   const canReach = useCanReach();
   const agentPath = `/agents/${schedule.packageId}`;
+  const nextRunAt = scheduleNextRunAt(schedule);
   const agentDisplayName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
   const input = schedule.input;
@@ -219,7 +221,9 @@ function ScheduleParams({
       >
         <FactGrid columns={2}>
           <Fact label={t("schedule.paramAgent")}>
-            {canReach(agentPath) ? (
+            {agentsPending ? (
+              <Skeleton className="h-4 w-32" />
+            ) : canReach(agentPath) ? (
               <Link className="text-primary hover:underline" to={agentPath}>
                 {agentDisplayName}
               </Link>
@@ -269,10 +273,9 @@ function ScheduleParams({
             { labelKey: "schedule.paramTimezone", value: schedule.timezone },
             {
               labelKey: "schedule.paramNextRun",
-              value:
-                schedule.enabled && schedule.next_run_at
-                  ? formatDateField(schedule.next_run_at, "datetime", schedule.timezone)
-                  : t("schedule.noNextRun"),
+              value: nextRunAt
+                ? formatDateField(nextRunAt, "datetime", schedule.timezone)
+                : t("schedule.noNextRun"),
             },
             {
               labelKey: "schedule.paramLastRun",
@@ -308,22 +311,21 @@ function ScheduleHistory({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const list = useLocalListParams();
-  const { search } = list;
-  const { statuses, filter: statusFilter } = useRunStatusFilter(list);
   const { data: agents } = useAgents();
   const agentName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
 
   const isActive = schedule.enabled;
 
-  // Use the same hook as RunList so React Query deduplicates the fetch.
+  // The same query ScopedRunList makes for its first page (12 rows), so React
+  // Query serves both from one fetch.
   // We only need the first run for the "next run" preview row.
-  const { data } = usePaginatedRuns({
+  const runsQuery = usePaginatedRuns({
     scheduleId: schedule.id,
-    limit: 20,
+    limit: 12,
     offset: 0,
   });
+  const { data } = runsQuery;
   const firstExec = data?.data?.[0];
 
   // Show the fake "next run" row only if the last run started > 30s ago.
@@ -347,45 +349,26 @@ function ScheduleHistory({
   }, [lastStartedAt]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  const nextRunAt = scheduleNextRunAt(schedule);
   const previewRow =
-    !search && statuses.length === 0 && isActive && showNext && schedule.next_run_at ? (
+    isActive && showNext && nextRunAt ? (
       <NextRunPreview
-        runNumber={(firstExec?.runNumber ?? 0) + 1}
+        // The last run's + 1: unknown while the runs load.
+        runNumber={isQueryInFlight(runsQuery) ? null : (firstExec?.runNumber ?? 0) + 1}
         agentName={agentName}
         schedule_name={schedule.name || t("schedule.unnamed")}
-        next_run_at={schedule.next_run_at}
+        next_run_at={nextRunAt}
         timezone={schedule.timezone}
       />
     ) : null;
 
   return (
-    <RunList
-      scheduleId={schedule.id}
-      pageSize={12}
-      status={statuses}
-      search={search}
-      tableSurface="integrated"
-      toolbar={({ columns }) => (
-        <ListToolbar
-          placement="panel"
-          columns={columns}
-          search={{ value: search, onChange: list.setSearch, placeholder: t("detail.runsSearch") }}
-          filters={[statusFilter]}
-          onReset={list.reset}
-        />
-      )}
-      fixedAgentName={agentName}
-      firstPageBanner={previewRow}
+    <ScopedRunList
+      scope={{ scheduleId: schedule.id, agentName }}
+      banner={previewRow}
       emptyState={
-        <div>
-          {previewRow}
-          <div className="p-6">
-            <EmptyState
-              message={t(search || statuses.length ? "runs.emptyFiltered" : "schedule.noRuns")}
-              icon={Clock}
-              compact
-            />
-          </div>
+        <div className="p-6">
+          <EmptyState message={t("schedule.noRuns")} icon={Clock} compact />
         </div>
       }
     />

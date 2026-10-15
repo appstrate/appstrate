@@ -6,7 +6,7 @@ import type { FileDto } from "../hooks/use-files";
 import { mimeKind } from "../lib/files";
 import type { DataColumn } from "./data-table";
 import { DocumentRowActions } from "./document-row-actions";
-import { ExpiryBadge } from "./file-tile";
+import { ExpiryBadge } from "./file-badges";
 import { rowActionsColumn } from "./row-actions-column";
 import { CellDate, CellText } from "./table-cells";
 

@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, Puzzle } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
+import { Puzzle } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -11,18 +9,14 @@ import {
   useIntegrationReadinessEntry,
   useAgentsConsumingIntegration,
   type AgentIntegrationEntry,
-  type IntegrationAuthStatus,
   type IntegrationCandidate,
   type IntegrationDetailWire,
-  type IntegrationManifestView,
 } from "../../hooks/use-integrations";
-import { useSetPackageActive } from "../../hooks/use-library";
+import { ActivateIntegrationButton } from "../activate-integration-button";
 import { ApiError } from "../../api/errors";
 import { errorMessage } from "../../lib/mutation-error";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
-import { maySetPackageActive } from "../../lib/package-permissions";
 import type { ConnectionSet } from "../../lib/connection-set";
+import { useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import {
@@ -93,8 +87,8 @@ export function AgentIntegrationsBlock({
   scheduleOverrides,
 }: AgentIntegrationsBlockProps) {
   const { t } = useTranslation(["agents", "settings"]);
-  const [search, setSearch] = useState("");
-  const [states, setStates] = useState<string[]>([]);
+  const list = useLocalListParams();
+  const states = list.values("activation", ["active", "inactive"] as const);
   const details = useIntegrationDetails(entries.map((entry) => entry.id));
 
   const rows = entries
@@ -116,7 +110,7 @@ export function AgentIntegrationsBlock({
     .filter((row) => {
       const state = row.spaceActive ? "active" : "inactive";
       const matchesState = states.length === 0 || states.includes(state);
-      return matchesState && matchesSearch(search, [row.entry.id, row.displayName]);
+      return matchesState && matchesSearch(list.search, [row.entry.id, row.displayName]);
     });
   type Row = (typeof rows)[number];
   const columns: DataColumn<Row>[] = [
@@ -146,11 +140,8 @@ export function AgentIntegrationsBlock({
       control: true,
       cell: ({ entry, state }) => (
         <IntegrationConnectionCell
-          packageId={entry.id}
+          entry={entry}
           state={state}
-          agentTools={entry.tools}
-          agentScopes={entry.scopes}
-          required={entry.required === true}
           agentPackageId={agentPackageId}
           {...(scheduleOverrides ? { scheduleOverrides } : {})}
         />
@@ -179,7 +170,7 @@ export function AgentIntegrationsBlock({
         { value: "active", label: t("detail.connectionsTable.active") },
         { value: "inactive", label: t("detail.connectionsTable.inactive") },
       ],
-      onChange: setStates,
+      onChange: list.setValues("activation"),
     },
   ];
 
@@ -188,15 +179,12 @@ export function AgentIntegrationsBlock({
       <ListToolbar
         placement="panel"
         search={{
-          value: search,
-          onChange: setSearch,
+          value: list.search,
+          onChange: list.setSearch,
           placeholder: t("detail.connectionsTable.search"),
         }}
         filters={filters}
-        onReset={() => {
-          setSearch("");
-          setStates([]);
-        }}
+        onReset={list.reset}
       />
       <DataTable
         tableId="agent-connections"
@@ -217,24 +205,20 @@ export function AgentIntegrationsBlock({
 }
 
 function IntegrationConnectionCell({
-  packageId,
+  entry,
   state,
-  agentTools,
-  agentScopes,
-  required,
   agentPackageId,
   scheduleOverrides,
 }: {
-  packageId: string;
+  /** The agent's dependency; its `required` flag decides whether an inactive one refuses the run. */
+  entry: AgentIntegrationEntry;
   state: DetailState;
-  agentTools: string[] | "*" | undefined;
-  agentScopes: string[] | undefined;
-  /** The agent's `required` flag: an inactive required integration refuses the run. */
-  required: boolean;
   agentPackageId: string;
   scheduleOverrides?: ScheduleOverrides;
 }) {
   const { detail, isLoading, error } = state;
+  const packageId = entry.id;
+  const required = entry.required === true;
 
   if (!detail) {
     // A placeholder only while a fetch is in flight: a disabled read (no `integrations:read`) never settles.
@@ -257,12 +241,8 @@ function IntegrationConnectionCell({
   if (scheduleOverrides) {
     return (
       <IntegrationConnectionPicker
-        integrationId={packageId}
+        integration={entry}
         agentPackageId={agentPackageId}
-        manifest={detail.manifest}
-        authStatuses={detail.auths}
-        agentTools={agentTools}
-        agentScopes={agentScopes}
         persistence={{
           mode: "override",
           value: scheduleOverrides.value[packageId] ?? null,
@@ -273,16 +253,7 @@ function IntegrationConnectionCell({
     );
   }
 
-  return (
-    <ManagedIntegration
-      packageId={packageId}
-      agentPackageId={agentPackageId}
-      manifest={detail.manifest}
-      authStatuses={detail.auths}
-      agentTools={agentTools}
-      agentScopes={agentScopes}
-    />
-  );
+  return <ManagedIntegration entry={entry} agentPackageId={agentPackageId} />;
 }
 
 /**
@@ -291,21 +262,14 @@ function IntegrationConnectionCell({
  * the parent's loading / not-active guards have passed — when the picker renders.
  */
 function ManagedIntegration({
-  packageId,
+  entry: integration,
   agentPackageId,
-  manifest,
-  authStatuses,
-  agentTools,
-  agentScopes,
 }: {
-  packageId: string;
+  entry: AgentIntegrationEntry;
   agentPackageId: string;
-  manifest: IntegrationManifestView;
-  authStatuses: IntegrationAuthStatus[];
-  agentTools: string[] | "*" | undefined;
-  agentScopes: string[] | undefined;
 }) {
   const { t } = useTranslation(["agents"]);
+  const packageId = integration.id;
   const { data: entry } = useIntegrationReadinessEntry(packageId, agentPackageId);
   const resolution = entry?.resolution;
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
@@ -333,14 +297,7 @@ function ManagedIntegration({
 
   return (
     <div className="min-w-0">
-      <IntegrationConnectionPicker
-        integrationId={packageId}
-        agentPackageId={agentPackageId}
-        manifest={manifest}
-        authStatuses={authStatuses}
-        agentTools={agentTools}
-        agentScopes={agentScopes}
-      />
+      <IntegrationConnectionPicker integration={integration} agentPackageId={agentPackageId} />
       {note && (
         <p
           className={cn(
@@ -357,14 +314,7 @@ function ManagedIntegration({
 
 /** Switched off in this space: the reason and the activation button. Only a required one blocks. */
 function InactiveIntegration({ packageId, required }: { packageId: string; required: boolean }) {
-  const { t } = useTranslation(["agents", "common"]);
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
-  // The tree's ONE activation verdict (`maySetPackageActive`), not a third
-  // spelling: the type's grant in THIS space, or owning it (RBAC §3.6).
-  const spaceGrant = useCurrentSpaceGrant();
-  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
-
+  const { t } = useTranslation(["agents"]);
   return (
     <span className="flex items-center justify-end gap-3">
       <span
@@ -380,23 +330,7 @@ function InactiveIntegration({ packageId, required }: { packageId: string; requi
           sits beside it. Somebody the route
           would refuse gets the button DEAD with the reason on it, rather
           than a click that ends in a toast. */}
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={setActive.isPending || !currentSpaceId || !canActivate}
-        title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
-        onClick={() => {
-          if (!currentSpaceId || !canActivate) return;
-          setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
-        }}
-        data-testid={`integration-activate-${packageId}`}
-      >
-        {setActive.isPending ? (
-          <Loader2 className="size-3.5 animate-spin" />
-        ) : (
-          t("editor.activateIntegration")
-        )}
-      </Button>
+      <ActivateIntegrationButton packageId={packageId} />
     </span>
   );
 }

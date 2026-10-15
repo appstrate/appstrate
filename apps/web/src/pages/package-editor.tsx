@@ -1,23 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import type { Versioned } from "../hooks/use-packages";
-import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
-import type { PackageType } from "@appstrate/core/validation";
-import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
+import type {
+  AgentDetail,
+  IntegrationToolCatalogEntry,
+  OrgPackageItemDetail,
+} from "@appstrate/shared-types";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
-import { packageListPath } from "../lib/package-paths";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
 import { primaryDisplayFile } from "../lib/package-files";
 import { newPackageContent } from "../lib/package-file-drafts";
 import { skillFrontmatterError } from "../lib/skill-frontmatter";
-import { useEditorState, type EditorState } from "../hooks/use-editor-state";
-import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
+import type { EditorState } from "../hooks/use-editor-state";
 import { FormField } from "../components/form-field";
+import {
+  usePackageEditor,
+  type PackageEditorTab,
+  type Presentation,
+} from "../components/package-editor/use-package-editor";
+import { PackageEditorFrame } from "../components/package-editor/package-editor-frame";
 
 // Agent editor components
 import { MetadataSection } from "../components/agent-editor/metadata-section";
@@ -25,25 +29,17 @@ import { AgentAppearanceFields } from "../components/agent-editor/agent-appearan
 import { SchemaFieldList } from "../components/agent-editor/schema-field-list";
 import { ResourceSection } from "../components/agent-editor/resource-section";
 import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-group";
-import { JsonEditor } from "../components/json-editor";
-import { PackageFilesEditor } from "../components/package-files/package-files-editor";
-import { ManifestEditEntry } from "../components/package-files/package-files-section";
 import { SourceSection } from "../components/integration-editor/source-section";
 import { getSource, isRemoteSourceUrl } from "../components/integration-editor/utils";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
-import { EditorShell } from "../components/editor-shell";
 
-import type { MetadataState } from "../components/agent-editor/metadata-section";
 import {
   defaultEditorState,
   defaultSkillManifest,
   defaultIntegrationManifest,
   DEFAULT_SKILL_CONTENT,
-  getManifestName,
-  manifestToMetadata,
-  metadataToManifestPatch,
   manifestToSchemaFields,
   manifestSchemaWrapper,
   getResourceEntries,
@@ -56,90 +52,6 @@ import {
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { SchemaField } from "../components/agent-editor/types";
-import {
-  agentSchema,
-  skillSchema,
-  integrationSchema,
-  mcpServerSchema,
-} from "@appstrate/core/schemas";
-import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
-
-const PACKAGE_SCHEMAS: Record<string, object | undefined> = {
-  agent: agentSchema,
-  skill: skillSchema,
-  integration: integrationSchema,
-  "mcp-server": mcpServerSchema,
-};
-
-type GenericEditorTab =
-  | "general"
-  | "schema"
-  | "skills"
-  | "integrations"
-  | "source"
-  | "auths"
-  | "tools"
-  | "files"
-  | "json";
-
-/**
- * Two presentations of one editor.
- *
- * `page` creates a package: every tab, the files included, on the creation
- * route. `embedded` edits an existing one inside its Paramètres › Package AFPS,
- * one rail section at a time — and there it edits the MANIFEST only. The
- * package's files are changed in Explorer › Fichiers, where the tree is; the
- * Package AFPS › Contenu table only reads them.
- *
- * So the presentation IS the create/edit distinction: `embedded` is what the
- * shared editor pieces call `isEdit`, and only `page` draws a Cancel.
- */
-type Presentation = "page" | "embedded";
-
-/**
- * Save from a package's Package AFPS. It saves the draft IN PLACE (no redirect:
- * the reader is already on the package) and reads back the draft's new ETag;
- * the parent refetches the package and remounts the editor on it, which is
- * what clears the unsaved state.
- */
-async function saveEmbedded(saveDraft: () => Promise<void>, savedMessage: string) {
-  try {
-    await saveDraft();
-    toast.success(savedMessage);
-  } catch {
-    // `saveDraft` has already said why, translated, in the editor's error slot.
-  }
-}
-
-/** The manifest's raw editor, opened from `manifest.json` in Explorer › Fichiers. */
-function EmbeddedManifestEntry({
-  type,
-  manifest,
-  onApply,
-}: {
-  type: PackageType;
-  manifest: Record<string, unknown>;
-  onApply: (manifest: Record<string, unknown>) => void;
-}) {
-  return (
-    <ManifestEditEntry
-      value={manifest}
-      schema={{ uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type] ?? {} }}
-      onApply={onApply}
-    />
-  );
-}
-
-/** The open section: the settings rail's when it names one (embedded), else the editor's own. */
-function useEditorTab(
-  tab: GenericEditorTab | undefined,
-  onTabRequest: ((tab: GenericEditorTab) => void) | undefined,
-) {
-  const [localTab, setLocalTab] = useState<GenericEditorTab>("general");
-  const setActiveTab = (next: GenericEditorTab) =>
-    tab !== undefined ? onTabRequest?.(next) : setLocalTab(next);
-  return [tab ?? localTab, setActiveTab] as const;
-}
 
 // ─── Agent Editor Inner Form ────────────────────────────────────────
 
@@ -163,47 +75,32 @@ function AgentEditorInner({
   effectiveTimeoutSeconds?: number;
   presentation?: Presentation;
   /** Embedded: the section is the settings rail's, not the editor's. */
-  tab?: GenericEditorTab;
-  onTabRequest?: (tab: GenericEditorTab) => void;
+  tab?: PackageEditorTab;
+  onTabRequest?: (tab: PackageEditorTab) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useEditorTab(tab, onTabRequest);
   const embedded = presentation === "embedded";
 
-  const {
-    state,
-    setState,
-    updateManifest,
-    blocker,
-    error,
-    setError,
-    isDirty,
-    jsonEditorKey,
-    bumpJsonKey,
-    saveDraft,
-    handleSubmit,
-    isPending,
-    setPreparingFiles,
-  } = useEditorState({
-    initialState,
-    packageType: "agent",
-    packageId,
-    isEdit: embedded,
-    validate: (s) => {
-      const { id } = getManifestName(s.manifest);
-      if (!id) {
-        return { error: t("editor.errorRequired"), tab: "general" };
-      }
-      if (!embedded && !newPackageContent("agent", s.operations ?? []).trim()) {
-        return { error: t("editor.errorPrompt"), tab: "files" };
-      }
-      return null;
-    },
-  });
+  // Schema fields are stored in local state to preserve fields being edited (empty key).
+  // Only complete fields are persisted to the manifest via fieldsToSchema.
+  const [schemaFields, setSchemaFields] = useState<Record<string, SchemaField[]>>(() =>
+    manifestToSchemaFields(initialState.manifest),
+  );
 
-  const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
-  const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
+  const editor = usePackageEditor({
+    type: "agent",
+    initialState,
+    packageId,
+    presentation,
+    tab,
+    onTabRequest,
+    validate: (s) =>
+      !embedded && !newPackageContent("agent", s.operations ?? []).trim()
+        ? { error: t("editor.errorPrompt"), tab: "files" }
+        : null,
+    onManifestReplace: (manifest) => setSchemaFields(manifestToSchemaFields(manifest)),
+  });
+  const { state, setState, updateManifest, activeTab } = editor;
 
   // Deployment run-timeout ceiling, surfaced as a non-blocking hint under the
   // timeout field. The server sends only `effective_timeout_seconds`
@@ -226,12 +123,6 @@ function AgentEditorInner({
       ? knownCeiling
       : undefined;
 
-  // Schema fields are stored in local state to preserve fields being edited (empty key).
-  // Only complete fields are persisted to the manifest via fieldsToSchema.
-  const [schemaFields, setSchemaFields] = useState<Record<string, SchemaField[]>>(() =>
-    manifestToSchemaFields(state.manifest),
-  );
-
   const getSchemaFields = (key: "input" | "output") => schemaFields[key] ?? [];
 
   const onSchemaChange = (key: "input" | "output") => (fields: SchemaField[]) => {
@@ -248,13 +139,6 @@ function AgentEditorInner({
         return { ...s, manifest: rest };
       });
     }
-  };
-
-  const discardChanges = () => {
-    setState(initialState);
-    setSchemaFields(manifestToSchemaFields(initialState.manifest));
-    setError(null);
-    bumpJsonKey();
   };
 
   // Sync resolved skill metadata from server (names, descriptions). The group
@@ -278,11 +162,6 @@ function AgentEditorInner({
     });
   }, [resolvedSkills, setState]);
 
-  const onSubmit = () =>
-    embedded
-      ? void saveEmbedded(saveDraft, t("editor.saved"))
-      : handleSubmit(undefined, (next) => next && setActiveTab(next as GenericEditorTab));
-
   const setManifestRuntimeTools = (next: string[]) =>
     setState((s) => {
       const m = { ...s.manifest };
@@ -290,7 +169,7 @@ function AgentEditorInner({
       return { ...s, manifest: m };
     });
 
-  const agentTabs: Array<{ id: GenericEditorTab; label: string }> = embedded
+  const agentTabs: Array<{ id: PackageEditorTab; label: string }> = embedded
     ? [
         { id: "general", label: t("editor.tabGeneral") },
         { id: "schema", label: t("editor.tabSchema") },
@@ -307,40 +186,23 @@ function AgentEditorInner({
         { id: "integrations", label: t("editor.tabIntegrations") },
         { id: "json", label: t("editor.tabJson") },
       ];
-  const agentTabDescriptions: Partial<Record<GenericEditorTab, string>> = {
-    general: t("editor.description.general"),
-    schema: t("editor.description.schema"),
-    skills: t("editor.description.skills"),
-    integrations: t("editor.description.integrations"),
-    tools: t("editor.runtimeToolsHint"),
-  };
 
   return (
-    <EditorShell
-      type="agent"
-      packageId={packageId}
-      isEdit={embedded}
-      displayName={(state.manifest.display_name as string) || packageId}
+    <PackageEditorFrame
+      editor={editor}
       tabs={agentTabs}
-      activeTab={activeTab}
-      onTabChange={(v) => {
-        if (v === "json") bumpJsonKey();
-        setActiveTab(v as GenericEditorTab);
+      descriptions={{
+        general: t("editor.description.general"),
+        schema: t("editor.description.schema"),
+        skills: t("editor.description.skills"),
+        integrations: t("editor.description.integrations"),
+        tools: t("editor.runtimeToolsHint"),
       }}
-      error={error}
-      isPending={isPending}
-      onSubmit={onSubmit}
-      onCancel={() => navigate("/")}
-      hideSubmitBar={!embedded && activeTab === "json"}
-      presentation={presentation}
-      activeDescription={embedded ? agentTabDescriptions[activeTab] : undefined}
-      isDirty={isDirty}
-      onDiscardChanges={discardChanges}
     >
       {activeTab === "general" && (
         <MetadataSection
-          value={metadata}
-          onChange={onMetadataChange}
+          value={editor.metadata}
+          onChange={editor.onMetadataChange}
           isEdit={embedded}
           surface={embedded ? "settings" : "card"}
           identityChildren={
@@ -444,43 +306,7 @@ function AgentEditorInner({
           surface={embedded ? "settings" : "card"}
         />
       )}
-      {embedded && (
-        <EmbeddedManifestEntry
-          type="agent"
-          manifest={state.manifest}
-          onApply={(manifest) => {
-            setState((s) => ({ ...s, manifest }));
-            setSchemaFields(manifestToSchemaFields(manifest));
-          }}
-        />
-      )}
-      {activeTab === "json" && !embedded && (
-        <JsonEditor
-          key={jsonEditorKey}
-          value={state.manifest}
-          onApply={(manifest) => {
-            setState((s) => ({ ...s, manifest }));
-            setSchemaFields(manifestToSchemaFields(manifest));
-            setActiveTab("general");
-          }}
-          schema={{ uri: AFPS_SCHEMA_URLS.agent, schema: PACKAGE_SCHEMAS.agent! }}
-        />
-      )}
-      {!embedded && (
-        <PackageFilesEditor
-          packageId={packageId}
-          type="agent"
-          active={activeTab === "files"}
-          operations={state.operations ?? []}
-          onChange={(operations) => setState((current) => ({ ...current, operations }))}
-          manifest={state.manifest}
-          disabled={isPending}
-          onBusyChange={setPreparingFiles}
-        />
-      )}
-
-      <UnsavedChangesModal blocker={blocker} onSaveDraft={embedded ? saveDraft : undefined} />
-    </EditorShell>
+    </PackageEditorFrame>
   );
 }
 
@@ -530,33 +356,13 @@ function PackageEditorInner({
   presentation?: Presentation;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
   const embedded = presentation === "embedded";
-  const {
-    state,
-    setState,
-    updateManifest,
-    blocker,
-    error,
-    setError,
-    isDirty,
-    jsonEditorKey,
-    bumpJsonKey,
-    saveDraft,
-    handleSubmit,
-    isPending,
-    setPreparingFiles,
-  } = useEditorState({
+  const editor = usePackageEditor({
+    type,
     initialState,
-    packageType: type,
     packageId,
-    isEdit: embedded,
+    presentation,
     validate: (s) => {
-      const { id } = getManifestName(s.manifest);
-      if (!id) {
-        return { error: t("editor.errorRequired"), tab: "general" };
-      }
       if (embedded || type !== "skill") return null;
       const content = newPackageContent(type, s.operations ?? []);
       if (!content.trim()) {
@@ -571,21 +377,7 @@ function PackageEditorInner({
     },
   });
 
-  const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
-  const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
-
-  const onSubmit = () =>
-    embedded
-      ? void saveEmbedded(saveDraft, t("editor.saved"))
-      : handleSubmit(undefined, (tab) => tab && setActiveTab(tab as GenericEditorTab));
-
-  const discardChanges = () => {
-    setState(initialState);
-    setError(null);
-    bumpJsonKey();
-  };
-
-  const pkgTabs: Array<{ id: GenericEditorTab; label: string }> = embedded
+  const pkgTabs: Array<{ id: PackageEditorTab; label: string }> = embedded
     ? [{ id: "general", label: t("editor.tabGeneral") }]
     : [
         { id: "general", label: t("editor.tabGeneral") },
@@ -594,73 +386,22 @@ function PackageEditorInner({
       ];
 
   return (
-    <EditorShell
-      type={type}
-      packageId={packageId}
-      isEdit={embedded}
-      displayName={(state.manifest.display_name as string) || packageId}
+    <PackageEditorFrame
+      editor={editor}
       tabs={pkgTabs}
-      activeTab={activeTab}
-      onTabChange={(v) => {
-        if (v === "json") bumpJsonKey();
-        setActiveTab(v as GenericEditorTab);
-      }}
-      error={error}
-      isPending={isPending}
-      onSubmit={onSubmit}
-      onCancel={() => navigate(packageListPath(type))}
-      hideSubmitBar={!embedded && activeTab === "json"}
-      presentation={presentation}
-      activeDescription={
-        embedded && type === "mcp-server" ? t("mcpServerEditor.description.general") : undefined
+      descriptions={
+        type === "mcp-server" ? { general: t("mcpServerEditor.description.general") } : undefined
       }
-      isDirty={isDirty}
-      onDiscardChanges={discardChanges}
     >
-      {activeTab === "general" && (
+      {editor.activeTab === "general" && (
         <MetadataSection
-          value={metadata}
-          onChange={onMetadataChange}
+          value={editor.metadata}
+          onChange={editor.onMetadataChange}
           isEdit={embedded}
           surface={embedded ? "settings" : "card"}
         />
       )}
-
-      {embedded && (
-        <EmbeddedManifestEntry
-          type={type}
-          manifest={state.manifest}
-          onApply={(manifest) => setState((s) => ({ ...s, manifest }))}
-        />
-      )}
-
-      {activeTab === "json" && !embedded && (
-        <JsonEditor
-          key={jsonEditorKey}
-          value={state.manifest}
-          onApply={(manifest) => {
-            setState((s) => ({ ...s, manifest }));
-            setActiveTab("general");
-          }}
-          schema={{ uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type]! }}
-        />
-      )}
-
-      {!embedded && (
-        <PackageFilesEditor
-          packageId={packageId}
-          type={type}
-          active={activeTab === "files"}
-          operations={state.operations ?? []}
-          onChange={(operations) => setState((current) => ({ ...current, operations }))}
-          manifest={state.manifest}
-          disabled={isPending}
-          onBusyChange={setPreparingFiles}
-        />
-      )}
-
-      <UnsavedChangesModal blocker={blocker} onSaveDraft={embedded ? saveDraft : undefined} />
-    </EditorShell>
+    </PackageEditorFrame>
   );
 }
 
@@ -678,40 +419,21 @@ function IntegrationEditorInner({
   packageId: string | undefined;
   /** A page to create; embedded in the integration's Package AFPS to edit. */
   presentation?: Presentation;
-  tab?: GenericEditorTab;
-  onTabRequest?: (tab: GenericEditorTab) => void;
+  tab?: PackageEditorTab;
+  onTabRequest?: (tab: PackageEditorTab) => void;
   /** Embedded: the saved package's tool catalog, shown with the draft's policy. */
   toolCatalog?: IntegrationToolCatalogEntry[];
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useEditorTab(tab, onTabRequest);
   const embedded = presentation === "embedded";
-
-  const {
-    state,
-    setState,
-    updateManifest,
-    blocker,
-    error,
-    setError,
-    isDirty,
-    jsonEditorKey,
-    bumpJsonKey,
-    saveDraft,
-    handleSubmit,
-    isPending,
-    setPreparingFiles,
-  } = useEditorState({
+  const editor = usePackageEditor({
+    type: "integration",
     initialState,
-    packageType: "integration",
     packageId,
-    isEdit: embedded,
+    presentation,
+    tab,
+    onTabRequest,
     validate: (s) => {
-      const { id } = getManifestName(s.manifest);
-      if (!id) {
-        return { error: t("editor.errorRequired"), tab: "general" };
-      }
       const source = getSource(s.manifest);
       if (source.kind === "remote" && !isRemoteSourceUrl(source.remoteUrl)) {
         return { error: t("integrationEditor.source.errorRemoteUrl"), tab: "source" };
@@ -719,34 +441,11 @@ function IntegrationEditorInner({
       return null;
     },
   });
-
-  const discardChanges = () => {
-    setState(initialState);
-    setError(null);
-    bumpJsonKey();
-  };
-
+  const { state, activeTab, replaceManifest: onManifestChange } = editor;
   const sectionSurface = embedded ? "settings" : "card";
-  const integrationTabDescriptions: Partial<Record<GenericEditorTab, string>> = {
-    general: t("integrationEditor.description.general"),
-    source: t("integrationEditor.description.source"),
-    auths: t("integrationEditor.description.auths"),
-    tools: t("integrationEditor.description.tools"),
-  };
-
-  const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
-  const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
-
-  const onSubmit = () =>
-    embedded
-      ? void saveEmbedded(saveDraft, t("editor.saved"))
-      : handleSubmit(undefined, (next) => next && setActiveTab(next as GenericEditorTab));
-
-  const onManifestChange = (manifest: Record<string, unknown>) =>
-    setState((s) => ({ ...s, manifest }));
 
   // Embedded, the labels are the settings rail's, so heading and rail agree.
-  const integrationTabs: Array<{ id: GenericEditorTab; label: string }> = embedded
+  const integrationTabs: Array<{ id: PackageEditorTab; label: string }> = embedded
     ? [
         { id: "general", label: t("editor.tabGeneral") },
         { id: "source", label: t("integrationEditor.tabSource") },
@@ -763,31 +462,20 @@ function IntegrationEditorInner({
       ];
 
   return (
-    <EditorShell
-      type="integration"
-      packageId={packageId}
-      isEdit={embedded}
-      displayName={(state.manifest.display_name as string) || packageId}
+    <PackageEditorFrame
+      editor={editor}
       tabs={integrationTabs}
-      activeTab={activeTab}
-      onTabChange={(v) => {
-        if (v === "json") bumpJsonKey();
-        setActiveTab(v as GenericEditorTab);
+      descriptions={{
+        general: t("integrationEditor.description.general"),
+        source: t("integrationEditor.description.source"),
+        auths: t("integrationEditor.description.auths"),
+        tools: t("integrationEditor.description.tools"),
       }}
-      error={error}
-      isPending={isPending}
-      onSubmit={onSubmit}
-      onCancel={() => navigate(packageListPath("integration"))}
-      hideSubmitBar={!embedded && activeTab === "json"}
-      presentation={presentation}
-      activeDescription={embedded ? integrationTabDescriptions[activeTab] : undefined}
-      isDirty={isDirty}
-      onDiscardChanges={discardChanges}
     >
       {activeTab === "general" && (
         <MetadataSection
-          value={metadata}
-          onChange={onMetadataChange}
+          value={editor.metadata}
+          onChange={editor.onMetadataChange}
           isEdit={embedded}
           surface={sectionSurface}
         />
@@ -822,41 +510,7 @@ function IntegrationEditorInner({
             surface={sectionSurface}
           />
         ))}
-
-      {embedded && (
-        <EmbeddedManifestEntry
-          type="integration"
-          manifest={state.manifest}
-          onApply={(manifest) => setState((s) => ({ ...s, manifest }))}
-        />
-      )}
-      {activeTab === "json" && !embedded && (
-        <JsonEditor
-          key={jsonEditorKey}
-          value={state.manifest}
-          onApply={(manifest) => {
-            setState((s) => ({ ...s, manifest }));
-            setActiveTab("general");
-          }}
-          schema={{ uri: AFPS_SCHEMA_URLS.integration, schema: PACKAGE_SCHEMAS.integration! }}
-        />
-      )}
-
-      {!embedded && (
-        <PackageFilesEditor
-          packageId={packageId}
-          type="integration"
-          active={activeTab === "files"}
-          operations={state.operations ?? []}
-          onChange={(operations) => setState((current) => ({ ...current, operations }))}
-          manifest={state.manifest}
-          disabled={isPending}
-          onBusyChange={setPreparingFiles}
-        />
-      )}
-
-      <UnsavedChangesModal blocker={blocker} onSaveDraft={embedded ? saveDraft : undefined} />
-    </EditorShell>
+    </PackageEditorFrame>
   );
 }
 

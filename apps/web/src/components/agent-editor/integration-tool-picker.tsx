@@ -28,6 +28,7 @@
  * to start without a connection; unset (an absent key), it starts without the integration.
  */
 
+import { toggleValue } from "../../lib/toggle-value";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -276,7 +277,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
     // wildcard with an array. Treat `"*"` as no-op here.
     if (wildcardSelected) return;
     const current = arrayTools;
-    const next = current.includes(name) ? current.filter((t) => t !== name) : [...current, name];
+    const next = toggleValue(current, name);
     onChange({ ...entry, tools: next });
   };
 
@@ -303,7 +304,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
 
   const toggleScope = (value: string) => {
     const current = entry.scopes ?? [];
-    const next = current.includes(value) ? current.filter((s) => s !== value) : [...current, value];
+    const next = toggleValue(current, value);
     onChange({ ...entry, scopes: next.length > 0 ? next : undefined });
   };
 

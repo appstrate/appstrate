@@ -18,6 +18,7 @@ import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { getModelIcon } from "../../components/icons";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
+import { TextSkeleton } from "../../components/loading-skeletons";
 
 export function OnboardingModelStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -34,7 +35,16 @@ export function OnboardingModelStep() {
 
   const goNext = () => nextRoute && navigate(nextRoute);
 
-  if (!orgId) return null;
+  if (!orgId)
+    return (
+      <OnboardingLayout
+        step="model"
+        title={t("onboarding.modelTitle")}
+        subtitle={t("onboarding.modelSubtitle")}
+      >
+        <TextSkeleton lines={3} className="py-4" />
+      </OnboardingLayout>
+    );
 
   const hasModels = models && models.length > 0;
   const hasQuickConnect = quickConnectProviders(registry).length > 0;
@@ -113,13 +123,14 @@ export function OnboardingModelStep() {
         </Button>
       </div>
 
-      <ModelFormModal
-        open={newModel.value !== null}
-        onClose={newModel.close}
-        model={null}
-        isPending={isPending}
-        onSubmit={onSubmit}
-      />
+      {newModel.value !== null && (
+        <ModelFormModal
+          onClose={newModel.close}
+          model={null}
+          isPending={isPending}
+          onSubmit={onSubmit}
+        />
+      )}
     </OnboardingLayout>
   );
 }

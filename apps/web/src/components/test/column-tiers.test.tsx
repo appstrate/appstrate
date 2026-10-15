@@ -40,12 +40,16 @@ import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
 import { useProviderColumns } from "../provider-columns.tsx";
 import { usePersonalServiceColumns } from "../personal-service-columns.tsx";
 import { useOAuthClientColumns } from "../../modules/oidc/components/oauth-client-columns.tsx";
-import { useCliSessionColumns } from "../../pages/org-settings/cli-session-columns.tsx";
+import { useCliSessionColumns } from "../cli-session-columns.tsx";
 import { useEndUserColumns } from "../../pages/end-user-columns.tsx";
 import { useWebhookColumns } from "../../modules/webhooks/components/webhook-columns.tsx";
 import { useDocumentColumns } from "../document-columns.tsx";
 import { useIntegrationListColumns } from "../../pages/integration-list-columns.tsx";
 import { useApiKeyColumns } from "../../pages/api-key-columns.tsx";
+import { useMemoryColumns } from "../persistence/memory-columns.tsx";
+import { usePackageFileColumns } from "../package-files/package-files-columns.tsx";
+import { useCatalogueSharedColumns } from "../catalogue-shared-columns.tsx";
+import { usePinColumns } from "../integration-detail/pin-columns.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 
@@ -140,9 +144,9 @@ const SETS = {
   userSpaces: () =>
     columnsFrom(() =>
       useUserSpaceColumns({
-        orgRole: "member",
+        member: { userId: "usr_x", role: "member" },
         editable: () => true,
-        roleValue: () => "preset:viewer",
+        roles: [],
         roleOptions: [],
         isChangingRole: false,
         onChangeRole: () => {},
@@ -156,7 +160,7 @@ const SETS = {
     columnsFrom(() =>
       useSpaceMemberColumns({
         editable: () => true,
-        roleValue: () => "preset:viewer",
+        roles: [],
         roleOptions: [],
         isChangingRole: false,
         onChangeRole: () => {},
@@ -305,6 +309,30 @@ const SETS = {
       }),
     ),
   integrations: () => columnsFrom(() => useIntegrationListColumns()),
+  memory: () =>
+    columnsFrom(() =>
+      useMemoryColumns({ isDeleting: () => false, onCopy: () => {}, onDelete: () => {} }),
+    ),
+  packageFiles: () => columnsFrom(() => usePackageFileColumns("agent", {})),
+  catalogueShared: () =>
+    columnsFrom(() =>
+      useCatalogueSharedColumns({
+        spaceNameOf: (id) => id,
+        mayActivateIn: () => true,
+        busy: false,
+        onActivate: () => {},
+      }),
+    ),
+  integrationPins: () =>
+    columnsFrom(() =>
+      usePinColumns({
+        agentName: (pin) => pin.agent_package_id,
+        pinnable: [],
+        connections: [],
+        isDeleting: () => false,
+        onDelete: () => {},
+      }),
+    ),
   apiKeys: () =>
     columnsFrom(() =>
       useApiKeyColumns({

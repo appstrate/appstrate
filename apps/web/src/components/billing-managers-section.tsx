@@ -34,7 +34,6 @@ import { memberLabel } from "../lib/members";
 import { ErrorState } from "./page-states";
 import { SettingsSkeleton } from "./loading-skeletons";
 import { SectionCard } from "./section-card";
-import { Spinner } from "./spinner";
 
 /** What a row the server would now refuse says about itself. */
 const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, string]> = {
@@ -190,8 +189,7 @@ export function BillingManagersSection() {
             {t("btn.cancel", { ns: "common" })}
           </Button>
         )}
-        <Button size="sm" disabled={!dirty || replace.isPending} onClick={handleSave}>
-          {replace.isPending && <Spinner />}
+        <Button size="sm" pending={replace.isPending} disabled={!dirty} onClick={handleSave}>
           {t("btn.save", { ns: "common" })}
         </Button>
       </div>

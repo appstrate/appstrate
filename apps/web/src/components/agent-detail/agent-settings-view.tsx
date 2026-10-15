@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useCallback, type ComponentProps } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Boxes,
@@ -21,26 +21,23 @@ import {
 import type { AgentDetail } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import type { Versioned } from "../../hooks/use-packages";
-import { EditorPlaceContext } from "../../hooks/use-unsaved-changes";
 import { RoleLimitNotice } from "../role-limit-notice";
 import { usePermissions } from "../../hooks/use-permissions";
 import { agentConnectionsTabVisible } from "../../lib/route-access";
 import {
   AGENT_DEFINITION_SECTIONS,
   type AgentDefinitionSection,
-  agentSettingsHref,
-  settingsEditorPlace,
+  isPackageCommonSection,
   type AgentSettingsSection,
   type ConfigurationSection,
 } from "../../lib/settings-section-href";
-import type { EditorPlace } from "../../lib/editor-place";
-import { SectionRail } from "../settings/section-rail";
-import { PackageFilesView } from "../package-files/package-files-view";
+import { SettingsRailView } from "../settings/settings-rail-view";
 import { AgentConfigurationView } from "./agent-configuration-view";
-import { AgentDetailSplit } from "./agent-detail-split";
-import { PackageVersionsSection } from "../package-detail/package-versions-section";
-import { PackageFilesSection } from "../package-files/package-files-section";
 import { SettingsSkeleton } from "../loading-skeletons";
+import {
+  PackageCommonSection,
+  type PackageVersionsProps,
+} from "../package-detail/package-common-section";
 
 /** The editor sections, lazily: the editor weighs more than the page reading it. */
 const AgentDefinitionEditor = lazy(() =>
@@ -104,21 +101,16 @@ export function AgentSettingsView({
   version,
   isHistorical,
   inputWrapperOverride,
-  currentManifest,
-  currentContent,
   versions,
 }: {
-  versions: Omit<ComponentProps<typeof PackageVersionsSection>, "type" | "packageId">;
+  versions: PackageVersionsProps;
   packageId: string;
   detail: Versioned<AgentDetail>;
   version?: string;
   isHistorical: boolean;
   inputWrapperOverride?: SchemaWrapper;
-  currentManifest?: Record<string, unknown>;
-  currentContent?: string | null;
 }) {
   const { t } = useTranslation("agents");
-  const location = useLocation();
   const navigate = useNavigate();
   const { can } = usePermissions();
   // Write authority is the package's HOME space (`home_writable`), never the
@@ -148,8 +140,15 @@ export function AgentSettingsView({
     return true;
   };
   const groups = SETTINGS_GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => applies(item.id, isSystem)),
+    title: t(group.labelKey),
+    items: group.items
+      .filter((item) => applies(item.id, isSystem))
+      .map((item) => ({
+        id: item.id,
+        icon: item.icon,
+        label: t(item.labelKey),
+        locked: !visible(item.id),
+      })),
   })).filter((group) => group.items.length > 0);
   const applicable = SETTINGS_SECTION_IDS.filter((id) =>
     applies(id, isSystem),
@@ -157,106 +156,63 @@ export function AgentSettingsView({
   const firstOpen = applicable.find(visible) ?? applicable[0] ?? "connections";
   const defaultSection: AgentSettingsSection = visible("model") ? "model" : firstOpen;
   // A section asked for by name opens even when locked: its panel explains.
-  const sectionOf = useCallback(
-    (search: URLSearchParams): AgentSettingsSection => {
-      const requested = search.get("agentSettings") ?? "";
-      return SETTINGS_SECTION_IDS.includes(requested) && applies(requested, isSystem)
-        ? (requested as AgentSettingsSection)
-        : defaultSection;
-    },
-    [isSystem, defaultSection],
-  );
-  const params = new URLSearchParams(location.search);
-  const activeSection = sectionOf(params);
-  const requestedFile = params.get("file") ?? undefined;
-  const editorPlace = useCallback<EditorPlace>(
-    (search) => settingsEditorPlace(sectionOf(search), search),
-    [sectionOf],
-  );
-
-  const sectionHref = (section: AgentSettingsSection) =>
-    agentSettingsHref(location.pathname, section);
-  // The manifest is edited through its forms, its raw editor over Identité.
-  const fileEditHref = (path: string) =>
-    path === "manifest.json"
-      ? agentSettingsHref(location.pathname, "general", { editManifest: "1" })
-      : undefined;
-  const filesHref = (path: string) => agentSettingsHref(location.pathname, "files", { file: path });
-
-  const body = !visible(activeSection) ? (
-    <div className="p-6">
-      <RoleLimitNotice>
-        {t(
-          isDefinitionSection(activeSection)
-            ? "detail.roleLimit.editDefinition"
-            : "detail.roleLimit.section",
-        )}
-      </RoleLimitNotice>
-    </div>
-  ) : activeSection === "versions" ? (
-    <PackageVersionsSection type="agent" packageId={packageId} {...versions} />
-  ) : activeSection === "bundle" ? (
-    <PackageFilesSection
-      type="agent"
-      packageId={packageId}
-      manifest={detail.manifest ?? {}}
-      filesHref={filesHref}
-    />
-  ) : isDefinitionSection(activeSection) ? (
-    <Suspense fallback={<SettingsSkeleton />}>
-      <AgentDefinitionEditor
-        detail={detail}
-        section={activeSection as AgentDefinitionSection}
-        onSection={(next) => void navigate(sectionHref(next))}
-      />
-    </Suspense>
-  ) : activeSection === "files" ? (
-    <PackageFilesView
-      type="agent"
-      packageId={packageId}
-      initialVersion={version}
-      currentManifest={currentManifest}
-      currentContent={currentContent}
-      key={requestedFile}
-      initialPath={requestedFile}
-      editHref={canEditDefinition ? fileEditHref : undefined}
-      editable={canEditDefinition}
-    />
-  ) : (
-    <AgentConfigurationView
-      packageId={packageId}
-      detail={detail}
-      inputWrapperOverride={inputWrapperOverride}
-      isHistorical={isHistorical}
-      // Past the branches above, only configuration sections remain.
-      section={activeSection as ConfigurationSection}
-    />
-  );
+  const resolve = (requested: string | null): AgentSettingsSection =>
+    requested && SETTINGS_SECTION_IDS.includes(requested) && applies(requested, isSystem)
+      ? (requested as AgentSettingsSection)
+      : defaultSection;
 
   return (
-    <EditorPlaceContext.Provider value={editorPlace}>
-      <AgentDetailSplit
-        data-agent-settings
-        phoneMenu={t("detail.tabSettings")}
-        rail={
-          <SectionRail
-            label={t("detail.tabSettings")}
-            active={activeSection}
-            groups={groups.map((group) => ({
-              title: t(group.labelKey),
-              items: group.items.map((item) => ({
-                id: item.id,
-                to: sectionHref(item.id),
-                icon: item.icon,
-                label: t(item.labelKey),
-                locked: !visible(item.id),
-              })),
-            }))}
+    <SettingsRailView
+      param="agentSettings"
+      tab="settings"
+      label={t("detail.tabSettings")}
+      groups={groups}
+      resolve={resolve}
+      definitionSections={AGENT_DEFINITION_SECTIONS}
+    >
+      {({ active, file, href }) =>
+        !visible(active) ? (
+          <div className="p-6">
+            <RoleLimitNotice>
+              {t(
+                isDefinitionSection(active)
+                  ? "detail.roleLimit.editDefinition"
+                  : "detail.roleLimit.section",
+              )}
+            </RoleLimitNotice>
+          </div>
+        ) : isPackageCommonSection(active) ? (
+          <PackageCommonSection
+            section={active}
+            type="agent"
+            packageId={packageId}
+            manifest={detail.manifest ?? {}}
+            file={file}
+            href={href}
+            version={version}
+            // The manifest is edited through its forms, its raw editor over Identité.
+            manifestSection={canEditDefinition ? "general" : undefined}
+            versions={versions}
           />
-        }
-      >
-        {body}
-      </AgentDetailSplit>
-    </EditorPlaceContext.Provider>
+        ) : isDefinitionSection(active) ? (
+          <Suspense fallback={<SettingsSkeleton />}>
+            <AgentDefinitionEditor
+              detail={detail}
+              section={active as AgentDefinitionSection}
+              onSection={(next) => void navigate(href(next))}
+            />
+          </Suspense>
+        ) : (
+          <AgentConfigurationView
+            packageId={packageId}
+            detail={detail}
+            inputWrapperOverride={inputWrapperOverride}
+            isHistorical={isHistorical}
+            // Past the branches above, only configuration sections remain.
+            section={active as ConfigurationSection}
+          />
+        )
+      }
+    </SettingsRailView>
   );
 }

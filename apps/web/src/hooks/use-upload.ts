@@ -17,14 +17,14 @@ import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { UploadFn } from "@appstrate/ui/schema-form";
 import { uploadClient } from "../api/uploads";
-import { invalidateOrgStorage } from "./use-files";
+import { invalidateOrgDetail } from "../lib/query-keys";
 
 export function useUploadClient(): UploadFn {
   const queryClient = useQueryClient();
   return useCallback(
     async (file, signal) => {
       const uri = await uploadClient(file, signal);
-      invalidateOrgStorage(queryClient);
+      void invalidateOrgDetail(queryClient);
       return uri;
     },
     [queryClient],

@@ -4,14 +4,12 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm } from "react-hook-form";
 import { useModalParam } from "@/hooks/use-modal-param";
-import { Modal } from "@/components/modal";
-import { Button } from "@appstrate/ui/components/button";
+import { FormModal } from "@/components/form-modal";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
-import { Spinner } from "@/components/spinner";
+import { FormItem } from "@appstrate/ui/components/field";
 import { WebhookFormFields } from "./webhook-form-fields";
-import { toggleEvent } from "../hooks/use-webhooks";
+import { toggleValue } from "@/lib/toggle-value";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { useCreateWebhook } from "../hooks/use-webhooks";
 import { errorMessage } from "../../../lib/mutation-error";
@@ -41,10 +39,10 @@ export function WebhookCreateModal({ levels }: Props) {
   if (createdSecret) {
     return (
       <SecretRevealModal
-        open
         onClose={() => setCreatedSecret(null)}
         title={t("settings:webhooks.created")}
         secret={createdSecret}
+        warning={t("settings:webhooks.secretWarning")}
       />
     );
   }
@@ -112,76 +110,63 @@ function WebhookCreateForm({
     );
   }
 
-  const onSubmit = handleSubmit(onFormSubmit);
-
   return (
-    <Modal
-      open
+    <FormModal
       onClose={onClose}
       title={t("settings:webhooks.createTitle")}
-      actions={
-        <>
-          <Button variant="outline" type="button" onClick={onClose}>
-            {t("common:btn.cancel")}
-          </Button>
-          <Button type="submit" form="create-webhook-form" disabled={createMutation.isPending}>
-            {createMutation.isPending ? <Spinner /> : t("settings:webhooks.createBtn")}
-          </Button>
-        </>
-      }
+      onSubmit={handleSubmit(onFormSubmit)}
+      isPending={createMutation.isPending}
+      submitLabel={t("settings:webhooks.createBtn")}
+      error={errors.root?.message}
     >
-      <form id="create-webhook-form" onSubmit={onSubmit} className="space-y-4">
-        <FormItem
-          id="webhook-url"
-          label={t("settings:webhooks.urlLabel")}
-          hint={errors.url ? undefined : t("settings:webhooks.urlHint")}
-          error={errors.url ? t("settings:webhooks.urlHint") : undefined}
-        >
-          <Input
-            type="url"
-            {...register("url", {
-              required: true,
-              pattern: /^https:\/\/.+/,
-            })}
-            placeholder={t("settings:webhooks.urlPlaceholder")}
-            autoFocus
-          />
-        </FormItem>
-
-        {/* Never create an organization-wide webhook without saying so. */}
-        {levels.length === 1 && level === "org" && (
-          <div className="space-y-2">
-            <Label>{t("settings:webhooks.levelLabel")}</Label>
-            <p className="text-sm">{levelLabels.org}</p>
-          </div>
-        )}
-
-        {levels.length > 1 && (
-          <div className="space-y-2">
-            <Label>{t("settings:webhooks.levelLabel")}</Label>
-            <RadioGroup value={level} onValueChange={(v) => setChosenLevel(v as Level)}>
-              {levels.map((l) => (
-                <div key={l} className="flex items-center gap-2">
-                  <RadioGroupItem value={l} id={`create-level-${l}`} />
-                  <Label htmlFor={`create-level-${l}`} className="cursor-pointer font-normal">
-                    {levelLabels[l]}
-                  </Label>
-                </div>
-              ))}
-            </RadioGroup>
-          </div>
-        )}
-
-        <WebhookFormFields
-          selectedEvents={selectedEvents}
-          onToggleEvent={(e) => toggleEvent(e, setSelectedEvents)}
-          payloadMode={payloadMode}
-          onPayloadModeChange={setPayloadMode}
-          idPrefix="create-"
+      <FormItem
+        id="webhook-url"
+        label={t("settings:webhooks.urlLabel")}
+        hint={errors.url ? undefined : t("settings:webhooks.urlHint")}
+        error={errors.url ? t("settings:webhooks.urlHint") : undefined}
+      >
+        <Input
+          type="url"
+          {...register("url", {
+            required: true,
+            pattern: /^https:\/\/.+/,
+          })}
+          placeholder={t("settings:webhooks.urlPlaceholder")}
+          autoFocus
         />
+      </FormItem>
 
-        <FieldError>{errors.root?.message}</FieldError>
-      </form>
-    </Modal>
+      {/* Never create an organization-wide webhook without saying so. */}
+      {levels.length === 1 && level === "org" && (
+        <div className="space-y-2">
+          <Label>{t("settings:webhooks.levelLabel")}</Label>
+          <p className="text-sm">{levelLabels.org}</p>
+        </div>
+      )}
+
+      {levels.length > 1 && (
+        <div className="space-y-2">
+          <Label>{t("settings:webhooks.levelLabel")}</Label>
+          <RadioGroup value={level} onValueChange={(v) => setChosenLevel(v as Level)}>
+            {levels.map((l) => (
+              <div key={l} className="flex items-center gap-2">
+                <RadioGroupItem value={l} id={`create-level-${l}`} />
+                <Label htmlFor={`create-level-${l}`} className="cursor-pointer font-normal">
+                  {levelLabels[l]}
+                </Label>
+              </div>
+            ))}
+          </RadioGroup>
+        </div>
+      )}
+
+      <WebhookFormFields
+        selectedEvents={selectedEvents}
+        onToggleEvent={(e) => setSelectedEvents((prev) => toggleValue(prev, e))}
+        payloadMode={payloadMode}
+        onPayloadModeChange={setPayloadMode}
+        idPrefix="create-"
+      />
+    </FormModal>
   );
 }

@@ -20,11 +20,13 @@ import { rowActionsColumn } from "./row-actions-column";
 import { TableRowActions } from "./table-row-actions";
 import { CellDate, CellList, CellText } from "./table-cells";
 import { roleI18nKey } from "../hooks/use-permissions";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 type Invitation = components["schemas"]["OrgInvitationInfo"];
 
 export function useInvitationColumns({
   assignments,
+  assignmentsLoading = false,
   canEdit,
   isCanceling,
   onEdit,
@@ -33,6 +35,8 @@ export function useInvitationColumns({
 }: {
   /** "Space · Role" for each space the invitation assigns. */
   assignments: (invitation: Invitation) => string[];
+  /** The spaces or roles that name the assignments are still being read. */
+  assignmentsLoading?: boolean;
   canEdit: boolean;
   isCanceling: boolean;
   onEdit: (invitation: Invitation) => void;
@@ -60,7 +64,12 @@ export function useInvitationColumns({
       header: t("orgSettings.inviteSpacesLabel"),
       width: "minmax(80px,1.3fr)",
       tier: 2,
-      cell: (invitation) => <CellList items={assignments(invitation)} />,
+      cell: (invitation) =>
+        assignmentsLoading ? (
+          <Skeleton className="h-4 w-40" />
+        ) : (
+          <CellList items={assignments(invitation)} />
+        ),
     },
     {
       id: "expires",

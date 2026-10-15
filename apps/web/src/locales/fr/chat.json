@@ -165,7 +165,6 @@
   "threads.actions.rename": "Renommer",
   "threads.actions.delete": "Supprimer",
   "threads.title": "Conversations",
-  "threads.loadingMore": "Chargement…",
   "threads.showMore": "Afficher plus",
   "threads.generating": "Opération en cours",
   "threads.unread": "Réponse non lue",
@@ -182,5 +181,7 @@
   "threads.empty": "Envoyez un message ! Votre historique de conversations apparaîtra ici.",
   "threads.emptyReadOnly": "Vous n’avez aucune conversation à relire.",
   "turn.error.needsReconnectionOwn": "L'abonnement qui sert le modèle sélectionné a expiré ou a été révoqué. Si c'est le vôtre, reconnectez-le dans vos préférences, puis réessayez ; sinon, demandez à un administrateur de l'organisation de le reconnecter.",
-  "turn.error.needsReconnectionMember": "L'abonnement qui sert le modèle sélectionné a expiré ou a été révoqué. Demandez à un administrateur de l'organisation de le reconnecter."
+  "turn.error.needsReconnectionMember": "L'abonnement qui sert le modèle sélectionné a expiré ou a été révoqué. Demandez à un administrateur de l'organisation de le reconnecter.",
+  "threads.error": "Les conversations n'ont pas pu être chargées.",
+  "model.loadFailed": "Modèles indisponibles"
 }

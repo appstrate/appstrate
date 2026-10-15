@@ -15,7 +15,6 @@ import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
-import { Spinner } from "./spinner";
 import { Label } from "@appstrate/ui/components/label";
 import { type OrgModelInfo } from "../hooks/use-models";
 import { DiscoveryControls } from "./model-form/discovery-controls";
@@ -56,7 +55,6 @@ import { selectableCredentials } from "@/lib/model-credential-filter";
 import { allowsMemberModels } from "@/lib/model-providers";
 
 interface ModelFormModalProps {
-  open: boolean;
   onClose: () => void;
   model: OrgModelInfo | null;
   isPending: boolean;
@@ -539,14 +537,14 @@ function ModelForm({
   );
 }
 
-/** Mounted only while open, so the footer's selection count starts empty on every open. */
-function ModelFormDialog({
+/** Mounted by the caller while open, so the footer's selection count starts empty on every open. */
+export function ModelFormModal({
   onClose,
   model,
   isPending,
   onSubmit,
   onDelete,
-}: Omit<ModelFormModalProps, "open">) {
+}: ModelFormModalProps) {
   const { t } = useTranslation(["settings", "common"]);
   const [selectionCount, setSelectionCount] = useState<number | null>(null);
 
@@ -554,30 +552,30 @@ function ModelFormDialog({
     <Modal
       open
       onClose={onClose}
+      preventClose={isPending}
       title={model ? t("models.form.editTitle") : t("models.form.title")}
       actions={
         <>
           {model && <SavedModelActions model={model} onDelete={onDelete} />}
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button type="submit" form="model-form" disabled={isPending || selectionCount === 0}>
-            {isPending ? (
-              <Spinner />
-            ) : selectionCount !== null ? (
-              t("models.form.addModels", { count: selectionCount })
-            ) : (
-              t("btn.save")
-            )}
+          <Button
+            type="submit"
+            form="model-form"
+            pending={isPending}
+            disabled={selectionCount === 0}
+          >
+            {selectionCount !== null
+              ? t("models.form.addModels", { count: selectionCount })
+              : t("btn.save")}
           </Button>
         </>
       }
     >
       {/* Keep the submitted endpoint stable until partial results have been applied. */}
       <fieldset disabled={isPending} className="min-w-0">
-        {/* Key forces remount when the target model changes, resetting all state */}
         <ModelFormBody
-          key={model?.id ?? "__create__"}
           model={model}
           onSubmit={onSubmit}
           onMultiSelectionChange={setSelectionCount}
@@ -585,9 +583,4 @@ function ModelFormDialog({
       </fieldset>
     </Modal>
   );
-}
-
-export function ModelFormModal({ open, ...props }: ModelFormModalProps) {
-  if (!open) return null;
-  return <ModelFormDialog {...props} />;
 }

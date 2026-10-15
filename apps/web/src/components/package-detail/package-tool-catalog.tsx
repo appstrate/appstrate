@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Wrench } from "lucide-react";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -10,6 +10,7 @@ import { ListToolbar } from "../list-toolbar";
 import { EmptyState } from "../page-states";
 import { CellEmpty } from "../table-cells";
 import { rowActionsColumn } from "../row-actions-column";
+import { useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
 
 export interface PackageTool {
@@ -36,8 +37,6 @@ export function PackageToolCatalog({
   };
 }) {
   const { t } = useTranslation("agents");
-  const [search, setSearch] = useState("");
-  const [auths, setAuths] = useState<string[]>([]);
   const authKeys = [
     ...new Set(
       tools.flatMap((tool) =>
@@ -47,9 +46,11 @@ export function PackageToolCatalog({
       ),
     ),
   ];
+  const list = useLocalListParams();
+  const auths = list.values("auth", authKeys);
   const rows = tools.filter(
     (tool) =>
-      matchesSearch(search, [tool.name, tool.description]) &&
+      matchesSearch(list.search, [tool.name, tool.description]) &&
       (auths.length === 0 || auths.some((key) => (tool.permissions?.[key]?.length ?? 0) > 0)),
   );
   const columns: DataColumn<PackageTool>[] = [
@@ -115,7 +116,11 @@ export function PackageToolCatalog({
       <ListToolbar
         placement="panel"
         actions={actions}
-        search={{ value: search, onChange: setSearch, placeholder: t("packageTools.search") }}
+        search={{
+          value: list.search,
+          onChange: list.setSearch,
+          placeholder: t("packageTools.search"),
+        }}
         filters={
           authKeys.length
             ? [
@@ -124,15 +129,12 @@ export function PackageToolCatalog({
                   label: t("packageTools.auth"),
                   values: auths,
                   options: authKeys.map((key) => ({ value: key, label: key })),
-                  onChange: setAuths,
+                  onChange: list.setValues("auth"),
                 },
               ]
             : []
         }
-        onReset={() => {
-          setSearch("");
-          setAuths([]);
-        }}
+        onReset={list.reset}
       />
       <DataTable
         tableId="package-tools"

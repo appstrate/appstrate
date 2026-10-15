@@ -78,7 +78,7 @@ function spaceFixture(role: { kind: "preset" | "custom"; key: string; name: stri
 /**
  * Render the chip. `seedSpaces: false` leaves `GET /api/spaces` unresolved,
  * which is the loading case — `usePermissions().ready` is false and the chip
- * must render nothing.
+ * must hold its box as a skeleton, never a verdict.
  */
 function chip(options: {
   seedSpaces: boolean;
@@ -126,10 +126,12 @@ function chip(options: {
 }
 
 describe("the chat access chip", () => {
-  it("renders nothing while the permission sets are still loading", () => {
+  it("holds its box as a skeleton while the permission sets are still loading", () => {
     // The flash guard. Without it every hard reload paints "you may do
     // nothing" for as long as `GET /api/spaces` takes.
-    expect(chip({ seedSpaces: false })).toBe("");
+    const html = chip({ seedSpaces: false });
+    expect(html).toContain("animate-pulse");
+    expect(html).not.toContain("<button");
   });
 
   it("labels itself with the caller's role in THIS space", () => {

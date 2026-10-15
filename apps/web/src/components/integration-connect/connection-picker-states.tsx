@@ -4,10 +4,11 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Loader2, Lock, Plus, RefreshCw } from "lucide-react";
+import { AlertTriangle, Lock, Plus, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { unavailableConnectionIds } from "../../lib/connection-set";
 import { ConfirmModal } from "../confirm-modal";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
@@ -34,9 +35,7 @@ export function PickerWarning({ testId, children }: { testId: string; children: 
 export function LoadingPicker({ integrationId }: { integrationId: string }) {
   return (
     <div data-testid={`member-picker-${integrationId}`}>
-      <Button variant="outline" size="sm" disabled className="h-7 gap-1.5 text-xs">
-        <Loader2 className="size-3 animate-spin" />
-      </Button>
+      <Skeleton className="h-7 w-32 rounded-md" />
     </div>
   );
 }

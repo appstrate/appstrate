@@ -6,13 +6,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { EmptyState } from "../../components/page-states";
-import { ItemList } from "../../components/item-list";
+import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { CliSessionCard } from "../../components/cli-session-card";
+import { useCliSessionColumns } from "../../components/cli-session-columns";
 import { $api } from "../../api/client";
+import { invalidatePaths } from "../../lib/query-keys";
 import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
-
-const SESSIONS_QUERY_KEY = ["get", "/api/auth/cli/sessions"] as const;
 
 export function PreferencesDevicesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -30,18 +29,24 @@ export function PreferencesDevicesPage() {
 
   const revokeOne = $api.useMutation("post", "/api/auth/cli/sessions/revoke", {
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+      void invalidatePaths(queryClient, ["/api/auth/cli/sessions"]);
     },
   });
 
   const revokeAll = $api.useMutation("post", "/api/auth/cli/sessions/revoke-all", {
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+      void invalidatePaths(queryClient, ["/api/auth/cli/sessions"]);
     },
   });
 
   const [pendingRevoke, setPendingRevoke] = useState<CliSessionDisplay | null>(null);
   const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
+
+  const columns = useCliSessionColumns({
+    showMember: false,
+    revokingFamilyId: revokeOne.isPending ? (revokeOne.variables?.body.familyId ?? null) : null,
+    onRevoke: setPendingRevoke,
+  });
 
   const sessions = data ?? [];
 
@@ -66,9 +71,12 @@ export function PreferencesDevicesPage() {
         )}
       </div>
 
-      <ItemList
-        items={sessions}
-        itemKey={(s) => s.familyId}
+      <DataTable
+        tableId="cli-sessions-me"
+        columns={columns}
+        rows={sessions}
+        rowKey={(s) => s.familyId}
+        label={t("devices.title")}
         isLoading={isLoading}
         failure={error}
         empty={
@@ -78,15 +86,6 @@ export function PreferencesDevicesPage() {
             hint={t("devices.emptyDescription")}
           />
         }
-        renderItem={(s) => (
-          <CliSessionCard
-            session={s}
-            revokeDisabled={
-              revokeOne.isPending && revokeOne.variables?.body.familyId === s.familyId
-            }
-            onRevoke={() => setPendingRevoke(s)}
-          />
-        )}
       />
 
       <ConfirmModal

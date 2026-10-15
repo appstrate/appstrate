@@ -7,7 +7,6 @@
  * Integrations keep their own page: execution tabs, protocol filter, columns.
  */
 
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { LibraryBig, Plus, Upload } from "lucide-react";
@@ -17,7 +16,6 @@ import {
   packagePermission,
   spacePackagePermission,
 } from "@appstrate/core/permissions";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useAgents, usePackageList } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useListView } from "../stores/list-view-store";
@@ -30,6 +28,7 @@ import { PageHeader } from "../components/page-header";
 import { PackageCollection } from "../components/package-collection";
 import { EmptyStateAction } from "../components/page-states";
 import { PageActionsMenu } from "../components/page-actions-menu";
+import type { MenuAction } from "../lib/menu-action";
 import { useModalParam } from "../hooks/use-modal-param";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
@@ -134,6 +133,13 @@ function PackageIndexBody({
   const canActivate = can(spacePackagePermission(type, "activate"));
   const creation = useCreationHandoff(type, canCreate);
   const words = presentation(type, t);
+  const createAction: MenuAction = {
+    id: "create",
+    label: words.create,
+    icon: Plus,
+    onSelect: creation.open,
+    hidden: !canCreate,
+  };
 
   return (
     <>
@@ -143,28 +149,25 @@ function PackageIndexBody({
         breadcrumbs={[{ label: words.title }]}
         actions={
           canCreate || canImport || canActivate ? (
-            <PageActionsMenu>
-              {canActivate && (
-                <DropdownMenuItem asChild data-page-action="catalogue">
-                  <Link to={catalogueHref(type)}>
-                    <LibraryBig />
-                    {t("catalogue.browse", { ns: "settings" })}
-                  </Link>
-                </DropdownMenuItem>
-              )}
-              {canImport && (
-                <DropdownMenuItem data-page-action="import" onSelect={() => importParam.open()}>
-                  <Upload />
-                  {t("nav.import", { ns: "common" })}
-                </DropdownMenuItem>
-              )}
-              {canCreate && (
-                <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
-                  <Plus />
-                  {words.create}
-                </DropdownMenuItem>
-              )}
-            </PageActionsMenu>
+            <PageActionsMenu
+              actions={[
+                {
+                  id: "catalogue",
+                  label: t("catalogue.browse", { ns: "settings" }),
+                  icon: LibraryBig,
+                  to: catalogueHref(type),
+                  hidden: !canActivate,
+                },
+                {
+                  id: "import",
+                  label: t("nav.import", { ns: "common" }),
+                  icon: Upload,
+                  onSelect: () => importParam.open(),
+                  hidden: !canImport,
+                },
+                createAction,
+              ]}
+            />
           ) : undefined
         }
       />
@@ -178,9 +181,7 @@ function PackageIndexBody({
         emptyMessage={words.empty}
         emptyHint={<SpaceLibraryHint type={type} />}
         emptyIcon={PACKAGE_TYPE_ICON[type]}
-        emptyAction={
-          canCreate ? <EmptyStateAction label={words.create} onClick={creation.open} /> : undefined
-        }
+        emptyAction={<EmptyStateAction action={createAction} />}
         list={list}
         view={view}
         onViewChange={setView}

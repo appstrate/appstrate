@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { CheckCheck, SearchX } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { CheckCheck } from "lucide-react";
 import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
 import { PageHeader } from "../components/page-header";
-import { EmptyState } from "../components/page-states";
+import { NoMatchState } from "../components/page-states";
 import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
@@ -91,16 +89,17 @@ export function RunsPage() {
         variant="collection"
         breadcrumbs={[{ label: t("runs.title") }]}
         actions={
-          <PageActionsMenu>
-            <DropdownMenuItem
-              data-page-action="mark-all-read"
-              onSelect={() => markAllRead.mutate({})}
-              disabled={markAllRead.isPending || !unreadCount}
-            >
-              <CheckCheck />
-              {t("runs.markAllRead")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
+          <PageActionsMenu
+            actions={[
+              {
+                id: "mark-all-read",
+                label: t("runs.markAllRead"),
+                icon: CheckCheck,
+                onSelect: () => markAllRead.mutate({}),
+                disabled: markAllRead.isPending || !unreadCount,
+              },
+            ]}
+          />
         }
       />
 
@@ -131,11 +130,7 @@ export function RunsPage() {
         // run out of matches, and the way out is the filter, not the agent.
         emptyState={
           search || filters.some((f) => f.values.length > 0) ? (
-            <EmptyState message={t("runs.emptyFiltered")} icon={SearchX} compact>
-              <Button variant="outline" size="sm" onClick={list.reset}>
-                {t("toolbar.clearAll", { ns: "common" })}
-              </Button>
-            </EmptyState>
+            <NoMatchState message={t("runs.emptyFiltered")} onReset={list.reset} />
           ) : undefined
         }
       />

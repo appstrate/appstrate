@@ -8,7 +8,6 @@ import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
-import { Spinner } from "./spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
 import { ApiError } from "../api/errors";
 import { errorMessage } from "../lib/mutation-error";
@@ -95,8 +94,7 @@ export function CreateVersionModal({
       onClose={onClose}
       title={t("version.createVersion")}
       actions={
-        <Button onClick={handleFormSubmit} disabled={!canCreate || createVersion.isPending}>
-          {createVersion.isPending && <Spinner />}{" "}
+        <Button onClick={handleFormSubmit} pending={createVersion.isPending} disabled={!canCreate}>
           {targetVersion && hasUnarchivedChanges
             ? t("version.createVersionX", { version: targetVersion })
             : t("version.createVersion")}

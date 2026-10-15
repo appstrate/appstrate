@@ -2,13 +2,11 @@
 
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Eye, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
@@ -22,8 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { $api, ApiError } from "../../api/client";
-import { useOrg, useOrgDetail } from "../../hooks/use-org";
+import { ApiError } from "../../api/client";
+import { useInviteMember, useOrg, useOrgDetail } from "../../hooks/use-org";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useModalParam } from "../../hooks/use-modal-param";
@@ -37,8 +35,8 @@ import {
 } from "../../hooks/use-roles";
 import {
   useAddSpaceMember,
+  useAssignSpaceRole,
   useRemoveSpaceMember,
-  useUpdateSpaceMember,
   useSpaceMembers,
   type SpaceMemberObject,
 } from "../../hooks/use-space-members";
@@ -48,14 +46,15 @@ import { CopyLinkButton } from "../../components/copy-link-button";
 import { DataTable } from "../../components/data-table";
 import { InvitationsTable } from "../../components/invitations-table";
 import { Modal } from "../../components/modal";
-import { PageActionsMenu } from "../../components/page-actions-menu";
+import { FormModal } from "../../components/form-modal";
+import type { MenuAction } from "../../lib/menu-action";
 import { RoleCatalogState } from "../../components/role-catalog-state";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SpaceRoleSelect } from "../../components/space-role-select";
 import { ViewAsDialog } from "../../components/view-as-dialog";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
-import { Spinner } from "../../components/spinner";
-import { spaceMemberLabel, useSpaceMemberColumns } from "./space-member-columns";
+import { useSpaceMemberColumns } from "./space-member-columns";
 import { memberLabel } from "../../lib/members";
 import { spaceMemberRemoval, spaceMembersPageDeeds } from "../org-settings/rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
@@ -94,8 +93,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const viewAsParam = useModalParam("viewAs");
   const canPreview = useCanPreviewRole();
 
-  const addMember = useAddSpaceMember();
-  const updateMember = useUpdateSpaceMember();
+  const assignRole = useAssignSpaceRole(roleOptions);
   const removeMember = useRemoveSpaceMember();
 
   const canInvite = can("space-members:invite");
@@ -108,33 +106,6 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const canSeeInvitations = can("members:invite");
   const { data: orgDetail } = useOrgDetail({ enabled: canSeeInvitations });
 
-  /**
-   * One control, two routes: an explicit row is PATCHed, an implicit member
-   * (open space) has no row yet, so picking a role CREATES one. `PATCH` 404s
-   * without a row, so the branch is the API's, not a nicety.
-   */
-  const changeRole = (member: SpaceMemberObject, value: string) => {
-    const body = spaceRoleAssignment(value);
-    const onSuccess = () =>
-      toast.success(
-        t("spaceMembers.roleUpdated", {
-          name: spaceMemberLabel(member),
-          role: roleOptions.find((option) => option.value === value)?.label ?? value,
-        }),
-      );
-    if (member.source === "explicit") {
-      updateMember.mutate(
-        { params: { path: { id: spaceId, userId: member.userId } }, body },
-        { onSuccess },
-      );
-      return;
-    }
-    addMember.mutate(
-      { params: { path: { id: spaceId } }, body: { userId: member.userId, ...body } },
-      { onSuccess },
-    );
-  };
-
   const remove = (member: SpaceMemberObject) => {
     removeMember.mutate(
       { params: { path: { id: spaceId, userId: member.userId } } },
@@ -144,10 +115,10 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
           toast.success(
             result.access_after === "implicit"
               ? t("spaceMembers.removedImplicit", {
-                  name: spaceMemberLabel(member),
+                  name: memberLabel(member),
                   role: t(`roles.preset.${space?.default_role}`),
                 })
-              : t("spaceMembers.removedNone", { name: spaceMemberLabel(member) }),
+              : t("spaceMembers.removedNone", { name: memberLabel(member) }),
           );
         },
       },
@@ -164,10 +135,11 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
       member.source !== "org_role" &&
       rolesReady &&
       (member.source === "explicit" ? canChangeRole : canInvite),
-    roleValue: (member) => memberRoleValue(member.role, roles) ?? `current:${member.role?.key}`,
+    roles,
     roleOptions,
-    isChangingRole: updateMember.isPending || addMember.isPending,
-    onChangeRole: changeRole,
+    isChangingRole: assignRole.isPending,
+    onChangeRole: (member, value) =>
+      assignRole.assign({ spaceId, member, name: memberLabel(member) }, value),
     removal: (member) => spaceMemberRemoval(member, { canRemove, visibility: space?.visibility }),
     isRemoving: removeMember.isPending,
     removeDisabled: removeMember.isPending || !space || !!spaceError,
@@ -181,35 +153,26 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     memberToRemove?.org_role === "member" && space?.visibility === "open";
   const canManageRoles = canInvite || canChangeRole;
   const deeds = spaceMembersPageDeeds({ canInvite, canPreview });
+  const add: MenuAction = {
+    id: "add",
+    icon: Plus,
+    testId: "add-space-member-button",
+    label: t("spaceMembers.add"),
+    onSelect: () => addParam.open(),
+    hidden: !deeds.includes("add"),
+  };
+  const viewAs: MenuAction = {
+    id: "view-as",
+    icon: Eye,
+    testId: "view-as-space-button",
+    label: t("viewAs.trigger"),
+    onSelect: () => viewAsParam.open(),
+    hidden: !deeds.includes("view-as"),
+  };
 
   return (
     <>
-      {deeds.length > 0 && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            {deeds.includes("add") && (
-              <DropdownMenuItem
-                data-page-action="add"
-                data-testid="add-space-member-button"
-                onSelect={() => addParam.open()}
-              >
-                <Plus />
-                {t("spaceMembers.add")}
-              </DropdownMenuItem>
-            )}
-            {deeds.includes("view-as") && (
-              <DropdownMenuItem
-                data-page-action="view-as"
-                data-testid="view-as-space-button"
-                onSelect={() => viewAsParam.open()}
-              >
-                <Eye />
-                {t("viewAs.trigger")}
-              </DropdownMenuItem>
-            )}
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
+      <SettingsPageActions actions={[add, viewAs]} />
 
       <p className="text-muted-foreground mb-6 max-w-2xl text-sm leading-relaxed">
         {t("spaceMembers.accessHint")}
@@ -217,6 +180,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
       {canManageRoles && (
         <RoleCatalogState
           className="mb-4"
+          pending={null}
           isLoading={rolesLoading}
           rolesKnown={rolesKnown}
           error={rolesError}
@@ -251,9 +215,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
               icon={Users}
               compact
             >
-              {deeds.includes("add") && (
-                <EmptyStateAction label={t("spaceMembers.add")} onClick={() => addParam.open()} />
-              )}
+              <EmptyStateAction action={add} />
             </EmptyState>
           }
         />
@@ -283,7 +245,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
             ? t(
                 removalRestoresDefault ? "spaceMembers.resetConfirm" : "spaceMembers.removeConfirm",
                 {
-                  name: spaceMemberLabel(memberToRemove),
+                  name: memberLabel(memberToRemove),
                   role: t(`roles.preset.${space?.default_role}`),
                 },
               )
@@ -299,26 +261,25 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
         }}
       />
 
-      <AddSpaceMemberModal
-        key={`${spaceId}:${addParam.value}`}
-        open={canInvite && addParam.value !== null}
-        onClose={addParam.close}
-        spaceId={spaceId}
-        orgId={currentOrg?.id}
-        excludedUserIds={explicitUserIds}
-      />
+      {canInvite && addParam.value !== null && (
+        <AddSpaceMemberModal
+          key={`${spaceId}:${addParam.value}`}
+          onClose={addParam.close}
+          spaceId={spaceId}
+          orgId={currentOrg?.id}
+          excludedUserIds={explicitUserIds}
+        />
+      )}
     </>
   );
 }
 
 function AddSpaceMemberModal({
-  open,
   onClose,
   spaceId,
   orgId,
   excludedUserIds,
 }: {
-  open: boolean;
   onClose: () => void;
   spaceId: string;
   orgId: string | undefined;
@@ -336,7 +297,6 @@ function AddSpaceMemberModal({
   } = useSpaceRoleOptions(spaceId);
   const addMember = useAddSpaceMember({ errorHandledByCaller: true });
   const { can } = usePermissions();
-  const queryClient = useQueryClient();
   const canInviteExternal = can("members:invite");
   const canReadDirectory = can("members:read");
   const [mode, setMode] = useState("existing");
@@ -350,22 +310,7 @@ function AddSpaceMemberModal({
   // The address already holds a pending invitation: the fix is to EDIT that
   // one (add this space), never a second token — the server refuses with 409.
   const [pendingConflict, setPendingConflict] = useState(false);
-  const inviteGuest = $api.useMutation("post", "/api/orgs/{orgId}/members", {
-    meta: { errorHandledByCaller: true },
-    onSuccess: (invitation) => {
-      setInvitationToken(invitation.token);
-      void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
-      toast.success(t("spaceMembers.invited", { email: email.trim() }));
-    },
-    onError: (err) => {
-      if (err instanceof ApiError && err.code === "invitation_already_pending") {
-        setPendingConflict(true);
-        setFormError(t("spaceMembers.invitationPending", { email: email.trim() }));
-        return;
-      }
-      setFormError(errorMessage(err));
-    },
-  });
+  const inviteGuest = useInviteMember();
   const isPending = addMember.isPending || inviteGuest.isPending;
 
   const {
@@ -373,7 +318,7 @@ function AddSpaceMemberModal({
     isLoading: usersLoading,
     error: usersError,
     refetch: refetchUsers,
-  } = useOrgDetail({ enabled: open && selectingUser });
+  } = useOrgDetail({ enabled: selectingUser });
   // Owners and admins reach every space through their org role, so adding one
   // as a space member grants nothing and the route refuses it (409).
   const candidates = (orgData?.members ?? []).filter(
@@ -403,14 +348,30 @@ function AddSpaceMemberModal({
     setPendingConflict(false);
     if (invitingExternal) {
       if (!orgId) return;
-      inviteGuest.mutate({
-        params: { path: { orgId } },
-        body: {
-          email: email.trim(),
-          role: "guest",
-          space_assignments: [{ spaceId, ...spaceRoleAssignment(effectiveRole) }],
+      inviteGuest.mutate(
+        {
+          params: { path: { orgId } },
+          body: {
+            email: email.trim(),
+            role: "guest",
+            space_assignments: [{ spaceId, ...spaceRoleAssignment(effectiveRole) }],
+          },
         },
-      });
+        {
+          onSuccess: (invitation) => {
+            setInvitationToken(invitation.token);
+            toast.success(t("spaceMembers.invited", { email: email.trim() }));
+          },
+          onError: (err) => {
+            if (err instanceof ApiError && err.code === "invitation_already_pending") {
+              setPendingConflict(true);
+              setFormError(t("spaceMembers.invitationPending", { email: email.trim() }));
+              return;
+            }
+            setFormError(errorMessage(err));
+          },
+        },
+      );
       return;
     }
     addMember.mutate(
@@ -445,31 +406,9 @@ function AddSpaceMemberModal({
     );
   };
 
-  return (
-    <Modal
-      open={open}
-      onClose={() => {
-        if (!isPending) onClose();
-      }}
-      title={t("spaceMembers.addTitle")}
-      actions={
-        invitationToken ? undefined : (
-          <>
-            <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>
-              {t("btn.cancel", { ns: "common" })}
-            </Button>
-            <Button type="submit" form="space-member-form" disabled={!canSubmit}>
-              {isPending ? (
-                <Spinner />
-              ) : (
-                t(invitingExternal ? "spaceMembers.inviteGuest" : "btn.add")
-              )}
-            </Button>
-          </>
-        )
-      }
-    >
-      {invitationToken ? (
+  if (invitationToken) {
+    return (
+      <Modal open onClose={onClose} title={t("spaceMembers.addTitle")}>
         <div className="flex flex-col items-start gap-4">
           <p>{t("spaceMembers.invited", { email: email.trim() })}</p>
           <p className="text-muted-foreground text-sm">{t("spaceMembers.invitationLinkHint")}</p>
@@ -483,153 +422,161 @@ function AddSpaceMemberModal({
             </Link>
           )}
         </div>
-      ) : (
-        <form id="space-member-form" onSubmit={submit}>
-          <FieldGroup>
-            {canInviteExternal && (
-              <fieldset disabled={isPending} className="flex flex-col gap-3">
-                <legend className="mb-3 text-sm font-medium">{t("spaceMembers.addMode")}</legend>
-                <RadioGroup
-                  value={mode}
-                  onValueChange={(value) => {
-                    setMode(value);
-                    setFormError(null);
-                    setPendingConflict(false);
-                  }}
-                  disabled={isPending}
-                >
-                  <Field orientation="horizontal">
-                    <RadioGroupItem id="space-member-existing" value="existing" />
-                    <Label htmlFor="space-member-existing">{t("spaceMembers.existingUser")}</Label>
-                  </Field>
-                  <Field orientation="horizontal">
-                    <RadioGroupItem id="space-member-external" value="external" />
-                    <Label htmlFor="space-member-external">{t("spaceMembers.externalGuest")}</Label>
-                  </Field>
-                </RadioGroup>
-                {invitingExternal && (
-                  <FieldDescription>{t("spaceMembers.externalHint")}</FieldDescription>
-                )}
-              </fieldset>
-            )}
-            {selectingUser ? (
-              <Field data-disabled={usersLoading || !!usersError || isPending}>
-                <Label htmlFor="space-member-user">{t("spaceMembers.userLabel")}</Label>
-                <Select
-                  value={userId}
-                  onValueChange={(value) => {
-                    setUserId(value);
-                    setFormError(null);
-                  }}
-                  disabled={usersLoading || !!usersError || isPending}
-                >
-                  <SelectTrigger id="space-member-user">
-                    <SelectValue placeholder={t("spaceMembers.userPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {candidates.map((member) => (
-                        <SelectItem key={member.userId} value={member.userId}>
-                          {memberLabel(member)}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                {usersLoading && (
-                  <FieldDescription role="status">
-                    {t("spaceMembers.usersLoading")}
-                  </FieldDescription>
-                )}
-                {usersError && (
-                  <Alert variant="destructive">
-                    <AlertDescription>
-                      <p>{t("spaceMembers.usersLoadError")}</p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void refetchUsers()}
-                      >
-                        {t("btn.retry", { ns: "common" })}
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
-                )}
-                {!usersLoading && !usersError && candidates.length === 0 && (
-                  <FieldDescription>{t("spaceMembers.noCandidates")}</FieldDescription>
-                )}
+      </Modal>
+    );
+  }
+
+  return (
+    <FormModal
+      onClose={onClose}
+      title={t("spaceMembers.addTitle")}
+      onSubmit={submit}
+      isPending={isPending}
+      submitLabel={t(invitingExternal ? "spaceMembers.inviteGuest" : "btn.add")}
+      submitDisabled={!canSubmit}
+    >
+      <FieldGroup>
+        {canInviteExternal && (
+          <fieldset disabled={isPending} className="flex flex-col gap-3">
+            <legend className="mb-3 text-sm font-medium">{t("spaceMembers.addMode")}</legend>
+            <RadioGroup
+              value={mode}
+              onValueChange={(value) => {
+                setMode(value);
+                setFormError(null);
+                setPendingConflict(false);
+              }}
+              disabled={isPending}
+            >
+              <Field orientation="horizontal">
+                <RadioGroupItem id="space-member-existing" value="existing" />
+                <Label htmlFor="space-member-existing">{t("spaceMembers.existingUser")}</Label>
               </Field>
+              <Field orientation="horizontal">
+                <RadioGroupItem id="space-member-external" value="external" />
+                <Label htmlFor="space-member-external">{t("spaceMembers.externalGuest")}</Label>
+              </Field>
+            </RadioGroup>
+            {invitingExternal && (
+              <FieldDescription>{t("spaceMembers.externalHint")}</FieldDescription>
+            )}
+          </fieldset>
+        )}
+        {selectingUser ? (
+          <Field data-disabled={usersLoading || !!usersError || isPending}>
+            <Label htmlFor="space-member-user">{t("spaceMembers.userLabel")}</Label>
+            {usersLoading ? (
+              <Skeleton className="h-9 w-full" />
             ) : (
-              <Field data-invalid={!!formError} data-disabled={isPending}>
-                <Label htmlFor="space-member-email">
-                  {t(invitingExternal ? "spaceMembers.guestEmailLabel" : "spaceMembers.emailLabel")}
-                </Label>
-                <Input
-                  id="space-member-email"
-                  type="email"
-                  required
-                  autoFocus
-                  autoComplete="email"
-                  value={email}
-                  disabled={isPending}
-                  aria-invalid={!!formError}
-                  aria-describedby="space-member-email-hint"
-                  onChange={(event) => {
-                    setEmail(event.target.value);
-                    setFormError(null);
-                    setPendingConflict(false);
-                  }}
-                  onInvalid={() => setFormError(t("spaceMembers.emailInvalid"))}
-                  placeholder="email@example.com"
-                />
-                <FieldDescription id="space-member-email-hint">
-                  {t(
-                    invitingExternal ? "spaceMembers.externalEmailHint" : "spaceMembers.emailHint",
-                  )}
-                </FieldDescription>
-              </Field>
-            )}
-            <Field data-disabled={roleFieldLocked}>
-              <Label htmlFor="space-member-role">{t("spaceMembers.colRole")}</Label>
-              <SpaceRoleSelect
-                id="space-member-role"
-                value={effectiveRole}
-                options={roleOptions}
-                fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
-                placeholder={t("spaceMembers.noAssignableRoles")}
-                disabled={roleFieldLocked}
+              <Select
+                value={userId}
                 onValueChange={(value) => {
-                  setRole(value);
+                  setUserId(value);
                   setFormError(null);
                 }}
-              />
-              <RoleCatalogState
-                isLoading={rolesLoading}
-                rolesKnown={rolesKnown}
-                error={rolesError}
-                refetch={() => void refetchRoles()}
-                emptyMessage={roleOptions.length === 0 ? t("spaceMembers.noAssignableRoles") : null}
-              />
-              {!rolesLoading && !rolesError && roleDescription && (
-                <FieldDescription>{roleDescription}</FieldDescription>
-              )}
-            </Field>
-            {formError && (
+                disabled={!!usersError || isPending}
+              >
+                <SelectTrigger id="space-member-user">
+                  <SelectValue placeholder={t("spaceMembers.userPlaceholder")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {candidates.map((member) => (
+                      <SelectItem key={member.userId} value={member.userId}>
+                        {memberLabel(member)}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            )}
+            {usersError && (
               <Alert variant="destructive">
                 <AlertDescription>
-                  <p>{formError}</p>
-                  {pendingConflict && canManageInvitations && (
-                    <Link to="/org-settings/members" className="underline underline-offset-4">
-                      {t("spaceMembers.manageInvitations")}
-                    </Link>
-                  )}
+                  <p>{t("spaceMembers.usersLoadError")}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void refetchUsers()}
+                  >
+                    {t("btn.retry", { ns: "common" })}
+                  </Button>
                 </AlertDescription>
               </Alert>
             )}
-          </FieldGroup>
-        </form>
-      )}
-    </Modal>
+            {!usersLoading && !usersError && candidates.length === 0 && (
+              <FieldDescription>{t("spaceMembers.noCandidates")}</FieldDescription>
+            )}
+          </Field>
+        ) : (
+          <Field data-invalid={!!formError} data-disabled={isPending}>
+            <Label htmlFor="space-member-email">
+              {t(invitingExternal ? "spaceMembers.guestEmailLabel" : "spaceMembers.emailLabel")}
+            </Label>
+            <Input
+              id="space-member-email"
+              type="email"
+              required
+              autoFocus
+              autoComplete="email"
+              value={email}
+              disabled={isPending}
+              aria-invalid={!!formError}
+              aria-describedby="space-member-email-hint"
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setFormError(null);
+                setPendingConflict(false);
+              }}
+              onInvalid={() => setFormError(t("spaceMembers.emailInvalid"))}
+              placeholder="email@example.com"
+            />
+            <FieldDescription id="space-member-email-hint">
+              {t(invitingExternal ? "spaceMembers.externalEmailHint" : "spaceMembers.emailHint")}
+            </FieldDescription>
+          </Field>
+        )}
+        <Field data-disabled={roleFieldLocked}>
+          <Label htmlFor="space-member-role">{t("spaceMembers.colRole")}</Label>
+          <SpaceRoleSelect
+            id="space-member-role"
+            value={effectiveRole}
+            options={roleOptions}
+            fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
+            placeholder={t("spaceMembers.noAssignableRoles")}
+            disabled={roleFieldLocked}
+            loading={rolesLoading}
+            onValueChange={(value) => {
+              setRole(value);
+              setFormError(null);
+            }}
+          />
+          <RoleCatalogState
+            pending={null}
+            isLoading={rolesLoading}
+            rolesKnown={rolesKnown}
+            error={rolesError}
+            refetch={() => void refetchRoles()}
+            emptyMessage={roleOptions.length === 0 ? t("spaceMembers.noAssignableRoles") : null}
+          />
+          {!rolesLoading && !rolesError && roleDescription && (
+            <FieldDescription>{roleDescription}</FieldDescription>
+          )}
+        </Field>
+        {formError && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              <p>{formError}</p>
+              {pendingConflict && canManageInvitations && (
+                <Link to="/org-settings/members" className="underline underline-offset-4">
+                  {t("spaceMembers.manageInvitations")}
+                </Link>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+      </FieldGroup>
+    </FormModal>
   );
 }

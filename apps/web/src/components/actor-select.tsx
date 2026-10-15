@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import {
   Command,
@@ -23,9 +24,12 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRoles } from "../hooks/use-roles";
 import { useSpaceMembers } from "../hooks/use-space-members";
+import { endUserLabel, memberLabel } from "../lib/members";
+import { matchesSearch } from "../lib/strings";
 import { mayGovernScheduleActor } from "../lib/schedule-governance";
 import type { ActorValue } from "../lib/schedule-payload";
-import { primaryLabel, useActorName } from "../hooks/use-actor-name";
+import { useActorName } from "../hooks/use-actor-name";
+import { isQueryInFlight } from "../lib/query-state";
 
 interface ActorSelectProps {
   value?: ActorValue;
@@ -62,7 +66,8 @@ export function ActorSelect({
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query);
 
-  const { data: orgData } = useOrgDetail();
+  const orgQuery = useOrgDetail();
+  const { data: orgData } = orgQuery;
   const members = useMemo(() => orgData?.members ?? [], [orgData]);
   // Naming ANOTHER identity takes authority over it (`mayGovernScheduleActor`); anyone else picks
   // themselves or the actor the field started on — kept listed after picking someone else, so it
@@ -73,8 +78,13 @@ export function ActorSelect({
   // server's `schedule_actor_invalid`). Without the two reads the list is not narrowed and the
   // server's refusal does the talking.
   const spaceId = useCurrentSpaceId();
-  const { data: spaceMembers } = useSpaceMembers(spaceId ?? "", can("space-members:read"));
-  const { data: roles } = useRoles(can("roles:read"));
+  const spaceMembersQuery = useSpaceMembers(spaceId ?? "", can("space-members:read"));
+  const rolesQuery = useRoles(can("roles:read"));
+  const { data: spaceMembers } = spaceMembersQuery;
+  const { data: roles } = rolesQuery;
+  // Members are listed once both reads are known: filtering later would drop entries already shown.
+  const membersPending =
+    isQueryInFlight(orgQuery) || isQueryInFlight(spaceMembersQuery) || isQueryInFlight(rolesQuery);
   const mayRunIds = useMemo(() => {
     if (!spaceMembers || !roles) return null;
     const runRoles = new Set(
@@ -89,10 +99,14 @@ export function ActorSelect({
   const [initialUserId] = useState(value?.userId);
   const [initialEndUserId] = useState(value?.endUserId);
 
-  const { data: endUserPage } = useEndUsers({
+  const endUsersQuery = useEndUsers({
     limit: 50,
     search: debouncedQuery || undefined,
   });
+  const { data: endUserPage } = endUsersQuery;
+  // The search is debounced, then fetched: both are waiting, not "no result".
+  const endUsersPending = includeEndUsers && (endUsersQuery.isFetching || query !== debouncedQuery);
+  const pending = membersPending || endUsersPending;
   const endUsers = useMemo(
     () =>
       (includeEndUsers ? (endUserPage?.data ?? []) : []).filter(
@@ -102,7 +116,7 @@ export function ActorSelect({
   );
 
   const memberOptions = useMemo<Option[]>(() => {
-    const q = debouncedQuery.toLowerCase();
+    if (membersPending) return [];
     return members
       .filter(
         (m) =>
@@ -110,24 +124,19 @@ export function ActorSelect({
           (mayGovernScheduleActor({ userId: m.userId }, caller) &&
             (mayRunIds === null || mayRunIds.has(m.userId))),
       )
-      .filter(
-        (m) =>
-          !q ||
-          (m.displayName ?? "").toLowerCase().includes(q) ||
-          (m.email ?? "").toLowerCase().includes(q),
-      )
+      .filter((m) => matchesSearch(debouncedQuery, [m.displayName, m.email]))
       .map((m) => ({
         actor: { userId: m.userId },
-        name: primaryLabel(m.displayName, m.email ?? null, m.userId),
+        name: memberLabel(m),
         email: m.email ?? null,
       }));
-  }, [members, debouncedQuery, caller, initialUserId, mayRunIds]);
+  }, [members, membersPending, debouncedQuery, caller, initialUserId, mayRunIds]);
 
   const endUserOptions = useMemo<Option[]>(
     () =>
       endUsers.map((eu) => ({
         actor: { endUserId: eu.id },
-        name: primaryLabel(eu.name, eu.email, eu.externalId || eu.id),
+        name: endUserLabel(eu, eu.id),
         email: eu.email,
       })),
     [endUsers],
@@ -169,7 +178,7 @@ export function ActorSelect({
             placeholder={t("actorSelect.search")}
           />
           <CommandList>
-            <CommandEmpty>{t("actorSelect.empty")}</CommandEmpty>
+            {!pending && <CommandEmpty>{t("actorSelect.empty")}</CommandEmpty>}
             {memberOptions.length > 0 && (
               <CommandGroup heading={t("actorSelect.groupMembers")}>
                 {memberOptions.map((o) => (
@@ -223,6 +232,13 @@ export function ActorSelect({
                   </CommandItem>
                 ))}
               </CommandGroup>
+            )}
+            {pending && (
+              <div className="space-y-1 p-1" aria-hidden>
+                <Skeleton className="h-7 w-full" />
+                <Skeleton className="h-7 w-full" />
+                <Skeleton className="h-7 w-full" />
+              </div>
             )}
           </CommandList>
         </Command>
