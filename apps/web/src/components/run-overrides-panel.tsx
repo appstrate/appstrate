@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
@@ -354,7 +355,7 @@ function ConnectionOverridesSection({
       <p className="text-muted-foreground text-xs">
         {scheduled ? t("schedule.connectionOverrides.hint") : t("run.overrides.connectionHint")}
       </p>
-      <div className="border-border bg-card flex flex-col gap-3 rounded-md border p-3">
+      <Card className="flex flex-col gap-3 rounded-md p-3">
         {integrations.map((integ) => (
           <IntegrationOverrideRow
             key={integ.id}
@@ -366,7 +367,7 @@ function ConnectionOverridesSection({
             onLeave={onLeave}
           />
         ))}
-      </div>
+      </Card>
     </div>
   );
 }

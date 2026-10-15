@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { Alert } from "@appstrate/ui/components/alert";
 import { useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -294,7 +295,7 @@ export function OrgSettingsGeneralPage() {
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
             {t("orgStorage.section")}
           </div>
-          <div className="border-border bg-card mb-4 rounded-lg border p-5">
+          <Card className="mb-4 p-5">
             <div className="flex items-center gap-3">
               <HardDrive size={18} className="text-muted-foreground shrink-0" />
               <div className="flex-1">
@@ -317,7 +318,7 @@ export function OrgSettingsGeneralPage() {
                 )}
               </div>
             )}
-          </div>
+          </Card>
         </>
       )}
 

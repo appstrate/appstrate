@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -94,7 +95,7 @@ function LinkedAccountsSection({
       ) : (
         <div className="flex flex-col gap-3">
           {credentialAccount && (
-            <div className="border-border bg-card flex items-center justify-between rounded-lg border p-4">
+            <Card className="flex items-center justify-between p-4">
               <div className="flex items-center gap-3">
                 <div className="bg-muted flex size-8 items-center justify-center rounded-full">
                   <Mail size={16} />
@@ -104,17 +105,14 @@ function LinkedAccountsSection({
               <span className="text-muted-foreground text-xs">
                 {t("preferences.linkedVia", { provider: "Email" })}
               </span>
-            </div>
+            </Card>
           )}
           {socialProviders.map((provider) => {
             const Icon = provider.icon;
             // Bound to a local so the narrowing survives into the click handlers.
             const account = provider.account;
             return account ? (
-              <div
-                key={provider.id}
-                className="border-border bg-card flex items-center justify-between rounded-lg border p-4"
-              >
+              <Card key={provider.id} className="flex items-center justify-between p-4">
                 <div className="flex items-center gap-3">
                   <Icon className="size-5" />
                   <div>
@@ -150,11 +148,11 @@ function LinkedAccountsSection({
                     ? t("preferences.unlinking")
                     : t("preferences.unlinkGoogle")}
                 </Button>
-              </div>
+              </Card>
             ) : (
-              <div
+              <Card
                 key={provider.id}
-                className="border-border bg-card flex items-center justify-between rounded-lg border border-dashed p-4"
+                className="flex items-center justify-between border-dashed p-4"
               >
                 <div className="flex items-center gap-3">
                   <Icon className="size-5" />
@@ -175,7 +173,7 @@ function LinkedAccountsSection({
                 >
                   {linking === provider.id ? t(provider.linkingKey) : t(provider.linkKey)}
                 </Button>
-              </div>
+              </Card>
             );
           })}
         </div>
@@ -239,7 +237,7 @@ function PasswordChangeForm() {
   };
 
   return (
-    <div className="border-border bg-card mb-4 rounded-lg border p-5">
+    <Card className="mb-4 p-5">
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 py-1">
         <FormItem
           id="current-password"
@@ -261,7 +259,7 @@ function PasswordChangeForm() {
           {isSubmitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
         </Button>
       </form>
-    </div>
+    </Card>
   );
 }
 
@@ -319,7 +317,7 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
   };
 
   return (
-    <div className="border-border bg-card mb-4 rounded-lg border p-5">
+    <Card className="mb-4 p-5">
       <p className="text-muted-foreground mb-4 text-sm">
         {t("preferences.setPasswordDescription")}
       </p>
@@ -347,7 +345,7 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 

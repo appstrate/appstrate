@@ -1,13 +1,12 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-// Custom RJSF widgets. Single- and multi-selects both use react-select so we get a rich,
-// consistent dropdown in every Appstrate surface.
+// Custom RJSF widgets. Single- and multi-selects are searchable comboboxes (Popover + Command).
 
 import { deepEquals, type WidgetProps } from "@rjsf/utils";
-import Select, { type StylesConfig } from "react-select";
 import { cn } from "../cn.ts";
 import { Checkbox } from "../components/checkbox.tsx";
+import { Combobox, MultiCombobox } from "../components/combobox.tsx";
 import { Label } from "../components/label.tsx";
 import { Textarea } from "../components/textarea.tsx";
 import type { SchemaFormContext } from "./context.ts";
@@ -17,30 +16,6 @@ interface EnumOption {
   value: unknown;
   label: string;
 }
-
-// react-select custom styles mapped onto Appstrate's CSS variables so the
-// dropdown picks up the current theme (dark/light) via CSS tokens.
-const selectStyles: StylesConfig<EnumOption> = {
-  control: (base) => ({
-    ...base,
-    backgroundColor: "transparent",
-    borderColor: "var(--border)",
-    minHeight: "2.25rem",
-  }),
-  menu: (base) => ({ ...base, backgroundColor: "var(--popover)" }),
-  option: (base, state) => ({
-    ...base,
-    backgroundColor: state.isFocused ? "var(--accent)" : "transparent",
-    color: "inherit",
-  }),
-  multiValue: (base) => ({ ...base, backgroundColor: "var(--secondary)" }),
-  // The app's base style rings every focused `<input>`: the one react-select
-  // keeps inside the control would draw a box around the typed text, while the
-  // control itself already shows the focus.
-  input: (base) => ({ ...base, color: "inherit", "input:focus": { boxShadow: "none" } }),
-  singleValue: (base) => ({ ...base, color: "inherit" }),
-  placeholder: (base) => ({ ...base, color: "var(--muted-foreground)" }),
-};
 
 export function TextareaWidget(props: WidgetProps) {
   const { id, value, onChange, required, readonly, disabled, placeholder, rawErrors } = props;
@@ -80,9 +55,9 @@ export function CheckboxWidget(props: WidgetProps) {
 }
 
 /** The select's "no match" sentence, from the form's labels (translated by the app). */
-function noOptionsMessage(props: WidgetProps): () => string {
+function noOptionsText(props: WidgetProps): string {
   const labels = ((props.registry?.formContext ?? {}) as SchemaFormContext).labels;
-  return () => labels?.noOptions ?? "No options";
+  return labels?.noOptions ?? "No options";
 }
 
 /** Primitives compare by text ("1" matches 1); objects deeply, since jsonb reorders keys. */
@@ -91,47 +66,60 @@ function sameOptionValue(a: unknown, b: unknown): boolean {
   return String(a) === String(b);
 }
 
+/** An enum value is any JSON, the combobox's key a string: the option's position stands in. */
+function comboboxOptions(enumOptions: EnumOption[]) {
+  return enumOptions.map((option, index) => ({
+    value: String(index),
+    label: option.label,
+    keywords: [option.label],
+  }));
+}
+
 export function SelectWidget(props: WidgetProps) {
   const { id, value, onChange, disabled, options, placeholder } = props;
   const enumOptions = (options.enumOptions as EnumOption[] | undefined) ?? [];
-
-  const selected = enumOptions.find((o) => sameOptionValue(o.value, value)) ?? null;
+  const selected = enumOptions.findIndex((o) => sameOptionValue(o.value, value));
 
   return (
-    <Select<EnumOption, false>
-      inputId={id}
-      isDisabled={disabled}
-      isClearable
-      options={enumOptions}
-      value={selected}
+    <Combobox
+      id={id}
+      disabled={disabled}
+      clearable
+      options={comboboxOptions(enumOptions)}
+      value={selected === -1 ? "" : String(selected)}
       placeholder={placeholder ?? ""}
-      onChange={(opt) => onChange(opt ? opt.value : undefined)}
-      noOptionsMessage={noOptionsMessage(props)}
-      classNamePrefix="rjsf-select"
-      styles={selectStyles}
+      onValueChange={(key) => onChange(key === "" ? undefined : enumOptions[Number(key)]!.value)}
+      searchPlaceholder=""
+      emptyText={noOptionsText(props)}
     />
   );
 }
 
-/** Array of enums → multi-select dropdown via react-select. */
+/** Array of enums → multi-select dropdown. */
 export function MultiSelectWidget(props: WidgetProps) {
   const { id, value, onChange, disabled, options } = props;
   const enumOptions = (options.enumOptions as EnumOption[] | undefined) ?? [];
 
   const raw = Array.isArray(value) ? value : [];
-  const selected = enumOptions.filter((o) => raw.some((v) => sameOptionValue(v, o.value)));
+  const picked = enumOptions.flatMap((o, index) =>
+    raw.some((v) => sameOptionValue(v, o.value)) ? [String(index)] : [],
+  );
 
   return (
-    <Select<EnumOption, true>
-      inputId={id}
-      isMulti
-      isDisabled={disabled}
-      options={enumOptions}
-      value={selected}
-      onChange={(sel) => onChange(sel.map((s) => s.value))}
-      noOptionsMessage={noOptionsMessage(props)}
-      classNamePrefix="rjsf-ms"
-      styles={selectStyles as StylesConfig<EnumOption, true>}
+    <MultiCombobox
+      id={id}
+      disabled={disabled}
+      options={comboboxOptions(enumOptions)}
+      value={picked}
+      onValueChange={(keys) =>
+        onChange(
+          [...keys]
+            .sort((a, b) => Number(a) - Number(b))
+            .map((key) => enumOptions[Number(key)]!.value),
+        )
+      }
+      searchPlaceholder=""
+      emptyText={noOptionsText(props)}
     />
   );
 }

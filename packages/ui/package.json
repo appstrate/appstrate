@@ -81,7 +81,6 @@
     "lucide-react": ">=0.400.0",
     "react": "^19",
     "react-dom": "^19",
-    "react-select": "^5",
     "typescript": ">=5 <8"
   },
   "devDependencies": {
@@ -94,8 +93,7 @@
     "@types/react-dom": "^19.3.0",
     "lucide-react": "^1.55.0",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "react-select": "^5.10.2"
+    "react-dom": "^19.3.0"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

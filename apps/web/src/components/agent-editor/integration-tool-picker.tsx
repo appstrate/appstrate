@@ -28,6 +28,13 @@ import {
 } from "./tool-selection.ts";
 import { cn } from "@appstrate/ui/cn";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@appstrate/ui/components/select";
 import { Button } from "@appstrate/ui/components/button";
 import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
@@ -39,6 +46,9 @@ interface IntegrationToolPickerProps {
   entry: ResourceEntry;
   onChange: (next: ResourceEntry) => void;
 }
+
+/** Radix `Select` refuses an empty item value: this stands for "the integration's default auth". */
+const DEFAULT_AUTH_KEY = "__default__";
 
 export function IntegrationToolPicker(props: IntegrationToolPickerProps) {
   return (
@@ -291,19 +301,24 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
             <span className="text-xs font-semibold">
               {t("agentEditor.integrations.authKey.label")}
             </span>
-            <select
-              className="bg-background rounded border px-2 py-1 text-xs"
-              value={entry.auth_key ?? ""}
-              onChange={(e) => onAuthKeyChange(e.target.value)}
-              data-testid={`integ-auth-key-${packageId}`}
+            <Select
+              value={entry.auth_key ?? DEFAULT_AUTH_KEY}
+              onValueChange={(key) => onAuthKeyChange(key === DEFAULT_AUTH_KEY ? "" : key)}
             >
-              <option value="">{t("agentEditor.integrations.authKey.default")}</option>
-              {authEntries.map(([key, auth]) => (
-                <option key={key} value={key}>
-                  {authMethodLabel(key, auth)}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-8 text-xs" data-testid={`integ-auth-key-${packageId}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_AUTH_KEY}>
+                  {t("agentEditor.integrations.authKey.default")}
+                </SelectItem>
+                {authEntries.map(([key, auth]) => (
+                  <SelectItem key={key} value={key}>
+                    {authMethodLabel(key, auth)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
         </div>
       )}

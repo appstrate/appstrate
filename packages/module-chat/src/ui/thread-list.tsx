@@ -26,6 +26,7 @@ import { PlusIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { relativeAge } from "@appstrate/core/format";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
+import { Input } from "@appstrate/ui/components/input";
 import {
   Dialog,
   DialogContent,
@@ -416,7 +417,7 @@ function RenameInput({
     onDone();
   };
   return (
-    <input
+    <Input
       autoFocus
       value={value}
       onChange={(e) => setValue(e.target.value)}
@@ -425,7 +426,7 @@ function RenameInput({
         if (e.key === "Enter") finish(true);
         else if (e.key === "Escape") finish(false);
       }}
-      className="bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-sm border px-1.5 py-0.5 text-sm outline-none focus-visible:ring-1"
+      className="h-7 min-w-0 flex-1 px-1.5 py-0.5"
     />
   );
 }
