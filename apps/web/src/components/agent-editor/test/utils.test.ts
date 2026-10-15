@@ -88,6 +88,15 @@ describe("getResourceEntries / setResourceEntries", () => {
     expect((m.dependencies as Record<string, unknown>).skills).toBeUndefined();
   });
 
+  // An agent created over the API may declare no `dependencies` at all; writing
+  // its (empty) skill list back must not invent the key, or the editor's state
+  // drifts from its initial snapshot and reads as dirty with no edit.
+  it("writes nothing for an empty skill list on a manifest without dependencies", () => {
+    const m: Record<string, unknown> = { name: "@org/agent" };
+    setResourceEntries(m, "skills", getResourceEntries(m, "skills"));
+    expect(m).toEqual({ name: "@org/agent" });
+  });
+
   // Niveau 2 — version + tool/scope selection both live on the canonical
   // `dependencies.integrations.<id>` object form (§4.1).
   describe("integrations (deps + integrations_configuration, §4.1/§4.4)", () => {
