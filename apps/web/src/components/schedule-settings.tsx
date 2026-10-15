@@ -342,7 +342,7 @@ function GeneralSection({ schedule, draft, edit }: SectionProps) {
           onChange={(e) => edit({ name: e.target.value })}
         />
       </SettingRow>
-      {/* A rhythm is composed field by field (a number typed, a day ticked): the composer
+      {/* A rhythm is composed field by field (a time picked, a day ticked): the composer
           reports it once it is valid. */}
       <FrequencyComposer
         cron={draft.cron ?? schedule.cron_expression}

@@ -6,7 +6,7 @@ import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Eye, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import type { ViewAsOrgRole } from "@appstrate/core/permissions";
+import { ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
@@ -42,7 +42,7 @@ import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useRoleColumns } from "./role-columns";
 import { CollectionTabs } from "../../components/detail-tabs";
-import { OrgRolesList } from "./org-roles";
+import { useOrgRoleColumns } from "./org-role-columns";
 import {
   groupPermissionsByResource,
   permissionLabel,
@@ -95,6 +95,7 @@ export function OrgSettingsRolesPage() {
   const previewOrgRole = deeds.includes("view-as")
     ? (role: ViewAsOrgRole) => setPreview({ preset: { kind: "org", role } })
     : undefined;
+  const orgColumns = useOrgRoleColumns({ onPreview: previewOrgRole });
   const presetColumns = useRoleColumns({
     onPreview: previewSpaceRole,
     canDelete: () => false,
@@ -186,7 +187,15 @@ export function OrgSettingsRolesPage() {
           ]}
         />
       </div>
-      {tab === "org" && <OrgRolesList onPreview={previewOrgRole} />}
+      {tab === "org" && (
+        <DataTable
+          label={t("roles.tabOrg")}
+          columns={orgColumns}
+          rows={[...ORG_ROLES]}
+          rowKey={(role) => role}
+          isLoading={false}
+        />
+      )}
       {tab === "space" && (
         <>
           <SettingsGroup title={t("roles.presetsSection")}>

@@ -84,10 +84,6 @@ describe("RunSnapshotInspector — the run's facts", () => {
       index: 0,
       contextTokens: 187_000,
       contextWindow: 200_000,
-      inputTokens: 187_000,
-      outputTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
     };
     const html = overview(published({ status: "success" }), [turn]);
     expect(html).toContain(agentsFr["run.usageContext"]);

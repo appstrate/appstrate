@@ -54,19 +54,8 @@ function presentation(type: IndexType, t: TFunction) {
   };
 }
 
-export function PackageIndexPage({
-  type,
-  manualCreation = "editor",
-}: {
-  type: IndexType;
-  /** Where « create manually » goes: the creation dialog, or the import (MCP servers). */
-  manualCreation?: "editor" | "import";
-}) {
-  return type === "agent" ? (
-    <AgentIndex />
-  ) : (
-    <PackageIndex type={type} manualCreation={manualCreation} />
-  );
+export function PackageIndexPage({ type }: { type: IndexType }) {
+  return type === "agent" ? <AgentIndex /> : <PackageIndex type={type} />;
 }
 
 /** Agents also carry their unread runs. */
@@ -74,47 +63,23 @@ function AgentIndex() {
   const { data: agents, isLoading, error } = useAgents();
   const { data: unreadCounts } = useUnreadCountsByAgent();
   const items = agents?.map((agent) => agentCardItem(agent, unreadCounts?.[agent.id]));
-  return (
-    <PackageIndexBody
-      type="agent"
-      manualCreation="editor"
-      items={items}
-      isLoading={isLoading}
-      error={error}
-    />
-  );
+  return <PackageIndexBody type="agent" items={items} isLoading={isLoading} error={error} />;
 }
 
-function PackageIndex({
-  type,
-  manualCreation,
-}: {
-  type: Exclude<IndexType, "agent">;
-  manualCreation: "editor" | "import";
-}) {
+function PackageIndex({ type }: { type: Exclude<IndexType, "agent"> }) {
   // What works in THIS space; the rest of the org is one action away.
   const { data: rows, isLoading, error } = usePackageList(type);
   const items = rows?.map((row) => packageCardItem(row, type));
-  return (
-    <PackageIndexBody
-      type={type}
-      manualCreation={manualCreation}
-      items={items}
-      isLoading={isLoading}
-      error={error}
-    />
-  );
+  return <PackageIndexBody type={type} items={items} isLoading={isLoading} error={error} />;
 }
 
 function PackageIndexBody({
   type,
-  manualCreation,
   items,
   isLoading,
   error,
 }: {
   type: IndexType;
-  manualCreation: "editor" | "import";
   items: CardItem[] | undefined;
   isLoading: boolean;
   error: Error | null;
@@ -192,13 +157,10 @@ function PackageIndexBody({
           resource={type}
           onClose={creation.close}
           onManual={() => {
-            if (manualCreation === "import") {
-              creation.close();
-              setImporting(true);
-              return;
-            }
             creation.close();
-            setCreating(true);
+            // MCP servers have no creation dialog: « manual » is the import.
+            if (type === "mcp-server") setImporting(true);
+            else setCreating(true);
           }}
           onChat={creation.openChat}
         />

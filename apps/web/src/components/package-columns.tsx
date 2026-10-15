@@ -4,9 +4,8 @@
  * The packages column set — agents, skills and MCP servers, which are the
  * same catalogue rendered three times.
  *
- * The index pages draw cards; the table serves the catalogue's management view and the
- * "used by" panel, where you scan twenty packages down a column. It reads the same
- * {@link CardItem} the cards do.
+ * Every package list is this table, where you scan twenty packages down a column; its
+ * rows are {@link CardItem}s.
  */
 
 import { useTranslation } from "react-i18next";

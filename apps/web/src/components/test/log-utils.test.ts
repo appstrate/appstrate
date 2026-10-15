@@ -364,49 +364,31 @@ describe("buildTurnRows — per-turn projection", () => {
       turnLog({
         event: "turn",
         index: 1,
-        latencyMs: 4200,
-        inputTokens: 120,
-        outputTokens: 340,
-        cacheReadTokens: 96000,
-        cacheWriteTokens: 800,
         contextTokens: 96920,
         contextWindow: 200000,
       }),
     ]);
-    expect(rows).toEqual([
-      {
-        index: 1,
-        contextTokens: 96920,
-        inputTokens: 120,
-        outputTokens: 340,
-        cacheReadTokens: 96000,
-        cacheWriteTokens: 800,
-        latencyMs: 4200,
-        contextWindow: 200000,
-      },
-    ]);
+    expect(rows).toEqual([{ index: 1, contextTokens: 96920, contextWindow: 200000 }]);
   });
 
   it("keeps the window ABSENT rather than zeroed when the runner states none", () => {
     // The denominator of the whole context reading. "Unknown" and "0" are
     // different statements, and a defaulted 0 would be indistinguishable from a
     // runner that genuinely reported one — so the key must simply not be there.
-    const rows = buildTurnRows([
-      turnLog({ event: "turn", index: 1, inputTokens: 10, outputTokens: 5 }),
-    ]);
+    const rows = buildTurnRows([turnLog({ event: "turn", index: 1, contextTokens: 10 })]);
     expect(rows[0]!).not.toHaveProperty("contextWindow");
   });
 
   it("carries the window the runner stated", () => {
     const rows = buildTurnRows([
-      turnLog({ event: "turn", index: 1, inputTokens: 10, contextWindow: 1_000_000 }),
+      turnLog({ event: "turn", index: 1, contextTokens: 10, contextWindow: 1_000_000 }),
     ]);
     expect(rows[0]!.contextWindow).toBe(1_000_000);
   });
 
   it("drops a malformed window instead of coercing it", () => {
     const rows = buildTurnRows([
-      turnLog({ event: "turn", index: 1, inputTokens: 10, contextWindow: "200k" }),
+      turnLog({ event: "turn", index: 1, contextTokens: 10, contextWindow: "200k" }),
     ]);
     expect(rows).toHaveLength(1);
     expect(rows[0]!).not.toHaveProperty("contextWindow");
@@ -417,16 +399,13 @@ describe("buildTurnRows — per-turn projection", () => {
       turnLog({ event: "output_reprompt", index: 1 }),
       { type: "progress", level: "debug", message: "plain narration" },
       { type: "result", level: "info", event: "output", data: { foo: 1 } },
-      turnLog({ event: "turn", index: 7, inputTokens: 1, outputTokens: 2 }),
+      turnLog({ event: "turn", index: 7, contextTokens: 1 }),
     ]);
     expect(rows.map((r) => r.index)).toEqual([7]);
   });
 
-  it("tolerates a missing latencyMs", () => {
-    const rows = buildTurnRows([
-      turnLog({ event: "turn", index: 3, inputTokens: 10, outputTokens: 5, cacheReadTokens: 20 }),
-    ]);
-    expect(rows[0]!.latencyMs).toBeUndefined();
+  it("tolerates a missing contextTokens", () => {
+    const rows = buildTurnRows([turnLog({ event: "turn", index: 3 })]);
     // `contextTokens` reads 0 when absent — it is NOT recomputed from the
     // parts. The emitter (`buildTurnProgress`) sets it unconditionally, so an
     // absent value means a malformed payload, not an older emitter; the
@@ -441,18 +420,9 @@ describe("buildTurnRows — per-turn projection", () => {
       { type: "progress", level: "debug", message: "null data", data: null },
       turnLog({ event: "turn" }), // no index → unplottable
       turnLog({ event: "turn", index: "two" }),
-      turnLog({ event: "turn", index: 4, inputTokens: "many", latencyMs: "slow" }),
+      turnLog({ event: "turn", index: 4, contextTokens: "many" }),
     ]);
-    expect(rows).toEqual([
-      {
-        index: 4,
-        contextTokens: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      },
-    ]);
+    expect(rows).toEqual([{ index: 4, contextTokens: 0 }]);
   });
 
   it("returns an empty array for runs predating the breadcrumb", () => {
@@ -465,7 +435,7 @@ describe("buildLogEntries — turn breadcrumbs excluded from the stream", () => 
     // A heavy run emits ~108 of them; interleaved they bury the real log.
     const logs: RawLog[] = [
       { type: "progress", level: "debug", message: "before" },
-      turnLog({ event: "turn", index: 1, inputTokens: 1, outputTokens: 2 }),
+      turnLog({ event: "turn", index: 1, contextTokens: 1 }),
       { type: "progress", level: "debug", message: "after" },
     ];
     const { entries } = buildLogEntries(logs);
@@ -476,7 +446,7 @@ describe("buildLogEntries — turn breadcrumbs excluded from the stream", () => 
     const logs: RawLog[] = [
       { type: "result", level: "info", event: "output", data: { foo: 1 } },
       { type: "progress", level: "info", message: "MCP connected", data: { boot: true } },
-      turnLog({ event: "turn", index: 1, inputTokens: 1, outputTokens: 2 }),
+      turnLog({ event: "turn", index: 1, contextTokens: 1 }),
       {
         type: "progress",
         level: "debug",

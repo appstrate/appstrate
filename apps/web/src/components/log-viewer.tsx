@@ -394,6 +394,61 @@ export function LogViewer({ entries, isLoading = false, focusError = false }: Lo
                     entry.kind === "tool" &&
                     (entry.args !== undefined || entry.result !== undefined);
                   const isOpen = hasDetail && expanded.has(entry.id);
+                  const rowClass = cn(
+                    "grid min-h-10 w-full items-center gap-4 px-4 py-2 text-left text-sm transition-colors",
+                    journalGrid,
+                    isOpen && "bg-muted/40",
+                  );
+                  const rowContent = (
+                    <>
+                      {showTimestamps && (
+                        <span className="text-muted-foreground font-mono text-xs">
+                          {formatTimestamp(entry.createdAt, i18n.language)}
+                        </span>
+                      )}
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="flex size-4 shrink-0 items-center justify-center">
+                          {entry.kind === "tool" ? (
+                            <ToolStatus status={entry.status} />
+                          ) : (
+                            <ExecutionEntryIcon entry={entry} />
+                          )}
+                        </span>
+                        <span className="text-muted-foreground truncate text-xs">
+                          {t(`log.type.${journalType(entry)}`)}
+                        </span>
+                      </span>
+                      <span
+                        className={cn(
+                          "text-foreground min-w-0",
+                          entry.kind === "tool" ? "truncate" : "break-words whitespace-pre-wrap",
+                          entry.level && levelColors[entry.level],
+                        )}
+                      >
+                        {entry.kind === "tool" ? (
+                          <>
+                            <span className="font-medium">{entry.tool}</span>
+                            {entry.detail && (
+                              <span className="text-muted-foreground"> · {entry.detail}</span>
+                            )}
+                          </>
+                        ) : (
+                          entry.message
+                        )}
+                      </span>
+                      <span className="text-muted-foreground flex items-center justify-end gap-1 text-xs tabular-nums">
+                        {entry.kind === "tool" && entry.durationMs !== undefined
+                          ? formatDuration(entry.durationMs)
+                          : ""}
+                        {hasDetail && (
+                          <ChevronRight
+                            className={cn("size-3.5 transition-transform", isOpen && "rotate-90")}
+                            aria-hidden
+                          />
+                        )}
+                      </span>
+                    </>
+                  );
                   return (
                     <div
                       key={entry.id}
@@ -407,70 +462,24 @@ export function LogViewer({ entries, isLoading = false, focusError = false }: Lo
                         transform: `translateY(${virtualRow.start}px)`,
                       }}
                     >
-                      <button
-                        type="button"
-                        disabled={!hasDetail}
-                        className={cn(
-                          "enabled:hover:bg-muted/20 grid min-h-10 w-full items-center gap-4 px-4 py-2 text-left text-sm transition-colors enabled:cursor-pointer",
-                          journalGrid,
-                          isOpen && "bg-muted/40",
-                        )}
-                        onClick={() =>
-                          setExpanded((prev) => {
-                            const next = new Set(prev);
-                            if (!next.delete(entry.id)) next.add(entry.id);
-                            return next;
-                          })
-                        }
-                        aria-expanded={hasDetail ? isOpen : undefined}
-                      >
-                        {showTimestamps && (
-                          <span className="text-muted-foreground font-mono text-xs">
-                            {formatTimestamp(entry.createdAt, i18n.language)}
-                          </span>
-                        )}
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="flex size-4 shrink-0 items-center justify-center">
-                            {entry.kind === "tool" ? (
-                              <ToolStatus status={entry.status} />
-                            ) : (
-                              <ExecutionEntryIcon entry={entry} />
-                            )}
-                          </span>
-                          <span className="text-muted-foreground truncate text-xs">
-                            {t(`log.type.${journalType(entry)}`)}
-                          </span>
-                        </span>
-                        <span
-                          className={cn(
-                            "text-foreground min-w-0",
-                            entry.kind === "tool" ? "truncate" : "break-words whitespace-pre-wrap",
-                            entry.level && levelColors[entry.level],
-                          )}
+                      {hasDetail ? (
+                        <button
+                          type="button"
+                          className={cn(rowClass, "hover:bg-muted/20 cursor-pointer")}
+                          onClick={() =>
+                            setExpanded((prev) => {
+                              const next = new Set(prev);
+                              if (!next.delete(entry.id)) next.add(entry.id);
+                              return next;
+                            })
+                          }
+                          aria-expanded={isOpen}
                         >
-                          {entry.kind === "tool" ? (
-                            <>
-                              <span className="font-medium">{entry.tool}</span>
-                              {entry.detail && (
-                                <span className="text-muted-foreground"> · {entry.detail}</span>
-                              )}
-                            </>
-                          ) : (
-                            entry.message
-                          )}
-                        </span>
-                        <span className="text-muted-foreground flex items-center justify-end gap-1 text-xs tabular-nums">
-                          {entry.kind === "tool" && entry.durationMs !== undefined
-                            ? formatDuration(entry.durationMs)
-                            : ""}
-                          {hasDetail && (
-                            <ChevronRight
-                              className={cn("size-3.5 transition-transform", isOpen && "rotate-90")}
-                              aria-hidden
-                            />
-                          )}
-                        </span>
-                      </button>
+                          {rowContent}
+                        </button>
+                      ) : (
+                        <div className={rowClass}>{rowContent}</div>
+                      )}
                       {isOpen && entry.kind === "tool" && (
                         <div className="bg-muted/40 flex flex-col gap-4 px-4 pt-1 pb-4">
                           {entry.args !== undefined && (

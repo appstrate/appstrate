@@ -6,7 +6,6 @@ import { useNavigate } from "react-router-dom";
 import { SLUG_REGEX } from "@appstrate/core/naming";
 import { FormModal } from "./form-modal";
 import { FormField } from "./form-field";
-import { isRemoteSourceUrl } from "./integration-editor/utils";
 import { useCreatePackage } from "../hooks/use-mutations";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
@@ -38,6 +37,9 @@ const WORDS = {
  * is for, and the one thing the type cannot do without (an agent's prompt, an integration's server
  * URL). Everything else is set on the saved package, where it is edited. Mounted by the caller while open.
  */
+/** A template (`{$variable.x}`) needs its variable declared, which the creation body does not do: it is set in the settings. */
+const isLiteralUrl = (url: string) => URL.canParse(url) && !url.includes("{$");
+
 export function CreatePackageModal({
   type,
   onClose,
@@ -63,7 +65,7 @@ export function CreatePackageModal({
     // A skill's description is required by its SKILL.md; an agent's prompt and an integration's URL by the type.
     (type !== "skill" || description.trim() !== "") &&
     (type !== "agent" || prompt.trim() !== "") &&
-    (type !== "integration" || isRemoteSourceUrl(url.trim()));
+    (type !== "integration" || isLiteralUrl(url.trim()));
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();

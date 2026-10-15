@@ -2,7 +2,7 @@
 
 /**
  * Every permission the screens list has a name in both languages: the role
- * editor and matrix list the whole catalog, the API-key scope picker every
+ * editor lists the whole catalog, the API-key scope picker every
  * grantable scope. A string without a label shows as its wire id, next to
  * translated ones.
  */

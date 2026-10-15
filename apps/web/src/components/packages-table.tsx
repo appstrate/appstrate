@@ -30,9 +30,7 @@ export function PackagesTable({
 } & CollectionState) {
   const { t } = useTranslation(["agents", "common"]);
 
-  // The same state `CardGrid` takes, forwarded whole: the two bodies answer it
-  // through the same `collectionVerdict`, so a caller can hand either one the
-  // same props and branch on nothing.
+  // The collection state, forwarded whole: `DataTable` answers it through `collectionVerdict`.
   return (
     <DataTable
       label={label ?? t("list.tableLabel")}

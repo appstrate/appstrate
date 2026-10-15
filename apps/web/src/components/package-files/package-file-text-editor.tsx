@@ -19,7 +19,7 @@ export function PackageFileTextEditor({
   path,
   onCommit,
 }: {
-  packageId: string | undefined;
+  packageId: string;
   entry: PackageFileEntry;
   path: string;
   onCommit: (text: string) => void;

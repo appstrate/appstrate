@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The sheet opened on a published version (`?package=…&version=…`) names the version it reads. */
+/** The sheet opened on a published version (`?package=…&version=…`) names a version only once it has read it. */
 
 import { describe, expect, it } from "bun:test";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -54,8 +54,8 @@ function sheet(pinnedVersion?: string): string {
 }
 
 describe("the sheet opened on a published version", () => {
-  it("names the version it reads", () => {
-    expect(sheet("1.0.0")).toContain("v1.0.0");
+  it("does not name a version it has not read", () => {
+    expect(sheet("1.0.0")).not.toContain("v1.0.0");
   });
 
   it("names none when none was pinned", () => {

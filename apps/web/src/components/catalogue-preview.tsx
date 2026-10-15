@@ -141,7 +141,7 @@ export function CataloguePreview({
     item.source === "system"
       ? t("catalogue.sourceSystem")
       : t("catalogue.sourceOrg", { name: currentOrg?.name ?? "" });
-  const version = detail?.version ?? pinnedVersion;
+  const version = detail?.version;
   // A version carries its own description; the row's is the current one's.
   const description = (pinnedVersion ? detail?.description : undefined) || item.description;
 

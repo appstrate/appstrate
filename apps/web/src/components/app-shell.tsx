@@ -175,7 +175,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
       </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
         <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
-          {/* With shares waiting, the entry opens ON them. */}
+          {/* With shares waiting, the entry opens the first one's kind (the package's own sheet when only one waits). */}
           <OverlayEntry
             to={catalogueTo}
             active={catalogueActive}

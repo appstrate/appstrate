@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The creation page has no saved package, so no tool catalog: the section still
+ * With no tool catalog (`tools` empty), the section still
  * edits `tools_policy` and `allow_undeclared_tools` straight from the draft.
  */
 

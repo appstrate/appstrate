@@ -593,7 +593,7 @@ describe("schemaToFields / fieldsToSchema — lossless round-trip", () => {
   });
 });
 
-// ─── Keyword operations ─────────────────────────────────────
+// ─── moveItem ───────────────────────────────────────────────
 
 describe("moveItem", () => {
   it("swaps an item with its neighbour, without touching the input", () => {
@@ -623,6 +623,8 @@ describe("moveItem", () => {
     ]);
   });
 });
+
+// ─── Keyword operations ─────────────────────────────────────
 
 describe("setKeyword", () => {
   it("sets a keyword without mutating the input", () => {

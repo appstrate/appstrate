@@ -10,18 +10,18 @@ import { splitPackageRef } from "../../lib/package-paths";
  * Every reader of the index goes through here so they all sit on the
  * generated `[method, path, init]` key that `invalidatePackageFiles` reaches.
  */
-export function usePackageFileIndex(packageId: string | undefined, version?: string) {
+export function usePackageFileIndex(packageId: string, version?: string) {
   const scope = useOrgScope();
   return $api.useQuery(
     "get",
     "/api/packages/{scope}/{name}/files",
     {
       params: {
-        path: splitPackageRef(packageId ?? ""),
+        path: splitPackageRef(packageId),
         ...(version ? { query: { version } } : {}),
         header: scope.header,
       },
     },
-    { enabled: scope.enabled && !!packageId },
+    { enabled: scope.enabled },
   );
 }

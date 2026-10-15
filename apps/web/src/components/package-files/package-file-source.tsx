@@ -32,7 +32,7 @@ import { usePackageFile } from "./use-package-file";
 interface PackageFileSourceProps {
   /** Target of the tree's `aria-controls` — see `FileTree`'s `controlsId`. */
   id: string;
-  packageId: string | undefined;
+  packageId: string;
   version: string | undefined;
   entry: PackageFileEntry;
   className?: string;

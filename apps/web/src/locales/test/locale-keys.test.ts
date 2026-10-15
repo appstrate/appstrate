@@ -263,7 +263,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
   "integration.structure.type.", // components/package-detail/integration-structure.tsx
-  "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
+  "integrations.execution.", // pages/integrations-page.tsx — tabs
   "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
   "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
@@ -271,7 +271,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
-  "orgRolesGuide.access.", // pages/org-settings/org-roles.tsx — space reach per org role
+  "orgRolesGuide.access.", // pages/org-settings/org-role-columns.tsx — space reach per org role
   "orgSettings.roleHint.", // components/org-invitation-form.tsx + OAuth signup form
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx
   "permissions.label.", // lib/permission-labels.ts — permissionLabel()

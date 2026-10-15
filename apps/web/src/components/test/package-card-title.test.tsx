@@ -14,8 +14,7 @@ const { render } = await import("../../test/render.tsx");
 
 describe("a package card's title", () => {
   it("links to the package's page", () => {
-    const html = render(<PackageCard id="@acme/notes" displayName="Notes" type="skill" />);
-    expect(html).toMatch(/<a\b[^>]*href="\/skills\/@acme\/notes"[^>]*>Notes<\/a>/);
-    expect(html).not.toContain("<button");
+    const html = render(<PackageCard id="@acme/worker" displayName="Worker" type="agent" />);
+    expect(html).toMatch(/<a\b[^>]*href="\/agents\/@acme\/worker"[^>]*>Worker<\/a>/);
   });
 });

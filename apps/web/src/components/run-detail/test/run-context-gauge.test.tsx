@@ -21,10 +21,6 @@ function turn(index: number, contextTokens: number, contextWindow?: number): Run
   return {
     index,
     contextTokens,
-    inputTokens: contextTokens,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
     ...(contextWindow !== undefined ? { contextWindow } : {}),
   };
 }

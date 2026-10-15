@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The state order every collection body (table, cards, list) answers: failure, then
+ * The state order every collection body (table, list) answers: failure, then
  * loading, then emptiness. A verdict is a word, not a node, so a body handed `"error"`
  * must draw something; what counts as failed is the caller's call.
  */

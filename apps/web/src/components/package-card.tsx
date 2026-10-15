@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import { Card } from "@appstrate/ui/components/card";
-import { RunStatusBadge, MetaBadge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
 import { CountBadge } from "./count-badge";
 import { PackageIcon } from "./package-icon";
 import { RunAgentButton } from "./run-agent-button";
@@ -14,11 +14,10 @@ import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import type { CardItem } from "../lib/package-card-item";
 
 /**
- * A package as a card, the same on every surface (the dashboard, the index
- * pages, the catalogue): its tile, name and description, its badges top right,
- * its keywords and an optional footer. The card is ONE link, its title's,
+ * An agent as a card on the dashboard: its tile, name and description, its
+ * badges top right and its keywords. The card is ONE link, its title's,
  * stretched over the surface (`after:absolute after:inset-0`); what acts on
- * its own (run, the state control, the footer) is raised above it.
+ * its own (run) is raised above it.
  */
 const KEYWORD_PILL = "bg-background text-muted-foreground shrink-0 px-2 text-[0.7rem] font-normal";
 
@@ -31,12 +30,8 @@ export function PackageCard({
   version,
   runningRuns,
   keywords,
-  usedByAgents,
   unreadCount,
-  actions,
-  autoInstalled,
   identity,
-  logo,
   headingLevel = 2,
 }: CardItem & {
   /** 3 where the cards sit under a section's `<h2>` (the dashboard). */
@@ -54,11 +49,7 @@ export function PackageCard({
       {/* The icon tile sits LEFT of the title and its description, the way a
           store's card reads: what it is, then what it does. */}
       <div className="flex min-w-0 gap-3">
-        <PackageIcon
-          type={type}
-          icon={type === "agent" ? identity?.icon : logo}
-          color={identity?.color}
-        />
+        <PackageIcon type={type} icon={identity?.icon} color={identity?.color} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
@@ -78,7 +69,6 @@ export function PackageCard({
                   />
                 </span>
               )}
-              {autoInstalled && <MetaBadge label={t("list.badgeAutoInstalled")} />}
               <CountBadge
                 count={unreadCount ?? 0}
                 label={t("dashboard.unreadRuns", { ns: "agents", count: unreadCount ?? 0 })}
@@ -101,10 +91,7 @@ export function PackageCard({
               )}
             </div>
           </div>
-          {/* Up to two lines, no reserved second one: the grid stretches every
-          card of a row to the tallest and the footer sits at the bottom
-          (`mt-auto`), so rows stay aligned without an empty line under a
-          short description. */}
+          {/* Up to two lines, no reserved second one: no empty line under a short description. */}
           <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">{description || ""}</p>
           {/* Under the description and still right of the icon: the text column
               never runs under the tile. */}
@@ -117,7 +104,7 @@ export function PackageCard({
           )}
         </div>
       </div>
-      {keywords?.length || (type !== "agent" && (usedByAgents ?? 0) > 0) ? (
+      {keywords?.length ? (
         <ScrollArea className="relative z-10 mt-2 w-full">
           <div className="flex gap-1">
             {keywords?.map((kw) => (
@@ -125,25 +112,10 @@ export function PackageCard({
                 {kw}
               </UIBadge>
             ))}
-            {type !== "agent" && usedByAgents !== undefined && usedByAgents > 0 && (
-              <UIBadge variant="outline" className={KEYWORD_PILL}>
-                {t("list.usedByAgents", { count: usedByAgents, ns: "agents" })}
-              </UIBadge>
-            )}
           </div>
           <ScrollBar orientation="horizontal" className="h-0 opacity-0" />
         </ScrollArea>
       ) : null}
-      {actions && <div className="min-h-3" aria-hidden />}
-      {actions && (
-        <div
-          // `min-h-8` so a footer carrying a button and one carrying a line of
-          // text are the same height, which is what kept the rows ragged.
-          className="border-border relative z-10 mt-auto flex min-h-8 items-center justify-between gap-2 border-t pt-3"
-        >
-          {actions}
-        </div>
-      )}
     </Card>
   );
 }

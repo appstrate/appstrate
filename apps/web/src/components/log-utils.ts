@@ -73,12 +73,6 @@ export function journalLevel(entry: ExecutionEntry): "info" | "warn" | "error" {
 export interface RunTurnRow {
   index: number;
   contextTokens: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  /** Omitted when the runner could not observe the turn's start. */
-  latencyMs?: number;
   /**
    * The window `contextTokens` is a share of, as stated by the runner for THIS turn
    * (it alone knows the container-side default). Absent when unknown, never zero.
@@ -98,7 +92,7 @@ function readNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-/** Per-turn breakdown for `TurnsTable`. Total: non-turn or malformed rows are skipped. */
+/** Per-turn context readings, for the run's context gauge. Total: non-turn or malformed rows are skipped. */
 export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
   const rows: RunTurnRow[] = [];
   for (const log of rawLogs) {
@@ -107,12 +101,7 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
     // `index` is the row's identity — without it there is nothing to plot.
     if (typeof d["index"] !== "number" || !Number.isFinite(d["index"])) continue;
 
-    const inputTokens = readNumber(d["inputTokens"], 0);
-    const outputTokens = readNumber(d["outputTokens"], 0);
-    const cacheReadTokens = readNumber(d["cacheReadTokens"], 0);
-    const cacheWriteTokens = readNumber(d["cacheWriteTokens"], 0);
-    const latencyMs = d["latencyMs"];
-    // Deliberately NOT `readNumber` (as for `latencyMs`): a missing window is "unknown",
+    // Deliberately NOT `readNumber`: a missing window is "unknown",
     // so the key stays ABSENT rather than defaulted.
     const contextWindow = d["contextWindow"];
 
@@ -121,11 +110,6 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
       // Always emitted, so absent means malformed: fall to 0, do NOT recompute a total
       // from the parts (that plots a bar never measured).
       contextTokens: readNumber(d["contextTokens"], 0),
-      inputTokens,
-      outputTokens,
-      cacheReadTokens,
-      cacheWriteTokens,
-      ...(typeof latencyMs === "number" && Number.isFinite(latencyMs) ? { latencyMs } : {}),
       ...(typeof contextWindow === "number" && Number.isFinite(contextWindow)
         ? { contextWindow }
         : {}),
@@ -233,7 +217,7 @@ export function buildLogEntries(
     } else if (log.event === "run_completed") {
       continue;
     } else if (isTurnRow(log)) {
-      // Turn breadcrumbs would drown the log lines; rendered by `buildTurnRows` → `TurnsTable`.
+      // Turn breadcrumbs would drown the log lines; read apart by `buildTurnRows`.
     } else {
       const logData = log.data ?? {};
       const message = (logData.message as string) || log.message || "";

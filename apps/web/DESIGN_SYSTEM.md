@@ -39,7 +39,7 @@ they start with `packages/` or `e2e/`.
   titles) draws at once; only what waits on a read waits, in its place and in its
   shape, as `Skeleton` blocks (`components/loading-skeletons.tsx`):
   `DetailPageSkeleton` (with the crumbs the address already gives),
-  `ListPageSkeleton`, `SettingsSkeleton`, `FormPageSkeleton`,
+  `ListPageSkeleton`, `SettingsSkeleton`,
   `DashboardSkeleton`, `TextSkeleton` for a panel, a modal body or a section.
   Collections draw their own rows. Nothing is drawn from a default while its
   read is on its way: no `0`, no « Aucun… », no switch or field holding a value
@@ -323,11 +323,10 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 
 ## 7. Collections
 
-- A **collection** is three bodies that take the same props (`CollectionState`
+- A **collection** is two bodies that take the same props (`CollectionState`
   in `components/collection.ts`: `isLoading`, `isError`, `empty`, `error`) and
   answer them in the same order, failure then loading then emptiness:
-  `DataTable` (aligned columns, needs width), `CardGrid` (`components/card-grid.tsx`,
-  `auto-fill`, no breakpoints) and `ItemList` (`components/item-list.tsx`, stacked
+  `DataTable` (aligned columns, needs width) and `ItemList` (`components/item-list.tsx`, stacked
   self-contained blocks, asks nothing of its container: use it in a panel, a modal
   or a narrow tab). A settings list is a table, not cards (except a list that never exceeds a handful of
   rows, such as an agent's connections: plain rows). A matrix (packages by
@@ -480,8 +479,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     no model uses is deleted. A member's personal key serves no model of its own: its
     confirmation says the member will have to add a new one.
 - **Packages** (agents, skills, MCP servers, the organisation catalogue) are one
-  list: `components/package-collection.tsx`, with `PackageCard` and
-  `packages-table.tsx`. Do not build another.
+  list: `components/package-collection.tsx`, a table (`packages-table.tsx`);
+  no card view. Do not build another.
 - **A row has ONE way to act** (`TableRowActions`, `components/table-row-actions.tsx`):
   the « … » menu holds EVERY action of the row, and nothing else sits at the
   row's end. No pencil, download, reconnect or gear icon beside it, in any
@@ -529,8 +528,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   journal, memory, devices and CLI sessions, shares, tools of a catalogue, files) and
   an empty state that is a fault or a locked page.
 - Adding something is one gesture: the surface (white) outline button with a `+`
-  icon, or an item in the Actions menu, opening a modal; when « create » means a
-  whole editor (agent, skill) it is a link to that page.
+  icon, or an item in the Actions menu, opening a modal (§ 9: creating a package
+  opens the creation hand-off, not a page).
 
 ## 8. Cards, badges, atoms
 
@@ -552,8 +551,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   never a raw Tailwind colour.
 - **Cards**: a summary block on a detail page is `DetailSectionCard`; a titled
   pane is `SectionCard` (`components/section-card.tsx`, a real `<h3>`); a figure with a label is `OperationalStat` (a `dl` row); a label and value fact grid is
-  not a collection. Entity cards in lists: `PackageCard` (every package
-  type, the dashboard's agents included), a run as
+  not a collection. Entity cards in lists: `PackageCard` (the dashboard's
+  agents only; every list is a table), a run as
   a dense list row is `RunRow` (the dashboard, the chat's context panel).
 - Cards are `bg-card` with a `border` on the canvas; a clickable card is one
   stretched link (`absolute inset-0`), never a link around a button.
@@ -756,7 +755,7 @@ movement uses `motion-reduce:animate-pulse`. No animation library.
 ## 17. Responsive
 
 Every screen at 390 px: no horizontal page scroll, a grid has a single-column
-variant (`max-md:grid-cols-1`, `lg:grid-cols-…`; a card grid is `CardGrid`),
+variant (`max-md:grid-cols-1`, `lg:grid-cols-…`),
 header actions wrap (`PageHeader wrapActions`: the group of badges and buttons
 wraps under the title as a whole), the sidebar becomes a sheet, a panel's rail
 becomes a menu sheet (`PhoneNavigation`), and a panel overlay covers the page

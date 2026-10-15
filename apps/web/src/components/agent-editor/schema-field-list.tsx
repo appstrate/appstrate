@@ -15,7 +15,7 @@
  * order, and the row's other deeds behind the standard "…" menu — the row itself
  * is not a button.
  */
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Braces, ChevronDown, ChevronUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -138,6 +138,7 @@ export function SchemaFieldList({
                   key={field._id}
                   field={field}
                   mode={mode}
+                  index={index}
                   isFirst={index === 0}
                   isLast={index === fields.length - 1}
                   onMove={(delta) => onChange(moveItem(fields, index, delta))}
@@ -188,12 +189,14 @@ function FieldRow({
   mode,
   isFirst,
   isLast,
+  index,
   onMove,
   onEdit,
   onRemove,
 }: {
   field: SchemaField;
   mode: SchemaMode;
+  index: number;
   isFirst: boolean;
   isLast: boolean;
   onMove: (delta: -1 | 1) => void;
@@ -201,31 +204,51 @@ function FieldRow({
   onRemove: () => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
+  const up = useRef<HTMLButtonElement>(null);
+  const down = useRef<HTMLButtonElement>(null);
+  const lastMove = useRef<-1 | 1 | null>(null);
+  // Moving a row moves its DOM node, which drops the keyboard focus: give it back to the
+  // button that was used, or to the other one once that one has hit an end.
+  useEffect(() => {
+    const delta = lastMove.current;
+    lastMove.current = null;
+    if (delta === null) return;
+    const blocked = delta === -1 ? isFirst : isLast;
+    (blocked ? (delta === -1 ? down : up) : delta === -1 ? up : down).current?.focus();
+  }, [index, isFirst, isLast]);
+  const move = (delta: -1 | 1) => {
+    lastMove.current = delta;
+    onMove(delta);
+  };
   return (
     <TableRow>
-      <TableCell className="flex">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="text-muted-foreground size-7"
-          disabled={isFirst}
-          aria-label={t("editor.fieldMoveUp", { name: field.key })}
-          onClick={() => onMove(-1)}
-        >
-          <ChevronUp />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="text-muted-foreground size-7"
-          disabled={isLast}
-          aria-label={t("editor.fieldMoveDown", { name: field.key })}
-          onClick={() => onMove(1)}
-        >
-          <ChevronDown />
-        </Button>
+      <TableCell>
+        <div className="flex">
+          <Button
+            ref={up}
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground size-7"
+            disabled={isFirst}
+            aria-label={t("editor.fieldMoveUp", { name: field.key })}
+            onClick={() => move(-1)}
+          >
+            <ChevronUp />
+          </Button>
+          <Button
+            ref={down}
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground size-7"
+            disabled={isLast}
+            aria-label={t("editor.fieldMoveDown", { name: field.key })}
+            onClick={() => move(1)}
+          >
+            <ChevronDown />
+          </Button>
+        </div>
       </TableCell>
       <TableCell className="text-sm">{field.key || "—"}</TableCell>
       <TableCell>

@@ -62,8 +62,6 @@ export function placementIn(placement: CataloguePlacement, spaceId: string): Pla
 export interface PendingShare {
   pkg: LibraryPackageItem;
   spaceId: string;
-  /** `null` for a share nobody authored. */
-  sharedBy: string | null;
 }
 
 /** One entry per PLACEMENT, not per package: each space's answer is its own switch. */
@@ -72,7 +70,6 @@ export function pendingShares(packages: readonly LibraryPackageItem[]): PendingS
     pkg.placements.filter(isPendingOffer).map((placement) => ({
       pkg,
       spaceId: placement.space_id,
-      sharedBy: placement.shared_by?.name ?? null,
     })),
   );
 }

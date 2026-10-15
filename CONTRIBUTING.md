@@ -145,39 +145,36 @@ git config commit.gpgsign true
 5. Wait for CI checks and code review
 6. Squash and merge after approval
 
-Step 5 is currently advice rather than a rule. The `Protect main` ruleset
-(`gh api repos/appstrate/appstrate/rulesets/14614228`) carries only `pull_request` and
-`non_fast_forward`; it declares **no** `required_status_checks`, and
-`repos/appstrate/appstrate/branches/main/protection` returns 404. So every gate in this repository —
-`check`, the test suites, CodeQL, secret scanning — is mergeable red today.
+Step 5 is a rule for the checks listed below: the `Protect main` ruleset
+(`gh api repos/appstrate/appstrate/rules/branches/main`) carries `pull_request`, `non_fast_forward`
+and a `required_status_checks` rule. `Secret Scanning`, `Dependency Audit`, `Analyze` (CodeQL) and
+`Scorecard Analysis` are not in it: they report, and are mergeable red.
 
 ### Required Checks (maintainers)
 
-The set that should gate a merge. Names are the GitHub check-run names, verbatim
+The set the ruleset requires. Names are the GitHub check-run names, verbatim
 (`gh api repos/appstrate/appstrate/commits/main/check-runs --jq '.check_runs[].name'`):
 
-| Check                                                   | Workflow       |
-| ------------------------------------------------------- | -------------- |
-| `check`                                                 | `check.yml`    |
-| `Package resolves for consumers (packages/core)`        | `check.yml`    |
-| `Package resolves for consumers (packages/afps-shared)` | `check.yml`    |
-| `Unit tests`                                            | `test.yml`     |
-| `Platform container health e2e`                         | `test.yml`     |
-| `Secret Scanning`                                       | `security.yml` |
-| `Dependency Audit`                                      | `security.yml` |
-| `Analyze`                                               | `codeql.yml`   |
+| Check                                                   | Workflow    |
+| ------------------------------------------------------- | ----------- |
+| `check`                                                 | `check.yml` |
+| `Package resolves for consumers (packages/core)`        | `check.yml` |
+| `Package resolves for consumers (packages/afps-shared)` | `check.yml` |
+| `Schema catalog matches the migration chain`            | `check.yml` |
+| `Unit tests`                                            | `test.yml`  |
+| `Integration tests`                                     | `test.yml`  |
+| `Platform container health e2e`                         | `test.yml`  |
+| `EE container health e2e`                               | `test.yml`  |
+| `Runtime container e2e`                                 | `test.yml`  |
+| `E2E tests`                                             | `test.yml`  |
 
-Deliberately **not** required, because a required check that does not report blocks the PR forever:
-`Scorecard Analysis` has no `pull_request` trigger at all.
-`Integration tests`, `Runtime container e2e` and `E2E tests` are gated by an `if:` on the job, not on
-the workflow, so they always report: `skipped` satisfies a required check, a job that is never created
-does not. `Integration tests` and `Runtime container e2e` run on the `integration` / `e2e` label or on
-`main`. `E2E tests` runs on those too, and also **automatically on any PR that changes `apps/web/**`,
-`packages/ui/**` or `e2e/**`** (the `Detect E2E-relevant changes` job in `test.yml`); add the `e2e` label
-for a change outside those paths that the Playwright suite exercises (API, runtime).
-The same rule applies to any check added later: require it only once it is observed reporting on an
-ordinary PR. `Dependency Audit` meets it: it triggers on `pull_request` like `Secret Scanning`, so it
-reports on every PR — confirm it appears in the `check-runs` listing above before applying.
+A required check must always report: `Integration tests`, `Runtime container e2e` and `E2E tests` are
+gated by an `if:` on the job, not on the workflow, so they always report. `skipped` satisfies a
+required check; a job that is never created does not. `Integration tests` and `Runtime container e2e`
+run on the `integration` / `e2e` label or on `main`. `E2E tests` runs on those too, and also
+**automatically on any PR that changes `apps/web/**`, `packages/ui/**`, `e2e/**`, the root `package.json` / `bun.lock` or `test.yml` itself** (the `Detect E2E-relevant changes` job in `test.yml`); add the `e2e` label for a change outside those paths
+that the Playwright suite exercises (API, runtime, the workflow itself). The same rule applies to any
+check added later: require it only once it is observed reporting on an ordinary PR.
 
 Applying it — a ruleset `PUT` **replaces** the whole ruleset, so read the live one and merge into it
 rather than writing a body from scratch:
@@ -194,11 +191,13 @@ jq '.rules += [{
           { context: "check" },
           { context: "Package resolves for consumers (packages/core)" },
           { context: "Package resolves for consumers (packages/afps-shared)" },
+          { context: "Schema catalog matches the migration chain" },
           { context: "Unit tests" },
+          { context: "Integration tests" },
           { context: "Platform container health e2e" },
-          { context: "Secret Scanning" },
-          { context: "Dependency Audit" },
-          { context: "Analyze" }
+          { context: "EE container health e2e" },
+          { context: "Runtime container e2e" },
+          { context: "E2E tests" }
         ]
       }
     }]

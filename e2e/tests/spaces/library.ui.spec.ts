@@ -12,14 +12,15 @@
  * share, and gives one act two buttons. So the acts below have to work:
  *
  *   - switching a package ON in a space it never reached shares it there and
- *     activates it in one click, and the chip under "Partagé avec" appears;
- *   - removing that chip revokes the share, and the switch falls with it,
- *     because a revocation takes the placement away;
+ *     activates it in one click, and the share shows on the wire;
+ *   - withdrawing that share from the package sheet's Actions menu revokes it,
+ *     and the switch falls with it, because a revocation takes the placement
+ *     away;
  *   - switching a package OFF at home keeps the row and everything on it — the
  *     model chosen for that space is still there afterwards — a switch moves,
  *     the row does not;
- *   - moving the home moves the Home column and leaves the source space
- *     reading a package it no longer homes.
+ *   - moving the home (through the API) moves the Provenance cell and leaves
+ *     the source space reading a package it no longer homes.
  *
  * What a route test cannot show is that these sit on one screen and that the
  * caches they invalidate agree afterwards.

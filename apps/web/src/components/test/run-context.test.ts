@@ -34,10 +34,6 @@ function windowlessTurn(index: number, contextTokens: number): RunTurnRow {
   return {
     index,
     contextTokens,
-    inputTokens: contextTokens,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
   };
 }
 

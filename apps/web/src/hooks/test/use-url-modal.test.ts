@@ -144,7 +144,7 @@ describe("closing a modal twice from one entry", () => {
 
 describe("opening a modal on another address", () => {
   it("closes it the way Back does, to the list it was opened from", async () => {
-    // The catalogue's waiting shares open a package's sheet on its own kind.
+    // A link from another page opens a package's sheet on a list of another kind.
     const router = createMemoryRouter([{ path: "*" }], {
       initialEntries: ["/catalogue/agent"],
     });

@@ -213,32 +213,32 @@ Gain = lignes de code, hors tests/locales. **Recommandation** en gras.
 
 ### Dialogues / modèles / planification
 
-| #    | Décision                                                                                          | Gain                                                            | Reco                                         |
-| ---- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------- |
-| D-M1 | Onboarding : un modèle unique vs `ProviderAddFlow` (clé + plusieurs modèles)                      | inclus Phase 4                                                  | **`ProviderAddFlow`**                        |
-| D-M2 | Température/raisonnement : presets nommés (selects) vs curseurs                                   | −140                                                            | Au choix, mais un seul                       |
-| D-M3 | **Autosave par champ** des planifications vs formulaire + bouton Enregistrer                      | −250 (−100 lib)                                                 | **Formulaire explicite**                     |
-| D-M4 | Refus d'écriture de planification **résolu en place** vs toast + navigation                       | −300 … −450                                                     | Toast + lien                                 |
-| D-M5 | `TimeField` : 3 selects vs `Input type=time` natif                                                | −65 (risque : « 09:30 AM » en UI française selon le navigateur) | Natif si acceptable                          |
-| D-M6 | `PanelDialog` : bandeau qui apparaît au défilement                                                | −35                                                             | **Couper**                                   |
-| D-M7 | Overlay catalogue : deux lectures (cartes/matrice), activation en masse, vue « partagés », aperçu | −150 … −300                                                     | À trancher fonctionnalité par fonctionnalité |
+| #    | Décision                                                                                          | Gain                                                            | Reco                                                                                  |
+| ---- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| D-M1 | Onboarding : un modèle unique vs `ProviderAddFlow` (clé + plusieurs modèles)                      | inclus Phase 4                                                  | **`ProviderAddFlow`**                                                                 |
+| D-M2 | Température/raisonnement : presets nommés (selects) vs curseurs                                   | −140                                                            | Au choix, mais un seul                                                                |
+| D-M3 | **Autosave par champ** des planifications vs formulaire + bouton Enregistrer                      | −250 (−100 lib)                                                 | **Formulaire explicite**                                                              |
+| D-M4 | Refus d'écriture de planification **résolu en place** vs toast + navigation                       | −300 … −450                                                     | Toast + lien                                                                          |
+| D-M5 | `TimeField` : 3 selects vs `Input type=time` natif                                                | −65 (risque : « 09:30 AM » en UI française selon le navigateur) | Natif si acceptable                                                                   |
+| D-M6 | `PanelDialog` : bandeau qui apparaît au défilement                                                | −35                                                             | **Couper**                                                                            |
+| D-M7 | Overlay catalogue : deux lectures (cartes/matrice), activation en masse, vue « partagés », aperçu | −150 … −300                                                     | **Fait** : le catalogue n'a plus qu'une lecture, le tableau, plus la fiche du package |
 
 ### Shell / dashboard / réglages / runs
 
-| #     | Décision                                                                   | Gain                                       | Reco                                  |
-| ----- | -------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------- |
-| D-S1  | **Carrousel** du dashboard                                                 | −305 (+ dépendance `embla-carousel-react`) | **Couper**                            |
-| D-S2  | Sélecteur org/espace à deux colonnes vs `DropdownMenu` natif               | −154 vs −244                               | Garder le comportement, dédoublonner  |
-| D-S3  | Anneaux concentriques de l'état vide vs `EmptyMedia` standard              | −30                                        | Standard                              |
-| D-S4  | Skeletons qui lisent le cache de requêtes pour le titre                    | −45                                        | **Couper**                            |
-| D-S5  | Matrice des **rôles** (bascule liste/matrice)                              | −250                                       | À trancher                            |
-| D-S6  | **Inspecteur latéral** des logs (vs développement en ligne)                | −160                                       | À trancher                            |
-| D-S7  | Tuiles de stats cliquables + actions de pied de carte (vue d'ensemble run) | −130                                       | À trancher                            |
-| D-S8  | Portail d'actions de page des réglages                                     | −50                                        | Couper                                |
-| D-S9  | Modale « Ask AI » du dashboard                                             | ~−60                                       | À trancher                            |
-| D-S10 | 9 exports `Sidebar*` inutilisés                                            | −150                                       | **Garder** (diff propre avec l'amont) |
-| D-S11 | Styles globaux d'éléments bruts `styles.css:216-245`                       | −30 CSS + churn                            | **Différer** (risque élevé)           |
-| D-S12 | Clés `settings:permissions.label.*` (miroir du catalogue serveur)          | −180                                       | Générer côté serveur ou accepter      |
+| #     | Décision                                                                   | Gain                                       | Reco                                               |
+| ----- | -------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------- |
+| D-S1  | **Carrousel** du dashboard                                                 | −305 (+ dépendance `embla-carousel-react`) | **Couper**                                         |
+| D-S2  | Sélecteur org/espace à deux colonnes vs `DropdownMenu` natif               | −154 vs −244                               | Garder le comportement, dédoublonner               |
+| D-S3  | Anneaux concentriques de l'état vide vs `EmptyMedia` standard              | −30                                        | Standard                                           |
+| D-S4  | Skeletons qui lisent le cache de requêtes pour le titre                    | −45                                        | **Couper**                                         |
+| D-S5  | Matrice des **rôles** (bascule liste/matrice)                              | −250                                       | **Fait** : la page des rôles ne garde que la liste |
+| D-S6  | **Inspecteur latéral** des logs (vs développement en ligne)                | −160                                       | À trancher                                         |
+| D-S7  | Tuiles de stats cliquables + actions de pied de carte (vue d'ensemble run) | −130                                       | À trancher                                         |
+| D-S8  | Portail d'actions de page des réglages                                     | −50                                        | Couper                                             |
+| D-S9  | Modale « Ask AI » du dashboard                                             | ~−60                                       | À trancher                                         |
+| D-S10 | 9 exports `Sidebar*` inutilisés                                            | −150                                       | **Garder** (diff propre avec l'amont)              |
+| D-S11 | Styles globaux d'éléments bruts `styles.css:216-245`                       | −30 CSS + churn                            | **Différer** (risque élevé)                        |
+| D-S12 | Clés `settings:permissions.label.*` (miroir du catalogue serveur)          | −180                                       | Générer côté serveur ou accepter                   |
 
 **Total si tu prends toutes les recommandations en gras : ≈ −4,5 à −5 k lignes supplémentaires** au-delà du ménage sans coupe.
 

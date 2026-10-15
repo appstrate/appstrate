@@ -41,7 +41,7 @@ export function packageFileText(query: { isSuccess: boolean; data: unknown }): s
  * the hook the entire index as well.
  */
 export function usePackageFile(
-  packageId: string | undefined,
+  packageId: string,
   version: string | undefined,
   entry: PackageFileEntry,
   fresh = false,
@@ -64,14 +64,14 @@ export function usePackageFile(
     "/api/packages/{scope}/{name}/files/content",
     {
       params: {
-        path: splitPackageRef(packageId ?? ""),
+        path: splitPackageRef(packageId),
         query: { path: entry.path, version },
         header: scope.header,
       },
       parseAs: "text",
     },
     {
-      enabled: scope.enabled && !!packageId && needsFetch,
+      enabled: scope.enabled && needsFetch,
       ...(fresh ? { staleTime: 0, gcTime: 0, refetchOnMount: "always" as const } : {}),
     },
   );
@@ -101,12 +101,11 @@ export function usePackageFile(
  * guards apply here too. A non-2xx throws in the client middleware and becomes
  * its failure toast.
  */
-export function usePackageFileDownload(packageId: string | undefined, version: string | undefined) {
+export function usePackageFileDownload(packageId: string, version: string | undefined) {
   const scope = useOrgScope();
   const header = scope.header;
   return useCallback(
     async (path: string) => {
-      if (!packageId) return;
       await downloadOrToast(
         () =>
           client.GET("/api/packages/{scope}/{name}/files/content", {

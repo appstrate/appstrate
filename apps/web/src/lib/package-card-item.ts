@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The one row shape every package collection draws (cards and table), and its builders.
+// The one row shape every package collection draws (the tables, the dashboard's cards), and its builders.
 
-import type { ReactNode } from "react";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AgentListItem } from "@appstrate/shared-types";
 
@@ -18,7 +17,6 @@ export interface CardItem {
   keywords?: string[];
   usedByAgents?: number;
   unreadCount?: number;
-  actions?: ReactNode;
   autoInstalled?: boolean;
   /** An agent's chosen icon and colour. */
   identity?: { icon?: string | null; color?: string | null };

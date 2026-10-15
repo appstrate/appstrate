@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
+import { Field, FieldDescription, FieldError, FieldGroup } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { OptionSelect } from "@/components/app-ui/option-select";
@@ -65,7 +65,7 @@ function switchKind(from: Frequency, kind: FrequencyKind): Frequency {
 const timeValue = (at: TimeOfDay) =>
   `${String(at.hour).padStart(2, "0")}:${String(at.minute).padStart(2, "0")}`;
 function parseTime(value: string): TimeOfDay | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(value);
   return match ? { hour: Number(match[1]), minute: Number(match[2]) } : null;
 }
 
@@ -93,6 +93,7 @@ export function FrequencyComposer({
     const nextCron = toCron(next);
     onChange(cronFires(nextCron, timezone) ? nextCron : null);
   };
+  const cronInvalid = frequency.kind === "custom" && !cronFires(frequency.cron, timezone);
   const setAt = (value: string) => {
     const at = parseTime(value);
     if (at && "at" in frequency) update({ ...frequency, at });
@@ -215,10 +216,14 @@ export function FrequencyComposer({
             className="font-mono"
             value={frequency.cron}
             placeholder="0 9 * * 1-5"
-            aria-invalid={!cronFires(frequency.cron, timezone) || undefined}
+            aria-invalid={cronInvalid || undefined}
             onChange={(e) => update({ kind: "custom", cron: e.target.value })}
           />
-          <FieldDescription>{t("schedule.cronHint")}</FieldDescription>
+          {cronInvalid ? (
+            <FieldError>{t("schedule.frequency.invalid")}</FieldError>
+          ) : (
+            <FieldDescription>{t("schedule.cronHint")}</FieldDescription>
+          )}
         </Field>
       )}
 

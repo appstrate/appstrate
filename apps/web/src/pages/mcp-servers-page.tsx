@@ -3,5 +3,5 @@
 import { PackageIndexPage } from "./package-index";
 
 export function McpServersPage() {
-  return <PackageIndexPage type="mcp-server" manualCreation="import" />;
+  return <PackageIndexPage type="mcp-server" />;
 }

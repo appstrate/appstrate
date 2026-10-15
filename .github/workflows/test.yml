@@ -485,7 +485,7 @@ jobs:
         run: |
           changed=$(git diff --name-only HEAD^1 HEAD)
           printf 'Changed files:\n%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -qE '^(apps/web|packages/ui|e2e)/'; then
+          if printf '%s\n' "$changed" | grep -qE '^(apps/web/|packages/ui/|e2e/|\.github/workflows/test\.yml$|package\.json$|bun\.lock$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
