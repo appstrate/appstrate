@@ -12,8 +12,10 @@
  * Every write locks the organization row and does its storage I/O inside that
  * transaction. The key is the same for every image of an org, so two unserialized
  * writes could let one request delete the bytes the other just wrote; under the lock,
- * the row and the object always change together. The object is a few KiB, so the lock
- * is short.
+ * the row and the object always change together. The lock is `FOR NO KEY UPDATE`:
+ * it serializes logo writers without blocking the `FOR KEY SHARE` every foreign-key
+ * check on `organizations.id` takes, so a slow object store holds back the next logo
+ * write and nothing else of the organization (runs, logs, usage, files).
  */
 
 import { eq, like } from "drizzle-orm";
@@ -104,7 +106,7 @@ export async function setOrgLogo(
       .from(organizations)
       .where(eq(organizations.id, orgId))
       .limit(1)
-      .for("update");
+      .for("no key update");
     if (!current) throw new Error("Failed to update organization logo: not found");
 
     let logo: string | null = null;
