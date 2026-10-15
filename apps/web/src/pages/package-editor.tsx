@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Fragment, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useContext, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Versioned } from "../hooks/use-packages";
 import type {
@@ -48,7 +48,6 @@ import {
   setRuntimeTools,
   withNormalizedManifest,
   withOutputTool,
-  toResourceEntry,
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { SchemaField } from "../components/agent-editor/types";
@@ -57,7 +56,6 @@ import type { SchemaField } from "../components/agent-editor/types";
 
 function AgentEditorInner({
   initialState,
-  resolvedDeps,
   packageId,
   effectiveTimeoutSeconds,
   presentation = "page",
@@ -65,7 +63,6 @@ function AgentEditorInner({
   onTabRequest,
 }: {
   initialState: EditorState;
-  resolvedDeps: { skills?: unknown[] } | null;
   packageId: string | undefined;
   /**
    * Timeout this deployment will actually enforce (server-computed: declared
@@ -140,27 +137,6 @@ function AgentEditorInner({
       });
     }
   };
-
-  // Sync resolved skill metadata from server (names, descriptions). The group
-  // is absent from a summary read of the agent, and then there is nothing to
-  // sync — the editor keeps what the manifest declares.
-  const resolvedSkills = resolvedDeps?.skills;
-  useEffect(() => {
-    if (!resolvedSkills) return;
-    setState((prev) => {
-      const m = { ...prev.manifest };
-      const skills = (
-        resolvedSkills as {
-          id: string;
-          version?: string;
-          name?: string;
-          description?: string;
-        }[]
-      ).map(toResourceEntry);
-      setResourceEntries(m, "skills", skills);
-      return { ...prev, manifest: m };
-    });
-  }, [resolvedSkills, setState]);
 
   const setManifestRuntimeTools = (next: string[]) =>
     setState((s) => {
@@ -364,7 +340,6 @@ export function AgentDefinitionEditor({
           manifest: withNormalizedManifest(detail.manifest ?? {}),
           etag: detail.etag,
         }}
-        resolvedDeps={detail.dependencies ?? null}
         packageId={detail.id}
         effectiveTimeoutSeconds={detail.effective_timeout_seconds}
         presentation="embedded"
@@ -613,7 +588,6 @@ export function PackageEditorPage({ type }: { type: "agent" | "skill" | "integra
     return (
       <AgentEditorInner
         initialState={defaultEditorState(currentOrg?.slug, user?.email)}
-        resolvedDeps={null}
         packageId={undefined}
       />
     );

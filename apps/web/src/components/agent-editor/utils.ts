@@ -287,8 +287,6 @@ export function setResourceEntries(
   type: "skills" | "integrations",
   entries: ResourceEntry[],
 ): void {
-  if (!m.dependencies) m.dependencies = {};
-  const deps = m.dependencies as Record<string, unknown>;
   if (type === "integrations") {
     writeManifestIntegrations(
       m,
@@ -301,21 +299,13 @@ export function setResourceEntries(
     if (e.id) record[e.id] = e.version ?? "*";
   }
   if (Object.keys(record).length > 0) {
-    deps[type] = record;
-  } else {
-    delete deps[type];
+    if (!m.dependencies) m.dependencies = {};
+    (m.dependencies as Record<string, unknown>)[type] = record;
+  } else if (m.dependencies) {
+    // An empty group writes nothing: a manifest that declares no
+    // `dependencies` stays that way, so the editor does not read as dirty.
+    delete (m.dependencies as Record<string, unknown>)[type];
   }
-}
-
-// ─── Resource entry helper ──────────────────────────────────
-
-export function toResourceEntry(r: {
-  id: string;
-  version?: string;
-  name?: string;
-  description?: string;
-}): ResourceEntry {
-  return { id: r.id, version: r.version ?? "*", name: r.name, description: r.description };
 }
 
 // ─── Manifest → SchemaFields (used by AgentEditorInner) ─────
