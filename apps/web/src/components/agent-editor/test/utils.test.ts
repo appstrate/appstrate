@@ -15,6 +15,7 @@ import {
   fileKind,
   itemsEnumText,
   listToText,
+  moveItem,
   setFileKind,
   setItemsEnum,
   setKeyword,
@@ -595,6 +596,35 @@ describe("schemaToFields / fieldsToSchema — lossless round-trip", () => {
 });
 
 // ─── Keyword operations ─────────────────────────────────────
+
+describe("moveItem", () => {
+  it("swaps an item with its neighbour, without touching the input", () => {
+    const list = ["a", "b", "c"];
+    expect(moveItem(list, 1, -1)).toEqual(["b", "a", "c"]);
+    expect(moveItem(list, 1, 1)).toEqual(["a", "c", "b"]);
+    expect(list).toEqual(["a", "b", "c"]);
+  });
+
+  it("returns the list unchanged at either end", () => {
+    const list = ["a", "b"];
+    expect(moveItem(list, 0, -1)).toBe(list);
+    expect(moveItem(list, 1, 1)).toBe(list);
+  });
+
+  it("is what `property_order` persists", () => {
+    const fields = ["a", "b", "c"].map((key) => ({
+      _id: key,
+      key,
+      required: false,
+      prop: { type: "string" as const },
+    }));
+    expect(fieldsToSchema(moveItem(fields, 2, -1), "input")?.property_order).toEqual([
+      "a",
+      "c",
+      "b",
+    ]);
+  });
+});
 
 describe("setKeyword", () => {
   it("sets a keyword without mutating the input", () => {

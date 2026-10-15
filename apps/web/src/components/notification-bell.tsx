@@ -231,22 +231,24 @@ export function NotificationBell() {
   };
 
   const triggerButton = (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon"
       className={cn(
-        "text-muted-foreground hover:text-foreground hover:bg-accent relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0 transition-colors",
+        "text-muted-foreground relative size-8 shrink-0",
         hasRunning && unread === 0 && "text-primary animate-pulse",
       )}
       aria-label={t("notifications.ariaLabel")}
     >
-      <Bell size={18} />
+      <Bell />
       <CountBadge
         count={unread}
         label={t("notifications.ariaLabel")}
         tone="spark"
         className="absolute -top-1 -right-1"
       />
-    </button>
+    </Button>
   );
 
   const contentProps = {
