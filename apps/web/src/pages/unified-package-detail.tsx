@@ -25,12 +25,14 @@ import { EmptyState, ResourceErrorState } from "../components/page-states";
 import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { isQueryInFlight } from "../lib/query-state";
+import { catalogueVersionFor } from "../lib/catalogue-link";
 import { packageDetailPath } from "../lib/package-paths";
 
 // Shared components
 import { PackageDetailBar } from "../components/package-detail/package-detail-bar";
 import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
+import { CatalogueLink } from "../components/package-detail/catalogue-link";
 import { VersionBanners } from "../components/version-banners";
 import { PackageOverview } from "../components/package-detail/package-overview";
 import { isOwnedSource } from "../components/package-detail/owned-source";
@@ -350,6 +352,19 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const versionLabel = isHistoricalVersion ? versionDetail?.version : undefined;
 
+  // The sheet opens on the version the reader chose, and follows the current one otherwise.
+  const catalogueLink = (
+    <CatalogueLink
+      type={type}
+      packageId={packageId}
+      version={catalogueVersionFor({
+        isHistoricalVersion,
+        source,
+        version: versionDetail?.version,
+      })}
+    />
+  );
+
   const runButton = (
     // The page's one launch verdict, shared with the empty runs list.
     <AgentRunButton
@@ -378,6 +393,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             tabs={agentTabs}
             actions={
               <div className="flex items-center gap-2">
+                {catalogueLink}
                 {runButton}
                 <AgentActions
                   packageId={packageId}
@@ -400,17 +416,20 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             hasUnarchivedChanges={hasTimestampChanges && !!homeWritable}
             tabs={tabDefs}
             actions={
-              <PackageActionsDropdown
-                packageId={packageId}
-                type={type}
-                detail={pkgDetail}
-                isHistoricalVersion={isHistoricalVersion}
-                downloadVersion={downloadVersion}
-                onDownload={downloadPackage}
-                onCreateVersion={() => newVersion.open()}
-                createVersionBlockedReason={unsavedReason}
-                isActiveHere={isActiveInCurrentSpace}
-              />
+              <div className="flex items-center gap-2">
+                {catalogueLink}
+                <PackageActionsDropdown
+                  packageId={packageId}
+                  type={type}
+                  detail={pkgDetail}
+                  isHistoricalVersion={isHistoricalVersion}
+                  downloadVersion={downloadVersion}
+                  onDownload={downloadPackage}
+                  onCreateVersion={() => newVersion.open()}
+                  createVersionBlockedReason={unsavedReason}
+                  isActiveHere={isActiveInCurrentSpace}
+                />
+              </div>
             }
           />
         )}

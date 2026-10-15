@@ -24,6 +24,8 @@ import {
 } from "react-router-dom";
 import { searchOf } from "../lib/url-search";
 
+const NO_COMPANIONS: readonly string[] = [];
+
 /** History state key naming the modal whose opening pushed the entry. */
 const OPENED_BY = "openedModal";
 
@@ -53,22 +55,27 @@ type ModalStep = { back: true } | { back: false; search: string; replace: boolea
 /**
  * The navigation that sets modal `name` to `next` (`null` closes it) from the
  * current entry. `closing` names the modal this one replaces: two never stack,
- * and one navigation does both.
+ * and one navigation does both. `companions` are the parameters that qualify
+ * the modal's value (a version beside a package): they go with it, whenever it
+ * closes or names another object.
  */
 export function modalParamStep(
   current: { search: string; state: unknown },
   name: string,
   next: string | null,
   closing?: string,
+  companions: readonly string[] = NO_COMPANIONS,
 ): ModalStep {
   const opener = openedBy(current.state);
   if (next === null && opener === name) return { back: true };
   const params = new URLSearchParams(current.search);
   const handover = closing !== undefined && params.has(closing);
   const open = params.has(name) || handover;
+  const previous = params.get(name);
   if (next === null) params.delete(name);
   else params.set(name, next);
   if (closing) params.delete(closing);
+  if (next !== previous) for (const companion of companions) params.delete(companion);
   const search = searchOf(params);
   if (next === null) return { back: false, search, replace: true, state: current.state };
   if (!open) return { back: false, search, replace: false, state: withOpener(current.state, name) };
@@ -107,9 +114,10 @@ export function closeOncePerEntry(): {
   };
 }
 
-function withoutParam(search: string, name: string): string {
+function withoutParam(search: string, name: string, companions: readonly string[]): string {
   const params = new URLSearchParams(search);
   params.delete(name);
+  for (const companion of companions) params.delete(companion);
   return searchOf(params);
 }
 
@@ -132,15 +140,16 @@ export function modalLeaveSteps(
   name: string,
   to: Path,
   state?: unknown,
+  companions: readonly string[] = NO_COMPANIONS,
 ): ModalNavigation[] {
-  const destination = { to: { ...to, search: withoutParam(to.search, name) }, state };
+  const destination = { to: { ...to, search: withoutParam(to.search, name, companions) }, state };
   const open = new URLSearchParams(current.search).has(name);
   if (!open || openedBy(current.state) === name) return [{ ...destination, replace: true }];
   return [
     {
       to: {
         pathname: current.pathname,
-        search: withoutParam(current.search, name),
+        search: withoutParam(current.search, name, companions),
         hash: current.hash,
       },
       replace: true,
@@ -150,7 +159,7 @@ export function modalLeaveSteps(
   ];
 }
 
-export function useModalParam(name: string) {
+export function useModalParam(name: string, companions: readonly string[] = NO_COMPANIONS) {
   const location = useLocation();
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -163,7 +172,7 @@ export function useModalParam(name: string) {
   const set = useCallback(
     (next: string | null, closing?: string) => {
       if (next === null && !closeGuard.take(location.key)) return;
-      const step = modalParamStep(location, name, next, closing);
+      const step = modalParamStep(location, name, next, closing, companions);
       if (step.back) {
         navigate(-1);
         return;
@@ -173,16 +182,22 @@ export function useModalParam(name: string) {
         { replace: step.replace, state: step.state },
       );
     },
-    [location, closeGuard, name, navigate],
+    [location, closeGuard, name, companions, navigate],
   );
   const open = useCallback((value = "1", closing?: string) => set(value, closing), [set]);
   const close = useCallback(() => set(null), [set]);
   const leave = useCallback(
     (to: To, state?: unknown) => {
-      const steps = modalLeaveSteps(location, name, resolvePath(to, location.pathname), state);
+      const steps = modalLeaveSteps(
+        location,
+        name,
+        resolvePath(to, location.pathname),
+        state,
+        companions,
+      );
       for (const step of steps) navigate(step.to, { replace: step.replace, state: step.state });
     },
-    [location, name, navigate],
+    [location, name, companions, navigate],
   );
   return {
     /** The parameter's value, or `null` when the modal is closed. */
@@ -195,6 +210,11 @@ export function useModalParam(name: string) {
   };
 }
 
+interface ModalTargetOptions {
+  /** Parameters that qualify the object and leave with it (see `modalParamStep`). */
+  companions?: readonly string[];
+}
+
 /**
  * A modal on one object of a list, named by id (`?editModel=<id>`). `target` is
  * the object once the list has loaded; an id the list does not hold (deleted,
@@ -204,18 +224,24 @@ export function useModalParam(name: string) {
 export function useModalTarget<T extends { id: string }>(
   name: string,
   items: readonly T[] | undefined,
+  options?: ModalTargetOptions,
 ): ReturnType<typeof useModalParam> & { target: T | undefined };
 export function useModalTarget<T>(
   name: string,
   items: readonly T[] | undefined,
   keyOf: (item: T) => string,
+  options?: ModalTargetOptions,
 ): ReturnType<typeof useModalParam> & { target: T | undefined };
 export function useModalTarget<T>(
   name: string,
   items: readonly T[] | undefined,
-  keyOf: (item: T) => string = (item) => (item as { id: string }).id,
+  keyOrOptions?: ((item: T) => string) | ModalTargetOptions,
+  maybeOptions?: ModalTargetOptions,
 ) {
-  const param = useModalParam(name);
+  const keyOf =
+    typeof keyOrOptions === "function" ? keyOrOptions : (item: T) => (item as { id: string }).id;
+  const options = typeof keyOrOptions === "function" ? maybeOptions : keyOrOptions;
+  const param = useModalParam(name, options?.companions);
   const target =
     param.value === null ? undefined : items?.find((item) => keyOf(item) === param.value);
   const unknown = param.value !== null && items !== undefined && target === undefined;
