@@ -272,7 +272,7 @@ function RefusedWriteForm({
   }).data?.dependencies.integrations;
   const [picks, setPicks] = useState<Record<string, string[]>>(refused.picks);
   return (
-    <div className="mb-6 space-y-4">
+    <div className="mb-6 flex flex-col gap-4">
       <ScheduleConnectionAnswer
         choices={refused.choices}
         submitted={refused.picks}
@@ -288,6 +288,7 @@ function RefusedWriteForm({
       />
       <Button
         type="button"
+        className="self-start"
         disabled={update.isPending}
         onClick={() => update.mutate(scheduleRefusalAnswerPayload(sent, picks))}
       >

@@ -143,8 +143,10 @@ export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
               {t("integrationEditor.auths.mtlsDelivery")}
             </p>
           ) : (
-            <div className="border-border space-y-2 rounded border border-dashed p-2">
-              <Label className="text-xs uppercase">{t("integrationEditor.auths.delivery")}</Label>
+            <div className="border-border flex flex-col gap-2 rounded border border-dashed p-2">
+              <Label className="mb-0 text-xs uppercase">
+                {t("integrationEditor.auths.delivery")}
+              </Label>
               <FormField
                 id={`auth-hdr-name-${idx}`}
                 label={t("integrationEditor.auths.headerName")}

@@ -96,7 +96,7 @@ function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
         </TableBody>
       </Table>
       {!hasWindow && (
-        <p className="text-muted-foreground mt-2 text-xs">{t("run.turnsPeakRelativeHint")}</p>
+        <p className="text-muted-foreground text-xs">{t("run.turnsPeakRelativeHint")}</p>
       )}
     </>
   );
@@ -105,7 +105,7 @@ function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
 export function RunTurnsDetail({ turns }: { turns: RunTurnRow[] }) {
   const { t } = useTranslation("agents");
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <p className="text-muted-foreground text-sm">{t("run.turnsHint")}</p>
       <TurnsTable turns={turns} />
     </div>

@@ -138,15 +138,15 @@ function WebhookCreateForm({
 
       {/* Never create an organization-wide webhook without saying so. */}
       {levels.length === 1 && level === "org" && (
-        <div className="space-y-2">
-          <Label>{t("settings:webhooks.levelLabel")}</Label>
+        <div className="flex flex-col gap-2">
+          <Label className="mb-0">{t("settings:webhooks.levelLabel")}</Label>
           <p className="text-sm">{levelLabels.org}</p>
         </div>
       )}
 
       {levels.length > 1 && (
-        <div className="space-y-2">
-          <Label>{t("settings:webhooks.levelLabel")}</Label>
+        <div className="flex flex-col gap-2">
+          <Label className="mb-0">{t("settings:webhooks.levelLabel")}</Label>
           <RadioGroup value={level} onValueChange={(v) => setChosenLevel(v as Level)}>
             {levels.map((l) => (
               <div key={l} className="flex items-center gap-2">

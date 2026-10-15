@@ -96,8 +96,8 @@ export function AgentVersionField({
   leadingOptions: VersionLeadingOption[];
 }) {
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
+    <div className="flex flex-col gap-2">
+      <Label className="mb-0">{label}</Label>
       <PackageVersionSelect
         type="agent"
         packageId={packageId}

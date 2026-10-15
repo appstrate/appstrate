@@ -249,7 +249,7 @@ export function RunResultsContent({
     >
       <section className="min-w-0 p-6">
         <SettingsHeading title={activeSection.label} description={activeSection.description} />
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           {isPartial && (
             <Alert>
               <FileOutput />
@@ -275,9 +275,14 @@ function StructuredOutputBody({
   const { t } = useTranslation("agents");
   const [showJson, setShowJson] = useState(false);
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       {showJson ? <JsonView data={output} /> : <StructuredOutput value={output} schema={schema} />}
-      <Button variant="outline" size="sm" onClick={() => setShowJson((v) => !v)}>
+      <Button
+        variant="outline"
+        size="sm"
+        className="self-start"
+        onClick={() => setShowJson((v) => !v)}
+      >
         <Braces />
         {showJson ? t("run.outputShowFields") : t("run.outputShowJson")}
       </Button>

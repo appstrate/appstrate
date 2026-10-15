@@ -304,8 +304,8 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
         )}
       />
 
-      <div className="space-y-2">
-        <Label>{t("settings:apiKeys.scopes")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("settings:apiKeys.scopes")}</Label>
         <p className="text-muted-foreground text-xs">{t("settings:oauthClients.scopesHint")}</p>
         <div className="flex flex-col gap-1.5">
           {(availableScopes ?? Array.from(REQUIRED_SCOPES)).map((scope) => {

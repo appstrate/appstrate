@@ -34,10 +34,11 @@ export function ModelChoiceList({
   return (
     <div className="flex flex-col gap-3">
       {source === "discover" && (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <PendingButton
             type="button"
             variant="outline"
+            className="self-start"
             onClick={choice.detect}
             pending={choice.detecting}
           >

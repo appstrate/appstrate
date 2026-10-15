@@ -240,7 +240,7 @@ function PasswordChangeForm() {
 
   return (
     <div className="border-border bg-card mb-4 rounded-lg border p-5">
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 py-1">
         <FormItem
           id="current-password"
           label={t("preferences.currentPassword")}
@@ -257,7 +257,7 @@ function PasswordChangeForm() {
         <NewPasswordFields form={form} />
         {errors.root && <FieldError>{errors.root.message}</FieldError>}
         {success && <div className="text-success text-sm">{success}</div>}
-        <Button type="submit" disabled={isSubmitting}>
+        <Button type="submit" className="self-start" disabled={isSubmitting}>
           {isSubmitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
         </Button>
       </form>
@@ -323,10 +323,10 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
       <p className="text-muted-foreground mb-4 text-sm">
         {t("preferences.setPasswordDescription")}
       </p>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 py-1">
         <NewPasswordFields form={form} />
         {errors.root && <FieldError>{errors.root.message}</FieldError>}
-        <Button type="submit" disabled={isSubmitting}>
+        <Button type="submit" className="self-start" disabled={isSubmitting}>
           {isSubmitting ? t("preferences.settingPassword") : t("preferences.setPassword")}
         </Button>
       </form>

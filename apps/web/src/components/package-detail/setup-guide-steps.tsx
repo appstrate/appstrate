@@ -13,7 +13,7 @@ export function SetupGuideSteps({
   if (steps.length === 0) return null;
   return (
     <section
-      className="bg-muted/20 mb-4 rounded-md border p-4"
+      className="bg-muted/20 rounded-md border p-4"
       data-testid="setup-guide-steps"
       aria-label={t("integration.setup_guide.step_label")}
     >

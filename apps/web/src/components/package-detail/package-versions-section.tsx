@@ -35,7 +35,7 @@ export function PackageVersionsSection({
   );
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="flex flex-col gap-4 p-6">
       {hasUnarchivedChanges && latestVersion && (
         <div className="border-border flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3">
           <p className="text-muted-foreground min-w-0 flex-1 text-sm">{t("version.draftAhead")}</p>
@@ -50,14 +50,16 @@ export function PackageVersionsSection({
           </Button>
         </div>
       )}
-      <VersionHistory
-        packageId={packageId}
-        type={type}
-        canRestore={canRestore}
-        canDelete={canDelete}
-        onCreate={onCreate}
-        onCompare={(version) => compare.open(version)}
-      />
+      <div>
+        <VersionHistory
+          packageId={packageId}
+          type={type}
+          canRestore={canRestore}
+          canDelete={canDelete}
+          onCreate={onCreate}
+          onCompare={(version) => compare.open(version)}
+        />
+      </div>
       <CompareWithDraftModal
         type={type}
         packageId={packageId}

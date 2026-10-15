@@ -22,9 +22,7 @@ export function SettingValue({ label, children }: { label: ReactNode; children: 
   return (
     <div className="pb-8 last:pb-0">
       <dt className="text-sm font-medium">{label}</dt>
-      <dd className="text-muted-foreground mt-1 space-y-2 text-sm leading-relaxed break-words">
-        {children}
-      </dd>
+      <dd className="text-muted-foreground mt-1 text-sm leading-relaxed break-words">{children}</dd>
     </div>
   );
 }

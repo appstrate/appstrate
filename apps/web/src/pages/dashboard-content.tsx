@@ -116,7 +116,7 @@ export function DashboardHeader({
       {assist.value !== null && (
         <Modal onClose={assist.close} title={t("dashboard.askAi.title")} className="sm:max-w-xl">
           <p className="text-muted-foreground text-sm">{t("dashboard.askAi.description")}</p>
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             {/* Offered where `/chat` opens: the module loaded AND the caller's grants. */}
             {canChat && (
               <ChoiceCard
@@ -350,7 +350,7 @@ export function DashboardContent(data: DashboardData) {
 
   if (!shown.recentAgents && !shown.recentRuns && !shown.schedules) {
     return (
-      <div className="space-y-8">
+      <div>
         <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
         <EmptyState
           message={t("dashboard.empty")}
@@ -362,60 +362,61 @@ export function DashboardContent(data: DashboardData) {
   }
 
   return (
-    <div className="space-y-8">
+    <>
       <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
+      <div className="flex flex-col gap-8">
+        {metrics.cards.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {metrics.cards.map((metric) => (
+              <MetricCard key={metric.label} {...metric} />
+            ))}
+          </div>
+        )}
 
-      {metrics.cards.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {metrics.cards.map((metric) => (
-            <MetricCard key={metric.label} {...metric} />
-          ))}
-        </div>
-      )}
+        {shown.recentAgents && (
+          <section>
+            <SectionHeading
+              title={t("dashboard.recentAgents")}
+              href="/agents"
+              action={t("dashboard.allAgents")}
+            />
+            <RecentAgents agents={data.agents} unreadCounts={data.unreadCounts} />
+          </section>
+        )}
 
-      {shown.recentAgents && (
-        <section>
-          <SectionHeading
-            title={t("dashboard.recentAgents")}
-            href="/agents"
-            action={t("dashboard.allAgents")}
-          />
-          <RecentAgents agents={data.agents} unreadCounts={data.unreadCounts} />
-        </section>
-      )}
-
-      {/* The schedules column follows the same permission as its nav entry, so
+        {/* The schedules column follows the same permission as its nav entry, so
           its link never 403s. When one column is absent the other takes the
           full width rather than leaving a hole. */}
-      <div
-        className={cn(
-          "grid grid-cols-1 gap-6",
-          shown.schedules &&
-            shown.recentRuns &&
-            "lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]",
-        )}
-      >
-        {shown.recentRuns && (
-          <section className="min-w-0">
-            <SectionHeading
-              title={t("dashboard.recentRuns")}
-              href="/runs"
-              action={t("dashboard.seeAll")}
-            />
-            <RecentRuns runs={data.runs} agentName={data.agentName} agentById={agentById} />
-          </section>
-        )}
-        {shown.schedules && (
-          <section className="min-w-0">
-            <SectionHeading
-              title={t("dashboard.upcomingSchedules")}
-              href="/schedules"
-              action={t("common:nav.schedules")}
-            />
-            <UpcomingSchedules schedules={metrics.upcomingSchedules} agentById={agentById} />
-          </section>
-        )}
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-6",
+            shown.schedules &&
+              shown.recentRuns &&
+              "lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]",
+          )}
+        >
+          {shown.recentRuns && (
+            <section className="min-w-0">
+              <SectionHeading
+                title={t("dashboard.recentRuns")}
+                href="/runs"
+                action={t("dashboard.seeAll")}
+              />
+              <RecentRuns runs={data.runs} agentName={data.agentName} agentById={agentById} />
+            </section>
+          )}
+          {shown.schedules && (
+            <section className="min-w-0">
+              <SectionHeading
+                title={t("dashboard.upcomingSchedules")}
+                href="/schedules"
+                action={t("common:nav.schedules")}
+              />
+              <UpcomingSchedules schedules={metrics.upcomingSchedules} agentById={agentById} />
+            </section>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

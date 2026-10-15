@@ -23,7 +23,7 @@ export function AgentIdentity({
   if (!description && !isSystem && !homeSpaceName) return null;
 
   return (
-    <section className="space-y-3" data-agent-identity>
+    <section className="flex flex-col gap-3" data-agent-identity>
       {description && (
         <p className="text-sm">
           <InlineMarkdown>{description}</InlineMarkdown>

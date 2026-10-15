@@ -195,7 +195,7 @@ export function HostedConnectPage() {
         )}
 
         {phase === "done" && handoffSteps && (
-          <div className="space-y-5" data-testid="connect-handoff">
+          <div className="flex flex-col gap-5" data-testid="connect-handoff">
             <div>
               <h1 className="text-lg font-semibold">
                 {t("integration.connect.handoffPanel.title")}
@@ -241,7 +241,7 @@ export function HostedConnectPage() {
                 {t("integration.connect.hosted.title", { display: context.display_name })}
               </h1>
             </div>
-            <form className="space-y-4" onSubmit={submit}>
+            <form className="flex flex-col gap-4" onSubmit={submit}>
               <p className="text-muted-foreground text-sm">
                 {isOAuth
                   ? t("integration.connect.variables.oauthSubtitle")

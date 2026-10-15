@@ -175,7 +175,7 @@ function ModelForm({
 
   return (
     <FormProvider {...form}>
-      <form id="model-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
+      <form id="model-form" onSubmit={onFormSubmit} noValidate className="flex flex-col gap-4">
         <input type="hidden" {...register("credentialId", { validate: credentialValidate })} />
         <FormItem
           id="mdl-credential"

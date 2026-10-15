@@ -92,8 +92,8 @@ function OverrideRow({
     );
   }
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
+    <div className="flex flex-col gap-2">
+      <Label className="mb-0">{label}</Label>
       {children}
     </div>
   );
@@ -349,8 +349,8 @@ function ConnectionOverridesSection({
 }) {
   const { t } = useTranslation(["agents"]);
   return (
-    <div className="space-y-2">
-      <Label>{t("connectionOverrides.label")}</Label>
+    <div className="flex flex-col gap-2">
+      <Label className="mb-0">{t("connectionOverrides.label")}</Label>
       <p className="text-muted-foreground text-xs">
         {scheduled ? t("schedule.connectionOverrides.hint") : t("run.overrides.connectionHint")}
       </p>

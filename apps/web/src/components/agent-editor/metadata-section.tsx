@@ -113,8 +113,10 @@ export function MetadataSection({
           placeholder="1.0.0"
           description={t("editor.metaVersionDesc")}
         />
-        <div className="space-y-2">
-          <Label htmlFor="meta-description">{t("editor.fieldDescLabel")}</Label>
+        <div className="flex flex-col gap-2">
+          <Label className="mb-0" htmlFor="meta-description">
+            {t("editor.fieldDescLabel")}
+          </Label>
           <Textarea
             id="meta-description"
             value={value.description}
@@ -122,27 +124,29 @@ export function MetadataSection({
             placeholder={t("editor.metaDescPlaceholder")}
           />
         </div>
-        <div className="space-y-2">
-          <Label>{t("manifest.keywords")}</Label>
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {value.keywords.map((keyword) => (
-              <span
-                key={keyword}
-                className="border-border bg-background text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs"
-              >
-                {keyword}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="text-muted-foreground hover:text-destructive size-auto p-0 text-sm leading-none"
-                  onClick={() => removeKeyword(keyword)}
+        <div className="flex flex-col gap-2">
+          <Label className="mb-0">{t("manifest.keywords")}</Label>
+          {value.keywords.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {value.keywords.map((keyword) => (
+                <span
+                  key={keyword}
+                  className="border-border bg-background text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs"
                 >
-                  &times;
-                </Button>
-              </span>
-            ))}
-          </div>
+                  {keyword}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-destructive size-auto p-0 text-sm leading-none"
+                    onClick={() => removeKeyword(keyword)}
+                  >
+                    &times;
+                  </Button>
+                </span>
+              ))}
+            </div>
+          )}
           <Input
             type="text"
             placeholder={t("editor.metaKeywordPlaceholder")}
@@ -161,7 +165,7 @@ function SettingsFieldGroup({ title, children }: { title: string; children: Reac
   return (
     <section>
       <SettingsHeading level="group" title={title} />
-      <div className="max-w-2xl space-y-5">{children}</div>
+      <div className="flex max-w-2xl flex-col gap-5">{children}</div>
     </section>
   );
 }

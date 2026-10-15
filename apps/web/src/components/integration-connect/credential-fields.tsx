@@ -34,10 +34,10 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
         // Defaults reach the input through `initialCredentialValues`, which also submits them.
         const value = values[field] ?? "";
         return (
-          <div key={field} className="space-y-1">
+          <div key={field} className="flex flex-col gap-1">
             <Label
               htmlFor={`field-${field}`}
-              className={labelText === field ? "font-mono text-xs" : "text-xs"}
+              className={labelText === field ? "mb-0 font-mono text-xs" : "mb-0 text-xs"}
             >
               {labelText}
             </Label>

@@ -138,7 +138,7 @@ export function ScopeMultiSelect({
   const label = allSelected ? text.all : noneSelected ? text.none : text.count(selected.length);
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button

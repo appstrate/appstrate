@@ -463,7 +463,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         {type === "agent" && agentDetail && (
           <div className="overflow-visible" data-agent-detail-surface>
             <DetailTabPanel value="overview">
-              <div className="space-y-8">
+              <div className="flex flex-col gap-8">
                 <AgentIdentity
                   description={unifiedForHeader.description}
                   source={unifiedForHeader.source}
@@ -478,10 +478,15 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 ) : (
                   // Without `agents:read` the summary's fields (manifest, prompt,
                   // authoring history) are not served: say what the role allows.
-                  <div className="space-y-4">
+                  <div className="flex flex-col gap-4">
                     <RoleLimitNotice>{t("detail.roleLimit.overview")}</RoleLimitNotice>
                     {tabReads.runs && (
-                      <Button variant="outline" size="sm" onClick={() => setTab("runs")}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="self-start"
+                        onClick={() => setTab("runs")}
+                      >
                         {t("detail.roleLimit.seeRuns")}
                       </Button>
                     )}

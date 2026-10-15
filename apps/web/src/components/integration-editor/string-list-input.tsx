@@ -34,7 +34,7 @@ export function StringListInput({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       {label && <Label>{label}</Label>}
       {values.length > 0 && (
         <div className="flex flex-wrap gap-1.5">

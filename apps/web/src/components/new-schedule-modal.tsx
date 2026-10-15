@@ -261,7 +261,7 @@ export function ScheduleFieldsReady({
 
   return (
     <form
-      className="space-y-5"
+      className="flex flex-col gap-5"
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -298,7 +298,7 @@ export function ScheduleFieldsReady({
         title={t("schedule.optionsTitle")}
         open={optionsOpen || refused.length > 0}
         onOpenChange={setOptionsOpen}
-        contentClassName="space-y-4"
+        contentClassName="flex flex-col gap-4"
       >
         <Field>
           <Label>{t("schedule.actorTitle")}</Label>

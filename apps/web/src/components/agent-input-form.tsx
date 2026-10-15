@@ -137,7 +137,7 @@ export function AgentInputForm({ wrapper, settings, value, onChange, ref }: Agen
           onOpenChange={setAdvancedOpen}
           triggerTestId="advanced-input-toggle"
           contentTestId="advanced-input-fields"
-          contentClassName="space-y-2"
+          contentClassName="flex flex-col gap-2"
         >
           <p className="text-muted-foreground text-xs">{t("input.advancedHint")}</p>
           <SchemaForm

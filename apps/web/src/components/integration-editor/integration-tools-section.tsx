@@ -76,7 +76,7 @@ export function IntegrationToolsSection({
   const commit = (next: ToolPolicyState[]) => edit?.onChange(setToolsPolicy(edit.manifest, next));
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       {edit ? (
         <AllowUndeclaredToggle manifest={edit.manifest} onChange={edit.onChange} />
       ) : (
@@ -91,48 +91,50 @@ export function IntegrationToolsSection({
           </Alert>
         )
       )}
-      <PackageToolCatalog
-        tools={entries}
-        actions={
-          edit && (
-            <PageActionsMenu
-              actions={[
-                {
-                  id: "add-tool",
-                  label: t("integrationEditor.toolsPolicy.addTool"),
-                  icon: Plus,
-                  onSelect: () => policyModal.open("new"),
-                },
-              ]}
-            />
-          )
-        }
-        rowActions={
-          policies
-            ? (tool) => (
-                <TableRowActions
-                  menuLabel={t("editor.rowActions", { name: tool.name })}
-                  actions={[
-                    {
-                      id: "edit",
-                      label: t("integrationEditor.toolsPolicy.editScopes"),
-                      icon: Pencil,
-                      onSelect: () => policyModal.open(tool.name),
-                    },
-                    {
-                      id: "remove",
-                      label: t("integrationEditor.toolsPolicy.remove"),
-                      icon: Trash2,
-                      onSelect: () =>
-                        commit(policies.filter((policy) => policy.name !== tool.name)),
-                      hidden: !policies.some((policy) => policy.name === tool.name),
-                    },
-                  ]}
-                />
-              )
-            : undefined
-        }
-      />
+      <div>
+        <PackageToolCatalog
+          tools={entries}
+          actions={
+            edit && (
+              <PageActionsMenu
+                actions={[
+                  {
+                    id: "add-tool",
+                    label: t("integrationEditor.toolsPolicy.addTool"),
+                    icon: Plus,
+                    onSelect: () => policyModal.open("new"),
+                  },
+                ]}
+              />
+            )
+          }
+          rowActions={
+            policies
+              ? (tool) => (
+                  <TableRowActions
+                    menuLabel={t("editor.rowActions", { name: tool.name })}
+                    actions={[
+                      {
+                        id: "edit",
+                        label: t("integrationEditor.toolsPolicy.editScopes"),
+                        icon: Pencil,
+                        onSelect: () => policyModal.open(tool.name),
+                      },
+                      {
+                        id: "remove",
+                        label: t("integrationEditor.toolsPolicy.remove"),
+                        icon: Trash2,
+                        onSelect: () =>
+                          commit(policies.filter((policy) => policy.name !== tool.name)),
+                        hidden: !policies.some((policy) => policy.name === tool.name),
+                      },
+                    ]}
+                  />
+                )
+              : undefined
+          }
+        />
+      </div>
 
       {edit && policies && policyModal.value !== null && (
         <Modal
@@ -238,7 +240,7 @@ function AllowUndeclaredToggle({
   // The grammar of every activation setting (collaborator SSO, for one): a
   // toggle row, its consequence as the description.
   return (
-    <SettingsGroup>
+    <SettingsGroup className="mb-4">
       <SettingRow
         variant="toggle"
         className="pb-0"

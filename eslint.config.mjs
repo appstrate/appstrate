@@ -108,6 +108,19 @@ const ALL_JS = ["**/*.{js,jsx,mjs,cjs}"];
 // A table row is acted on in ONE way (apps/web/DESIGN_SYSTEM.md, « A row's end »): the « … » menu
 // (`TableRowActions`) holds every action of the row, with no pencil, download or reconnect button
 // beside it. A control that IS the setting (a role select, a switch) lives in its own column.
+// shadcn spacing rule: a stack is `flex flex-col gap-*`, never `space-y-*` / `space-x-*` (the latter
+// leaves a child's own margin overriding the spacing, and misses inline children).
+const SPACING_UTILITY_BANS = [
+  {
+    selector: "Literal[value=/(^|\\s)space-[xy]-/]",
+    message: "Use `flex flex-col gap-*` (or `flex gap-*`) instead of `space-x-*` / `space-y-*`.",
+  },
+  {
+    selector: "TemplateElement[value.raw=/(^|\\s)space-[xy]-/]",
+    message: "Use `flex flex-col gap-*` (or `flex gap-*`) instead of `space-x-*` / `space-y-*`.",
+  },
+];
+
 const ROW_ACTION_BANS = [
   {
     selector:
@@ -706,7 +719,12 @@ export default tseslint.config(
     files: ["apps/web/src/**/*.tsx"],
     ignores: ["**/test/**", "apps/web/src/components/table-row-actions.tsx"],
     rules: {
-      "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS, ...ROW_ACTION_BANS],
+      "no-restricted-syntax": [
+        "error",
+        ...ZOD4_STRING_FORMAT_BANS,
+        ...ROW_ACTION_BANS,
+        ...SPACING_UTILITY_BANS,
+      ],
     },
   },
   {

@@ -26,8 +26,8 @@ const ALL_SPACES = "all";
 function DeeplinkTab({ label, href, fallback }: { label: string; href: string; fallback: string }) {
   const { t } = useTranslation("settings");
   return (
-    <div className="space-y-3">
-      <Button asChild variant="default" size="sm">
+    <div className="flex flex-col gap-3">
+      <Button asChild variant="default" size="sm" className="self-start">
         <a href={href}>
           <ExternalLink />
           {label}
@@ -112,12 +112,12 @@ export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="claude-code" className="space-y-2">
+        <TabsContent value="claude-code" className="flex flex-col gap-2">
           <p className="text-muted-foreground text-xs">{t("orgSettings.mcpClaudeCodeHint")}</p>
           <CopyBlock value={cfg.claudeCodeCommand} multiline />
         </TabsContent>
 
-        <TabsContent value="claude-desktop" className="space-y-2">
+        <TabsContent value="claude-desktop" className="flex flex-col gap-2">
           <p className="text-muted-foreground text-xs">{t("orgSettings.mcpJsonHint")}</p>
           <CopyBlock value={cfg.httpJson} multiline />
         </TabsContent>
@@ -138,12 +138,12 @@ export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
           />
         </TabsContent>
 
-        <TabsContent value="json" className="space-y-2">
+        <TabsContent value="json" className="flex flex-col gap-2">
           <p className="text-muted-foreground text-xs">{t("orgSettings.mcpGenericHint")}</p>
           <CopyBlock value={cfg.httpJson} multiline />
         </TabsContent>
 
-        <TabsContent value="mcp-remote" className="space-y-2">
+        <TabsContent value="mcp-remote" className="flex flex-col gap-2">
           <p className="text-muted-foreground text-xs">{t("orgSettings.mcpRemoteHint")}</p>
           <CopyBlock value={cfg.mcpRemoteJson} multiline />
         </TabsContent>

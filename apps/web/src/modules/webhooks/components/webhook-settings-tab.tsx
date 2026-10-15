@@ -100,10 +100,10 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       {/* URL (read-only) */}
-      <div className="space-y-2">
-        <Label>{t("settings:webhooks.urlLabel")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("settings:webhooks.urlLabel")}</Label>
         <div className="bg-muted rounded px-3 py-2 font-mono text-sm break-all">{webhook.url}</div>
       </div>
 
@@ -125,19 +125,24 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
 
       {/* Save */}
       {canWrite && (
-        <PendingButton onClick={handleSave} pending={updateMutation.isPending}>
+        <PendingButton
+          className="self-start"
+          onClick={handleSave}
+          pending={updateMutation.isPending}
+        >
           {t("common:btn.save")}
         </PendingButton>
       )}
 
       {/* Secret section */}
-      <div className="border-border space-y-2 border-t pt-4">
-        <Label>{t("settings:webhooks.secret")}</Label>
+      <div className="border-border flex flex-col gap-2 border-t pt-4">
+        <Label className="mb-0">{t("settings:webhooks.secret")}</Label>
         <div className="bg-muted rounded px-3 py-2 font-mono text-sm">whsec_****...</div>
         {canWrite && (
           <Button
             variant="outline"
             size="sm"
+            className="self-start"
             onClick={() => setRotateOpen(true)}
             disabled={rotateMutation.isPending}
           >
@@ -184,13 +189,14 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
 
       {/* Danger zone */}
       {canDelete && (
-        <div className="border-border space-y-3 border-t pt-4">
+        <div className="border-border flex flex-col gap-3 border-t pt-4">
           <h3 className="text-destructive text-sm font-semibold">
             {t("settings:spaces.dangerZone")}
           </h3>
           <PendingButton
             variant="destructive"
             size="sm"
+            className="self-start"
             onClick={() => setDeleteConfirmOpen(true)}
             pending={deleteMutation.isPending}
           >

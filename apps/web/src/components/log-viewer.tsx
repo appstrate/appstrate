@@ -190,9 +190,14 @@ function ToolResult({ tool, result }: { tool: string; result: unknown }) {
     );
   }
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       {items}
-      <Button variant="outline" size="sm" onClick={() => setShowJson((v) => !v)}>
+      <Button
+        variant="outline"
+        size="sm"
+        className="self-start"
+        onClick={() => setShowJson((v) => !v)}
+      >
         <Braces />
         {showJson ? t("run.outputShowFields") : t("run.outputShowJson")}
       </Button>

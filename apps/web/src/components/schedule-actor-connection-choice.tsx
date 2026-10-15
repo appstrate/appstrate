@@ -44,8 +44,8 @@ export function ScheduleActorConnectionChoice({
   const refused = (integrationId: string) => choices.some((c) => c.integrationId === integrationId);
   const others = [...new Set([...Object.keys(value), ...optional])].filter((id) => !refused(id));
   return (
-    <div className="space-y-2" data-testid="schedule-actor-connections">
-      <Label>{t("connectionOverrides.label")}</Label>
+    <div className="flex flex-col gap-2" data-testid="schedule-actor-connections">
+      <Label className="mb-0">{t("connectionOverrides.label")}</Label>
       {showContext && (
         <p className="text-muted-foreground text-xs">
           {t("schedule.connectionOverrides.otherActor")}
@@ -66,7 +66,9 @@ export function ScheduleActorConnectionChoice({
           {/* No candidates travel with an unreachable pick: clearing it lets
               the next save resolve again, and ask again if it must. */}
           {choice.candidates.length === 0 && value[choice.integrationId] !== undefined && (
-            <ClearChoiceButton onClick={() => onChange(choice.integrationId, null)} />
+            <div>
+              <ClearChoiceButton onClick={() => onChange(choice.integrationId, null)} />
+            </div>
           )}
         </IntegrationChoiceBox>
       ))}
@@ -112,7 +114,10 @@ function IntegrationChoiceBox({
 }) {
   const name = useIntegrationName(integrationId);
   return (
-    <div className="border-border bg-card space-y-1.5 rounded-md border p-3" data-testid={testId}>
+    <div
+      className="border-border bg-card flex flex-col gap-1.5 rounded-md border p-3"
+      data-testid={testId}
+    >
       <div className="text-sm font-medium">{name}</div>
       {children}
     </div>
@@ -179,7 +184,9 @@ function StoredChoice({
       testId={`schedule-actor-stored-${integrationId}`}
     >
       <p className="text-xs">{connectionIds.map(labelOf).join(" · ")}</p>
-      <ClearChoiceButton onClick={onClear} />
+      <div>
+        <ClearChoiceButton onClick={onClear} />
+      </div>
     </IntegrationChoiceBox>
   );
 }

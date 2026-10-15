@@ -25,8 +25,8 @@ export function WebhookFormFields({
 
   return (
     <>
-      <div className="space-y-2">
-        <Label>{t("webhooks.eventsLabel")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("webhooks.eventsLabel")}</Label>
         <div className="flex flex-col gap-2">
           {WEBHOOK_EVENTS.map((event) => (
             <CheckboxField
@@ -40,8 +40,8 @@ export function WebhookFormFields({
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label>{t("webhooks.payloadModeLabel")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("webhooks.payloadModeLabel")}</Label>
         <RadioGroup
           value={payloadMode}
           onValueChange={(v) => onPayloadModeChange(v as "full" | "summary")}

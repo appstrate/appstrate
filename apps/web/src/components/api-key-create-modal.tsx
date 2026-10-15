@@ -150,8 +150,8 @@ function ApiKeyCreateForm({
       </FormItem>
 
       {/* Permissions */}
-      <div className="space-y-2">
-        <Label>{t("roles.permissionsLabel")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("roles.permissionsLabel")}</Label>
         {availableScopes ? (
           <ScopeMultiSelect
             available={availableScopes}

@@ -190,8 +190,10 @@ export function SharePackageDialog({
           <TabsTrigger value="use">{t("packages.shareTabUse")}</TabsTrigger>
           <TabsTrigger value="coedit">{t("packages.shareTabCoedit")}</TabsTrigger>
         </TabsList>
-        <TabsContent value="use" className="space-y-2">
-          <Label htmlFor="share-target">{t("packages.shareUseLabel")}</Label>
+        <TabsContent value="use" className="flex flex-col gap-2">
+          <Label htmlFor="share-target" className="mb-0">
+            {t("packages.shareUseLabel")}
+          </Label>
           <div className="flex gap-2">
             <Select value={target || undefined} onValueChange={setTarget}>
               <SelectTrigger id="share-target" className="w-full">
@@ -256,9 +258,9 @@ export function SharePackageDialog({
             <Alert
               variant="warning"
               data-testid="share-needs-version"
-              className="bg-warning/10 mt-4 rounded-md p-3"
+              className="bg-warning/10 mt-2 rounded-md p-3"
             >
-              <AlertDescription className="space-y-2">
+              <AlertDescription className="flex flex-col items-start gap-2">
                 <p>{t("packages.shareNeedsVersion")}</p>
                 {canPublish ? (
                   <PendingButton
@@ -277,7 +279,7 @@ export function SharePackageDialog({
             </Alert>
           )}
 
-          <div className="mt-4 flex flex-col gap-1 border-t pt-4">
+          <div className="mt-2 flex flex-col gap-1 border-t pt-4">
             <p className="text-sm font-medium">{t("packages.shareCurrent")}</p>
             {isLoading ? (
               <TextSkeleton lines={2} className="py-1.5" />
@@ -373,7 +375,7 @@ function CoeditTab({
   // converted (`personal_space_not_orphaned`): the gesture is to move the PACKAGE out (`PUT …/home`).
   if (verdict === "personal") {
     return (
-      <div className="space-y-3" data-testid="coedit-personal">
+      <div className="flex flex-col items-start gap-3" data-testid="coedit-personal">
         <p className="text-muted-foreground text-sm">{t("packages.coeditPersonal")}</p>
         {onMoveHome && (
           <Button type="button" size="sm" variant="outline" onClick={onMoveHome}>
@@ -417,8 +419,10 @@ function CoeditTab({
   };
 
   return (
-    <div className="space-y-2" data-testid="coedit-invite">
-      <Label htmlFor="coedit-member">{t("packages.coeditLabel")}</Label>
+    <div className="flex flex-col gap-2" data-testid="coedit-invite">
+      <Label htmlFor="coedit-member" className="mb-0">
+        {t("packages.coeditLabel")}
+      </Label>
       <div className="flex gap-2">
         <OptionSelect
           id="coedit-member"

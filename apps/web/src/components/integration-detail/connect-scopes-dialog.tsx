@@ -93,7 +93,7 @@ export function ConnectScopesForm({
           })}
         </p>
       )}
-      <fieldset className="min-w-0 space-y-2">
+      <fieldset className="flex min-w-0 flex-col gap-2">
         <legend className="mb-2 text-xs font-medium">
           {t("integration.auth.scopeChoice.extra")}
         </legend>

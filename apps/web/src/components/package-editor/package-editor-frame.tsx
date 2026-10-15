@@ -68,7 +68,11 @@ export function PackageEditorFrame({
   const schema = { uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type] };
 
   const body = (
-    <div inert={isPending} aria-busy={isPending} className={isEdit ? "space-y-4" : undefined}>
+    <div
+      inert={isPending}
+      aria-busy={isPending}
+      className={isEdit ? "flex flex-col gap-4" : undefined}
+    >
       {children}
       {isEdit ? (
         <ManifestEditEntry
@@ -139,10 +143,11 @@ export function PackageEditorFrame({
     );
     return (
       <div className="flex min-h-full flex-col">
-        <div className="flex-1 space-y-4 p-6">
+        <div className="flex flex-1 flex-col gap-4 p-6">
           <SettingsHeading
             title={tabs.find((tab) => tab.id === activeTab)?.label}
             description={descriptions?.[activeTab]}
+            className="mb-2"
           />
           {editor.error && (
             <Alert variant="destructive">
@@ -176,9 +181,9 @@ export function PackageEditorFrame({
         tabs={tabs.map(({ id, label }) => ({ value: id, label }))}
       />
 
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         {editor.error && (
-          <Alert variant="destructive" className="mb-4">
+          <Alert variant="destructive">
             <AlertDescription>{editor.error}</AlertDescription>
           </Alert>
         )}
@@ -186,7 +191,7 @@ export function PackageEditorFrame({
         {body}
 
         {activeTab !== "json" && (
-          <div className="border-border mt-6 flex justify-end gap-2 border-t pt-4">
+          <div className="border-border mt-2 flex justify-end gap-2 border-t pt-4">
             <Button variant="outline" type="button" onClick={() => navigate(listPath)}>
               {t("btn.cancel")}
             </Button>

@@ -77,9 +77,11 @@ export function ConfigAuthBlock({
           )}
           {authorizedUris.length > 0 && (
             <SettingValue label={t("integration.structure.addresses")}>
-              {authorizedUris.map((uri) => (
-                <CopyBlock key={uri} value={uri} />
-              ))}
+              <div className="flex flex-col gap-2">
+                {authorizedUris.map((uri) => (
+                  <CopyBlock key={uri} value={uri} />
+                ))}
+              </div>
             </SettingValue>
           )}
         </dl>

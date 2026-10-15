@@ -117,8 +117,8 @@ export function AgentAppearanceFields({
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label>{t("editor.appearanceIcon")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("editor.appearanceIcon")}</Label>
         <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
           <PopoverTrigger asChild>
             <Button
@@ -190,8 +190,8 @@ export function AgentAppearanceFields({
         </p>
       </div>
 
-      <div className="space-y-2">
-        <Label>{t("editor.appearanceColor")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("editor.appearanceColor")}</Label>
         <RadioGroup
           value={isAgentColorKey(resolved.color) ? resolved.color : "custom"}
           onValueChange={(value) => changeColor(value === "custom" ? customColor : value)}

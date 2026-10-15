@@ -432,7 +432,7 @@ function ProviderConfigSection({
   ) : null;
 
   return (
-    <section className="space-y-4">
+    <section className="flex flex-col gap-4">
       <header className="flex flex-col gap-1">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           {icon}
@@ -448,7 +448,13 @@ function ProviderConfigSection({
         <p className="text-muted-foreground text-sm">{hint}</p>
       </header>
 
-      {loading ? <SettingsSkeleton /> : personal ? deleteButton : children(deleteButton)}
+      {loading ? (
+        <SettingsSkeleton />
+      ) : personal ? (
+        <div>{deleteButton}</div>
+      ) : (
+        children(deleteButton)
+      )}
 
       <ConfirmModal
         open={confirmDelete}

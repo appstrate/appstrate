@@ -243,7 +243,7 @@ function IntegrationSettings({
               )}
             />
             {active === "authentication" && (
-              <div className="space-y-6">
+              <div className="flex flex-col gap-4">
                 <SetupGuideSteps steps={steps} />
                 {detail.auths.length === 0 && (
                   <p className="text-sm">{t("integration.auth.none")}</p>

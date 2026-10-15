@@ -35,8 +35,8 @@ export function RowsEditor<T>({
   const { t } = useTranslation("common");
 
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
+    <div className="flex flex-col gap-2">
+      <Label className="mb-0">{label}</Label>
       {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
       {rows.map((row, index) => (
         <div key={index} className="flex items-center gap-2">
@@ -55,7 +55,13 @@ export function RowsEditor<T>({
           )}
         </div>
       ))}
-      <Button type="button" variant="outline" size="sm" onClick={() => onChange([...rows, newRow])}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="self-start"
+        onClick={() => onChange([...rows, newRow])}
+      >
         <Plus />
         {addLabel}
       </Button>

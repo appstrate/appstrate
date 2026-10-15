@@ -61,16 +61,16 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
         <p className="text-muted-foreground text-sm">{t("preferences.reauthDescription")}</p>
 
         {methods.length === 0 ? (
-          <div className="space-y-4">
+          <div className="flex flex-col items-start gap-4">
             <p className="text-muted-foreground text-sm">{t("preferences.reauthFallback")}</p>
             <Button onClick={() => logout("/login")}>{t("login.login")}</Button>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
             {passwordMethod && (
-              <form onSubmit={onPasswordSubmit} className="space-y-3">
-                <div className="space-y-2">
-                  <Label>{t("common:claim.passwordLabel")}</Label>
+              <form onSubmit={onPasswordSubmit} className="flex flex-col gap-3">
+                <div className="flex flex-col gap-2">
+                  <Label className="mb-0">{t("common:claim.passwordLabel")}</Label>
                   <Input
                     type="password"
                     value={password}
@@ -80,7 +80,7 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
                   />
                 </div>
                 <FieldError>{error}</FieldError>
-                <PendingButton type="submit" pending={submitting}>
+                <PendingButton type="submit" pending={submitting} className="self-start">
                   {t("common:btn.confirm")}
                 </PendingButton>
               </form>

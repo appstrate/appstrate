@@ -455,14 +455,20 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       <FormItem id="role-description" label={t("roles.descriptionLabel")}>
         <Input maxLength={500} disabled={isPending} {...register("description")} />
       </FormItem>
-      <div className="space-y-2">
-        <Label>{t("roles.permissionsLabel")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("roles.permissionsLabel")}</Label>
         {isLoading ? (
           <TextSkeleton lines={5} />
         ) : vocabularyError ? (
-          <div role="alert" className="space-y-2">
+          <div role="alert" className="flex flex-col gap-2">
             <ErrorState error={vocabularyError} compact />
-            <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={() => void refetch()}
+            >
               {t("common:btn.retry")}
             </Button>
           </div>

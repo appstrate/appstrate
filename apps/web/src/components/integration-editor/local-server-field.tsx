@@ -59,8 +59,8 @@ export function LocalServerField({
 
   return (
     <>
-      <div className="space-y-2">
-        <Label htmlFor="int-source-server">
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="int-source-server" className="mb-0">
           {t("integrationEditor.source.server")}
           {" *"}
         </Label>

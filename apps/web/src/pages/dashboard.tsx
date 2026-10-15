@@ -37,7 +37,7 @@ export function DashboardPage() {
   // The greeting is known before any read: only the body waits.
   if (isLoading)
     return (
-      <div className="space-y-8">
+      <div>
         <DashboardHeader firstName={firstName} />
         <DashboardBodySkeleton />
       </div>
