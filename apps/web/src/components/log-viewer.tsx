@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-  Braces,
   Copy,
   Check,
   CheckCircle2,
+  ChevronRight,
   Info,
   AlertTriangle,
   XCircle,
@@ -18,13 +18,11 @@ import {
   Bug,
   ScrollText,
   SearchX,
-  X,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { DropdownMenuCheckboxItem, DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "./page-actions-menu";
-import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { cn } from "@appstrate/ui/cn";
 import { formatDuration } from "../lib/format-duration";
 import {
@@ -34,13 +32,8 @@ import {
   type ExecutionEntry,
   type ToolExecutionStatus,
 } from "./log-utils";
-import { ItemList } from "./item-list";
 import { Waiting } from "./loading-skeletons";
 import { EmptyState } from "./page-states";
-import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
-import { RunStatusBadge } from "./status-badge";
-import { formatDateField } from "../lib/format-date";
-import { historyRuns, recalledMemories } from "../lib/runtime-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 
@@ -99,27 +92,13 @@ const toolStatusConfig = {
   { icon: typeof Loader2; className: string; labelKey: string }
 >;
 
-function ToolStatus({
-  status,
-  showLabel = false,
-}: {
-  status: ToolExecutionStatus;
-  showLabel?: boolean;
-}) {
+function ToolStatus({ status }: { status: ToolExecutionStatus }) {
   const { t } = useTranslation("agents");
   const config = toolStatusConfig[status];
   const Icon = config.icon;
-  const label = t(config.labelKey);
 
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5">
-      <Icon
-        className={cn("size-3.5 shrink-0", config.className)}
-        aria-hidden={showLabel || undefined}
-        aria-label={showLabel ? undefined : label}
-      />
-      {showLabel && <span>{label}</span>}
-    </span>
+    <Icon className={cn("size-3.5 shrink-0", config.className)} aria-label={t(config.labelKey)} />
   );
 }
 
@@ -140,82 +119,12 @@ function JsonBlock({ value }: { value: unknown }) {
   );
 }
 
-function InspectorSection({ label, children }: { label: string; children: ReactNode }) {
+function ExpandedSection({ label, value }: { label: string; value: unknown }) {
   return (
     <section className="flex flex-col gap-2">
       <h3 className="text-sm font-medium">{label}</h3>
-      {children}
+      <JsonBlock value={value} />
     </section>
-  );
-}
-
-/**
- * A tool's result. The two first-party memory tools read as the items they
- * returned (a memory's text, a past run's status and date); anything else, and
- * the raw payload of those two, is the JSON as the runner logged it.
- */
-function ToolResult({ tool, result }: { tool: string; result: unknown }) {
-  const { t } = useTranslation("agents");
-  const [showJson, setShowJson] = useState(false);
-  const memories = tool === "recall_memory" ? recalledMemories(result) : null;
-  const runs = tool === "run_history" ? historyRuns(result) : null;
-  const raw = <JsonBlock value={result} />;
-  if (!memories && !runs) return raw;
-  let items = raw;
-  if (!showJson && memories) {
-    items = (
-      <ItemList
-        items={memories}
-        itemKey={(memory) => memory.id}
-        empty={<EmptyState compact icon={Info} message={t("log.recalledNone")} />}
-        renderItem={(memory) => (
-          <div className="rounded-md border px-3 py-2 text-sm">
-            <p className="whitespace-pre-wrap">{memory.content}</p>
-            {memory.createdAt && (
-              <p className="text-muted-foreground mt-1 text-xs">
-                {formatDateField(memory.createdAt)}
-              </p>
-            )}
-          </div>
-        )}
-      />
-    );
-  } else if (!showJson && runs) {
-    items = (
-      <ItemList
-        items={runs}
-        itemKey={(run) => run.id}
-        empty={<EmptyState compact icon={Info} message={t("log.historyNone")} />}
-        renderItem={(run) => (
-          <div className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
-            {run.status && <RunStatusBadge status={run.status} />}
-            <span className="font-mono text-xs">{run.id}</span>
-            <span className="text-muted-foreground ml-auto text-xs tabular-nums">
-              {[
-                run.date && formatDateField(run.date),
-                run.duration != null && formatDuration(run.duration),
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </span>
-          </div>
-        )}
-      />
-    );
-  }
-  return (
-    <div className="flex flex-col gap-3">
-      {items}
-      <Button
-        variant="outline"
-        size="sm"
-        className="self-start"
-        onClick={() => setShowJson((v) => !v)}
-      >
-        <Braces />
-        {showJson ? t("run.outputShowFields") : t("run.outputShowJson")}
-      </Button>
-    </div>
   );
 }
 
@@ -225,15 +134,8 @@ interface LogViewerProps {
   isLoading?: boolean;
   /** Terminal failures open with the causal event near the middle of the journal. */
   focusError?: boolean;
-  headerActions?: ReactNode;
-  selectedEntryId?: string | null;
-  onSelectEntry: (entryId: string | null) => void;
-  /** Read once at mount: the caller keys the viewer on it to apply a new focus. */
-  initialFocus?: JournalOverviewFilter;
 }
 
-export type JournalOverviewFilter = "tools" | "warnings" | "errors";
-type JournalLevelFilter = ReturnType<typeof journalLevel>;
 type JournalTypeFilter = "message" | "tool_call" | "tool_result" | "diagnostic";
 
 function journalType(entry: ExecutionEntry): JournalTypeFilter {
@@ -241,15 +143,6 @@ function journalType(entry: ExecutionEntry): JournalTypeFilter {
   if (entry.kind === "tool") return entry.status === "running" ? "tool_call" : "tool_result";
   return "diagnostic";
 }
-
-const FOCUS_FILTERS: Record<
-  JournalOverviewFilter,
-  { levels: JournalLevelFilter[]; types: JournalTypeFilter[] }
-> = {
-  tools: { levels: [], types: ["tool_call", "tool_result"] },
-  warnings: { levels: ["warn"], types: [] },
-  errors: { levels: ["error"], types: [] },
-};
 
 /** A filter in force stays on screen, so it can be cleared. */
 function facet(
@@ -274,15 +167,7 @@ function journalSearchText(entry: ExecutionEntry): string {
     .join(" ");
 }
 
-export function LogViewer({
-  entries,
-  isLoading = false,
-  focusError = false,
-  headerActions,
-  selectedEntryId,
-  onSelectEntry,
-  initialFocus,
-}: LogViewerProps) {
+export function LogViewer({ entries, isLoading = false, focusError = false }: LogViewerProps) {
   const { t, i18n } = useTranslation("agents");
   const scrollRef = useRef<HTMLDivElement>(null);
   const positionedRef = useRef(false);
@@ -291,16 +176,14 @@ export function LogViewer({
   const { copied, copy } = useCopyToClipboard();
   const [display, setDisplay] = useState<string[]>([]);
   const showTimestamps = display.includes("timestamps");
-  const showTools = !display.includes("hide_tools");
   const [query, setQuery] = useState("");
-  const focus = initialFocus ? FOCUS_FILTERS[initialFocus] : undefined;
-  const [levelFilters, setLevelFilters] = useState<string[]>(focus?.levels ?? []);
-  const [typeFilters, setTypeFilters] = useState<string[]>(focus?.types ?? []);
+  const [levelFilters, setLevelFilters] = useState<string[]>([]);
+  const [typeFilters, setTypeFilters] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
   const normalizedQuery = query.trim().toLocaleLowerCase(i18n.language);
   const visibleEntries = useMemo(() => {
     return entries.filter((entry) => {
-      if (!showTools && entry.kind === "tool") return false;
       if (levelFilters.length > 0 && !levelFilters.includes(journalLevel(entry))) return false;
       if (typeFilters.length > 0 && !typeFilters.includes(journalType(entry))) return false;
       if (
@@ -311,7 +194,7 @@ export function LogViewer({
       }
       return true;
     });
-  }, [entries, i18n.language, levelFilters, normalizedQuery, showTools, typeFilters]);
+  }, [entries, i18n.language, levelFilters, normalizedQuery, typeFilters]);
   const availableLevels = (["info", "warn", "error"] as const).filter((value) =>
     entries.some((entry) => journalLevel(entry) === value),
   );
@@ -341,10 +224,7 @@ export function LogViewer({
       id: "display",
       label: t("log.filterDisplay"),
       values: display,
-      options: [
-        { value: "timestamps", label: t("log.toggleTimestamps") },
-        { value: "hide_tools", label: t("log.hideTools") },
-      ],
+      options: [{ value: "timestamps", label: t("log.toggleTimestamps") }],
       onChange: setDisplay,
     },
   ];
@@ -359,7 +239,7 @@ export function LogViewer({
 
   useEffect(() => {
     positionedRef.current = false;
-  }, [levelFilters, normalizedQuery, showTools, typeFilters]);
+  }, [levelFilters, normalizedQuery, typeFilters]);
 
   // Auto-scroll when entries are added OR a running tool row settles in place.
   useEffect(() => {
@@ -438,26 +318,23 @@ export function LogViewer({
         filters={filters}
         onReset={clearJournalFilters}
         actions={
-          <div className="flex items-center gap-2">
-            {headerActions}
-            <PageActionsMenu>
-              <DropdownMenuItem onSelect={handleCopy}>
-                {copied ? <Check /> : <Copy />}
-                {copied ? t("common:btn.copied") : t("log.copyLogs")}
-              </DropdownMenuItem>
-              <DropdownMenuCheckboxItem
-                checked={autoScroll}
-                onCheckedChange={(checked) => {
-                  setAutoScroll(checked);
-                  if (checked && visibleEntries.length > 0) {
-                    virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
-                  }
-                }}
-              >
-                {t("log.autoScroll")}
-              </DropdownMenuCheckboxItem>
-            </PageActionsMenu>
-          </div>
+          <PageActionsMenu>
+            <DropdownMenuItem onSelect={handleCopy}>
+              {copied ? <Check /> : <Copy />}
+              {copied ? t("common:btn.copied") : t("log.copyLogs")}
+            </DropdownMenuItem>
+            <DropdownMenuCheckboxItem
+              checked={autoScroll}
+              onCheckedChange={(checked) => {
+                setAutoScroll(checked);
+                if (checked && visibleEntries.length > 0) {
+                  virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
+                }
+              }}
+            >
+              {t("log.autoScroll")}
+            </DropdownMenuCheckboxItem>
+          </PageActionsMenu>
         }
       />
 
@@ -513,7 +390,10 @@ export function LogViewer({
               >
                 {virtualizer.getVirtualItems().map((virtualRow) => {
                   const entry = visibleEntries[virtualRow.index]!;
-                  const isSelected = selectedEntryId === entry.id;
+                  const hasDetail =
+                    entry.kind === "tool" &&
+                    (entry.args !== undefined || entry.result !== undefined);
+                  const isOpen = hasDetail && expanded.has(entry.id);
                   return (
                     <div
                       key={entry.id}
@@ -529,13 +409,20 @@ export function LogViewer({
                     >
                       <button
                         type="button"
+                        disabled={!hasDetail}
                         className={cn(
-                          "hover:bg-muted/20 grid min-h-10 w-full cursor-pointer items-center gap-4 px-4 py-2 text-left text-sm transition-colors",
+                          "enabled:hover:bg-muted/20 grid min-h-10 w-full items-center gap-4 px-4 py-2 text-left text-sm transition-colors enabled:cursor-pointer",
                           journalGrid,
-                          isSelected && "bg-muted/40",
+                          isOpen && "bg-muted/40",
                         )}
-                        onClick={() => onSelectEntry(isSelected ? null : entry.id)}
-                        aria-pressed={isSelected}
+                        onClick={() =>
+                          setExpanded((prev) => {
+                            const next = new Set(prev);
+                            if (!next.delete(entry.id)) next.add(entry.id);
+                            return next;
+                          })
+                        }
+                        aria-expanded={hasDetail ? isOpen : undefined}
                       >
                         {showTimestamps && (
                           <span className="text-muted-foreground font-mono text-xs">
@@ -572,12 +459,28 @@ export function LogViewer({
                             entry.message
                           )}
                         </span>
-                        <span className="text-muted-foreground text-right text-xs tabular-nums">
+                        <span className="text-muted-foreground flex items-center justify-end gap-1 text-xs tabular-nums">
                           {entry.kind === "tool" && entry.durationMs !== undefined
                             ? formatDuration(entry.durationMs)
                             : ""}
+                          {hasDetail && (
+                            <ChevronRight
+                              className={cn("size-3.5 transition-transform", isOpen && "rotate-90")}
+                              aria-hidden
+                            />
+                          )}
                         </span>
                       </button>
+                      {isOpen && entry.kind === "tool" && (
+                        <div className="bg-muted/40 flex flex-col gap-4 px-4 pt-1 pb-4">
+                          {entry.args !== undefined && (
+                            <ExpandedSection label={t("log.arguments")} value={entry.args} />
+                          )}
+                          {entry.result !== undefined && (
+                            <ExpandedSection label={t("log.result")} value={entry.result} />
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -588,85 +491,4 @@ export function LogViewer({
       </div>
     </div>
   );
-}
-
-export function LogEntryInspector({
-  entry,
-  onClose,
-}: {
-  entry: ExecutionEntry;
-  onClose: () => void;
-}) {
-  const { t, i18n } = useTranslation("agents");
-  const type = journalType(entry);
-
-  return (
-    <div className="flex h-full min-h-[400px] flex-col">
-      <div className="border-border flex h-14 shrink-0 items-center gap-3 border-b px-4">
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{t("log.inspectorTitle")}</h2>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-muted-foreground size-7"
-          onClick={onClose}
-          aria-label={t("common:btn.close")}
-        >
-          <X />
-        </Button>
-      </div>
-
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-5 p-4">
-          <FactGrid columns={1}>
-            <Fact label={t("log.filterType")}>{t(`log.type.${type}`)}</Fact>
-            {entry.createdAt && (
-              <Fact label={t("log.timestamp")}>
-                {formatTimestamp(entry.createdAt, i18n.language)}
-              </Fact>
-            )}
-            <Fact label={t("log.filterLevel")}>{t(`log.level.${journalLevel(entry)}`)}</Fact>
-            {entry.kind === "tool" && (
-              <>
-                <Fact label={t("log.tool")}>{entry.tool}</Fact>
-                <Fact label={t("log.status")}>
-                  <ToolStatus status={entry.status} showLabel />
-                </Fact>
-                {entry.durationMs !== undefined && (
-                  <Fact label={t("run.infoDuration")}>{formatDuration(entry.durationMs)}</Fact>
-                )}
-              </>
-            )}
-          </FactGrid>
-
-          {entry.kind === "tool" ? (
-            <>
-              {entry.args !== undefined && (
-                <InspectorSection label={t("log.arguments")}>
-                  <JsonBlock value={entry.args} />
-                </InspectorSection>
-              )}
-              {entry.result !== undefined && (
-                <InspectorSection label={t("log.result")}>
-                  <ToolResult key={entry.id} tool={entry.tool} result={entry.result} />
-                </InspectorSection>
-              )}
-              {entry.detail && entry.args === undefined && (
-                <InspectorSection label={t("log.details")}>
-                  <InspectorProse>{entry.detail}</InspectorProse>
-                </InspectorSection>
-              )}
-            </>
-          ) : (
-            <InspectorSection label={t("log.message")}>
-              <InspectorProse>{entry.message}</InspectorProse>
-            </InspectorSection>
-          )}
-        </div>
-      </ScrollArea>
-    </div>
-  );
-}
-
-function InspectorProse({ children }: { children: string }) {
-  return <p className="text-foreground/80 text-sm break-words whitespace-pre-wrap">{children}</p>;
 }

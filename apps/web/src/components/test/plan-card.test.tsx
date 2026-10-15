@@ -3,7 +3,7 @@
 /**
  * `PlanGrid` rendering tests — the storage entitlement shown next to credits.
  *
- * Same harness as `run-turns-detail.test.tsx`: no DOM, so the component is
+ * Same harness as `run-results-view.test.tsx`: no DOM, so the component is
  * rendered with `renderToStaticMarkup` and asserted on its HTML, through the
  * SPA's own i18n singleton so the locale under test is the locale the
  * assertions use.

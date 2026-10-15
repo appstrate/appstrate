@@ -2,8 +2,7 @@
 
 /**
  * The shared context derivation (#1046) — the single source both the Usage
- * card's gauge and the per-turn table (`run-detail/run-turns-detail.tsx`) read
- * from. Pure, so it needs no DOM.
+ * card's gauge reads from. Pure, so it needs no DOM.
  */
 
 import { describe, it, expect } from "bun:test";

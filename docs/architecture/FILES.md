@@ -146,11 +146,11 @@ An agent's user-facing report is **a file**. The convention: the agent writes it
 
 The run-detail page is three FIXED tabs (`RUN_DETAIL_TABS` in `apps/web/src/pages/run-detail.tsx`). Every one renders for every run, so the strip has the same shape whichever run is open and no deep link can land on a pane that is not there:
 
-| Tab        | Answers                                                                                                                                       |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `overview` | How the run went and was set up — problem, agent, version, trigger, runner, timing, activity and result counts, usage, input (its files too). |
-| `journal`  | What happened, step by step — the logs, filterable (`?journalFilter=tools\|warnings\|errors`), one entry inspected beside them.               |
-| `results`  | What the run produced — its files (featured per the derived rule), the `output` tool's value, the memory it wrote.                            |
+| Tab        | Answers                                                                                                                            |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `overview` | How the run went and was set up — problem, agent, version, trigger, runner, timing, activity counts, usage, input (its files too). |
+| `journal`  | What happened, step by step — the logs, filterable, a tool call opening in place on its arguments and result.                      |
+| `results`  | What the run produced — its files (featured per the derived rule), the `output` tool's value, the memory it wrote.                 |
 
 Tab keys above are the URL hashes; in the French UI the panes read « Vue d’ensemble », « Journal » and « Résultats », and the sections of Résultats « Productions », « Sortie structurée » and « Mémoire » (each shown only when the run has something there).
 
