@@ -143,6 +143,8 @@
   "detail.overview.lastUpdated": "Last updated",
   "detail.overview.noRuns": "No run recorded",
   "detail.overview.noSchedule": "No active schedule",
+  "detail.overview.origin": "Origin",
+  "detail.overview.homeSpace": "Home space",
   "detail.diagnostics.fix": "Fix",
   "detail.configuration.modelDescription": "Model used when the run does not provide an override.",
   "detail.configuration.modelIntro": "Set the model and its behavior for this agent's runs.",

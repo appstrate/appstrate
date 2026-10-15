@@ -143,6 +143,8 @@
   "detail.overview.lastUpdated": "Dernière mise à jour",
   "detail.overview.noRuns": "Aucun run enregistré",
   "detail.overview.noSchedule": "Aucune planification active",
+  "detail.overview.origin": "Origine",
+  "detail.overview.homeSpace": "Espace d’origine",
   "detail.diagnostics.fix": "Corriger",
   "detail.configuration.modelDescription": "Modèle utilisé lorsque le run ne fournit aucune surcharge.",
   "detail.configuration.modelIntro": "Définissez le modèle et son comportement pour les exécutions de cet agent.",

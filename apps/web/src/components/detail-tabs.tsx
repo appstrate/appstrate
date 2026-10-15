@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as React from "react";
+import type { LucideIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
+import { ShellHeaderTabs } from "@/components/shell-header-slots";
 
 /** The fade is drawn on the edge that hides tabs, nothing when they all fit. */
 const FADE_EDGE = {
@@ -40,26 +42,11 @@ function useScrollEdges() {
   return { ref, edge };
 }
 
-/** Stock shadcn tabs, tighter on a phone; when they still do not fit they scroll, with a fade on the hidden edge. */
-function DetailTabsList(props: Omit<React.ComponentPropsWithoutRef<typeof TabsList>, "className">) {
-  const { ref, edge } = useScrollEdges();
-  return (
-    <div ref={ref} className={cn("max-w-full overflow-x-auto", FADE_EDGE[edge])}>
-      <TabsList className="mt-6 mb-3 w-max justify-start" {...props} />
-    </div>
-  );
-}
-
-function DetailTabsTrigger({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<typeof TabsTrigger>) {
-  return <TabsTrigger className={cn("max-sm:px-2", className)} {...props} />;
-}
-
 export interface DetailTab<T extends string> {
   value: T;
   label: string;
+  /** Drawn by the header's tab bar only (`HeaderTabBar`). */
+  icon?: LucideIcon;
 }
 
 /** The tabs root of a detail page; the header, the tab bar and the panels all live inside it. */
@@ -79,16 +66,63 @@ export function DetailTabs<T extends string>({
   );
 }
 
-/** The tab bar of `tabs`. */
-export function DetailTabBar<T extends string>({ tabs }: { tabs: readonly DetailTab<T>[] }) {
+/**
+ * Underlined tabs, `end` at the far right (a search, a filter): the tab list of
+ * `HeaderTabBar`, and of a page with no shell header of its own (an overlay's)
+ * once it draws the band's rule under it. Needs a `<DetailTabs>` above.
+ */
+export function UnderlineTabList<T extends string>({
+  tabs,
+  end,
+}: {
+  tabs: readonly DetailTab<T>[];
+  end?: React.ReactNode;
+}) {
+  const { ref, edge } = useScrollEdges();
   return (
-    <DetailTabsList>
-      {tabs.map((tab) => (
-        <DetailTabsTrigger key={tab.value} value={tab.value}>
-          {tab.label}
-        </DetailTabsTrigger>
-      ))}
-    </DetailTabsList>
+    <div className="flex items-center justify-between gap-4">
+      <div
+        ref={ref}
+        className={cn(
+          "min-w-0 [scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden",
+          FADE_EDGE[edge],
+        )}
+      >
+        <TabsList className="h-11 w-max justify-start gap-1 rounded-none bg-transparent p-0 md:gap-2">
+          {tabs.map(({ value, label, icon: Icon }) => (
+            <TabsTrigger
+              key={value}
+              value={value}
+              className="text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground h-full gap-2 rounded-none border-b-2 border-transparent px-2.5 py-0 data-[state=active]:bg-transparent data-[state=active]:shadow-none max-sm:px-2 md:px-3"
+            >
+              {Icon && <Icon className="size-4 shrink-0" aria-hidden />}
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
+      {end && <div className="flex shrink-0 items-center gap-2">{end}</div>}
+    </div>
+  );
+}
+
+/**
+ * The tab bar of a page whose title block is in the shell header (`DetailBar`):
+ * `UnderlineTabList`, portalled to the header, where the band's own rule runs
+ * under it. Must render inside the page's `DetailTabs`: the portal keeps the
+ * tabs' context.
+ */
+export function HeaderTabBar<T extends string>({
+  tabs,
+  end,
+}: {
+  tabs: readonly DetailTab<T>[];
+  end?: React.ReactNode;
+}) {
+  return (
+    <ShellHeaderTabs>
+      <UnderlineTabList tabs={tabs} end={end} />
+    </ShellHeaderTabs>
   );
 }
 

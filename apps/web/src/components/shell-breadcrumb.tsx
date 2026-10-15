@@ -56,6 +56,7 @@ export function ShellBreadcrumb() {
   return (
     <nav
       aria-label={t("nav.breadcrumb")}
+      data-trail
       className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-sm"
     >
       {entries.map((crumb, i) => (
