@@ -56,7 +56,11 @@ export function DetailBar<T extends string = string>({
   parent?: BreadcrumbEntry;
   /** After the parent, in the small line under the title. */
   meta?: ReactNode;
-  /** The header's right end, left of the notification bell. */
+  /**
+   * The header's right end, left of the notification bell. The bar lays them out:
+   * pass the controls as siblings, in the order links, the page's deed, then the
+   * Actions menu, each a `HeaderActionButton` or the menu's own trigger.
+   */
   actions?: ReactNode;
   /** The tab bar, on the band's rule. Needs the page's `DetailTabs` above. */
   tabs?: readonly DetailTab<T>[];
@@ -91,7 +95,11 @@ export function DetailBar<T extends string = string>({
           </div>
         </div>
       </ShellHeaderLead>
-      {actions && <ShellHeaderActions>{actions}</ShellHeaderActions>}
+      {actions && (
+        <ShellHeaderActions>
+          <div className="flex items-center gap-2">{actions}</div>
+        </ShellHeaderActions>
+      )}
       {tabs && <HeaderTabBar tabs={tabs} />}
     </>
   );

@@ -112,12 +112,20 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    opens the overview tab: an agent's description, home space and origin
    (`AgentIdentity`), a package's description, a run's trigger, start, cost and
    duration (`RunHeaderSummary`). A settings overlay's sub-page (a webhook) has no shell header behind its panel: it keeps the section heading and draws its tabs with `UnderlineTabList`.
-1. **`PageHeader`** (`components/page-header.tsx`): title with its identity tile
-   in `icon` (`PackageIcon`), a one-line summary and the object's id as `children`, and in
-   `actions` the status and version badges (`components/status-badge.tsx`, see
-   section 8) then the **Actions** menu. `variant="collection"` is for level-one
-   list pages only. One primary button at most (Lancer, Relancer, Annuler) next
-   to Actions.
+1. **`DetailBar`** (`components/detail-bar.tsx`): the identity tile in `icon`
+   (`PackageIcon`), the `title`, the status and version pills in `badge`, the
+   parent list and the object's id in `parent` / `meta`, the `tabs`, and in
+   `actions` the page's controls. `DetailBar` lays `actions` out (one row, `gap-2`),
+   so a caller passes siblings and never wraps them. They come in one order: links
+   (`CatalogueLink`), the page's deed (Lancer, Relancer, Annuler, Activer), then the
+   Actions menu. Every one is `TOOLBAR_ACTION` (`lib/toolbar-button.ts`: outline,
+   32 px, `bg-card`) — a `HeaderActionButton` (`components/header-action-button.tsx`),
+   `CatalogueLink`, `RunAgentButton` given that class, or the menu's own trigger.
+   Never a bare `<Button size="sm">`, which is 36 px. The bar's one filled button
+   (Activer) is `<HeaderActionButton primary>`; a deed's icon takes its colour from its own
+   `className` (`text-primary`, `text-destructive`). A link that loses its label
+   under `lg` becomes a square icon (`max-lg:w-8 max-lg:px-0`).
+   `PageHeader` with `variant="collection"` is for level-one list pages only.
 2. **The Actions menu** is one trigger at every width, labelled « Actions »,
    outline `sm` with a chevron (`TOOLBAR_ACTION` from `lib/toolbar-button.ts`).
    List, settings and detail pages use `PageActionsMenu`
@@ -364,7 +372,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   index: a preference, not a location). Hidden columns
   are in `stores/column-visibility-store.ts`.
 - Toolbar buttons have two treatments (`lib/toolbar-button.ts`): `TOOLBAR_UTILITY`
-  adjusts the view (filters, columns), `TOOLBAR_ACTION` acts on the data.
+  adjusts the view (filters, columns), `TOOLBAR_ACTION` acts on the data (outline,
+  32 px, on a `bg-card` surface — the same in a detail page's header).
   `CollectionTabs` splits one collection into parts at the head of the bar; it is
   not a detail page's tabs.
 - **Runs** (`components/runs-table.tsx`): the Résultat column is what ended the run

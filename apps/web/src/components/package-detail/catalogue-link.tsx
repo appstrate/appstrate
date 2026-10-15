@@ -5,6 +5,7 @@ import { Link, useLocation } from "react-router-dom";
 import { Library } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { modalOpeningState } from "../../hooks/use-modal-param";
 import { catalogueHref } from "../../lib/catalogue-link";
@@ -37,7 +38,13 @@ export function CatalogueLink({
     ? t("catalogue.openInCatalogueVersion", { version })
     : t("catalogue.openInCatalogue");
   return (
-    <Button asChild variant="outline" size="sm" className={`${TOOLBAR_ACTION} bg-card`}>
+    // Square, icon only, where the label is dropped (`lg`): not the label's padding around a glyph.
+    <Button
+      asChild
+      variant="outline"
+      size="sm"
+      className={cn(TOOLBAR_ACTION, "max-lg:w-8 max-lg:px-0")}
+    >
       {/* Pushed as the sheet's own opening: closing it goes back to this page. */}
       <Link
         to={catalogueHref(type, { packageId, version })}
