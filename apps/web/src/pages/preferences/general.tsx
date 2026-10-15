@@ -51,18 +51,19 @@ function EmailVerificationBadge() {
         <AlertCircle size={14} />
         <span>{t("preferences.emailNotVerified")}</span>
       </div>
-      <button
+      <Button
         type="button"
+        variant="link"
         onClick={handleResend}
         disabled={resendState !== "idle"}
-        className="text-primary text-xs underline underline-offset-2 hover:no-underline disabled:no-underline disabled:opacity-50"
+        className="h-auto p-0 text-xs font-normal"
       >
         {resendState === "sending"
           ? t("verifyEmail.resending")
           : resendState === "sent"
             ? t("preferences.verificationResent")
             : t("preferences.resendVerification")}
-      </button>
+      </Button>
     </div>
   );
 }
