@@ -44,7 +44,6 @@ import { useActorName } from "../hooks/use-actor-name";
 import { useAuth } from "../hooks/use-auth";
 import { useModalParam } from "../hooks/use-modal-param";
 import { usePermissions } from "../hooks/use-permissions";
-import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useCreateSchedule, useScheduleFormDeps } from "../hooks/use-schedules";
 import { changedInputValues, hasInputFields, initialInputValues } from "../lib/agent-input";
@@ -220,12 +219,6 @@ export function ScheduleFieldsReady({
   // Its `required` flags tell which integrations may run with "Aucune connexion".
   const firedIntegrations = usePackageDetail("agent", agentId, { version: firedVersion }).data
     ?.dependencies.integrations;
-  // The server takes no fallback for an enabled schedule, so the connection the viewer's fallback
-  // binds is named in the write — from their own verdict, asked only when the fires run as them.
-  const { data: readiness, isLoading: readinessLoading } = useAgentConnectionReadiness(
-    runsAsViewer ? agentId : undefined,
-    firedVersion,
-  );
   const picks = overrides.connection_overrides ?? {};
 
   // A scheduled fire cannot ask which connection to use: a refusal over it is answered here, in
@@ -261,8 +254,6 @@ export function ScheduleFieldsReady({
     create.mutate(
       scheduleCreatePayload({
         overrides,
-        runsAsViewer,
-        viewerReadiness: readiness?.integrations,
         declared: firedIntegrations?.map((i) => i.id),
         name,
         cron_expression: cron,
@@ -390,7 +381,7 @@ export function ScheduleFieldsReady({
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>
-        <Button type="submit" pending={create.isPending} disabled={!cron || readinessLoading}>
+        <Button type="submit" pending={create.isPending} disabled={!cron}>
           {t("btn.create")}
         </Button>
       </div>

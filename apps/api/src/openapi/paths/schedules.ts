@@ -11,7 +11,7 @@ import { connectionConflictContent } from "../responses.ts";
  */
 const scheduleConnectionNotChosen = {
   description:
-    "`missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write; a write for another member takes that one connection by default, since its writer can neither see nor name it. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run and leaves the schedule enabled. A fire refused over one of the items above records a failed run and disables the schedule (`disabled_reason: connection_choice_invalid`), which then stays disabled until it is re-enabled. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail.",
+    "`missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write — by the server itself when the caller writes for itself (that one connection is stored in `connection_overrides`, so this refusal then means several connections or only shared ones); a write for another member takes that one connection by default, since its writer can neither see nor name it. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run and leaves the schedule enabled. A fire refused over one of the items above records a failed run and disables the schedule (`disabled_reason: connection_choice_invalid`), which then stays disabled until it is re-enabled. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail.",
   headers: REQUEST_ID_ONLY_HEADERS,
   content: connectionConflictContent,
 };
@@ -158,7 +158,7 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  description: `Per-integration connection sets frozen on the schedule row. Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY; \`[]\` fires without the integration (see the set schema). Resolved through the cascade \`IntegrationAgentResolution\` describes: this field is the launch-override layer of every fire, and the one own connection its fallback binds for the schedule's actor is a default the write of an enabled schedule wants named (see 409). Under an admin pin or an enforced org default the set must name only connections of that governing set (\`[]\` included), which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Ids that are not uuids are refused here, and so are a key that names no integration the fired agent declares and \`[]\` on an integration it marks \`required\`: 400 \`validation_failed\`, an \`errors[]\` item on \`connection_overrides.<id>\` whose \`code\` is \`undeclared_connection_override\` or \`required_integration_unbound\`.`,
+                  description: `Per-integration connection sets frozen on the schedule row. Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY; \`[]\` fires without the integration (see the set schema). Resolved through the cascade \`IntegrationAgentResolution\` describes: this field is the launch-override layer of every fire, and a fire takes no fallback: when the caller writes for itself, the server names the one own connection its fallback binds for each integration the set leaves unpicked, and stores it (a write for another member must name it, see 409). Under an admin pin or an enforced org default the set must name only connections of that governing set (\`[]\` included), which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Ids that are not uuids are refused here, and so are a key that names no integration the fired agent declares and \`[]\` on an integration it marks \`required\`: 400 \`validation_failed\`, an \`errors[]\` item on \`connection_overrides.<id>\` whose \`code\` is \`undeclared_connection_override\` or \`required_integration_unbound\`.`,
                   additionalProperties: connectionIdSetJsonSchema,
                 },
                 dependency_overrides: {
@@ -195,7 +195,14 @@ export const schedulesPaths = {
         "201": {
           description:
             "Schedule created, plus `warnings`: the integrations its fires would start without.",
-          headers: STD_RESPONSE_HEADERS,
+          headers: {
+            ...STD_RESPONSE_HEADERS,
+            ETag: {
+              description:
+                "The schedule's version (its `updatedAt` in milliseconds, quoted). Send it as `If-Match` on `PATCH /api/schedules/{id}` to refuse overwriting a write you have not seen.",
+              schema: { type: "string" },
+            },
+          },
           content: {
             "application/json": {
               schema: scheduleWriteSchema,
@@ -278,7 +285,14 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule details",
-          headers: STD_RESPONSE_HEADERS,
+          headers: {
+            ...STD_RESPONSE_HEADERS,
+            ETag: {
+              description:
+                "The schedule's version (its `updatedAt` in milliseconds, quoted). Send it as `If-Match` on `PATCH /api/schedules/{id}` to refuse overwriting a write you have not seen.",
+              schema: { type: "string" },
+            },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Schedule" },
@@ -329,6 +343,7 @@ export const schedulesPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/IfMatch" },
       ],
       requestBody: {
         required: true,
@@ -400,7 +415,14 @@ export const schedulesPaths = {
         "200": {
           description:
             "Schedule updated, plus `warnings`: the integrations its fires would start without, `null` unless this write moves what they resolve with.",
-          headers: STD_RESPONSE_HEADERS,
+          headers: {
+            ...STD_RESPONSE_HEADERS,
+            ETag: {
+              description:
+                "The schedule's version (its `updatedAt` in milliseconds, quoted). Send it as `If-Match` on `PATCH /api/schedules/{id}` to refuse overwriting a write you have not seen.",
+              schema: { type: "string" },
+            },
+          },
           content: {
             "application/json": {
               schema: scheduleWriteSchema,
@@ -437,6 +459,7 @@ export const schedulesPaths = {
           ...scheduleConnectionNotChosen,
           description: `${scheduleConnectionNotChosen.description} — Or \`schedule_modified_concurrently\`: the schedule was written since this patch read it (\`updated_at\` moved: another patch, a connection delete or unshare, the removal of the pin or org default that alone named one of its connection sets, a fire disabling it for an actor who lost access or for its own connection choice, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.`,
         },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
