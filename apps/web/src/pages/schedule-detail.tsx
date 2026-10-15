@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneAlert } from "@/components/app-ui/status-variants";
+import { Alert } from "@appstrate/ui/components/alert";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -127,7 +127,7 @@ export function ScheduleDetailPage() {
             blocks it. A lost connection is repaired in the form's connection
             choice, so the alert opens it. */}
         {disabledReason && (
-          <ToneAlert variant="warning" className="mb-4">
+          <Alert variant="warning" className="mb-4">
             <Pause aria-hidden />
             <AlertDescription className="flex items-start justify-between gap-3">
               <span className="min-w-0">{disabledReason}</span>
@@ -142,7 +142,7 @@ export function ScheduleDetailPage() {
                 </Button>
               )}
             </AlertDescription>
-          </ToneAlert>
+          </Alert>
         )}
         <DetailTabBar tabs={tabs} />
 

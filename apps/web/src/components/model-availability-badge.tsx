@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useTranslation } from "react-i18next";
 
 /**
@@ -15,8 +15,8 @@ import { useTranslation } from "react-i18next";
 export function ModelUnavailableBadge({ className }: { className?: string }) {
   const { t } = useTranslation("settings");
   return (
-    <ToneBadge variant="failed" className={className} title={t("models.credentialUnavailableHint")}>
+    <Badge variant="failed" className={className} title={t("models.credentialUnavailableHint")}>
       {t("models.credentialUnavailable")}
-    </ToneBadge>
+    </Badge>
   );
 }

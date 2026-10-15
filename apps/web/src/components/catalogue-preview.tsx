@@ -9,7 +9,7 @@
  * one not shared to the reader's space would 404. A skill also carries a per-space
  * `chat_enforced` switch.
  */
-import { ToneAlert } from "@/components/app-ui/status-variants";
+import { Alert } from "@appstrate/ui/components/alert";
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -288,7 +288,7 @@ export function CataloguePreview({
   return (
     <div>
       {offers.map((offer) => (
-        <ToneAlert key={offer.id} variant="info" className="mb-5">
+        <Alert key={offer.id} variant="info" className="mb-5">
           <Inbox className="h-4 w-4" />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
@@ -307,7 +307,7 @@ export function CataloguePreview({
               </Button>
             )}
           </div>
-        </ToneAlert>
+        </Alert>
       ))}
 
       <div className="flex items-start justify-between gap-4">

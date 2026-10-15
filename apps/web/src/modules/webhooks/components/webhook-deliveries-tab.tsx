@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -79,7 +79,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
                 <span className="font-mono text-sm">{d.eventType}</span>
               </div>
               <div className="text-muted-foreground flex items-center gap-2 text-xs">
-                <ToneBadge variant={variant}>{deliveryStatusLabel(d)}</ToneBadge>
+                <Badge variant={variant}>{deliveryStatusLabel(d)}</Badge>
                 {d.latency != null && <span>{d.latency}ms</span>}
                 <span>{t("settings:webhooks.deliveryAttempt", { attempt: d.attempt })}</span>
                 <span>{formatRelativeTime(d.createdAt, t)}</span>

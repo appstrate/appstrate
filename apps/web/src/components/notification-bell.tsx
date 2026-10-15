@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
-import { Badge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
 import { CountBadge } from "./count-badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
@@ -169,7 +169,7 @@ export function NotificationContent({
                     ) : (
                       <span className="truncate text-sm font-medium">{displayName}</span>
                     )}
-                    {status && <Badge status={status} />}
+                    {status && <RunStatusBadge status={status} />}
                   </div>
                   <p className="text-muted-foreground text-xs">
                     {formatDateField(notification.createdAt)}

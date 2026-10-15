@@ -48,7 +48,7 @@ import {
   DetailTabPanel,
   type DetailTab,
 } from "../components/detail-tabs";
-import { Badge } from "../components/status-badge";
+import { RunStatusBadge } from "../components/status-badge";
 import { RunProvenanceBadges } from "../components/run-cells";
 import type { JournalOverviewFilter } from "../components/log-viewer";
 import { isQueryInFlight } from "../lib/query-state";
@@ -259,7 +259,7 @@ export function RunDetailPage() {
         actions={
           <>
             {/* No unread dot here: this page is the reading. */}
-            <Badge status={enrichedRun.status} />
+            <RunStatusBadge status={enrichedRun.status} />
             <RunProvenanceBadges run={enrichedRun} />
             <RunHeaderActions
               canRerun={canRerun}

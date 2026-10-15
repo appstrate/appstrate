@@ -20,7 +20,6 @@ import { CountBadge } from "./count-badge";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import type { RoutePath } from "../lib/route-access";
 import { useCanReach, useReachReady } from "../hooks/use-can-reach";
-import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -36,7 +35,6 @@ type NavItem = {
   path: RoutePath;
   label: string;
   icon: LucideIcon;
-  badge?: number;
 };
 
 export function NavOrg() {
@@ -87,22 +85,19 @@ export function NavOrg() {
   ]);
 
   const renderItems = (items: NavItem[]) =>
-    items.map((item) => (
-      <SidebarNavLink
-        key={item.path}
-        to={item.path}
-        icon={item.icon}
-        label={item.label}
-        isActive={
-          item.path === "/" ? visiblePathname === "/" : visiblePathname.startsWith(item.path)
-        }
-      >
-        {item.badge && item.badge > 0 ? (
-          <SidebarMenuBadge>
-            <CountBadge count={item.badge} label={item.label} />
-          </SidebarMenuBadge>
-        ) : null}
-      </SidebarNavLink>
+    items.map(({ path, label, icon: Icon }) => (
+      <SidebarMenuItem key={path}>
+        <SidebarMenuButton
+          asChild
+          isActive={path === "/" ? visiblePathname === "/" : visiblePathname.startsWith(path)}
+          tooltip={label}
+        >
+          <Link to={path}>
+            <Icon />
+            <span>{label}</span>
+          </Link>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
     ));
 
   const canReachRuns = canReach("/runs");

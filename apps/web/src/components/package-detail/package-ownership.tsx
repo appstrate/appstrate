@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneAlert } from "@/components/app-ui/status-variants";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Info } from "lucide-react";
@@ -39,13 +38,13 @@ export function PackageOwnershipNotice({
         </Alert>
       )}
       {!isOwned && type !== "agent" && (
-        <ToneAlert variant="info" className="mb-4">
+        <Alert variant="info" className="mb-4">
           <Info />
           <AlertDescription className="flex flex-wrap items-center gap-x-3">
             <span>{t("ownership.readOnly")}</span>
             {origin}
           </AlertDescription>
-        </ToneAlert>
+        </Alert>
       )}
       {isOwned && origin && (
         <div className="border-border/50 bg-muted/30 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">

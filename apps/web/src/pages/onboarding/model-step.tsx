@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
@@ -90,9 +90,9 @@ export function OnboardingModelStep() {
                         so a dead one must say so rather than look configured. */}
                     {m.needs_reconnection && <ModelUnavailableBadge className="shrink-0" />}
                     {m.is_default && (
-                      <ToneBadge variant="success" className="shrink-0 text-[0.65rem]">
+                      <Badge variant="success" className="shrink-0 text-[0.65rem]">
                         {t("models.default")}
-                      </ToneBadge>
+                      </Badge>
                     )}
                   </div>
                 );

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -117,7 +117,7 @@ export function BillingManagersSection() {
                 <div className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium">{row.label}</span>
-                    {stale && <ToneBadge variant="pending">{t(stale[0])}</ToneBadge>}
+                    {stale && <Badge variant="pending">{t(stale[0])}</Badge>}
                   </span>
                   {row.email && (
                     <span className="text-muted-foreground block truncate text-sm">
@@ -170,7 +170,7 @@ export function BillingManagersSection() {
                     }}
                   >
                     <span className="min-w-0 flex-1 truncate">{memberLabel(member)}</span>
-                    <ToneBadge variant="pending">{t(roleI18nKey(member.role))}</ToneBadge>
+                    <Badge variant="pending">{t(roleI18nKey(member.role))}</Badge>
                   </CommandItem>
                 ))}
               </CommandList>

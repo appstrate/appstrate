@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { CheckCircle2, Pause } from "lucide-react";
 import type { EnrichedSchedule, ScheduleWireDto } from "@appstrate/shared-types";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { CountBadge } from "./count-badge";
-import { Badge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
 
 interface ScheduleStatusBadgeProps {
   schedule: Pick<ScheduleWireDto, "enabled" | "disabled_reason">;
@@ -22,19 +22,19 @@ export function ScheduleStatusBadge({ schedule }: ScheduleStatusBadgeProps) {
           schedule.disabled_reason ? t(`schedule.disabledReason.${schedule.disabled_reason}`) : null
         }
       >
-        <ToneBadge variant="secondary" className="gap-1">
+        <Badge variant="secondary" className="gap-1">
           <Pause className="size-3" />
           {t("schedule.statusDisabled")}
-        </ToneBadge>
+        </Badge>
       </DisabledReasonTooltip>
     );
   }
 
   return (
-    <ToneBadge variant="success" className="gap-1">
+    <Badge variant="success" className="gap-1">
       <CheckCircle2 className="size-3" />
       {t("schedule.statusActive")}
-    </ToneBadge>
+    </Badge>
   );
 }
 
@@ -55,7 +55,7 @@ export function ScheduleStateBadges({
         count={schedule.unread_count}
         label={t("dashboard.unreadRuns", { count: schedule.unread_count })}
       />
-      {schedule.running_runs > 0 && <Badge status="running" />}
+      {schedule.running_runs > 0 && <RunStatusBadge status="running" />}
     </div>
   );
 }

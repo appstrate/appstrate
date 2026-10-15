@@ -18,7 +18,7 @@
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
 import type { DataColumn } from "./data-table";
-import { Badge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
 import { RunAgentButton } from "./run-agent-button";
 import { PackageIcon } from "./package-icon";
 import { useCatalogueOriginColumn } from "./catalogue-columns";
@@ -103,7 +103,7 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
       tier: 2,
       cell: (item) =>
         item.type === "agent" && !!item.runningRuns && item.runningRuns > 0 ? (
-          <Badge status="running" compact />
+          <RunStatusBadge status="running" compact />
         ) : (
           <CellEmpty />
         ),

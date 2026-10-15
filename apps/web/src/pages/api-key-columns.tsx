@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import type { DataColumn } from "../components/data-table";
@@ -64,9 +64,9 @@ export function useApiKeyColumns({
       tier: 2,
       cell: (key) =>
         isApiKeyExpired(key.expiresAt) ? (
-          <ToneBadge variant="failed">{t("apiKeys.expired")}</ToneBadge>
+          <Badge variant="failed">{t("apiKeys.expired")}</Badge>
         ) : (
-          <ToneBadge variant="success">{t("apiKeys.active")}</ToneBadge>
+          <Badge variant="success">{t("apiKeys.active")}</Badge>
         ),
     },
     {

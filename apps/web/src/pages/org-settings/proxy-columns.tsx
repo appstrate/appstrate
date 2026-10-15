@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, FlaskConical, Pencil, Trash2 } from "lucide-react";
 import type { DataColumn } from "../../components/data-table";
@@ -89,9 +89,9 @@ export function useProxyColumns({
             failedKey="proxies.testFailed"
           />
         ) : (
-          <ToneBadge variant={p.enabled ? "success" : "secondary"}>
+          <Badge variant={p.enabled ? "success" : "secondary"}>
             {p.enabled ? t("proxies.active") : t("proxies.disabled")}
-          </ToneBadge>
+          </Badge>
         ),
     },
     {
@@ -100,11 +100,7 @@ export function useProxyColumns({
       width: "96px",
       tier: 2,
       cell: (p) =>
-        p.is_default ? (
-          <ToneBadge variant="success">{t("proxies.default")}</ToneBadge>
-        ) : (
-          <CellEmpty />
-        ),
+        p.is_default ? <Badge variant="success">{t("proxies.default")}</Badge> : <CellEmpty />,
     },
     rowActionsColumn((p: OrgProxyInfo) => {
       const isTesting = testingIds.has(p.id);

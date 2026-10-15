@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
@@ -99,7 +98,7 @@ export function SharedHeader({
               </Badge>
             )}
             {detail.type !== "agent" && hasUnarchivedChanges && !isHistoricalVersion && (
-              <ToneBadge variant="warning">{t("version.modified")}</ToneBadge>
+              <Badge variant="warning">{t("version.modified")}</Badge>
             )}
             {detail.type !== "agent" && isHistoricalVersion && (
               <Badge variant="secondary">{t("version.readOnly")}</Badge>

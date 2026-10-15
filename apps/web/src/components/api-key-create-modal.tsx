@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm, Controller } from "react-hook-form";
@@ -85,7 +84,7 @@ export function ApiKeyCreateModal() {
             {t("apiKeys.scopesGranted")}
           </p>
           {isFullAccess ? (
-            <ToneBadge variant="success">{t("apiKeys.fullAccess")}</ToneBadge>
+            <Badge variant="success">{t("apiKeys.fullAccess")}</Badge>
           ) : (
             <div className="flex flex-wrap gap-1">
               {summary.map((g) => (

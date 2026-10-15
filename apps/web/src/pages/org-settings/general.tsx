@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneAlert } from "@/components/app-ui/status-variants";
+import { Alert } from "@appstrate/ui/components/alert";
 import { useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -310,10 +310,10 @@ export function OrgSettingsGeneralPage() {
                   {t("orgStorage.percentUsed", { percent: storagePercent ?? 0 })}
                 </div>
                 {storageNearLimit && (
-                  <ToneAlert variant="warning" className="mt-3">
+                  <Alert variant="warning" className="mt-3">
                     <AlertTriangle size={16} />
                     <AlertDescription>{t("orgStorage.nearLimitWarning")}</AlertDescription>
-                  </ToneAlert>
+                  </Alert>
                 )}
               </div>
             )}

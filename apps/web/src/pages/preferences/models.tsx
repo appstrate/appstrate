@@ -5,7 +5,7 @@
  * organization's providers narrowed to them, with the kind of each. The Models column says what each lets them use.
  */
 
-import { ToneAlert } from "@/components/app-ui/status-variants";
+import { Alert } from "@appstrate/ui/components/alert";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
@@ -129,10 +129,10 @@ export function PreferencesModelsPage() {
   return (
     <>
       {personalModelCredentialsDisabled && (
-        <ToneAlert variant="warning" className="mb-4">
+        <Alert variant="warning" className="mb-4">
           <AlertTriangle size={16} />
           <AlertDescription>{t("modelCredentials.policyDisabled")}</AlertDescription>
-        </ToneAlert>
+        </Alert>
       )}
 
       <SettingsPageActions actions={[addCredential]} />

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useId, type ReactNode } from "react";
 import { Activity, CircleX, TriangleAlert } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
@@ -16,10 +16,10 @@ export function HealthIssueBadge({
 }) {
   const Icon = blocking ? CircleX : TriangleAlert;
   return (
-    <ToneBadge variant={blocking ? "failed" : "warning"} className={cn("gap-1", className)}>
+    <Badge variant={blocking ? "failed" : "warning"} className={cn("gap-1", className)}>
       <Icon className="size-3" aria-hidden />
       {children}
-    </ToneBadge>
+    </Badge>
   );
 }
 

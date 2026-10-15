@@ -24,7 +24,7 @@ import { useTranslation } from "react-i18next";
 import { Shield } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import type { DataColumn } from "./data-table";
-import { Badge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { RunDuration } from "./run-duration";
 import { DocumentCounts, RunProvenanceBadges, RunResult } from "./run-cells";
@@ -79,7 +79,7 @@ export function useRunColumns({
       id: "status",
       header: t("runs.column.status"),
       width: "104px",
-      cell: (run) => <Badge status={run.status} compact unread={run.unread} />,
+      cell: (run) => <RunStatusBadge status={run.status} compact unread={run.unread} />,
     },
     {
       id: "trigger",

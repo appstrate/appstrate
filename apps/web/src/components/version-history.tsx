@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -130,9 +130,9 @@ export function VersionHistory({
             header: t("version.status"),
             width: "minmax(100px,1fr)",
             cell: (version) => (
-              <ToneBadge variant={version.yanked ? "warning" : "secondary"}>
+              <Badge variant={version.yanked ? "warning" : "secondary"}>
                 {t(version.yanked ? "version.yanked" : "version.published")}
-              </ToneBadge>
+              </Badge>
             ),
           },
           ...(onCompare || canRestore || canDelete

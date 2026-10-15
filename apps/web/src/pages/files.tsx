@@ -7,7 +7,7 @@
  * files, end-users see only their own.
  */
 
-import { ToneAlert } from "@/components/app-ui/status-variants";
+import { Alert } from "@appstrate/ui/components/alert";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -101,10 +101,10 @@ function DocumentsCollection({
       />
 
       {overLimit && (
-        <ToneAlert variant="warning" className="mb-4">
+        <Alert variant="warning" className="mb-4">
           <AlertTriangle size={16} />
           <AlertDescription>{t("storage.limitReached")}</AlertDescription>
-        </ToneAlert>
+        </Alert>
       )}
 
       <DocumentListPanel

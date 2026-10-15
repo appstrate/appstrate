@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
-import { Badge, MetaBadge } from "./status-badge";
+import { RunStatusBadge, MetaBadge } from "./status-badge";
 import { CountBadge } from "./count-badge";
 import { PackageIcon } from "./package-icon";
 import { RunAgentButton } from "./run-agent-button";
@@ -101,7 +101,9 @@ export function PackageCard({
                 count={unreadCount ?? 0}
                 label={t("dashboard.unreadRuns", { ns: "agents", count: unreadCount ?? 0 })}
               />
-              {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
+              {type === "agent" && !!runningRuns && runningRuns > 0 && (
+                <RunStatusBadge status="running" />
+              )}
               {/* Listed here IS runnable here: the index and the launch routes
                   read the same rule (placed in this space and switched on), so
                   the card never has to explain an activation the row could not

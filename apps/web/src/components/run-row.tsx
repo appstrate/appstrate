@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { AgentListItem, EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
 import { PackageIcon } from "./package-icon";
-import { Badge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
 import { RunProvenanceBadges } from "./run-cells";
 import { RunDuration } from "./run-duration";
 import { formatDateField } from "../lib/format-date";
@@ -55,7 +55,7 @@ export function RunRow({
           {run.started_at ? formatDateField(run.started_at) : t("dashboard.runPending")}
         </p>
       </div>
-      <Badge status={run.status} unread={run.unread} compact={dense} />
+      <RunStatusBadge status={run.status} unread={run.unread} compact={dense} />
       {!dense && (
         <span className="text-muted-foreground w-14 text-right text-xs tabular-nums">
           <RunDuration status={run.status} startedAt={run.started_at} duration={run.duration} />

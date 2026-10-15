@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import type { DataColumn } from "./data-table";
@@ -58,9 +58,7 @@ export function useCliSessionColumns({
           >
             {deriveLabel(session, t)}
           </span>
-          {session.current && (
-            <ToneBadge variant="running">{t("orgCliSessions.current")}</ToneBadge>
-          )}
+          {session.current && <Badge variant="running">{t("orgCliSessions.current")}</Badge>}
         </div>
       ),
     },

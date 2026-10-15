@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -75,7 +75,7 @@ export function OnboardingMembersStep() {
                     <span className="block truncate text-sm font-medium">{inv.email}</span>
                   </div>
                   <CopyLinkButton token={inv.token} />
-                  <ToneBadge variant="pending">{t(roleI18nKey(inv.role))}</ToneBadge>
+                  <Badge variant="pending">{t(roleI18nKey(inv.role))}</Badge>
                 </div>
               </div>
             ))}

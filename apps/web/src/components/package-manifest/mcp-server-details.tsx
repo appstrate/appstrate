@@ -2,7 +2,6 @@
 
 /** MCP-server tail of the manifest overview (`server`, `tools`, `user_config`); `manifest.json` is this type's only required file, so it has no other view. */
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { ManifestFact, McpServerManifestDetails } from "../../lib/package-manifest";
@@ -56,9 +55,7 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
                 <code className="text-sm">{entry.key}</code>
                 {entry.type && <Badge variant="secondary">{entry.type}</Badge>}
                 {entry.required && <Badge variant="outline">{t("manifest.required")}</Badge>}
-                {entry.sensitive && (
-                  <ToneBadge variant="warning">{t("manifest.sensitive")}</ToneBadge>
-                )}
+                {entry.sensitive && <Badge variant="warning">{t("manifest.sensitive")}</Badge>}
               </div>
               {(entry.title ?? entry.description) && (
                 <p className="text-muted-foreground mt-0.5 text-xs">

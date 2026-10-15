@@ -4,7 +4,14 @@ import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { UnsavedBlocker } from "../hooks/use-unsaved-changes";
-import { Modal } from "./modal";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@appstrate/ui/components/alert-dialog";
 import { Button } from "@appstrate/ui/components/button";
 
 interface UnsavedChangesModalProps {
@@ -34,12 +41,13 @@ export function UnsavedChangesModal({ blocker, onSaveDraft }: UnsavedChangesModa
   };
 
   return (
-    <Modal
-      open
-      onClose={() => blocker.reset()}
-      title={t("unsaved.title")}
-      actions={
-        <>
+    <AlertDialog open onOpenChange={(v) => !v && blocker.reset()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("unsaved.title")}</AlertDialogTitle>
+          <AlertDialogDescription>{t("unsaved.message")}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
           <Button variant="outline" onClick={() => blocker.reset()} disabled={isSaving}>
             {t("btn.cancel")}
           </Button>
@@ -51,10 +59,8 @@ export function UnsavedChangesModal({ blocker, onSaveDraft }: UnsavedChangesModa
               {t("unsaved.saveDraft")}
             </PendingButton>
           )}
-        </>
-      }
-    >
-      <p className="text-muted-foreground text-sm">{t("unsaved.message")}</p>
-    </Modal>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

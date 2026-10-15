@@ -17,7 +17,6 @@
  * so there a row that exists is shown only to be deleted.
  */
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, type ReactNode } from "react";
 import { useModalParam } from "@/hooks/use-modal-param";
@@ -443,7 +442,7 @@ function ProviderConfigSection({
           {loading ? (
             <Skeleton className="h-5 w-20" />
           ) : configured ? (
-            <ToneBadge variant="running">{t("spaceAuth.configured")}</ToneBadge>
+            <Badge variant="running">{t("spaceAuth.configured")}</Badge>
           ) : (
             <Badge variant="secondary">{t("spaceAuth.notConfigured")}</Badge>
           )}

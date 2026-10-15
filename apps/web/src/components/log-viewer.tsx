@@ -37,7 +37,7 @@ import {
 import { ItemList } from "./item-list";
 import { EmptyState } from "./page-states";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
-import { Badge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
 import { formatDateField } from "../lib/format-date";
 import { historyRuns, recalledMemories } from "../lib/runtime-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
@@ -174,7 +174,7 @@ function ToolResult({ tool, result }: { tool: string; result: unknown }) {
         empty={<EmptyState compact icon={Info} message={t("log.historyNone")} />}
         renderItem={(run) => (
           <div className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
-            {run.status && <Badge status={run.status} />}
+            {run.status && <RunStatusBadge status={run.status} />}
             <span className="font-mono text-xs">{run.id}</span>
             <span className="text-muted-foreground ml-auto text-xs tabular-nums">
               {[

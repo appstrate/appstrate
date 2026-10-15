@@ -6,7 +6,7 @@ import { ChartNoAxesCombined, Database, PlayCircle } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { useSchedules } from "../../hooks/use-schedules";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
-import { Badge } from "../status-badge";
+import { RunStatusBadge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
 import { latestMemoryDate } from "../../lib/agent-overview";
 import { runDetailPath } from "../../lib/package-paths";
@@ -83,7 +83,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
               label={
                 <span className="flex flex-wrap items-center gap-2">
                   {t("detail.overview.lastRun")}
-                  {detail.last_run && <Badge status={detail.last_run.status} compact />}
+                  {detail.last_run && <RunStatusBadge status={detail.last_run.status} compact />}
                 </span>
               }
               value={

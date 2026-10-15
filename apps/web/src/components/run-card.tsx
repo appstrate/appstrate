@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Shield } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
-import { Badge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
 import { DocumentCounts, RunProvenanceBadges } from "./run-cells";
 import { RunDuration } from "./run-duration";
 import { RunTrigger } from "./run-trigger";
@@ -47,7 +47,7 @@ export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: strin
             <RunProvenanceBadges run={run} />
           </div>
         </div>
-        <Badge status={run.status} unread={run.unread} />
+        <RunStatusBadge status={run.status} unread={run.unread} />
       </div>
 
       {run.error && (
