@@ -123,8 +123,8 @@ const t = (key: string) => i18n.t(`settings:integration.admin.pinManagement.${ke
 describe("PinManagementSection, 'Aucune connexion'", () => {
   it("is a mode of the connection menu, beside the shared connections", () => {
     const items = formItems([SHARED]);
-    expect(items.get("pin-add-pick-none-connections")).toMatchObject({ role: "menuitemradio" });
-    expect(items.get("pin-add-pick-choose-connections")).toMatchObject({ role: "menuitemradio" });
+    expect(items.get("pin-add-pick-none-connections")).toMatchObject({ value: "none" });
+    expect(items.get("pin-add-pick-choose-connections")).toMatchObject({ value: "choose" });
     expect(items.has(`pin-add-pick-option-${SHARED.id}`)).toBe(true);
     // An exception to the default: « Hériter » is the pin's absence, which the table's delete does.
     expect(items.has("pin-add-pick-reset-connections")).toBe(false);

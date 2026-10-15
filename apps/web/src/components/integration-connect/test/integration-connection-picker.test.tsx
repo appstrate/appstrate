@@ -30,6 +30,7 @@ import { IntegrationConnectionPicker } from "../integration-connection-picker.ts
 import { PickerMenu } from "../connection-picker-menu.tsx";
 import { ConnectionChoiceMenu } from "../connection-choice-menu.tsx";
 import { UnderScopedWarning } from "../connection-picker-states.tsx";
+import { DropdownMenuRadioGroup } from "@appstrate/ui/components/dropdown-menu";
 import { ScopeSummaryText } from "../scope-summary-text.tsx";
 import {
   useConnectionPicker,
@@ -501,17 +502,26 @@ function WarningProbe({
 }
 
 /** The props of the element carrying `testId`, found in an element tree. */
-function propsOf(node: ReactNode, testId: string): Record<string, unknown> | undefined {
+function propsOf(
+  node: ReactNode,
+  testId: string,
+  group?: unknown,
+): Record<string, unknown> | undefined {
   if (Array.isArray(node)) {
     for (const child of node) {
-      const found = propsOf(child, testId);
+      const found = propsOf(child, testId, group);
       if (found) return found;
     }
     return undefined;
   }
   if (!isValidElement<Record<string, unknown>>(node)) return undefined;
-  if (node.props["data-testid"] === testId) return node.props;
-  return propsOf(node.props.children as ReactNode, testId);
+  if (node.props["data-testid"] === testId) {
+    // A radio item is ticked by its group's value.
+    const radio = group !== undefined && "value" in node.props;
+    return radio ? { ...node.props, checked: node.props.value === group } : node.props;
+  }
+  const inGroup = node.type === DropdownMenuRadioGroup ? node.props.value : group;
+  return propsOf(node.props.children as ReactNode, testId, inGroup);
 }
 
 /**
@@ -753,20 +763,16 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     const tree = (res: Resolution) => menuOf(pickerFor(res));
     const none = tree(resolution({ source: null, member_pinned_connection_ids: [] }));
     expect(propsOf(none, `member-pick-none-${INTEGRATION}`)).toMatchObject({
-      role: "menuitemradio",
-      "aria-checked": true,
+      checked: true,
     });
     expect(propsOf(none, `member-pick-reset-${INTEGRATION}`)).toMatchObject({
-      role: "menuitemradio",
-      "aria-checked": false,
+      checked: false,
     });
     expect(propsOf(none, `member-pick-choose-${INTEGRATION}`)).toMatchObject({
-      role: "menuitemradio",
-      "aria-checked": false,
+      checked: false,
     });
     expect(propsOf(none, `member-pick-option-${WEB}`)).toMatchObject({
-      role: "menuitemcheckbox",
-      "aria-checked": false,
+      checked: false,
     });
     // One connection to pick from is still a box, never a radio of its own.
     const single = tree(
@@ -777,14 +783,13 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
       }),
     );
     expect(propsOf(single, `member-pick-option-${WEB}`)).toMatchObject({
-      role: "menuitemcheckbox",
-      "aria-checked": true,
+      checked: true,
     });
     expect(propsOf(single, `member-pick-choose-${INTEGRATION}`)).toMatchObject({
-      "aria-checked": true,
+      checked: true,
     });
     expect(propsOf(single, `member-pick-reset-${INTEGRATION}`)).toMatchObject({
-      "aria-checked": false,
+      checked: false,
     });
   });
 
@@ -1523,10 +1528,10 @@ describe("PickerMenu — one way to read the state", () => {
         resolved_connection_ids: [WEB],
       }),
     );
-    expect(menu.inherit).toMatchObject({ "aria-checked": true });
-    expect(menu.web).toMatchObject({ "aria-checked": false });
-    expect(menu.db).toMatchObject({ "aria-checked": false });
-    expect(menu.none).toMatchObject({ "aria-checked": false });
+    expect(menu.inherit).toMatchObject({ checked: true });
+    expect(menu.web).toMatchObject({ checked: false });
+    expect(menu.db).toMatchObject({ checked: false });
+    expect(menu.none).toMatchObject({ checked: false });
     expect(descriptionOf(menu.inherit?.children)).toBe(
       t("inheritFromSpaceDefault", { name: "web", count: 1 }),
     );
@@ -1539,10 +1544,10 @@ describe("PickerMenu — one way to read the state", () => {
     const menu = menuFor(
       resolution({ member_pinned_connection_ids: [WEB], resolved_connection_ids: [WEB] }),
     );
-    expect(menu.inherit).toMatchObject({ "aria-checked": false });
-    expect(menu.web).toMatchObject({ "aria-checked": true });
-    expect(menu.db).toMatchObject({ "aria-checked": false });
-    expect(menu.none).toMatchObject({ "aria-checked": false });
+    expect(menu.inherit).toMatchObject({ checked: false });
+    expect(menu.web).toMatchObject({ checked: true });
+    expect(menu.db).toMatchObject({ checked: false });
+    expect(menu.none).toMatchObject({ checked: false });
     // Under a pin the verdict is the pin: inheriting is not named after it.
     expect(descriptionOf(menu.inherit?.children)).toBe(t("inheritGeneric"));
   });
@@ -1553,7 +1558,7 @@ describe("PickerMenu — one way to read the state", () => {
       value: null,
       onChange: () => {},
     });
-    expect(menu.inherit).toMatchObject({ "aria-checked": true });
+    expect(menu.inherit).toMatchObject({ checked: true });
     expect(descriptionOf(menu.inherit?.children)).toBe(t("inheritFromPin", { name: "db" }));
   });
 });
@@ -1666,8 +1671,8 @@ describe("IntegrationConnectionPicker — an unset override", () => {
     const pinnedNone = resolution({ source: null, member_pinned_connection_ids: [] });
     const noneItem = (persistence: Persistence) =>
       propsOf(menuOf(pickerFor(pinnedNone, { persistence })), `member-pick-none-${INTEGRATION}`)!;
-    expect(noneItem(unset)).toMatchObject({ "aria-checked": false, disabled: false });
-    expect(noneItem(picked([]))).toMatchObject({ "aria-checked": true });
+    expect(noneItem(unset)).toMatchObject({ checked: false, disabled: false });
+    expect(noneItem(picked([]))).toMatchObject({ checked: true });
   });
 });
 
