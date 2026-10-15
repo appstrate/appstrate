@@ -364,11 +364,9 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
      no handle.
 - **List state lives in the URL** (`lib/list-params.ts`: `useListParams` on a
   page, `useLocalListParams` in a panel that floats over a page): filters are
-  pushed, the search is replaced, a reset is one update. Runs, schedules, files
-  and integrations are tables; the package indexes (agents, skills, MCP) let the reader
-  choose cards or table (`Tabs`, `stores/list-view-store.ts`, one preference per
-  index: a preference, not a location). Hidden columns
-  are in `stores/column-visibility-store.ts`.
+  pushed, the search is replaced, a reset is one update. Runs, schedules, files,
+  integrations and the package indexes (agents, skills, MCP) are tables, with no
+  cards/table switch. Hidden columns are in `stores/column-visibility-store.ts`.
 - Toolbar buttons have two treatments (`lib/toolbar-button.ts`): `TOOLBAR_UTILITY`
   adjusts the view (filters, columns), `TOOLBAR_ACTION` acts on the data (outline,
   32 px, on a `bg-card` surface — the same in a detail page's header).
