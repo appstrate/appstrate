@@ -225,6 +225,8 @@ describe("t() keys", () => {
  * alone. Kept alphabetical.
  */
 const DYNAMIC_KEY_PREFIXES = [
+  "agent-map:concept.", // components/map-primitives.tsx — ConceptTitle — t(`agent-map:concept.${concept}.{title,body}`)
+  "agent-map:systemTool.", // modules/agent-map/map-nodes.tsx — t(`agent-map:systemTool.${item.id}`)
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
   "common:status.", // components/status-badge.tsx — t(`status.${status}`)
   "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
@@ -243,6 +245,8 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.inventory.originDetail.", // components/package-detail/package-tool-catalog.tsx
   "integration.inventory.reason.", // components/package-detail/package-tool-catalog.tsx
   "integration.inventory.rules.", // components/package-detail/package-tool-catalog.tsx
+  "integration.structure.concept.", // components/package-detail/integration-structure.tsx
+  "integration.structure.empty.", // components/package-detail/integration-structure.tsx
   "integration.structure.type.", // components/package-detail/integration-structure.tsx
   "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
   "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()

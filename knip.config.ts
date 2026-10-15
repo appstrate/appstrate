@@ -317,7 +317,11 @@ const config: KnipConfig = {
    * still reported, which is the whole reason the `./components/*` wildcard
    * was dropped from the `packages/ui` entry list below.
    */
-  ignoreIssues: { "packages/ui/src/components/*.tsx": ["exports"] },
+  ignoreIssues: {
+    "packages/ui/src/components/*.tsx": ["exports"],
+    /** The map's wire types, exported for the screens still to be built. */
+    "apps/web/src/modules/agent-map/use-agent-map.ts": ["types"],
+  },
 
   /**
    * Invoked through `npx`/`bunx` or a shell builtin, so no manifest lists

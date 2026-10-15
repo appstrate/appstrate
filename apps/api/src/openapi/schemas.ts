@@ -2474,13 +2474,24 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["code", "severity", "title", "explanation", "field", "correction"],
+          required: ["code", "severity", "title", "explanation", "field", "target", "correction"],
           properties: {
             code: { type: "string" },
             severity: { type: "string", enum: ["blocking", "warning"] },
             title: { type: "string" },
             explanation: { type: "string" },
             field: { type: "string" },
+            target: {
+              type: "object",
+              required: ["node", "item"],
+              properties: {
+                node: {
+                  type: ["string", "null"],
+                  enum: ["agent", "config", "skills", "toolbox", "model", "schedules", null],
+                },
+                item: { type: ["string", "null"] },
+              },
+            },
             correction: {
               type: "object",
               required: ["destination", "section", "params"],

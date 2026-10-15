@@ -12,7 +12,11 @@
 import { lazy, Suspense } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
-import { IntegrationFunctioning } from "../components/package-detail/integration-structure";
+import {
+  IntegrationFunctioning,
+  IntegrationMap,
+} from "../components/package-detail/integration-structure";
+import { PackageFilesView } from "../components/package-files/package-files-view";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 
 const INTEGRATION_TABS = ["overview", "connections", "configuration"] as const;
@@ -24,6 +28,7 @@ import {
   ShieldCheck,
   KeyRound,
   Plug,
+  Workflow,
   FolderTree,
   Wrench,
   History,
@@ -59,6 +64,7 @@ import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/u
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
 import { usePackageActivation } from "../hooks/use-library";
+import { structurePanelState } from "../lib/integration-structure-panel";
 import {
   integrationSettingsHref,
   isPackageCommonSection,
@@ -113,6 +119,7 @@ function IntegrationSettings({
   const resolve = (requested: string | null): IntegrationSettingsSection =>
     requested === "tools" ||
     requested === "functioning" ||
+    requested === "map" ||
     (requested === "versions" && isOwned) ||
     requested === "bundle" ||
     (definition && requested && DEFINITION_SECTIONS.includes(requested))
@@ -123,7 +130,7 @@ function IntegrationSettings({
           ? "access"
           : "authentication";
   const steps = detail.manifest.setup_guide?.steps ?? [];
-  // Same order as an agent's: Explorer (see it: files, versions), then
+  // Same order as an agent's: Explorer (see it: map, files, versions), then
   // what is set here, then the AFPS package, what the integration IS for every
   // space, edited in place when the reader may. The tool catalogue belongs to
   // the package: nothing about it is set per organization or per space.
@@ -136,6 +143,7 @@ function IntegrationSettings({
     {
       title: t("detail.settings.exploreGroup", { ns: "agents" }),
       items: [
+        item("map", Workflow, t("integration.structure.map")),
         item("files", FolderTree, t("detail.overview.explorer", { ns: "agents" })),
         ...(isOwned
           ? [item("versions", History, t("detail.settings.versions", { ns: "agents" }))]
@@ -212,6 +220,65 @@ function IntegrationSettings({
           <div className="p-6">
             <SettingsHeading title={t("integration.structure.functioning")} description={null} />
             <IntegrationGeneral detail={detail} />
+          </div>
+        ) : active === "map" ? (
+          <div className="p-6">
+            <SettingsHeading title={t("integration.structure.map")} description={null} />
+            <IntegrationMap
+              detail={detail}
+              packageId={packageId}
+              renderPanel={(section, openPanel) => {
+                const state = structurePanelState(section, detail.active, canConfigure);
+                if (state === "inactive") return <ActivationHint packageId={packageId} />;
+                if (state === "admin-only")
+                  return (
+                    <p className="text-muted-foreground text-sm">
+                      {t("integration.health.adminRequired")}
+                    </p>
+                  );
+                if (section === "files")
+                  return <PackageFilesView type="integration" packageId={packageId} />;
+                if (section === "tools")
+                  return (
+                    <IntegrationToolsSection
+                      integrationId={packageId}
+                      inspection={detail.tool_catalog_inspection}
+                      allowUndeclaredTools={detail.allow_undeclared_tools}
+                    />
+                  );
+                if (section === "functioning") return <IntegrationGeneral detail={detail} />;
+                if (section.startsWith("connections:"))
+                  return (
+                    <ConnectionsTable
+                      key={section}
+                      packageId={packageId}
+                      detail={detail}
+                      canConfigure={canConfigure}
+                      onConfigure={(authKey) =>
+                        openPanel(`auth:${authKey ?? detail.auths[0]?.auth_key ?? ""}`)
+                      }
+                    />
+                  );
+                if (section === "access")
+                  return (
+                    <AccessRulesSection
+                      packageId={packageId}
+                      blockUserConnections={blockUserConnections}
+                    />
+                  );
+                const authKey = section.slice("auth:".length);
+                const status = detail.auths.find((auth) => auth.auth_key === authKey);
+                const authDecl = detail.manifest.auths?.[authKey];
+                return status && authDecl ? (
+                  <ConfigAuthBlock
+                    key={authKey}
+                    packageId={packageId}
+                    status={status}
+                    authDecl={authDecl}
+                  />
+                ) : null;
+              }}
+            />
           </div>
         ) : active === "tools" ? (
           <div className="p-6">

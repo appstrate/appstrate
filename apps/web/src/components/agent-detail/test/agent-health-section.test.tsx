@@ -33,6 +33,7 @@ function diagnostic(code: string, field: string, section = "inputs"): AgentDiagn
     title: code,
     explanation: code,
     field,
+    target: { node: null, item: null },
     correction: { destination: "configuration", section, params: {} },
   };
 }

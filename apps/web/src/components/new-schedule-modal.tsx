@@ -10,7 +10,8 @@
  *
  * Opened from anywhere by the `newSchedule` URL parameter (`useModalParam`),
  * carrying the agent to preselect or `1` for none: the schedules list, an
- * agent's page and its settings all open the same modal.
+ * agent's page and its settings all open the same modal. The agent map embeds
+ * the form itself, its agent fixed.
  */
 
 import { useState } from "react";
@@ -96,14 +97,19 @@ export function NewScheduleModalHost() {
   );
 }
 
-/** The form itself. */
-function NewScheduleForm({
+/**
+ * The form itself. `fixedAgent` hides the agent selector: the agent map creates
+ * a schedule for the agent it shows, never another one.
+ */
+export function NewScheduleForm({
   initialAgentId,
+  fixedAgent = false,
   onCreated,
   onCancel,
   onLeave,
 }: {
   initialAgentId?: string;
+  fixedAgent?: boolean;
   onCreated: (schedule: ScheduleWireDto) => void;
   onCancel: () => void;
   /** A connection picker's way out to the integration page leaves this modal. */
@@ -118,20 +124,22 @@ function NewScheduleForm({
 
   return (
     <div className="space-y-5">
-      <FormItem id="new-schedule-agent" label={t("schedule.agent")}>
-        {agentsPending ? (
-          <Skeleton className="h-9 w-full" />
-        ) : (
-          <OptionSelect
-            value={agentId ?? ""}
-            onValueChange={setPicked}
-            options={(agents ?? []).map((agent) => ({
-              value: agent.id,
-              label: agent.display_name ?? agent.id,
-            }))}
-          />
-        )}
-      </FormItem>
+      {!fixedAgent && (
+        <FormItem id="new-schedule-agent" label={t("schedule.agent")}>
+          {agentsPending ? (
+            <Skeleton className="h-9 w-full" />
+          ) : (
+            <OptionSelect
+              value={agentId ?? ""}
+              onValueChange={setPicked}
+              options={(agents ?? []).map((agent) => ({
+                value: agent.id,
+                label: agent.display_name ?? agent.id,
+              }))}
+            />
+          )}
+        </FormItem>
+      )}
       {agentsPending ? (
         <SettingsSkeleton />
       ) : agentId ? (

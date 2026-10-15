@@ -1,0 +1,297 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * In-place editing from the visual map.
+ *
+ * Deliberately thin: it mounts the SAME widgets the agent editor uses
+ * (`ResourceSection` for skills / integrations, `ContentEditor` for the prompt)
+ * and saves through the SAME mutation (`useUpdatePackage`, which owns the cache
+ * invalidations). Nothing about how a manifest is read or written lives here —
+ * `getResourceEntries` / `setResourceEntries` remain the single round-trip for
+ * that, wildcard tool selections and `integrations_configuration` included.
+ *
+ * What is edited is always the agent's own definition: the prompt as text, and
+ * declared dependencies. The map never becomes a source the definition is
+ * generated from.
+ */
+
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
+import { Button } from "@appstrate/ui/components/button";
+import type { ResourceEntry } from "@appstrate/shared-types";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
+import { Modal } from "../../components/modal";
+import { Spinner } from "@appstrate/ui/components/spinner";
+import { ResourceSection } from "../../components/agent-editor/resource-section";
+import { ContentEditor } from "../../components/package-editor/content-editor";
+import { RuntimeToolsGroup } from "../../components/agent-editor/runtime-tools-group";
+import { SchemaFieldList } from "../../components/agent-editor/schema-field-list";
+import type { SchemaField } from "../../components/agent-editor/types";
+import {
+  caretRange,
+  fieldsToSchema,
+  getResourceEntries,
+  manifestToSchemaFields,
+  setResourceEntries,
+} from "../../components/agent-editor/utils";
+import { fileTextOperation, packageUpdateBody } from "../../lib/package-file-drafts";
+import { usePackageDetail } from "../../hooks/use-packages";
+import { useUpdatePackage } from "../../hooks/use-mutations";
+import { useSetPackageActive } from "../../hooks/use-library";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { agentMapQueryKeyPrefix } from "./use-agent-map";
+import { LibraryPicker, type LibraryCandidate } from "./library-picker";
+
+/**
+ * Which manifest section the dialog edits.
+ *
+ * `runtime_tools` is what the memory card acts on: `note` and `pin` are platform
+ * runtime tools granted per agent in the manifest (`manifest.runtime_tools`), not
+ * installable dependencies — so the memory card's affordance opens the same
+ * system-tools checklist the editor uses, which also covers `output` / `log` /
+ * `publish_document`.
+ */
+export type MapEditKind =
+  "prompt" | "skills" | "integrations" | "runtime_tools" | "input" | "output";
+
+const TITLE_KEY: Record<MapEditKind, string> = {
+  prompt: "agent-map:editPrompt",
+  skills: "agent-map:addSkill",
+  runtime_tools: "agent-map:systemTools",
+  integrations: "agent-map:addIntegration",
+  input: "agent-map:editInput",
+  output: "agent-map:editOutput",
+};
+
+/**
+ * The two AFPS schema wrappers (§3.4), which share one field editor. Kept as a
+ * guard rather than a repeated union so adding a third touches one line.
+ * `config` was one of them until it merged into `input`.
+ */
+function isSchemaKind(kind: MapEditKind): kind is "input" | "output" {
+  return kind === "input" || kind === "output";
+}
+
+/** An agent's prompt is one file of its bundle, and always that one. */
+const PROMPT_FILE = PACKAGE_CONTENT_ENTRY.agent!.path;
+
+interface MapEditDialogProps {
+  /** The `?mapEdit=` value as it came: one that names no editor opens nothing. */
+  kind: string | null;
+  packageId: string;
+  onClose: () => void;
+}
+
+export function MapEditDialog({ kind: requested, packageId, onClose }: MapEditDialogProps) {
+  const kind = requested !== null && requested in TITLE_KEY ? (requested as MapEditKind) : null;
+  const { t } = useTranslation(["agents", "agent-map"]);
+  const qc = useQueryClient();
+  // Only fetched while open, and re-read on open so the draft starts from the
+  // current definition rather than a stale cache entry.
+  const { data: detail } = usePackageDetail("agent", kind ? packageId : undefined);
+
+  if (!kind) return null;
+
+  // Saving already refreshes the map, but a save is not the only thing that can
+  // change it here: activating an integration takes effect immediately and
+  // server-side, so cancelling right after would leave the card still claiming
+  // the integration is inactive. Refreshing on the way out covers both.
+  const closeAndRefresh = () => {
+    void qc.invalidateQueries({ queryKey: agentMapQueryKeyPrefix });
+    onClose();
+  };
+
+  return (
+    <Modal open onClose={closeAndRefresh} title={t(TITLE_KEY[kind])} className="sm:max-w-2xl">
+      {detail?.manifest ? (
+        // Keyed on the draft's ETag: a save moves it, which remounts the form
+        // on the freshly saved definition instead of keeping a draft that no
+        // longer matches the server.
+        <MapEditForm
+          key={detail.etag ?? undefined}
+          kind={kind}
+          packageId={packageId}
+          manifest={detail.manifest}
+          prompt={detail.prompt ?? ""}
+          etag={detail.etag}
+          onClose={closeAndRefresh}
+        />
+      ) : (
+        <div className="flex justify-center py-8">
+          <Spinner />
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function MapEditForm({
+  kind,
+  packageId,
+  manifest,
+  prompt,
+  etag,
+  onClose,
+}: {
+  kind: MapEditKind;
+  packageId: string;
+  manifest: Record<string, unknown>;
+  prompt: string;
+  /** The draft version the dialog read, sent as `If-Match`: a save over a moved draft is refused. */
+  etag: string | null;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation(["agents", "agent-map", "common"]);
+  const qc = useQueryClient();
+  const update = useUpdatePackage("agent", packageId);
+  const setActive = useSetPackageActive();
+  const currentSpaceId = useCurrentSpaceId();
+  const [draftPrompt, setDraftPrompt] = useState(prompt);
+  const [entries, setEntries] = useState<ResourceEntry[]>(() =>
+    kind === "skills" || kind === "integrations" ? getResourceEntries(manifest, kind) : [],
+  );
+  const [runtimeTools, setRuntimeTools] = useState<string[]>(() =>
+    Array.isArray(manifest.runtime_tools) ? (manifest.runtime_tools as string[]) : [],
+  );
+  // Schema fields live in local state exactly as in the package editor: a field
+  // being typed has an empty key, and `fieldsToSchema` drops those — persisting
+  // on every keystroke would delete the row you are in the middle of naming.
+  const [schemaFields, setSchemaFields] = useState<SchemaField[]>(() =>
+    isSchemaKind(kind) ? (manifestToSchemaFields(manifest)[kind] ?? []) : [],
+  );
+  // Catalogue integrations staged for activation-then-declaration on save.
+  const [staged, setStaged] = useState<LibraryCandidate[]>([]);
+  const [activating, setActivating] = useState(false);
+
+  function toggleStaged(candidate: LibraryCandidate) {
+    setStaged((prev) =>
+      prev.some((c) => c.id === candidate.id)
+        ? prev.filter((c) => c.id !== candidate.id)
+        : [...prev, candidate],
+    );
+  }
+
+  function writeManifest(declared: ResourceEntry[]) {
+    // Clone before mutating: `setResourceEntries` writes in place, and the
+    // manifest here is the React Query cache's object.
+    const next = structuredClone(manifest);
+    if (kind === "skills" || kind === "integrations") setResourceEntries(next, kind, declared);
+    // `runtime_tools` is a flat top-level array (AFPS), not a dependency group —
+    // dropped entirely when empty rather than written as `[]`.
+    if (kind === "runtime_tools") {
+      if (runtimeTools.length > 0) next.runtime_tools = runtimeTools;
+      else delete next.runtime_tools;
+    }
+    // An emptied schema drops its wrapper rather than persisting `{}`, matching
+    // the package editor — `input: {}` is not the same manifest as no input.
+    if (isSchemaKind(kind)) {
+      const wrapper = fieldsToSchema(schemaFields, kind);
+      if (wrapper) next[kind] = wrapper;
+      else delete next[kind];
+    }
+    // The same body the explorer's save bar sends. The prompt is a FILE, so it
+    // travels as a file operation rather than through `content`, the legacy
+    // field that names a different file per package type. The other kinds
+    // touch the manifest alone, and a PATCH carrying no file operation leaves
+    // the stored draft as it is — echoing the prompt as it was read when the
+    // dialog opened would be the only way to lose a concurrent edit of it.
+    update.mutate(
+      {
+        etag: etag ?? "",
+        body: packageUpdateBody({
+          manifest: next,
+          operations: kind === "prompt" ? [fileTextOperation(PROMPT_FILE, draftPrompt)] : [],
+        }),
+      },
+      {
+        onSuccess: () => {
+          // The map is a projection of what we just changed, and it is the very
+          // view the user is looking at — refetch it before closing.
+          void qc.invalidateQueries({ queryKey: agentMapQueryKeyPrefix });
+          onClose();
+        },
+      },
+    );
+  }
+
+  const busy = update.isPending || activating;
+
+  async function save() {
+    if (staged.length === 0) {
+      writeManifest(entries);
+      return;
+    }
+    // Activate first, sequentially, and declare only what actually activated: a
+    // dependency on an integration that failed to activate would put the agent
+    // straight into `integration_not_active`. The hook surfaces its own error
+    // toast per failure.
+    setActivating(true);
+    const activated: ResourceEntry[] = [];
+    for (const candidate of staged) {
+      try {
+        // Staging a catalogue integration ACTIVATES it in this space, the one
+        // door every family now uses (#1437).
+        if (!currentSpaceId) throw new Error("no space");
+        await setActive.mutateAsync({
+          spaceId: currentSpaceId,
+          packageId: candidate.id,
+          active: true,
+        });
+        activated.push({ id: candidate.id, version: caretRange(candidate.version) });
+      } catch {
+        /* toast already shown; keep going so one failure doesn't sink the rest */
+      }
+    }
+    setActivating(false);
+    writeManifest([...entries, ...activated]);
+  }
+
+  return (
+    <>
+      <div className="max-h-[60vh] overflow-y-auto">
+        {kind === "prompt" ? (
+          <ContentEditor value={draftPrompt} onChange={setDraftPrompt} language="markdown" />
+        ) : kind === "runtime_tools" ? (
+          <RuntimeToolsGroup selected={runtimeTools} onChange={setRuntimeTools} />
+        ) : isSchemaKind(kind) ? (
+          <SchemaFieldList
+            title={t(`agent-map:${kind}`)}
+            mode={kind}
+            fields={schemaFields}
+            onChange={setSchemaFields}
+          />
+        ) : (
+          <ResourceSection
+            type={kind === "skills" ? "skill" : "integration"}
+            title={kind === "skills" ? t("agent-map:skills") : t("agent-map:toolbox")}
+            emptyLabel={
+              kind === "skills" ? t("agent-map:emptySkills") : t("agent-map:emptyToolbox")
+            }
+            selectedEntries={entries}
+            onChange={(updater) =>
+              setEntries((prev) => (typeof updater === "function" ? updater(prev) : updater))
+            }
+          />
+        )}
+        {kind === "integrations" && (
+          <LibraryPicker
+            // Anything already declared is offered by `ResourceSection` above;
+            // listing it twice would let the two lists disagree.
+            activeIds={new Set(entries.map((e) => e.id))}
+            selected={staged}
+            onToggle={toggleStaged}
+          />
+        )}
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={onClose} disabled={busy}>
+          {t("common:btn.cancel")}
+        </Button>
+        <Button onClick={() => void save()} disabled={busy}>
+          {busy ? <Spinner /> : t("common:btn.save")}
+        </Button>
+      </div>
+    </>
+  );
+}

@@ -3,9 +3,10 @@
 /**
  * Canonical Agent diagnostics routing.
  *
- * The backend owns every verdict and correction. This module only words that
- * interface and maps it to SPA locations. It must never infer whether something
- * is healthy or invent a fix.
+ * The backend owns every verdict, correction and semantic target. This module
+ * only words that interface and maps it to SPA locations and the map's node
+ * ids. It must never infer whether something is healthy or invent a fix from a
+ * visual card id.
  */
 
 import type {
@@ -123,6 +124,15 @@ const DIAGNOSTIC_TEXT_KEYS = {
   },
 } as const satisfies Record<AgentDiagnosticCode, { title: string; explanation: string }>;
 
+const MAP_NODE_BY_TARGET: Record<NonNullable<AgentDiagnostic["target"]["node"]>, string> = {
+  agent: "agent",
+  config: "input_values",
+  skills: "skills",
+  toolbox: "toolbox",
+  model: "model",
+  schedules: "schedules",
+};
+
 /**
  * What a diagnostic says, in the reader's language: worded by `code`, its
  * values read from `correction.params`. The server's English text is kept only
@@ -159,6 +169,36 @@ export function agentDiagnosticsTitle(
 
 export function agentDiagnosticKey(diagnostic: AgentDiagnostic): string {
   return `${diagnostic.code}:${diagnostic.field}`;
+}
+
+/** Translate a semantic backend target to the current drawing only. */
+export function agentDiagnosticMapNodeId(diagnostic: AgentDiagnostic): string | null {
+  const target = diagnostic.target.node;
+  return target ? MAP_NODE_BY_TARGET[target] : null;
+}
+
+export function requestedAgentDiagnostic(
+  search: URLSearchParams,
+  diagnostics: AgentDiagnostic[],
+): AgentDiagnostic | null {
+  const requestedField = search.get("agentIssueField");
+  if (requestedField) {
+    const exact = diagnostics.find((diagnostic) => diagnostic.field === requestedField);
+    if (exact) return exact;
+  }
+  const requestedCode = search.get("agentIssue");
+  return diagnostics.find((diagnostic) => diagnostic.code === requestedCode) ?? null;
+}
+
+/**
+ * The map, centred on a diagnostic. A code may occur more than once (one
+ * warning per schedule), so the field rides along to keep the link exact.
+ */
+export function agentDiagnosticLocateTarget(diagnostic: AgentDiagnostic, pathname: string): string {
+  return agentSettingsHref(pathname, "map", {
+    agentIssue: diagnostic.code,
+    agentIssueField: diagnostic.field,
+  });
 }
 
 /** The server's correction sections that name a Paramètres section of the same name. */

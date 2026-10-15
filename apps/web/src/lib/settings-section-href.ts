@@ -18,9 +18,12 @@ export const AGENT_DEFINITION_SECTIONS = [
 
 export type AgentDefinitionSection = (typeof AGENT_DEFINITION_SECTIONS)[number];
 
-/** Package AFPS › Contenu is `bundle` in the URL: `files` is Explorer's tree. */
+/**
+ * Package AFPS › Contenu is `bundle` in the URL: `files` is Explorer's tree.
+ * `map` is the agent map, present only with the `agent-map` module.
+ */
 export type AgentSettingsSection =
-  ConfigurationSection | AgentDefinitionSection | PackageCommonSectionId;
+  ConfigurationSection | AgentDefinitionSection | PackageCommonSectionId | "map";
 
 /** The sections every package's Paramètres has (`PackageCommonSection`). */
 export type PackageCommonSectionId = "files" | "versions" | "bundle";
@@ -31,6 +34,7 @@ export const isPackageCommonSection = (section: string): section is PackageCommo
 export type PackageSettingsSection = PackageCommonSectionId | "general";
 
 export type IntegrationSettingsSection =
+  | "map"
   | "files"
   | "versions"
   | "functioning"

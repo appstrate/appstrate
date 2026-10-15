@@ -294,7 +294,7 @@ export interface paths {
         };
         /**
          * Get shared diagnostics for an agent
-         * @description Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview and the launch header. Diagnostics are ordered with blockers first and carry their correction destinations. Connection verdicts are included only for a caller holding `integrations:read`, and schedule warnings only for one holding `schedules:read`.
+         * @description Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview, the launch header and the visual map. Diagnostics are ordered with blockers first and carry stable semantic targets plus correction destinations. Connection verdicts are included only for a caller holding `integrations:read`, and schedule warnings only for one holding `schedules:read`.
          */
         get: operations["getAgentDiagnostics"];
         put?: never;
@@ -318,6 +318,26 @@ export interface paths {
          * @description Save the agent's stored input values and field locks for this space. `values` are validated against the manifest `input.schema` of the definition this space RUNS — the draft for a caller who may write the agent, the latest published version for everybody else — so the editor never validates against a definition the page did not show (`defaultDefinitionSelector` — the same answer the detail projection and the readiness badge use, which falls back to the draft when nothing is published rather than refusing a readable agent). `values` are checked with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.
          */
         put: operations["saveAgentInputSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{scope}/{name}/map": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Visual map of an agent
+         * @description Projects the agent's manifest into positioned nodes and edges (triggers and schedules on the left, the agent in the middle, toolbox / skills / mcp servers on the right) crossed with the installation state: resolved versions against declared ranges, per-integration connection status, admin pins, active schedules. `diagnostics[]` carries the readiness failures routed to the node and row they belong to, sourced from the same readiness gate and connection resolver as the run-kickoff 412 — so the map cannot disagree with what a run would do. Read-only: it owns no data and computes no verdict of its own. Every card is emitted even when empty: the card set is the inventory of what an AFPS manifest can hold, and an empty card is where the missing piece gets added.
+         */
+        get: operations["getAgentMap"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -5629,6 +5649,11 @@ export interface components {
                 title: string;
                 explanation: string;
                 field: string;
+                target: {
+                    /** @enum {string|null} */
+                    node: "agent" | "config" | "skills" | "toolbox" | "model" | "schedules" | null;
+                    item: string | null;
+                };
                 correction: {
                     /** @enum {string} */
                     destination: "bundle" | "configuration" | "schedule";
@@ -5831,6 +5856,56 @@ export interface components {
         }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. An id outside this enum is rejected on author input and dropped (with the drop reported) when read back from a stored manifest. */
             runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_file")[];
+        };
+        /** @description Read-only visual map of an agent: its manifest projected as positioned nodes and edges, crossed with the installation state (resolved versions, connection status, admin pins, active schedules) and annotated with readiness diagnostics. The node set is FIXED — every card is emitted even when empty, because the card inventory is what an agent manifest can hold and an empty one is where the renderer offers to add the missing piece. */
+        AgentMap: {
+            agent: {
+                packageId: string;
+                display_name: string;
+                version: string | null;
+                /** @description Version selector this projection was built from (`draft` by default). */
+                version_ref: string;
+                source: string;
+            };
+            nodes: components["schemas"]["AgentMapNode"][];
+            /** @description Directed: trigger cards point at the agent, capability cards are pointed at by it, and the contract flows down through it. The handles are part of the layout — the agent card carries one on each side, so an edge has to name the one it means. */
+            edges: {
+                id: string;
+                source: string;
+                target: string;
+                /** @enum {string} */
+                source_handle: "top" | "right" | "bottom" | "left";
+                /** @enum {string} */
+                target_handle: "top" | "right" | "bottom" | "left";
+            }[];
+            diagnostics: components["schemas"]["AgentMapDiagnostic"][];
+        };
+        /** @description A readiness failure routed to the node (and row) it describes, so the renderer badges the exact item. Sourced from the same readiness gate and connection resolver the run-kickoff uses — the map can never disagree with the run. `node_id`/`item_id` are null for a field with no place on the map. */
+        AgentMapDiagnostic: {
+            /** @description Readiness field path: `prompt`, `config.<key>`, `dependencies.skills.<id>` or `integrations.<id>`. */
+            field: string;
+            code: string;
+            title: string | null;
+            message: string;
+            node_id: string | null;
+            item_id: string | null;
+        };
+        /** @description One card of the visual map. `position` is computed server-side (three columns: what fires the agent on the left, the agent's own axis `input → agent → output` in the centre, its capabilities on the right) so every client lays the map out identically. `data` is node-type dependent: list cards carry `items[]`, the `agent` card carries the definition fields. */
+        AgentMapNode: {
+            /** @description Stable node id, also the edge endpoint. */
+            id: string;
+            /**
+             * @description Never `input`/`output`/`default`/`group`: React Flow reserves those names for its built-in nodes and styles them, which draws a second box behind the card. Hence `agent_input` / `agent_output`.
+             * @enum {string}
+             */
+            type: "schedules" | "connections" | "input_values" | "agent_input" | "agent" | "model" | "proxy" | "agent_output" | "toolbox" | "skills" | "mcp_servers" | "system_tools" | "memory";
+            position: {
+                x: number;
+                y: number;
+            };
+            data: {
+                [key: string]: unknown;
+            };
         };
         AgentSkillRef: {
             id: string;
@@ -8483,6 +8558,44 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["VersionArtifactUnavailable"];
+        };
+    };
+    getAgentMap: {
+        parameters: {
+            query?: {
+                /** @description Which agent definition to map: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). **Omitting the parameter resolves the `draft`**, so a never-published agent still renders. Ignored for system agents. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent visual map */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMap"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getAgentModel: {
