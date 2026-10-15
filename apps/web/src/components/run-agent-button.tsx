@@ -63,7 +63,7 @@ export function RunAgentButton({
     isFetching,
     refetch,
   } = usePackageDetail("agent", providedDetail ? undefined : packageId, {
-    enabled: false,
+    enabled: inputOpen,
   });
 
   const detail: AgentDetail | undefined = providedDetail ?? fetchedDetail;

@@ -54,7 +54,13 @@ type RunLogEntry = components["schemas"]["RunLog"];
 const RUN_DETAIL_TABS = ["overview", "journal", "results"] as const;
 type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
 
+/** One body per run: a re-run leaves for another run, and the form it came from must not follow it. */
 export function RunDetailPage() {
+  const { runId } = useParams<{ runId: string }>();
+  return <RunDetailBody key={runId} />;
+}
+
+function RunDetailBody() {
   const { t } = useTranslation(["agents", "common"]);
   const { scope, name, runId } = useParams<{ scope: string; name: string; runId: string }>();
   const packageId = `${scope}/${name}`;
@@ -128,9 +134,7 @@ export function RunDetailPage() {
 
   const launcher = useRunLauncher(packageId);
   const cancelRun = useCancelRun();
-  // Keyed by run: the page stays mounted when a re-run leaves for /runs/<new>, and the form must not follow it.
-  const [rerunFor, setRerunFor] = useState<string | null>(null);
-  const rerunRequested = rerunFor === runId;
+  const [rerunRequested, setRerunRequested] = useState(false);
   const { historicalLogs, structuredOutput, turnRows } = useMemo(() => {
     if (!logs) {
       return { historicalLogs: [], structuredOutput: null, turnRows: [] };
@@ -295,7 +299,7 @@ export function RunDetailPage() {
             rerunPending={launcher.isPending}
             cancelPending={cancelRun.isPending}
             onRerun={() => {
-              if (canReadAgent) setRerunFor(runId ?? null);
+              if (canReadAgent) setRerunRequested(true);
               // The API conceals resolved input from runners: replay that
               // snapshot server-side, keeping its parameters.
               else
@@ -312,7 +316,7 @@ export function RunDetailPage() {
       {agent && canReadAgent && (
         <RunModal
           open={rerunOpen}
-          onClose={() => setRerunFor(null)}
+          onClose={() => setRerunRequested(false)}
           agent={agent}
           onSubmit={(input) => {
             // Re-run the SAME definition the original run executed, as far as

@@ -455,8 +455,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     list: unticking withdraws access. A refusal the server names (`model_disabled`,
     `model_scheduled`, said by `refusalMessage`) is shown under the list or in the form. A saved
     model's finer settings (name, capabilities, prices, the key it is bound to) are the
-    « Réglages avancés » link on its line: the model form, `?editModel=<id>`, which replaces the
-    list, and opens only on a model a list offers (never one the instance ships). A model's own
+    « Réglages avancés » link on its line: the model form, which replaces the
+    list (it is a state of the page, not an address), and opens only on a model a list offers (never one the instance ships). A model's own
     deeds sit at the start of that form's footer (`components/model-form/saved-model-actions.tsx`):
     « Supprimer » for a caller with `models:delete`, behind a `ConfirmModal` (« Supprimer le
     modèle ? »), and « Tester » for a model bound to an organization key (a model left to each
@@ -510,15 +510,15 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   control (a name, a held cell) hands its click to the row (`handOver` in
   `data-table.tsx`: a plain click, on anything that is not a link, button, field or tab stop), so a click
   on a name opens the row like a click anywhere else. A menu deed that opens the page's own modal pre-filled
-  on the row says so in the modal's URL value (`?view-as=space:viewer`, the
-  roles page's « Prévisualiser »), the same modal as the page's Actions menu.
+  on the row says so in the modal's initial value (the roles page's « Prévisualiser »
+  opens the preview on that role), the same modal as the page's Actions menu.
 - States: a skeleton (section 1), `EmptyState`, `ErrorState error=…`, and
   for an unreadable resource `ResourceErrorState`
   (`components/page-states.tsx`). Never a silent redirect.
 - **An empty collection you can add to always offers the add button**
   (`EmptyStateAction`, `components/page-states.tsx`, a white outline button with a
   `+`, as `children` of the `EmptyState`), and only to someone who may add: the same
-  condition, label and handler (`useUrlModal(...).open`, `creation.open`) as the entry
+  condition, label and handler (`setOpen(true)`, `creation.open`) as the entry
   in the page's Actions menu (`SettingsPageActions`, `PageActionsMenu`), written once and
   reused, never a second implementation. The Actions entry stays: the empty button
   repeats it, it does not replace it. The button repeats a MENU entry, which is
@@ -577,13 +577,16 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     confirmations, one-off gestures, a secret shown once, pairings, the chat: none
     has an address, none survives a reload, Back does not close it. A creation
     modal that several pages offer is mounted by each of them.
-  - **URL** (`useUrlModal` / `useUrlModalTarget`, `hooks/use-url-modal.ts`): only a
-    detail, the edition of an existing object, a share, a view worth a link, or a
-    creation another page sends the user to (`?newSpace=1` from the organization
-    switcher, `?create` hand-off). It can be linked, reloads onto the same modal,
-    Back closes it; opening pushes an entry, closing goes back over it (or
-    replaces it when the address opened it).
-  - **Naming** of a URL param: the act and the object, camelCase (`?editModel=<id>`,
+  - **URL** (`useUrlModal` / `useUrlModalTarget`, `hooks/use-url-modal.ts`): only what is
+    worth a link: the detail or the edition of an object a list or a table row opens
+    (`?endUser=<id>`, `?editProxy=<id>`), a share, a view, or a creation another page
+    sends the user to (`?newSpace=1` from the organization switcher, `?newProxy=1`
+    from an agent's configuration, the `?create` hand-off). Such a modal can be
+    linked, reloads onto the same modal and Back closes it: opening pushes an entry,
+    closing goes back over it (or replaces it when the address opened it). An edition
+    reached from another modal's button (`editModel`, `editEndUser`) is a state of
+    the page instead.
+  - **Naming** of a URL param: the act and the object, camelCase (`?editProxy=<id>`,
     `?endUser=<id>`, `?models=<credentialId>`); `1` when there is no object, the
     object's id otherwise. Export the name when several entry points open the same
     modal (`SHARE_PARAM`).
@@ -591,9 +594,12 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     id against the loaded list and drops the param for an unknown id. Pass
     `undefined` while the list loads, never `[]`. Never `find` by `param.value` by hand.
   - **Handing over** from a URL modal to another modal: close the first, open the
-    second (`share.close(); setMovingHome(true)`); two never stack.
-  - **Leaving** for another page from a state modal: `navigate(to)`; from a URL
-    modal: `navigate(to, { replace: true })`.
+    second (`share.close(); setMovingHome(true)`). Closing a URL modal goes back one
+    entry, which lands a frame later: the two overlap for that frame.
+  - **Leaving** for another page: `navigate(to)` from a state modal, `navigate(to,
+{ replace: true })` from a URL modal. A state modal belongs to its component: when
+    the destination keeps that component mounted (a detail page reused for another id),
+    key the page on the id (`PackageDetailBody`, `RunDetailBody`) or close the modal first.
 - **Closing a form modal abandons its input**, whichever way (Annuler, a click outside,
   Escape, Back): the form is mounted only while the modal is open (`{open && <Form />}`), so it reopens empty on a creation and on the stored values on an
   edition. Never keep a draft in a component that stays mounted while the modal is closed.

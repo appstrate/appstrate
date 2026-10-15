@@ -127,7 +127,7 @@ interface ModalTargetOptions {
 }
 
 /**
- * A modal on one object of a list, named by id (`?editModel=<id>`). `target` is
+ * A modal on one object of a list, named by id (`?editProxy=<id>`). `target` is
  * the object once the list has loaded; an id the list does not hold (deleted,
  * mistyped, another space) drops the parameter instead of leaving a modal on
  * nothing. Objects without an `id` say which key names them.

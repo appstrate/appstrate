@@ -117,7 +117,13 @@ function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentMo
 
 // ─── Main Page ──────────────────────────────────────────────────────
 
+/** One body per package and version: the modals it opens hold that package's state, and a route change must not carry them to another. */
 export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
+  const { scope, name, version } = useParams<{ scope: string; name: string; version?: string }>();
+  return <PackageDetailBody key={`${scope}/${name}@${version ?? ""}`} type={type} />;
+}
+
+function PackageDetailBody({ type }: { type: PackageType }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
   // Only an agent has a narrower read: without `agents:read` a runner launches
