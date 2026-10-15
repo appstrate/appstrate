@@ -88,7 +88,7 @@ export function UnderlineTabList<T extends string>({
           FADE_EDGE[edge],
         )}
       >
-        <TabsList className="h-11 w-max justify-start gap-1 rounded-none bg-transparent p-0 md:h-12 md:gap-2">
+        <TabsList className="h-11 w-max justify-start gap-1 rounded-none bg-transparent p-0 md:gap-2">
           {tabs.map(({ value, label, icon: Icon }) => (
             <TabsTrigger
               key={value}
