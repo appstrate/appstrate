@@ -1993,6 +1993,7 @@
                   "artifacts": null,
                   "checkpoint": {},
                   "error": null,
+                  "model_error": null,
                   "metadata": null,
                   "generation": {
                     "temperature": 0.2,
@@ -2471,6 +2472,7 @@
                   "artifacts": null,
                   "checkpoint": {},
                   "error": null,
+                  "model_error": null,
                   "metadata": null,
                   "generation": null,
                   "generation_override": null,
@@ -2975,6 +2977,7 @@
                     "lastProcessedId": "msg_99f2a"
                   },
                   "error": null,
+                  "model_error": null,
                   "metadata": null,
                   "generation": {
                     "reasoning_level": "medium"
@@ -3227,6 +3230,7 @@
                   "artifacts": null,
                   "checkpoint": {},
                   "error": "Cancelled by user",
+                  "model_error": null,
                   "metadata": null,
                   "generation": null,
                   "generation_override": null,
@@ -18588,7 +18592,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`."
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -18813,7 +18817,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`."
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -18894,7 +18898,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`."
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -19166,7 +19170,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`."
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -30774,6 +30778,16 @@
             "type": "string",
             "description": "Human-readable title; preserved from the underlying error factory."
           },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "On a file-level validation item, the 1-based line where the validator stopped, counted in the file itself (e.g. `skill_invalid_frontmatter` on a YAML syntax error: the opening `---` is line 1). Absent when unknown."
+          },
+          "column": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The 1-based column beside `line`."
+          },
           "candidate_connections": {
             "type": "array",
             "items": {
@@ -32410,6 +32424,7 @@
           "status",
           "input",
           "result",
+          "model_error",
           "artifacts",
           "checkpoint",
           "error",
@@ -32519,7 +32534,43 @@
             "additionalProperties": true
           },
           "error": {
-            "type": ["string", "null"]
+            "type": ["string", "null"],
+            "description": "The failure as it happened, verbatim — a debugging surface. To say WHY a run failed, branch on `model_error` (and `status`), never on this text."
+          },
+          "model_error": {
+            "description": "What a run that failed on a model call failed on, classified once when it finalized: `category` (one of `credential_unavailable`, `rate_limited`, `upstream_unavailable`, `invalid_request`, `unknown`), `retryable` (derived from it), the provider's HTTP `status` and its own `message`, each `null` when the failure text carried none. `null` on every other run, and on a run finalized before the platform recorded it. A `cancelled` run is always a member's cancellation (`POST /api/runs/{id}/cancel`).",
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["category", "retryable", "status", "message"],
+                "properties": {
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "credential_unavailable",
+                      "rate_limited",
+                      "upstream_unavailable",
+                      "invalid_request",
+                      "unknown"
+                    ]
+                  },
+                  "retryable": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": ["integer", "null"],
+                    "minimum": 100,
+                    "maximum": 599
+                  },
+                  "message": {
+                    "type": ["string", "null"]
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "token_usage": {
             "description": "Snapshot of token consumption for the run, as every runner (PiRunner / remote CLI / GitHub Action) reports it, parsed on ingestion before it is stored. `null` until the run reports usage.",

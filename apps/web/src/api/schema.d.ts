@@ -6712,6 +6712,10 @@ export interface components {
             message: string;
             /** @description Human-readable title; preserved from the underlying error factory. */
             title?: string;
+            /** @description On a file-level validation item, the 1-based line where the validator stopped, counted in the file itself (e.g. `skill_invalid_frontmatter` on a YAML syntax error: the opening `---` is line 1). Absent when unknown. */
+            line?: number;
+            /** @description The 1-based column beside `line`. */
+            column?: number;
             /** @description Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, least privilege first (the order of readiness `candidates`), each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. The write of an enabled schedule raises it for its actor's one own connection too (see that write's 409). Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set, unranked (else every own and shared connection), and the retry names one in `X-Connection-Id`. */
             candidate_connections?: {
                 id: string;
@@ -6832,7 +6836,16 @@ export interface components {
             checkpoint: {
                 [key: string]: unknown;
             } | null;
+            /** @description The failure as it happened, verbatim — a debugging surface. To say WHY a run failed, branch on `model_error` (and `status`), never on this text. */
             error: string | null;
+            /** @description What a run that failed on a model call failed on, classified once when it finalized: `category` (one of `credential_unavailable`, `rate_limited`, `upstream_unavailable`, `invalid_request`, `unknown`), `retryable` (derived from it), the provider's HTTP `status` and its own `message`, each `null` when the failure text carried none. `null` on every other run, and on a run finalized before the platform recorded it. A `cancelled` run is always a member's cancellation (`POST /api/runs/{id}/cancel`). */
+            model_error: {
+                /** @enum {string} */
+                category: "credential_unavailable" | "rate_limited" | "upstream_unavailable" | "invalid_request" | "unknown";
+                retryable: boolean;
+                status: number | null;
+                message: string | null;
+            } | null;
             /** @description Snapshot of token consumption for the run, as every runner (PiRunner / remote CLI / GitHub Action) reports it, parsed on ingestion before it is stored. `null` until the run reports usage. */
             token_usage: components["schemas"]["TokenUsage"] | null;
             /** Format: date-time */
@@ -8826,6 +8839,7 @@ export interface operations {
                      *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": null,
+                     *       "model_error": null,
                      *       "metadata": null,
                      *       "generation": {
                      *         "temperature": 0.2,
@@ -21606,7 +21620,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -21759,7 +21773,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -21856,7 +21870,7 @@ export interface operations {
                     "application/json": components["schemas"]["PackageVersionDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -22017,7 +22031,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -23514,6 +23528,7 @@ export interface operations {
                      *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": null,
+                     *       "model_error": null,
                      *       "metadata": null,
                      *       "generation": null,
                      *       "generation_override": null,
@@ -23889,6 +23904,7 @@ export interface operations {
                      *         "lastProcessedId": "msg_99f2a"
                      *       },
                      *       "error": null,
+                     *       "model_error": null,
                      *       "metadata": null,
                      *       "generation": {
                      *         "reasoning_level": "medium"
@@ -24004,6 +24020,7 @@ export interface operations {
                      *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": "Cancelled by user",
+                     *       "model_error": null,
                      *       "metadata": null,
                      *       "generation": null,
                      *       "generation_override": null,

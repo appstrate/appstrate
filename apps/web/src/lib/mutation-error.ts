@@ -22,16 +22,15 @@ export const SKILL_FRONTMATTER_ERROR_KEYS = {
 } as const satisfies Partial<Record<Lowercase<CompanionViolationReason>, string>>;
 
 /**
- * Where a YAML parser stopped, said in the reader's language: « (ligne 3, colonne 14) », or "".
- * Only the two numbers are read from the checker's sentence, never its English. The parser counts
- * from the first line after the opening `---`, so the line is shifted onto SKILL.md's own.
+ * Where the validator stopped in the file, said in the reader's language: « (ligne 3,
+ * colonne 14) », or "". The server sends the position (`line`/`column`, 1-based, in the file's
+ * own lines); nothing is read from its sentence.
  */
-export function yamlPosition(message: string): string {
-  const match = /\bline (\d+), column (\d+)/.exec(message);
-  if (!match) return "";
+export function filePosition(err: { line?: number; column?: number }): string {
+  if (err.line === undefined || err.column === undefined) return "";
   return i18n.t("editor.errorSkillYamlPosition", {
-    line: Number(match[1]) + 1,
-    column: match[2],
+    line: err.line,
+    column: err.column,
     ns: "agents",
   });
 }
@@ -71,6 +70,7 @@ export const REFUSAL_ERROR_KEYS = {
   locked_required_field_empty: "error.lockedRequiredFieldEmpty",
   draft_not_writable: "error.draftNotWritable",
   connection_label_taken: "error.connectionLabelTaken",
+  output_tool_required: "error.outputToolRequired",
   connection_pinned: "error.connectionPinned",
   connection_owner_without_access: "error.connectionOwnerWithoutAccess",
   end_user_connection_not_shareable: "error.endUserConnectionNotShareable",
@@ -84,18 +84,15 @@ export function sentenceKey(keys: Readonly<Record<string, string>>, code: string
   return Object.prototype.hasOwnProperty.call(keys, code) ? keys[code] : undefined;
 }
 
-/** Generic refusals made precise by the member they blame: `<code>:<param>` → `agents` key. */
-const PARAM_REFUSAL_KEYS: Record<string, string> = {
-  // The only rule on the whole `runtime_tools` member: an output schema needs the `output` tool.
-  "invalid_manifest:manifest.runtime_tools": "error.outputToolRequired",
-};
-
 /** What a refusal carries: a problem body, or one item of its `errors[]`. */
 interface Refusal {
   code: string;
   param?: string;
   field?: string;
   message?: string;
+  /** 1-based position in the offending file, on a file-level item. */
+  line?: number;
+  column?: number;
 }
 
 /**
@@ -105,14 +102,12 @@ interface Refusal {
 export function refusalMessage(err: Refusal): string | null {
   const code = err.code.toLowerCase();
   const message = err.message ?? "";
-  const paramKey = PARAM_REFUSAL_KEYS[`${code}:${err.param ?? err.field}`];
-  if (paramKey) return i18n.t(paramKey, { ns: "agents" });
   const agentsKey = sentenceKey(REFUSAL_ERROR_KEYS, code);
   if (agentsKey) {
     // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
     // the first segment is the prefix.
     const field = err.param?.slice(err.param.indexOf(".") + 1) || err.param || "";
-    const position = code === "skill_invalid_frontmatter" ? yamlPosition(message) : "";
+    const position = filePosition(err);
     return i18n.t(agentsKey, { field, message, detail: message, position, ns: "agents" });
   }
   const key = `apiError.${code}`;
@@ -127,13 +122,14 @@ export function refusalMessage(err: Refusal): string | null {
 function fieldErrors(err: ApiError): Refusal[] {
   return (err.errors ?? []).flatMap((item: unknown) => {
     if (typeof item !== "object" || item === null) return [];
-    const { code, field, message } = item as Record<string, unknown>;
+    const { code, field, message, line, column } = item as Record<string, unknown>;
     if (typeof code !== "string") return [];
     return [
       {
         code,
         field: typeof field === "string" ? field : undefined,
         message: typeof message === "string" ? message : undefined,
+        ...(typeof line === "number" && typeof column === "number" ? { line, column } : {}),
       },
     ];
   });

@@ -70,6 +70,7 @@ import {
 } from "@appstrate/core/integration";
 import type { z } from "zod";
 import { tokenUsageSchema, type TokenUsage } from "@appstrate/core/token-usage";
+import { runModelErrorWire } from "@appstrate/shared-types";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
@@ -172,6 +173,9 @@ const enrichedRunColumns = {
   artifacts: runs.artifacts,
   checkpoint: runs.checkpoint,
   error: runs.error,
+  modelErrorCategory: runs.modelErrorCategory,
+  modelErrorStatus: runs.modelErrorStatus,
+  modelErrorMessage: runs.modelErrorMessage,
   metadata: runs.metadata,
   startedAt: runs.startedAt,
   completedAt: runs.completedAt,
@@ -309,6 +313,11 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     artifacts: row.artifacts ?? null,
     checkpoint: row.checkpoint,
     error: row.error,
+    model_error: runModelErrorWire({
+      category: row.modelErrorCategory,
+      status: row.modelErrorStatus,
+      message: row.modelErrorMessage,
+    }),
     metadata: row.metadata,
     started_at: row.startedAt?.toISOString() ?? null,
     completed_at: row.completedAt?.toISOString() ?? null,

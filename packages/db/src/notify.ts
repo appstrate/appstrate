@@ -122,6 +122,13 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         -- is ample for a surfaced error message; the full text lives in
         -- run_logs. Every other value here is an id, an enum or a timestamp.
         'error', notify_text_budget(NEW.error, 2000),
+        -- The classified model failure (the run's model_error); its sentence is
+        -- bounded like error above, the rest is an enum and an integer.
+        'model_error', CASE WHEN NEW.model_error_category IS NULL THEN NULL ELSE json_build_object(
+          'category', NEW.model_error_category,
+          'status', NEW.model_error_status,
+          'message', notify_text_budget(NEW.model_error_message, 1000)
+        ) END,
         'started_at', to_char(NEW.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'completed_at', to_char(NEW.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'duration', NEW.duration

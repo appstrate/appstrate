@@ -68,6 +68,10 @@ describe("skillFrontmatterError", () => {
           code: "skill_invalid_frontmatter",
           message:
             "skill SKILL.md frontmatter is not valid YAML: Map keys must be unique at line 3, column 1:",
+          // The position the server sends, already in SKILL.md's own lines: no number is read
+          // from the message.
+          line: 4,
+          column: 1,
         },
       ],
     );

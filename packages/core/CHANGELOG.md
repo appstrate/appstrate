@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`describeModelFailure`** and **`MODEL_ERROR_CATEGORIES`** (`@appstrate/core/model-error`):
+  one failed model call's text read once into `{ category, retryable, status?,
+providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusal unwrapped
+  server-side — and the category vocabulary as a runtime tuple.
+- **`ValidateManifestResult.issues`** (`@appstrate/core/validation`): on an invalid
+  manifest, the failures structured as `{ path, message, code? }` beside the `errors`
+  strings; `code` is set on a rule that carries its own — today
+  **`OUTPUT_TOOL_REQUIRED`** (`"output_tool_required"`, an output schema without the
+  `output` runtime tool). **`ValidationFieldError.line` / `.column`**
+  (`@appstrate/core/api-errors`): the 1-based position of a file-level failure.
 - **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,
   the `_meta` key holding an agent's presentation (`color`), next to
   `AGENT_RESOURCES_META_KEY`.

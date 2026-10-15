@@ -1317,6 +1317,7 @@ describe("realtime SSE routes (integration)", () => {
           'space_id', ${ctx.defaultSpaceId}::text,
           'schedule_id', NULL,
           'error', NULL,
+          'model_error', NULL,
           'started_at', NULL,
           'completed_at', NULL,
           'duration', NULL
@@ -1358,6 +1359,7 @@ describe("realtime SSE routes (integration)", () => {
           'space_id', ${ctx.defaultSpaceId}::text,
           'schedule_id', NULL,
           'error', NULL,
+          'model_error', NULL,
           'started_at', NULL,
           'completed_at', NULL,
           'duration', NULL
