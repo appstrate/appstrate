@@ -6,7 +6,8 @@ import { X } from "lucide-react";
 import type { WidgetProps } from "@rjsf/utils";
 import { formatBytes } from "@appstrate/core/format";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { Button, LABEL_CLASS } from "./primitives.tsx";
+import { Button } from "../components/button.tsx";
+import { Label } from "../components/label.tsx";
 import { cn } from "../cn.ts";
 import { isUploadUri } from "@appstrate/core/file-uri";
 import type { UploadFn } from "./upload-client.ts";
@@ -213,10 +214,10 @@ export function FileWidget(props: WidgetProps) {
 
   return (
     <div className="space-y-2">
-      <label htmlFor={id} className={LABEL_CLASS}>
+      <Label htmlFor={id}>
         {label}
         {required && " *"}
-      </label>
+      </Label>
       {attachments.length === 0 ? (
         <div
           role="button"

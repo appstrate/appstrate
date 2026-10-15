@@ -1,12 +1,8 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-// Tailwind-styled RJSF templates matching the Appstrate dark theme. Only
-// templates we actually want to restyle are overridden — RJSF defaults
-// handle the rest. No shadcn/radix imports here so this module ships in
-// `@appstrate/ui` and can be consumed by any Appstrate frontend (main app,
-// portal, future surfaces). Styling relies solely on CSS tokens that all
-// Appstrate UIs expose (`--background`, `--input`, `--primary`, …).
+// RJSF templates built on this package's shadcn primitives. Only templates we
+// actually want to restyle are overridden — RJSF defaults handle the rest.
 
 import type {
   BaseInputTemplateProps,
@@ -22,7 +18,9 @@ import type {
 import { getInputProps, getSubmitButtonOptions } from "@rjsf/utils";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "../cn.ts";
-import { Button, INPUT_CLASS, LABEL_CLASS } from "./primitives.tsx";
+import { Button } from "../components/button.tsx";
+import { Input } from "../components/input.tsx";
+import { Label } from "../components/label.tsx";
 import type { SchemaFormContext } from "./context.ts";
 
 export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>) {
@@ -68,7 +66,7 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
   const isReadOnly = readonly || isConst;
 
   return (
-    <input
+    <Input
       id={id}
       type={inputType}
       step={inputType === "number" ? "any" : undefined}
@@ -81,7 +79,8 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
       autoFocus={autofocus && !isReadOnly}
       placeholder={(placeholder ?? (options?.["ui:placeholder"] as string | undefined)) as string}
       className={cn(
-        INPUT_CLASS,
+        // Form fields stay h-9 (the shadcn Input defaults to h-10).
+        "h-9",
         isReadOnly && "bg-muted/50 cursor-not-allowed",
         rawErrors && rawErrors.length > 0 && "border-destructive",
       )}
@@ -128,12 +127,12 @@ export function FieldTemplate(props: FieldTemplateProps) {
   const showDescription = rawDescription && !isFileWidget && !isContainer;
 
   return (
-    <div className={cn("space-y-1.5", classNames)}>
+    <div className={cn("flex flex-col gap-1.5", classNames)}>
       {showLabel && (
-        <label htmlFor={id} className={LABEL_CLASS}>
+        <Label htmlFor={id}>
           {label}
           {required && " *"}
-        </label>
+        </Label>
       )}
       {showDescription && <p className="text-muted-foreground text-xs">{rawDescription}</p>}
       {children}
@@ -174,7 +173,7 @@ export function DescriptionFieldTemplate(props: DescriptionFieldProps) {
 export function MultiSchemaFieldTemplate(props: MultiSchemaFieldTemplateProps) {
   const { selector, optionSchemaField } = props;
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       {selector}
       {optionSchemaField}
     </div>
