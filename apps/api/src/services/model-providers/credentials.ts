@@ -25,7 +25,7 @@ import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, user } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { MODEL_CREDENTIAL_OWNERS } from "@appstrate/core/model-payer";
-import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
+import { inTransaction, mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { ApiError, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { getModelProvider } from "./registry.ts";
@@ -410,7 +410,10 @@ interface CreateApiKeyCredentialInput {
   ownerUserId: string | null;
 }
 
-export async function createApiKeyCredential(input: CreateApiKeyCredentialInput): Promise<string> {
+export async function createApiKeyCredential(
+  input: CreateApiKeyCredentialInput,
+  executor: DbOrTx = db,
+): Promise<string> {
   const cfg = getModelProvider(input.providerId);
   if (!cfg) {
     throw new Error(`Unknown providerId: ${input.providerId}`);
@@ -444,6 +447,7 @@ export async function createApiKeyCredential(input: CreateApiKeyCredentialInput)
         throw forbidden("Not a member of this organization");
       }
     },
+    executor,
   );
 }
 
@@ -451,8 +455,9 @@ export async function createApiKeyCredential(input: CreateApiKeyCredentialInput)
 async function insertCredential(
   values: typeof modelProviderCredentials.$inferInsert,
   admit: (tx: DbOrTx) => Promise<void>,
+  executor: DbOrTx = db,
 ): Promise<string> {
-  const id = await db.transaction(async (tx) => {
+  const id = await inTransaction(executor, async (tx) => {
     await admit(tx);
     const [row] = await tx
       .insert(modelProviderCredentials)
@@ -692,10 +697,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export async function loadCredentialBinding(
   orgId: string,
   credentialId: string,
+  executor: DbOrTx = db,
 ): Promise<{ providerId: string; ownerUserId: string | null } | null> {
   // A built-in key's id (`anthropic`, …) is not a uuid: no row, never a 22P02.
   if (!UUID_RE.test(credentialId)) return null;
-  const [row] = await db
+  const [row] = await executor
     .select({
       providerId: modelProviderCredentials.providerId,
       ownerUserId: modelProviderCredentials.ownerUserId,

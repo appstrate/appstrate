@@ -1,16 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
-import {
-  useCreateModel,
-  useSetDefaultModel,
-  useUpdateModel,
-  type OrgModelInfo,
-} from "./use-models";
-import { useCreateModelProviderCredential } from "./use-model-provider-credentials";
+import { $api, type paths } from "../api/client";
+import { ApiError } from "../api/errors";
+import { useInvalidatePaths } from "./use-invalidate-paths";
 import { rowToEntry } from "../lib/model-form-payload";
 import { refusalMessage } from "../lib/mutation-error";
-import { ApiError } from "../api/errors";
 import type { ModelChoicePlan } from "../lib/model-choice";
 
 /** Where the models of a choice live: an organization key, or no key (each person's own). */
@@ -28,146 +22,94 @@ export interface NewProviderCredential {
   baseUrlOverride?: string;
 }
 
-interface ModelChoiceOutcome {
-  /** The upstream ids whose creation, activation or deactivation was refused. */
+export type ModelChoiceBody =
+  paths["/api/models/apply"]["post"]["requestBody"]["content"]["application/json"];
+
+/**
+ * The body of a choice: the key (an existing one, one to mint, or none), the models added, those
+ * switched back on, the default, those switched off. The server applies it in that order, in one
+ * transaction ({@link useApplyModelChoice}).
+ */
+export function modelChoiceBody(input: {
+  plan: ModelChoicePlan;
+  target: ModelChoiceTarget;
+  newCredential?: NewProviderCredential;
+}): ModelChoiceBody {
+  const { plan, target, newCredential } = input;
+  const credential: ModelChoiceBody["credential"] = newCredential
+    ? {
+        label: newCredential.label,
+        providerId: newCredential.providerId,
+        api_key: newCredential.apiKey,
+        ...(newCredential.baseUrlOverride
+          ? { base_url_override: newCredential.baseUrlOverride }
+          : {}),
+      }
+    : target.credentialId
+      ? { id: target.credentialId }
+      : null;
+  return {
+    credential,
+    ...(credential === null ? { providerId: target.providerId } : {}),
+    add: plan.add.map(rowToEntry),
+    enable: plan.grant.map((model) => model.id),
+    disable: plan.withdraw.map((model) => model.id),
+    ...(plan.defaultModelId ? { default_model_id: plan.defaultModelId } : {}),
+  };
+}
+
+/** A refused choice: nothing was written. */
+export interface ModelChoiceRefusal {
+  /** The upstream ids the refusal names, one per refused entry. */
   failedModelIds: string[];
   /** What the server said of the first refusal it has a sentence for, else `null`. */
   refusal: string | null;
-  /** The key minted, to bind a retry to instead of minting a second one. */
-  credentialId: string | null;
-  /** The models created, so a retry knows them (a new key's models are not in the dialog's list). */
-  createdModels: OrgModelInfo[];
-}
-
-/** The writes a choice is made of: the model mutations' `mutateAsync`. */
-interface ModelChoiceWrites {
-  createCredential: ReturnType<typeof useCreateModelProviderCredential>["mutateAsync"];
-  createModel: ReturnType<typeof useCreateModel>["mutateAsync"];
-  updateModel: ReturnType<typeof useUpdateModel>["mutateAsync"];
-  setDefault: ReturnType<typeof useSetDefaultModel>["mutateAsync"];
 }
 
 /**
- * Applies a {@link ModelChoicePlan}: the key first when there is one to mint, then each model
- * created or switched back on, then the default, then each model switched off (a model is never
- * deleted from here, and the default moves first so the one it leaves can be switched off).
- * A refusal of the key rejects (nothing was written); a refusal of a model is reported in the
- * outcome, and the rest still go through.
+ * The upstream ids a `400 validation_failed` names, read off its items' `field` (`add.<i>`,
+ * `enable.<i>`, `disable.<i>`, `default_model_id`), and the first sentence among them. `null` for
+ * any other failure, which is the choice's as a whole (the key refused, a permission).
  */
-export async function applyModelChoice(
-  writes: ModelChoiceWrites,
-  input: {
-    plan: ModelChoicePlan;
-    existing: readonly OrgModelInfo[];
-    target: ModelChoiceTarget;
-    newCredential?: NewProviderCredential;
-  },
-): Promise<ModelChoiceOutcome> {
-  const { plan, existing, target, newCredential } = input;
-  const minted = newCredential
-    ? await writes.createCredential({
-        body: {
-          label: newCredential.label,
-          providerId: newCredential.providerId,
-          api_key: newCredential.apiKey,
-          ...(newCredential.baseUrlOverride
-            ? { base_url_override: newCredential.baseUrlOverride }
-            : {}),
-        },
-      })
-    : null;
-  const credentialId = minted?.id ?? target.credentialId;
-
+export function choiceRefusal(err: unknown, plan: ModelChoicePlan): ModelChoiceRefusal | null {
+  if (!(err instanceof ApiError) || err.code !== "validation_failed") return null;
   const failedModelIds: string[] = [];
   let refusal: string | null = null;
-  const fail = (modelId: string, err: unknown) => {
+  for (const item of err.errors ?? []) {
+    if (typeof item !== "object" || item === null) continue;
+    const { field, code, message } = item as Record<string, unknown>;
+    if (typeof field !== "string" || typeof code !== "string") continue;
+    const [list, index] = field.split(".");
+    const at = Number(index);
+    const modelId =
+      list === "add"
+        ? plan.add[at]?.id
+        : list === "enable"
+          ? (plan.grant[at]?.modelId ?? undefined)
+          : list === "disable"
+            ? (plan.withdraw[at]?.modelId ?? undefined)
+            : list === "default_model_id"
+              ? (plan.defaultModelId ?? undefined)
+              : undefined;
+    if (!modelId) return null;
     failedModelIds.push(modelId);
-    if (refusal === null && err instanceof ApiError) refusal = refusalMessage(err);
-  };
-  const setEnabled = async (model: OrgModelInfo, enabled: boolean) => {
-    try {
-      await writes.updateModel({ params: { path: { id: model.id } }, body: { enabled } });
-    } catch (err) {
-      fail(model.modelId ?? model.id, err);
-    }
-  };
-  const idByModelId = new Map(existing.map((m) => [m.modelId, m.id]));
-  const createdModels: OrgModelInfo[] = [];
-  let defaulted: string | undefined;
-  for (const row of plan.add) {
-    try {
-      const created = await writes.createModel({
-        body: {
-          ...rowToEntry(row),
-          credentialId,
-          ...(credentialId === null ? { providerId: target.providerId } : {}),
-        },
-      });
-      idByModelId.set(row.id, created.id);
-      createdModels.push(created);
-    } catch (err) {
-      fail(row.id, err);
-    }
+    refusal ??= refusalMessage({
+      code,
+      field,
+      ...(typeof message === "string" ? { message } : {}),
+    });
   }
-  for (const model of plan.grant) await setEnabled(model, true);
-  const defaultId = plan.defaultModelId ? idByModelId.get(plan.defaultModelId) : undefined;
-  if (defaultId) {
-    try {
-      await writes.setDefault({ body: { modelId: defaultId } });
-      defaulted = defaultId;
-    } catch (err) {
-      fail(plan.defaultModelId!, err);
-    }
-  }
-  for (const model of plan.withdraw) await setEnabled(model, false);
-  return {
-    failedModelIds,
-    refusal,
-    credentialId: minted?.id ?? null,
-    // The rows as the server holds them now: the one starred is the default.
-    createdModels: createdModels.map((m) => (m.id === defaulted ? { ...m, is_default: true } : m)),
-  };
+  return failedModelIds.length > 0 ? { failedModelIds, refusal } : null;
 }
 
-/**
- * Where an attempt at a choice writes: once a refused attempt minted the key, a retry binds to it
- * instead of minting a second one.
- */
-export function attemptTarget(
-  minted: string | null,
-  base: { credentialId: string | null; providerId: string; newCredential?: NewProviderCredential },
-): { target: ModelChoiceTarget; newCredential?: NewProviderCredential } {
-  return minted
-    ? { target: { credentialId: minted, providerId: base.providerId } }
-    : {
-        target: { credentialId: base.credentialId, providerId: base.providerId },
-        newCredential: base.newCredential,
-      };
-}
-
+/** Applies a choice in one write: all of it, or — refused — none of it. */
 export function useApplyModelChoice() {
-  const createModel = useCreateModel();
-  const updateModel = useUpdateModel();
-  const setDefault = useSetDefaultModel({ errorHandledByCaller: true });
-  const createCredential = useCreateModelProviderCredential({ errorHandledByCaller: true });
-  const [isPending, setPending] = useState(false);
-
-  const apply = async (input: Parameters<typeof applyModelChoice>[1]) => {
-    setPending(true);
-    try {
-      return await applyModelChoice(
-        {
-          createCredential: createCredential.mutateAsync,
-          createModel: createModel.mutateAsync,
-          updateModel: updateModel.mutateAsync,
-          setDefault: setDefault.mutateAsync,
-        },
-        input,
-      );
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return { apply, isPending };
+  const invalidate = useInvalidatePaths("/api/models", "/api/model-provider-credentials");
+  const mutation = $api.useMutation("post", "/api/models/apply", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
+  const apply = (input: Parameters<typeof modelChoiceBody>[0]) =>
+    mutation.mutateAsync({ body: modelChoiceBody(input) });
+  return { apply, isPending: mutation.isPending };
 }

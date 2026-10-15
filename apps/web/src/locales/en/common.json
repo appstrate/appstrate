@@ -242,6 +242,7 @@
   "apiError.model_disabled": "The default model must stay accessible to the organization. First pick another default model, or give access back to this one.",
   "apiError.model_provider_unregistered": "This model's provider is not available on this instance: {{message}}",
   "apiError.model_already_added": "This model is already added with this key.",
+  "apiError.model_not_in_choice": "This model does not run on the chosen key.",
   "apiError.model_not_offered": "This model is not offered by this provider: {{message}}",
   "apiError.credential_in_use": "Models still use this key: try deleting it again.",
   "apiError.model_scheduled": "Enabled schedules would run a model served only by personal keys; change their model or bind it to an org key.",
