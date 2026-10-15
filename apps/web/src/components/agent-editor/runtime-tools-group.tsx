@@ -10,11 +10,9 @@ interface RuntimeToolsGroupProps {
   /** Currently selected runtime tool ids (manifest.runtime_tools). */
   selected: string[];
   onChange: (next: string[]) => void;
-  /** Off where the section heading already says what the tools are. */
-  showHint?: boolean;
 }
 
-export function RuntimeToolsGroup({ selected, onChange, showHint = true }: RuntimeToolsGroupProps) {
+export function RuntimeToolsGroup({ selected, onChange }: RuntimeToolsGroupProps) {
   const { t } = useTranslation(["agents", "common"]);
   const selectedSet = new Set(selected);
 
@@ -28,9 +26,6 @@ export function RuntimeToolsGroup({ selected, onChange, showHint = true }: Runti
 
   return (
     <div data-testid="runtime-tools-group">
-      {showHint && (
-        <p className="text-muted-foreground mb-4 text-sm">{t("editor.runtimeToolsHint")}</p>
-      )}
       <PackageToolCatalog
         tools={RUNTIME_TOOL_CATALOG.map((tool) => ({
           name: tool.id,

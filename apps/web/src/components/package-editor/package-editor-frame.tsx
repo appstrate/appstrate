@@ -23,7 +23,7 @@ import { UnsavedChangesModal } from "../unsaved-changes-modal";
 import { packageListPath } from "../../lib/package-paths";
 import type { PackageEditor, PackageEditorTab } from "./use-package-editor";
 
-/** Every type is edited embedded, in its Package AFPS; these three are also created on a page. */
+/** Every type is edited in its Package AFPS; these three are also created on a page. */
 export type EditablePackageType = "agent" | "skill" | "integration" | "mcp-server";
 type CreatablePackageType = Exclude<EditablePackageType, "mcp-server">;
 
@@ -49,7 +49,7 @@ const createPages: Record<
   },
 };
 
-/** What every package editor draws around its sections: page chrome to create, or embedded only the open section and save bar; plus the raw manifest, files tab and unsaved-changes guard. */
+/** What every package editor draws around its sections: page chrome to create, or when editing only the open section and save bar; plus the raw manifest, files tab and unsaved-changes guard. */
 export function PackageEditorFrame({
   editor,
   tabs,
@@ -58,19 +58,19 @@ export function PackageEditorFrame({
 }: {
   editor: PackageEditor;
   tabs: Array<{ id: PackageEditorTab; label: string }>;
-  /** Embedded: the line under the open section's heading. */
+  /** Editing: the line under the open section's heading. */
   descriptions?: Partial<Record<PackageEditorTab, string>>;
   children: ReactNode;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const navigate = useNavigate();
-  const { type, packageId, embedded, state, setState, activeTab, setActiveTab, isPending } = editor;
+  const { type, packageId, isEdit, state, setState, activeTab, setActiveTab, isPending } = editor;
   const schema = { uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type] };
 
   const body = (
-    <div inert={isPending} aria-busy={isPending} className={embedded ? "space-y-4" : undefined}>
+    <div inert={isPending} aria-busy={isPending} className={isEdit ? "space-y-4" : undefined}>
       {children}
-      {embedded ? (
+      {isEdit ? (
         <ManifestEditEntry
           value={state.manifest}
           schema={schema}
@@ -104,12 +104,12 @@ export function PackageEditorFrame({
 
       <UnsavedChangesModal
         blocker={editor.blocker}
-        onSaveDraft={embedded ? editor.saveDraft : undefined}
+        onSaveDraft={isEdit ? editor.saveDraft : undefined}
       />
     </div>
   );
 
-  if (embedded) {
+  if (isEdit) {
     // Only when there is something to save, as the files explorer's bar is.
     const footer = (editor.isDirty || isPending) && (
       <div className="bg-background border-border sticky bottom-0 z-10 flex min-h-16 items-center gap-3 border-t px-6 py-3 max-lg:flex-col max-lg:items-stretch">

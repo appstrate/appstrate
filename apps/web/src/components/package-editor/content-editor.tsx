@@ -9,8 +9,7 @@
 
 import { useCallback } from "react";
 import type { OnMount } from "@monaco-editor/react";
-import { MonacoEditor as Editor } from "../monaco";
-import { useTheme } from "../../stores/theme-store";
+import { CodeEditor } from "../monaco";
 
 interface ContentEditorProps {
   /** The text the editor mounts with. Remount it (`key`) to show another. */
@@ -32,29 +31,23 @@ export function ContentEditor({
   readOnly = false,
   ariaLabel,
 }: ContentEditorProps) {
-  const { resolvedTheme } = useTheme();
   const handleMount: OnMount = useCallback((editor) => {
     editor.focus();
   }, []);
 
   return (
     <div className="border-border my-4 overflow-hidden rounded-lg border">
-      <Editor
+      <CodeEditor
         height={height}
         language={language}
-        theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
         defaultValue={value}
         onChange={(v) => onChange(v ?? "")}
         onMount={handleMount}
         options={{
           readOnly,
           ariaLabel,
-          minimap: { enabled: false },
           wordWrap: language === "markdown" ? "on" : "off",
-          fontSize: 13,
-          fontFamily: "'SF Mono', 'Fira Code', monospace",
           lineNumbers: "on",
-          scrollBeyondLastLine: false,
           padding: { top: 12, bottom: 12 },
           renderWhitespace: "none",
           tabSize: 2,

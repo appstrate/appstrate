@@ -23,17 +23,10 @@ export type PackageEditorTab =
   | "files"
   | "json";
 
-/**
- * `page` creates a package (every tab, files included). `embedded` edits an existing one inside
- * Paramètres › Package AFPS, the MANIFEST only (files are changed in Explorer › Fichiers).
- * `embedded` is what shared pieces call `isEdit`; only `page` draws a Cancel.
- */
-export type Presentation = "page" | "embedded";
-
 type ValidationError = { error: string; tab?: string } | null;
 
 /** Saves the draft in place; the parent then refetches and remounts the editor, which clears the unsaved state. */
-async function saveEmbedded(saveDraft: () => Promise<void>, savedMessage: string) {
+async function saveEdit(saveDraft: () => Promise<void>, savedMessage: string) {
   try {
     await saveDraft();
     toast.success(savedMessage);
@@ -42,7 +35,7 @@ async function saveEmbedded(saveDraft: () => Promise<void>, savedMessage: string
   }
 }
 
-/** The open section: the settings rail's when it names one (embedded), else the editor's own. */
+/** The open section: the settings rail's when it names one (editing), else the editor's own. */
 function useEditorTab(
   tab: PackageEditorTab | undefined,
   onTabRequest: ((tab: PackageEditorTab) => void) | undefined,
@@ -53,12 +46,15 @@ function useEditorTab(
   return [tab ?? localTab, setActiveTab] as const;
 }
 
-/** The editor state every package type shares: draft, open section, identity form, save and discard. */
+/**
+ * The editor state every package type shares: draft, open section, identity form, save and discard.
+ * Without a `packageId` it creates a package (every tab, files included); with one it edits that
+ * package inside Paramètres › Package AFPS, the MANIFEST only (files are changed in Explorer › Fichiers).
+ */
 export function usePackageEditor({
   type,
   initialState,
   packageId,
-  presentation,
   tab,
   onTabRequest,
   validate,
@@ -67,8 +63,7 @@ export function usePackageEditor({
   type: EditablePackageType;
   initialState: EditorState;
   packageId: string | undefined;
-  presentation: Presentation;
-  /** Embedded: the section is the settings rail's, not the editor's. */
+  /** Editing: the section is the settings rail's, not the editor's. */
   tab?: PackageEditorTab;
   onTabRequest?: (tab: PackageEditorTab) => void;
   validate?: (state: EditorState) => ValidationError;
@@ -77,13 +72,13 @@ export function usePackageEditor({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const [activeTab, setActiveTab] = useEditorTab(tab, onTabRequest);
-  const embedded = presentation === "embedded";
+  const isEdit = packageId !== undefined;
 
   const editor = useEditorState({
     initialState,
     packageType: type,
     packageId,
-    isEdit: embedded,
+    isEdit,
     validate: (s) =>
       getManifestName(s.manifest).id
         ? (validate?.(s) ?? null)
@@ -108,16 +103,15 @@ export function usePackageEditor({
   };
 
   const submit = () =>
-    embedded
-      ? void saveEmbedded(saveDraft, t("editor.saved"))
+    isEdit
+      ? void saveEdit(saveDraft, t("editor.saved"))
       : handleSubmit(undefined, (next) => next && setActiveTab(next as PackageEditorTab));
 
   return {
     ...editor,
     type,
     packageId,
-    presentation,
-    embedded,
+    isEdit,
     activeTab,
     setActiveTab,
     metadata,

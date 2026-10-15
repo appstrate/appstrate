@@ -11,8 +11,9 @@
  * in the agent. So they are one section of the package: the catalog as a
  * table, the policy edited from each row, in a modal.
  *
- * The catalog is the server's reading of the SAVED package; the scopes follow
- * the draft, so an applied change shows at once.
+ * The catalog is the server's reading of the SAVED package (empty while the
+ * package is being created); the scopes follow the draft, so an applied change
+ * shows at once.
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
