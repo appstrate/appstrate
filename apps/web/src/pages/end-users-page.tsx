@@ -15,7 +15,7 @@ import { useDebouncedValue } from "../hooks/use-debounced-value";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { ErrorState, EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
 import { SettingsSkeleton } from "../components/loading-skeletons";
-import { useModalParam } from "../hooks/use-modal-param";
+import { useUrlModal } from "../hooks/use-url-modal";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
 import { ConfirmModal } from "../components/confirm-modal";
@@ -29,7 +29,6 @@ import { endUserLabel } from "../lib/members";
 import { useEndUserColumns } from "./end-user-columns";
 
 const END_USER_PARAM = "endUser";
-const EDIT_END_USER_PARAM = "editEndUser";
 
 export function EndUsersPage() {
   // Remount on space switch so the loaded pages (and the rest of the page state)
@@ -45,18 +44,18 @@ function EndUsersPageContent() {
   const spaceId = useCurrentSpaceId();
 
   const [search, setSearch] = useState("");
-  const newEndUser = useModalParam("newEndUser");
+  const [creating, setCreating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<EndUserInfo | null>(null);
   const query = useDebouncedValue(search).trim();
 
   const { data, isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } =
     useEndUsersPaged({ search: query });
   const endUsers = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
-  // The detail and the edition are two addresses of one modal: `?endUser=<id>`
-  // shows, `?editEndUser=<id>` edits, and switching hands one over to the other.
-  const detailParam = useModalParam(END_USER_PARAM);
-  const editParam = useModalParam(EDIT_END_USER_PARAM);
-  const selectedUserId = editParam.value ?? detailParam.value;
+  // The detail has an address (`?endUser=<id>`); the edition is a state of the page, and
+  // switching hands one over to the other.
+  const detailParam = useUrlModal(END_USER_PARAM);
+  const [editUserId, setEditUserId] = useState<string | null>(null);
+  const selectedUserId = editUserId ?? detailParam.value;
   const {
     data: selectedUserDetail,
     isLoading: selectedUserLoading,
@@ -68,13 +67,13 @@ function EndUsersPageContent() {
     ? (selectedUserDetail ?? endUsers.find((user) => user.id === selectedUserId) ?? null)
     : null;
 
-  const closeUser = editParam.value !== null ? editParam.close : detailParam.close;
+  const closeUser = editUserId !== null ? () => setEditUserId(null) : detailParam.close;
 
   const allColumns = useEndUserColumns({
     deletingUserId: deleteMutation.isPending
       ? (deleteMutation.variables?.params.path.id ?? null)
       : null,
-    onEdit: (user) => editParam.open(user.id),
+    onEdit: (user) => setEditUserId(user.id),
     onDelete: setPendingDelete,
   });
   const { columns, menu } = useColumnVisibility("end-users", allColumns);
@@ -83,7 +82,7 @@ function EndUsersPageContent() {
     id: "create",
     icon: Plus,
     label: t("spaces.newEndUser"),
-    onSelect: () => newEndUser.open(),
+    onSelect: () => setCreating(true),
     hidden: !canWrite,
   };
 
@@ -144,16 +143,22 @@ function EndUsersPageContent() {
         </PendingButton>
       )}
 
-      {canWrite && newEndUser.value !== null && <EndUserCreateModal onClose={newEndUser.close} />}
+      {canWrite && creating && <EndUserCreateModal onClose={() => setCreating(false)} />}
 
       {selectedUserId && selectedUser && (
         <EndUserDetailModal
           key={selectedUserId}
           onClose={closeUser}
           endUser={selectedUser}
-          editing={canWrite && editParam.value !== null}
-          onEdit={() => editParam.open(selectedUserId, END_USER_PARAM)}
-          onShowDetail={() => detailParam.open(selectedUserId, EDIT_END_USER_PARAM)}
+          editing={canWrite && editUserId !== null}
+          onEdit={() => {
+            detailParam.close();
+            setEditUserId(selectedUserId);
+          }}
+          onShowDetail={() => {
+            setEditUserId(null);
+            detailParam.open(selectedUserId);
+          }}
         />
       )}
 

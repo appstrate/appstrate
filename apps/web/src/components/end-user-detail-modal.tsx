@@ -21,7 +21,7 @@ import { errorMessage } from "../lib/mutation-error";
 interface Props {
   onClose: () => void;
   endUser: EndUserInfo | null;
-  /** The edition is its own address (`?editEndUser=<id>`); the host owns both. */
+  /** The edition is a state of the page; the host owns both. */
   editing: boolean;
   onEdit: () => void;
   /** Leaves the edition for the detail it was entered from. */
@@ -45,7 +45,7 @@ export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDe
   const mounted = useRef(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
   // An edition reached from the detail returns to it; one opened from the list's
-  // deed, or straight from its address, closes.
+  // deed closes.
   const [enteredFromDetail] = useState(!editing);
 
   const [editValues, setEditValues] = useState(() => formValues(endUser));

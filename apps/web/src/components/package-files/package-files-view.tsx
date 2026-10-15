@@ -28,7 +28,7 @@ import {
 import type { PackageType } from "@appstrate/core/validation";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { ApiError } from "../../api/client";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useUrlModal } from "../../hooks/use-url-modal";
 import { usePackageVersions } from "../../hooks/use-packages";
 import { matchesSearch } from "../../lib/strings";
 import { isPinnedEntry, previewBlockReason } from "../../lib/package-file-tree";
@@ -79,8 +79,8 @@ export function PackageFilesView({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const [selectedVersion, setSelectedVersion] = useState(initialVersion ?? "draft");
-  const compareParam = useModalParam("compareFiles");
-  const editingFile = useModalParam("editFile");
+  const compareParam = useUrlModal("compareFiles");
+  const [editingPath, setEditingPath] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -107,9 +107,7 @@ export function PackageFilesView({
     visibleFiles.find((file) => file.path === selectedPath) ??
     visibleFiles.find((file) => file.path === mainFile) ??
     visibleFiles[0];
-  const editedFile = editingFile.value
-    ? entries?.find((file) => file.path === editingFile.value)
-    : undefined;
+  const editedFile = editingPath ? entries?.find((file) => file.path === editingPath) : undefined;
 
   const publishedVersions = versions?.filter((version) => !version.yanked) ?? [];
   const versionOptions = [
@@ -159,7 +157,7 @@ export function PackageFilesView({
           busy,
           onEdit:
             activePath !== "manifest.json" && previewBlockReason(sourceEntryOf(activeFile)) === null
-              ? () => editingFile.open(activePath)
+              ? () => setEditingPath(activePath)
               : undefined,
           onReplace:
             activePath !== "manifest.json" ? () => staged.pickUpload(activePath) : undefined,
@@ -349,25 +347,23 @@ export function PackageFilesView({
         />
       )}
       {staged.dialogs}
-      {editing && editingFile.value !== null && (
+      {editing && editingPath !== null && (
         <Modal
-          onClose={editingFile.close}
-          title={t("editor.editFile", { name: editingFile.value })}
+          onClose={() => setEditingPath(null)}
+          title={t("editor.editFile", { name: editingPath })}
           className="sm:max-w-5xl"
         >
           {/* The editor seeds Monaco once and owns its text afterwards, so it may
-              only mount on the real entry: mounting on a placeholder (a deep
-              link that lands before the tree has loaded) would open an empty
-              file that never fills in. */}
+              only mount on the real entry: mounting on a placeholder would open
+              an empty file that never fills in. */}
           {editedFile ? (
             <PackageFileTextEditor
               packageId={packageId}
               entry={sourceEntryOf(editedFile)}
-              path={editingFile.value}
+              path={editingPath}
               commit="apply"
               onCommit={(text) => {
-                if (staged.stage([fileTextOperation(editingFile.value!, text)]))
-                  editingFile.close();
+                if (staged.stage([fileTextOperation(editingPath, text)])) setEditingPath(null);
               }}
             />
           ) : entries ? (

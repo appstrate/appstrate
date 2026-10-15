@@ -16,7 +16,7 @@ import { connectableAuthKeys } from "./connectable-auth-keys";
 import { isConnectionOwnedBy } from "./connection-ownership";
 import { useHostedConnectPopup } from "./use-hosted-connect-popup";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
-import { useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import { connectPopupInput, scopeChoiceFor } from "../integration-detail/connect-scope-choice";
 import {
   CONNECT_SCOPES_PARAM,
@@ -43,7 +43,7 @@ type AddProps = {
  */
 export function AddIntegrationConnection(props: AddProps) {
   const { packageId, detail, userId } = props;
-  const modal = useModalTarget(CONNECT_SCOPES_PARAM, detail.auths, (auth) => auth.auth_key);
+  const modal = useUrlModalTarget(CONNECT_SCOPES_PARAM, detail.auths, (auth) => auth.auth_key);
   const { openPopup, isPending } = useHostedConnectPopup();
   const forceAccountSelect = (auth: IntegrationAuthStatus) =>
     auth.connections.some((connection) => isConnectionOwnedBy(connection, userId));

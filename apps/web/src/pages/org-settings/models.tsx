@@ -38,7 +38,7 @@ import {
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
 import { useOrgSettings } from "../../hooks/use-org-settings";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModal, useUrlModalTarget } from "../../hooks/use-url-modal";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { DeleteKeyConfirm } from "../../components/delete-key-confirm";
@@ -85,14 +85,16 @@ export function OrgSettingsModelsPage() {
   const { data: registry } = useProvidersRegistry();
   const { data: orgSettings, isLoading: settingsLoading } = useOrgSettings();
 
-  const addProvider = useModalParam("newCredential");
-  const editKey = useModalTarget("editCredential", credentials);
-  const chooseModels = useModalTarget("models", credentials);
-  const personalModels = useModalParam("personalModels");
-  // The form edits what a list offers: never a model the instance ships, which an id typed in
-  // the URL would otherwise open.
-  const editableModels = useMemo(() => models?.filter((m) => !isSystemModel(m)), [models]);
-  const editModel = useModalTarget("editModel", editableModels);
+  const [addingProvider, setAddingProvider] = useState(false);
+  const editKey = useUrlModalTarget("editCredential", credentials);
+  const chooseModels = useUrlModalTarget("models", credentials);
+  const personalModels = useUrlModal("personalModels");
+  // The form edits what a list offers: never a model the instance ships.
+  const [editModelId, setEditModelId] = useState<string | null>(null);
+  const editTarget = useMemo(
+    () => models?.find((m) => m.id === editModelId && !isSystemModel(m)),
+    [models, editModelId],
+  );
 
   // The tab is a place: `?tab=personal` opens it, and the first one leaves the URL alone.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -146,7 +148,7 @@ export function OrgSettingsModelsPage() {
     id: "create-credential",
     icon: Plus,
     label: t("credentials.add"),
-    onSelect: () => addProvider.open(),
+    onSelect: () => setAddingProvider(true),
     hidden: !canWriteCredentials,
   };
   // The deed of the tab in view; a member who may write nothing has no menu.
@@ -252,8 +254,8 @@ export function OrgSettingsModelsPage() {
         </>
       )}
 
-      {canWriteCredentials && addProvider.value !== null && (
-        <ProviderAddFlow credentials={credentials ?? []} onClose={addProvider.close} />
+      {canWriteCredentials && addingProvider && (
+        <ProviderAddFlow credentials={credentials ?? []} onClose={() => setAddingProvider(false)} />
       )}
 
       {editKey.target && (
@@ -281,7 +283,10 @@ export function OrgSettingsModelsPage() {
           credential={chooseModels.target}
           onClose={chooseModels.close}
           // The model form replaces the list: two never stack.
-          onAdvanced={(id) => editModel.open(id, "models")}
+          onAdvanced={(id) => {
+            chooseModels.close();
+            setEditModelId(id);
+          }}
         />
       )}
 
@@ -291,15 +296,18 @@ export function OrgSettingsModelsPage() {
           providerId={personalModels.value}
           onChangeService={(id) => personalModels.open(id)}
           onClose={personalModels.close}
-          onAdvanced={(id) => editModel.open(id, "personalModels")}
+          onAdvanced={(id) => {
+            personalModels.close();
+            setEditModelId(id);
+          }}
         />
       )}
 
-      {editModel.target && (
+      {editTarget && (
         <ModelFormModal
-          onClose={editModel.close}
-          model={editModel.target}
-          onDelete={canDeleteModels ? () => setDeletingModel(editModel.target ?? null) : undefined}
+          onClose={() => setEditModelId(null)}
+          model={editTarget}
+          onDelete={canDeleteModels ? () => setDeletingModel(editTarget) : undefined}
         />
       )}
 
@@ -318,7 +326,7 @@ export function OrgSettingsModelsPage() {
             {
               onSuccess: () => {
                 setDeletingModel(null);
-                editModel.close();
+                setEditModelId(null);
               },
             },
           );

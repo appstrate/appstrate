@@ -41,7 +41,6 @@ import {
   TableHeader,
   TableRow,
 } from "@appstrate/ui/components/table";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { usePermissions } from "../../hooks/use-permissions";
 import { packagePermission } from "@appstrate/core/permissions";
 import { TextSkeleton } from "../loading-skeletons";
@@ -83,9 +82,9 @@ export function ResourceSection({
   // entries are then all this section knows, listed by id.
   const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
   const upload = useImportPackage();
-  const picker = useModalParam("add");
-  const toolsFor = useModalTarget("tools", selectedEntries);
-  const toolsEntry = toolsFor.target;
+  const [picking, setPicking] = useState(false);
+  const [toolsId, setToolsId] = useState<string | null>(null);
+  const toolsEntry = selectedEntries.find((entry) => entry.id === toolsId);
   const isIntegration = type === "integration";
 
   // A declared dependency the catalog does not return: an integration that is no
@@ -171,7 +170,7 @@ export function ResourceSection({
               id: "add",
               label: t("common:btn.add"),
               icon: Plus,
-              onSelect: () => picker.open(),
+              onSelect: () => setPicking(true),
               disabled: !canReadCatalog,
             },
             {
@@ -197,7 +196,7 @@ export function ResourceSection({
         >
           {canReadCatalog && (
             <EmptyStateAction
-              action={{ label: t("common:btn.add"), onSelect: () => picker.open() }}
+              action={{ label: t("common:btn.add"), onSelect: () => setPicking(true) }}
             />
           )}
         </EmptyState>
@@ -287,7 +286,7 @@ export function ResourceSection({
                             id: "tools",
                             label: t("editor.toolsEdit"),
                             icon: Wrench,
-                            onSelect: () => toolsFor.open(entry.id),
+                            onSelect: () => setToolsId(entry.id),
                             hidden: !isIntegration || isMissing,
                           },
                           {
@@ -319,14 +318,14 @@ export function ResourceSection({
         </div>
       )}
 
-      {picker.value !== null && (
+      {picking && (
         <ResourcePicker
           title={t("editor.resourceAddTitle", { kind: title })}
           items={(items ?? []).filter((item) => !selectedEntries.some((e) => e.id === item.id))}
-          onClose={picker.close}
+          onClose={() => setPicking(false)}
           onAdd={(ids) => {
             add(ids);
-            picker.close();
+            setPicking(false);
           }}
         />
       )}
@@ -335,10 +334,10 @@ export function ResourceSection({
         <ToolsModal
           name={byId.get(toolsEntry.id)?.name || toolsEntry.id}
           entry={toolsEntry}
-          onClose={toolsFor.close}
+          onClose={() => setToolsId(null)}
           onApply={(next) => {
             replaceEntry(toolsEntry.id, next);
-            toolsFor.close();
+            setToolsId(null);
           }}
         />
       )}

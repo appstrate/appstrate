@@ -38,7 +38,6 @@ import { VersionBanners } from "../components/version-banners";
 import { PackageOverview } from "../components/package-detail/package-overview";
 import { isOwnedSource } from "../components/package-detail/owned-source";
 import { PackageOwnershipNotice } from "../components/package-detail/package-ownership";
-import { useModalParam } from "../hooks/use-modal-param";
 import { CreateVersionModal } from "../components/create-version-modal";
 // Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
@@ -118,7 +117,13 @@ function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentMo
 
 // ─── Main Page ──────────────────────────────────────────────────────
 
+/** One body per package and version: the modals it opens hold that package's state, and a route change must not carry them to another. */
 export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
+  const { scope, name, version } = useParams<{ scope: string; name: string; version?: string }>();
+  return <PackageDetailBody key={`${scope}/${name}@${version ?? ""}`} type={type} />;
+}
+
+function PackageDetailBody({ type }: { type: PackageType }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
   // Only an agent has a narrower read: without `agents:read` a runner launches
@@ -204,7 +209,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // An agent the reader may only run opens on its runs when that role reads them.
   const defaultTab: PackageTab = !fullRead && tabReads.runs ? "runs" : "overview";
   const [tab, setTab] = useTabWithHash<PackageTab>(allValidTabs, defaultTab);
-  const newVersion = useModalParam("newVersion");
+  const [creatingVersion, setCreatingVersion] = useState(false);
   const [editorDirty, setEditorDirty] = useState(false);
   // ── Loading / Error ──
   if (isQueryInFlight(detailQuery) || (isVersionView && versionLoading))
@@ -289,7 +294,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     icon,
   }));
 
-  // The trigger's own verdict, which also bounds its `?newVersion` URL.
+  // The trigger's own verdict, which also bounds the dialog.
   const canCreateVersion = !!homeWritable && !isBuiltIn && !isHistoricalVersion && isOwned;
   // Publishing or running reads the stored draft, not the edits held on screen.
   const unsavedReason = editorDirty ? t("detail.unsavedBlocksAction") : undefined;
@@ -301,7 +306,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     canRestore: !isBuiltIn && !!homeWritable,
     canDelete: !isBuiltIn && !!homeDeletable,
     // The page's « Créer une version » (PackageActionsDropdown's `isMutable`).
-    onCreate: canCreateVersion ? () => newVersion.open() : undefined,
+    onCreate: canCreateVersion ? () => setCreatingVersion(true) : undefined,
     hasUnarchivedChanges: hasArchivableChanges && !isVersionView,
   };
 
@@ -356,7 +361,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   downloadVersion={downloadVersion}
                   downloadPackage={downloadPackage}
                   downloadBundle={downloadBundle}
-                  onCreateVersion={() => newVersion.open()}
+                  onCreateVersion={() => setCreatingVersion(true)}
                   unsavedReason={unsavedReason}
                 />
               </>
@@ -380,7 +385,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   isHistoricalVersion={isHistoricalVersion}
                   downloadVersion={downloadVersion}
                   onDownload={downloadPackage}
-                  onCreateVersion={() => newVersion.open()}
+                  onCreateVersion={() => setCreatingVersion(true)}
                   createVersionBlockedReason={unsavedReason}
                   isActiveHere={isActiveInCurrentSpace}
                 />
@@ -515,9 +520,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         )}
 
         {/* Mounted only while open: any way of closing a form modal abandons its input. */}
-        {newVersion.value !== null && canCreateVersion && (
+        {creatingVersion && canCreateVersion && (
           <CreateVersionModal
-            onClose={newVersion.close}
+            onClose={() => setCreatingVersion(false)}
             type={type}
             packageId={packageId}
             hasUnarchivedChanges={hasTimestampChanges}

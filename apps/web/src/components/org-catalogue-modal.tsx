@@ -25,7 +25,7 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import type { PackageType } from "@appstrate/core/validation";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { MOVE_HOME_PARAM, MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
+import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SHARE_PARAM, SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ActivationClosureDialog } from "./catalogue-activation-dialog";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
@@ -62,7 +62,7 @@ import {
   type CataloguePlacement,
   type PlacementState,
 } from "../lib/catalogue-placement";
-import { modalOpeningState, useModalParam, useModalTarget } from "../hooks/use-modal-param";
+import { modalOpeningState, useUrlModal, useUrlModalTarget } from "../hooks/use-url-modal";
 import { useListParams } from "../lib/list-params";
 import {
   INTEGRATION_EXECUTIONS,
@@ -195,7 +195,7 @@ export function OrgCatalogueModal({
   // package (a share notification) opens its sheet whatever the list shows,
   // the other execution's integrations included. An id the kind does not hold
   // drops from the address.
-  const preview = useModalTarget("package", library ? ofKind : undefined, {
+  const preview = useUrlModalTarget("package", library ? ofKind : undefined, {
     companions: SHEET_COMPANIONS,
   });
   const placementById = new Map(ofKind.map((item) => [item.id, placementOf(item)] as const));
@@ -233,8 +233,8 @@ export function OrgCatalogueModal({
   const [closures, setClosures] = useState<Closure[]>([]);
   const closure = closures[0];
   const nextClosure = () => setClosures((queue) => queue.slice(1));
-  const moveHome = useModalParam(MOVE_HOME_PARAM);
-  const share = useModalParam(SHARE_PARAM);
+  const [movingHome, setMovingHome] = useState<string | null>(null);
+  const share = useUrlModal(SHARE_PARAM);
   const revoke = useRevokePackageShare();
   // Targets the SPACE id; a share to a person publishes their user id instead, so that
   // offer is withdrawn from the package's share dialog.
@@ -444,7 +444,7 @@ export function OrgCatalogueModal({
     deedsOf,
     spaceNameOf,
     onOpen: (item) => preview.open(item.id),
-    onMoveHome: (item) => moveHome.open(item.id),
+    onMoveHome: (item) => setMovingHome(item.id),
     onShare: (item) => share.open(item.id),
     onRevoke: revokeFrom,
   });
@@ -609,7 +609,7 @@ export function OrgCatalogueModal({
                       }
                     : undefined
                 }
-                onMoveHome={(item) => moveHome.open(item.id)}
+                onMoveHome={(item) => setMovingHome(item.id)}
                 onShare={(item) => share.open(item.id)}
                 onRevoke={revokeFrom}
               />
@@ -733,13 +733,13 @@ export function OrgCatalogueModal({
         />
       )}
 
-      {/* A URL names a package; the dialog mounts only when its deed is the reader's. */}
-      {moveHome.value && deedsOf({ id: moveHome.value })?.moveHome && (
+      {/* The dialogs mount only when their deed is the reader's; a URL names the shared package. */}
+      {movingHome && deedsOf({ id: movingHome })?.moveHome && (
         <MoveHomeSpaceDialog
-          onClose={moveHome.close}
-          packageId={moveHome.value}
+          onClose={() => setMovingHome(null)}
+          packageId={movingHome}
           type={active}
-          homeSpaceId={placementById.get(moveHome.value)?.homeSpaceId}
+          homeSpaceId={placementById.get(movingHome)?.homeSpaceId}
         />
       )}
       {share.value && deedsOf({ id: share.value })?.share && (

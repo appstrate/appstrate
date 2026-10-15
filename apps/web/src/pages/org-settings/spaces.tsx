@@ -21,13 +21,13 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import type { MenuAction } from "../../lib/menu-action";
 import { useSpaceColumns } from "./space-columns";
-import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SPACE_PARAM, SpaceCreateModal } from "../../components/space-create-modal";
+import { useUrlModal } from "../../hooks/use-url-modal";
 
 export function OrgSettingsSpacesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { data: spaces, isLoading, error } = useSpaces();
-  const newSpace = useModalParam(NEW_SPACE_PARAM);
+  const newSpace = useUrlModal(NEW_SPACE_PARAM);
   const [pending, setPending] = useState<{ id: string; action: "convert" | "sweep" } | null>(null);
   const navigate = useNavigate();
   const { switchSpace } = useSpaceSwitcher();
@@ -105,7 +105,9 @@ export function OrgSettingsSpacesPage() {
         }
       />
 
-      {can("spaces:write") && <SpaceCreateModal />}
+      {newSpace.value !== null && can("spaces:write") && (
+        <SpaceCreateModal onClose={newSpace.close} />
+      )}
 
       <ConfirmModal
         open={pending !== null}

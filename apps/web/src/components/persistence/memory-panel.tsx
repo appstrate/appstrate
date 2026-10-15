@@ -14,7 +14,7 @@ import { ConfirmModal } from "../confirm-modal";
 import { formatDateField } from "../../lib/format-date";
 import { filterMemoryItems, memoryText } from "../../lib/memory-items";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
-import { useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import {
   useAgentMemories,
   useAgentPinned,
@@ -87,7 +87,7 @@ export function MemoryPanel({
   );
 
   // The entry read in the modal: `?memory=pinned:12`.
-  const memoryParam = useModalTarget(
+  const memoryParam = useUrlModalTarget(
     "memory",
     isLoading ? undefined : allItems,
     (item) => `${item.kind}:${item.id}`,

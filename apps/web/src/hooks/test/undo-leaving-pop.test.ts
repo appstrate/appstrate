@@ -3,7 +3,7 @@
 /**
  * A Back blocked by the unsaved-changes guard pushes the editor's entry back.
  * It must carry that entry's router state (`idx`, `key`, `usr`): the overlay
- * close step and `useModalParam` read it, and a `null` state turns a later
+ * close step and `useUrlModal` read it, and a `null` state turns a later
  * modal close into a replace instead of a Back.
  */
 

@@ -1,26 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
+import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 import { memberRoleValue, type RoleObject } from "../hooks/use-roles";
 
-/** What a role's row asks the preview dialog to start from, kept in the URL (`?viewAs=org:member`) so it reopens pre-filled. */
+/** What a role's row asks the preview dialog to start from. */
 export type ViewAsPreset = { kind: "org"; role: ViewAsOrgRole } | { kind: "space"; key: string };
-
-export function viewAsPresetParam(preset: ViewAsPreset): string {
-  return preset.kind === "org" ? `org:${preset.role}` : `space:${preset.key}`;
-}
-
-/** `null` for the bare `?view-as` of the page's Actions menu, and for anything unreadable. */
-export function parseViewAsPreset(raw: string | null): ViewAsPreset | null {
-  if (!raw) return null;
-  const separator = raw.indexOf(":");
-  const kind = raw.slice(0, separator);
-  const key = raw.slice(separator + 1);
-  if (separator === -1 || !key) return null;
-  if (kind === "space") return { kind, key };
-  const role = VIEW_AS_ORG_ROLES.find((r) => r === key);
-  return kind === "org" && role ? { kind, role } : null;
-}
 
 /** The dialog's "no space" value: not the empty string, which Radix refuses as an item value. */
 export const VIEW_AS_NO_SPACE = "none";

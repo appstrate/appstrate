@@ -17,7 +17,7 @@ import { SettingsPageActions } from "@/components/settings/settings-page-actions
 import type { MenuAction } from "@/lib/menu-action";
 import { EmptyState, EmptyStateAction } from "@/components/page-states";
 import { usePermissions } from "@/hooks/use-permissions";
-import { useModalParam, useModalTarget } from "@/hooks/use-modal-param";
+import { useUrlModalTarget } from "@/hooks/use-url-modal";
 import { useOAuthClients } from "../hooks/use-oauth-clients";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { OAuthClientFormModal, type CreatedSecret } from "./oauth-client-form-modal";
@@ -32,17 +32,17 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   const { data, isLoading, error } = useOAuthClients(level);
   const { can } = usePermissions();
   const canWrite = can("oauth-clients:write");
-  const newClient = useModalParam("newOauthClient");
-  const editClient = useModalTarget("editOauthClient", data, (client) => client.clientId);
+  const [creating, setCreating] = useState(false);
+  const editClient = useUrlModalTarget("editOauthClient", data, (client) => client.clientId);
   const selectedClient = editClient.target ?? null;
-  // Shown once, and with no address: the creation's one (`?newOauthClient`) goes away as it appears.
+  // Shown once, and with no address.
   const [createdSecret, setCreatedSecret] = useState<CreatedSecret | null>(null);
 
   const create: MenuAction = {
     id: "create",
     icon: Plus,
     label: t("settings:oauthClients.createBtn"),
-    onSelect: () => newClient.open(),
+    onSelect: () => setCreating(true),
     hidden: !canWrite,
   };
 
@@ -81,15 +81,15 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
         }
       />
 
-      {canWrite && (newClient.value !== null || selectedClient !== null) && (
+      {canWrite && (creating || selectedClient !== null) && (
         <OAuthClientFormModal
           key={selectedClient?.clientId ?? "__create__"}
-          onClose={selectedClient ? editClient.close : newClient.close}
+          onClose={selectedClient ? editClient.close : () => setCreating(false)}
           client={selectedClient}
           level={level}
           onCreated={(secret) => {
             setCreatedSecret(secret);
-            newClient.close();
+            setCreating(false);
           }}
         />
       )}

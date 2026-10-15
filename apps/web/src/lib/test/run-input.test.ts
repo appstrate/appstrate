@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `?run=<agent>` is an address any link can carry. It opens the input form
- * only where a click on the agent's Run button would have: never past a
+ * A requested run opens the input form only where a click on the agent's Run
+ * button would have: never past a
  * disabled button, a caller without `agents:run`, a never-published agent, or
  * an agent that declares no input (a click launches those directly).
  *
@@ -35,7 +35,7 @@ function agent(over: Partial<AgentDetail> = {}): AgentDetail {
 
 const open = { requested: true, disabled: false, canRun: true, detail: agent() };
 
-describe("the run input form opened from ?run=", () => {
+describe("the run input form", () => {
   it("opens where the button would open it", () => {
     expect(runInputOpens(open)).toBe(true);
   });

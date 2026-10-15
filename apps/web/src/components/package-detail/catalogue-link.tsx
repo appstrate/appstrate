@@ -7,7 +7,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { useCanReach } from "../../hooks/use-can-reach";
-import { modalOpeningState } from "../../hooks/use-modal-param";
+import { modalOpeningState } from "../../hooks/use-url-modal";
 import { catalogueHref } from "../../lib/catalogue-link";
 import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 

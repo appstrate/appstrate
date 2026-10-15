@@ -20,7 +20,7 @@ import { useSpaceLabelOf, useSpaces } from "../hooks/use-spaces";
 import { invitationUrl } from "../lib/invitation-url";
 import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
-import { useModalTarget } from "../hooks/use-modal-param";
+import { useUrlModalTarget } from "../hooks/use-url-modal";
 import { ConfirmModal } from "./confirm-modal";
 import { DataTable } from "./data-table";
 import { Modal } from "./modal";
@@ -55,7 +55,7 @@ export function InvitationsTable({
         invitation.space_assignments.some((assignment) => assignment.spaceId === spaceId),
       )
     : invitations;
-  const editParam = useModalTarget("invitation", canEdit ? visible : undefined);
+  const editParam = useUrlModalTarget("invitation", canEdit ? visible : undefined);
   const editing = editParam.target;
   const canceling = visible.find((invitation) => invitation.id === cancelingId);
   const spaceName = (id: string) => spaceLabelOf(id) ?? t("orgSettings.assignmentUnavailableSpace");

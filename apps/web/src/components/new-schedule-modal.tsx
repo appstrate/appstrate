@@ -3,13 +3,13 @@
 /**
  * Creating a schedule, as a modal: the agent, a name, when it fires and the agent's
  * inputs, with what may decide whether it can be created folded away (who it runs as,
- * the version, the model, the connections). Opened from anywhere by the `newSchedule`
- * URL parameter (`useModalParam`): the agent to preselect, or `1` for none.
+ * the version, the model, the connections). Mounted by whoever offers it, while open.
  */
 
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
@@ -32,8 +32,6 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { isQueryInFlight } from "../lib/query-state";
 import { useActorName } from "../hooks/use-actor-name";
 import { useAuth } from "../hooks/use-auth";
-import { useModalParam } from "../hooks/use-modal-param";
-import { usePermissions } from "../hooks/use-permissions";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useCreateSchedule, useScheduleFormDeps } from "../hooks/use-schedules";
 import { changedInputValues, hasInputFields, initialInputValues } from "../lib/agent-input";
@@ -55,30 +53,30 @@ import { scheduleVersionOptions, VERSION_INHERIT } from "../lib/schedule-options
 import { scheduleDetailPath } from "../lib/package-paths";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
 
-/** The URL parameter that opens the modal; its value is the agent to preselect, or `1`. */
-export const NEW_SCHEDULE_PARAM = "newSchedule";
-
 /** A new schedule's first rhythm: every day at 9, in UTC. */
 const DEFAULT_CRON = "0 9 * * *";
 const DEFAULT_TIMEZONE = "UTC";
 
-/** Mounted once in the shell: the modal answers the parameter on any page. */
-export function NewScheduleModalHost() {
+/** `initialAgentId` is the agent to preselect, none for the first of the list. */
+export function NewScheduleModal({
+  initialAgentId,
+  onClose,
+}: {
+  initialAgentId?: string;
+  onClose: () => void;
+}) {
   const { t } = useTranslation(["agents"]);
-  const { can } = usePermissions();
-  const param = useModalParam(NEW_SCHEDULE_PARAM);
-  if (!param.value || !can("schedules:write")) return null;
+  const navigate = useNavigate();
   return (
     <Modal
-      onClose={param.close}
+      onClose={onClose}
       title={t("schedule.titleNew")}
       className="max-h-[90svh] overflow-y-auto sm:max-w-xl"
     >
       <NewScheduleForm
-        initialAgentId={param.value === "1" ? undefined : param.value}
-        onCancel={param.close}
-        onCreated={(schedule) => param.leave(scheduleDetailPath(schedule.id))}
-        onLeave={param.leave}
+        initialAgentId={initialAgentId}
+        onCancel={onClose}
+        onCreated={(schedule) => navigate(scheduleDetailPath(schedule.id))}
       />
     </Modal>
   );
@@ -89,13 +87,10 @@ function NewScheduleForm({
   initialAgentId,
   onCreated,
   onCancel,
-  onLeave,
 }: {
   initialAgentId?: string;
   onCreated: (schedule: ScheduleWireDto) => void;
   onCancel: () => void;
-  /** A connection picker's way out to the integration page leaves this modal. */
-  onLeave?: (to: string) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   const agentsQuery = useAgents();
@@ -124,13 +119,7 @@ function NewScheduleForm({
         <SettingsSkeleton />
       ) : agentId ? (
         // A new agent, a new form: its inputs and connections are another agent's.
-        <ScheduleFields
-          key={agentId}
-          agentId={agentId}
-          onCreated={onCreated}
-          onCancel={onCancel}
-          onLeave={onLeave}
-        />
+        <ScheduleFields key={agentId} agentId={agentId} onCreated={onCreated} onCancel={onCancel} />
       ) : (
         agents && <p className="text-muted-foreground text-sm">{t("schedule.noAgent")}</p>
       )}
@@ -142,12 +131,10 @@ function ScheduleFields({
   agentId,
   onCreated,
   onCancel,
-  onLeave,
 }: {
   agentId: string;
   onCreated: (schedule: ScheduleWireDto) => void;
   onCancel: () => void;
-  onLeave?: (to: string) => void;
 }) {
   // The form seeds its inputs once: it waits for the agent detail, or a field
   // locked since would be seeded and refused (400 `locked_input_field`).
@@ -155,13 +142,7 @@ function ScheduleFields({
   if (error) return <ErrorState error={error} />;
   if (!deps) return <SettingsSkeleton />;
   return (
-    <ScheduleFieldsReady
-      deps={deps}
-      agentId={agentId}
-      onCreated={onCreated}
-      onCancel={onCancel}
-      onLeave={onLeave}
-    />
+    <ScheduleFieldsReady deps={deps} agentId={agentId} onCreated={onCreated} onCancel={onCancel} />
   );
 }
 
@@ -170,13 +151,11 @@ export function ScheduleFieldsReady({
   agentId,
   onCreated,
   onCancel,
-  onLeave,
 }: {
   deps: NonNullable<ReturnType<typeof useScheduleFormDeps>["deps"]>;
   agentId: string;
   onCreated: (schedule: ScheduleWireDto) => void;
   onCancel: () => void;
-  onLeave?: (to: string) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const { user } = useAuth();
@@ -327,7 +306,6 @@ export function ScheduleFieldsReady({
           onConnectionPick={setConnectionPick}
           version={firedVersion}
           scheduled
-          onLeave={onLeave}
         />
         {/* Fires running as someone else: the panel's pickers would judge the viewer's
             connections. A refusal is answered below the options. */}

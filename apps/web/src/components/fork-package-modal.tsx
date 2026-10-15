@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { SLUG_REGEX } from "@appstrate/core/naming";
 import { FormModal } from "./form-modal";
 import { FormItem } from "@/components/app-ui/form-item";
@@ -14,17 +15,16 @@ import { errorMessage } from "../lib/mutation-error";
 
 interface Props {
   onClose: () => void;
-  /** Leaves the modal for the copy's page. */
-  onLeave: (to: string) => void;
   packageId: string;
   defaultName: string;
   type: string;
 }
 
 /** Mounted by the caller while open: closing abandons the name. */
-export function ForkPackageModal({ onClose, onLeave, packageId, defaultName, type }: Props) {
+export function ForkPackageModal({ onClose, packageId, defaultName, type }: Props) {
   const { t } = useTranslation(["agents", "common"]);
   const { currentOrg } = useOrg();
+  const navigate = useNavigate();
   const forkMutation = useForkPackage();
 
   const [name, setName] = useState(defaultName.toLowerCase());
@@ -37,7 +37,10 @@ export function ForkPackageModal({ onClose, onLeave, packageId, defaultName, typ
     forkMutation.mutate(
       { packageId, name },
       {
-        onSuccess: (result) => onLeave(packageDetailPath(type, result.id)),
+        onSuccess: (result) => {
+          onClose();
+          navigate(packageDetailPath(type, result.id));
+        },
         onError: (err) => {
           const code = err instanceof ApiError ? err.code : "";
           setError(

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Webhook } from "lucide-react";
 import { useWebhooks } from "../hooks/use-webhooks";
@@ -8,14 +9,13 @@ import { DataTable } from "@/components/data-table";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
 import type { MenuAction } from "@/lib/menu-action";
 import { useWebhookColumns } from "../components/webhook-columns";
-import { useModalParam } from "@/hooks/use-modal-param";
-import { NEW_WEBHOOK_PARAM, WebhookCreateModal } from "../components/webhook-create-modal";
+import { WebhookCreateModal } from "../components/webhook-create-modal";
 import { usePermissions } from "@/hooks/use-permissions";
 import { webhookResource } from "@/lib/webhook-permissions";
 
 export function WebhooksPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const newWebhook = useModalParam(NEW_WEBHOOK_PARAM);
+  const [creating, setCreating] = useState(false);
   const { can } = usePermissions();
 
   const { data: webhooks, isLoading, error } = useWebhooks();
@@ -30,7 +30,7 @@ export function WebhooksPage() {
     id: "create",
     icon: Plus,
     label: t("settings:webhooks.createTitle"),
-    onSelect: () => newWebhook.open(),
+    onSelect: () => setCreating(true),
     hidden: createLevels.length === 0,
   };
 
@@ -54,7 +54,9 @@ export function WebhooksPage() {
         }
       />
 
-      {!create.hidden && <WebhookCreateModal levels={createLevels} />}
+      {creating && !create.hidden && (
+        <WebhookCreateModal levels={createLevels} onClose={() => setCreating(false)} />
+      )}
     </div>
   );
 }

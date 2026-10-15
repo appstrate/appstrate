@@ -8,7 +8,7 @@ import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { Modal } from "../modal";
 import { useHostedConnectPopup } from "../integration-connect/use-hosted-connect-popup";
 import { scopeLabels } from "../integration-connect/scope-labels";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useUrlModal } from "../../hooks/use-url-modal";
 import { connectPopupInput, type ScopeTarget } from "./connect-scope-choice";
 import { AgentQuickFill } from "./agent-quick-fill";
 
@@ -25,7 +25,7 @@ export function ConnectScopesModal({
   ...target
 }: ScopeTarget & { forceAccountSelect: boolean }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const modal = useModalParam(CONNECT_SCOPES_PARAM);
+  const modal = useUrlModal(CONNECT_SCOPES_PARAM);
   const { openPopup } = useHostedConnectPopup();
   const formId = `connect-scopes-${target.authKey}`;
 

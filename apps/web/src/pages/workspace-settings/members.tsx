@@ -23,7 +23,6 @@ import { ApiError } from "../../api/client";
 import { useInviteMember, useOrg, useOrgDetail } from "../../hooks/use-org";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useModalParam } from "../../hooks/use-modal-param";
 import { useCanReach } from "../../hooks/use-can-reach";
 import {
   DEFAULT_SPACE_ROLE_VALUE,
@@ -88,9 +87,8 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   } = useSpaceRoleOptions(spaceId);
   const { data: space, error: spaceError, refetch: refetchSpace } = useSpace(spaceId);
   const [memberToRemove, setMemberToRemove] = useState<SpaceMemberObject | null>(null);
-  // Both modals have an address: `?add-member` and `?view-as`.
-  const addParam = useModalParam("addMember");
-  const viewAsParam = useModalParam("viewAs");
+  const [adding, setAdding] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const canPreview = useCanPreviewRole();
 
   const assignRole = useAssignSpaceRole(roleOptions);
@@ -170,7 +168,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     icon: Plus,
     testId: "add-space-member-button",
     label: t("spaceMembers.add"),
-    onSelect: () => addParam.open(),
+    onSelect: () => setAdding(true),
     hidden: !deeds.includes("add"),
   };
   const viewAs: MenuAction = {
@@ -178,7 +176,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     icon: Eye,
     testId: "view-as-space-button",
     label: t("viewAs.trigger"),
-    onSelect: () => viewAsParam.open(),
+    onSelect: () => setPreviewing(true),
     hidden: !deeds.includes("view-as"),
   };
 
@@ -238,8 +236,8 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
         />
       )}
 
-      {viewAsParam.value !== null && canPreview && (
-        <ViewAsDialog spaceId={spaceId} onClose={viewAsParam.close} />
+      {previewing && canPreview && (
+        <ViewAsDialog spaceId={spaceId} onClose={() => setPreviewing(false)} />
       )}
 
       <ConfirmModal
@@ -261,10 +259,10 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
         }}
       />
 
-      {canInvite && addParam.value !== null && (
+      {canInvite && adding && (
         <AddSpaceMemberModal
-          key={`${spaceId}:${addParam.value}`}
-          onClose={addParam.close}
+          key={spaceId}
+          onClose={() => setAdding(false)}
           spaceId={spaceId}
           orgId={currentOrg?.id}
           excludedUserIds={explicitUserIds}

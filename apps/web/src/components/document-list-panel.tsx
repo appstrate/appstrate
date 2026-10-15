@@ -22,7 +22,7 @@ import { useDocumentColumns } from "./document-columns";
 import { DocumentRowActions } from "./document-row-actions";
 import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
-import { useModalParam } from "../hooks/use-modal-param";
+import { useUrlModal } from "../hooks/use-url-modal";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 
 export function DocumentListPanel({
@@ -64,7 +64,7 @@ export function DocumentListPanel({
 
   // A deep-linked doc may be outside the currently loaded page, so an empty name
   // is fine — the preview modal falls back to the fetched DTO's name.
-  const preview = useModalParam("preview");
+  const preview = useUrlModal("preview");
   const previewDoc = preview.value
     ? { id: preview.value, name: documents.find((d) => d.id === preview.value)?.name ?? "" }
     : null;

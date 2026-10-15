@@ -19,7 +19,6 @@
 
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, type ReactNode } from "react";
-import { useModalParam } from "@/hooks/use-modal-param";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Mail, Trash2, Send } from "lucide-react";
@@ -81,7 +80,7 @@ function SmtpSection({ personal }: { personal: boolean }) {
   const upsert = useUpsertSmtpConfig();
   const del = useDeleteSmtpConfig();
   const test = useTestSmtp();
-  const smtpTest = useModalParam("smtpTest");
+  const [testing, setTesting] = useState(false);
   const [form, setForm] = useSeededForm(config, isLoading, emptySmtp, fromSmtp);
   const initial = config ?? null;
 
@@ -203,7 +202,7 @@ function SmtpSection({ personal }: { personal: boolean }) {
                 {t("common:btn.save")}
               </PendingButton>
               {initial && (
-                <Button type="button" variant="outline" onClick={() => smtpTest.open()}>
+                <Button type="button" variant="outline" onClick={() => setTesting(true)}>
                   <Send />
                   {t("settings:spaceAuth.smtpTest")}
                 </Button>
@@ -214,9 +213,9 @@ function SmtpSection({ personal }: { personal: boolean }) {
         )}
       </ProviderConfigSection>
 
-      {!personal && !!initial && smtpTest.value !== null && (
+      {!personal && !!initial && testing && (
         <SmtpTestModal
-          onClose={smtpTest.close}
+          onClose={() => setTesting(false)}
           isPending={test.isPending}
           onSend={(to) =>
             test.mutate(to, {
@@ -224,7 +223,7 @@ function SmtpSection({ personal }: { personal: boolean }) {
               // the SMTP error verbatim), which the mutation cache toasts.
               onSuccess: () => {
                 toast.success(t("settings:spaceAuth.smtpTestOk"));
-                smtpTest.close();
+                setTesting(false);
               },
             })
           }

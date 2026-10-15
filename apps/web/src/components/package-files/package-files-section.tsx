@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useUrlModal } from "../../hooks/use-url-modal";
 import { JsonEditor } from "../json-editor";
 import { Modal } from "../modal";
 
@@ -24,7 +24,7 @@ export function ManifestEditEntry({
   onApply: (value: Record<string, unknown>) => void;
 }) {
   const { t } = useTranslation("agents");
-  const editing = useModalParam("editManifest");
+  const editing = useUrlModal("editManifest");
   if (editing.value === null) return null;
   return (
     <Modal

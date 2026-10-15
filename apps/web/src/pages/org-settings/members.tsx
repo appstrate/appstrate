@@ -6,7 +6,7 @@ import type { components } from "../../api/client";
 import { useChangeMemberRole, useOrg, useOrgDetail, useRemoveMember } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
@@ -30,7 +30,7 @@ export function OrgSettingsMembersPage() {
   const { user } = useAuth();
   const { can, orgRole } = usePermissions();
   const orgId = currentOrg?.id;
-  const invite = useModalParam("invite");
+  const [inviting, setInviting] = useState(false);
 
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
   const canInvite = can("members:invite");
@@ -48,7 +48,7 @@ export function OrgSettingsMembersPage() {
   const { data: orgData, isLoading, error } = useOrgDetail();
 
   const members = orgData?.members ?? [];
-  const memberParam = useModalTarget("member", orgData?.members, (member) => member.userId);
+  const memberParam = useUrlModalTarget("member", orgData?.members, (member) => member.userId);
   const invitations = orgData?.invitations ?? [];
 
   const removeMemberMutation = useRemoveMember();
@@ -115,7 +115,7 @@ export function OrgSettingsMembersPage() {
     id: "invite",
     icon: Plus,
     label: t("orgSettings.inviteMember"),
-    onSelect: () => invite.open(),
+    onSelect: () => setInviting(true),
     hidden: !canInvite,
   };
 
@@ -126,18 +126,18 @@ export function OrgSettingsMembersPage() {
       {/* The invitation is one form wherever it is made: the org role, then the
           spaces it opens and the role in each — which is what a guest needs,
           having no implicit access anywhere. */}
-      {canInvite && orgId && invite.value !== null && (
+      {canInvite && orgId && inviting && (
         <Modal
-          onClose={invite.close}
+          onClose={() => setInviting(false)}
           title={t("orgSettings.inviteMember")}
           className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
         >
           <OrgInvitationForm
-            key={`${orgId}:${invite.value}`}
+            key={orgId}
             orgId={orgId}
             allowGuest
-            onSuccess={invite.close}
-            onCancel={invite.close}
+            onSuccess={() => setInviting(false)}
+            onCancel={() => setInviting(false)}
           />
         </Modal>
       )}

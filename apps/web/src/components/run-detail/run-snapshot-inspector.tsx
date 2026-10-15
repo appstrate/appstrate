@@ -36,7 +36,7 @@ import type { JournalOverviewFilter } from "../log-viewer";
 import { RunDuration } from "../run-duration";
 import { DetailSectionCard } from "../detail-section-card";
 import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useUrlModal } from "../../hooks/use-url-modal";
 import type { RunModelFallback } from "../../lib/run-model-fallback";
 import { RunWarnings } from "./run-warnings";
 import { formatNumber } from "../../lib/format-number";
@@ -74,7 +74,7 @@ export function RunSnapshotInspector({
   onOpenResults: () => void;
 }) {
   const { t } = useTranslation("agents");
-  const turnsParam = useModalParam("turns");
+  const turnsParam = useUrlModal("turns");
   // The run's whole file container (the query the Results tab reads too): its
   // inputs are what it consumed, uploads and files chained in from earlier runs.
   const filesQuery = useFiles({ runId: run.id, limit: 100 });

@@ -18,8 +18,7 @@
  * accidentally create extra rows.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { useModalTarget } from "../hooks/use-modal-param";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, Plug } from "lucide-react";
 import { toast } from "sonner";
@@ -39,23 +38,15 @@ import { hasOrgSubscription } from "../lib/oauth-pairing";
 interface CardProps {
   entry: ProviderRegistryEntry;
   alreadyConnected: boolean;
-  /** The pairing modal is open: `?connectProvider=<providerId>` names this card. */
-  dialogOpen: boolean;
-  onOpenDialog: () => void;
-  onCloseDialog: () => void;
 }
 
-function QuickConnectCard({
-  entry,
-  alreadyConnected,
-  dialogOpen,
-  onOpenDialog,
-  onCloseDialog,
-}: CardProps) {
+function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { seed } = useAutoSeedFeaturedModels();
 
   const [working, setWorking] = useState(false);
+  // The pairing's token lives in memory: a reload starts over rather than resuming it.
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   // Inline lookup to satisfy `react-hooks/static-components` — the rule
   // flags PascalCase consts assigned from helper calls. Equivalent to
@@ -64,7 +55,7 @@ function QuickConnectCard({
 
   const openDialog = () => {
     if (alreadyConnected || working) return;
-    onOpenDialog();
+    setDialogOpen(true);
   };
 
   const handleConnected = async (newId: string) => {
@@ -134,11 +125,11 @@ function QuickConnectCard({
       {dialogOpen && (
         <PairingModal
           title={t("credentials.oauth.cliStageTitle")}
-          onClose={onCloseDialog}
+          onClose={() => setDialogOpen(false)}
           providerId={entry.providerId}
           target={{ ownerType: "org" }}
           onConnected={(newId) => {
-            onCloseDialog();
+            setDialogOpen(false);
             void handleConnected(newId);
           }}
         />
@@ -152,53 +143,21 @@ export function OnboardingQuickConnect() {
   const credentialsQuery = useModelProviderCredentials();
 
   const entries = quickConnectProviders(registryQuery.data);
-  // A pairing has an address. Its token lives in memory, so a reload does not resume it:
-  // the modal opens again and starts a fresh pairing (the old token expires on its own).
-  const connect = useModalTarget(
-    "connectProvider",
-    registryQuery.data && entries,
-    (entry) => entry.providerId,
-  );
-
   // Only an organization subscription can serve the models the onboarding seeds: a member's
   // own one does not make the card connected.
   const isConnected = (providerId: string) => hasOrgSubscription(credentialsQuery.data, providerId);
-
-  // A link to a pairing for a provider that is already connected has nothing
-  // to pair: the modal closes. Judged ONCE, when the modal opens and the
-  // credentials are known: a connection that arrives DURING the pairing is
-  // `onConnected`'s to finish (it seeds the models), not this effect's to cut.
-  const judged = useRef<string | null>(null);
-  const { value: connectValue, target: connectTarget, close: closeConnect } = connect;
-  const credentialsKnown = credentialsQuery.data !== undefined;
-  const connectedAtOpen = connectTarget ? isConnected(connectTarget.providerId) : false;
-  useEffect(() => {
-    if (connectValue === null) {
-      judged.current = null;
-      return;
-    }
-    if (!connectTarget || !credentialsKnown || judged.current === connectValue) return;
-    judged.current = connectValue;
-    if (connectedAtOpen) closeConnect();
-  }, [connectValue, connectTarget, credentialsKnown, connectedAtOpen, closeConnect]);
 
   if (entries.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-2">
-      {entries.map((entry) => {
-        const alreadyConnected = isConnected(entry.providerId);
-        return (
-          <QuickConnectCard
-            key={entry.providerId}
-            entry={entry}
-            alreadyConnected={alreadyConnected}
-            dialogOpen={connect.target?.providerId === entry.providerId}
-            onOpenDialog={() => connect.open(entry.providerId)}
-            onCloseDialog={connect.close}
-          />
-        );
-      })}
+      {entries.map((entry) => (
+        <QuickConnectCard
+          key={entry.providerId}
+          entry={entry}
+          alreadyConnected={isConnected(entry.providerId)}
+        />
+      ))}
     </div>
   );
 }

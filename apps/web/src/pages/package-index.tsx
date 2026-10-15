@@ -7,6 +7,7 @@
  * Integrations keep their own page: execution tabs, protocol filter, columns.
  */
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { LibraryBig, Plus, Upload } from "lucide-react";
@@ -29,7 +30,6 @@ import { EmptyStateAction } from "../components/page-states";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
 import { useListView } from "../stores/list-view-store";
-import { useModalParam } from "../hooks/use-modal-param";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePermissions } from "../hooks/use-permissions";
@@ -123,8 +123,8 @@ function PackageIndexBody({
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
-  const importParam = useModalParam("import");
-  const createAgentParam = useModalParam("createAgent");
+  const [importing, setImporting] = useState(false);
+  const [creatingAgent, setCreatingAgent] = useState(false);
   const list = useListParams(["origin", "activity"]);
   const [view, setView] = useListView(type);
   // Creating is a write on the package type, as its route is.
@@ -164,7 +164,7 @@ function PackageIndexBody({
                   id: "import",
                   label: t("nav.import", { ns: "common" }),
                   icon: Upload,
-                  onSelect: () => importParam.open(),
+                  onSelect: () => setImporting(true),
                   hidden: !canImport,
                 },
                 createAction,
@@ -188,11 +188,9 @@ function PackageIndexBody({
         view={view}
         onViewChange={setView}
       />
-      {importParam.value !== null && canImport && (
-        <ImportModal onClose={importParam.close} onLeave={importParam.leave} />
-      )}
-      {createAgentParam.value !== null && canCreate && type === "agent" && (
-        <CreateAgentModal onClose={createAgentParam.close} onLeave={createAgentParam.leave} />
+      {importing && canImport && <ImportModal onClose={() => setImporting(false)} />}
+      {creatingAgent && canCreate && type === "agent" && (
+        <CreateAgentModal onClose={() => setCreatingAgent(false)} />
       )}
       {creation.isOpen && (
         <CreationHandoffModal
@@ -200,13 +198,15 @@ function PackageIndexBody({
           onClose={creation.close}
           onManual={() => {
             if (manualCreation === "import") {
-              // Handing over from the chooser: one navigation, never two modals.
-              importParam.open("1", "create");
+              creation.close();
+              setImporting(true);
               return;
             }
             // The chooser hands over to the agent dialog; other types have a page of their own.
-            if (type === "agent") createAgentParam.open("1", "create");
-            else creation.leave(packageNewPath(type));
+            if (type === "agent") {
+              creation.close();
+              setCreatingAgent(true);
+            } else creation.leave(packageNewPath(type));
           }}
           onChat={creation.openChat}
         />
