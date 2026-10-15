@@ -45,6 +45,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   may not be the space it was pinned to, and an agent whose read fails loses
   its command until the next sync. Both settle on the following sync.
 
+### Added
+
+- **Vapi — an agent collects an answer through an outbound phone call
+  (#2002).** `@appstrate/vapi@1.0.0` calls Vapi's REST API through `api_call`
+  with one `api_key` auth (the Vapi private key, sent as
+  `Authorization: Bearer`). Not Vapi's MCP server: its `get_call` returns no
+  transcript and no extracted data, and its `create_call` takes no per-call
+  assistant. It is the first system package shipping an `INTEGRATION.md`,
+  inlined in the prompt of every run that uses it: pick the caller number
+  (`GET /phone-number`), place the call with a transient assistant and
+  transient `artifactPlan.structuredOutputs` (the JSON schema of the answer),
+  poll `GET /call/{id}` until the call ends and the extraction lands, then read
+  the answer by name. An agent using it needs a manifest `timeout` of at least
+  the call's `maxDurationSeconds` plus 120 s; the 300 s default is too short.
+  Calling French numbers needs a Twilio number imported into Vapi: free Vapi
+  numbers are US-only.
+
 ### Fixed
 
 - **A non-UUID organization id is refused like an unknown org, not with a
