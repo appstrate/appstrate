@@ -2,14 +2,7 @@
 
 import type { TFunction } from "i18next";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
-import {
-  BrainCircuit,
-  CalendarClock,
-  IdCard,
-  Plug,
-  SlidersHorizontal,
-  UserRound,
-} from "lucide-react";
+import { BrainCircuit, IdCard, Plug, SlidersHorizontal } from "lucide-react";
 import { scheduleDetailPath } from "./package-paths";
 import { sectionHref } from "./settings-section-href";
 
@@ -44,18 +37,6 @@ export const SCHEDULE_SETTINGS_SECTIONS = [
     icon: IdCard,
     labelKey: "editor.tabGeneral",
     descriptionKey: "schedule.settings.generalDescription",
-  },
-  {
-    id: "recurrence",
-    icon: CalendarClock,
-    labelKey: "schedule.settings.recurrence",
-    descriptionKey: "schedule.settings.recurrenceDescription",
-  },
-  {
-    id: "identity",
-    icon: UserRound,
-    labelKey: "editor.identity",
-    descriptionKey: "schedule.settings.identityDescription",
   },
   {
     id: "inputs",

@@ -27,9 +27,14 @@ describe("FrequencyComposer", () => {
     expect(html).toMatch(/role="toolbar"[^>]*aria-labelledby="frequency-days"/);
   });
 
-  it("shows the composed number in a controlled field", () => {
+  it("labels the day of the month by its field", () => {
     const html = compose("0 9 15 * *");
-    expect(html).toMatch(/id="frequency-day"[^>]*value="15"|value="15"[^>]*id="frequency-day"/);
-    expect(html).not.toContain('aria-invalid="true"');
+    expect(html).toMatch(/for="frequency-day"/);
+    expect(html).toMatch(/id="frequency-day"/);
+  });
+
+  it("marks a raw expression the scheduler would refuse", () => {
+    expect(compose("not cron")).toContain('aria-invalid="true"');
+    expect(compose("0 9 * * 1-5")).not.toContain('aria-invalid="true"');
   });
 });

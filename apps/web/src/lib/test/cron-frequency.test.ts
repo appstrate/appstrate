@@ -10,7 +10,7 @@ import { describe, expect, it } from "bun:test";
 import {
   HOUR_STEPS,
   MINUTE_STEPS,
-  nextFires,
+  cronFires,
   parseCron,
   toCron,
   type Frequency,
@@ -56,26 +56,18 @@ describe("every N minutes or hours", () => {
 
   it("keeps a step that restarts unevenly as the raw expression, never « every 45 minutes »", () => {
     // `*\/45` fires at :00 and :45 of every hour: 45 minutes, then 15.
-    const fires = nextFires("*/45 * * * *", "UTC", 3, new Date("2026-10-08T12:01:00Z"));
-    expect(fires?.map((d) => d.toISOString().slice(11, 16))).toEqual(["12:45", "13:00", "13:45"]);
     for (const cron of ["*/45 * * * *", "*/7 * * * *", "0 */5 * * *", "0 */7 * * *"]) {
       expect(parseCron(cron)).toEqual({ kind: "custom", cron });
     }
   });
 });
 
-describe("nextFires", () => {
-  it("answers in the schedule's time zone", () => {
-    const from = new Date("2026-10-08T12:00:00Z");
-    const fires = nextFires("0 9 * * *", "America/Toronto", 2, from);
-    // 9:00 in Toronto (EDT, UTC-4) is 13:00 UTC.
-    expect(fires?.map((d) => d.toISOString())).toEqual([
-      "2026-10-08T13:00:00.000Z",
-      "2026-10-09T13:00:00.000Z",
-    ]);
+describe("cronFires", () => {
+  it("accepts an expression the scheduler runs, in any time zone", () => {
+    expect(cronFires("0 9 * * *", "America/Toronto")).toBe(true);
   });
 
-  it("is null for an expression the scheduler would refuse", () => {
-    expect(nextFires("not cron", "UTC")).toBeNull();
+  it("refuses an expression the scheduler would refuse", () => {
+    expect(cronFires("not cron", "UTC")).toBe(false);
   });
 });

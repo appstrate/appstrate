@@ -20,9 +20,6 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
 import { NewScheduleModal } from "../components/new-schedule-modal";
 
-/** The values the state dimension accepts — a URL is user input. */
-const STATES = ["enabled", "disabled"] as const;
-
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { can } = usePermissions();
@@ -56,26 +53,19 @@ export function SchedulesListPage() {
   });
   const { columns, menu } = useColumnVisibility("schedules", allColumns);
 
-  // Client-side, and honestly so: `GET /api/schedules` returns the list whole,
-  // with no paging and no query parameters, so the box searches every schedule
-  // rather than the page on screen — the same test the package lists pass and
-  // the run list fails, which is why the run list waited for a `q`.
-  //
-  // The state still rides in the URL, like the runs page: a filtered list is
-  // what people paste to each other, whoever does the filtering.
-  const list = useListParams(["state"]);
+  // Client-side, and honestly so: `GET /api/schedules` returns the list whole, with no paging and
+  // no query parameters, so the box searches every schedule rather than the page on screen.
+  const list = useListParams([]);
   const query = list.search;
-  const states = list.values("state", STATES);
-  const shown = useMemo(() => {
-    return (schedules ?? []).filter((schedule) => {
-      const enabled = schedule.enabled ?? true;
-      const key = enabled ? "enabled" : "disabled";
-      if (states.length > 0 && !states.includes(key)) return false;
-      return matchesSearch(query, [schedule.name, agentName(schedule.packageId)]);
-    });
-  }, [schedules, query, states, agentName]);
+  const shown = useMemo(
+    () =>
+      (schedules ?? []).filter((schedule) =>
+        matchesSearch(query, [schedule.name, agentName(schedule.packageId)]),
+      ),
+    [schedules, query, agentName],
+  );
 
-  const filtering = query.trim() !== "" || states.length > 0;
+  const filtering = query.trim() !== "";
   const emptyBody = filtering ? (
     <NoMatchState message={t("schedules.noMatch")} />
   ) : (
@@ -100,18 +90,6 @@ export function SchedulesListPage() {
 
       <ListToolbar
         search={{ value: query, onChange: list.setSearch, placeholder }}
-        filters={[
-          {
-            id: "state",
-            label: t("providers.col.state"),
-            values: states,
-            onChange: list.setValues("state"),
-            options: [
-              { value: "enabled", label: t("schedule.statusActive", { ns: "agents" }) },
-              { value: "disabled", label: t("schedule.statusDisabled", { ns: "agents" }) },
-            ],
-          },
-        ]}
         onReset={list.reset}
         columns={menu}
       />

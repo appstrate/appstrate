@@ -20,13 +20,10 @@ type RunScope = { packageId: string } | { scheduleId: string; agentName: string 
 export function ScopedRunList({
   scope,
   initialStatus,
-  banner,
   emptyState,
 }: {
   scope: RunScope;
   initialStatus?: RunStatus[];
-  /** Row above the first page, and above `emptyState`; shown only while nothing is filtered. */
-  banner?: ReactNode;
   /** The panel's empty state when nothing is filtered. */
   emptyState: ReactNode;
 }) {
@@ -57,15 +54,11 @@ export function ScopedRunList({
           onReset={list.reset}
         />
       )}
-      banner={filtered ? null : banner}
       emptyState={
         filtered ? (
           <NoMatchState message={t("runs.emptyFiltered")} onReset={list.reset} />
         ) : (
-          <>
-            {banner}
-            {emptyState}
-          </>
+          emptyState
         )
       }
     />

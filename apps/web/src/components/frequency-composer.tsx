@@ -2,9 +2,8 @@
 
 /**
  * When a schedule fires, composed as a phrase instead of typed as cron (rhythm, time,
- * zone, raw expression for anything else) and read back as a sentence plus the next three
- * fires, from the scheduler's own parser. Seeded by the expression (`parseCron`); reports
- * `null` while the composition is incomplete or invalid.
+ * zone, raw expression for anything else). Seeded by the expression (`parseCron`); reports
+ * `null` while the raw expression is invalid.
  */
 
 import { useState } from "react";
@@ -21,13 +20,12 @@ import {
   HOUR_STEPS,
   MINUTE_STEPS,
   WEEK_ORDER,
-  nextFires,
+  cronFires,
   parseCron,
   toCron,
 } from "../lib/cron-frequency";
-import { describeFrequency, frequencyFormats } from "../lib/frequency-summary";
+import { frequencyFormats } from "../lib/frequency-summary";
 import { TimezoneSelect } from "./timezone-select";
-import { TimeField } from "./time-field";
 
 /** The rhythms offered, in the order of the select, with their labels. */
 const KIND_LABELS: Record<FrequencyKind, string> = {
@@ -63,11 +61,7 @@ function switchKind(from: Frequency, kind: FrequencyKind): Frequency {
   }
 }
 
-function isComplete(frequency: Frequency): boolean {
-  return frequency.kind !== "weekly" || frequency.days.length > 0;
-}
-
-/** `09:30` ↔ the time field. */
+/** `09:30` ↔ the time input; a cleared or half-typed field parses to nothing and is ignored. */
 const timeValue = (at: TimeOfDay) =>
   `${String(at.hour).padStart(2, "0")}:${String(at.minute).padStart(2, "0")}`;
 function parseTime(value: string): TimeOfDay | null {
@@ -75,65 +69,8 @@ function parseTime(value: string): TimeOfDay | null {
   return match ? { hour: Number(match[1]), minute: Number(match[2]) } : null;
 }
 
-/** A whole number within bounds, or null while the field is being typed. */
-function bounded(value: string, min: number, max: number): number | null {
-  const n = Number(value);
-  return value !== "" && Number.isInteger(n) && n >= min && n <= max ? n : null;
-}
-
-interface Bounds {
-  min: number;
-  max: number;
-}
-
-/** What is typed stays on screen; out of bounds it is marked and reported as `null`. */
-function WholeNumberInput({
-  id,
-  value,
-  bounds,
-  onChange,
-}: {
-  id: string;
-  value: number;
-  bounds: Bounds;
-  onChange: (value: number | null) => void;
-}) {
-  const [text, setText] = useState(String(value));
-  return (
-    <Input
-      id={id}
-      type="number"
-      className="w-24"
-      min={bounds.min}
-      max={bounds.max}
-      value={text}
-      aria-invalid={bounded(text, bounds.min, bounds.max) === null || undefined}
-      onChange={(e) => {
-        setText(e.target.value);
-        onChange(bounded(e.target.value, bounds.min, bounds.max));
-      }}
-    />
-  );
-}
-
-const MINUTE_BOUNDS: Bounds = { min: 0, max: 59 };
-const DAY_BOUNDS: Bounds = { min: 1, max: 31 };
-
-function useFormats(timezone: string) {
-  const { i18n } = useTranslation();
-  const lang = i18n.language;
-  const fire = (date: Date) =>
-    new Intl.DateTimeFormat(lang, {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-      hour: "numeric",
-      minute: "2-digit",
-      timeZone: timezone,
-      timeZoneName: "short",
-    }).format(date);
-  return { ...frequencyFormats(lang), fire };
-}
+const MINUTES = Array.from({ length: 60 }, (_, i) => i);
+const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
 
 export function FrequencyComposer({
   cron,
@@ -146,39 +83,20 @@ export function FrequencyComposer({
   onChange: (cron: string | null) => void;
   onTimezoneChange: (timezone: string) => void;
 }) {
-  const { t } = useTranslation(["agents"]);
-  const format = useFormats(timezone);
+  const { t, i18n } = useTranslation(["agents"]);
+  const format = frequencyFormats(i18n.language);
   const [frequency, setFrequency] = useState<Frequency>(() => parseCron(cron));
-  // The bounds a number field is typed out of; nothing is composed meanwhile.
-  const [outOfBounds, setOutOfBounds] = useState<Bounds | null>(null);
 
-  const expression = toCron(frequency);
-  const fires = isComplete(frequency) && !outOfBounds ? nextFires(expression, timezone) : null;
+  // Only a composition the scheduler would accept is reported.
   const update = (next: Frequency) => {
     setFrequency(next);
-    setOutOfBounds(null);
     const nextCron = toCron(next);
-    onChange(isComplete(next) && nextFires(nextCron, timezone, 1) ? nextCron : null);
-  };
-  const updateNumber = (bounds: Bounds, value: number | null, next: (n: number) => Frequency) => {
-    if (value !== null) return update(next(value));
-    setOutOfBounds(bounds);
-    onChange(null);
+    onChange(cronFires(nextCron, timezone) ? nextCron : null);
   };
   const setAt = (value: string) => {
     const at = parseTime(value);
     if (at && "at" in frequency) update({ ...frequency, at });
   };
-
-  const summary = (() => {
-    if (outOfBounds) return t("schedule.frequency.outOfBounds", { ...outOfBounds });
-    if (frequency.kind === "weekly" && frequency.days.length === 0)
-      return t("schedule.frequency.noDay");
-    return (
-      describeFrequency(frequency) ??
-      (fires ? t("schedule.frequency.summary.custom") : t("schedule.frequency.invalid"))
-    );
-  })();
 
   return (
     <FieldGroup className="gap-5">
@@ -217,17 +135,16 @@ export function FrequencyComposer({
       {frequency.kind === "hours" && (
         <Field>
           <Label htmlFor="frequency-minute">{t("schedule.frequency.atMinute")}</Label>
-          {/* Kept to the width of its value: a field takes the full row. */}
-          <div>
-            <WholeNumberInput
-              id="frequency-minute"
-              value={frequency.minute}
-              bounds={MINUTE_BOUNDS}
-              onChange={(minute) =>
-                updateNumber(MINUTE_BOUNDS, minute, (n) => ({ ...frequency, minute: n }))
-              }
-            />
-          </div>
+          <OptionSelect
+            id="frequency-minute"
+            className="w-24"
+            value={String(frequency.minute)}
+            onValueChange={(minute) => update({ ...frequency, minute: Number(minute) })}
+            options={MINUTES.map((minute) => ({
+              value: String(minute),
+              label: String(minute).padStart(2, "0"),
+            }))}
+          />
         </Field>
       )}
 
@@ -240,7 +157,10 @@ export function FrequencyComposer({
             variant="outline"
             className="flex-wrap justify-start"
             value={frequency.days.map(String)}
-            onValueChange={(values) => update({ ...frequency, days: values.map(Number) })}
+            // At least one day stays ticked: a week with no day is no rhythm.
+            onValueChange={(values) =>
+              values.length > 0 && update({ ...frequency, days: values.map(Number) })
+            }
           >
             {WEEK_ORDER.map((day) => (
               <ToggleGroupItem
@@ -259,14 +179,13 @@ export function FrequencyComposer({
       {frequency.kind === "monthly" && (
         <Field>
           <Label htmlFor="frequency-day">{t("schedule.frequency.dayOfMonth")}</Label>
-          <div>
-            <WholeNumberInput
-              id="frequency-day"
-              value={frequency.day}
-              bounds={DAY_BOUNDS}
-              onChange={(day) => updateNumber(DAY_BOUNDS, day, (n) => ({ ...frequency, day: n }))}
-            />
-          </div>
+          <OptionSelect
+            id="frequency-day"
+            className="w-24"
+            value={String(frequency.day)}
+            onValueChange={(day) => update({ ...frequency, day: Number(day) })}
+            options={DAYS_OF_MONTH.map((day) => ({ value: String(day), label: day }))}
+          />
           {frequency.day > 28 && (
             <FieldDescription>{t("schedule.frequency.dayOfMonthHint")}</FieldDescription>
           )}
@@ -277,7 +196,13 @@ export function FrequencyComposer({
         <Field>
           <Label htmlFor="frequency-at">{t("schedule.frequency.at")}</Label>
           <div>
-            <TimeField id="frequency-at" value={timeValue(frequency.at)} onChange={setAt} />
+            <Input
+              id="frequency-at"
+              type="time"
+              className="w-32"
+              value={timeValue(frequency.at)}
+              onChange={(e) => setAt(e.target.value)}
+            />
           </div>
         </Field>
       )}
@@ -290,7 +215,7 @@ export function FrequencyComposer({
             className="font-mono"
             value={frequency.cron}
             placeholder="0 9 * * 1-5"
-            aria-invalid={!fires || undefined}
+            aria-invalid={!cronFires(frequency.cron, timezone) || undefined}
             onChange={(e) => update({ kind: "custom", cron: e.target.value })}
           />
           <FieldDescription>{t("schedule.cronHint")}</FieldDescription>
@@ -301,23 +226,6 @@ export function FrequencyComposer({
         <Label htmlFor="frequency-timezone">{t("schedule.timezone")}</Label>
         <TimezoneSelect id="frequency-timezone" value={timezone} onChange={onTimezoneChange} />
       </Field>
-
-      {/* What was composed, read back. */}
-      <div
-        className="bg-muted/40 rounded-lg border px-4 py-3 text-sm"
-        aria-live="polite"
-        data-testid="frequency-summary"
-      >
-        <p className={fires ? "font-medium" : "text-destructive font-medium"}>{summary}</p>
-        {fires && (
-          <p className="text-muted-foreground mt-1 text-xs">
-            {t("schedule.frequency.next")} {fires.map(format.fire).join(" · ")}
-          </p>
-        )}
-        {frequency.kind !== "custom" && fires && (
-          <p className="text-muted-foreground mt-1 font-mono text-xs">{expression}</p>
-        )}
-      </div>
     </FieldGroup>
   );
 }

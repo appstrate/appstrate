@@ -85,8 +85,7 @@ describe("ScheduleFieldsReady", () => {
       if (tz === undefined) delete process.env.TZ;
       else process.env.TZ = tz;
     }
-    expect(html).toContain("0 9 * * *");
-    expect(html).not.toContain("0 9 * * 1-5");
+    expect(html).toContain('value="09:00"');
     expect(html).toMatch(/id="frequency-timezone"[^>]*>(<[^>]+>)*UTC</);
   });
 
