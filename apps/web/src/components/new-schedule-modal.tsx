@@ -10,15 +10,8 @@
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown } from "lucide-react";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
-import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@appstrate/ui/components/collapsible";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
@@ -26,6 +19,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { Modal } from "./modal";
 import { ActorSelect } from "./actor-select";
+import { AdvancedSection } from "./advanced-section";
 import { AgentInputForm } from "./agent-input-form";
 import { FrequencyComposer } from "./frequency-composer";
 import { AgentVersionField } from "./package-version-select";
@@ -300,65 +294,54 @@ export function ScheduleFieldsReady({
         </Field>
       )}
       {/* Open while a refusal speaks for this actor: answering it may mean changing them. */}
-      <Collapsible open={optionsOpen || refused.length > 0} onOpenChange={setOptionsOpen}>
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
-          >
-            <span>{t("schedule.optionsTitle")}</span>
-            <ChevronDown
-              className={cn(
-                "text-muted-foreground size-4 transition-transform",
-                (optionsOpen || refused.length > 0) && "rotate-180",
-              )}
-            />
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-4 pt-3">
-          <Field>
-            <Label>{t("schedule.actorTitle")}</Label>
-            <ActorSelect
-              value={actor}
-              onChange={changeActor}
-              placeholder={t("schedule.actorDefaultSelf")}
-            />
-            <FieldDescription>{t("schedule.actorHint")}</FieldDescription>
-          </Field>
-          <AgentVersionField
-            packageId={agentId}
-            label={t("run.overrides.versionLabel")}
-            value={versionOverride ?? VERSION_INHERIT}
-            onChange={(next) => setVersionOverride(next === VERSION_INHERIT ? undefined : next)}
-            leadingOptions={scheduleVersionOptions(t, { draftOffered: deps.homeWritable })}
+      <AdvancedSection
+        title={t("schedule.optionsTitle")}
+        open={optionsOpen || refused.length > 0}
+        onOpenChange={setOptionsOpen}
+        contentClassName="space-y-4"
+      >
+        <Field>
+          <Label>{t("schedule.actorTitle")}</Label>
+          <ActorSelect
+            value={actor}
+            onChange={changeActor}
+            placeholder={t("schedule.actorDefaultSelf")}
           />
-          <RunOverridesPanel
-            packageId={agentId}
-            persistedModelId={deps.persistedModelId}
-            persistedGenerationConfig={deps.persistedGenerationConfig}
-            persistedProxyId={deps.persistedProxyId}
-            {...(runsAsViewer && firedIntegrations ? { agentIntegrations: firedIntegrations } : {})}
-            value={overrides}
-            onChange={(next) => setRun((prev) => ({ ...prev, overrides: next }))}
-            onConnectionPick={setConnectionPick}
-            version={firedVersion}
-            scheduled
-            onLeave={onLeave}
-          />
-          {/* Fires running as someone else: the panel's pickers would judge the viewer's
-              connections. A refusal is answered below the options. */}
-          {!runsAsViewer &&
-            refused.length === 0 &&
-            ((firedIntegrations?.length ?? 0) > 0 || Object.keys(picks).length > 0) && (
-              <ScheduleActorConnectionChoice
-                choices={[]}
-                integrations={firedIntegrations ?? []}
-                value={picks}
-                onChange={setConnectionPick}
-              />
-            )}
-        </CollapsibleContent>
-      </Collapsible>
+          <FieldDescription>{t("schedule.actorHint")}</FieldDescription>
+        </Field>
+        <AgentVersionField
+          packageId={agentId}
+          label={t("run.overrides.versionLabel")}
+          value={versionOverride ?? VERSION_INHERIT}
+          onChange={(next) => setVersionOverride(next === VERSION_INHERIT ? undefined : next)}
+          leadingOptions={scheduleVersionOptions(t, { draftOffered: deps.homeWritable })}
+        />
+        <RunOverridesPanel
+          packageId={agentId}
+          persistedModelId={deps.persistedModelId}
+          persistedGenerationConfig={deps.persistedGenerationConfig}
+          persistedProxyId={deps.persistedProxyId}
+          {...(runsAsViewer && firedIntegrations ? { agentIntegrations: firedIntegrations } : {})}
+          value={overrides}
+          onChange={(next) => setRun((prev) => ({ ...prev, overrides: next }))}
+          onConnectionPick={setConnectionPick}
+          version={firedVersion}
+          scheduled
+          onLeave={onLeave}
+        />
+        {/* Fires running as someone else: the panel's pickers would judge the viewer's
+            connections. A refusal is answered below the options. */}
+        {!runsAsViewer &&
+          refused.length === 0 &&
+          ((firedIntegrations?.length ?? 0) > 0 || Object.keys(picks).length > 0) && (
+            <ScheduleActorConnectionChoice
+              choices={[]}
+              integrations={firedIntegrations ?? []}
+              value={picks}
+              onChange={setConnectionPick}
+            />
+          )}
+      </AdvancedSection>
       {refused.length > 0 && (
         <ScheduleConnectionAnswer
           choices={refused}

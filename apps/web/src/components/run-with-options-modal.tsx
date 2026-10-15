@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { defaultRunVersion, VERSION_DRAFT, VERSION_PUBLISHED } from "../lib/version-selector";
-import { useState, type RefObject } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { RunLaunchModal } from "./run-launch-modal";
+import { FormModal } from "./form-modal";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { storedInputValues } from "../lib/agent-input";
@@ -53,41 +53,20 @@ interface RunWithOptionsModalProps {
  * `AgentInputForm` (as in `RunModal`), `RunOverridesPanel` (the schedule
  * editor's override surface), and the per-skill `DependencyOverridesSection`.
  */
-export function RunWithOptionsModal({
-  open,
+export function RunWithOptionsModal({ open, ...props }: RunWithOptionsModalProps) {
+  return open ? <RunWithOptionsForm {...props} /> : null;
+}
+
+/** Mounted afresh at each opening, so the fields seed from the agent again. */
+function RunWithOptionsForm({
   onClose,
   agent,
   onSubmit,
   isPending,
   onLeave,
-}: RunWithOptionsModalProps) {
+}: Omit<RunWithOptionsModalProps, "open">) {
   const { t } = useTranslation(["agents"]);
-  return (
-    <RunLaunchModal
-      open={open}
-      onClose={onClose}
-      title={t("run.options.title", { name: agent.display_name })}
-      isPending={isPending}
-    >
-      {(formRef) => (
-        <RunWithOptionsForm formRef={formRef} agent={agent} onSubmit={onSubmit} onLeave={onLeave} />
-      )}
-    </RunLaunchModal>
-  );
-}
-
-function RunWithOptionsForm({
-  formRef,
-  agent,
-  onSubmit,
-  onLeave,
-}: {
-  formRef: RefObject<AgentInputFormHandle | null>;
-  agent: AgentDetail;
-  onSubmit: (payload: RunWithOptionsSubmit) => void;
-  onLeave?: (to: string) => void;
-}) {
-  const { t } = useTranslation(["agents"]);
+  const inputRef = useRef<AgentInputFormHandle>(null);
   // Seeded from the STORED values only — they are per-space and do not
   // move with the version pick. Author `default`s deliberately stay out: they
   // belong to the selected version's schema, and seeding the draft's here would
@@ -125,24 +104,32 @@ function RunWithOptionsForm({
       ...(s.name ? { name: s.name } : {}),
     }));
 
-  const fire = (input: Record<string, unknown>) =>
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!(inputRef.current?.validate() ?? true)) return;
     onSubmit({
-      input,
+      input: inputData,
       version,
       overrides,
       declaredIntegrations: deps?.agentIntegrations.map((i) => i.id),
       dependencyOverrides,
     });
+  };
 
   return (
-    <>
+    <FormModal
+      onClose={onClose}
+      title={t("run.options.title", { name: agent.display_name })}
+      onSubmit={submit}
+      isPending={isPending}
+      submitLabel={t("input.run")}
+    >
       <AgentInputForm
-        ref={formRef}
+        ref={inputRef}
         wrapper={inputWrapper}
         settings={agent.input}
         value={inputData}
         onChange={setInputData}
-        onSubmit={fire}
       />
 
       {/* Run version — a run has no schedule-style "inherit" to defer to, so
@@ -184,6 +171,6 @@ function RunWithOptionsForm({
         value={dependencyOverrides}
         onChange={setDependencyOverrides}
       />
-    </>
+    </FormModal>
   );
 }

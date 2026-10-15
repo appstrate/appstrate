@@ -69,6 +69,33 @@ function buildGroups(available: string[], selected: string[]): ResourceGroup[] {
   }));
 }
 
+/** The resources a set of scopes reaches, each with how many of its scopes are in. */
+export function ScopeSummaryBadges({
+  available,
+  selected,
+}: {
+  available: string[];
+  selected: string[];
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <div className="flex flex-wrap gap-1">
+      {buildGroups(available, selected)
+        .filter((g) => g.selectedCount > 0)
+        .map((g) => (
+          <Badge key={g.resource} variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
+            {permissionResourceLabel(g.resource, t)}
+            {g.selectedCount < g.scopes.length && (
+              <span className="ml-0.5 opacity-60">
+                {g.selectedCount}/{g.scopes.length}
+              </span>
+            )}
+          </Badge>
+        ))}
+    </div>
+  );
+}
+
 export function ScopeMultiSelect({
   available,
   selected,
@@ -174,27 +201,12 @@ export function ScopeMultiSelect({
         </PopoverContent>
       </Popover>
 
-      {/* Resource summary badges */}
-      {!noneSelected && (
-        <div className="flex flex-wrap gap-1">
-          {allSelected ? (
-            <span className="text-muted-foreground text-xs">{t("apiKeys.fullAccess")}</span>
-          ) : (
-            groups
-              .filter((g) => g.selectedCount > 0)
-              .map((g) => (
-                <Badge key={g.resource} variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
-                  {permissionResourceLabel(g.resource, t)}
-                  {g.selectedCount < g.scopes.length && (
-                    <span className="ml-0.5 opacity-60">
-                      {g.selectedCount}/{g.scopes.length}
-                    </span>
-                  )}
-                </Badge>
-              ))
-          )}
-        </div>
-      )}
+      {!noneSelected &&
+        (allSelected ? (
+          <span className="text-muted-foreground text-xs">{t("apiKeys.fullAccess")}</span>
+        ) : (
+          <ScopeSummaryBadges available={available} selected={selected} />
+        ))}
     </div>
   );
 }

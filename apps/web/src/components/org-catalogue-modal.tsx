@@ -64,7 +64,7 @@ import {
   integrationProtocol,
   type IntegrationExecution,
 } from "../lib/integration-collection";
-import { CollectionTabs } from "./collection-tabs";
+import { CollectionTabs } from "./detail-tabs";
 import type { CardItem } from "../lib/package-card-item";
 import { CataloguePreview } from "./catalogue-preview";
 import { CatalogueMenuItems } from "./catalogue-row";
@@ -510,37 +510,18 @@ export function OrgCatalogueModal({
     <PanelDialog
       title={t("common:nav.catalogue")}
       rail={rail}
-      contentHeader={(stuck) =>
+      contentHeader={
         previewed ? (
-          <div className="flex min-w-0 items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="-ml-2 shrink-0 gap-1.5"
-              onClick={preview.close}
-            >
-              <ArrowLeft />
-              {t("catalogue.back")}
-            </Button>
-            <span
-              className={cn(
-                "duration-fast truncate text-sm font-medium transition-opacity",
-                stuck ? "opacity-100" : "opacity-0",
-              )}
-            >
-              {previewed.name || previewed.id}
-            </span>
-          </div>
-        ) : (
-          <span
-            className={cn(
-              "duration-fast text-sm font-semibold transition-opacity",
-              stuck ? "opacity-100" : "opacity-0",
-            )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2 shrink-0 gap-1.5"
+            onClick={preview.close}
           >
-            {t(kind.titleKey)}
-          </span>
-        )
+            <ArrowLeft />
+            {t("catalogue.back")}
+          </Button>
+        ) : null
       }
       onClose={onClose}
     >

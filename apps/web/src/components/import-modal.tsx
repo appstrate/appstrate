@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useRef, useCallback } from "react";
+import { useRef, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { useForm, useWatch } from "react-hook-form";
 import { FormModal } from "./form-modal";
 import { cn } from "@appstrate/ui/cn";
-import { FieldError } from "@appstrate/ui/components/field";
-import { Separator } from "@appstrate/ui/components/separator";
+import { Field, FieldError, FieldLabel, FieldSeparator } from "@appstrate/ui/components/field";
+import { Input } from "@appstrate/ui/components/input";
 import { useImportPackage, useImportFromGithub } from "../hooks/use-mutations";
 import { ApiError } from "../api/errors";
 import { packageDetailPath } from "../lib/package-paths";
@@ -32,10 +31,19 @@ type ImportModalProps = { onClose: () => void } & (
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
-type FormData = { file: File | null; githubUrl: string };
+function fileRefusal(f: File): "import.errZip" | "import.errSize" | null {
+  const lower = f.name.toLowerCase();
+  if (!lower.endsWith(".afps") && !lower.endsWith(".afps-bundle") && !lower.endsWith(".zip")) {
+    return "import.errZip";
+  }
+  return f.size > MAX_SIZE ? "import.errSize" : null;
+}
 
 export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) {
   const { t } = useTranslation(["agents", "common"]);
+  const [file, setFile] = useState<File | null>(null);
+  const [githubUrl, setGithubUrl] = useState("");
+  const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState<{
     activeVersion: string | null;
@@ -45,78 +53,53 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
   const importPackage = useImportPackage({ errorHandledByCaller: true });
   const importGithub = useImportFromGithub();
 
-  const {
-    setValue,
-    setError,
-    reset,
-    control,
-    formState: { errors },
-  } = useForm<FormData>({
-    defaultValues: { file: null, githubUrl: "" },
-  });
-
-  const file = useWatch({ control, name: "file" });
-  const githubUrl = useWatch({ control, name: "githubUrl" });
-
   const isPending = importPackage.isPending || importGithub.isPending;
-  const hasFile = !!file;
   const hasUrl = !!githubUrl.trim();
-  const canSubmit = (hasFile || hasUrl) && !isPending;
 
-  const validateFile = useCallback(
-    (f: File): string => {
-      const lower = f.name.toLowerCase();
-      if (!lower.endsWith(".afps") && !lower.endsWith(".afps-bundle") && !lower.endsWith(".zip")) {
-        return t("import.errZip");
-      }
-      if (f.size > MAX_SIZE) return t("import.errSize");
-      return "";
-    },
-    [t],
-  );
+  const clearConfirmations = () => {
+    setConfirmOverwrite(null);
+    setConfirmIntegrity(null);
+  };
 
-  const handleFile = useCallback(
-    (f: File) => {
-      const err = validateFile(f);
-      setConfirmOverwrite(null);
-      setConfirmIntegrity(null);
-      setValue("githubUrl", "");
-      if (err) {
-        setError("root", { message: err });
-        setValue("file", null);
-      } else {
-        setError("root", { message: "" });
-        setValue("file", f);
-      }
-    },
-    [validateFile, setValue, setError],
-  );
+  const handleFile = (f: File) => {
+    const refusal = fileRefusal(f);
+    clearConfirmations();
+    setGithubUrl("");
+    setError(refusal ? t(refusal) : "");
+    setFile(refusal ? null : f);
+  };
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOver(false);
-      const f = e.dataTransfer.files[0];
-      if (f) handleFile(f);
-    },
-    [handleFile],
-  );
+  const handleDrop = (e: DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  };
 
   const handleUrlChange = (value: string) => {
-    setValue("githubUrl", value);
-    setError("root", { message: "" });
+    setGithubUrl(value);
+    setError("");
     if (value.trim()) {
-      setValue("file", null);
-      setConfirmOverwrite(null);
-      setConfirmIntegrity(null);
+      setFile(null);
+      clearConfirmations();
+    }
+  };
+
+  /** A finished import opens the package, or hands it back to the form it was made from. */
+  const finish = (result: { packageId: string; type: string }) => {
+    if (onImported) {
+      onImported(result);
+      onClose();
+    } else {
+      onLeave(packageDetailPath(result.type, result.packageId));
     }
   };
 
   const handleFormSubmit = () => {
-    if (hasFile) {
+    if (file) {
       const force = !!confirmOverwrite || !!confirmIntegrity;
       importPackage.mutate(
-        { file: file, force },
+        { file, force },
         {
           onSuccess: finish,
           onError: (err) => {
@@ -140,38 +123,9 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
     } else if (hasUrl) {
       importGithub.mutate(githubUrl.trim(), {
         onSuccess: finish,
-        onError: (err) => {
-          setError("root", { message: errorMessage(err) });
-        },
+        onError: (err) => setError(errorMessage(err)),
       });
     }
-  };
-
-  const resetForm = () => {
-    reset({ file: null, githubUrl: "" });
-    setConfirmOverwrite(null);
-    setConfirmIntegrity(null);
-  };
-
-  const resetAndClose = () => {
-    resetForm();
-    onClose();
-  };
-
-  /** A finished import opens the package, or hands it back to the form it was made from. */
-  const finish = (result: { packageId: string; type: string }) => {
-    resetForm();
-    if (onImported) {
-      onImported(result);
-      onClose();
-    } else {
-      onLeave(packageDetailPath(result.type, result.packageId));
-    }
-  };
-
-  const handleClose = () => {
-    if (isPending) return;
-    resetAndClose();
   };
 
   const submitLabel = isPending
@@ -182,11 +136,9 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
         ? t("import.forceIntegrity")
         : t("common:nav.import");
 
-  const rootError = errors.root?.message;
-
   return (
     <FormModal
-      onClose={handleClose}
+      onClose={onClose}
       onSubmit={(e) => {
         e.preventDefault();
         // The modal may be opened from inside another form (React bubbles through portals).
@@ -196,9 +148,9 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
       title={t("import.title")}
       isPending={isPending}
       submitLabel={submitLabel}
-      submitDisabled={!canSubmit}
+      submitDisabled={!file && !hasUrl}
+      error={error}
     >
-      {/* --- File upload --- */}
       <div
         className={cn(
           "border-border hover:border-primary/50 cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors",
@@ -233,40 +185,29 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
         )}
       </div>
 
-      {/* --- Separator --- */}
-      <div className="relative my-4">
-        <div className="absolute inset-0 flex items-center">
-          <Separator />
-        </div>
-        <div className="relative flex justify-center text-xs">
-          <span className="bg-popover text-muted-foreground px-2">{t("import.or")}</span>
-        </div>
-      </div>
+      <FieldSeparator>{t("import.or")}</FieldSeparator>
 
-      {/* --- URL input --- */}
-      <div>
-        <label className="text-foreground text-sm font-medium">{t("import.urlLabel")}</label>
-        <input
+      <Field>
+        <FieldLabel htmlFor="import-url">{t("import.urlLabel")}</FieldLabel>
+        <Input
+          id="import-url"
           type="url"
           value={githubUrl}
           onChange={(e) => handleUrlChange(e.target.value)}
           placeholder={t("import.urlPlaceholder")}
-          className="border-input bg-background placeholder:text-muted-foreground focus:ring-ring mt-1.5 w-full rounded-md border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
           disabled={isPending}
         />
-      </div>
+      </Field>
 
-      {/* --- Errors & confirmations --- */}
-      <FieldError className="mt-3">{rootError}</FieldError>
       {confirmOverwrite && (
-        <FieldError className="mt-3">
+        <FieldError>
           {confirmOverwrite.activeVersion
             ? t("import.confirmOverwrite", { activeVersion: confirmOverwrite.activeVersion })
             : t("import.confirmOverwriteNoVersion")}
         </FieldError>
       )}
       {confirmIntegrity && (
-        <FieldError className="mt-3">
+        <FieldError>
           {t("import.confirmIntegrity", { version: confirmIntegrity.version })}
         </FieldError>
       )}

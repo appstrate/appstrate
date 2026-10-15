@@ -9,6 +9,8 @@ import { Modal } from "./modal";
 
 interface FormModalProps {
   title: string;
+  /** What the dialog does, read by assistive technology after the title. */
+  description?: string;
   onClose: () => void;
   onSubmit: FormEventHandler<HTMLFormElement>;
   /** The request is in flight: the modal does not close and Cancel is disabled. */
@@ -34,6 +36,7 @@ interface FormModalProps {
  */
 export function FormModal({
   title,
+  description,
   onClose,
   onSubmit,
   isPending = false,
@@ -54,6 +57,7 @@ export function FormModal({
       onClose={onClose}
       preventClose={isPending}
       title={title}
+      description={description}
       className={className}
       actions={
         <>

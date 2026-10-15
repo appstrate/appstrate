@@ -19,7 +19,6 @@ import { SettingsPageActionTargetProvider } from "../../components/settings/sett
 import { RailLink } from "../../components/settings/rail-link";
 import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
 import { ContextSelector } from "../../components/settings/context-selector";
-import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { PanelDialog } from "../../components/panel-dialog";
 import { SettingsSkeleton } from "../../components/loading-skeletons";
@@ -192,21 +191,7 @@ export function UnifiedSettingsLayout() {
     <PanelDialog
       title={label("common:nav.settings")}
       rail={rail}
-      // The same band as the catalogue: invisible at rest, the section's name
-      // once the page has scrolled past its own heading — and an opaque surface
-      // under the close control, so the page does not scroll beneath it.
-      contentHeader={(stuck) =>
-        activeItem ? (
-          <span
-            className={cn(
-              "duration-fast truncate text-sm font-semibold transition-opacity",
-              stuck ? "opacity-100" : "opacity-0",
-            )}
-          >
-            {label(activeItem.labelKey)}
-          </span>
-        ) : null
-      }
+      contentHeader={null}
       onClose={closeSettings}
     >
       {activeItem && (

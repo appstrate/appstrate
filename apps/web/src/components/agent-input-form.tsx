@@ -3,14 +3,9 @@
 import { useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { useTranslation } from "react-i18next";
 import type RjsfForm from "@rjsf/core";
-import { ChevronDown, Lock } from "lucide-react";
-import { cn } from "@appstrate/ui/cn";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@appstrate/ui/components/collapsible";
+import { Lock } from "lucide-react";
 import type { SchemaWrapper } from "@appstrate/core/form";
+import { AdvancedSection } from "./advanced-section";
 import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { useUploadClient } from "../hooks/use-upload";
@@ -21,10 +16,10 @@ import {
 } from "@appstrate/core/input-resolution";
 import { formatInputValue, hasInputFields, subsetWrapper } from "../lib/agent-input";
 
-/** Imperative surface for a caller whose submit button lives outside the form. */
+/** For a caller whose own `<form>` submits the values: it asks first whether they are valid. */
 export interface AgentInputFormHandle {
-  /** Validate every rendered field and, when valid, call `onSubmit`. */
-  submit: () => void;
+  /** Validates every rendered field, showing the errors, and unfolds Avancé when one is there. */
+  validate: () => boolean;
 }
 
 interface AgentInputFormProps {
@@ -35,8 +30,6 @@ interface AgentInputFormProps {
   /** Current caller-editable values (locked fields are never part of this). */
   value: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
-  /** Fired by {@link AgentInputFormHandle.submit} once the fields validate. */
-  onSubmit?: (input: Record<string, unknown>) => void;
   ref?: Ref<AgentInputFormHandle>;
 }
 
@@ -52,14 +45,7 @@ interface AgentInputFormProps {
  * A locked field is DISPLAYED, never hidden (the run will use that value), as a value
  * with a lock rather than a greyed-out input: "imposed" and "disabled" must not look alike.
  */
-export function AgentInputForm({
-  wrapper,
-  settings,
-  value,
-  onChange,
-  onSubmit,
-  ref,
-}: AgentInputFormProps) {
+export function AgentInputForm({ wrapper, settings, value, onChange, ref }: AgentInputFormProps) {
   const { t } = useTranslation(["agents"]);
   const labels = useSchemaFormLabels();
   const upload = useUploadClient();
@@ -85,19 +71,12 @@ export function AgentInputForm({
   };
 
   useImperativeHandle(ref, () => ({
-    submit: () => {
+    validate: () => {
       // The advanced fields are collapsed, so a validation error there would be
       // invisible: check them first and unfold on failure.
-      if (advancedRef.current && !advancedRef.current.validateForm()) {
-        setAdvancedOpen(true);
-        return;
-      }
-      // RJSF re-validates on submit and calls `onSubmit` with the clean data.
-      if (promptedRef.current) {
-        promptedRef.current.submit();
-        return;
-      }
-      onSubmit?.(value);
+      const advancedValid = advancedRef.current?.validateForm() ?? true;
+      if (!advancedValid) setAdvancedOpen(true);
+      return (promptedRef.current?.validateForm() ?? true) && advancedValid;
     },
   }));
 
@@ -143,47 +122,36 @@ export function AgentInputForm({
             formData={pick(value, partition.prompted)}
             upload={upload}
             labels={labels}
+            tagName="div"
             onChange={(e) =>
               onChange(mergedWith(partition.prompted, e.formData as Record<string, unknown>))
-            }
-            onSubmit={(e) =>
-              onSubmit?.(mergedWith(partition.prompted, e.formData as Record<string, unknown>))
             }
           />
         </div>
       )}
 
       {advancedWrapper && (
-        <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
-              data-testid="advanced-input-toggle"
-            >
-              <span>{t("input.advancedTitle")}</span>
-              <ChevronDown
-                className={cn(
-                  "text-muted-foreground size-4 transition-transform",
-                  advancedOpen && "rotate-180",
-                )}
-              />
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-2 pt-3" data-testid="advanced-input-fields">
-            <p className="text-muted-foreground text-xs">{t("input.advancedHint")}</p>
-            <SchemaForm
-              ref={advancedRef}
-              wrapper={advancedWrapper}
-              formData={pick(value, partition.prefilled)}
-              upload={upload}
-              labels={labels}
-              onChange={(e) =>
-                onChange(mergedWith(partition.prefilled, e.formData as Record<string, unknown>))
-              }
-            />
-          </CollapsibleContent>
-        </Collapsible>
+        <AdvancedSection
+          title={t("input.advancedTitle")}
+          open={advancedOpen}
+          onOpenChange={setAdvancedOpen}
+          triggerTestId="advanced-input-toggle"
+          contentTestId="advanced-input-fields"
+          contentClassName="space-y-2"
+        >
+          <p className="text-muted-foreground text-xs">{t("input.advancedHint")}</p>
+          <SchemaForm
+            ref={advancedRef}
+            wrapper={advancedWrapper}
+            formData={pick(value, partition.prefilled)}
+            upload={upload}
+            labels={labels}
+            tagName="div"
+            onChange={(e) =>
+              onChange(mergedWith(partition.prefilled, e.formData as Record<string, unknown>))
+            }
+          />
+        </AdvancedSection>
       )}
     </div>
   );
