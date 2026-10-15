@@ -373,7 +373,7 @@ export function ListToolbar({
 
   if (placement === "panel") {
     return (
-      <div className="@container/bar mb-4 space-y-2">
+      <div data-list-toolbar="panel" className="@container/bar mb-4 space-y-2">
         <div className="flex items-center gap-2">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             {tabs}
@@ -432,7 +432,7 @@ export function ListToolbar({
   }
 
   return (
-    <div className="@container/bar mb-3 space-y-2">
+    <div data-list-toolbar="page" className="@container/bar mb-3 space-y-2">
       {tabs && <div className="sm:hidden">{tabs}</div>}
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex sm:items-center">
         {tabs && <div className="hidden sm:block">{tabs}</div>}

@@ -11,6 +11,7 @@ export function ChoiceCard({
   adornment,
   onClick,
   disabled,
+  ...data
 }: {
   icon: ComponentType;
   title: ReactNode;
@@ -19,6 +20,8 @@ export function ChoiceCard({
   adornment?: ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  /** `data-*` hooks the lab's drivers read. */
+  [key: `data-${string}`]: string;
 }) {
   return (
     <Button
@@ -27,6 +30,7 @@ export function ChoiceCard({
       className="h-auto min-h-16 w-full justify-start gap-3 p-3 text-left whitespace-normal"
       onClick={onClick}
       disabled={disabled}
+      {...data}
     >
       <span className="bg-muted grid size-9 shrink-0 place-items-center rounded-md">
         <Icon />

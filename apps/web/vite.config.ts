@@ -81,16 +81,51 @@ function i18nBootPreload(): Plugin {
   };
 }
 
+/**
+ * Lab mode (`bun run dev:lab`) — inject `src/lab/install.ts` as the module
+ * script *ahead of* `/src/main.tsx`, so the fixture layer patches `fetch`
+ * before `api/client.ts` and `lib/auth-client.ts` are evaluated and capture a
+ * reference to the real one. Ordered `type="module"` scripts run in document
+ * order, which is the whole mechanism.
+ *
+ * `apply: "serve"` — this never touches a production build, and `src/lab` is
+ * unreachable from the app's import graph, so it is not bundled either.
+ */
+function labMode(): Plugin {
+  return {
+    name: "appstrate:lab-mode",
+    apply: "serve",
+    transformIndexHtml: {
+      order: "pre",
+      handler(html) {
+        if (!process.env.VITE_LAB) return html;
+        return {
+          html,
+          tags: [
+            {
+              tag: "script",
+              attrs: { type: "module", src: "/src/lab/install.ts" },
+              injectTo: "body-prepend",
+            },
+          ],
+        };
+      },
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), i18nBootPreload()],
+  plugins: [react(), tailwindcss(), i18nBootPreload(), labMode()],
   envDir: "../../",
-  // Hot-reload dev server (`bun run dev:hmr`). `dev`/`build` emit into
-  // `dist/`, which the API serves; this block only applies to `vite dev`,
+  // Hot-reload dev server (`bun run dev:hmr` / `dev:lab`). `dev`/`build` emit
+  // into `dist/`, which the API serves; this block only applies to `vite dev`,
   // which serves the SPA itself and swaps edited modules into the running page
   // instead of rebuilding the whole bundle and reloading the tab.
   //
   // `proxy` forwards API + auth + SSE traffic to the local backend so the
-  // cookie and the `/api` paths keep working from port 5173. Two limits:
+  // cookie and the `/api` paths keep working from port 5173. In lab mode nothing
+  // reaches it — `src/lab` answers every request in the browser. Against a real
+  // instance, two limits:
   // - the browser's Origin stays `http://localhost:5173`, which Better Auth
   //   refuses unless the API runs with `TRUSTED_ORIGINS=http://localhost:5173`;
   // - `window.__APP_CONFIG__` is injected only into the `index.html` the API

@@ -61,11 +61,12 @@ export function CreationHandoffModal({
 
   return (
     <Modal open onClose={onClose} title={t(TITLE_KEYS[resource])} className="sm:max-w-xl">
-      <div className="space-y-2">
+      <div className="space-y-2" data-creation-chooser={resource}>
         {methods.map(({ id, ...method }) => (
           <ChoiceCard
             key={id}
             {...method}
+            data-creation-method={id}
             adornment={id === "chat" ? <Badge variant="secondary">Appstrate</Badge> : undefined}
           />
         ))}
