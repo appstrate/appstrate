@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { defaultRunVersion, VERSION_DRAFT, VERSION_PUBLISHED } from "../lib/version-selector";
-import { useRef, useState } from "react";
+import { useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { RunLaunchModal } from "./run-launch-modal";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { storedInputValues } from "../lib/agent-input";
@@ -43,6 +41,8 @@ interface RunWithOptionsModalProps {
   agent: AgentDetail;
   onSubmit: (payload: RunWithOptionsSubmit) => void;
   isPending?: boolean;
+  /** A connection picker's way out to the integration page leaves this modal. */
+  onLeave?: (to: string) => void;
 }
 
 /**
@@ -59,42 +59,35 @@ export function RunWithOptionsModal({
   agent,
   onSubmit,
   isPending,
+  onLeave,
 }: RunWithOptionsModalProps) {
-  const { t } = useTranslation(["agents", "common"]);
-  const guardedClose = () => {
-    if (!isPending) onClose();
-  };
+  const { t } = useTranslation(["agents"]);
   return (
-    <Modal
+    <RunLaunchModal
       open={open}
-      onClose={guardedClose}
+      onClose={onClose}
       title={t("run.options.title", { name: agent.display_name })}
-      actions={null}
+      isPending={isPending}
     >
-      {open && (
-        <RunWithOptionsForm
-          agent={agent}
-          onClose={guardedClose}
-          onSubmit={onSubmit}
-          isPending={isPending}
-        />
+      {(formRef) => (
+        <RunWithOptionsForm formRef={formRef} agent={agent} onSubmit={onSubmit} onLeave={onLeave} />
       )}
-    </Modal>
+    </RunLaunchModal>
   );
 }
 
 function RunWithOptionsForm({
+  formRef,
   agent,
-  onClose,
   onSubmit,
-  isPending,
+  onLeave,
 }: {
+  formRef: RefObject<AgentInputFormHandle | null>;
   agent: AgentDetail;
-  onClose: () => void;
   onSubmit: (payload: RunWithOptionsSubmit) => void;
-  isPending?: boolean;
+  onLeave?: (to: string) => void;
 }) {
-  const { t } = useTranslation(["agents", "common"]);
+  const { t } = useTranslation(["agents"]);
   // Seeded from the STORED values only — they are per-space and do not
   // move with the version pick. Author `default`s deliberately stay out: they
   // belong to the selected version's schema, and seeding the draft's here would
@@ -113,7 +106,6 @@ function RunWithOptionsForm({
   );
   const [overrides, setOverrides] = useState<RunOverridesValue>({});
   const [dependencyOverrides, setDependencyOverrides] = useState<Record<string, string>>({});
-  const inputFormRef = useRef<AgentInputFormHandle>(null);
   // Deps follow the selected version: the input / integrations / skills
   // the modal renders match what the run will execute, not the draft.
   const { deps } = useScheduleFormDeps(agent.id, version);
@@ -143,9 +135,9 @@ function RunWithOptionsForm({
     });
 
   return (
-    <div className="space-y-5">
+    <>
       <AgentInputForm
-        ref={inputFormRef}
+        ref={formRef}
         wrapper={inputWrapper}
         settings={agent.input}
         value={inputData}
@@ -183,6 +175,7 @@ function RunWithOptionsForm({
             setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds))
           }
           version={version}
+          onLeave={onLeave}
         />
       )}
 
@@ -191,15 +184,6 @@ function RunWithOptionsForm({
         value={dependencyOverrides}
         onChange={setDependencyOverrides}
       />
-
-      <div className="flex justify-end gap-2 pt-1">
-        <Button variant="outline" onClick={onClose} disabled={isPending}>
-          {t("btn.cancel")}
-        </Button>
-        <Button onClick={() => inputFormRef.current?.submit()} disabled={isPending}>
-          {isPending ? <Spinner /> : t("input.run")}
-        </Button>
-      </div>
-    </div>
+    </>
   );
 }

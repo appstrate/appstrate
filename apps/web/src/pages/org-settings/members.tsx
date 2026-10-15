@@ -1,52 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { UserPlus, Users } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
-import { useQueryClient } from "@tanstack/react-query";
-import { $api, type components } from "../../api/client";
-import { useOrg } from "../../hooks/use-org";
-import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
+import { Plus, Users } from "lucide-react";
+import type { components } from "../../api/client";
+import { useChangeMemberRole, useOrg, useOrgDetail, useRemoveMember } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
-import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
-import { OrgInvitationForm } from "../../components/org-invitation-form";
+import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { OrgInvitationsList } from "../../components/org-invitations-list";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { EmptyState, EmptyStateAction } from "../../components/page-states";
+import { DataTable } from "../../components/data-table";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
+import type { MenuAction } from "../../lib/menu-action";
+import { InvitationsTable } from "../../components/invitations-table";
+import { OrgInvitationForm } from "../../components/org-invitation-form";
+import { useMemberColumns } from "./member-columns";
+import { UserDetailModal } from "./user-detail-modal";
+import { useState } from "react";
 import { hasFullOrgAccess } from "../../lib/org-role";
+import { memberLabel } from "../../lib/members";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
-
-/**
- * Implicit space reach per role: a drop ends access, and the server then unshares connections.
- * Exhaustive, so a new role must be placed here rather than read as one that revokes access.
- */
-const ROLE_REACH = { owner: 2, admin: 2, member: 1, guest: 0 } satisfies Record<OrgRole, number>;
 
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
   const { user } = useAuth();
   const { can, orgRole } = usePermissions();
-  const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
+  const invite = useModalParam("invite");
 
+  const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
   const canInvite = can("members:invite");
   const canChangeRole = can("members:change-role");
 
-  const [inviting, setInviting] = useState(false);
-  const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
   // Ownership changes confirm first (a new owner can remove whoever named them), and so do
   // demotions that end space access.
   const [roleChange, setRoleChange] = useState<{
@@ -56,38 +45,17 @@ export function OrgSettingsMembersPage() {
     from: OrgRole;
   } | null>(null);
 
-  const {
-    data: orgData,
-    isLoading,
-    error,
-  } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
+  const { data: orgData, isLoading, error } = useOrgDetail();
 
   const members = orgData?.members ?? [];
+  const memberParam = useModalTarget("member", orgData?.members, (member) => member.userId);
   const invitations = orgData?.invitations ?? [];
-  // A removal or a role drop that ends space access unshares the member's connections.
-  const invalidateOrg = () => {
-    void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
-    void invalidateIntegrationQueries(queryClient);
-  };
 
-  const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
-    onSuccess: invalidateOrg,
-  });
-
-  const changeRoleMutation = $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}", {
-    onSuccess: invalidateOrg,
-  });
-
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState error={error} />;
+  const removeMemberMutation = useRemoveMember();
+  const changeRoleMutation = useChangeMemberRole();
 
   const handleRemove = (member: OrgMember) => {
-    const label = member.displayName || member.email || member.userId;
+    const label = memberLabel(member);
     setConfirmState({ label, id: member.userId });
   };
 
@@ -102,7 +70,7 @@ export function OrgSettingsMembersPage() {
   const handleRoleChange = (member: OrgMember, newRole: OrgRole) => {
     if (newRole === "owner" || member.role === "owner" || revokesAccess(member.role, newRole)) {
       setRoleChange({
-        label: member.displayName || member.email || member.userId,
+        label: memberLabel(member),
         id: member.userId,
         role: newRole,
         from: member.role,
@@ -112,120 +80,108 @@ export function OrgSettingsMembersPage() {
     changeRole(member.userId, newRole);
   };
 
+  // Which spaces a person reaches, and as what, comes with the member itself:
+  // the column and the detail read the same rows.
+  const seesEverySpace = hasFullOrgAccess(orgRole);
+
+  const assignableRoles = (member: OrgMember) =>
+    orgRole && canChangeRole
+      ? assignableRolesForMember({
+          actorRole: orgRole,
+          targetRole: member.role,
+          isSelf: member.userId === user?.id,
+        })
+      : [];
+
+  const memberColumns = useMemberColumns({
+    assignableRoles,
+    canRemove: (member) =>
+      orgRole && can("members:remove")
+        ? canRemoveMember({
+            actorRole: orgRole,
+            targetRole: member.role,
+            isSelf: member.userId === user?.id,
+          })
+        : false,
+    isChangingRole: changeRoleMutation.isPending,
+    isRemoving: removeMemberMutation.isPending,
+    onChangeRole: handleRoleChange,
+    onRemove: handleRemove,
+    spaces: seesEverySpace ? (member) => member.spaces.map((space) => space.name) : undefined,
+  });
+
+  const openedUser = memberParam.target;
+  const inviteAction: MenuAction = {
+    id: "invite",
+    icon: Plus,
+    label: t("orgSettings.inviteMember"),
+    onSelect: () => invite.open(),
+    hidden: !canInvite,
+  };
+
   return (
     <>
-      <p className="text-muted-foreground mb-4 text-sm">{t("orgSettings.usersDescription")}</p>
+      <SettingsPageActions actions={[inviteAction]} />
+
+      {/* The invitation is one form wherever it is made: the org role, then the
+          spaces it opens and the role in each — which is what a guest needs,
+          having no implicit access anywhere. */}
       {canInvite && orgId && (
-        <div className="mb-4 flex justify-end">
-          <Button data-testid="invite-org-user-button" onClick={() => setInviting(true)}>
-            <UserPlus />
-            {t("orgSettings.inviteUser")}
-          </Button>
-        </div>
+        <Modal
+          open={invite.value !== null}
+          onClose={invite.close}
+          title={t("orgSettings.inviteMember")}
+          className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
+        >
+          <OrgInvitationForm
+            key={`${orgId}:${invite.value}`}
+            orgId={orgId}
+            allowGuest
+            onSuccess={invite.close}
+            onCancel={invite.close}
+          />
+        </Modal>
       )}
 
-      <div className="flex flex-col gap-3">
-        {members.map((member) => {
-          const label = member.displayName || member.email || member.userId;
-          const isMemberOwner = member.role === "owner";
-          const isSelf = member.userId === user?.id;
-          const assignableRoles =
-            orgRole && canChangeRole
-              ? assignableRolesForMember({ actorRole: orgRole, targetRole: member.role, isSelf })
-              : [];
-          const canRemove =
-            orgRole && can("members:remove")
-              ? canRemoveMember({ actorRole: orgRole, targetRole: member.role, isSelf })
-              : false;
-          return (
-            <div
-              key={member.userId}
-              className="border-border bg-card flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center"
-            >
-              <div className="flex min-w-0 flex-1 items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-semibold break-words">{label}</h3>
-                  {member.email && member.email !== label && (
-                    <span className="text-muted-foreground text-sm">{member.email}</span>
-                  )}
-                </div>
-                {assignableRoles.length === 0 && (
-                  <Badge
-                    variant={
-                      isMemberOwner ? "running" : member.role === "admin" ? "success" : "pending"
-                    }
-                  >
-                    {t(roleI18nKey(member.role))}
-                  </Badge>
-                )}
-              </div>
-              {(assignableRoles.length > 0 || canRemove) && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {assignableRoles.length > 0 && (
-                    <Select
-                      value={member.role}
-                      onValueChange={(v) => handleRoleChange(member, v as OrgRole)}
-                      disabled={changeRoleMutation.isPending}
-                    >
-                      <SelectTrigger
-                        className="w-full sm:w-[200px]"
-                        aria-label={t("orgSettings.inviteRoleAriaLabel")}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {assignableRoles.map((r) => (
-                          <SelectItem key={r} value={r}>
-                            {t(roleI18nKey(r))}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {canRemove && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      className="ml-auto"
-                      onClick={() => handleRemove(member)}
-                      disabled={removeMemberMutation.isPending}
-                    >
-                      {t("btn.remove")}
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      {/* No `empty` prop on purpose: this page has TWO lists and one shared
+          empty state below, for when neither members nor invitations exist. A
+          per-list empty sentence here would fire while invitations are pending
+          and say the page is empty when it is not. */}
+      <DataTable
+        tableId="members"
+        label={t("orgSettings.tabMembers")}
+        columns={memberColumns}
+        rows={members}
+        rowKey={(member) => member.userId}
+        rowAction={(member) => memberParam.open(member.userId)}
+        rowLabel={memberLabel}
+        isLoading={isLoading}
+        failure={error}
+      />
 
-      {orgId && <OrgInvitationsList key={orgId} orgId={orgId} invitations={invitations} />}
+      {openedUser && (
+        <UserDetailModal
+          key={openedUser.userId}
+          member={openedUser}
+          showSpaces={seesEverySpace}
+          assignableRoles={assignableRoles(openedUser)}
+          isChangingOrgRole={changeRoleMutation.isPending}
+          onChangeOrgRole={(role) => handleRoleChange(openedUser, role)}
+          onClose={memberParam.close}
+        />
+      )}
 
-      {members.length === 0 && invitations.length === 0 && (
+      {orgId && <InvitationsTable orgId={orgId} invitations={invitations} />}
+
+      {!isLoading && !error && members.length === 0 && invitations.length === 0 && (
         <EmptyState
           message={t("orgSettings.noMembers")}
           hint={t("orgSettings.noMembersHint")}
           icon={Users}
           compact
-        />
-      )}
-
-      {canInvite && orgId && inviting && (
-        <Modal
-          open
-          onClose={() => setInviting(false)}
-          title={t("orgSettings.inviteUser")}
-          className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
         >
-          <OrgInvitationForm
-            key={orgId}
-            orgId={orgId}
-            allowGuest
-            onSuccess={() => setInviting(false)}
-            onCancel={() => setInviting(false)}
-          />
-        </Modal>
+          <EmptyStateAction action={inviteAction} />
+        </EmptyState>
       )}
 
       <ConfirmModal
@@ -279,7 +235,8 @@ export function OrgSettingsMembersPage() {
       <ConfirmModal
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("orgSettings.removeMemberTitle")}
+        confirmLabel={t("btn.remove", { ns: "common" })}
         description={
           confirmState ? t("orgSettings.removeMember", { name: confirmState.label }) : ""
         }
@@ -297,6 +254,15 @@ export function OrgSettingsMembersPage() {
   );
 }
 
+/** How far each role reaches into spaces on its own; owner and admin reach every one. */
+const ROLE_REACH = {
+  owner: 2,
+  admin: 2,
+  member: 1,
+  guest: 0,
+} satisfies Record<OrgRole, number>;
+
+/** A drop ends implicit space access, and the server then unshares connections. */
 function revokesAccess(from: OrgRole, to: OrgRole): boolean {
   return ROLE_REACH[to] < ROLE_REACH[from];
 }

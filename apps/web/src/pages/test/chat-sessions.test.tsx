@@ -2,7 +2,8 @@
 
 import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
-import { ChatPage } from "@appstrate/module-chat/ui";
+import { ChatConversationList, ChatHeadersProvider } from "@appstrate/module-chat/ui";
+import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import {
   sessionsQueryKey,
   type SessionsCache,
@@ -25,8 +26,13 @@ function cache(data: SessionSummary[]): SessionsCache {
   return { pages: [{ data, hasMore: false }], pageParams: [null] };
 }
 
-/** Render `ChatPage` with a visible document, which it reads on render. */
-function renderChatPage(qc: QueryClient, can: (permission: string) => boolean): string {
+/**
+ * Render the conversation list as the chat shell mounts it. The list is the
+ * shell's navigation, not part of `ChatPage`; the headers provider is what
+ * scopes the sessions query to one space. Its visibility read needs a document,
+ * no DOM or effects.
+ */
+function renderConversationList(qc: QueryClient, can: (permission: string) => boolean): string {
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
   Object.defineProperty(globalThis, "document", {
     configurable: true,
@@ -34,17 +40,11 @@ function renderChatPage(qc: QueryClient, can: (permission: string) => boolean): 
   });
   try {
     return render(
-      <ChatPage
-        getHeaders={() => ({ "X-Space-Id": "spc_a" })}
-        conversationId="chat_active"
-        downloadFile={() => {}}
-        useFileImageSrc={() => null}
-        uploadFile={async () => "upload://unused"}
-        t={(key) => key}
-        can={can}
-        personalModelCredentials
-        formatBytes={String}
-      />,
+      <SidebarProvider>
+        <ChatHeadersProvider value={() => ({ "X-Space-Id": "spc_a" })}>
+          <ChatConversationList activeId="chat_active" t={(key) => key} can={can} />
+        </ChatHeadersProvider>
+      </SidebarProvider>,
       { queryClient: qc },
     );
   } finally {
@@ -61,6 +61,7 @@ function hostWith(granted: string[]): ChatHost {
     t: (key) => key,
     can: (permission) => granted.includes(permission),
     personalModelCredentials: true,
+    modelCredentials: [],
     formatBytes: String,
   };
 }
@@ -81,14 +82,16 @@ describe("chat page session scope", () => {
       cache([conversation("chat_other", "Only in B", true)]),
     );
 
-    const html = renderChatPage(qc, () => true);
+    const html = renderConversationList(qc, () => true);
 
     expect(html).toContain("Unread in A");
     expect(html).toContain("Read in A");
     expect(html).not.toContain("Only in B");
-    // ChatPage computes this marker, while ThreadList reads its own query.
-    // Seeing the row alone would miss an observer stranded outside the provider.
-    expect(html.match(/aria-label="threads.unread"/g)).toHaveLength(1);
+    // The unread dot lives in the list itself, and the test injects an identity
+    // `t`, so the rendered label is the KEY. Counting it is what proves the
+    // marker is derived from the same scoped query as the rows beside it —
+    // `chat_active` is excluded because looking at a thread reads it.
+    expect(html.match(/aria-label="threads\.unread"/g)).toHaveLength(1);
   });
 });
 
@@ -97,11 +100,11 @@ describe("chat surfaces held to the caller's grants", () => {
     const qc = new QueryClient();
     qc.setQueryData(sessionsQueryKey("spc_a"), cache([]));
 
-    const readOnly = renderChatPage(qc, (p) => p === "chat:read");
+    const readOnly = renderConversationList(qc, (p) => p === "chat:read");
     expect(readOnly).toContain("threads.emptyReadOnly");
     expect(readOnly).not.toContain("threads.empty<");
 
-    const writer = renderChatPage(qc, (p) => p === "chat:read" || p === "chat:write");
+    const writer = renderConversationList(qc, (p) => p === "chat:read" || p === "chat:write");
     expect(writer).toContain("threads.empty<");
   });
 

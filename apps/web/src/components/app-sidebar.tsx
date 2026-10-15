@@ -1,64 +1,89 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ComponentProps } from "react";
-import { Link } from "react-router-dom";
-import { OrgSwitcher } from "@/components/org-switcher";
-import { NavOrg } from "@/components/nav-org";
-import { SidebarBilling } from "@/components/sidebar-billing";
-import { useTheme } from "@/stores/theme-store";
+import { lazy, Suspense } from "react";
+import { Plus } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarTrigger,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSkeleton,
 } from "@appstrate/ui/components/sidebar";
+import { NavOrg } from "@/components/nav-org";
+import { ShellSidebar } from "@/components/shell-frame";
+import { SidebarCredits } from "@/components/sidebar-credits";
+import { useCanReach, useReachReady } from "@/hooks/use-can-reach";
+
+// The chat's list ships with the chat module's UI, out of the entry chunk; it
+// loads INSIDE the frame, so the frame never blanks while it does.
+const ChatSidebar = lazy(() =>
+  import("../modules/chat/chat-sidebar").then((m) => ({ default: m.ChatSidebar })),
+);
 
 /**
- * Sidebar header branding + collapse control.
- *
- * - Expanded: wordmark logo + collapse toggle (toggle pinned right).
- * - Collapsed: square app icon only.
- * - Collapsed + hovered: the icon is swapped for the collapse toggle, which
- *   stays clickable to re-open the sidebar.
+ * The conversation list's shape, drawn while its permissions and chunk load:
+ * the "new conversation" row (the chat's primary action, so it is real, not
+ * grey) above a group of row skeletons — what `ChatConversationList` draws.
  */
-function SidebarLogo() {
-  const { resolvedTheme } = useTheme();
-
+function ChatSidebarSkeleton() {
+  const { t } = useTranslation("chat");
   return (
-    <div className="group/logo flex w-full items-center gap-2 pl-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:pl-0">
-      <Link to="/" className="flex items-center group-data-[collapsible=icon]:hidden">
-        <img
-          src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
-          alt="Appstrate"
-          className="h-7 w-auto"
-        />
-      </Link>
-      {/* Collapsed-only app icon — hidden as soon as the header is hovered */}
-      <img
-        src={resolvedTheme === "dark" ? "/icon-dark.svg" : "/icon-light.svg"}
-        alt="Appstrate"
-        className="hidden size-7 shrink-0 group-data-[collapsible=icon]:block group-data-[collapsible=icon]:group-hover/logo:hidden"
-      />
-      {/* Toggle: always shown when expanded; collapsed only on hover */}
-      <SidebarTrigger className="ml-auto shrink-0 group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:hidden group-data-[collapsible=icon]:group-hover/logo:flex" />
-    </div>
+    <>
+      <SidebarGroup className="pb-0">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton disabled tooltip={t("threads.new")}>
+              <Plus />
+              <span>{t("threads.new")}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+      <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
+        <SidebarGroupLabel>{t("threads.title")}</SidebarGroupLabel>
+        <SidebarMenu>
+          {Array.from({ length: 5 }, (_, i) => (
+            <SidebarMenuItem key={i}>
+              <SidebarMenuSkeleton />
+            </SidebarMenuItem>
+          ))}
+        </SidebarMenu>
+      </SidebarGroup>
+    </>
   );
 }
 
-export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
+/**
+ * The shell's sidebar: one frame, filled with the navigation of the product on
+ * screen. The frame stays mounted across a product switch; only this content
+ * changes.
+ */
+export function AppSidebar({ product }: { product: "studio" | "chat" }) {
+  const canReach = useCanReach();
+  const ready = useReachReady();
+  if (product === "chat") {
+    return (
+      <ShellSidebar contentClassName="overflow-hidden">
+        {/* A refused chat route says so in the page; the list would only
+            fetch what the caller cannot read. */}
+        {!ready ? (
+          <ChatSidebarSkeleton />
+        ) : (
+          canReach("/chat") && (
+            <Suspense fallback={<ChatSidebarSkeleton />}>
+              <ChatSidebar />
+            </Suspense>
+          )
+        )}
+      </ShellSidebar>
+    );
+  }
   return (
-    <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader className="border-sidebar-border h-16 justify-center border-b group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-        <SidebarLogo />
-      </SidebarHeader>
-      <SidebarContent className="gap-0">
-        <NavOrg />
-        <SidebarBilling />
-      </SidebarContent>
-      <SidebarFooter>
-        <OrgSwitcher />
-      </SidebarFooter>
-    </Sidebar>
+    <ShellSidebar>
+      <NavOrg />
+      <SidebarCredits />
+    </ShellSidebar>
   );
 }

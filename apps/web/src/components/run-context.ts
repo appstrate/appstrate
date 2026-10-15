@@ -3,11 +3,10 @@
 /**
  * Pure logic behind "how full is this run's context window".
  *
- * Two surfaces read it — the run-header gauge (`ContextGaugeReadout`) and the
- * Exécution pane's per-turn table (`TurnsTable`, in `run-execution-tab.tsx`) —
- * and they must agree: a header
- * saying `64 %` above a table whose widest bar is always full is the
- * disagreement to avoid. This module is the single derivation;
+ * Two surfaces read it — the Usage card's gauge (`ContextGaugeReadout`) and the
+ * per-turn table (`TurnsTable`, in `run-detail/run-turns-detail.tsx`) — and
+ * they must agree: a gauge saying `64 %` above a table whose widest bar is
+ * always full is the disagreement to avoid. This module is the single derivation;
  * the two components only render what it returns.
  *
  * Split from both components for the same reason `run-cost.ts` is: the web test
@@ -26,10 +25,9 @@
  *
  * DENOMINATOR PROVENANCE — the window is read off the turns too, not off the run
  * row. The runner is the authority on it (it applies the container-side default
- * the platform cannot see), it states it where it already states the numerator,
- * and keeping the two on one payload removes the failure this module used to
- * have: a run whose logs were pruned kept a denominator with no numerator left
- * to divide.
+ * the platform cannot see), and it states it on the same payload as the
+ * numerator, so a run whose logs were pruned cannot keep a denominator with no
+ * numerator left to divide.
  */
 
 import type { RunTurnRow } from "./log-utils";
@@ -87,9 +85,9 @@ export function fractionOfWindow(tokens: number, window: number): number {
  *     the interesting case, because the turns may still carry a perfectly real
  *     `128 430`: we drop it anyway. A raw token count with no denominator
  *     informs nobody — 128k is comfortable in a 1M window and terminal in a
- *     200k one, and the header's whole job is to answer "how much headroom is
+ *     200k one, and the gauge's whole job is to answer "how much headroom is
  *     left" at a glance. Naming the cost of that choice: the number is not
- *     lost, it is relocated — the Exécution pane's per-turn table still lists every
+ *     lost, it is relocated — the per-turn table still lists every
  *     turn's absolute context, and falls back to its own peak-relative bar
  *     precisely so a window-less run keeps a readable breakdown somewhere.
  *     Fabricating a 200k default client-side is the one option rejected

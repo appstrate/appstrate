@@ -1,34 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Dispatch, ReactNode } from "react";
-import {
-  ActivityIcon,
-  ChevronRightIcon,
-  DownloadIcon,
-  ExternalLinkIcon,
-  EyeIcon,
-  FileIcon,
-  FilesIcon,
-  InfoIcon,
-  Maximize2Icon,
-} from "lucide-react";
-import { Link } from "react-router-dom";
+import { ActivityIcon, ChevronRightIcon, FileIcon, FilesIcon, InfoIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { $api } from "../../api/client";
-import { Badge } from "../../components/status-badge";
-import { FilePreview } from "../../components/file-preview";
-import { FileViewer } from "../../components/file-viewer";
-import { useFile, useFileDownload, useFiles } from "../../hooks/use-files";
+import { FileArtifact } from "../../components/file-artifact";
+import { RunRow } from "../../components/run-row";
+import { useAgents } from "../../hooks/use-packages";
+import { useFile, useFiles } from "../../hooks/use-files";
 import { useOrgOnlyScope, useOrgScope } from "../../hooks/use-org-scope";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useRunAgentName } from "../../hooks/use-run-agent-name";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { formatDateField } from "../../lib/format-date";
 import type {
@@ -37,34 +22,37 @@ import type {
   ConversationSidebarTab,
   SidebarFile,
 } from "./conversation-sidebar-state";
+import { TextSkeleton } from "../../components/loading-skeletons";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 
 /**
  * `chat:read` opens the page, not the runs and files two tabs list. A stored
- * tab the caller can no longer see resolves to the preview, which always stays.
+ * tab the caller can no longer see resolves to Info, which always stays.
  */
 function useConversationTabs(selected: ConversationSidebarTab) {
   const { t } = useTranslation("chat");
   const { can } = usePermissions();
   const readable: Record<ConversationSidebarTab, boolean> = {
-    preview: true,
     runs: canReadRuns(can),
     files: can("files:read"),
     info: true,
   };
-  const [preview, ...rest] = [
-    { id: "preview", Icon: EyeIcon, label: t("context.tabs.preview") },
-    { id: "runs", Icon: ActivityIcon, label: t("context.tabs.runs") },
-    { id: "files", Icon: FilesIcon, label: t("context.tabs.files") },
-    { id: "info", Icon: InfoIcon, label: t("context.tabs.info") },
-  ] as const satisfies readonly {
-    id: ConversationSidebarTab;
-    Icon: typeof EyeIcon;
-    label: string;
-  }[];
-  const tabs = [preview, ...rest.filter(({ id }) => readable[id])];
-  return { tabs, activeTab: tabs.find(({ id }) => id === selected) ?? preview };
+  const tabs = (
+    [
+      { id: "runs", Icon: ActivityIcon, label: t("context.tabs.runs") },
+      { id: "files", Icon: FilesIcon, label: t("context.tabs.files") },
+      { id: "info", Icon: InfoIcon, label: t("context.tabs.info") },
+    ] as const satisfies readonly {
+      id: ConversationSidebarTab;
+      Icon: typeof InfoIcon;
+      label: string;
+    }[]
+  ).filter(({ id }) => readable[id]);
+  return {
+    tabs,
+    activeTab: tabs.find(({ id }) => id === selected) ?? tabs.find(({ id }) => id === "info")!,
+  };
 }
 
 export function ConversationContextActions({
@@ -78,33 +66,29 @@ export function ConversationContextActions({
   const { tabs, activeTab } = useConversationTabs(state.activeTab);
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <Tabs
-        value={state.expanded ? activeTab.id : ""}
-        onValueChange={(tab) =>
-          dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })
-        }
-      >
-        <TabsList className="h-8" aria-label={t("context.label")}>
-          {tabs.map(({ id, Icon, label }) => (
-            <Tooltip key={id}>
-              <TooltipTrigger asChild>
-                <TabsTrigger
-                  id={`conversation-context-${id}-tab`}
-                  value={id}
-                  className="aria-selected:bg-background aria-selected:text-foreground size-7 p-0 aria-selected:shadow"
-                  aria-label={label}
-                  aria-controls={CONVERSATION_CONTEXT_PANEL_ID}
-                >
-                  <Icon className="size-4" />
-                </TabsTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{label}</TooltipContent>
-            </Tooltip>
-          ))}
-        </TabsList>
-      </Tabs>
-    </TooltipProvider>
+    <Tabs
+      value={state.expanded ? activeTab.id : ""}
+      onValueChange={(tab) => dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })}
+    >
+      <TabsList className="h-8" aria-label={t("context.label")}>
+        {tabs.map(({ id, Icon, label }) => (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <TabsTrigger
+                id={`conversation-context-${id}-tab`}
+                value={id}
+                className="aria-selected:bg-background aria-selected:text-foreground size-7 p-0 aria-selected:shadow"
+                aria-label={label}
+                aria-controls={CONVERSATION_CONTEXT_PANEL_ID}
+              >
+                <Icon className="size-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{label}</TooltipContent>
+          </Tooltip>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }
 
@@ -116,45 +100,35 @@ function PanelState({ children }: { children: ReactNode }) {
   );
 }
 
-function PreviewTab({ file, onOpenModal }: { file: SidebarFile | null; onOpenModal: () => void }) {
-  const { t } = useTranslation(["chat", "files"]);
-  const download = useFileDownload();
-  const { data, isLoading, error } = useFile(file?.id ?? "");
+/**
+ * The file's frame IS the panel: its header replaces the panel's. Its X closes
+ * the panel, or goes back to the file list the file was opened from.
+ */
+function ShownFile({
+  file,
+  backToList,
+  onClose,
+}: {
+  file: SidebarFile;
+  backToList: boolean;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation("chat");
+  const { data, isLoading, error } = useFile(file.id);
 
-  if (!file) return <PanelState>{t("context.preview.empty", { ns: "chat" })}</PanelState>;
-
-  const name = file.name || data?.name || t("context.file.untitled", { ns: "chat" });
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium" title={name}>
-          {name}
-        </span>
-        {data?.downloadable ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8"
-            aria-label={t("row.download", { ns: "files" })}
-            onClick={() => void download(file.id, name)}
-          >
-            <DownloadIcon className="size-4" />
-          </Button>
-        ) : null}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8"
-          aria-label={t("context.preview.openModal", { ns: "chat" })}
-          onClick={onOpenModal}
-        >
-          <Maximize2Icon className="size-4" />
-        </Button>
-      </div>
-      <div className="flex min-h-0 flex-1 p-3">
-        <FileViewer fileId={file.id} file={data} isLoading={isLoading} error={error} />
-      </div>
-    </div>
+    <FileArtifact
+      fileId={file.id}
+      file={data}
+      isLoading={isLoading}
+      error={error}
+      fallbackName={file.name || t("context.file.untitled")}
+      onClose={{
+        label: backToList ? t("context.backToFiles") : t("context.collapse"),
+        onClick: onClose,
+      }}
+      className="h-full rounded-none border-0"
+    />
   );
 }
 
@@ -168,6 +142,9 @@ function ConversationRuns({
   const { t } = useTranslation("chat");
   const scope = useOrgScope();
   const { can } = usePermissions();
+  const agentName = useRunAgentName();
+  const { data: agents } = useAgents();
+  const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
   const query = $api.useQuery(
     "get",
     "/api/runs",
@@ -181,45 +158,23 @@ function ConversationRuns({
   );
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
-  if (query.isLoading) return <PanelState>{t("context.loading")}</PanelState>;
+  if (query.isLoading) return <TextSkeleton className="p-4" />;
   if (query.error) return <PanelState>{t("context.error")}</PanelState>;
   const runs = query.data?.data ?? [];
   if (runs.length === 0) return <PanelState>{t("context.runs.empty")}</PanelState>;
 
   return (
     <div className="divide-y">
-      {runs.map((run) => {
-        const label = run.agent_name || run.packageId || t("run.fallbackLabel");
-        const content = (
-          <>
-            <div className="flex min-w-0 items-center gap-2">
-              <ActivityIcon className="text-muted-foreground size-4 shrink-0" />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">{label}</span>
-              <Badge status={run.status} compact />
-              {run.packageId ? (
-                <ExternalLinkIcon className="text-muted-foreground size-3.5" />
-              ) : null}
-            </div>
-            <div className="text-muted-foreground mt-1 flex items-center justify-between gap-2 pl-6 text-xs">
-              <span className="truncate font-mono">{run.id}</span>
-              <span className="shrink-0">{formatDateField(run.started_at)}</span>
-            </div>
-          </>
-        );
-        return run.packageId ? (
-          <Link
-            key={run.id}
-            className="hover:bg-muted/50 block px-3 py-3"
-            to={`/agents/${run.packageId}/runs/${run.id}`}
-          >
-            {content}
-          </Link>
-        ) : (
-          <div key={run.id} className="px-3 py-3">
-            {content}
-          </div>
-        );
-      })}
+      {runs.map((run) => (
+        <RunRow
+          key={run.id}
+          run={run}
+          agentName={agentName(run)}
+          agent={run.packageId ? agentById.get(run.packageId) : undefined}
+          dense
+          className="px-3"
+        />
+      ))}
     </div>
   );
 }
@@ -241,7 +196,7 @@ function ConversationFiles({
   });
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
-  if (query.isLoading) return <PanelState>{t("context.loading")}</PanelState>;
+  if (query.isLoading) return <TextSkeleton className="p-4" />;
   if (query.error) return <PanelState>{t("context.error")}</PanelState>;
   const files = query.data?.data ?? [];
   if (files.length === 0) return <PanelState>{t("context.files.empty")}</PanelState>;
@@ -293,7 +248,7 @@ function ConversationInfo({
   );
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
-  if (query.isLoading) return <PanelState>{t("context.loading")}</PanelState>;
+  if (query.isLoading) return <TextSkeleton className="p-4" />;
   if (query.error || !query.data) return <PanelState>{t("context.error")}</PanelState>;
 
   const session = query.data;
@@ -333,7 +288,11 @@ export function ConversationSidebar({
   const { t } = useTranslation("chat");
   const { activeTab } = useConversationTabs(state.activeTab);
   const ActiveTabIcon = activeTab.Icon;
-  const showFile = (file: SidebarFile) => dispatch({ type: "show-file", file });
+  const showFromList = (file: SidebarFile) => dispatch({ type: "show-file", file, fromList: true });
+  const collapse = () => dispatch({ type: "toggle" });
+  // Read from the state, not the readable tabs: a file the thread opens shows
+  // even for a caller whose Files tab is not drawn.
+  const previewedFile = state.activeTab === "files" ? state.selectedFile : null;
 
   return (
     <>
@@ -342,7 +301,7 @@ export function ConversationSidebar({
           type="button"
           className="absolute inset-0 z-20 bg-black/30 lg:hidden"
           aria-label={t("context.collapse")}
-          onClick={() => dispatch({ type: "toggle" })}
+          onClick={collapse}
         />
       ) : null}
       {state.expanded ? (
@@ -353,42 +312,47 @@ export function ConversationSidebar({
           aria-label={t("context.label")}
           className="bg-background absolute inset-y-0 right-0 z-30 flex h-full w-[min(92vw,36rem)] shrink-0 flex-col border-l shadow-xl lg:static lg:w-[42vw] lg:max-w-[42rem] lg:min-w-[28rem] lg:shadow-none"
         >
-          <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2 px-1 text-sm font-medium">
-              <ActiveTabIcon className="text-muted-foreground size-4 shrink-0" />
-              <span className="truncate">{activeTab.label}</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8 shrink-0"
-              aria-label={t("context.collapse")}
-              onClick={() => dispatch({ type: "toggle" })}
-            >
-              <ChevronRightIcon className="size-4" />
-            </Button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto">
-            {activeTab.id === "preview" ? (
-              <PreviewTab
-                file={state.selectedFile}
-                onOpenModal={() => dispatch({ type: "open-modal" })}
-              />
-            ) : null}
-            {activeTab.id === "runs" ? (
-              <ConversationRuns conversationId={conversationId} active />
-            ) : null}
-            {activeTab.id === "files" ? (
-              <ConversationFiles conversationId={conversationId} active onSelect={showFile} />
-            ) : null}
-            {activeTab.id === "info" ? (
-              <ConversationInfo conversationId={conversationId} active />
-            ) : null}
-          </div>
+          {previewedFile ? (
+            <ShownFile
+              file={previewedFile}
+              backToList={state.fileFromList}
+              onClose={() => dispatch({ type: "close-file" })}
+            />
+          ) : (
+            <>
+              <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2 px-1 text-sm font-medium">
+                  <ActiveTabIcon className="text-muted-foreground size-4 shrink-0" />
+                  <span className="truncate">{activeTab.label}</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 shrink-0"
+                  aria-label={t("context.collapse")}
+                  onClick={collapse}
+                >
+                  <XIcon className="size-4" />
+                </Button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto">
+                {activeTab.id === "runs" ? (
+                  <ConversationRuns conversationId={conversationId} active />
+                ) : null}
+                {activeTab.id === "files" ? (
+                  <ConversationFiles
+                    conversationId={conversationId}
+                    active
+                    onSelect={showFromList}
+                  />
+                ) : null}
+                {activeTab.id === "info" ? (
+                  <ConversationInfo conversationId={conversationId} active />
+                ) : null}
+              </div>
+            </>
+          )}
         </aside>
-      ) : null}
-      {state.modalFile ? (
-        <FilePreview file={state.modalFile} onClose={() => dispatch({ type: "close-modal" })} />
       ) : null}
     </>
   );

@@ -22,19 +22,11 @@ import {
   parseMcpResourceUri,
   setMcpOrgVerifyAudiences,
 } from "../../lib/audiences.ts";
+import { likePrefix } from "../../lib/like-pattern.ts";
 
 // GUID-shaped, like the router's `:org` check: an org id that is not one can
 // name no row, and must not reach a uuid column comparison.
 const orgIdSchema = z.guid();
-
-/**
- * `value` as a LIKE prefix pattern. `_` and `%` are LIKE wildcards, so an
- * APP_URL carrying either would over-match — escape them (Postgres' default
- * LIKE escape is the backslash).
- */
-function likePrefix(value: string): string {
-  return `${value.replace(/([\\%_])/g, "\\$1")}%`;
-}
 
 /** The `oauth_resources` row backing one org's MCP endpoint. */
 export function mcpOrgResourceRow(orgId: string) {

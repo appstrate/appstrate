@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  type MutationMeta,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { client, type components } from "../api/client";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
-import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import { invalidateLibraries } from "./use-library";
+import { runDetailPath, splitPackageRef } from "../lib/package-paths";
 import i18n from "../i18n";
 import {
   packageKeys,
@@ -17,6 +23,8 @@ import {
   paginatedRunsKeys,
   persistenceKeys,
   invalidatePackageFiles,
+  invalidatePackageCaches,
+  versionKeys,
 } from "../lib/query-keys";
 import {
   launchFlight,
@@ -56,7 +64,6 @@ export function useSaveInputSettings(packageId: string) {
 
 function useRunAgent(packageId: string) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
     mutationFn: async (launch: RunLaunch) => {
@@ -103,10 +110,18 @@ function useRunAgent(packageId: string) {
     onSuccess: (data) => {
       // Stale, not refetched: every launch leaves for the run's own page.
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all, refetchType: "none" });
-      navigate(`/agents/${packageId}/runs/${data.id}`);
       toastWarnings({ kind: "run" }, packageId, data.warnings);
     },
   });
+}
+
+interface LaunchOptions {
+  /**
+   * The launch comes from a modal addressed in the URL (`?run=`, `?rerun=`):
+   * the modal's `leave` goes to the run page, so Back does not reopen it, and
+   * a refused launch leaves the form open with what was typed.
+   */
+  leave?: (to: string) => void;
 }
 
 /**
@@ -119,35 +134,42 @@ function useRunAgent(packageId: string) {
  */
 export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
+  const navigate = useNavigate();
   const [refusal, setRefusal] = useState<LaunchRefusal | null>(null);
   // What `retry` sends: the refused launch, as `retryLaunch` replays it.
-  const replay = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
+  const replay = useRef<{ launch: RunLaunch; options: LaunchOptions }>({
+    launch: {},
+    options: {},
+  });
   const [isPending, setIsPending] = useState(false);
   const [flight] = useState(() => launchFlight(setIsPending));
 
-  const send = (launch: RunLaunch, onSuccess?: () => void) => {
-    flight.run(() => runAgent.mutateAsync(launch), {
-      onSuccess: () => {
-        setRefusal(null);
-        onSuccess?.();
+  const send = (launch: RunLaunch, options: LaunchOptions = {}) => {
+    flight.run(
+      () =>
+        runAgent.mutateAsync(launch).then((run) => {
+          (options.leave ?? navigate)(runDetailPath(packageId, run.id));
+        }),
+      {
+        onSuccess: () => setRefusal(null),
+        // The mutation cache reports every failure; this picks up the 409.
+        onError: (err) => {
+          const refused = launchRefusal(err);
+          if (!refused) return;
+          setRefusal(refused);
+          replay.current = { launch: retryLaunch(launch, refused.errors), options };
+        },
       },
-      // The mutation cache reports every failure; this picks up the 409.
-      onError: (err) => {
-        const refused = launchRefusal(err);
-        if (!refused) return;
-        setRefusal(refused);
-        replay.current = { launch: retryLaunch(launch, refused.errors), onSuccess };
-      },
-    });
+    );
   };
 
   return {
     isPending,
     missingErrors: refusal?.errors ?? null,
     missingVersion: refusal?.version,
-    /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
+    /** `options` also apply when the recovery retry of this launch succeeds. */
     launch: send,
-    retry: () => send(replay.current.launch, replay.current.onSuccess),
+    retry: () => send(replay.current.launch, replay.current.options),
     dismiss: () => {
       // A retry still in flight must not reopen the modal.
       flight.forget();
@@ -158,18 +180,31 @@ export function useRunLauncher(packageId: string) {
 
 export type RunLauncher = ReturnType<typeof useRunLauncher>;
 
-export function useImportPackage() {
+/** After an import: refresh every package cache and surface the non-blocking import-time warnings. */
+function afterImport(qc: QueryClient, data: { type: string; warnings?: string[] }) {
+  // An import REPLACES the draft artifact, and the import modal opens the
+  // detail page straight away — without the file caches the explorer renders
+  // the pre-import index until the query goes stale.
+  invalidatePackageCaches(qc);
+  if (data.type === "integration") void invalidateIntegrationQueries(qc);
+  for (const message of data.warnings ?? []) toast.warning(message);
+  // The library feeds the integration editor's picker, which imports in place
+  // and must see the new package.
+  void invalidateLibraries(qc);
+}
+
+/** `meta`: the import modal answers a refusal itself (overwrite and integrity prompts). */
+export function useImportPackage(meta?: MutationMeta) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   return useMutation({
-    meta: { errorHandledByCaller: true },
+    meta,
     mutationFn: async ({
       file,
       force,
     }: {
       file: File;
       force?: boolean;
-    }): Promise<{ packageId: string; type: string; warnings?: string[] }> => {
+    }): Promise<{ packageId: string; type: string; version?: string; warnings?: string[] }> => {
       const fd = new FormData();
       fd.append("file", file);
       // Multi-package bundles route to a different endpoint; the
@@ -197,42 +232,19 @@ export function useImportPackage() {
       });
       return data!;
     },
-    onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
-      // An import REPLACES the draft artifact, and this mutation navigates
-      // straight to the detail page — without this the explorer renders the
-      // pre-import index and the pre-import `inline` bodies until the query
-      // goes stale.
-      invalidatePackageFiles(qc);
-      // Non-blocking import-time warnings — surface each one as a sonner
-      // warning toast so publishers see them immediately after a successful import.
-      if (data.warnings && data.warnings.length > 0) {
-        for (const message of data.warnings) {
-          toast.warning(message);
-        }
-      }
-      navigate(packageDetailPath(data.type, data.packageId));
-    },
+    onSuccess: (data) => afterImport(qc, data),
   });
 }
 
 export function useImportFromGithub() {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   return useMutation({
     meta: { errorHandledByCaller: true },
     mutationFn: async (url: string) => {
       const { data } = await client.POST("/api/packages/import-github", { body: { url } });
       return data!;
     },
-    onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
-      // Same reason as `useImportPackage`: the draft artifact was replaced.
-      invalidatePackageFiles(qc);
-      navigate(packageDetailPath(data.type, data.packageId));
-    },
+    onSuccess: (data) => afterImport(qc, data),
   });
 }
 
@@ -266,22 +278,6 @@ export function useDeleteAgentRuns(packageId: string) {
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
-    },
-  });
-}
-
-export function useDeleteAgent() {
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-  return useMutation({
-    mutationFn: async (packageId: string) => {
-      await client.DELETE("/api/packages/agents/{scope}/{name}", {
-        params: { path: splitPackageRef(packageId) },
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      navigate("/");
     },
   });
 }
@@ -375,6 +371,9 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
+    // Every caller builds `body` through `packageUpdateBody`, and none of them
+    // sends the API's `content` field: a package's primary file is
+    // one of its files, written as a file operation like the others.
     meta: { errorHandledByCaller: true },
     mutationFn: async ({
       etag,
@@ -384,8 +383,6 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       etag: string;
       body: {
         manifest: Record<string, unknown>;
-        /** Legacy API content field; the editor sends ordered file operations. */
-        content?: string;
         operations?: import("../lib/package-file-tree").PackageFileWriteOperation[];
       };
     }): Promise<{ id: string; etag: string | null }> => {
@@ -409,7 +406,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       if (type === "agent" || type === "integration") {
         void invalidateIntegrationQueries(qc);
       }
-      qc.invalidateQueries({ queryKey: ["version-info"] });
+      qc.invalidateQueries({ queryKey: versionKeys.infoAll });
     },
   });
 }

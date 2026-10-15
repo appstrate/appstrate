@@ -12,7 +12,7 @@ import i18n from "../i18n";
 import { ApiError } from "../api/errors";
 import { PACKAGE_PATH_ERROR_KEYS } from "./package-files";
 
-/** SKILL.md frontmatter refusals; their sentences quote the checker's own `{{detail}}`. */
+/** SKILL.md frontmatter refusals; each key is one rule, said in the reader's language. */
 export const SKILL_FRONTMATTER_ERROR_KEYS = {
   skill_invalid_frontmatter: "editor.errorSkillInvalidFrontmatter",
   skill_missing_frontmatter_name: "editor.errorSkillFrontmatterName",
@@ -20,6 +20,20 @@ export const SKILL_FRONTMATTER_ERROR_KEYS = {
   skill_missing_frontmatter_description: "editor.errorSkillFrontmatterDescription",
   skill_invalid_frontmatter_description: "editor.errorSkillDescriptionTooLong",
 } as const satisfies Partial<Record<Lowercase<CompanionViolationReason>, string>>;
+
+/**
+ * Where the validator stopped in the file, said in the reader's language: « (ligne 3,
+ * colonne 14) », or "". The server sends the position (`line`/`column`, 1-based, in the file's
+ * own lines); nothing is read from its sentence.
+ */
+export function filePosition(err: { line?: number; column?: number }): string {
+  if (err.line === undefined || err.column === undefined) return "";
+  return i18n.t("editor.errorSkillYamlPosition", {
+    line: err.line,
+    column: err.column,
+    ns: "agents",
+  });
+}
 
 /** Item codes whose sentence is `common:apiError.<code>`, or the server's own message. */
 type CommonSentenceCode =
@@ -56,6 +70,7 @@ export const REFUSAL_ERROR_KEYS = {
   locked_required_field_empty: "error.lockedRequiredFieldEmpty",
   draft_not_writable: "error.draftNotWritable",
   connection_label_taken: "error.connectionLabelTaken",
+  output_tool_required: "error.outputToolRequired",
   connection_pinned: "error.connectionPinned",
   connection_owner_without_access: "error.connectionOwnerWithoutAccess",
   end_user_connection_not_shareable: "error.endUserConnectionNotShareable",
@@ -75,6 +90,9 @@ interface Refusal {
   param?: string;
   field?: string;
   message?: string;
+  /** 1-based position in the offending file, on a file-level item. */
+  line?: number;
+  column?: number;
 }
 
 /**
@@ -89,7 +107,8 @@ export function refusalMessage(err: Refusal): string | null {
     // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
     // the first segment is the prefix.
     const field = err.param?.slice(err.param.indexOf(".") + 1) || err.param || "";
-    return i18n.t(agentsKey, { field, message, detail: message, ns: "agents" });
+    const position = filePosition(err);
+    return i18n.t(agentsKey, { field, message, detail: message, position, ns: "agents" });
   }
   const key = `apiError.${code}`;
   if (!i18n.exists(key, { ns: "common" })) return null;
@@ -103,13 +122,14 @@ export function refusalMessage(err: Refusal): string | null {
 function fieldErrors(err: ApiError): Refusal[] {
   return (err.errors ?? []).flatMap((item: unknown) => {
     if (typeof item !== "object" || item === null) return [];
-    const { code, field, message } = item as Record<string, unknown>;
+    const { code, field, message, line, column } = item as Record<string, unknown>;
     if (typeof code !== "string") return [];
     return [
       {
         code,
         field: typeof field === "string" ? field : undefined,
         message: typeof message === "string" ? message : undefined,
+        ...(typeof line === "number" && typeof column === "number" ? { line, column } : {}),
       },
     ];
   });

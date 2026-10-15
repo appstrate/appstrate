@@ -17,7 +17,9 @@ type Plan = components["schemas"]["EeBillingPlan"];
 type UpgradePlan = components["schemas"]["EeBillingUpgradePlan"];
 
 installFakeStorage({
-  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
+  // The billing page redirects when the module is absent, so the flag the
+  // ee module contributes has to be on for the page to render at all.
+  __APP_CONFIG__: { features: { billing: true }, trustedOrigins: [] },
 });
 
 const { $api } = await import("../../api/client.ts");

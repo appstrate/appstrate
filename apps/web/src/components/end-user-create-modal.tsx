@@ -1,120 +1,55 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { useForm } from "react-hook-form";
-import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
-import { Spinner } from "./spinner";
+import { FormModal } from "./form-modal";
 import { useCreateEndUser } from "../hooks/use-end-users";
 import { errorMessage } from "../lib/mutation-error";
-import { EndUserMetadataEditor } from "./end-user-metadata-editor";
-import { entriesToMetadata, type MetadataEntry } from "../lib/end-user-metadata";
+import { EndUserFields, type EndUserFormValues } from "./end-user-fields";
+import { entriesToMetadata } from "../lib/end-user-metadata";
 
 interface Props {
-  open: boolean;
   onClose: () => void;
 }
 
-type FormData = {
-  name: string;
-  email: string;
-  externalId: string;
-};
-
-export function EndUserCreateModal({ open, onClose }: Props) {
+/** Mounted only while open: any way of closing it (Annuler, outside, Escape, Back) abandons the input. */
+export function EndUserCreateModal({ onClose }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateEndUser();
-  const [metadata, setMetadata] = useState<MetadataEntry[]>([]);
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    setError,
-    formState: { errors },
-  } = useForm<FormData>({
-    defaultValues: { name: "", email: "", externalId: "" },
+  const [values, setValues] = useState<EndUserFormValues>({
+    name: "",
+    email: "",
+    externalId: "",
+    metadata: [],
   });
+  const [error, setError] = useState<string | null>(null);
 
-  const handleClose = () => {
-    reset({ name: "", email: "", externalId: "" });
-    setMetadata([]);
-    createMutation.reset();
-    onClose();
-  };
-
-  const onFormSubmit = (data: FormData) => {
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
     const payload: NonNullable<Parameters<typeof createMutation.mutate>[0]["body"]> = {};
-    if (data.name.trim()) payload.name = data.name.trim();
-    if (data.email.trim()) payload.email = data.email.trim();
-    if (data.externalId.trim()) payload.externalId = data.externalId.trim();
-    const meta = entriesToMetadata(metadata);
+    if (values.name.trim()) payload.name = values.name.trim();
+    if (values.email.trim()) payload.email = values.email.trim();
+    if (values.externalId.trim()) payload.externalId = values.externalId.trim();
+    const meta = entriesToMetadata(values.metadata);
     if (Object.keys(meta).length > 0) payload.metadata = meta;
 
     createMutation.mutate(
       { body: payload },
-      {
-        onSuccess: () => handleClose(),
-        onError: (err) => {
-          setError("root", { message: errorMessage(err) });
-        },
-      },
+      { onSuccess: onClose, onError: (err) => setError(errorMessage(err)) },
     );
   };
 
-  if (!open) return null;
-
   return (
-    <Modal
-      open={open}
-      onClose={handleClose}
+    <FormModal
+      onClose={onClose}
       title={t("spaces.createEndUserTitle")}
-      actions={
-        <>
-          <Button type="button" variant="outline" onClick={handleClose}>
-            {t("btn.cancel")}
-          </Button>
-          <Button type="submit" form="create-end-user-form" disabled={createMutation.isPending}>
-            {createMutation.isPending ? <Spinner /> : t("btn.create")}
-          </Button>
-        </>
-      }
+      onSubmit={onSubmit}
+      isPending={createMutation.isPending}
+      submitLabel={t("btn.create")}
+      error={error}
     >
-      <form id="create-end-user-form" onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="eu-name">{t("spaces.endUserName")}</Label>
-          <Input
-            id="eu-name"
-            type="text"
-            placeholder={t("spaces.endUserNamePlaceholder")}
-            autoFocus
-            {...register("name")}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="eu-email">{t("spaces.endUserEmail")}</Label>
-          <Input
-            id="eu-email"
-            type="email"
-            placeholder="alice@example.com"
-            {...register("email")}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="eu-external-id">{t("spaces.endUserExternalId")}</Label>
-          <Input
-            id="eu-external-id"
-            type="text"
-            placeholder="my_user_123"
-            {...register("externalId")}
-          />
-        </div>
-        <EndUserMetadataEditor entries={metadata} onChange={setMetadata} />
-        {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
-      </form>
-    </Modal>
+      <EndUserFields values={values} onChange={setValues} />
+    </FormModal>
   );
 }

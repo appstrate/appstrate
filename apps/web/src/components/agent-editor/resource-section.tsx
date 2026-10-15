@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ChangeEvent, type ReactNode, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type ReactNode, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
 import { SectionCard } from "../section-card";
-import { packageListPath } from "../../lib/package-paths";
-import {
-  usePackageList,
-  useUploadPackage,
-  usePackageVersions,
-  type PackageType,
-} from "../../hooks/use-packages";
+import { ActivateIntegrationButton } from "../activate-integration-button";
+import { packageDetailPath, packageListPath } from "../../lib/package-paths";
+import { useLocalListParams } from "../../lib/list-params";
+import { matchesSearch } from "../../lib/strings";
+import { usePackageList, usePackageVersions, type PackageType } from "../../hooks/use-packages";
+import { useImportPackage } from "../../hooks/use-mutations";
 import {
   Select,
   SelectContent,
@@ -21,17 +20,44 @@ import {
 } from "@appstrate/ui/components/select";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Button } from "@appstrate/ui/components/button";
-import { ShieldCheck, AlertTriangle } from "lucide-react";
-import { Spinner } from "../spinner";
+import {
+  ShieldCheck,
+  AlertTriangle,
+  ArrowUpRight,
+  Plus,
+  SearchX,
+  Trash2,
+  Upload,
+  Wrench,
+} from "lucide-react";
+import { Spinner } from "@appstrate/ui/components/spinner";
+import { ListToolbar } from "../list-toolbar";
+import { Badge } from "@appstrate/ui/components/badge";
+import { ErrorState, EmptyState, EmptyStateAction, NoMatchState } from "../page-states";
 import type { ResourceEntry } from "./types";
 import { caretRange } from "./utils";
 import { IntegrationToolPicker } from "./integration-tool-picker";
-import { useSetPackageActive } from "../../hooks/use-library";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useCurrentSpaceGrant, usePermissions } from "../../hooks/use-permissions";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { TableRowActions } from "../table-row-actions";
+import { FormModal } from "../form-modal";
+import { Modal } from "../modal";
+import { PageActionsMenu } from "../page-actions-menu";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@appstrate/ui/components/table";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { usePermissions } from "../../hooks/use-permissions";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { packagePermission } from "@appstrate/core/permissions";
-import { maySetPackageActive } from "../../lib/package-permissions";
+import { TextSkeleton } from "../loading-skeletons";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+
+const SELECTIONS = ["selected", "available"] as const;
 
 type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
 
@@ -49,6 +75,7 @@ interface ResourceSectionProps {
    * (the list always renders so the leading items show).
    */
   leadingItems?: ReactNode;
+  surface?: "card" | "settings";
 }
 
 function VersionSelect({
@@ -62,6 +89,7 @@ function VersionSelect({
   value: string;
   onChange: (version: string) => void;
 }) {
+  const { t } = useTranslation("agents");
   const { data: versions, isLoading } = usePackageVersions(type, packageId);
   const available = useMemo(() => versions?.filter((v) => !v.yanked), [versions]);
   const ranges = useMemo(() => available?.map((v) => caretRange(v.version)) ?? [], [available]);
@@ -73,18 +101,22 @@ function VersionSelect({
   // mutate the draft. Picking a listed range replaces it explicitly.
   const outOfListValue = value && !ranges.includes(value) ? value : null;
 
-  if (isLoading) return <Spinner />;
+  if (isLoading) return <Skeleton className="h-5 w-16" />;
   if (!available || available.length === 0) {
     return (
       <span className="bg-muted text-muted-foreground inline-block rounded px-2 py-0.5 font-mono text-xs">
-        *
+        {value || "*"}
       </span>
     );
   }
 
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-7 w-[100px] text-xs" onClick={(e) => e.stopPropagation()}>
+      <SelectTrigger
+        aria-label={t("editor.resourceVersion", { name: packageId })}
+        className="h-8 w-[100px] text-xs"
+        onClick={(e) => e.stopPropagation()}
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -106,29 +138,25 @@ export function ResourceSection({
   selectedEntries,
   onChange,
   leadingItems,
+  surface = "card",
 }: ResourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const resourceId = useId();
+  const list = useLocalListParams();
+  const selection = list.values("selection", SELECTIONS);
   // The picker offers what this space RUNS: activation governs what a space
   // offers — hints, CLI sync, this list — so the index (placed here and
   // switched on, every type) is the offer. It is narrower than what a manifest
   // may declare: resolving a DECLARED dependency name stays org-wide (RBAC
   // §6.9, `services/package-catalog.ts`), so an agent can legally depend on a
   // package this space does not run, and the entry below stays visible for it.
-  const { data: items, isLoading } = usePackageList(type);
+  const { data: items, isLoading, error } = usePackageList(type);
   // Without the type's read the catalog never loads: the declared
   // entries are then all this section knows, listed by id.
   const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
   const canReach = useCanReach();
-  const upload = useUploadPackage(type);
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
-  // The tree's ONE activation verdict, the same one the library and the package
-  // dropdown ask: the type's grant in THIS space, or owning it (RBAC §3.6).
-  // Offering the cure to somebody the route will refuse is a worse sentence
-  // than saying so on the button.
-  const spaceGrant = useCurrentSpaceGrant();
-  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
+  const upload = useImportPackage();
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
@@ -186,8 +214,8 @@ export function ResourceSection({
     if (!file) return;
 
     try {
-      const result = await upload.mutateAsync(file);
-      const newId = result.id;
+      const result = await upload.mutateAsync({ file });
+      const newId = result.packageId;
       const newVersion = result.version;
       if (!newVersion) return;
 
@@ -216,12 +244,45 @@ export function ResourceSection({
     </label>
   );
 
-  return (
-    <SectionCard title={title} headerRight={uploadButton}>
-      {isLoading ? (
-        <div className="text-muted-foreground flex items-center justify-center py-6">
-          <Spinner />
-        </div>
+  const matchesFilter = (id: string, name = "", description = "") =>
+    matchesSearch(list.search, [id, name, description]) &&
+    (selection.length === 0 || selection.includes(selectedMap.has(id) ? "selected" : "available"));
+  const visibleItems = (items ?? []).filter((item) =>
+    matchesFilter(item.id, item.name ?? "", item.description ?? ""),
+  );
+  const visibleMissingIds = unlistedDeclaredIds.filter((id) => matchesFilter(id));
+
+  const toolbar = (
+    <ListToolbar
+      placement="panel"
+      search={{
+        value: list.search,
+        onChange: list.setSearch,
+        placeholder: t("editor.resourceSearch"),
+      }}
+      filters={[
+        {
+          id: "selection",
+          label: t("editor.resourceSelection"),
+          values: selection,
+          options: [
+            { value: "selected", label: t("editor.resourceSelected") },
+            { value: "available", label: t("editor.resourceAvailable") },
+          ],
+          onChange: list.setValues("selection"),
+        },
+      ]}
+      actions={uploadButton}
+      onReset={list.reset}
+    />
+  );
+
+  const content = (
+    <>
+      {error ? (
+        <ErrorState error={error} compact />
+      ) : isLoading ? (
+        <TextSkeleton className="py-2" />
       ) : (!items || items.length === 0) && unlistedDeclaredIds.length === 0 && !leadingItems ? (
         <>
           <p className="text-muted-foreground text-xs">
@@ -234,12 +295,14 @@ export function ResourceSection({
           )}
         </>
       ) : (
-        <div className="flex flex-col gap-1">
+        <div className="border-border flex flex-col border-t">
           {!canReadCatalog && (
-            <p className="text-muted-foreground mb-1 text-xs">{t("editor.catalogUnreadable")}</p>
+            <p className="text-muted-foreground border-border border-b py-3 text-xs">
+              {t("editor.catalogUnreadable")}
+            </p>
           )}
           {leadingItems}
-          {(items ?? []).map((item) => {
+          {visibleItems.map((item) => {
             const isSelected = selectedMap.has(item.id);
             const isBuiltIn = item.source === "system";
             const entry = selectedMap.get(item.id);
@@ -248,18 +311,20 @@ export function ResourceSection({
               <div
                 key={item.id}
                 className={cn(
-                  "border-border rounded-md border transition-colors",
-                  isSelected && "border-primary bg-primary/5",
+                  "border-border border-b transition-colors",
+                  isSelected && "bg-muted/10",
                 )}
               >
-                <label
-                  className={cn(
-                    "flex cursor-pointer items-center gap-2.5 px-3 py-2",
-                    !isSelected && "hover:bg-muted/50 rounded-md",
-                  )}
-                >
-                  <Checkbox checked={isSelected} onCheckedChange={() => toggle(item.id)} />
-                  <div className="flex min-w-0 flex-1 flex-col">
+                <div className="hover:bg-muted/30 flex items-center gap-2.5 py-4">
+                  <Checkbox
+                    id={`${resourceId}-${item.id}`}
+                    checked={isSelected}
+                    onCheckedChange={() => toggle(item.id)}
+                  />
+                  <label
+                    htmlFor={`${resourceId}-${item.id}`}
+                    className="flex min-w-0 flex-1 cursor-pointer flex-col"
+                  >
                     <span className="flex items-center gap-1.5 truncate text-sm font-medium">
                       {item.name || item.id}
                       {isBuiltIn && (
@@ -271,7 +336,7 @@ export function ResourceSection({
                         {item.description}
                       </span>
                     )}
-                  </div>
+                  </label>
                   {isSelected && (
                     <div className="ml-auto shrink-0">
                       <VersionSelect
@@ -282,9 +347,19 @@ export function ResourceSection({
                       />
                     </div>
                   )}
-                </label>
+                  <Button asChild variant="ghost" size="icon" className="size-8 shrink-0">
+                    <Link
+                      to={packageDetailPath(type, item.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={t("editor.resourceOpen", { name: item.name || item.id })}
+                    >
+                      <ArrowUpRight className="size-4" />
+                    </Link>
+                  </Button>
+                </div>
                 {isSelected && type === "integration" && entry && (
-                  <div className="px-3 pb-3">
+                  <div className="pb-4">
                     <IntegrationToolPicker
                       packageId={item.id}
                       entry={entry}
@@ -304,11 +379,14 @@ export function ResourceSection({
               "activate it to connect it", and until now nothing on this screen
               could: the checkbox only removes the dependency. So the one action
               the sentence asks for had no button anywhere. */}
-          {unlistedDeclaredIds.map((id) => (
+          {visibleItems.length === 0 && visibleMissingIds.length === 0 && !leadingItems && (
+            <NoMatchState message={t("editor.resourceNoMatch")} />
+          )}
+          {visibleMissingIds.map((id) => (
             <div
               key={id}
               className={cn(
-                "flex items-center gap-2 rounded-md border pr-2",
+                "flex flex-wrap items-center gap-2 border-b pr-2",
                 canReadCatalog ? "border-destructive/40 bg-destructive/5" : "border-border",
               )}
             >
@@ -329,23 +407,416 @@ export function ResourceSection({
                 </div>
               </label>
               {type === "integration" && canReadCatalog && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={setActive.isPending || !currentSpaceId || !canActivate}
-                  title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
-                  onClick={() => {
-                    if (!currentSpaceId || !canActivate) return;
-                    setActive.mutate({ spaceId: currentSpaceId, packageId: id, active: true });
-                  }}
-                >
-                  {setActive.isPending ? <Spinner /> : t("editor.activateIntegration")}
-                </Button>
+                <ActivateIntegrationButton packageId={id} />
               )}
             </div>
           ))}
         </div>
       )}
+    </>
+  );
+
+  if (surface === "settings") {
+    return (
+      <SelectedResources
+        type={type}
+        title={title}
+        emptyLabel={emptyLabel}
+        items={items}
+        isLoading={isLoading}
+        error={error}
+        selectedEntries={selectedEntries}
+        missingIds={unlistedDeclaredIds}
+        canReadCatalog={canReadCatalog}
+        importInput={
+          <input
+            type="file"
+            accept=".afps"
+            ref={fileInputRef}
+            onChange={handleUpload}
+            className="hidden"
+            disabled={upload.isPending}
+          />
+        }
+        onImport={() => fileInputRef.current?.click()}
+        importing={upload.isPending}
+        onToggle={toggle}
+        onVersion={updateVersion}
+        onReplace={replaceEntry}
+        onAdd={(ids) =>
+          onChange((prev) => [
+            ...prev,
+            ...ids
+              .filter((id) => !prev.some((e) => e.id === id))
+              .map((id) => {
+                const item = items?.find((i) => i.id === id);
+                return { id, version: item?.version ? caretRange(item.version) : "*" };
+              }),
+          ])
+        }
+      />
+    );
+  }
+
+  return (
+    <SectionCard title={title}>
+      {toolbar}
+      {content}
     </SectionCard>
+  );
+}
+
+type CatalogItem = NonNullable<ReturnType<typeof usePackageList>["data"]>[number];
+
+/**
+ * The Définition's view of an agent's skills or integrations: ONLY what the
+ * agent uses, in a table, and the list's one "Actions" menu to add or import.
+ *
+ * The page editor lists the whole catalogue with a box per item, which stops
+ * reading once an organization has twenty skills. Here the rows are the
+ * dependencies — stock shadcn `Table` — each with its version and, for an
+ * integration, the tools it allows summed up in one line; changing those opens
+ * a modal, from the row's "…" menu. Adding opens the catalogue in a modal too.
+ */
+function SelectedResources({
+  type,
+  title,
+  emptyLabel,
+  items,
+  isLoading,
+  error,
+  selectedEntries,
+  missingIds,
+  canReadCatalog,
+  importInput,
+  onImport,
+  importing,
+  onToggle,
+  onVersion,
+  onReplace,
+  onAdd,
+}: {
+  type: PackageType;
+  title: string;
+  emptyLabel: string;
+  items: CatalogItem[] | undefined;
+  isLoading: boolean;
+  error: unknown;
+  selectedEntries: ResourceEntry[];
+  missingIds: string[];
+  /** Without the type's read the catalog never loads: an unlisted row is unknown, not missing. */
+  canReadCatalog: boolean;
+  /** The hidden file input the "Importer" item clicks. */
+  importInput: ReactNode;
+  onImport: () => void;
+  importing: boolean;
+  onToggle: (id: string) => void;
+  onVersion: (id: string, version: string) => void;
+  onReplace: (id: string, next: ResourceEntry) => void;
+  onAdd: (ids: string[]) => void;
+}) {
+  const { t } = useTranslation(["agents", "settings", "common"]);
+  const picker = useModalParam("add");
+  const byId = new Map((items ?? []).map((item) => [item.id, item] as const));
+  const missing = new Set(missingIds);
+  const rows = selectedEntries;
+  const toolsFor = useModalTarget("tools", rows);
+  const toolsEntry = toolsFor.target;
+  const isIntegration = type === "integration";
+
+  const toolsSummary = (entry: ResourceEntry) =>
+    entry.tools === undefined
+      ? t("editor.toolsDefault")
+      : entry.tools === "*"
+        ? t("editor.toolsAll")
+        : entry.tools.length === 0
+          ? t("editor.toolsNone")
+          : entry.tools.join(", ");
+
+  return (
+    <section aria-label={title} className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          <Badge variant="secondary">{rows.length}</Badge>
+        </div>
+        {importInput}
+        <PageActionsMenu
+          actions={[
+            {
+              id: "add",
+              label: t("editor.resourceAdd"),
+              icon: Plus,
+              onSelect: () => picker.open(),
+              disabled: !canReadCatalog,
+            },
+            {
+              id: "import",
+              label: t("editor.importZip"),
+              icon: Upload,
+              onSelect: onImport,
+              disabled: importing,
+            },
+          ]}
+        />
+      </div>
+
+      {error ? (
+        <ErrorState error={error} compact />
+      ) : isLoading ? (
+        <TextSkeleton className="py-2" />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          message={canReadCatalog ? emptyLabel : t("editor.catalogUnreadable")}
+          icon={SearchX}
+          compact
+        >
+          {canReadCatalog && (
+            <EmptyStateAction
+              action={{ label: t("editor.resourceAdd"), onSelect: () => picker.open() }}
+            />
+          )}
+        </EmptyState>
+      ) : (
+        <div className="border-border overflow-hidden rounded-lg border">
+          {!canReadCatalog && (
+            <p className="text-muted-foreground border-border border-b px-4 py-3 text-xs">
+              {t("editor.catalogUnreadable")}
+            </p>
+          )}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("editor.resourceName")}</TableHead>
+                <TableHead className="w-32">{t("editor.resourceVersionHead")}</TableHead>
+                {isIntegration && <TableHead>{t("editor.resourceTools")}</TableHead>}
+                <TableHead className="w-12" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((entry) => {
+                const item = byId.get(entry.id);
+                const isMissing = missing.has(entry.id);
+                // Unlisted because the catalog is unreadable, not because it is inactive here.
+                const flagged = isMissing && canReadCatalog;
+                const name = item?.name || entry.id;
+                return (
+                  <TableRow key={entry.id} className={cn(flagged && "bg-destructive/5")}>
+                    <TableCell>
+                      <div className="flex min-w-0 flex-col">
+                        <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                          {name}
+                          {item?.source === "system" && (
+                            <ShieldCheck className="text-muted-foreground size-3.5 shrink-0" />
+                          )}
+                        </span>
+                        {flagged ? (
+                          <span className="text-destructive inline-flex items-center gap-1 text-xs">
+                            <AlertTriangle className="size-3.5 shrink-0" />
+                            {isIntegration
+                              ? t("editor.integrationInactive")
+                              : t("editor.dependencyMissing")}
+                          </span>
+                        ) : (
+                          item?.description && (
+                            <span className="text-muted-foreground max-w-[24rem] truncate text-xs">
+                              {item.description}
+                            </span>
+                          )
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {isMissing ? (
+                        !flagged ? (
+                          <span className="text-muted-foreground font-mono text-xs">
+                            {entry.version ?? "*"}
+                          </span>
+                        ) : (
+                          isIntegration && <ActivateIntegrationButton packageId={entry.id} />
+                        )
+                      ) : (
+                        <VersionSelect
+                          type={type}
+                          packageId={entry.id}
+                          value={entry.version ?? "*"}
+                          onChange={(v) => onVersion(entry.id, v)}
+                        />
+                      )}
+                    </TableCell>
+                    {isIntegration && (
+                      <TableCell className="text-muted-foreground max-w-[20rem] truncate text-sm">
+                        {isMissing ? "—" : toolsSummary(entry)}
+                      </TableCell>
+                    )}
+                    <TableCell className="text-right">
+                      <TableRowActions
+                        menuLabel={t("editor.resourceActions", { name })}
+                        actions={[
+                          {
+                            id: "tools",
+                            label: t("editor.toolsEdit"),
+                            icon: Wrench,
+                            onSelect: () => toolsFor.open(entry.id),
+                            hidden: !isIntegration || isMissing,
+                          },
+                          {
+                            id: "remove",
+                            label: t("editor.resourceRemove"),
+                            icon: Trash2,
+                            onSelect: () => onToggle(entry.id),
+                            destructive: true,
+                          },
+                        ]}
+                      >
+                        <DropdownMenuItem asChild>
+                          <Link
+                            to={packageDetailPath(type, entry.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <ArrowUpRight />
+                            {t("editor.resourceOpen", { name })}
+                          </Link>
+                        </DropdownMenuItem>
+                      </TableRowActions>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {picker.value !== null && (
+        <ResourcePicker
+          title={t("editor.resourceAddTitle", { kind: title })}
+          items={(items ?? []).filter((item) => !selectedEntries.some((e) => e.id === item.id))}
+          onClose={picker.close}
+          onAdd={(ids) => {
+            onAdd(ids);
+            picker.close();
+          }}
+        />
+      )}
+
+      {toolsEntry && (
+        <ToolsModal
+          name={byId.get(toolsEntry.id)?.name || toolsEntry.id}
+          entry={toolsEntry}
+          onClose={toolsFor.close}
+          onApply={(next) => {
+            onReplace(toolsEntry.id, next);
+            toolsFor.close();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+/** An integration's allowed tools, edited on a copy and applied to the draft. */
+function ToolsModal({
+  name,
+  entry,
+  onClose,
+  onApply,
+}: {
+  name: string;
+  entry: ResourceEntry;
+  onClose: () => void;
+  onApply: (entry: ResourceEntry) => void;
+}) {
+  const { t } = useTranslation(["agents", "common"]);
+  const [draft, setDraft] = useState(entry);
+  return (
+    <FormModal
+      title={t("editor.toolsTitle", { name })}
+      onClose={onClose}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onApply(draft);
+      }}
+      submitLabel={t("editor.apply")}
+      className="sm:max-w-2xl"
+    >
+      <div className="max-h-[60dvh] overflow-y-auto">
+        <IntegrationToolPicker packageId={entry.id} entry={draft} onChange={setDraft} />
+      </div>
+    </FormModal>
+  );
+}
+
+/** The catalogue of what can be added, searched and ticked, in a modal. */
+function ResourcePicker({
+  title,
+  items,
+  onClose,
+  onAdd,
+}: {
+  title: string;
+  items: CatalogItem[];
+  onClose: () => void;
+  onAdd: (ids: string[]) => void;
+}) {
+  const { t } = useTranslation(["agents", "common"]);
+  const [search, setSearch] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const shown = items.filter((item) =>
+    matchesSearch(search, [item.id, item.name, item.description]),
+  );
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={title}
+      className="sm:max-w-2xl"
+      actions={
+        <Button type="button" disabled={picked.length === 0} onClick={() => onAdd(picked)}>
+          {t("editor.resourceAddSelection", { count: picked.length })}
+        </Button>
+      }
+    >
+      <ListToolbar
+        placement="panel"
+        search={{ value: search, onChange: setSearch, placeholder: t("editor.resourceSearch") }}
+      />
+      <div className="border-border max-h-[50dvh] divide-y overflow-y-auto rounded-lg border">
+        {shown.length === 0 ? (
+          <NoMatchState message={t("editor.resourceNoMatch")} />
+        ) : (
+          shown.map((item) => (
+            <label
+              key={item.id}
+              className="hover:bg-muted/30 flex cursor-pointer items-center gap-3 px-4 py-3"
+            >
+              <Checkbox
+                checked={picked.includes(item.id)}
+                onCheckedChange={() =>
+                  setPicked((prev) =>
+                    prev.includes(item.id)
+                      ? prev.filter((id) => id !== item.id)
+                      : [...prev, item.id],
+                  )
+                }
+              />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                  {item.name || item.id}
+                  {item.source === "system" && (
+                    <ShieldCheck className="text-muted-foreground size-3.5 shrink-0" />
+                  )}
+                </span>
+                {item.description && (
+                  <span className="text-muted-foreground truncate text-xs">{item.description}</span>
+                )}
+              </span>
+            </label>
+          ))
+        )}
+      </div>
+    </Modal>
   );
 }

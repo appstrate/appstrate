@@ -2,62 +2,73 @@
 
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Badge } from "./status-badge";
-import { ScheduleStatusBadge } from "./schedule-status-badge";
-import { NextRunPreview } from "./next-run-preview";
+import { cn } from "@appstrate/ui/cn";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { ScheduleStateBadges } from "./schedule-status-badge";
 import { ActorLabel } from "./actor-label";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
+import { formatDateField } from "../lib/format-date";
+import { scheduleDetailPath } from "../lib/package-paths";
+import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
+import { describeSchedule } from "../lib/frequency-summary";
 
 interface ScheduleCardProps {
   schedule: EnrichedSchedule;
   agentName?: string;
+  /** The agents list is still loading: the name is not known yet, only the id. */
+  agentPending?: boolean;
 }
 
-export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
-  const { t } = useTranslation("agents");
-  // The three counters this card shows are served WITH the schedule list
-  // (`enrichSchedules` in services/scheduler.ts). They used to come from a
-  // per-card `GET .../schedules/:id/runs`, which made a list of N schedules
-  // fan out to N HTTP requests and ~2N SQL queries just to count three things.
-  // They are also whole-history counts now, not counts within the last page of
-  // runs the card happened to fetch.
-  const runningRuns = schedule.running_runs;
-  const unreadCount = schedule.unread_count;
-  const lastRunNumber = schedule.last_run_number;
-
-  const statusBadge = <ScheduleStatusBadge schedule={schedule} />;
+/** A schedule in the schedules collection: a vertical card of comparable facts. */
+export function ScheduleCard({ schedule, agentName, agentPending = false }: ScheduleCardProps) {
+  const { t } = useTranslation(["settings", "agents", "common"]);
+  // The counters are served with the schedule list (`enrichSchedules` in
+  // services/scheduler.ts) as whole-history counts: the card fetches nothing.
+  const nextRunAt = scheduleNextRunAt(schedule);
+  const recurrence = describeSchedule(schedule);
 
   return (
     <Link
-      to={`/schedules/${schedule.id}`}
-      className="border-border bg-card hover:bg-accent/50 block rounded-lg border transition-colors"
+      to={scheduleDetailPath(schedule.id)}
+      className="border-border bg-card hover:bg-accent/50 flex min-h-44 flex-col rounded-lg border p-4 transition-colors"
     >
-      <div className="flex items-center gap-2 p-3">
-        <span className="truncate font-medium">{schedule.name || t("schedule.unnamed")}</span>
-        {statusBadge}
-        {unreadCount > 0 && (
-          <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-            {unreadCount > 99 ? "99+" : unreadCount}
-          </span>
-        )}
-        {runningRuns > 0 && <Badge status="running" />}
-        <ActorLabel
-          actor_type={schedule.actor_type}
-          actor_name={schedule.actor_name}
-          className="text-muted-foreground ml-auto text-xs"
-        />
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-medium">{scheduleLabel(schedule, t)}</h2>
+          {agentPending ? (
+            <Skeleton className="mt-1 h-4 w-24" />
+          ) : (
+            <p className="text-muted-foreground mt-1 truncate text-xs">
+              {agentName ?? schedule.packageId}
+            </p>
+          )}
+        </div>
+        <ScheduleStateBadges schedule={schedule} />
       </div>
 
-      {/* Next run preview -- flush to card edges */}
-      {schedule.enabled && schedule.next_run_at && (
-        <NextRunPreview
-          runNumber={lastRunNumber + 1}
-          agentName={agentName}
-          schedule_name={schedule.name || t("schedule.unnamed")}
-          next_run_at={schedule.next_run_at}
-          className="border-border border-t border-dashed"
-        />
-      )}
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+        <div className="min-w-0">
+          <dt className="text-muted-foreground">{t("schedules.column.cron")}</dt>
+          <dd
+            className={cn("mt-1 truncate", recurrence.isCron && "font-mono")}
+            title={recurrence.text}
+          >
+            {recurrence.text}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-muted-foreground">{t("schedules.column.next")}</dt>
+          <dd className="mt-1 truncate">
+            {nextRunAt ? formatDateField(nextRunAt, "datetime", schedule.timezone) : "—"}
+          </dd>
+        </div>
+      </dl>
+
+      <ActorLabel
+        actor_type={schedule.actor_type}
+        actor_name={schedule.actor_name}
+        className="text-muted-foreground mt-auto pt-4 text-xs"
+      />
     </Link>
   );
 }

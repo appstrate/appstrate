@@ -11,6 +11,8 @@ import { describe, it, expect } from "bun:test";
 import {
   buildModelFormPayload,
   buildModelsBatchPayload,
+  manualRow,
+  rowToEntry,
   modelFormRefusals,
   toCreateModelBody,
   type ModelFormData,
@@ -848,5 +850,42 @@ describe("modelFormRefusals", () => {
 
   it("leaves a free-form provider's id alone", () => {
     expect(modelFormRefusals({ ...base, manual: true, modelId: "anything" }).modelId).toBeNull();
+  });
+});
+
+describe("manualRow — an id typed into the model list", () => {
+  const typed = (overrides: Partial<ModelFormFields> = {}) => manualRow(fields(overrides));
+
+  it("ships the id alone when the operator answered nothing else", () => {
+    const row = typed({ modelId: " llama3 " });
+    expect(row).toMatchObject({ id: "llama3", label: null, origin: "manual" });
+    expect(rowToEntry(row)).toEqual({ modelId: "llama3" });
+  });
+
+  it("ships the name when one is typed, for the server to keep", () => {
+    expect(rowToEntry(typed({ modelId: "llama3", label: " Llama 3 " }))).toEqual({
+      modelId: "llama3",
+      label: "Llama 3",
+    });
+  });
+
+  it("ships the limits and modalities the operator set, an unticked box included", () => {
+    const row = typed({
+      modelId: "llama3",
+      capabilitiesExplicit: true,
+      inputImage: true,
+      contextWindow: "32768",
+    });
+    expect(rowToEntry(row)).toEqual({
+      modelId: "llama3",
+      input: ["text", "image"],
+      contextWindow: 32768,
+      reasoning: false,
+    });
+  });
+
+  it("ignores the capability fields while the operator leaves them to the server", () => {
+    const row = typed({ modelId: "llama3", inputImage: true, contextWindow: "32768" });
+    expect(rowToEntry(row)).toEqual({ modelId: "llama3" });
   });
 });

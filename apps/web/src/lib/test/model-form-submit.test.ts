@@ -1,64 +1,49 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `submitModelForm` — what a refused submission reports back.
- *
- * The modal re-submits the SAME form on a retry, inline key included. So every
- * refusal that happens after the key was minted has to name the credential it
- * minted; the modal binds the retry to it. Without that the retry mints a
- * second credential holding the same secret and leaves the first referenced by
- * no model.
+ * `submitModelForm` — a creation is ONE `apply` (key, models and binding written together or not
+ * at all), so a refusal reports what the server said per entry and leaves nothing to resume; only
+ * an edit is still a `PATCH`, with the typed key minted first and named back when it is refused.
  */
 
 import { describe, expect, it } from "bun:test";
 import { ApiError } from "../../api/errors.ts";
+import type { ModelChoiceBody } from "../../hooks/use-apply-model-choice.ts";
 import type {
   ModelFormData,
   ModelFormMultiData,
   NewCredentialBody,
 } from "../model-form-payload.ts";
-import {
-  submitModelForm,
-  type ModelFormCreateBody,
-  type ModelFormWrites,
-} from "../model-form-submit.ts";
+import { submitModelForm, type ModelFormWrites } from "../model-form-submit.ts";
 
 const NEW_CREDENTIAL = { api_key: "sk-abc", providerId: "openai" };
 
-const DUPLICATE = new ApiError(
-  "model_already_added",
-  "Model 'gpt-6' is already added for this credential",
-  409,
-);
-
-/** Records every write; `refuse` names the step that throws. */
-function harness(refuse?: "credential" | "model" | "duplicate") {
-  const created: ModelFormCreateBody[] = [];
+/** Records every write; `refuse` is the error the named write throws. */
+function harness(refuse?: { apply?: unknown; credential?: unknown; update?: unknown }) {
+  const applied: ModelChoiceBody[] = [];
   const updated: { id: string; credentialId: string | null }[] = [];
   const credentials: NewCredentialBody[] = [];
   let successes = 0;
 
   const writes: ModelFormWrites = {
+    applyChoice: async (body) => {
+      if (refuse?.apply) throw refuse.apply;
+      applied.push(body);
+    },
     createCredential: async (body) => {
-      if (refuse === "credential") throw new Error("key refused");
+      if (refuse?.credential) throw refuse.credential;
       credentials.push(body);
       return { id: `cred_${credentials.length}` };
     },
-    createModel: async (body) => {
-      if (refuse === "duplicate") throw DUPLICATE;
-      if (refuse === "model") throw new Error("model refused");
-      created.push(body);
-    },
     updateModel: async (id, body) => {
-      if (refuse === "duplicate") throw DUPLICATE;
-      if (refuse === "model") throw new Error("model refused");
+      if (refuse?.update) throw refuse.update;
       updated.push({ id, credentialId: body.credentialId });
     },
   };
 
   return {
     writes,
-    created,
+    applied,
     updated,
     credentials,
     onSuccess: () => {
@@ -69,6 +54,18 @@ function harness(refuse?: "credential" | "model" | "duplicate") {
     },
   };
 }
+
+const run = (h: ReturnType<typeof harness>, editModelId: string | null = null) =>
+  submitModelForm({ writes: h.writes, editModelId, onSuccess: h.onSuccess });
+
+/** What `POST /api/models/apply` answers when entries are refused. */
+const refusedEntries = (...items: { field: string; code: string }[]) =>
+  new ApiError(
+    "validation_failed",
+    "Validation failed",
+    400,
+    items.map((item) => ({ ...item, message: item.code })),
+  );
 
 const oneWithTypedKey: ModelFormData = {
   modelId: "gpt-6",
@@ -82,204 +79,163 @@ const batchWithTypedKey: ModelFormMultiData = {
   models: [{ modelId: "gpt-6" }, { modelId: "gpt-6-mini" }],
 };
 
-describe("submitModelForm — single model", () => {
-  it("reports the minted credential when the model is refused, so a retry rebinds to it", async () => {
-    const h = harness("model");
-    const outcome = await submitModelForm({
-      writes: h.writes,
-      editModelId: null,
-      onSuccess: h.onSuccess,
-    })(oneWithTypedKey);
-
-    expect(outcome.failedModelIds).toEqual(["gpt-6"]);
-    expect(outcome.credentialId).toBe("cred_1");
-    expect(h.credentials).toHaveLength(1);
-    expect(h.successes).toBe(0);
-
-    // The retry the modal builds from that outcome: the picked credential, no
-    // inline key — so nothing new is minted.
-    const retry = harness();
-    const second = await submitModelForm({
-      writes: retry.writes,
-      editModelId: null,
-      onSuccess: retry.onSuccess,
-    })({ modelId: "gpt-6", credentialId: outcome.credentialId! });
-
-    expect(second.failedModelIds).toEqual([]);
-    expect(retry.credentials).toEqual([]);
-    expect(retry.created[0]?.credentialId).toBe("cred_1");
-    expect(retry.successes).toBe(1);
-  });
-
-  it("names no credential when the key itself was refused, and never tries the model", async () => {
-    const h = harness("credential");
-    const outcome = await submitModelForm({
-      writes: h.writes,
-      editModelId: null,
-      onSuccess: h.onSuccess,
-    })(oneWithTypedKey);
-
-    expect(outcome).toEqual({ failedModelIds: ["gpt-6"], duplicateModelIds: [] });
-    expect(h.created).toEqual([]);
-  });
-
-  it("binds a successful create to the credential it minted", async () => {
+describe("submitModelForm — creation is one apply", () => {
+  it("sends the typed key and the model in a single write, minting nothing on its own", async () => {
     const h = harness();
-    const outcome = await submitModelForm({
-      writes: h.writes,
-      editModelId: null,
-      onSuccess: h.onSuccess,
-    })(oneWithTypedKey);
-
-    expect(outcome).toEqual({ failedModelIds: [], duplicateModelIds: [], credentialId: "cred_1" });
-    expect(h.created).toEqual([{ modelId: "gpt-6", credentialId: "cred_1" }]);
-    expect(h.successes).toBe(1);
-  });
-
-  it("routes an edit to the update write, bound to the minted credential", async () => {
-    const h = harness();
-    await submitModelForm({ writes: h.writes, editModelId: "mdl_1", onSuccess: h.onSuccess })(
-      oneWithTypedKey,
-    );
-
-    expect(h.updated).toEqual([{ id: "mdl_1", credentialId: "cred_1" }]);
-    expect(h.created).toEqual([]);
-  });
-
-  it("reports a 409 model_already_added apart from a failure to retry", async () => {
-    const h = harness("duplicate");
-    const outcome = await submitModelForm({
-      writes: h.writes,
-      editModelId: null,
-      onSuccess: h.onSuccess,
-    })(oneWithTypedKey);
-
-    expect(outcome).toEqual({
-      failedModelIds: ["gpt-6"],
-      duplicateModelIds: ["gpt-6"],
-      credentialId: "cred_1",
-    });
-    expect(h.successes).toBe(0);
-  });
-});
-
-describe("submitModelForm — each member's own credential (unbound)", () => {
-  const unbound: ModelFormData = { modelId: "gpt-6", credentialId: null, providerId: "openai" };
-
-  it("creates the model with no credential, naming the provider, and mints none", async () => {
-    const h = harness();
-    const outcome = await submitModelForm({
-      writes: h.writes,
-      editModelId: null,
-      onSuccess: h.onSuccess,
-    })(unbound);
+    const outcome = await run(h)(oneWithTypedKey);
 
     expect(outcome).toEqual({ failedModelIds: [], duplicateModelIds: [] });
     expect(h.credentials).toEqual([]);
-    expect(h.created).toEqual([{ modelId: "gpt-6", credentialId: null, providerId: "openai" }]);
+    expect(h.applied).toEqual([{ credential: NEW_CREDENTIAL, add: [{ modelId: "gpt-6" }] }]);
     expect(h.successes).toBe(1);
   });
 
-  it("creates every entry of an unbound batch against the same provider", async () => {
+  it("binds a batch to the one key and sends every entry in the same write", async () => {
     const h = harness();
-    await submitModelForm({
-      writes: h.writes,
-      editModelId: null,
-      onSuccess: h.onSuccess,
-    })({
+    await run(h)(batchWithTypedKey);
+
+    expect(h.applied).toHaveLength(1);
+    expect(h.applied[0]).toEqual({
+      credential: NEW_CREDENTIAL,
+      add: [{ modelId: "gpt-6" }, { modelId: "gpt-6-mini" }],
+    });
+  });
+
+  it("binds to a picked credential by id", async () => {
+    const h = harness();
+    await run(h)({ modelId: "gpt-6", credentialId: "cred_9" });
+
+    expect(h.applied).toEqual([{ credential: { id: "cred_9" }, add: [{ modelId: "gpt-6" }] }]);
+  });
+
+  it("names the provider when each member serves the model with their own credential", async () => {
+    const h = harness();
+    await run(h)({
       credentialId: null,
       providerId: "openai",
       models: [{ modelId: "gpt-6" }, { modelId: "gpt-6-mini" }],
     });
 
-    expect(h.created).toEqual([
-      { modelId: "gpt-6", credentialId: null, providerId: "openai" },
-      { modelId: "gpt-6-mini", credentialId: null, providerId: "openai" },
+    expect(h.applied).toEqual([
+      {
+        credential: null,
+        providerId: "openai",
+        add: [{ modelId: "gpt-6" }, { modelId: "gpt-6-mini" }],
+      },
     ]);
   });
 
-  it("sends an unbound edit as an update that clears the credential", async () => {
+  it("drops the credential and provider from an entry: they ride on the choice", async () => {
     const h = harness();
-    await submitModelForm({ writes: h.writes, editModelId: "mdl_1", onSuccess: h.onSuccess })(
-      unbound,
-    );
+    await run(h)({ modelId: "gpt-6", credentialId: null, providerId: "openai", reasoning: true });
 
-    expect(h.updated).toEqual([{ id: "mdl_1", credentialId: null }]);
-    expect(h.successes).toBe(1);
+    expect(h.applied[0]?.add).toEqual([{ modelId: "gpt-6", reasoning: true }]);
+  });
+});
+
+describe("submitModelForm — a refused creation", () => {
+  it("keeps every entry to submit again — nothing was written — and names the refused one", async () => {
+    const h = harness({ apply: refusedEntries({ field: "add.1", code: "model_not_offered" }) });
+    const outcome = await run(h)(batchWithTypedKey);
+
+    expect(outcome).toEqual({
+      failedModelIds: ["gpt-6", "gpt-6-mini"],
+      duplicateModelIds: [],
+      refusalCode: "model_not_offered",
+      refusedModelIds: ["gpt-6-mini"],
+    });
+    expect(h.successes).toBe(0);
   });
 
-  it("reports a refused unbound model without naming a credential", async () => {
-    const h = harness("model");
-    const outcome = await submitModelForm({
-      writes: h.writes,
-      editModelId: null,
-      onSuccess: h.onSuccess,
-    })(unbound);
+  it("names the refused entry from a body-validation path (add[<i>].<key>)", async () => {
+    const h = harness({
+      apply: refusedEntries({ field: "add[1].maxTokens", code: "invalid_value" }),
+    });
+    const outcome = await run(h)(batchWithTypedKey);
+
+    expect(outcome.refusedModelIds).toEqual(["gpt-6-mini"]);
+    expect(outcome.failedModelIds).toEqual(["gpt-6", "gpt-6-mini"]);
+  });
+
+  it("reports an entry the organization already holds apart from the ones to retry", async () => {
+    const h = harness({
+      apply: refusedEntries({ field: "add.0", code: "model_already_added" }),
+    });
+    const outcome = await run(h)(batchWithTypedKey);
+
+    expect(outcome).toEqual({
+      failedModelIds: ["gpt-6", "gpt-6-mini"],
+      duplicateModelIds: ["gpt-6"],
+    });
+    expect(h.successes).toBe(0);
+  });
+
+  it("takes the code of a refusal that is the choice's as a whole (a permission, the key)", async () => {
+    const h = harness({ apply: new ApiError("forbidden", "Not allowed", 403) });
+    const outcome = await run(h)(oneWithTypedKey);
+
+    expect(outcome).toEqual({
+      failedModelIds: ["gpt-6"],
+      duplicateModelIds: [],
+      refusalCode: "forbidden",
+    });
+  });
+
+  it("reports a transport failure without a code", async () => {
+    const h = harness({ apply: new Error("network down") });
+    const outcome = await run(h)(oneWithTypedKey);
 
     expect(outcome).toEqual({ failedModelIds: ["gpt-6"], duplicateModelIds: [] });
     expect(h.successes).toBe(0);
   });
 });
 
-describe("submitModelForm — batch", () => {
-  it("reports the shared credential alongside the ids it could not create", async () => {
-    const h = harness("model");
-    const outcome = await submitModelForm({
-      writes: h.writes,
-      editModelId: null,
-      onSuccess: h.onSuccess,
-    })(batchWithTypedKey);
+describe("submitModelForm — edit", () => {
+  const unbound: ModelFormData = { modelId: "gpt-6", credentialId: null, providerId: "openai" };
 
-    expect(outcome).toEqual({
-      failedModelIds: ["gpt-6", "gpt-6-mini"],
-      duplicateModelIds: [],
-      credentialId: "cred_1",
-    });
-    expect(h.credentials).toHaveLength(1);
-    expect(h.successes).toBe(0);
-  });
-
-  it("names no credential when the key itself was refused", async () => {
-    const h = harness("credential");
-    const outcome = await submitModelForm({
-      writes: h.writes,
-      editModelId: null,
-      onSuccess: h.onSuccess,
-    })(batchWithTypedKey);
-
-    expect(outcome).toEqual({
-      failedModelIds: ["gpt-6", "gpt-6-mini"],
-      duplicateModelIds: [],
-    });
-    expect(h.created).toEqual([]);
-  });
-
-  it("creates every entry against one credential and reports it", async () => {
+  it("routes an edit to the update write, bound to the minted credential", async () => {
     const h = harness();
-    const outcome = await submitModelForm({
-      writes: h.writes,
-      editModelId: null,
-      onSuccess: h.onSuccess,
-    })(batchWithTypedKey);
+    const outcome = await run(h, "mdl_1")(oneWithTypedKey);
 
-    expect(outcome).toEqual({ failedModelIds: [], duplicateModelIds: [], credentialId: "cred_1" });
-    expect(h.created.map((m) => m.credentialId)).toEqual(["cred_1", "cred_1"]);
+    expect(h.updated).toEqual([{ id: "mdl_1", credentialId: "cred_1" }]);
+    expect(h.applied).toEqual([]);
+    expect(outcome.credentialId).toBe("cred_1");
     expect(h.successes).toBe(1);
   });
 
-  it("lists every entry the server refused as already added", async () => {
-    const h = harness("duplicate");
-    const outcome = await submitModelForm({
-      writes: h.writes,
-      editModelId: null,
-      onSuccess: h.onSuccess,
-    })(batchWithTypedKey);
+  it("reports the minted credential when the update is refused, so a retry rebinds to it", async () => {
+    const h = harness({ update: new Error("model refused") });
+    const outcome = await run(h, "mdl_1")(oneWithTypedKey);
 
-    expect(outcome).toEqual({
-      failedModelIds: ["gpt-6", "gpt-6-mini"],
-      duplicateModelIds: ["gpt-6", "gpt-6-mini"],
-      credentialId: "cred_1",
+    expect(outcome.failedModelIds).toEqual(["gpt-6"]);
+    expect(outcome.credentialId).toBe("cred_1");
+    expect(h.successes).toBe(0);
+  });
+
+  it("names no credential when the key itself was refused, and never tries the update", async () => {
+    const h = harness({ credential: new Error("key refused") });
+    const outcome = await run(h, "mdl_1")(oneWithTypedKey);
+
+    expect(outcome).toEqual({ failedModelIds: ["gpt-6"], duplicateModelIds: [] });
+    expect(h.updated).toEqual([]);
+  });
+
+  it("sends an unbound edit as an update that clears the credential", async () => {
+    const h = harness();
+    await run(h, "mdl_1")(unbound);
+
+    expect(h.updated).toEqual([{ id: "mdl_1", credentialId: null }]);
+    expect(h.successes).toBe(1);
+  });
+
+  it("reports the code of a refused edit, so the form can say it (model_scheduled)", async () => {
+    const h = harness({
+      update: new ApiError("model_scheduled", "Enabled schedules run this model", 409),
     });
-    expect(h.created).toEqual([]);
+    const outcome = await run(h, "mdl_1")(unbound);
+
+    expect(outcome.failedModelIds).toEqual(["gpt-6"]);
+    expect(outcome.refusalCode).toBe("model_scheduled");
+    expect(h.successes).toBe(0);
   });
 });

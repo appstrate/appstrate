@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { defaultRunVersion } from "../lib/version-selector";
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { cn } from "@appstrate/ui/cn";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
+import { useModalParam } from "../hooks/use-modal-param";
 import { usePackageDetail } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { isNeverPublishedForReader } from "../hooks/use-agent-readiness";
 import type { AgentDetail } from "@appstrate/shared-types";
+import { agentHasInput, runInputOpens } from "../lib/run-input";
 
 interface RunAgentButtonProps {
   packageId: string;
@@ -30,11 +31,17 @@ interface RunAgentButtonProps {
   /**
    * Render a non-blocking orange badge on the button when the agent's
    * integration connections are not ready for a run. Iso with the run-kickoff
-   * 409 / MissingConnectionsModal (same server resolver) — see
-   * `useAgentIntegrationsReadiness`. Does NOT disable the button: the user can
+   * 409 / MissingConnectionsModal (same server resolver), read from the
+   * agent's diagnostics. Does NOT disable the button: the user can
    * still click Run and recover through the modal.
    */
   connectionWarning?: boolean;
+  /**
+   * False for a second button of the same agent on one page (the agent page's
+   * empty runs list): it opens `?run=<agent>` and the page's other button
+   * answers it, so a click never opens two forms.
+   */
+  inputDialog?: boolean;
 }
 
 export function RunAgentButton({
@@ -48,22 +55,26 @@ export function RunAgentButton({
   className,
   showLabel = false,
   connectionWarning = false,
+  inputDialog = true,
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
   const { can } = usePermissions();
   const launcher = useRunLauncher(packageId);
-  const [inputOpen, setInputOpen] = useState(false);
+  // The input form's address: `?run=<agent>`, so the agent's own button answers it.
+  const runParam = useModalParam("run");
+  const inputRequested = inputDialog && runParam.value === packageId;
 
   // Skip the fetch when the parent already provided the detail (detail page
-  // case). Otherwise the query stays DISABLED — list pages render N of these
-  // buttons and eagerly fetching full agent detail per card caused an N+1
-  // request burst on mount. The detail is fetched on demand via `refetch()`
-  // in `handleClick` instead (and cached by React Query for the next click).
+  // case). Otherwise it runs only for the agent `?run=` names: list pages
+  // render N of these buttons, and fetching every detail on mount is an N+1.
+  // A click fetches on demand via `refetch()` in `handleClick`.
   const {
     data: fetchedDetail,
     isFetching,
     refetch,
-  } = usePackageDetail("agent", providedDetail ? undefined : packageId, { enabled: false });
+  } = usePackageDetail("agent", providedDetail ? undefined : packageId, {
+    enabled: inputRequested,
+  });
 
   const detail: AgentDetail | undefined = providedDetail ?? fetchedDetail;
   // Draft for whoever authors the package, no selector at all for everyone
@@ -79,14 +90,11 @@ export function RunAgentButton({
       toast.error(t("detail.titleNeverPublished"));
       return;
     }
-    const agentHasInput =
-      !!agentDetail.input?.schema?.properties &&
-      Object.keys(agentDetail.input.schema.properties).length > 0;
-    if (!agentHasInput) {
+    if (!agentHasInput(agentDetail)) {
       launcher.launch({ version: version ?? defaultRunVersion(agentDetail.home_writable) });
       return;
     }
-    setInputOpen(true);
+    runParam.open(packageId);
   };
 
   const handleClick = (e: React.MouseEvent) => {
@@ -110,6 +118,12 @@ export function RunAgentButton({
   };
 
   const neverPublished = isNeverPublishedForReader(detail);
+  const inputOpen = runInputOpens({
+    requested: inputRequested,
+    disabled: !!disabled,
+    canRun: can("agents:run"),
+    detail,
+  });
   const isPending = isFetching || launcher.isPending;
   const isDisabled = disabled || isPending || neverPublished;
   const blockedTitle =
@@ -136,39 +150,34 @@ export function RunAgentButton({
   return (
     <>
       <DisabledReasonTooltip reason={blockedTitle}>
-        {showLabel ? (
-          <Button
-            variant={variant}
-            onClick={handleClick}
-            disabled={isDisabled}
-            title={blockedTitle ? undefined : t("detail.run")}
-            className="relative"
-          >
-            {isPending ? <Spinner /> : t("detail.run")}
-            {warningDot}
-          </Button>
-        ) : (
-          <Button
-            variant={variant}
-            size={size}
-            className={`relative ${className ?? ""}`}
-            onClick={handleClick}
-            disabled={isDisabled}
-            title={blockedTitle ? undefined : t("detail.run")}
-            aria-label={t("detail.run")}
-          >
-            {isPending ? <Spinner /> : <Play size={14} />}
-            {warningDot}
-          </Button>
-        )}
+        <PendingButton
+          variant={variant}
+          size={size}
+          className={cn("relative", className)}
+          onClick={handleClick}
+          pending={isPending}
+          disabled={isDisabled}
+          title={blockedTitle ? undefined : t("detail.run")}
+          aria-label={showLabel ? undefined : t("detail.run")}
+        >
+          {!isPending && (
+            <Play
+              className={cn("size-3.5", showLabel && variant === "outline" && "text-primary")}
+            />
+          )}
+          {showLabel && t("detail.run")}
+          {warningDot}
+        </PendingButton>
       </DisabledReasonTooltip>
 
-      {detail && (
+      {inputDialog && detail && (
         <RunModal
           open={inputOpen}
-          onClose={() => setInputOpen(false)}
+          onClose={runParam.close}
           agent={detail}
-          onSubmit={(input) => launcher.launch({ input, version: runVersion })}
+          onSubmit={(input) =>
+            launcher.launch({ input, version: runVersion }, { leave: runParam.leave })
+          }
           isPending={launcher.isPending}
         />
       )}

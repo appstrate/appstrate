@@ -14,6 +14,7 @@
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import type { PairingTarget } from "../lib/oauth-pairing";
+import { persistedJson } from "./local-storage";
 
 export const STORAGE_KEY = "appstrate_pending_pairings";
 
@@ -66,47 +67,20 @@ function isRetained(p: PendingPairing, now: number): boolean {
   return new Date(p.expiresAt).getTime() + UNPOLLED_RETENTION_MS > now;
 }
 
-/**
- * Lazily resolve the Web Storage backend. Feature-detected (not gated on
- * `window`) so it works in any host that exposes `localStorage`, and
- * returns `null` — never throws — when storage is absent or access is
- * denied (SSR, private-mode quota errors, tests without a DOM). Reading it
- * lazily also lets tests inject a fake `globalThis.localStorage`.
- */
-function getStorage(): Storage | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
-}
+// A write failure (quota, private mode) just means the pairing won't survive a reload; the
+// in-memory poll still completes it.
+const persisted = persistedJson(STORAGE_KEY, (value): PendingPairing[] => {
+  const now = Date.now();
+  return Array.isArray(value)
+    ? value.filter((p): p is PendingPairing => isPendingPairing(p) && isRetained(p, now))
+    : [];
+});
 
 /** Read + validate + retention-filter the persisted list. Exported for tests. */
-export function readPersistedPairings(): PendingPairing[] {
-  const storage = getStorage();
-  if (!storage) return [];
-  try {
-    const raw = storage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    const now = Date.now();
-    return parsed.filter((p) => isPendingPairing(p) && isRetained(p, now)) as PendingPairing[];
-  } catch {
-    return [];
-  }
-}
+export const readPersistedPairings = persisted.read;
 
 function persist(pairings: PendingPairing[]): void {
-  const storage = getStorage();
-  if (!storage) return;
-  try {
-    if (pairings.length === 0) storage.removeItem(STORAGE_KEY);
-    else storage.setItem(STORAGE_KEY, JSON.stringify(pairings));
-  } catch {
-    // Best-effort — a write failure (quota, private mode) just means the
-    // pairing won't survive a reload; the in-memory poll still completes it.
-  }
+  persisted.write(pairings.length === 0 ? null : pairings);
 }
 
 export const pairingStore = createStore<PairingState>()((set) => ({

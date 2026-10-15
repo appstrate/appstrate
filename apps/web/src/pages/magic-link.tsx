@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Mail } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { AuthLayout } from "../components/auth-layout";
-import { AuthSuccessState } from "../components/auth-success-state";
+import { AuthLink, AuthMessage } from "../components/auth-message";
 import { useAuth } from "../hooks/use-auth";
 
 export function MagicLinkPage() {
@@ -40,7 +41,7 @@ export function MagicLinkPage() {
   if (state === "sent") {
     return (
       <AuthLayout>
-        <AuthSuccessState
+        <AuthMessage
           icon={Mail}
           title={t("magicLink.sentTitle")}
           description={t("magicLink.sentDescription")}
@@ -59,10 +60,8 @@ export function MagicLinkPage() {
           <p className="text-muted-foreground text-center text-sm">{t("magicLink.description")}</p>
         </div>
         <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-sm flex-col gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="email">{t("login.email")}</Label>
+          <FormItem id="email" label={t("login.email")}>
             <Input
-              id="email"
               type="email"
               placeholder="email@example.com"
               autoComplete="email"
@@ -70,21 +69,16 @@ export function MagicLinkPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-          </div>
-          {linkFailed && !error && (
-            <p className="text-destructive text-sm">{t("magicLink.linkInvalid")}</p>
-          )}
-          {error && <p className="text-destructive text-sm">{error}</p>}
+          </FormItem>
+          {linkFailed && !error && <FieldError>{t("magicLink.linkInvalid")}</FieldError>}
+          <FieldError>{error}</FieldError>
           <Button type="submit" className="w-full" disabled={state === "submitting"}>
             {state === "submitting" ? t("loading") : t("magicLink.submit")}
           </Button>
         </form>
-        <Link
-          to="/login"
-          className="text-muted-foreground hover:text-primary text-center text-sm underline underline-offset-4"
-        >
+        <AuthLink to="/login" className="text-center">
           {t("magicLink.backToLogin")}
-        </Link>
+        </AuthLink>
       </div>
     </AuthLayout>
   );

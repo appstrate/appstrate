@@ -51,7 +51,8 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
 import { Markdown } from "./markdown";
-import { LoadingState, ErrorState } from "./page-states";
+import { ErrorState } from "./page-states";
+import { TextSkeleton } from "./loading-skeletons";
 import { isMarkdownFile } from "../lib/files";
 import { client } from "../api/client";
 
@@ -64,7 +65,7 @@ export const PREVIEW_IFRAME_SANDBOX = "allow-scripts";
 /** Inline-render cap for sanitized markdown. */
 const INLINE_MARKDOWN_MAX_BYTES = 1_048_576; // 1 MiB
 
-interface ViewableFile {
+export interface ViewableFile {
   id: string;
   name: string;
   mime: string;
@@ -121,7 +122,7 @@ function MarkdownPreview({ id, unavailable }: { id: string; unavailable: string 
   const state = useRemoteText(load);
 
   if (state.failed) return <ErrorState message={unavailable} />;
-  if (state.text === undefined) return <LoadingState />;
+  if (state.text === undefined) return <TextSkeleton lines={6} />;
   return (
     <div className="bg-background h-full w-full overflow-auto p-4">
       <Markdown>{state.text}</Markdown>
@@ -138,7 +139,7 @@ function TextPreview({ url, unavailable }: { url: string; unavailable: string })
   const state = useRemoteText(load);
 
   if (state.failed) return <ErrorState message={unavailable} />;
-  if (state.text === undefined) return <LoadingState />;
+  if (state.text === undefined) return <TextSkeleton lines={6} />;
   return (
     <pre className="text-foreground h-full w-full overflow-auto p-4 font-mono text-xs break-words whitespace-pre-wrap">
       {state.text}
@@ -173,7 +174,7 @@ export function FileViewer({
   const { t } = useTranslation("files");
 
   function renderBody() {
-    if (isLoading) return <LoadingState />;
+    if (isLoading) return <TextSkeleton lines={6} />;
     if (error) return <ErrorState error={error} />;
     if (!file?.preview_url) {
       return <UnavailablePreview message={t("preview.unavailable")} action={unavailableAction} />;

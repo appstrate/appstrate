@@ -7,7 +7,14 @@ import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import { resolveListingViewAs } from "../lib/view-as.ts";
+import {
+  callerOrgRole,
+  callerPersonalOwnerId,
+  effectiveInSpace,
+  personaFor,
+  personaMemberships,
+  resolveListingViewAs,
+} from "../lib/view-as.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   createOrganization,
@@ -49,13 +56,23 @@ import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
 import { mayCreateOrganization } from "@appstrate/db/auth-policy";
-import { createDefaultSpace } from "../services/spaces.ts";
+import { createDefaultSpace, listSpacesForPrincipal } from "../services/spaces.ts";
+import { listSpacesOfMembers } from "../services/space-members.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { recordSharesRemoved } from "../services/connection-shares.ts";
-import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
+import { ASSIGNABLE_ORG_ROLES, type OrganizationMemberSpace } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
+import { ORG_LOGO_MAX_BYTES } from "@appstrate/core/validation";
+import {
+  isWebp,
+  logoImageVersion,
+  orgLogoWire,
+  readOrgLogoImage,
+  setOrgLogo,
+} from "../services/org-logo.ts";
+import { ifNoneMatchSatisfied } from "../lib/conditional-request.ts";
 
 export const createOrgSchema = z
   .object({
@@ -64,10 +81,34 @@ export const createOrgSchema = z
   })
   .strict();
 
+/** Enough for any single emoji: the longest ZWJ sequences hold about ten code points. */
+const MAX_EMOJI_CODE_POINTS = 16;
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Exactly one emoji. An image is uploaded by `PUT /:orgId/logo`. */
+function isOneEmoji(emoji: string): boolean {
+  return (
+    [...emoji].length <= MAX_EMOJI_CODE_POINTS &&
+    [...graphemes.segment(emoji)].length === 1 &&
+    /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u.test(emoji)
+  );
+}
+
 export const updateOrgSchema = z
   .object({
     name: z.string().min(1).optional(),
     slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
+    logo: z
+      .object({
+        kind: z.literal("emoji", {
+          error:
+            "Only an emoji logo is written here; upload an image with PUT /api/orgs/{orgId}/logo",
+        }),
+        emoji: z.string().refine(isOneEmoji, "Logo must be exactly one emoji"),
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -134,6 +175,7 @@ router.get("/", async (c) => {
             id: o.id,
             name: o.name,
             slug: o.slug,
+            logo: orgLogoWire(o.id, o.logo),
             role: identity.role,
             permissions: identity.permissions,
             createdAt: o.createdAt,
@@ -211,6 +253,7 @@ router.post("/", async (c) => {
       id: org.id,
       name: org.name,
       slug: org.slug,
+      logo: orgLogoWire(org.id, org.logo),
       role: "owner",
       createdAt: org.createdAt,
     },
@@ -220,14 +263,45 @@ router.post("/", async (c) => {
 
 // --- Routes below require org context (orgId from params, verified via membership) ---
 
+/**
+ * The spaces each org member reaches, among those whose member list the caller
+ * may read: `GET /api/spaces/{id}/members`'s own guard, applied per space —
+ * `space-members:read` there opens the explicit rows, `members:read` on top the
+ * implicit ones — over the spaces the caller reaches, the one a pinned
+ * credential is bound to only. So the member payload discloses no more than the
+ * per-space reads it replaces.
+ */
+async function memberSpacesForCaller(
+  c: Context<AppEnv>,
+  orgId: string,
+): Promise<Map<string, OrganizationMemberSpace[]>> {
+  const entries = await listSpacesForPrincipal(
+    orgId,
+    callerOrgRole(c, orgId),
+    c.get("user").id,
+    callerPersonalOwnerId(c, orgId),
+    personaMemberships(personaFor(c, orgId)),
+  );
+  const pinnedSpaceId = c.get("spaceId");
+  const readable = entries.flatMap(({ space, role }) => {
+    if (pinnedSpaceId && space.id !== pinnedSpaceId) return [];
+    const permissions = effectiveInSpace(c, role);
+    if (!permissions.has("space-members:read")) return [];
+    return [{ spaceId: space.id, includeImplicit: permissions.has("members:read") }];
+  });
+  return listSpacesOfMembers(orgId, readable);
+}
+
 // OrgDetail serializer — shared by GET /:orgId and PATCH /:orgId so the update
 // response is the exact same resource shape as the detail read.
 async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
   const permissions = c.get("permissions");
-  const [org, members, invitations] = await Promise.all([
+  const readsMembers = permissions?.has("members:read") ?? false;
+  const [org, members, invitations, memberSpaces] = await Promise.all([
     getOrgById(orgId),
-    permissions?.has("members:read") ? getOrgMembers(orgId) : Promise.resolve([]),
+    readsMembers ? getOrgMembers(orgId) : Promise.resolve([]),
     permissions?.has("members:invite") ? getOrgInvitations(orgId) : Promise.resolve([]),
+    readsMembers ? memberSpacesForCaller(c, orgId) : Promise.resolve(new Map()),
   ]);
   if (!org) {
     throw notFound("Organization not found");
@@ -247,6 +321,7 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
     id: org.id,
     name: org.name,
     slug: org.slug,
+    logo: orgLogoWire(org.id, org.logo),
     createdAt: org.createdAt,
     deleting_at: org.deletingAt,
     storage: {
@@ -260,6 +335,7 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
       joinedAt: m.joinedAt,
       displayName: m.displayName,
       email: m.email,
+      spaces: memberSpaces.get(m.userId) ?? [],
     })),
     invitations: invitations.map((inv) => ({
       id: inv.id,
@@ -301,10 +377,16 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
     }
   }
 
-  await updateOrganization(orgId, {
-    ...(data.name?.trim() ? { name: data.name.trim() } : {}),
-    ...(data.slug ? { slug: data.slug } : {}),
-  });
+  const { logo, ...renamed } = data;
+  if (renamed.name?.trim() || renamed.slug) {
+    await updateOrganization(orgId, {
+      ...(renamed.name?.trim() ? { name: renamed.name.trim() } : {}),
+      ...(renamed.slug ? { slug: renamed.slug } : {}),
+    });
+  }
+  if (logo !== undefined) {
+    await setOrgLogo(orgId, logo ? { emoji: logo.emoji } : null);
+  }
 
   await recordAuditFromContext(c, {
     action: "org.updated",
@@ -315,6 +397,58 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
   });
 
   // Bare updated resource — same OrgDetail serializer as GET /:orgId.
+  return c.json(await buildOrgDetail(c, orgId));
+});
+
+// GET /api/orgs/:orgId/logo — the logo image, revalidated by its version
+router.get("/:orgId/logo", async (c) => {
+  const orgId = c.req.param("orgId")!;
+  if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
+
+  const version = logoImageVersion((await getOrgById(orgId))?.logo ?? null);
+  const bytes = version ? await readOrgLogoImage(orgId) : null;
+  if (!version || !bytes) throw notFound("Organization has no logo image");
+
+  const etag = `"${version}"`;
+  c.header("ETag", etag);
+  // A URL naming the current version never changes content; any other URL revalidates.
+  c.header(
+    "Cache-Control",
+    c.req.query("v") === version ? "private, max-age=31536000, immutable" : "private, no-cache",
+  );
+  if (ifNoneMatchSatisfied(c.req.header("If-None-Match"), etag)) return c.body(null, 304);
+  c.header("Content-Type", "image/webp");
+  c.header("X-Content-Type-Options", "nosniff");
+  return c.body(new Uint8Array(bytes));
+});
+
+// PUT /api/orgs/:orgId/logo — replace the logo with a WebP image (raw bytes)
+router.put("/:orgId/logo", requirePermission("org", "update"), async (c) => {
+  const orgId = c.req.param("orgId")!;
+  if (c.req.header("Content-Type")?.split(";")[0]?.trim() !== "image/webp") {
+    throw invalidRequest("Logo must be sent as image/webp", "body");
+  }
+  if (Number(c.req.header("Content-Length") ?? 0) > ORG_LOGO_MAX_BYTES) {
+    throw invalidRequest(`Logo must be at most ${ORG_LOGO_MAX_BYTES} bytes`, "body");
+  }
+  const image = new Uint8Array(await c.req.arrayBuffer());
+  if (image.length > ORG_LOGO_MAX_BYTES) {
+    throw invalidRequest(`Logo must be at most ${ORG_LOGO_MAX_BYTES} bytes`, "body");
+  }
+  if (!isWebp(image)) throw invalidRequest("Logo must be a WebP image", "body");
+
+  await setOrgLogo(orgId, { image });
+
+  // An image is recorded by its version, never by its bytes.
+  const org = await getOrgById(orgId);
+  await recordAuditFromContext(c, {
+    action: "org.updated",
+    resourceType: "org",
+    resourceId: orgId,
+    after: { logo: { kind: "image", version: logoImageVersion(org?.logo ?? null) } },
+    orgIdOverride: orgId,
+  });
+
   return c.json(await buildOrgDetail(c, orgId));
 });
 
@@ -574,12 +708,14 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
   if (!updated) {
     throw notFound("Member not found");
   }
+  const memberSpaces = await memberSpacesForCaller(c, orgId);
   return c.json({
     userId: updated.userId,
     role: updated.role,
     joinedAt: updated.joinedAt,
     displayName: updated.displayName,
     email: updated.email,
+    spaces: memberSpaces.get(targetUserId) ?? [],
   });
 });
 

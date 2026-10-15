@@ -435,6 +435,43 @@ describe("files service + routes", () => {
     expect(problem.errors.map((e) => e.field)).toEqual(["run_id"]);
   });
 
+  it("searches the complete file collection by name before pagination", async () => {
+    const runId = await seedRunRow(scope);
+    // A published file copies its run's attribution (`getRunAttribution`), and a
+    // member without `runs:read-all` only reads the rows attributed to them.
+    const attribution = { userId: ctx.user.id, endUserId: null };
+    const matching = await publishStream(
+      scope,
+      runId,
+      "Quarterly Forecast.pdf",
+      "forecast",
+      attribution,
+    );
+    await publishStream(scope, runId, "Meeting notes.txt", "notes", attribution);
+
+    const page = await listFilesForActor(
+      scope,
+      userActor,
+      { search: "FORECAST", limit: 1 },
+      NO_GRANTS,
+    );
+    expect(page.data.map((file) => file.id)).toEqual([matching.row.id]);
+    expect(page.hasMore).toBe(false);
+
+    const response = await app.request("/api/files?q=quarterly&limit=1", {
+      headers: authHeaders(ctx),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: Array<{ id: string }>; hasMore: boolean };
+    expect(body.data.map((file) => file.id)).toEqual([matching.row.id]);
+    expect(body.hasMore).toBe(false);
+
+    const invalid = await app.request(`/api/files?q=${"x".repeat(201)}`, {
+      headers: authHeaders(ctx),
+    });
+    expect(invalid.status).toBe(400);
+  });
+
   it("run_id filter returns produced outputs AND input files referenced in runs.input", async () => {
     // docA: a chat-session user_upload consumed by the run as input (its own
     // container is the chat session, so runId is NULL — it would be missed by a

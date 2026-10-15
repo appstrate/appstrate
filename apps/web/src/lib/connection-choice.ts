@@ -7,7 +7,12 @@ import {
 import { ApiError } from "../api/errors";
 import type { components } from "../api/schema";
 import { withConnectionOverride, type ConnectionSet } from "./connection-set";
-import { type ActorValue, type RunOverridesValue, sameActor } from "./schedule-payload";
+import {
+  type ActorValue,
+  type RunOverridesValue,
+  type ScheduleUpdateBody,
+  sameActor,
+} from "./schedule-payload";
 import { sameSet } from "./strings";
 
 /** The integration package id an `integrations.{packageId}` error field names. */
@@ -38,6 +43,16 @@ export interface ConnectionChoice {
   integrationId: string;
   code: (typeof SCHEDULE_CHOICE_CODES)[number];
   candidates: ConnectionChoiceCandidate[];
+}
+
+/** An integration refused for a reason no pick fixes alone (see `isChoiceRequest`). */
+export type ConnectionRefusal = ConnectionChoice & {
+  code: Exclude<ConnectionChoice["code"], "must_choose_connection">;
+};
+
+/** A connection the schedule cannot settle by itself: it asks for a choice rather than fails. */
+export function isChoiceRequest(choice: ConnectionChoice): boolean {
+  return choice.code === "must_choose_connection";
 }
 
 function isScheduleChoiceCode(
@@ -98,6 +113,23 @@ export function refusalForActor(
 }
 
 /**
+ * A schedule PATCH refused over connections: what it was refused over, and whom and with which
+ * picks the server judged it — the sent map, else the stored one (an absent key keeps it).
+ * `null` for any other outcome.
+ */
+export function refusedScheduleWrite(
+  error: unknown,
+  sent: ScheduleUpdateBody | undefined,
+  stored: { actor: ActorValue; picks: Record<string, string[]> | null },
+): (SubmittedPicks & { choices: ConnectionChoice[] }) | null {
+  const choices = scheduleConnectionChoices(error);
+  if (choices.length === 0 || !sent) return null;
+  const picks =
+    "connection_overrides" in sent ? sent.connection_overrides : (stored.picks ?? undefined);
+  return { choices, runsAs: sent.actor ?? stored.actor, picks: picks ?? {} };
+}
+
+/**
  * Picks name the previous identity's connections, so an actor change drops them — except back
  * on the schedule's stored actor (`stored`, edit only), whose stored picks hold again.
  */
@@ -131,11 +163,8 @@ export function withConnectionPickAs(
     : overrides;
 }
 
-/**
- * Why an integration was refused, as an `agents` key. An open choice with no candidate is one
- * only the actor (or an admin pin) can make.
- */
-export function refusalReasonKey(choice: ConnectionChoice): string {
+/** Why an integration was refused, as an `agents` key. */
+export function refusalReasonKey(choice: ConnectionRefusal): string {
   switch (choice.code) {
     case "override_connection_unavailable":
       return "schedule.connectionOverrides.unavailable";
@@ -145,10 +174,6 @@ export function refusalReasonKey(choice: ConnectionChoice): string {
       return "error.overrideOutranked";
     case "required_integration_unbound":
       return "error.requiredIntegrationUnbound";
-    case "must_choose_connection":
-      return choice.candidates.length > 0
-        ? "schedule.connectionOverrides.mustChoose"
-        : "schedule.connectionOverrides.actorMustChoose";
   }
 }
 

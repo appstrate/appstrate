@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The organization library as a MAP of placements, driven from the browser
- * (RBAC spec §6.8).
+ * The organization catalogue's « Par espace » view as a MAP of placements,
+ * driven from the browser (RBAC spec §6.8).
  *
- * `/library` renders the three axes the model has — home, share, activation —
- * and every one of them is actionable from the row. A single cell meaning "a
+ * `/catalogue/placed/agent` renders the three axes the model has — home, share,
+ * activation — and every one of them is actionable from the row: a Provenance
+ * column for the home, one activation switch per space, and the row's « … » menu
+ * for moving, sharing and withdrawing a share. A single cell meaning "a
  * `space_packages` row exists here" can say none of it: it tells a home from a
  * share not at all, has nowhere to show a share, and gives one act two buttons.
  * So the four acts below have to work, on one screen:
@@ -24,25 +26,18 @@
  * the caches they invalidate agree afterwards.
  */
 
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createAgent, createSpace } from "../../helpers/seed.ts";
 
-/** The catalog row for one package, whatever tab it is under. */
+/** The catalogue row for one package, whatever its provenance. */
 function rowFor(page: Page, displayName: string) {
   return page.getByRole("row").filter({ hasText: displayName });
 }
 
-/**
- * The activation switch for one space, by its column position. The header's
- * last row carries one cell per space in the same order as the body row's
- * trailing cells, so the index of the space name is the index of the switch.
- */
-async function spaceColumn(page: Page, spaceName: string): Promise<number> {
-  const names = await page.locator("thead tr").last().locator("th").allTextContents();
-  const index = names.findIndex((text) => text.includes(spaceName));
-  expect(index, `no column named ${spaceName} in ${names.join(" | ")}`).toBeGreaterThanOrEqual(0);
-  return index;
+/** The activation switch of one space on a row (« Activer <package> dans <espace> »). */
+function spaceSwitch(row: Locator, displayName: string, spaceName: string) {
+  return row.getByRole("switch", { name: `Activer ${displayName} dans ${spaceName}`, exact: true });
 }
 
 test("an admin places, revokes, deactivates and moves a package from the catalog", async ({
@@ -74,11 +69,11 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
     }>;
   };
 
-  await page.goto("/library");
+  await page.goto("/catalogue/placed/agent");
   const row = rowFor(page, displayName);
   await expect(row).toBeVisible();
-  const targetColumn = await spaceColumn(page, target.name);
-  const homeColumn = await spaceColumn(page, homeSpaceName);
+  const targetSwitch = spaceSwitch(row, displayName, target.name);
+  const homeSwitch = spaceSwitch(row, displayName, homeSpaceName);
 
   // ── One click places it in a space it never reached ──
   const activated = page.waitForResponse(
@@ -86,11 +81,11 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
       response.request().method() === "POST" &&
       response.url().endsWith(`/spaces/${target.id}/packages`),
   );
-  await row.getByRole("checkbox").nth(targetColumn).click();
+  await targetSwitch.click();
   expect((await activated).status()).toBe(201);
-  // The share it minted is a fact on the wire, not only a checkbox: the chip
-  // under "Partagé avec" names the destination.
-  await expect(row.getByText(target.name, { exact: false }).first()).toBeVisible();
+  await expect(targetSwitch).toBeChecked();
+  // The share it minted is a fact on the wire, not only a switch: the row's menu
+  // now offers to withdraw it from the destination.
   const shares = await apiClient.get(`/packages/${scope}/${name}/shares`);
   expect(shares.status()).toBe(200);
   expect(
@@ -105,12 +100,10 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
     (response) =>
       response.request().method() === "DELETE" && response.url().includes(`/shares/${target.id}`),
   );
-  await row
-    .getByRole("button", { name: /Retirer ce partage|Revoke this share/ })
-    .first()
-    .click();
+  await row.getByRole("button", { name: `Actions pour ${displayName}`, exact: true }).click();
+  await page.getByRole("menuitem", { name: `Retirer de ${target.name}`, exact: true }).click();
   expect((await revoked).status()).toBe(204);
-  await expect(row.getByRole("checkbox").nth(targetColumn)).not.toBeChecked();
+  await expect(targetSwitch).not.toBeChecked();
   expect((await packagesIn(target.id)).map((p) => p.packageId)).not.toContain(`${scope}/${name}`);
 
   // ── Deactivating at home keeps the row and its settings ──
@@ -139,7 +132,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
       response.request().method() === "DELETE" &&
       response.url().includes(`/spaces/${browserCtx.org.defaultSpaceId}/packages/${scope}/${name}`),
   );
-  await row.getByRole("checkbox").nth(homeColumn).click();
+  await homeSwitch.click();
   expect((await deactivated).status()).toBe(204);
   const offRow = (await packagesIn(browserCtx.org.defaultSpaceId)).find(
     (p) => p.packageId === `${scope}/${name}`,
@@ -153,7 +146,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
       response.request().method() === "POST" &&
       response.url().endsWith(`/spaces/${browserCtx.org.defaultSpaceId}/packages`),
   );
-  await row.getByRole("checkbox").nth(homeColumn).click();
+  await homeSwitch.click();
   // 201 says THIS call turned it on — the status reports the state change, not
   // whether a row was created; the row never went away.
   expect((await reactivated).status()).toBe(201);
@@ -177,9 +170,12 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
   expect(moved.status(), await moved.text()).toBe(200);
   await page.reload();
   const movedRow = rowFor(page, displayName);
-  // Home is now the destination, and it runs there without anybody activating
-  // it: creating a package activates it at its home, and so does moving one.
-  await expect(movedRow.getByText(target.name, { exact: false }).first()).toBeVisible();
+  // Home is now the destination (the Provenance cell says so), and it runs
+  // there without anybody activating it: creating a package activates it at its
+  // home, and so does moving one.
+  // Every space column's switch names its space too, so only the Provenance
+  // cell itself tells a moved home from an unmoved one.
+  await expect(movedRow.locator('[data-data-table-column="origin"]')).toContainText(target.name);
   expect(
     (await packagesIn(target.id)).find((p) => p.packageId === `${scope}/${name}`)?.enabled,
   ).toBe(true);
@@ -198,9 +194,10 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
  *
  * Deactivating is reversible and ordinary, so it has to be legible in exactly
  * one place. The INDEX answers "what can I run here", so a switched-off agent
- * leaves it entirely: no greyed card, no badge, nothing to misread. The space
- * LIBRARY answers "what is placed here, and in what state", so the same agent
- * is still a row there, marked off, with its switch (RBAC spec §6.8/§6.9).
+ * leaves it entirely: no greyed card, no badge, nothing to misread. The
+ * catalogue's « Par espace » view answers "what is placed here, and in what
+ * state", so the same agent is still a row there, its switch off (RBAC spec
+ * §6.8/§6.9).
  *
  * The detail page has to stay reachable through all of it: every READ and
  * CONFIGURE route answers 200 for an agent placed here and switched off (only
@@ -241,14 +238,13 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
   expect(off.status(), await off.text()).toBe(204);
 
   // ── Still in the library, off the index ──
-  // Two questions, two pages. The library is the placement map, so the row is
-  // there, marked off, with its switch; the index is the ACTIVE set, so the
-  // card is gone — not greyed, gone.
-  await page.goto("/space/packages");
-  const libraryRow = page.getByRole("row").filter({ hasText: `Test Agent ${name}` });
+  // Two questions, two pages. The catalogue is the placement map, so the row is
+  // there, with its switch off; the index is the ACTIVE set, so the row is gone
+  // — not greyed, gone.
+  await page.goto("/catalogue/placed/agent");
+  const libraryRow = rowFor(page, `Test Agent ${name}`);
   await expect(libraryRow).toBeVisible();
-  await expect(libraryRow.getByText(/^(Désactivé|Inactive)$/)).toBeVisible();
-  await expect(libraryRow.getByRole("checkbox")).not.toBeChecked();
+  await expect(spaceSwitch(libraryRow, `Test Agent ${name}`, "Default")).not.toBeChecked();
 
   // Waited on the LIST response, not on a heading: an absence asserted while
   // the page is still loading passes for the wrong reason.
@@ -261,16 +257,6 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
   await expect(page.getByText(`Test Agent ${name}`, { exact: true })).toHaveCount(0);
 
   // ── The detail page opens, and its two reads answer 200 ──
-  // One page, one source: the agent's own detail carries `active`, so the page
-  // must not also project the space library to learn the same fact. Recorded
-  // across the whole load, and asserted before anything is clicked — which is
-  // why the library page is visited ABOVE the index and not here: a full
-  // navigation sits between it and this listener, so no refetch it left in
-  // flight can be counted against the page under test.
-  const libraryReads: string[] = [];
-  page.on("request", (request) => {
-    if (/\/api\/spaces\/[^/]+\/library/.test(request.url())) libraryReads.push(request.url());
-  });
   const modelRead = page.waitForResponse(
     (response) =>
       response.request().method() === "GET" &&
@@ -289,19 +275,22 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
   // reader got here from the library or from a link they kept.
   const banner = page.getByText(/Désactivé dans cet espace|Switched off in this space/);
   await expect(banner).toBeVisible();
-  expect(libraryReads, "the agent page answers activation from its own detail").toEqual([]);
 
   // ── Configured while off: choosing a model is a read-write on the placement,
   //    not a run, so the route takes it ──
-  await page.getByRole("tab", { name: "Paramètres par défaut", exact: true }).click();
+  // Paramètres › Modèle saves itself on every pick: no save button.
+  await page.getByRole("tab", { name: "Paramètres", exact: true }).click();
+  await page.getByRole("link", { name: "Modèle", exact: true }).click();
   const modelWrite = page.waitForResponse(
     (response) =>
       response.request().method() === "PATCH" &&
       response.url().includes(`/agents/${scope}/${name}/model`),
   );
   await page
-    .getByRole("button", { name: /Enregistrer les réglages du modèle|Save model settings/ })
+    .getByRole("combobox")
+    .filter({ hasText: /^Par défaut \(Moyen\)$/ })
     .click();
+  await page.getByRole("option", { name: "Élevé", exact: true }).click();
   expect((await modelWrite).status(), "PATCH …/model on a switched-off agent").toBe(200);
 
   // ── Switched back on from the banner itself ──

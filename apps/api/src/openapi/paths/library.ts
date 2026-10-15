@@ -78,6 +78,18 @@ const PACKAGES_EXAMPLE = {
           shared_by: { user_id: "usr_1", name: "Alex" },
         },
       ],
+      activation: [
+        {
+          spaceId: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+          activate: "allowed",
+          deactivate: "allowed",
+        },
+        {
+          spaceId: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+          activate: "allowed",
+          deactivate: "forbidden",
+        },
+      ],
     },
   ],
   skill: [],
@@ -110,6 +122,18 @@ const PACKAGES_EXAMPLE = {
           shared_by: null,
         },
       ],
+      activation: [
+        {
+          spaceId: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+          activate: "allowed",
+          deactivate: "allowed",
+        },
+        {
+          spaceId: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+          activate: "forbidden",
+          deactivate: "forbidden",
+        },
+      ],
     },
   ],
 } as const;
@@ -124,14 +148,18 @@ const organizationLibraryPaths = {
     get: {
       operationId: "getLibrary",
       tags: ["Library"],
-      summary: "Organization library — the placement map (owners and admins)",
+      summary: "Organization library — the placement map, graded by caller",
       description:
         "Returns every package the organization can see (org-owned + system), grouped by type, each carrying its " +
         "`placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there " +
         "(`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). " +
-        "Members, guests and delegated credentials cannot access this administrative " +
-        "endpoint. Ephemeral packages are excluded. The spaces list and the placements include only spaces the " +
-        "caller can enter, and each package type also requires that type's read permission in the space. " +
+        "Graded by the caller: the spaces list and the placements include only the spaces whose own library " +
+        "(`GET /api/spaces/{spaceId}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — " +
+        "and each package type also requires that type's read permission in the space. So the response is the union " +
+        "of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package " +
+        "with no placement the caller reads is listed, with empty `placements`, when its home grants the caller " +
+        "`<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one " +
+        "space) receive 403. Ephemeral packages are excluded. " +
         "Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` " +
         "activates a package in a space — creating the offer that places it when the caller holds `<type>:share` " +
         "in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.",

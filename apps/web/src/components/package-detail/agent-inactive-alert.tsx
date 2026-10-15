@@ -4,10 +4,7 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { Alert, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
-import { useSetPackageActive } from "../../hooks/use-library";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
-import { maySetPackageActive } from "../../lib/package-permissions";
+import { usePackageActivation } from "../../hooks/use-library";
 
 /**
  * The agent is placed in this space and switched OFF.
@@ -28,29 +25,24 @@ import { maySetPackageActive } from "../../lib/package-permissions";
  * The verdict itself is NOT read here: the page passes it from its own detail
  * response (`AgentDetail.active`), so one page asks one source.
  *
- * The button is live on the same predicate the server enforces
- * (`maySetPackageActive` — the type's activation grant in this space, or owning
- * the space, RBAC spec §3.6). Without it the banner would name a cure the
+ * The button is live on the verdict the server serves on the agent's library
+ * row (`activation` — the type's activation grant in this space, or owning the
+ * space, RBAC spec §3.6). Without it the banner would name a cure the
  * reader cannot apply, so it states the blockage alone.
  */
 export function AgentInactiveAlert({ packageId }: { packageId: string }) {
   const { t } = useTranslation("agents");
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
-  const spaceGrant = useCurrentSpaceGrant();
-  const mayActivate = maySetPackageActive(spaceGrant, "agent", true);
+  const { mayActivate, activate, pending } = usePackageActivation(packageId);
 
   return (
     <Alert variant="destructive" className="mb-4">
       <AlertTriangle className="h-4 w-4" />
-      <div className="flex items-center justify-between gap-3">
-        <AlertTitle className="mb-0">{t("detail.deactivatedHere")}</AlertTitle>
-        {mayActivate && currentSpaceId && (
-          <Button
-            size="sm"
-            disabled={setActive.isPending}
-            onClick={() => setActive.mutate({ spaceId: currentSpaceId, packageId, active: true })}
-          >
+      {/* The button centres on the title's line (-my-1.5: 32px on a 20px line),
+          which is where the alert's icon sits too. */}
+      <div className="flex items-start justify-between gap-3">
+        <AlertTitle>{t("detail.deactivatedHere")}</AlertTitle>
+        {mayActivate && (
+          <Button size="sm" className="-my-1.5" disabled={pending} onClick={() => activate()}>
             {t("detail.activate")}
           </Button>
         )}

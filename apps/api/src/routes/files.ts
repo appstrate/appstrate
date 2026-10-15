@@ -82,6 +82,7 @@ const listFilesQuerySchema = z
     packageId: z.string().optional(),
     chat_session_id: z.string().optional(),
     context_chat_session_id: z.string().optional(),
+    q: z.string().max(200).trim().optional(),
     startingAfter: z.string().optional(),
     // Checked by `parseListPagination` (anything but 1..100 is a 400).
     limit: z.string().optional(),
@@ -111,6 +112,7 @@ export function createFilesRouter() {
     if (query.context_chat_session_id) {
       filters.contextChatSessionId = query.context_chat_session_id;
     }
+    if (query.q) filters.search = query.q;
     if (query.startingAfter) filters.startingAfter = query.startingAfter;
     filters.limit = parseListPagination(c, { defaultLimit: 20 }).limit;
 

@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The ModelFormModal submission, minus React: mint the inline key if there is
- * one, then run the create(s) or the update against it.
+ * The ModelFormModal submission, minus React. A creation is ONE `POST /api/models/apply`: the
+ * typed key, the models and their binding are written together or not at all, so a refusal leaves
+ * nothing behind and a retry starts from a clean slate. Only an edit of a saved model is still a
+ * `PATCH`, with the typed key (if any) minted first and reported back on failure so the retry
+ * rebinds to it.
  *
- * The writes are injected rather than closed over, so the retry contract this
- * flow exists to hold is assertable without a DOM. That contract: once the
- * typed key has been minted, every later refusal reports the credential back,
- * because the modal re-submits with the same `newCredential` still in the form
- * — nothing to rebind to means a second credential holding the same secret and
- * a first one referenced by no model.
+ * The writes are injected rather than closed over, so the contract is assertable without a DOM.
  */
 
 import type {
@@ -21,82 +19,118 @@ import type {
 } from "./model-form-payload.ts";
 import { toCreateModelBody } from "./model-form-payload.ts";
 import { ApiError } from "../api/errors.ts";
+import type { ModelChoiceBody } from "../hooks/use-apply-model-choice.ts";
 
-/**
- * `POST /api/models` refuses a (credential, model) pair the organization
- * already holds — one row per binding, or `llm_usage` splits that model's spend
- * across the copies. Reported apart from a real failure: nothing to retry.
- */
-function isDuplicate(err: unknown): boolean {
-  return err instanceof ApiError && err.code === "model_already_added";
-}
-
-export type ModelFormCreateBody = ModelFormModelEntry & {
-  /** `null` when each member serves the model with their own personal credential. */
-  credentialId: string | null;
-  providerId?: string;
-};
 type ModelFormUpdateBody = Omit<ModelFormData, "newCredential">;
 
-/** The three writes a submission can make. */
+/** The writes a submission can make. */
 export interface ModelFormWrites {
+  applyChoice: (body: ModelChoiceBody) => Promise<unknown>;
   createCredential: (body: NewCredentialBody) => Promise<{ id: string }>;
-  createModel: (body: ModelFormCreateBody) => Promise<unknown>;
   updateModel: (id: string, body: ModelFormUpdateBody) => Promise<unknown>;
 }
 
-/**
- * The credential the model(s) bind to: the picked one (`null` when each member
- * brings their own), or the typed key created first. `undefined` when minting
- * that key was itself refused, the one case where a retry has nothing to rebind to.
- */
-async function bindCredential(
-  writes: ModelFormWrites,
-  data: ModelFormSubmission,
-): Promise<{ credentialId: string | null } | undefined> {
-  if (!data.newCredential) return { credentialId: data.credentialId };
-  try {
-    return { credentialId: (await writes.createCredential(data.newCredential)).id };
-  } catch {
-    return undefined;
-  }
+/** One model of the form as an `add` entry of the choice: the binding rides on the choice itself. */
+function toAddEntry(data: ModelFormData): ModelFormModelEntry {
+  const {
+    credentialId: _credentialId,
+    providerId: _providerId,
+    ...entry
+  } = toCreateModelBody(data, null);
+  return entry;
 }
 
-/** One POST per entry; PUT preserves nulls that clear an existing override. */
+/** The credential of the choice: the typed key to mint, the picked one, or none (each member's own). */
+function toChoiceCredential(data: ModelFormSubmission): ModelChoiceBody["credential"] {
+  if (data.newCredential) {
+    const { api_key, providerId, base_url_override } = data.newCredential;
+    return {
+      providerId,
+      api_key,
+      ...(base_url_override ? { base_url_override } : {}),
+    };
+  }
+  return data.credentialId ? { id: data.credentialId } : null;
+}
+
+/**
+ * What a refused choice reports back. The choice is atomic — nothing was written — so every entry
+ * is still to submit, except the ones the server says the organization already holds.
+ */
+function refusalOutcome(err: unknown, modelIds: string[]): ModelFormSubmitOutcome {
+  const duplicateModelIds: string[] = [];
+  const refusedModelIds: string[] = [];
+  let refusalCode: string | undefined;
+  if (err instanceof ApiError) {
+    const items = err.code === "validation_failed" ? (err.errors ?? []) : [];
+    for (const item of items) {
+      const { field, code } = (item ?? {}) as Record<string, unknown>;
+      // `add.<i>` from the service, `add[<i>].<key>` from body validation.
+      const at = typeof field === "string" ? Number(/^add(?:\.|\[)(\d+)/.exec(field)?.[1]) : NaN;
+      const modelId = modelIds[at];
+      if (modelId !== undefined && code === "model_already_added") duplicateModelIds.push(modelId);
+      else {
+        if (modelId !== undefined && !refusedModelIds.includes(modelId))
+          refusedModelIds.push(modelId);
+        if (typeof code === "string") refusalCode ??= code;
+      }
+    }
+    if (items.length === 0) refusalCode = err.code;
+  }
+  return {
+    failedModelIds: modelIds,
+    duplicateModelIds,
+    ...(refusalCode ? { refusalCode } : {}),
+    ...(refusedModelIds.length > 0 ? { refusedModelIds } : {}),
+  };
+}
+
+/** A creation is one `apply`; an edit is one `PATCH` (PUT preserves nulls that clear an override). */
 export function submitModelForm(opts: {
   writes: ModelFormWrites;
   editModelId: string | null;
   onSuccess: () => void;
 }) {
   return async (data: ModelFormSubmission): Promise<ModelFormSubmitOutcome> => {
-    const entries = "models" in data ? data.models : [toCreateModelBody(data, data.credentialId)];
-    const bound = await bindCredential(opts.writes, data);
-    if (!bound) {
-      return { failedModelIds: entries.map((entry) => entry.modelId), duplicateModelIds: [] };
-    }
-    const { credentialId } = bound;
-    const providerBinding = data.providerId !== undefined ? { providerId: data.providerId } : {};
+    if (!("models" in data) && opts.editModelId) return edit(opts, opts.editModelId, data);
 
-    const failedModelIds: string[] = [];
-    const duplicateModelIds: string[] = [];
-    for (const entry of entries) {
-      try {
-        if (!("models" in data) && opts.editModelId) {
-          const { newCredential: _, ...modelData } = data;
-          await opts.writes.updateModel(opts.editModelId, { ...modelData, credentialId });
-        } else {
-          await opts.writes.createModel({ ...entry, credentialId, ...providerBinding });
-        }
-      } catch (err) {
-        failedModelIds.push(entry.modelId);
-        if (isDuplicate(err)) duplicateModelIds.push(entry.modelId);
-      }
+    const entries = "models" in data ? data.models : [toAddEntry(data)];
+    const modelIds = entries.map((entry) => entry.modelId);
+    const credential = toChoiceCredential(data);
+    try {
+      await opts.writes.applyChoice({
+        credential,
+        ...(credential === null && data.providerId !== undefined
+          ? { providerId: data.providerId }
+          : {}),
+        add: entries,
+      });
+    } catch (err) {
+      return refusalOutcome(err, modelIds);
     }
-    if (failedModelIds.length === 0) opts.onSuccess();
-    return {
-      failedModelIds,
-      duplicateModelIds,
-      ...(credentialId ? { credentialId } : {}),
-    };
+    opts.onSuccess();
+    return { failedModelIds: [], duplicateModelIds: [] };
   };
+}
+
+async function edit(
+  opts: { writes: ModelFormWrites; onSuccess: () => void },
+  editModelId: string,
+  data: ModelFormData,
+): Promise<ModelFormSubmitOutcome> {
+  const { newCredential, ...modelData } = data;
+  let credentialId = data.credentialId;
+  try {
+    if (newCredential) credentialId = (await opts.writes.createCredential(newCredential)).id;
+  } catch {
+    return { failedModelIds: [data.modelId], duplicateModelIds: [] };
+  }
+  try {
+    await opts.writes.updateModel(editModelId, { ...modelData, credentialId });
+  } catch (err) {
+    const refusal = refusalOutcome(err, [data.modelId]);
+    return { ...refusal, ...(newCredential && credentialId ? { credentialId } : {}) };
+  }
+  opts.onSuccess();
+  return { failedModelIds: [], duplicateModelIds: [], ...(credentialId ? { credentialId } : {}) };
 }

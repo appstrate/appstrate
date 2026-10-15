@@ -858,21 +858,29 @@ describe("view as role", () => {
       expect(response.headers.get(ACTIVE)).toBeNull();
     });
 
-    it("refuses the ORGANIZATION map to a `member`, and serves it to an owner", async () => {
-      // `GET /api/library` spans every space of the organization, so it is
-      // owner/admin-only — a PAGE gate, not an authority over any package on
-      // it. What this pins is that the org role survives the hop: the same
-      // identity, the same scope, two different verdicts.
-      await seedAgent({ id: "@view-as/mapped", orgId: owner.orgId });
-      const map = async (orgRole: string) =>
-        app.request("/api/library", { headers: loopbackHeaders(orgRole) });
+    it("grades the ORGANIZATION map by the org role carried over the hop", async () => {
+      // `GET /api/library` lists the spaces whose library the caller reads, so
+      // a closed space shows for an owner and not for a `member`. What this
+      // pins is that the org role survives the hop: the same identity, the same
+      // scope, two different maps.
+      const closed = await space("Closed map", "closed");
+      await seedAgent({ id: "@view-as/mapped", orgId: owner.orgId, homeSpaceId: closed.id });
+      const map = async (orgRole: string) => {
+        const res = await app.request("/api/library", { headers: loopbackHeaders(orgRole) });
+        expect(res.status).toBe(200);
+        return (await res.json()) as {
+          spaces: Array<{ id: string }>;
+          packages: { agent: Array<{ id: string }> };
+        };
+      };
 
       const served = await map("owner");
-      expect(served.status).toBe(200);
-      const body = (await served.json()) as { packages: { agent: Array<{ id: string }> } };
-      expect(body.packages.agent.map((pkg) => pkg.id)).toContain("@view-as/mapped");
+      expect(served.spaces.map((s) => s.id)).toContain(closed.id);
+      expect(served.packages.agent.map((pkg) => pkg.id)).toContain("@view-as/mapped");
 
-      expect((await map("member")).status).toBe(403);
+      const graded = await map("member");
+      expect(graded.spaces.map((s) => s.id)).not.toContain(closed.id);
+      expect(graded.packages.agent.map((pkg) => pkg.id)).not.toContain("@view-as/mapped");
     });
   });
 

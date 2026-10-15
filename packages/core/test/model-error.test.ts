@@ -14,7 +14,12 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { classifyModelError, MODEL_ERROR_RETRYABLE_BY_CATEGORY } from "../src/model-error.ts";
+import {
+  classifyModelError,
+  describeModelFailure,
+  MODEL_ERROR_CATEGORIES,
+  MODEL_ERROR_RETRYABLE_BY_CATEGORY,
+} from "../src/model-error.ts";
 import { syntheticAliasClassifierMessage } from "../src/model-swap.ts";
 
 describe("classifyModelError", () => {
@@ -208,5 +213,49 @@ describe("classifyModelError agrees with pi-ai on every forwardable alias status
       category: "upstream_unavailable",
       retryable: true,
     });
+  });
+});
+
+describe("describeModelFailure", () => {
+  it("unwraps a provider refusal's status and its own sentence, from either JSON shape", () => {
+    expect(describeModelFailure('429 {"error":{"message":"  slow down  "}}')).toEqual({
+      category: "rate_limited",
+      retryable: true,
+      status: 429,
+      providerMessage: "slow down",
+    });
+    expect(describeModelFailure('500 {"message":"overloaded"}')).toMatchObject({
+      category: "upstream_unavailable",
+      status: 500,
+      providerMessage: "overloaded",
+    });
+    expect(describeModelFailure('401 {"error":{"message":"invalid x-api-key"}}')).toMatchObject({
+      category: "credential_unavailable",
+      status: 401,
+    });
+  });
+
+  it("keeps the status alone when the body names no message or is not JSON", () => {
+    const noMessage = describeModelFailure('400 {"error":{"code":"x"}}');
+    expect(noMessage).toMatchObject({ category: "invalid_request", status: 400 });
+    expect(noMessage).not.toHaveProperty("providerMessage");
+    expect(describeModelFailure("400 {not json}")).not.toHaveProperty("providerMessage");
+  });
+
+  it("reads no status outside the HTTP range, which runs.model_error_status refuses", () => {
+    for (const text of ['000 {"message":"x"}', '999 {"message":"x"}', '600 {"message":"x"}']) {
+      expect(describeModelFailure(text)).not.toHaveProperty("status");
+    }
+  });
+
+  it("classifies a failure with no status by its text, as classifyModelError does", () => {
+    const failure = describeModelFailure("fetch failed");
+    expect(failure).toEqual(classifyModelError({ message: "fetch failed" }));
+  });
+
+  it("names every category the retryable table knows", () => {
+    expect<string[]>([...MODEL_ERROR_CATEGORIES].sort()).toEqual(
+      Object.keys(MODEL_ERROR_RETRYABLE_BY_CATEGORY).sort(),
+    );
   });
 });

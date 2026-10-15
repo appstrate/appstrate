@@ -17,9 +17,11 @@ const InlineMarkdownImpl = lazy(() =>
 interface MarkdownProps {
   children: string;
   className?: string;
+  /** Package previews must not fetch images or offer author-controlled navigation. */
+  inert?: boolean;
 }
 
-export function Markdown({ children, className }: MarkdownProps) {
+export function Markdown({ children, className, inert }: MarkdownProps) {
   return (
     <Suspense
       fallback={
@@ -28,7 +30,9 @@ export function Markdown({ children, className }: MarkdownProps) {
         </div>
       }
     >
-      <MarkdownImpl className={className}>{children}</MarkdownImpl>
+      <MarkdownImpl className={className} inert={inert}>
+        {children}
+      </MarkdownImpl>
     </Suspense>
   );
 }

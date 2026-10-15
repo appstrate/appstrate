@@ -16,11 +16,28 @@ import {
   CommandSeparator,
 } from "@appstrate/ui/components/command";
 import { cn } from "@appstrate/ui/cn";
+import { permissionLabel, permissionResourceLabel } from "../lib/permission-labels";
+
+/** What the picker calls the things it picks. API keys say "scopes", roles say "permissions". */
+interface ScopeMultiSelectLabels {
+  all: string;
+  none: string;
+  count: (count: number) => string;
+  search: string;
+  empty: string;
+}
 
 interface ScopeMultiSelectProps {
   available: string[];
   selected: string[];
   onChange: (scopes: string[]) => void;
+  labels?: ScopeMultiSelectLabels;
+  /** A note under an entry, such as the action that requires it. */
+  hint?: (scope: string) => string | null;
+  /** A short mark at the end of an entry, its meaning in `title`: a property, not a sentence. */
+  tag?: (scope: string) => { label: string; title: string } | null;
+  /** The pending save: the picker cannot be opened. */
+  disabled?: boolean;
 }
 
 interface ResourceGroup {
@@ -52,7 +69,15 @@ function buildGroups(available: string[], selected: string[]): ResourceGroup[] {
   }));
 }
 
-export function ScopeMultiSelect({ available, selected, onChange }: ScopeMultiSelectProps) {
+export function ScopeMultiSelect({
+  available,
+  selected,
+  onChange,
+  labels,
+  hint,
+  tag,
+  disabled = false,
+}: ScopeMultiSelectProps) {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
   const groups = useMemo(() => buildGroups(available, selected), [available, selected]);
@@ -76,26 +101,33 @@ export function ScopeMultiSelect({ available, selected, onChange }: ScopeMultiSe
     onChange(allSelected ? [] : [...available]);
   };
 
-  const label = allSelected
-    ? t("apiKeys.allScopes")
-    : noneSelected
-      ? t("apiKeys.scopes")
-      : t("apiKeys.scopeCount", { count: selected.length });
+  const text = labels ?? {
+    all: t("apiKeys.allScopes"),
+    none: t("apiKeys.scopes"),
+    count: (count: number) => t("apiKeys.scopeCount", { count }),
+    search: t("apiKeys.searchScopes"),
+    empty: t("apiKeys.noScopes"),
+  };
+  const label = allSelected ? text.all : noneSelected ? text.none : text.count(selected.length);
 
   return (
     <div className="space-y-2">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" className="w-full justify-between font-normal">
+          <Button
+            variant="outline"
+            className="w-full justify-between font-normal"
+            disabled={disabled}
+          >
             <span className="truncate">{label}</span>
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-80 p-0" align="start">
           <Command>
-            <CommandInput placeholder={t("apiKeys.searchScopes")} />
+            <CommandInput placeholder={text.search} />
             <CommandList>
-              <CommandEmpty>{t("apiKeys.noScopes")}</CommandEmpty>
+              <CommandEmpty>{text.empty}</CommandEmpty>
               <CommandGroup>
                 <CommandItem onSelect={toggleAll}>
                   <Check
@@ -106,16 +138,36 @@ export function ScopeMultiSelect({ available, selected, onChange }: ScopeMultiSe
               </CommandGroup>
               <CommandSeparator />
               {groups.map(({ resource, scopes }) => (
-                <CommandGroup key={resource} heading={resource}>
+                <CommandGroup key={resource} heading={permissionResourceLabel(resource, t)}>
                   {scopes.map((scope) => {
-                    const action = scope.split(":")[1]!;
+                    const label = permissionLabel(scope, t);
                     const isSelected = selected.includes(scope);
+                    const note = hint?.(scope);
+                    const mark = tag?.(scope);
                     return (
-                      <CommandItem key={scope} value={scope} onSelect={() => toggle(scope)}>
+                      <CommandItem
+                        key={scope}
+                        value={scope}
+                        keywords={[label]}
+                        title={scope}
+                        onSelect={() => toggle(scope)}
+                      >
                         <Check
                           className={cn("mr-2 h-4 w-4", isSelected ? "opacity-100" : "opacity-0")}
                         />
-                        {action}
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span>{label}</span>
+                          {note && <span className="text-muted-foreground text-xs">{note}</span>}
+                        </span>
+                        {mark && (
+                          <Badge
+                            variant="outline"
+                            className="text-muted-foreground ml-2 shrink-0 font-normal"
+                            title={mark.title}
+                          >
+                            {mark.label}
+                          </Badge>
+                        )}
                       </CommandItem>
                     );
                   })}
@@ -136,7 +188,7 @@ export function ScopeMultiSelect({ available, selected, onChange }: ScopeMultiSe
               .filter((g) => g.selectedCount > 0)
               .map((g) => (
                 <Badge key={g.resource} variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
-                  {g.resource}
+                  {permissionResourceLabel(g.resource, t)}
                   {g.selectedCount < g.scopes.length && (
                     <span className="ml-0.5 opacity-60">
                       {g.selectedCount}/{g.scopes.length}

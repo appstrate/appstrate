@@ -164,6 +164,7 @@ const LOCAL_KEY: ModelProviderCredentialInfo = {
   created_by: null,
   allowed_actions: ["edit", "delete", "test"],
   bindable: true,
+  serves_model_ids: [],
   createdAt: "2026-07-01T10:00:00.000Z",
   updatedAt: "2026-07-01T10:00:00.000Z",
 };
@@ -211,6 +212,7 @@ const ORG_CONNECTION: ModelProviderCredentialInfo = {
   owner_id: null,
   owner_name: null,
   bindable: true,
+  serves_model_ids: [],
 };
 
 function form(
@@ -265,8 +267,8 @@ describe("ModelFormBody — editing a custom endpoint", () => {
   it("locks the base URL, which belongs to the selected key", () => {
     // Editing it here would save a 200 that changes nothing: the URL rides on
     // the credential (`baseUrlOverride`), not on the model row.
-    const input = html.slice(html.indexOf('id="mdl-baseUrl"'));
-    expect(input.slice(0, input.indexOf(">"))).toContain("disabled");
+    const at = html.indexOf('id="mdl-baseUrl"');
+    expect(html.slice(html.lastIndexOf("<input", at), html.indexOf(">", at))).toContain("disabled");
     expect(html).toContain(settingsFr["models.form.baseUrlPinnedHint"]);
   });
 

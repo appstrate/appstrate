@@ -1,24 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
-import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Label } from "@appstrate/ui/components/label";
+import { OptionSelect } from "@/components/app-ui/option-select";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
+import { FormItem } from "@/components/app-ui/form-item";
 import type { PackageType } from "@appstrate/core/validation";
-import { Modal } from "../modal";
-import { Spinner } from "../spinner";
+import { FormModal } from "../form-modal";
+import { spaceLabel } from "../../lib/space-label";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useMovePackageHome } from "../../hooks/use-packages";
 import { writableDestinations } from "../../lib/package-home";
+
+/** The URL parameter that opens the dialog; its value is the package. */
+export const MOVE_HOME_PARAM = "moveHome";
 
 /**
  * Move a package's home space — the counterpart of `PUT
@@ -26,20 +22,18 @@ import { writableDestinations } from "../../lib/package-home";
  * deletion answers when it still homes packages.
  */
 export function MoveHomeSpaceDialog({
-  open,
   onClose,
   packageId,
   type,
   homeSpaceId,
 }: {
-  open: boolean;
   onClose: () => void;
   packageId: string;
   type: PackageType;
   homeSpaceId: string | null | undefined;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: spaces } = useSpaces(open);
+  const { data: spaces } = useSpaces();
   const move = useMovePackageHome(type);
   const [target, setTarget] = useState("");
   // Checked by default: that is what the move has always done, so opening this
@@ -61,7 +55,8 @@ export function MoveHomeSpaceDialog({
     onClose();
   };
 
-  const submit = () => {
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
     const destination = writable.find((space) => space.id === target);
     if (!destination) return;
     move.mutate(
@@ -76,39 +71,27 @@ export function MoveHomeSpaceDialog({
   };
 
   return (
-    <Modal
-      open={open}
+    <FormModal
       onClose={close}
+      onSubmit={submit}
       title={t("packages.moveHomeTitle")}
-      actions={
-        <>
-          <Button variant="outline" type="button" onClick={close}>
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-          <Button type="button" onClick={submit} disabled={!target || move.isPending}>
-            {move.isPending ? <Spinner /> : t("packages.moveHomeSubmit")}
-          </Button>
-        </>
-      }
+      isPending={move.isPending}
+      submitLabel={t("packages.moveHomeSubmit")}
+      submitDisabled={!target}
     >
-      <div className="space-y-2">
-        <Label htmlFor="move-home-space">{t("packages.moveHomeLabel")}</Label>
-        <Select value={target || undefined} onValueChange={setTarget}>
-          <SelectTrigger id="move-home-space" className="w-full">
-            <SelectValue placeholder={t("packages.moveHomePlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            {writable.map((space) => (
-              <SelectItem key={space.id} value={space.id}>
-                {space.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-muted-foreground text-sm">
-          {writable.length === 0 ? t("packages.moveHomeEmpty") : t("packages.moveHomeHint")}
-        </p>
-      </div>
+      <FormItem
+        id="move-home-space"
+        label={t("packages.moveHomeLabel")}
+        hint={writable.length === 0 ? t("packages.moveHomeEmpty") : t("packages.moveHomeHint")}
+      >
+        <OptionSelect
+          value={target || undefined}
+          onValueChange={setTarget}
+          placeholder={t("packages.moveHomePlaceholder")}
+          className="w-full"
+          options={writable.map((space) => ({ value: space.id, label: space.name }))}
+        />
+      </FormItem>
       {/*
         The half of the act the word "move" does not carry: the space being
         LEFT keeps the package unless this is unchecked. Rendered whether or
@@ -117,25 +100,19 @@ export function MoveHomeSpaceDialog({
         the old asymmetry back where the user cannot see it.
       */}
       {previousHome ? (
-        <div className="mt-4 flex gap-3">
-          <Checkbox
-            id="move-home-keep"
-            className="mt-0.5"
-            checked={keepInPreviousHome}
-            onCheckedChange={(checked) => setKeepInPreviousHome(checked === true)}
-          />
-          <div className="space-y-1">
-            <Label htmlFor="move-home-keep" className="font-normal">
-              {t("packages.moveHomeKeep", { space: previousHome.name })}
-            </Label>
-            <p className="text-muted-foreground text-sm">
-              {keepInPreviousHome
-                ? t("packages.moveHomeKeepHint", { space: previousHome.name })
-                : t("packages.moveHomeReleaseHint", { space: previousHome.name })}
-            </p>
-          </div>
-        </div>
+        <CheckboxField
+          id="move-home-keep"
+          className="mt-4"
+          label={t("packages.moveHomeKeep", { space: spaceLabel(previousHome, t) })}
+          description={
+            keepInPreviousHome
+              ? t("packages.moveHomeKeepHint", { space: spaceLabel(previousHome, t) })
+              : t("packages.moveHomeReleaseHint", { space: spaceLabel(previousHome, t) })
+          }
+          checked={keepInPreviousHome}
+          onCheckedChange={(checked) => setKeepInPreviousHome(checked === true)}
+        />
       ) : null}
-    </Modal>
+    </FormModal>
   );
 }

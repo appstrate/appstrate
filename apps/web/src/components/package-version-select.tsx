@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { usePackageVersions } from "../hooks/use-packages";
 import type { PackageType } from "@appstrate/shared-types";
 
@@ -37,34 +32,25 @@ export function PackageVersionSelect({
   value,
   onChange,
   leadingOptions,
+  disabled,
 }: {
   type: PackageType;
   packageId: string;
   value: string;
   onChange: (next: string) => void;
   leadingOptions: VersionLeadingOption[];
+  disabled?: boolean;
 }) {
-  const { data: versions } = usePackageVersions(type, packageId);
+  const { data: versions, isLoading } = usePackageVersions(type, packageId);
+  if (isLoading) return <Skeleton className="h-9 w-full" />;
+  const options = [
+    ...leadingOptions,
+    ...(versions
+      ?.filter((v) => !v.yanked)
+      .map((v) => ({ value: v.version, label: `v${v.version}` })) ?? []),
+  ];
   return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {leadingOptions.map((opt) => (
-          <SelectItem key={opt.value} value={opt.value}>
-            {opt.label}
-          </SelectItem>
-        ))}
-        {versions
-          ?.filter((v) => !v.yanked)
-          .map((v) => (
-            <SelectItem key={v.version} value={v.version}>
-              v{v.version}
-            </SelectItem>
-          ))}
-      </SelectContent>
-    </Select>
+    <OptionSelect value={value} onValueChange={onChange} disabled={disabled} options={options} />
   );
 }
 

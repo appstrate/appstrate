@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { client } from "../api/client";
 import { orgStore } from "../stores/org-store";
-import { Spinner } from "../components/spinner";
 import { AuthLayout } from "../components/auth-layout";
 import { errorMessage } from "../lib/mutation-error";
 
@@ -62,10 +62,8 @@ export function WelcomePage() {
 
         <form onSubmit={handleSubmit}>
           <div className="flex flex-col gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="displayName">{t("welcome.displayName")}</Label>
+            <FormItem id="displayName" label={t("welcome.displayName")}>
               <Input
-                id="displayName"
                 type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
@@ -73,13 +71,13 @@ export function WelcomePage() {
                 autoComplete="name"
                 autoFocus
               />
-            </div>
+            </FormItem>
 
-            {serverError && <p className="text-destructive text-sm">{serverError}</p>}
+            <FieldError>{serverError}</FieldError>
 
-            <Button className="w-full" type="submit" disabled={loading}>
-              {loading ? <Spinner /> : t("welcome.save")}
-            </Button>
+            <PendingButton className="w-full" type="submit" pending={loading}>
+              {t("welcome.save")}
+            </PendingButton>
           </div>
         </form>
       </div>

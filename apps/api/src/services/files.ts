@@ -36,6 +36,7 @@ import {
   notInArray,
   notExists,
   exists,
+  ilike,
   sql,
   type SQL,
 } from "drizzle-orm";
@@ -57,6 +58,7 @@ import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
+import { likeContains } from "../lib/like-pattern.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
 import {
   conflict,
@@ -1348,6 +1350,7 @@ export interface ListFilesFilters {
   runId?: string;
   chatSessionId?: string;
   contextChatSessionId?: string;
+  search?: string;
   limit?: number;
   startingAfter?: string;
 }
@@ -1507,6 +1510,7 @@ export async function listFilesForActor(
   if (filters.contextChatSessionId) {
     conditions.push(await chatContextFileFilter(scope, actor, filters.contextChatSessionId));
   }
+  if (filters.search) conditions.push(ilike(files.name, likeContains(filters.search)));
 
   if (filters.startingAfter) {
     const [cursor] = await db

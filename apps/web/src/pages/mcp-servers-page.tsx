@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ItemTab } from "./item-tab";
+import { PackageIndexPage } from "./package-index";
 
 export function McpServersPage() {
-  return (
-    <div className="p-6">
-      <ItemTab type="mcp-server" readOnly />
-    </div>
-  );
+  return <PackageIndexPage type="mcp-server" manualCreation="import" />;
 }

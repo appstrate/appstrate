@@ -27,6 +27,7 @@ import { createModelProvidersOAuthRouter } from "./routes/model-providers-oauth.
 import { createInternalRouter } from "./routes/internal.ts";
 import { createSpacesRouter } from "./routes/spaces.ts";
 import { createRolesRouter } from "./routes/roles.ts";
+import { createOrgRolesRouter } from "./routes/org-roles.ts";
 import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
@@ -373,6 +374,7 @@ app.route("/api/model-provider-credentials", createModelProviderCredentialsRoute
 app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
 app.route("/api/spaces", createSpacesRouter());
 app.route("/api/roles", createRolesRouter());
+app.route("/api/org-roles", createOrgRolesRouter());
 app.route("/api/library", createLibraryRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());

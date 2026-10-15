@@ -9,7 +9,8 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import type { UseFormRegisterReturn } from "react-hook-form";
@@ -43,16 +44,12 @@ export function CapabilitiesSection({
 
   return (
     <div className="mt-2 space-y-4 border-t pt-4">
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id="mdl-capabilities-explicit"
-          checked={explicit}
-          onCheckedChange={(checked) => onExplicitChange(Boolean(checked))}
-        />
-        <Label htmlFor="mdl-capabilities-explicit" className="cursor-pointer font-normal">
-          {t("models.form.capabilitiesExplicit")}
-        </Label>
-      </div>
+      <CheckboxField
+        id="mdl-capabilities-explicit"
+        label={t("models.form.capabilitiesExplicit")}
+        checked={explicit}
+        onCheckedChange={(checked) => onExplicitChange(Boolean(checked))}
+      />
 
       {explicit ? (
         <>
@@ -61,14 +58,12 @@ export function CapabilitiesSection({
               {t("models.form.capabilitiesLimits")}
             </Label>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="mdl-ctx">{t("models.form.contextWindow")}</Label>
-                <Input id="mdl-ctx" type="number" {...contextWindowProps} placeholder="128000" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mdl-maxtok">{t("models.form.maxTokens")}</Label>
-                <Input id="mdl-maxtok" type="number" {...maxTokensProps} placeholder="16384" />
-              </div>
+              <FormItem id="mdl-ctx" label={t("models.form.contextWindow")}>
+                <Input type="number" {...contextWindowProps} placeholder="128000" />
+              </FormItem>
+              <FormItem id="mdl-maxtok" label={t("models.form.maxTokens")}>
+                <Input type="number" {...maxTokensProps} placeholder="16384" />
+              </FormItem>
             </div>
           </div>
 
@@ -77,36 +72,24 @@ export function CapabilitiesSection({
               {t("models.form.capabilitiesAccepts")}
             </Label>
             <div className="flex flex-wrap gap-4">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="mdl-input-text"
-                  checked={inputText}
-                  onCheckedChange={(checked) => onInputTextChange(Boolean(checked))}
-                />
-                <Label htmlFor="mdl-input-text" className="cursor-pointer font-normal">
-                  {t("models.form.inputText")}
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="mdl-input-image"
-                  checked={inputImage}
-                  onCheckedChange={(checked) => onInputImageChange(Boolean(checked))}
-                />
-                <Label htmlFor="mdl-input-image" className="cursor-pointer font-normal">
-                  {t("models.form.inputImage")}
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="mdl-reasoning"
-                  checked={reasoning}
-                  onCheckedChange={(checked) => onReasoningChange(Boolean(checked))}
-                />
-                <Label htmlFor="mdl-reasoning" className="cursor-pointer font-normal">
-                  {t("models.form.reasoning")}
-                </Label>
-              </div>
+              <CheckboxField
+                id="mdl-input-text"
+                label={t("models.form.inputText")}
+                checked={inputText}
+                onCheckedChange={(checked) => onInputTextChange(Boolean(checked))}
+              />
+              <CheckboxField
+                id="mdl-input-image"
+                label={t("models.form.inputImage")}
+                checked={inputImage}
+                onCheckedChange={(checked) => onInputImageChange(Boolean(checked))}
+              />
+              <CheckboxField
+                id="mdl-reasoning"
+                label={t("models.form.reasoning")}
+                checked={reasoning}
+                onCheckedChange={(checked) => onReasoningChange(Boolean(checked))}
+              />
             </div>
           </div>
         </>

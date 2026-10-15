@@ -29,8 +29,9 @@ import {
   getRuntimeTools,
   withNormalizedManifest,
   setRuntimeTools,
+  withOutputTool,
 } from "../utils";
-import type { SchemaField } from "../schema-section";
+import type { SchemaField } from "../types";
 import type { JSONSchema7, JSONSchemaObject } from "@appstrate/core/form";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
@@ -85,6 +86,15 @@ describe("getResourceEntries / setResourceEntries", () => {
     };
     setResourceEntries(m, "skills", []);
     expect((m.dependencies as Record<string, unknown>).skills).toBeUndefined();
+  });
+
+  // An agent created over the API may declare no `dependencies` at all; writing
+  // its (empty) skill list back must not invent the key, or the editor's state
+  // drifts from its initial snapshot and reads as dirty with no edit.
+  it("writes nothing for an empty skill list on a manifest without dependencies", () => {
+    const m: Record<string, unknown> = { name: "@org/agent" };
+    setResourceEntries(m, "skills", getResourceEntries(m, "skills"));
+    expect(m).toEqual({ name: "@org/agent" });
   });
 
   // Niveau 2 — version + tool/scope selection both live on the canonical
@@ -865,6 +875,18 @@ describe("getRuntimeTools", () => {
 // (`@appstrate/core`). The former is gated on `type: "agent"` — the fixtures
 // carry it because the only call site (`package-editor.tsx`) runs in the agent
 // branch on a stored AFPS manifest, where `type` is required by the schema.
+describe("withOutputTool", () => {
+  it("turns the output tool on next to the tools already chosen", () => {
+    expect(withOutputTool({ runtime_tools: ["log"] }).runtime_tools).toEqual(["log", "output"]);
+    expect(withOutputTool({}).runtime_tools).toEqual(["output"]);
+  });
+
+  it("returns the same manifest when the tool is already there", () => {
+    const manifest = { runtime_tools: ["output", "log"] };
+    expect(withOutputTool(manifest)).toBe(manifest);
+  });
+});
+
 describe("withNormalizedManifest", () => {
   it("strips a retired id from the manifest loaded into the editor", () => {
     const m = { type: "agent", name: "@o/a", runtime_tools: ["report", "log"] };

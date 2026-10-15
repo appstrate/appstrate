@@ -1,34 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Preferences › My providers: the caller's own keys and subscriptions, in the table of the
+ * organization's providers narrowed to them, with the kind of each. The Models column says what each lets them use.
+ */
+
+import { ToneAlert } from "@/components/app-ui/status-variants";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { useQueryClient } from "@tanstack/react-query";
+import { AlertDescription } from "@appstrate/ui/components/alert";
+import { AlertTriangle, Plus } from "lucide-react";
 import { ConfirmModal } from "../../components/confirm-modal";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { CredentialFormModal } from "../../components/credential-form-modal";
-import { CredentialsSection } from "../../components/model-credentials-section";
-import { ErrorState, LoadingState } from "../../components/page-states";
-import { Spinner } from "../../components/spinner";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { AlertTriangle } from "lucide-react";
+import { ProvidersTable } from "../../components/providers-table";
+import type { MenuAction } from "../../lib/menu-action";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import {
   deduplicateLabel,
   useCreateModelProviderCredential,
   useDeleteModelProviderCredential,
   useModelProviderCredentials,
+  useProvidersRegistry,
   useUpdateModelProviderCredential,
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
 import { useModels } from "../../hooks/use-models";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import { usePermissions } from "../../hooks/use-permissions";
-import { errorMessage } from "../../lib/mutation-error";
 import {
   credentialUpdateBody,
   ownPersonalCredentials,
   personalApiKeyBody,
 } from "../../lib/personal-model-credentials";
+import { invalidatePaths } from "../../lib/query-keys";
+import { providerRows } from "../../lib/model-providers";
 import { authStore } from "../../stores/auth-store";
+import { EmptyStateAction } from "../../components/page-states";
 
 export function PreferencesModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -42,41 +52,46 @@ export function PreferencesModelsPage() {
   // from the credentials already held (deleting is never gated by the policy).
   const personalModelCredentialsDisabled = orgSettings?.personal_model_credentials === false;
   const personalModelCredentialsAllowed = orgSettings?.personal_model_credentials === true;
+  const canAdd = canConnect && personalModelCredentialsAllowed;
   const credentialsQuery = useModelProviderCredentials();
   const modelsQuery = useModels();
+  const { data: registry } = useProvidersRegistry();
   const createCredential = useCreateModelProviderCredential();
   const updateCredential = useUpdateModelProviderCredential();
   const deleteCredential = useDeleteModelProviderCredential();
 
-  const [formOpen, setFormOpen] = useState(false);
-  const [editCredential, setEditCredential] = useState<ModelProviderCredentialInfo | null>(null);
+  const newParam = useModalParam("newCredential");
+  const credentials = ownPersonalCredentials(credentialsQuery.data ?? [], userId);
+  const editParam = useModalTarget("editCredential", credentialsQuery.data && credentials);
+  const editCredential = editParam.target ?? null;
+  // `?newCredential` opens only for a caller the add action is offered to.
+  const formOpen = (newParam.value !== null && canAdd) || editCredential !== null;
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
 
-  if (credentialsQuery.isLoading) return <LoadingState />;
-  if (credentialsQuery.error) return <ErrorState error={credentialsQuery.error} />;
+  const rows = providerRows(modelsQuery.data ?? [], credentials, registry ?? [], userId).filter(
+    (row) => row.credential !== null,
+  );
 
-  const allCredentials = credentialsQuery.data ?? [];
-  const credentials = ownPersonalCredentials(allCredentials, userId);
-  const paidByCaller = (modelsQuery.data ?? []).filter((m) => m.billed_to === "user");
-
-  // A credential's add, rename, delete or pairing changes which models the caller pays for.
+  // A credential's add, rename, delete or pairing changes which models the caller can use.
   const refreshModels = () => {
-    void queryClient.invalidateQueries({ queryKey: ["get", "/api/models"] });
+    void invalidatePaths(queryClient, ["/api/models"]);
   };
 
   const closeForm = () => {
-    setFormOpen(false);
+    (editCredential ? editParam : newParam).close();
     refreshModels();
   };
 
-  const openCreate = () => {
-    setEditCredential(null);
-    setFormOpen(true);
-  };
+  const openCreate = () => newParam.open();
 
-  const openEdit = (credential: ModelProviderCredentialInfo) => {
-    setEditCredential(credential);
-    setFormOpen(true);
+  const openEdit = (credential: ModelProviderCredentialInfo) => editParam.open(credential.id);
+
+  // A refusal is toasted by the mutation cache; the rejection keeps the typed label.
+  const renameCredential = async (credential: ModelProviderCredentialInfo, label: string) => {
+    await updateCredential.mutateAsync({
+      params: { path: { id: credential.id } },
+      body: { label },
+    });
   };
 
   const submitForm = (data: { label: string; providerId: string; apiKey?: string }) => {
@@ -103,70 +118,63 @@ export function PreferencesModelsPage() {
     );
   };
 
+  const addCredential: MenuAction = {
+    id: "create-credential",
+    icon: Plus,
+    label: t("credentials.addPersonal"),
+    onSelect: openCreate,
+    hidden: !canAdd,
+  };
+
   return (
     <>
       {personalModelCredentialsDisabled && (
-        <Alert variant="warning" className="mb-4">
+        <ToneAlert variant="warning" className="mb-4">
           <AlertTriangle size={16} />
           <AlertDescription>{t("modelCredentials.policyDisabled")}</AlertDescription>
-        </Alert>
+        </ToneAlert>
       )}
+
+      <SettingsPageActions actions={[addCredential]} />
 
       <p className="text-muted-foreground mb-4 text-sm">{t("modelCredentials.description")}</p>
 
-      <CredentialsSection
-        credentials={credentials}
-        isLoading={false}
-        error={null}
-        onCreate={openCreate}
-        onEdit={openEdit}
-        onDelete={(credential) => setConfirmDelete(credential)}
-        onConnectOAuth={openEdit}
-        canAdd={canConnect && personalModelCredentialsAllowed}
-        showOwner={false}
+      <ProvidersTable
+        label={t("preferences.tabModels")}
+        tableId="my-providers"
+        rows={rows}
+        showType
+        isLoading={credentialsQuery.isLoading || modelsQuery.isLoading}
+        error={credentialsQuery.error ?? modelsQuery.error}
+        // The add deed is in the Actions menu, which is closed: the empty list repeats it.
         empty={{
           message: t("modelCredentials.empty"),
           hint: t("modelCredentials.emptyHint"),
+          action: <EmptyStateAction action={addCredential} />,
         }}
+        canWriteModels={false}
+        onRename={renameCredential}
+        onChangeKey={openEdit}
+        onReconnect={openEdit}
+        onDelete={setConfirmDelete}
       />
 
-      <div className="border-border bg-card mt-6 rounded-lg border p-5">
-        <h3 className="text-sm font-medium">{t("modelCredentials.billedTitle")}</h3>
-        {modelsQuery.isLoading ? (
-          <div className="mt-2">
-            <Spinner />
-          </div>
-        ) : modelsQuery.error ? (
-          <p className="text-destructive mt-2 text-xs">{errorMessage(modelsQuery.error)}</p>
-        ) : paidByCaller.length > 0 ? (
-          <ul className="mt-3 flex flex-col gap-1.5">
-            {paidByCaller.map((m) => (
-              <li key={m.id} className="text-sm">
-                {m.label}
-                {m.provider_name && (
-                  <span className="text-muted-foreground text-xs"> · {m.provider_name}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-muted-foreground mt-2 text-sm">{t("modelCredentials.billedNone")}</p>
-        )}
-      </div>
-
-      <CredentialFormModal
-        open={formOpen}
-        onClose={closeForm}
-        credential={editCredential}
-        isPending={createCredential.isPending || updateCredential.isPending}
-        onSubmit={submitForm}
-        personal
-      />
+      {formOpen && (
+        <CredentialFormModal
+          key={editCredential?.id ?? "__create__"}
+          onClose={closeForm}
+          credential={editCredential}
+          isPending={createCredential.isPending || updateCredential.isPending}
+          onSubmit={submitForm}
+          personal
+        />
+      )}
 
       <ConfirmModal
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("modelCredentials.deleteTitle")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         description={
           confirmDelete ? t("modelCredentials.deleteConfirm", { label: confirmDelete.label }) : ""
         }

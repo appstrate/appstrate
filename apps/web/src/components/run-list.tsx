@@ -1,15 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * A page of runs: the query, the paging, and the table underneath.
+ *
+ * Agent names resolve in `use-run-agent-name.ts`; the table and the card grid
+ * draw the rows. What is left here is fetching, and the one empty state both
+ * views show.
+ */
+
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { PlayCircle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { usePaginatedRuns, type RunKindFilter } from "../hooks/use-paginated-runs";
-import { useAgents } from "../hooks/use-packages";
-import { RunRow } from "./run-row";
+import { useRunAgentName } from "../hooks/use-run-agent-name";
+import { useDebouncedValue } from "../hooks/use-debounced-value";
+import { RunsTable } from "./runs-table";
+import { useRunColumns } from "./run-columns";
+import { RunCard } from "./run-card";
+import { CardGrid } from "./card-grid";
 import { EmptyState, ErrorState } from "./page-states";
+import { columnMenu, visibleColumns } from "../lib/column-visibility";
+import { useColumnVisibility } from "../stores/column-visibility-store";
 import type { EnrichedRun } from "@appstrate/shared-types";
-import { inlineRunDisplayName } from "../lib/run-title";
+import type { RunStatus } from "@appstrate/core/run-status";
+import { ListFooter, type ColumnMenuSpec } from "./list-toolbar";
+import type { ListView } from "../stores/list-view-store";
+import { PlayCircle } from "lucide-react";
 
 interface RunListProps {
   packageId?: string;
@@ -25,94 +41,34 @@ interface RunListProps {
   /** Custom empty state (replaces default) */
   emptyState?: React.ReactNode;
   /** Preview row shown above the first page (e.g. scheduled next-run) */
-  firstPageBanner?: React.ReactNode;
+  banner?: React.ReactNode;
   /** Filter runs by user -- "me" for current user only */
   user?: "me";
   /** Filter runs by kind -- "all" | "package" | "inline" */
   kind?: RunKindFilter;
-}
-
-interface RunRowsProps {
-  /** Runs to render, already fetched by the caller. */
-  runs: EnrichedRun[];
-  /** Still loading — renders the loading placeholder instead of the rows. */
-  isLoading?: boolean;
-  fixedAgentName?: string;
-  hideAgentName?: boolean;
-  emptyState?: React.ReactNode;
-  /** Row pinned above the list (e.g. scheduled next-run preview). */
-  banner?: React.ReactNode;
-}
-
-/**
- * The presentation half of {@link RunList}: rows, agent-name resolution, empty
- * and loading states — no fetching of its own.
- *
- * Split out so a page that ALREADY has runs in hand can render them without a
- * second request. The dashboard is exactly that case: it loads 15 runs for its
- * own header, and mounting `<RunList pageSize={7}>` underneath issued a second
- * `GET /api/runs` (a different `limit` = a different React Query key = a
- * different network call, each one a `COUNT` plus an enriched page read).
- *
- * `useAgents()` here is not an extra request: it is the same query key every
- * caller of this component already holds, served from cache.
- */
-export function RunRows({
-  runs,
-  isLoading = false,
-  fixedAgentName,
-  hideAgentName = false,
-  emptyState,
-  banner,
-}: RunRowsProps) {
-  const { t } = useTranslation(["agents"]);
-  const { data: agents } = useAgents();
-
-  const agentNameMap = new Map<string, string>();
-  if (!hideAgentName && !fixedAgentName && agents) {
-    for (const f of agents) {
-      agentNameMap.set(f.id, f.display_name ?? f.id);
-    }
-  }
-
-  const resolveAgentName = (run: EnrichedRun) => {
-    if (hideAgentName) return undefined;
-    if (fixedAgentName) return fixedAgentName;
-    // Inline runs: use the manifest displayName snapshot (run.agent_name) — the
-    // raw shadow packageId (`@inline/r-…`) is never meaningful to users, and
-    // the ephemeral row isn't in `agents` so the map lookup would miss anyway.
-    if (run.package_ephemeral) {
-      return inlineRunDisplayName(run.agent_name, t("runs.inlineBadge"));
-    }
-    // Source agent deleted (FK SET NULL): fall back to the denormalized
-    // `agent_name` snapshot stamped at INSERT time, then to a generic label.
-    if (run.packageId == null) {
-      return run.agent_name ?? t("runs.deletedAgent", { ns: "agents" });
-    }
-    return agentNameMap.get(run.packageId) ?? run.agent_name ?? run.packageId;
-  };
-
-  if (isLoading) {
-    return (
-      <div className="border-border text-muted-foreground rounded-md border p-8 text-center text-sm">
-        {t("loading", { ns: "common" })}
-      </div>
-    );
-  }
-
-  if (runs.length === 0) {
-    if (emptyState) return <>{emptyState}</>;
-    return <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />;
-  }
-
-  return (
-    <div className="border-border rounded-md border">
-      {banner}
-      {runs.map((run) => (
-        <RunRow key={run.id} run={run} agentName={resolveAgentName(run)} />
-      ))}
-    </div>
-  );
+  /** Filter runs by lifecycle status — one, or several at once. */
+  status?: RunStatus[];
+  /** Free text: the agent a run executed, the error it ended on, its number. */
+  search?: string;
+  /**
+   * The bar above the table.
+   *
+   * A render prop rather than props the page reads for itself: the columns live
+   * here, and the bar's column menu has to name the same ones the table draws.
+   * The page still owns WHAT the bar says.
+   */
+  toolbar?: (bar: { columns: ColumnMenuSpec }) => React.ReactNode;
+  /**
+   * What the list amounts to, under the table — IN THE CALLER'S OWN WORDS. A
+   * render prop because the query lives here: a page asking for the same rows a
+   * second time to count them would send a duplicate `GET /api/runs`.
+   */
+  countLabel?: (total: number) => React.ReactNode;
+  /** Level-one Runs offers both representations; embedded run lists stay tables. */
+  view?: ListView;
+  /** Level-one tables preserve every selected column behind horizontal overflow. */
+  tableColumnMode?: "tiered" | "scroll";
+  tableSurface?: "framed" | "integrated";
 }
 
 export function RunList({
@@ -123,68 +79,113 @@ export function RunList({
   paginated = true,
   hideAgentName = false,
   emptyState,
-  firstPageBanner,
+  banner,
   user,
   kind,
+  status,
+  search,
+  toolbar,
+  countLabel,
+  view = "table",
+  tableColumnMode = "tiered",
+  tableSurface = "framed",
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
-  const [page, setPage] = useState(0);
+  const agentName = useRunAgentName(fixedAgentName);
+  const allColumns = useRunColumns({ agentName, hideAgentName });
+  // Per TABLE, not per screen: the run list keeps its columns wherever it is
+  // shown — the runs page, an agent's tab, a schedule's history.
+  const visibility = useColumnVisibility("runs");
+  const columns = visibleColumns(allColumns, visibility.hidden);
 
-  const { data, isLoading, error } = usePaginatedRuns({
+  // Paging resets when the filters change — WITHOUT remounting this component.
+  // A `key` at the call site is the idiomatic way to reset state, but the
+  // toolbar renders inside here, so remounting would close its open menu on
+  // every tick and make multi-select unusable. The page is derived from the
+  // filter set instead: a new set reads as page zero straight away.
+  // The search asks once the typing pauses; clearing it asks at once.
+  const debouncedSearch = useDebouncedValue(search ?? "");
+  const querySearch = search ? debouncedSearch : "";
+  const signature = `${user ?? ""}|${kind ?? ""}|${status?.join(",") ?? ""}|${querySearch}`;
+  const [paging, setPaging] = useState({ signature, page: 0 });
+  const page = paging.signature === signature ? paging.page : 0;
+  const setPage = (next: number) => setPaging({ signature, page: next });
+
+  const { data, isLoading, isError, error } = usePaginatedRuns({
     packageId,
     scheduleId,
     user,
     kind,
+    status,
+    search: querySearch || undefined,
     limit: pageSize,
     offset: page * pageSize,
   });
 
   const runs: EnrichedRun[] = data?.data ?? [];
-  const total = data?.total ?? 0;
-  const totalPages = Math.ceil(total / pageSize);
+  // Undefined until the request answers — the count and the pager both read
+  // it, and `?? 0` here would tell the footer there were zero runs on a 500.
+  const total = data?.total;
+  const totalPages = total === undefined ? 0 : Math.ceil(total / pageSize);
 
   // Only the first page shows a placeholder; paging keeps the previous rows.
   const showLoading = isLoading && page === 0;
 
-  // A refused or failed listing is not "no runs".
-  if (error && !data) return <ErrorState error={error} />;
-
-  if (showLoading || runs.length === 0) {
-    return (
-      <RunRows
-        runs={runs}
-        isLoading={showLoading}
-        fixedAgentName={fixedAgentName}
-        hideAgentName={hideAgentName}
-        emptyState={emptyState}
-      />
-    );
-  }
+  // A refused or failed listing is not "no runs": the body says the refusal.
+  // Only when nothing was loaded: a failed background refetch keeps the rows.
+  const failed = isError && !data;
+  const errorBody = <ErrorState error={error} compact />;
+  const emptyBody = emptyState ?? (
+    <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />
+  );
 
   return (
-    <div className="space-y-2">
-      <RunRows
-        runs={runs}
-        fixedAgentName={fixedAgentName}
-        hideAgentName={hideAgentName}
-        emptyState={emptyState}
-        banner={page === 0 ? firstPageBanner : undefined}
-      />
+    <div>
+      {toolbar?.({ columns: columnMenu(allColumns, visibility) })}
 
-      {paginated && totalPages > 1 && (
-        <div className="flex items-center justify-end gap-4 pt-1">
-          <span className="text-muted-foreground text-sm">
-            {t("pagination.pageOf", {
-              page: page + 1,
-              total: totalPages,
-              ns: "common",
-            })}
-          </span>
-          <div className="flex gap-2">
+      {view === "table" ? (
+        <RunsTable
+          runs={runs}
+          columns={columns}
+          agentName={agentName}
+          isLoading={showLoading}
+          isError={failed}
+          error={errorBody}
+          empty={emptyBody}
+          banner={page === 0 ? banner : undefined}
+          columnMode={tableColumnMode}
+          surface={tableSurface}
+        />
+      ) : (
+        <CardGrid
+          items={runs}
+          itemKey={(run) => run.id}
+          renderCard={(run) => <RunCard run={run} agentName={agentName(run)} />}
+          isLoading={showLoading}
+          isError={failed}
+          error={errorBody}
+          empty={emptyBody}
+        />
+      )}
+
+      {/* The count speaks only for an answer we actually have: it read "0 run"
+          while the first page was still loading and, worse, on a 500 — the same
+          lie the empty state had to be cured of. */}
+      <ListFooter count={total === undefined ? undefined : countLabel?.(total)}>
+        {paginated && totalPages > 1 && (
+          <>
+            <span>
+              {t("pagination.pageOf", {
+                page: page + 1,
+                total: totalPages,
+                ns: "common",
+              })}
+            </span>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => p - 1)}
+              className="h-8"
+              onClick={() => setPage(page - 1)}
               disabled={page === 0}
             >
               {t("pagination.previous", { ns: "common" })}
@@ -192,14 +193,15 @@ export function RunList({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => p + 1)}
+              className="h-8"
+              onClick={() => setPage(page + 1)}
               disabled={page >= totalPages - 1}
             >
               {t("pagination.next", { ns: "common" })}
             </Button>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </ListFooter>
     </div>
   );
 }

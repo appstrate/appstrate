@@ -1,53 +1,64 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback, useMemo, useEffect } from "react";
-import { useParams, useLocation } from "react-router-dom";
+import { useCallback, useMemo, useEffect } from "react";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button } from "@appstrate/ui/components/button";
-import { cn } from "@appstrate/ui/cn";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
 import { agentLaunchRefusal } from "../hooks/use-agent-readiness";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunLauncher, useCancelRun } from "../hooks/use-mutations";
-import { Spinner } from "../components/spinner";
 import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
+import { useModalParam } from "../hooks/use-modal-param";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ResourceErrorState } from "../components/page-states";
-import { RunOutcomeTab } from "../components/run-outcome-tab";
-import { RunExecutionTab } from "../components/run-execution-tab";
-import { RunConfigurationTab } from "../components/run-configuration-tab";
-import { RunFilesTab } from "../components/run-files-tab";
-import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
-import { invalidateOrgStorage } from "../hooks/use-files";
-import { isPublishedFileLogEvent } from "../lib/files";
-import { replayVersion } from "../lib/version-selector";
-import { RunRow } from "../components/run-row";
-import { RunCostReadout } from "../components/run-cost-readout";
-import { ContextGaugeReadout } from "../components/run-context-gauge";
-import { RunDegradedBanner } from "../components/run-degraded-banner";
-import { RunArtifactsBanner } from "../components/run-artifacts-banner";
+import { ResourceErrorState } from "../components/page-states";
+import { RunDetailSkeleton } from "../components/loading-skeletons";
 import { useMarkReadByRun } from "../hooks/use-notifications";
-import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type AgentListItem, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/format-date";
+import { isPublishedFileLogEvent } from "../lib/files";
+import { searchOf } from "../lib/url-search";
+import { replayVersion } from "../lib/version-selector";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
-import { runKeys, invalidateRunLogs } from "../lib/query-keys";
+import {
+  agentsKeys,
+  runKeys,
+  invalidateOrgDetail,
+  invalidatePaths,
+  invalidateRunLogs,
+} from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
-import { Play } from "lucide-react";
-import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
-import { runHasOutputValue, type RunDetailTab } from "../lib/run-detail-tabs";
+import { useTabWithHash } from "../hooks/use-tab-with-hash";
+import { RunHeaderActions, RunHeaderSummary } from "../components/run-detail/run-header-summary";
+import { RunExecutionView } from "../components/run-detail/run-execution-view";
+import { RunResultsView } from "../components/run-detail/run-results-view";
+import { RunSnapshotInspector } from "../components/run-detail/run-snapshot-inspector";
+import { Button } from "@appstrate/ui/components/button";
+import { ArrowRight } from "lucide-react";
+import {
+  DetailTabs,
+  DetailTabBar,
+  DetailTabPanel,
+  type DetailTab,
+} from "../components/detail-tabs";
+import { Badge } from "../components/status-badge";
+import { RunProvenanceBadges } from "../components/run-cells";
+import type { JournalOverviewFilter } from "../components/log-viewer";
 import { isQueryInFlight } from "../lib/query-state";
+import { findModelFallback } from "../lib/run-model-fallback";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
+
+const RUN_DETAIL_TABS = ["overview", "journal", "results"] as const;
+type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
 
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -57,6 +68,7 @@ export function RunDetailPage() {
   // filtered from catalog endpoints so the query would 404 on every view.
   const isInlinePath = packageId.startsWith("@inline/");
   const location = useLocation();
+  const navigate = useNavigate();
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -68,13 +80,25 @@ export function RunDetailPage() {
   // said before the click rather than collected as a 404 after it. The verdict
   // rides this very response (`AgentDetail.active`), resolved for the space the
   // page is read from; the Re-run control renders only once it has landed.
-  const { data: agent, isLoading: agentLoading } = usePackageDetail(
-    "agent",
-    isInlinePath ? undefined : packageId,
-  );
+  const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const runQuery = useRun(runId);
+  const [tab, setTab] = useTabWithHash(RUN_DETAIL_TABS, "overview");
   const { data: run, error } = runQuery;
   const runNumber = run?.runNumber ?? stateNumber;
+  const requestedJournalFilter = new URLSearchParams(location.search).get("journalFilter");
+  const journalFilter: JournalOverviewFilter | undefined =
+    requestedJournalFilter === "tools" ||
+    requestedJournalFilter === "warnings" ||
+    requestedJournalFilter === "errors"
+      ? requestedJournalFilter
+      : undefined;
+  // A tab of this run, the journal on `filter`; the rest of the query stays.
+  const openTab = (hash: "#journal" | "#results", filter?: JournalOverviewFilter) => {
+    const search = new URLSearchParams(location.search);
+    if (filter) search.set("journalFilter", filter);
+    else search.delete("journalFilter");
+    navigate({ pathname: location.pathname, search: searchOf(search), hash });
+  };
 
   // `useGlobalRunSync` (mounted in MainLayout) patches `run.status` directly
   // into the React Query cache from the LISTEN/NOTIFY stream, so reading
@@ -83,7 +107,8 @@ export function RunDetailPage() {
   const isRunning = !!status && (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
   const isTerminal = !!status && !isRunning;
 
-  const { data: logs } = useRunLogs(runId);
+  const logsQuery = useRunLogs(runId);
+  const { data: logs } = logsQuery;
 
   const qc = useQueryClient();
 
@@ -109,15 +134,15 @@ export function RunDetailPage() {
 
   const launcher = useRunLauncher(packageId);
   const cancelRun = useCancelRun();
-  const [inputOpen, setInputOpen] = useState(false);
+  const rerun = useModalParam("rerun");
   const { historicalLogs, structuredOutput, turnRows } = useMemo(() => {
     if (!logs) {
       return { historicalLogs: [], structuredOutput: null, turnRows: [] };
     }
     const { entries, output } = buildLogEntries(logs, { isRunTerminal: isTerminal });
     // Turn breadcrumbs are filtered OUT of the log stream by `buildLogEntries`
-    // and projected here into the Exécution pane's per-turn table instead
-    // (`TurnsTable` in `run-execution-tab.tsx`, fed by the `turns` prop below).
+    // and projected here into the per-turn table instead (`TurnsTable` in
+    // `run-detail/run-turns-detail.tsx`, opened from the overview's Usage card).
     return { historicalLogs: entries, structuredOutput: output, turnRows: buildTurnRows(logs) };
   }, [logs, isTerminal]);
 
@@ -128,33 +153,16 @@ export function RunDetailPage() {
   const execResult = run?.result as components["schemas"]["Run"]["result"];
   const finalOutput =
     structuredOutput || (execResult?.output as Record<string, unknown> | undefined) || null;
-  // One predicate, shared with the Outcome pane, which is handed this exact
-  // object as its `output` prop and used to re-derive the answer itself. The
-  // pane's «Ce run n'a rien produit» state and this tab-selection input have to
-  // agree, and a second spelling one prop away is how they stop agreeing.
-  const hasOutput = runHasOutputValue(finalOutput);
-
+  const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
+  const allLogs = historicalLogs;
+  const modelFallback = useMemo(() => findModelFallback(logs), [logs]);
   // Run-level memory rows (only those touched during this run).
-  const runMemoriesQuery = useRunMemories(packageId, runId);
-  const runPinnedQuery = useRunPinned(packageId, runId);
-  const runMemoryCount = (runMemoriesQuery.data?.length ?? 0) + (runPinnedQuery.data?.length ?? 0);
-  // These two resolve independently of `useRun`, so `runMemoryCount` is 0 for a
-  // while on a run that DID write memory. The tab controller captures its
-  // default pane once and must not capture it from that transient 0 — hand it
-  // the settled flag rather than the count alone.
-  const memorySettled = !isQueryInFlight(runMemoriesQuery) && !isQueryInFlight(runPinnedQuery);
-
-  // File count for the tab badge — read off the run DTO the page already
-  // has (same field `run-row.tsx` renders). Listing the run's files just to
-  // count them cost a request on every run page and silently saturated at the
-  // page size; the list query now runs only when a pane that shows them opens.
-  //
-  // `outputFileCount` is also what decides which pane LEADS: the derived
-  // presentation rule counts what the run PRODUCED and nothing else —
-  // inputs it consumed never count, and no agent-declared field takes part.
-  const inputFileCount = run?.file_counts.input ?? 0;
-  const outputFileCount = run?.file_counts.output ?? 0;
-  const fileCount = inputFileCount + outputFileCount;
+  const { data: runMemories, isLoading: memoriesLoading } = useRunMemories(packageId, runId);
+  const { data: runPinned, isLoading: pinnedLoading } = useRunPinned(packageId, runId);
+  const memoryLoading = memoriesLoading || pinnedLoading;
+  const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
+  const hasRunMemory = runMemoryCount > 0;
+  const hasDurableResults = hasOutput || (run?.file_counts.output ?? 0) > 0 || hasRunMemory;
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
@@ -191,9 +199,9 @@ export function RunDetailPage() {
         // channel. `isPublishedFileLogEvent` tests membership of the set the
         // sink's own tag is built from — it carries no legacy spelling.
         if (entry.type === "result" && isPublishedFileLogEvent(entry.event)) {
-          void qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
+          void invalidatePaths(qc, ["/api/files"]);
           void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, spaceId, runId) });
-          invalidateOrgStorage(qc);
+          void invalidateOrgDetail(qc);
         }
       },
       [qc, orgId, spaceId, runId],
@@ -201,8 +209,8 @@ export function RunDetailPage() {
     onMetric: useCallback(
       (metric: RunMetricEvent) => {
         // Patch the cached run row with the running token usage + cost
-        // so the header readout above and the Exécution pane's Usage card
-        // (`run-execution-tab.tsx`) reflect live progress without polling.
+        // so the overview's Usage card (`run-snapshot-inspector.tsx`)
+        // reflects live progress without polling.
         // `runs.cost` is the cached aggregate written at finalize on
         // the server; mid-run we render the broadcaster's
         // `cost_so_far` instead. The next terminal-status invalidation
@@ -227,29 +235,35 @@ export function RunDetailPage() {
     ),
   });
 
-  if (isQueryInFlight(runQuery)) return <LoadingState />;
+  if (isQueryInFlight(runQuery)) return <RunDetailSkeleton agentName={agent?.display_name} />;
 
   if (error || !run) return <ResourceErrorState error={error} />;
   const rerunRefusal = agent ? agentLaunchRefusal(agent) : null;
 
   const enrichedRun = run;
+  const knownAgentName = qc
+    .getQueryData<AgentListItem[]>(agentsKeys.list(orgId, spaceId))
+    ?.find((candidate) => candidate.id === packageId)?.display_name;
   const date = run.started_at ? formatDateField(run.started_at) : "";
   const isInline = enrichedRun.package_ephemeral;
+  const canRerun = !isRunning && !isInline && !!agent && permissionsReady && can("agents:run");
+  // `?rerun=1` opens the form only where the Re-run button itself would.
+  const rerunOpen = rerun.value !== null && canRerun && !rerunRefusal;
   const hasInlineName = !!enrichedRun.agent_name?.trim();
   const inlineName = inlineRunDisplayName(enrichedRun.agent_name, t("runs.inlineBadge"));
 
-  // For inline runs the agent crumb *is* the last crumb (the run itself),
-  // so omit href — PageHeader renders it as the current-page indicator.
   const agentCrumb = isInline
     ? {
         label: hasInlineName
           ? `${inlineName} (${t("runs.inlineBadge").toLowerCase()})`
           : inlineName,
+        href: location.pathname,
       }
     : {
-        // The id is the fallback for an agent with no name, not a placeholder
-        // for one whose name is still on its way.
-        label: agent?.display_name || (agentLoading ? "…" : packageId),
+        // The name the agents list already holds stands in while the detail
+        // loads; the id is the fallback for an agent with no name, never a
+        // placeholder for one whose name is still on its way.
+        label: agent?.display_name || knownAgentName || packageId,
         href: `/agents/${packageId}`,
       };
 
@@ -261,28 +275,66 @@ export function RunDetailPage() {
     inlineName,
     numberedTitle: runCrumbLabel,
   });
+  const tabs: DetailTab<RunDetailTab>[] = [
+    { value: "overview", label: t("run.tabOverview") },
+    { value: "journal", label: t("run.tabJournal") },
+    { value: "results", label: t("run.tabResults") },
+  ];
 
-  // Inline agents are 1:1 with their single run — the agent crumb already
-  // identifies the run, so a trailing "Run #N" crumb is redundant.
   const breadcrumbs = [
-    { label: t("nav.orgSection", { ns: "common" }), href: "/" },
     { label: t("detail.breadcrumb"), href: "/agents" },
     agentCrumb,
-    ...(isInline ? [] : [{ label: runCrumbLabel }]),
+    ...(isInline
+      ? []
+      : [
+          { label: t("detail.tabRuns"), href: `/agents/${packageId}#runs` },
+          { label: runCrumbLabel, href: location.pathname },
+        ]),
+    { label: tabs.find((item) => item.value === tab)?.label ?? tab },
   ];
 
   return (
-    <div className="p-6">
-      <PageHeader title={title} breadcrumbs={breadcrumbs} />
-
-      <div className="border-border mb-4 rounded-md border">
-        <RunRow run={enrichedRun} variant="detail" />
-      </div>
+    <div>
+      <PageHeader
+        title={title}
+        titleClassName="text-xl"
+        breadcrumbs={breadcrumbs}
+        wrapActions
+        actions={
+          <>
+            {/* No unread dot here: this page is the reading. */}
+            <Badge status={enrichedRun.status} />
+            <RunProvenanceBadges run={enrichedRun} />
+            <RunHeaderActions
+              canRerun={canRerun}
+              rerunRefusal={rerunRefusal ? t(rerunRefusal) : null}
+              // Hidden for remote-origin runs: the process runs on the caller's
+              // host and the platform cannot signal it.
+              canCancel={isRunning && enrichedRun.runOrigin !== "remote" && can("runs:cancel")}
+              rerunPending={launcher.isPending}
+              cancelPending={cancelRun.isPending}
+              onRerun={() => {
+                if (canReadAgent) rerun.open();
+                // The API conceals resolved input from runners: replay that
+                // snapshot server-side, keeping its parameters.
+                else
+                  launcher.launch({
+                    rerun_from: run.id,
+                    version: replayVersion(run.version_ref, agent?.home_writable),
+                  });
+              }}
+              onCancel={() => cancelRun.mutate(runId!)}
+            />
+          </>
+        }
+      >
+        <RunHeaderSummary run={enrichedRun} />
+      </PageHeader>
 
       {agent && canReadAgent && (
         <RunModal
-          open={inputOpen}
-          onClose={() => setInputOpen(false)}
+          open={rerunOpen}
+          onClose={rerun.close}
           agent={agent}
           onSubmit={(input) => {
             // Re-run the SAME definition the original run executed, as far as
@@ -290,7 +342,7 @@ export function RunDetailPage() {
             // and only an author replays a draft (see `replayVersion`).
             launcher.launch(
               { input, version: replayVersion(run.version_ref, agent.home_writable) },
-              () => setInputOpen(false),
+              { leave: rerun.leave },
             );
           }}
           isPending={launcher.isPending}
@@ -304,151 +356,55 @@ export function RunDetailPage() {
         integrationEntries={agent?.dependencies.integrations}
       />
 
-      {isTerminal && run.status !== "success" && run.error && (
-        <div
-          className={cn(
-            "mb-4 rounded-md px-4 py-3 text-sm",
-            run.status === "cancelled"
-              ? "bg-muted text-muted-foreground"
-              : "bg-destructive/10 text-destructive",
-          )}
-          data-testid="run-error-banner"
-        >
-          {run.error}
-        </div>
-      )}
+      <DetailTabs value={tab} onChange={setTab}>
+        <div className="overflow-visible" data-run-detail-surface>
+          <DetailTabBar tabs={tabs} />
 
-      <RunDegradedBanner metadata={run.metadata} />
+          <DetailTabPanel value="overview">
+            <RunSnapshotInspector
+              run={enrichedRun}
+              turns={turnRows}
+              logs={allLogs}
+              structuredOutput={finalOutput}
+              memoryChangeCount={runMemoryCount}
+              logsLoading={logsQuery.isLoading}
+              memoryLoading={memoryLoading}
+              modelFallback={modelFallback}
+              onOpenJournal={(filter) => openTab("#journal", filter)}
+              onOpenResults={() => openTab("#results")}
+            />
+          </DetailTabPanel>
 
-      <RunArtifactsBanner artifacts={run.artifacts} />
-
-      <RunDetailTabsController
-        key={runId}
-        availability={{
-          producedFileCount: outputFileCount,
-          hasOutput,
-          hasMemory: runMemoryCount > 0,
-        }}
-        memorySettled={memorySettled}
-      >
-        {({ activeTab, setActiveTab }) => (
-          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RunDetailTab)}>
-            {/* `flex-wrap`, not a fixed row: at 375px the tab list alone eats most of
-                the width, and the actions group (cost pill, context gauge, Re-run /
-                Cancel) cannot fit beside it. The tabs themselves scroll inside
-                their bounded region rather than widening the page. */}
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-              <div className="max-w-full min-w-0 overflow-x-auto pb-1">
-                {/* Four panes, ALWAYS the same four: what the run produced, its
-                    files, how it ran, how it was set up. The previous strip
-                    grew and shrank per run (Résultat and Mémoire came and
-                    went), so its shape carried information nobody could read
-                    and every position was unlearnable. Emptiness is now stated
-                    inside the pane, where it can say what it means. */}
-                <TabsList className="w-max">
-                  <TabsTrigger value="outcome">{t("run.tabOutcome")}</TabsTrigger>
-                  <TabsTrigger value="files">
-                    {t("run.tabFiles")}
-                    {fileCount > 0 && (
-                      <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
-                        {fileCount}
-                      </span>
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger value="execution">{t("run.tabExecution")}</TabsTrigger>
-                  <TabsTrigger value="configuration">{t("run.tabConfiguration")}</TabsTrigger>
-                </TabsList>
-              </div>
-              <div className="flex items-center gap-2">
-                {/* Cost readout — shown at all times (pending, running, terminal).
-              While the run is active the pulse dot animates and `onMetric` SSE
-              patches `run.cost` in place at the throttled 250 ms cadence; once
-              finalized, the field holds the authoritative aggregate written by
-              `finalizeRun`. Structural, not conditional on data. The token
-              count that used to sit beside it moved into the run row's details
-              panel (#1046): it is a diagnostic, read once, where the `$` is a
-              governance figure read at a glance. */}
-                <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
-                  {isRunning && (
-                    <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
-                  )}
-                  <RunCostReadout
-                    cost={run.cost}
-                    pricingStatus={run.cost_pricing_status}
-                    className="text-foreground font-medium"
-                  />
-                </div>
-                {/* Context gauge — the state metric the cumulative token total never
-              was (#1046). Numerator AND denominator both ride `turnRows`, so
-              nothing is threaded from the run DTO; see `ContextGaugeReadout`
-              for the readings, the live cadence and when it renders nothing. */}
-                <ContextGaugeReadout turns={turnRows} status={run.status} />
-                {!isRunning && !isInline && agent && can("agents:run") && (
-                  <DisabledReasonTooltip reason={rerunRefusal ? t(rerunRefusal) : null}>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!permissionsReady || launcher.isPending || rerunRefusal !== null}
-                      onClick={() => {
-                        if (canReadAgent) {
-                          setInputOpen(true);
-                        } else {
-                          // The API conceals resolved input from runners. Replay
-                          // that snapshot server-side, preserving its parameters.
-                          launcher.launch({
-                            rerun_from: run.id,
-                            version: replayVersion(run.version_ref, agent.home_writable),
-                          });
-                        }
-                      }}
-                    >
-                      {launcher.isPending && <Spinner />}
-                      <Play className="size-3.5" />
-                      {t("run.rerun")}
-                    </Button>
-                  </DisabledReasonTooltip>
-                )}
-                {/* Cancel hidden for remote-origin runs — the process runs on the
-              caller's host and the platform cannot signal it. A soft-cancel
-              (server flag + CLI poll) is tracked as a follow-up. */}
-                {isRunning && enrichedRun.runOrigin !== "remote" && can("runs:cancel") && (
-                  <Button
-                    variant="destructive"
-                    onClick={() => cancelRun.mutate(runId!)}
-                    disabled={cancelRun.isPending}
-                  >
-                    {cancelRun.isPending && <Spinner />} {t("btn.cancel")}
+          <DetailTabPanel value="journal" flush>
+            <RunExecutionView
+              run={enrichedRun}
+              logs={allLogs}
+              logsLoading={logsQuery.isLoading}
+              initialFilter={journalFilter}
+              headerActions={
+                run.status === "success" && hasDurableResults ? (
+                  <Button variant="outline" size="sm" onClick={() => setTab("results")}>
+                    {t("run.viewResults")}
+                    <ArrowRight className="size-3.5" />
                   </Button>
-                )}
-              </div>
-            </div>
+                ) : undefined
+              }
+            />
+          </DetailTabPanel>
 
-            <TabsContent value="outcome" className="mt-0">
-              {runId && (
-                <RunOutcomeTab
-                  runId={runId}
-                  packageId={packageId}
-                  output={finalOutput}
-                  memoryCount={runMemoryCount}
-                  producedFileCount={outputFileCount}
-                />
-              )}
-            </TabsContent>
-
-            <TabsContent value="files" className="mt-0">
-              {runId && <RunFilesTab runId={runId} />}
-            </TabsContent>
-
-            <TabsContent value="execution" className="mt-0">
-              <RunExecutionTab run={enrichedRun} logs={historicalLogs} turns={turnRows} />
-            </TabsContent>
-
-            <TabsContent value="configuration" className="mt-0">
-              <RunConfigurationTab run={enrichedRun} agentName={agent?.display_name} />
-            </TabsContent>
-          </Tabs>
-        )}
-      </RunDetailTabsController>
+          <DetailTabPanel value="results" flush>
+            <RunResultsView
+              run={enrichedRun}
+              packageId={packageId}
+              output={finalOutput}
+              hasRunMemory={hasRunMemory}
+              isRunning={isRunning}
+              outputLoading={logsQuery.isLoading}
+              memoryLoading={memoryLoading}
+            />
+          </DetailTabPanel>
+        </div>
+      </DetailTabs>
     </div>
   );
 }

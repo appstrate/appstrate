@@ -16,20 +16,21 @@
  * picker's single "custom endpoint" row and are configured through the shared
  * endpoint fields, which own the API type, the base URL and the key.
  *
- * An OAuth row can be renamed here and nothing else: its connection changes
- * only through the reconnect affordance, which re-enters the modal with the
- * exact credential targeted. No key is ever sent for an OAuth row.
+ * Renaming is never done here: the name is edited in place in the table
+ * (`InlineEditableLabel`), the one rename. Editing a key-based row changes its
+ * key; an OAuth row's connection changes only through the reconnect
+ * affordance, which re-enters the modal with the exact credential targeted.
+ * No key is ever sent for an OAuth row.
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
-import { cn } from "@appstrate/ui/cn";
-import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { FormModal } from "./form-modal";
 import { TestResultSpan } from "./test-result-span";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -58,14 +59,14 @@ import { EndpointFields } from "./model-form/endpoint-fields";
 import { CustomEndpointItem } from "./model-form/provider-picker";
 import { PROVIDER_ICONS } from "./icons";
 import { ProviderPickerGroups } from "./provider-picker-groups";
-import { OAuthPairingBody } from "./oauth-pairing-body";
-import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
+import { PairingModal } from "./pairing-modal";
+import { PreferencesModelsLink } from "./preferences-models-link";
 
 /**
  * Canonical payload shape submitted to `POST /api/model-provider-credentials`.
  * `baseUrlOverride` is only meaningful for a base-URL-overridable entry.
  */
-interface CredentialFormData {
+export interface CredentialFormData {
   label: string;
   providerId: string;
   apiKey?: string;
@@ -73,13 +74,19 @@ interface CredentialFormData {
 }
 
 interface CredentialFormModalProps {
-  open: boolean;
   onClose: () => void;
   credential: ModelProviderCredentialInfo | null;
   isPending: boolean;
   onSubmit: (data: CredentialFormData) => void;
-  /** The caller's own credential: the picker offers only what a member may own. */
+  /**
+   * The caller's own credential: the picker offers only what a member may own. Otherwise the
+   * credential is the organization's, a key or a subscription.
+   */
   personal?: boolean;
+  /** The key being added comes back here from the next step with what was typed. */
+  initial?: CredentialFormData;
+  /** Replaces « Save » when the form is a step, not the whole act. */
+  submitLabel?: string;
 }
 
 interface CredentialFormFields {
@@ -115,25 +122,26 @@ function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[
   }));
 }
 
-function CredentialFormBody({
+/**
+ * Mounted by the caller while open, one per credential (`key`): the picked provider, the typed
+ * values and any pairing token start fresh on every open.
+ */
+export function CredentialFormModal({
   credential,
   isPending,
   onSubmit,
   onClose,
-  personal,
-}: {
-  credential: ModelProviderCredentialInfo | null;
-  isPending: boolean;
-  onSubmit: (data: CredentialFormData) => void;
-  onClose: () => void;
-  personal: boolean;
-}) {
+  personal = false,
+  initial,
+  submitLabel,
+}: CredentialFormModalProps) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   const registry = registryQuery.data ?? [];
   const options = buildOptions(personal ? registry.filter((p) => p.personal_allowed) : registry);
 
   const [selectedId, setSelectedId] = useState<string>(() => {
+    if (initial) return initial.providerId;
     if (credential?.providerId) {
       return credential.authMode === "oauth2"
         ? `oauth:${credential.providerId}`
@@ -163,9 +171,9 @@ function CredentialFormBody({
     formState: { errors },
   } = useAppForm<CredentialFormFields>({
     defaultValues: {
-      label: credential?.label ?? "",
-      apiKey: "",
-      baseUrlOverride: credential?.base_url ?? "",
+      label: credential?.label ?? initial?.label ?? "",
+      apiKey: initial?.apiKey ?? "",
+      baseUrlOverride: credential?.base_url ?? initial?.baseUrlOverride ?? "",
     },
   });
 
@@ -200,8 +208,8 @@ function CredentialFormBody({
           setTestResult({
             ok: false,
             latency: 0,
-            error: "NETWORK_ERROR",
-            message: "Request failed",
+            error: "INTERNAL_ERROR",
+            message: t("test.failed", { ns: "common" }),
           }),
       },
     );
@@ -262,211 +270,158 @@ function CredentialFormBody({
   const apiKeyValidate = (v: string) =>
     !credential && !v.trim() ? t("validation.required", { ns: "common" }) : undefined;
 
-  const oauthDismiss = usePairingDismissConfirm(onClose);
+  const title = !credential
+    ? t(personal ? "credentials.form.titlePersonal" : "credentials.form.title")
+    : isOAuthSelected
+      ? t("credentials.form.reconnectTitle", { label: credential.label })
+      : t("credentials.form.editTitle", { label: credential.label });
 
-  const title = credential ? t("credentials.form.editTitle") : t("credentials.form.title");
+  const providerPicker = (
+    <Select value={pickerValue} onValueChange={handleProviderChange} disabled={isEditing}>
+      <SelectTrigger id="pk-provider">
+        <SelectValue placeholder={t("models.form.providerPlaceholder")} />
+      </SelectTrigger>
+      <SelectContent>
+        <ProviderPickerGroups
+          items={pickerRows}
+          featuredLabel={t("models.form.providerGroupFeatured")}
+          otherLabel={t("models.form.providerGroupOther")}
+          renderItem={(row) =>
+            row.kind === "customEndpoint" ? (
+              <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} />
+            ) : (
+              <PickerOptionItem key={row.entry.id} option={row.entry} t={t} />
+            )
+          }
+        />
+      </SelectContent>
+    </Select>
+  );
 
   const labelField = (
-    <div className="space-y-2">
-      <Label htmlFor="pk-label">{t("credentials.form.label")}</Label>
+    <FormItem
+      id="pk-label"
+      label={t("credentials.form.label")}
+      error={showError("label") ? errors.label?.message : undefined}
+    >
       <Input
-        id="pk-label"
         type="text"
         {...register("label", {
           validate: (v) => (!v.trim() ? t("validation.required", { ns: "common" }) : undefined),
         })}
-        placeholder="ex: My Anthropic Key"
-        aria-invalid={showError("label") ? true : undefined}
-        className={cn(showError("label") && "border-destructive")}
+        placeholder={t("credentials.form.labelPlaceholder")}
       />
-      {showError("label") && errors.label?.message && (
-        <div className="text-destructive text-sm">{errors.label.message}</div>
-      )}
-    </div>
+    </FormItem>
   );
 
-  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds
-  // back). An existing row is renamed here, and re-paired when it is flagged and
-  // the server allows the caller to reconnect it.
+  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds back). A new
+  // subscription is owned as the form says (the caller's own, or the organization's); an existing
+  // row is re-paired only when it is flagged and the server allows the caller to reconnect it. Its
+  // name is changed in the table.
   if (isOAuthSelected && selectedOption?.providerId) {
     const showPairing = credential
       ? !!credential.needs_reconnection && credential.allowed_actions.includes("reconnect")
       : true;
     return (
-      <>
-        <Modal
-          open
-          onClose={oauthDismiss.requestClose}
-          title={title}
-          actions={
-            isEditing ? (
-              <>
-                <Button type="button" variant="outline" onClick={oauthDismiss.requestClose}>
-                  {t("credentials.oauth.close")}
-                </Button>
-                <Button type="submit" form="pk-form" disabled={isPending}>
-                  {isPending ? <Spinner /> : t("btn.save")}
-                </Button>
-              </>
-            ) : (
-              <Button type="button" variant="outline" onClick={oauthDismiss.requestClose}>
-                {t("credentials.oauth.close")}
-              </Button>
-            )
-          }
-        >
-          <div className="space-y-4">
-            {!isEditing && (
-              <div className="space-y-2">
-                <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
-                <Select value={pickerValue} onValueChange={handleProviderChange}>
-                  <SelectTrigger id="pk-provider">
-                    <SelectValue placeholder={t("models.form.providerPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <ProviderPickerGroups
-                      items={pickerRows}
-                      featuredLabel={t("models.form.providerGroupFeatured")}
-                      otherLabel={t("models.form.providerGroupOther")}
-                      renderItem={(row) =>
-                        row.kind === "customEndpoint" ? (
-                          <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} />
-                        ) : (
-                          <PickerOptionItem key={row.entry.id} option={row.entry} t={t} />
-                        )
-                      }
-                    />
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {isEditing && (
-              <form id="pk-form" onSubmit={onFormSubmit} noValidate>
-                {labelField}
-              </form>
-            )}
-            {showPairing && (
-              <OAuthPairingBody
-                key={selectedOption.providerId}
-                providerId={selectedOption.providerId}
-                target={
-                  credential
-                    ? { credentialId: credential.id }
-                    : { ownerType: personal ? "user" : "org" }
-                }
-                onConnected={() => onClose()}
-                onBusyChange={oauthDismiss.onBusyChange}
-              />
-            )}
+      <PairingModal
+        title={title}
+        onClose={onClose}
+        providerId={selectedOption.providerId}
+        target={
+          credential ? { credentialId: credential.id } : { ownerType: personal ? "user" : "org" }
+        }
+        onConnected={() => onClose()}
+        showPairing={showPairing}
+      >
+        {!isEditing && (
+          <div className="space-y-2">
+            <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
+            {providerPicker}
           </div>
-        </Modal>
-        {oauthDismiss.confirmDialog}
-      </>
+        )}
+      </PairingModal>
     );
   }
 
   return (
-    <Modal
-      open
+    <FormModal
       onClose={onClose}
       title={title}
-      actions={
-        <>
-          <div className="mr-auto flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleTest}
-              disabled={!canTest || testMutation.isPending}
-            >
-              {testMutation.isPending ? <Spinner /> : t("credentials.test")}
-            </Button>
-            {testResult && (
-              <TestResultSpan
-                result={testResult}
-                successKey="credentials.testSuccess"
-                failedKey="credentials.testFailed"
-              />
-            )}
-          </div>
-          <Button type="button" variant="outline" onClick={onClose}>
-            {t("btn.cancel")}
-          </Button>
-          <Button type="submit" form="pk-form" disabled={isPending || !selectedProvider}>
-            {isPending ? <Spinner /> : t("btn.save")}
-          </Button>
-        </>
+      onSubmit={onFormSubmit}
+      isPending={isPending}
+      submitLabel={submitLabel}
+      submitDisabled={!selectedProvider}
+      formProps={{ noValidate: true }}
+      secondaryActions={
+        <div className="mr-auto flex items-center gap-2">
+          <PendingButton
+            type="button"
+            variant="outline"
+            onClick={handleTest}
+            pending={testMutation.isPending}
+            disabled={!canTest}
+          >
+            {t("credentials.test")}
+          </PendingButton>
+          {testResult && (
+            <TestResultSpan
+              result={testResult}
+              successKey="credentials.testSuccess"
+              failedKey="credentials.testFailed"
+            />
+          )}
+        </div>
       }
     >
-      <form id="pk-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
-          <Select value={pickerValue} onValueChange={handleProviderChange} disabled={isEditing}>
-            <SelectTrigger id="pk-provider">
-              <SelectValue placeholder={t("models.form.providerPlaceholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              <ProviderPickerGroups
-                items={pickerRows}
-                featuredLabel={t("models.form.providerGroupFeatured")}
-                otherLabel={t("models.form.providerGroupOther")}
-                renderItem={(row) =>
-                  row.kind === "customEndpoint" ? (
-                    <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} />
-                  ) : (
-                    <PickerOptionItem key={row.entry.id} option={row.entry} t={t} />
-                  )
-                }
-              />
-            </SelectContent>
-          </Select>
-        </div>
-
-        {labelField}
-
-        {needsBaseUrlOverride ? (
-          <EndpointFields
-            idPrefix="pk"
-            providers={overridableProviders}
-            provider={selectedProvider}
-            onApiTypeChange={handleApiTypeChange}
-            // `apiShape` and `baseUrl` are pinned by `providerId` at create
-            // time — delete and re-create to point the key elsewhere.
-            providerLocked={isEditing}
-            baseUrlProps={register("baseUrlOverride", { validate: baseUrlValidate })}
-            baseUrlLocked={isEditing}
-            baseUrlError={
-              showError("baseUrlOverride") ? errors.baseUrlOverride?.message : undefined
-            }
-            apiKeyProps={register("apiKey", { validate: apiKeyValidate })}
-            apiKeyError={showError("apiKey") ? errors.apiKey?.message : undefined}
-            apiKeyHint={credential ? t("credentials.form.apiKeyHint") : undefined}
-          />
-        ) : (
-          !!selectedProvider && (
-            <div className="space-y-2">
-              <Label htmlFor="pk-apiKey">{t("credentials.form.apiKey")}</Label>
-              <Input
-                id="pk-apiKey"
-                type="password"
-                {...register("apiKey", { validate: apiKeyValidate })}
-                placeholder="sk-..."
-                aria-invalid={showError("apiKey") ? true : undefined}
-                className={cn(showError("apiKey") && "border-destructive")}
-              />
-              {credential && (
-                <div className="text-muted-foreground text-sm">
-                  {t("credentials.form.apiKeyHint")}
-                </div>
-              )}
-              {showError("apiKey") && errors.apiKey?.message && (
-                <div className="text-destructive text-sm">{errors.apiKey.message}</div>
-              )}
-            </div>
-          )
+      <div className="space-y-2">
+        <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
+        {providerPicker}
+        {/* The organization's form: a member's own subscription is connected elsewhere. */}
+        {!personal && !isEditing && (
+          <p className="text-muted-foreground text-sm">
+            {t("credentials.form.subscriptionNote")}{" "}
+            <PreferencesModelsLink>
+              {t("credentials.form.subscriptionNoteLink")}
+            </PreferencesModelsLink>
+          </p>
         )}
-      </form>
-    </Modal>
+      </div>
+
+      {!isEditing && labelField}
+
+      {needsBaseUrlOverride ? (
+        <EndpointFields
+          idPrefix="pk"
+          providers={overridableProviders}
+          provider={selectedProvider}
+          onApiTypeChange={handleApiTypeChange}
+          // `apiShape` and `baseUrl` are pinned by `providerId` at create
+          // time — delete and re-create to point the key elsewhere.
+          providerLocked={isEditing}
+          baseUrlProps={register("baseUrlOverride", { validate: baseUrlValidate })}
+          baseUrlLocked={isEditing}
+          baseUrlError={showError("baseUrlOverride") ? errors.baseUrlOverride?.message : undefined}
+          apiKeyProps={register("apiKey", { validate: apiKeyValidate })}
+          apiKeyError={showError("apiKey") ? errors.apiKey?.message : undefined}
+          apiKeyHint={credential ? t("credentials.form.apiKeyHint") : undefined}
+        />
+      ) : (
+        !!selectedProvider && (
+          <FormItem
+            id="pk-apiKey"
+            label={t("credentials.form.apiKey")}
+            hint={credential ? t("credentials.form.apiKeyHint") : undefined}
+            error={showError("apiKey") ? errors.apiKey?.message : undefined}
+          >
+            <Input
+              type="password"
+              {...register("apiKey", { validate: apiKeyValidate })}
+              placeholder={t("credentials.form.apiKeyPlaceholder")}
+            />
+          </FormItem>
+        )
+      )}
+    </FormModal>
   );
 }
 
@@ -493,29 +448,5 @@ function PickerOptionItem({
         )}
       </span>
     </SelectItem>
-  );
-}
-
-export function CredentialFormModal({
-  open,
-  onClose,
-  credential,
-  isPending,
-  onSubmit,
-  personal = false,
-}: CredentialFormModalProps) {
-  if (!open) return null;
-  // Re-mount on every (re)open so internal state (selected provider,
-  // form values, pairing token if any) resets cleanly.
-  const key = credential?.id ?? "__create__";
-  return (
-    <CredentialFormBody
-      key={key}
-      credential={credential}
-      isPending={isPending}
-      onSubmit={onSubmit}
-      onClose={onClose}
-      personal={personal}
-    />
   );
 }

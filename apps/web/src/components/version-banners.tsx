@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneAlert } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
@@ -19,12 +20,12 @@ export function VersionBanners({
   return (
     <>
       {versionDetail.yanked && (
-        <Alert variant="warning" className="mb-3">
+        <ToneAlert variant="warning" className="mb-3">
           <AlertDescription>
             {t("version.yanked")}
             {versionDetail.yanked_reason ? ` — ${versionDetail.yanked_reason}` : ""}
           </AlertDescription>
-        </Alert>
+        </ToneAlert>
       )}
       <Alert className="mb-3">
         <AlertDescription>

@@ -29,6 +29,16 @@ export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  */
 export type DbOrTx = typeof db | Tx;
 
+/**
+ * Run `fn` in a transaction: its own on the root `db`, or a SAVEPOINT of the one `executor`
+ * already is — so a service that needs its writes atomic stays atomic alone, and joins a
+ * caller's transaction (committing or rolling back with it) when handed one. Drizzle's
+ * transaction handle nests through the same method; only the union type hides it.
+ */
+export function inTransaction<T>(executor: DbOrTx, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return (executor as typeof db).transaction(fn);
+}
+
 // --- Scoped WHERE builder ---
 
 /**

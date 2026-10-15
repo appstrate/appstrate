@@ -2,10 +2,12 @@
 
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Check, LogOut, Settings, FileText, Palette } from "lucide-react";
+import { DOCS_URL, SUPPORT_URL } from "@/lib/external-links";
+import { BookOpen, Check, FileText, LifeBuoy, LogOut, Palette, Settings } from "lucide-react";
 import { useAuth } from "../hooks/use-auth";
 import { useTheme } from "../stores/theme-store";
 import { themeOptions } from "../lib/theme";
+import { initials } from "../lib/initials";
 import { Avatar, AvatarFallback } from "@appstrate/ui/components/avatar";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -20,16 +22,12 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 
-function getInitials(name: string): string {
-  return name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((s) => s[0] ?? "")
-    .join("")
-    .toUpperCase();
-}
-
 interface NavUserProps {
+  /**
+   * `avatar` is the round button in the header's right corner; `row` is the
+   * full-width identity line at the foot of the sidebar (avatar, name, email).
+   */
+  variant?: "avatar" | "row";
   /**
    * Drop every entry that needs an organization to be resolvable.
    *
@@ -41,7 +39,7 @@ interface NavUserProps {
   minimal?: boolean;
 }
 
-export function NavUser({ minimal = false }: NavUserProps) {
+export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
   const { t } = useTranslation();
   const { user, profile, logout } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -49,30 +47,53 @@ export function NavUser({ minimal = false }: NavUserProps) {
   if (!user) return null;
 
   const displayName = profile?.displayName || user.email || "";
-  const initials = getInitials(displayName);
+  const userInitials = initials(profile?.displayName, user.email);
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t("userMenu.ariaLabel")}
-          className="rounded-full"
-        >
-          <Avatar className="size-8 rounded-full">
-            <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground rounded-full text-sm font-medium">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-        </Button>
+        {variant === "row" ? (
+          <button
+            type="button"
+            aria-label={t("userMenu.ariaLabel")}
+            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex w-full items-center gap-2 rounded-md p-2 text-left transition-colors"
+          >
+            <Avatar className="size-7 shrink-0 rounded-full">
+              <AvatarFallback className="bg-spark text-spark-foreground rounded-full text-xs font-medium">
+                {userInitials}
+              </AvatarFallback>
+            </Avatar>
+            <span className="grid min-w-0 flex-1 leading-tight">
+              <span className="truncate text-sm font-medium">{displayName}</span>
+              <span className="text-muted-foreground truncate text-xs">{user.email}</span>
+            </span>
+          </button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("userMenu.ariaLabel")}
+            className="rounded-full"
+          >
+            <Avatar className="size-8 rounded-full">
+              <AvatarFallback className="bg-spark text-spark-foreground rounded-full text-sm font-medium">
+                {userInitials}
+              </AvatarFallback>
+            </Avatar>
+          </Button>
+        )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="min-w-56 rounded-lg" side="bottom" align="end" sideOffset={4}>
+      <DropdownMenuContent
+        className="min-w-56 rounded-lg"
+        side={variant === "row" ? "right" : "bottom"}
+        align="end"
+        sideOffset={4}
+      >
         <DropdownMenuLabel className="p-0 font-normal">
           <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
             <Avatar className="size-8 rounded-lg">
-              <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground rounded-lg text-sm font-medium">
-                {initials}
+              <AvatarFallback className="bg-spark text-spark-foreground rounded-lg text-sm font-medium">
+                {userInitials}
               </AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
@@ -111,6 +132,32 @@ export function NavUser({ minimal = false }: NavUserProps) {
             ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        {/* Documentation and support live here as well as in the product
+            switcher. The duplication is deliberate: this menu is where people
+            look for help by habit, and a second door onto the docs costs less
+            than a first door nobody finds. */}
+        <DropdownMenuItem asChild>
+          <a
+            href={DOCS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2"
+          >
+            <BookOpen size={14} />
+            {t("userMenu.documentation")}
+          </a>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <a
+            href={SUPPORT_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2"
+          >
+            <LifeBuoy size={14} />
+            {t("userMenu.getHelp")}
+          </a>
+        </DropdownMenuItem>
         {!minimal && (
           <DropdownMenuItem asChild>
             <a

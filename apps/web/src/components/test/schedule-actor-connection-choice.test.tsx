@@ -13,6 +13,7 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import type { ConnectionChoice } from "../../lib/connection-choice.ts";
 import { ScheduleActorConnectionChoice } from "../schedule-actor-connection-choice.tsx";
+import { menuItems, textsOf, type MenuItem } from "../../test/connection-menu-tree.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -55,6 +56,33 @@ const REQUIRED = [
   { id: NOTION, required: true },
 ];
 
+function Choice({
+  props,
+  onItems,
+}: {
+  props: Parameters<typeof ScheduleActorConnectionChoice>[0];
+  onItems: (items: Map<string, MenuItem>) => void;
+}) {
+  onItems(menuItems(ScheduleActorConnectionChoice(props)));
+  return null;
+}
+
+/** The items of every connection menu of the section. */
+function itemsOf(
+  value: Record<string, string[]>,
+  integrations: { id: string; required?: boolean }[] = REQUIRED,
+  choices: readonly ConnectionChoice[] = CHOICES,
+): Map<string, MenuItem> {
+  let items = new Map<string, MenuItem>();
+  render(
+    <Choice
+      props={{ choices, integrations, value, onChange: () => {} }}
+      onItems={(found) => (items = found)}
+    />,
+  );
+  return items;
+}
+
 function renderChoice(
   value: Record<string, string[]>,
   integrations: { id: string; required?: boolean }[] = REQUIRED,
@@ -82,29 +110,51 @@ describe("ScheduleActorConnectionChoice", () => {
     expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.otherActor"));
   });
 
+  it("leaves that sentence out where the form has just named the identity", () => {
+    const html = render(
+      <ScheduleActorConnectionChoice
+        choices={[]}
+        integrations={[]}
+        value={{}}
+        onChange={() => {}}
+        showContext={false}
+      />,
+    );
+    expect(html).not.toContain(i18n.t("agents:schedule.connectionOverrides.otherActor"));
+  });
+
   it("offers the actor's candidates, flagging a shared one and a dead one", () => {
-    const html = renderChoice({ [NOTION]: ["gone"] });
-    expect(html).toContain("Travail");
-    expect(html).toContain("bob@acme.test");
-    expect(html).toContain("Équipe");
-    expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.sharedByOther"));
-    expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.needsReconnection"));
+    const items = itemsOf({ [NOTION]: ["gone"] });
+    expect(items.has("sched-choice-pick-option-c_work")).toBe(true);
+    expect(items.has("sched-choice-pick-option-c_team")).toBe(true);
+    const texts = textsOf(items.get("sched-choice-pick-option-c_work")?.children).join("|");
+    expect(texts).toContain("Travail");
+    expect(texts).toContain("bob@acme.test");
+    const team = textsOf(items.get("sched-choice-pick-option-c_team")?.children).join("|");
+    expect(team).toContain(i18n.t("agents:schedule.connectionOverrides.sharedByOther"));
+    expect(team).toContain(i18n.t("agents:schedule.connectionOverrides.needsReconnection"));
     // No candidates travel with an unreachable pick: the way out is clearing it.
-    expect(html).toContain(i18n.t("agents:connectionOverrides.clearChoice"));
+    expect(renderChoice({ [NOTION]: ["gone"] })).toContain(
+      i18n.t("agents:connectionOverrides.clearChoice"),
+    );
   });
 
   it("leaves the refusal reasons to the form-level list", () => {
     const html = renderChoice({});
-    expect(html).not.toContain(i18n.t("agents:schedule.connectionOverrides.mustChoose"));
+    expect(html).not.toContain(i18n.t("agents:schedule.connectionOverrides.choiceTitle"));
     expect(html).not.toContain(i18n.t("agents:schedule.connectionOverrides.unavailable"));
     expect(html).not.toContain('role="alert"');
   });
 
+  it("names each integration by its display name, never by its package id's mono line", () => {
+    expect(renderChoice({})).not.toContain("font-mono");
+  });
+
   it("lets a picked dead connection be unticked, but not a fresh one ticked", () => {
-    const box = (html: string) =>
-      html.match(new RegExp(`<button[^>]*id="sched-choice-${GMAIL}-c_team"[^>]*>`))![0];
-    expect(box(renderChoice({ [GMAIL]: ["c_team"] }))).not.toContain('disabled=""');
-    expect(box(renderChoice({}))).toContain('disabled=""');
+    expect(itemsOf({}).get("sched-choice-pick-option-c_team")?.disabled).toBe(true);
+    expect(itemsOf({ [GMAIL]: ["c_team"] }).get("sched-choice-pick-option-c_team")?.disabled).toBe(
+      false,
+    );
   });
 
   it("shows a stored pick nothing refused, read-only and clearable", () => {
@@ -122,34 +172,35 @@ describe("ScheduleActorConnectionChoice", () => {
     expect(html).toContain(i18n.t("agents:connectionOverrides.clearChoice"));
   });
 
-  it("with nothing the viewer may name, offers no checkbox", () => {
-    const html = render(
-      <ScheduleActorConnectionChoice
-        choices={[{ integrationId: GMAIL, code: "must_choose_connection", candidates: [] }]}
-        integrations={[{ id: GMAIL, required: true }]}
-        value={{}}
-        onChange={() => {}}
-      />,
+  it("with nothing the viewer may name, offers no connection to tick", () => {
+    const items = itemsOf(
+      {},
+      [{ id: GMAIL, required: true }],
+      [{ integrationId: GMAIL, code: "must_choose_connection", candidates: [] }],
     );
-    expect(html).toContain(GMAIL);
-    expect(html).not.toContain('role="checkbox"');
+    expect([...items.keys()].some((id) => id.startsWith("sched-choice-pick-option-"))).toBe(false);
   });
 
   it("offers 'no connection' for each integration the agent does not require, refused or not", () => {
-    const html = renderChoice({}, [{ id: GMAIL }, { id: NOTION, required: true }, { id: SLACK }]);
-    // Inside the refused card of an optional integration, and on its own row otherwise.
-    expect(html).toContain(`id="sched-choice-${GMAIL}-none"`);
-    expect(html).toContain(`schedule-actor-none-${SLACK}`);
-    expect(html).toContain(`id="sched-choice-${SLACK}-none"`);
+    const items = itemsOf({}, [{ id: GMAIL }, { id: NOTION, required: true }, { id: SLACK }]);
+    // A mode of the refused menu of an optional integration, and of its own row otherwise.
+    expect(items.has(`sched-choice-pick-none-${GMAIL}`)).toBe(true);
+    expect(items.has(`sched-choice-pick-none-${SLACK}`)).toBe(true);
     // Control: never for one the agent requires.
-    expect(html).not.toContain(`sched-choice-${NOTION}-none`);
+    expect(items.has(`sched-choice-pick-none-${NOTION}`)).toBe(false);
   });
 
-  it("shows a stored 'no connection' ticked", () => {
-    const box = (html: string) =>
-      html.match(new RegExp(`<button[^>]*id="sched-choice-${SLACK}-none"[^>]*>`))![0];
-    expect(box(renderChoice({ [SLACK]: [] }, [{ id: SLACK }]))).toContain('aria-checked="true"');
-    expect(box(renderChoice({}, [{ id: SLACK }]))).toContain('aria-checked="false"');
+  it("offers « Hériter » only where nothing was refused: a refusal says inheriting decides nothing", () => {
+    const items = itemsOf({}, [{ id: GMAIL }, { id: SLACK }]);
+    expect(items.has(`sched-choice-pick-reset-${SLACK}`)).toBe(true);
+    expect(items.has(`sched-choice-pick-reset-${GMAIL}`)).toBe(false);
+  });
+
+  it("shows a stored 'no connection' as the chosen mode", () => {
+    const none = (value: Record<string, string[]>) =>
+      itemsOf(value, [{ id: SLACK }]).get(`sched-choice-pick-none-${SLACK}`);
+    expect(none({ [SLACK]: [] })).toMatchObject({ "aria-checked": true });
+    expect(none({})).toMatchObject({ "aria-checked": false });
   });
 
   it("lets a stored 'no connection' on a required integration be cleared", () => {
@@ -161,7 +212,7 @@ describe("ScheduleActorConnectionChoice", () => {
         onChange={() => {}}
       />,
     );
-    expect(html).not.toContain(`sched-choice-${GMAIL}-none`);
+    expect(html).not.toContain(`sched-choice-pick-none-${GMAIL}`);
     expect(html).toContain(i18n.t("agents:connectionOverrides.clearChoice"));
   });
 });

@@ -2,17 +2,10 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Globe, Pencil, Trash2 } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@appstrate/ui/components/table";
+import { Globe, Plus } from "lucide-react";
+import { DataTable } from "../../components/data-table";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
+import type { MenuAction } from "../../lib/menu-action";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   useProxies,
@@ -24,195 +17,130 @@ import {
   type OrgProxyInfo,
 } from "../../hooks/use-proxies";
 import { useConnectionTest } from "../../hooks/use-connection-test";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
-import { Spinner } from "../../components/spinner";
-import { TestResultSpan } from "../../components/test-result-span";
-import { SourceBadge } from "../../components/source-badge";
-import { DefaultCell } from "../../components/default-cell";
+import { EmptyState, EmptyStateAction } from "../../components/page-states";
+import { useProxyColumns } from "./proxy-columns";
 
 export function OrgSettingsProxiesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
+  const canWrite = can("proxies:write");
+  const canDelete = can("proxies:delete");
 
-  const [proxyModalOpen, setProxyModalOpen] = useState(false);
-  const [editProxy, setEditProxy] = useState<OrgProxyInfo | null>(null);
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
 
   const { data: proxies, isLoading, error } = useProxies();
+  const newProxy = useModalParam("newProxy");
+  const editParam = useModalTarget("editProxy", proxies);
+  const editProxy = editParam.target ?? null;
+  // Opened by its trigger's rule too, not just by the URL: a built-in proxy is not editable.
+  const proxyModalOpen =
+    canWrite &&
+    (newProxy.value !== null || (editProxy !== null && editProxy.source !== "built-in"));
+  const closeProxyModal = editProxy ? editParam.close : newProxy.close;
   const createMutation = useCreateProxy();
   const updateMutation = useUpdateProxy();
   const deleteMutation = useDeleteProxy();
   const setDefaultMutation = useSetDefaultProxy();
   const testMutation = useTestProxy();
-  const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
+  const { testingIds, testResults, handleTest } = useConnectionTest(testMutation);
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState error={error} />;
-
-  const onCreate = () => {
-    setEditProxy(null);
-    setProxyModalOpen(true);
+  const create: MenuAction = {
+    id: "create",
+    icon: Plus,
+    label: t("proxies.add"),
+    onSelect: () => newProxy.open(),
+    hidden: !canWrite,
   };
-  const onEdit = (p: OrgProxyInfo) => {
-    setEditProxy(p);
-    setProxyModalOpen(true);
-  };
+  const onEdit = (p: OrgProxyInfo) => editParam.open(p.id);
   const onDelete = (p: OrgProxyInfo) => setConfirmState({ label: p.label, id: p.id });
   const onSetDefault = (p: OrgProxyInfo) => setDefaultMutation.mutate({ body: { proxyId: p.id } });
-  // `POST /api/proxies/:id/test` is a read; creating, editing and setting the
-  // default are `proxies:write`; removing one is `proxies:delete`.
-  const canWrite = can("proxies:write");
-  const canDelete = can("proxies:delete");
+  const columns = useProxyColumns({
+    testingIds,
+    testResults,
+    onTest: handleTest,
+    onEdit: canWrite ? onEdit : undefined,
+    onDelete: canDelete ? onDelete : undefined,
+    onSetDefault: canWrite ? onSetDefault : undefined,
+    settingDefaultId: setDefaultMutation.isPending
+      ? (setDefaultMutation.variables?.body.proxyId ?? null)
+      : null,
+  });
 
   return (
     <>
-      {canWrite && (
-        <div className="mb-4 flex items-center justify-end gap-2">
-          <Button onClick={onCreate}>{t("proxies.add")}</Button>
-        </div>
-      )}
+      {/* The page's own action, in the treatment every list bar uses: a white
+          surface, not a filled blue. A screen whose table now looks like every
+          other table cannot keep the one button that does not. */}
+      <SettingsPageActions actions={[create]} />
 
-      {proxies && proxies.length > 0 ? (
-        <div className="overflow-hidden rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">{t("proxies.col.source")}</TableHead>
-                <TableHead className="text-xs">{t("proxies.col.proxy")}</TableHead>
-                <TableHead className="text-xs">{t("proxies.col.default")}</TableHead>
-                <TableHead className="w-px text-right text-xs">
-                  {t("proxies.col.actions")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {proxies.map((p) => {
-                const isBuiltIn = p.source === "built-in";
-                return (
-                  <TableRow key={p.id} data-testid={`proxy-row-${p.id}`}>
-                    <TableCell>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <SourceBadge source={p.source} />
-                        {!isBuiltIn && !p.enabled && (
-                          <Badge variant="secondary" className="opacity-60">
-                            {t("proxies.disabled")}
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">{p.label}</div>
-                        <div className="text-muted-foreground font-mono text-[0.65rem]">
-                          {p.urlPrefix}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <DefaultCell
-                        isDefault={p.is_default}
-                        defaultLabel={t("proxies.default")}
-                        setLabel={t("proxies.setDefault")}
-                        onSetDefault={() => onSetDefault(p)}
-                        canSetDefault={canWrite}
-                        testId={`set-default-proxy-${p.id}`}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {testResults[p.id] && (
-                          <TestResultSpan
-                            result={testResults[p.id]!}
-                            successKey="proxies.testSuccess"
-                            failedKey="proxies.testFailed"
-                          />
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => handleTest(p.id)}
-                          disabled={testingId === p.id}
-                        >
-                          {testingId === p.id ? <Spinner /> : t("proxies.test")}
-                        </Button>
-                        {!isBuiltIn && (
-                          <>
-                            {canWrite && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => onEdit(p)}
-                                aria-label={t("proxies.edit")}
-                              >
-                                <Pencil size={14} />
-                              </Button>
-                            )}
-                            {canDelete && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => onDelete(p)}
-                                aria-label={t("proxies.delete")}
-                              >
-                                <Trash2 size={14} className="text-destructive" />
-                              </Button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <EmptyState message={t("proxies.empty")} icon={Globe} compact>
-          {canWrite && <Button onClick={onCreate}>{t("proxies.add")}</Button>}
-        </EmptyState>
-      )}
-
-      <ProxyFormModal
-        open={proxyModalOpen}
-        onClose={() => setProxyModalOpen(false)}
-        proxy={editProxy}
-        isPending={createMutation.isPending || updateMutation.isPending}
-        onSubmit={(data) => {
-          if (editProxy) {
-            // The credential-bearing URL is never returned to the client, so the
-            // edit form starts blank. An empty field means "keep the current
-            // URL" — omit it entirely (`url` is optional on PATCH); sending `""`
-            // fails the server's `z.url()` and 400s a label-only edit.
-            updateMutation.mutate(
-              {
-                params: { path: { id: editProxy.id } },
-                body: data.url ? data : { label: data.label },
-              },
-              { onSuccess: () => setProxyModalOpen(false) },
-            );
-          } else {
-            createMutation.mutate({ body: data }, { onSuccess: () => setProxyModalOpen(false) });
-          }
-        }}
+      <DataTable
+        tableId="proxies"
+        label={t("proxies.tabTitle")}
+        columns={columns}
+        rows={proxies ?? []}
+        rowKey={(p) => p.id}
+        rowAction={canWrite ? onEdit : undefined}
+        rowActionable={(p) => p.source !== "built-in"}
+        rowLabel={(p) => t("proxies.editNamed", { name: p.label })}
+        isLoading={isLoading}
+        failure={error}
+        empty={
+          <EmptyState message={t("proxies.empty")} icon={Globe} compact>
+            <EmptyStateAction action={create} />
+          </EmptyState>
+        }
       />
+
+      {proxyModalOpen && (
+        <ProxyFormModal
+          key={editProxy?.id ?? "__create__"}
+          onClose={closeProxyModal}
+          proxy={editProxy}
+          isPending={createMutation.isPending || updateMutation.isPending}
+          onSubmit={(data) => {
+            if (editProxy) {
+              // The credential-bearing URL is never returned to the client, so the
+              // edit form starts blank. An empty field means "keep the current
+              // URL" — omit it entirely (`url` is optional on PATCH); sending `""`
+              // fails the server's `z.url()` and 400s a label-only edit.
+              updateMutation.mutate(
+                {
+                  params: { path: { id: editProxy.id } },
+                  body: data.url ? data : { label: data.label },
+                },
+                {
+                  onSuccess: closeProxyModal,
+                },
+              );
+            } else {
+              createMutation.mutate(
+                { body: data },
+                {
+                  onSuccess: closeProxyModal,
+                },
+              );
+            }
+          }}
+        />
+      )}
 
       <ConfirmModal
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("proxies.deleteTitle")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         description={confirmState ? t("proxies.deleteConfirm", { label: confirmState.label }) : ""}
         isPending={deleteMutation.isPending}
         onConfirm={() => {
           if (confirmState) {
             deleteMutation.mutate(
               { params: { path: { id: confirmState.id } } },
-              { onSuccess: () => setConfirmState(null) },
+              {
+                onSuccess: () => setConfirmState(null),
+              },
             );
           }
         }}

@@ -5,8 +5,7 @@
  *
  * Reads go through `GET /agents/:id/persistence` with `kind` and optional
  * `runId` filters. The same `usePersistenceQuery` factor backs every read
- * hook so cache keys, scope-filter logic, and `enabled` semantics stay in
- * one place.
+ * hook so cache keys and `enabled` semantics stay in one place.
  *
  * "Pinned slot" = any non-null `key` in `package_persistence`. Includes the
  * carry-over slot (`key="checkpoint"`) plus Letta-style named blocks
@@ -14,18 +13,13 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type {
-  AgentMemoryItem,
-  AgentPinnedSlotItem,
-  PersistenceActorType,
-} from "@appstrate/shared-types";
+import type { AgentMemoryItem, AgentPinnedSlotItem } from "@appstrate/shared-types";
 import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
 import { persistenceKeys } from "../lib/query-keys";
-import type { PersistenceScopeFilter } from "../components/persistence/scope-filter";
 
 interface PersistenceResponse {
   pinned?: AgentPinnedSlotItem[];
@@ -63,25 +57,13 @@ function usePersistenceQuery<T>(
   });
 }
 
-function applyScopeFilter<T extends { actor_type: PersistenceActorType }>(
-  rows: T[],
-  filter: PersistenceScopeFilter,
-): T[] {
-  if (filter === "shared") return rows.filter((r) => r.actor_type === "shared");
-  if (filter === "mine") return rows.filter((r) => r.actor_type !== "shared");
-  return rows;
-}
-
-/**
- * Memories visible to the caller for an agent, with an optional client-side
- * scope filter on top of what the server returned.
- */
-export function useAgentMemories(
-  packageId: string | undefined,
-  filter: PersistenceScopeFilter = "all",
-) {
-  return usePersistenceQuery(packageId, `agent-memories:${filter}`, { kind: "memory" }, (res) =>
-    applyScopeFilter(res.memories ?? [], filter),
+/** Every memory row the caller may read for an agent. */
+export function useAgentMemories(packageId: string | undefined) {
+  return usePersistenceQuery(
+    packageId,
+    "agent-memories",
+    { kind: "memory" },
+    (res) => res.memories ?? [],
   );
 }
 
@@ -96,18 +78,15 @@ export function useRunMemories(packageId: string | undefined, runId: string | un
 }
 
 /**
- * Pinned slots for an agent (any non-null `key`).
- *
- * Admins see every actor's slot when no scope filter is applied; members see
- * their own actor + shared. The `filter` is then applied client-side
- * identically to memories.
+ * Pinned slots for an agent (any non-null `key`). Admins see every actor's
+ * slot; members see their own actor's and the shared ones.
  */
-export function useAgentPinned(
-  packageId: string | undefined,
-  filter: PersistenceScopeFilter = "all",
-) {
-  return usePersistenceQuery(packageId, `agent-pinned:${filter}`, { kind: "pinned" }, (res) =>
-    applyScopeFilter(res.pinned ?? [], filter),
+export function useAgentPinned(packageId: string | undefined) {
+  return usePersistenceQuery(
+    packageId,
+    "agent-pinned",
+    { kind: "pinned" },
+    (res) => res.pinned ?? [],
   );
 }
 

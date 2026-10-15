@@ -10,8 +10,6 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import i18n from "../i18n";
 import { $api, client } from "../api/client";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateSchedules } from "./use-schedules";
@@ -79,7 +77,6 @@ export function useRenameMeConnection() {
       return data;
     },
     onSuccess: () => {
-      toast.success(i18n.t("settings:integration.connection.updated"));
       // A label shows on every picker and readiness view, not just the connection list.
       return invalidateIntegrationQueries(qc);
     },

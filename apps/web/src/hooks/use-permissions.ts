@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { useOrg } from "./use-org.ts";
-import { useSpaces } from "./use-spaces.ts";
+import { useSpaceLabelOf, useSpaces } from "./use-spaces.ts";
 import type { SpaceGrant } from "../lib/package-permissions.ts";
 import { isSpaceEnterable, useCurrentSpaceId } from "./use-current-space.ts";
 import type { OrgRole } from "@appstrate/shared-types";
@@ -44,11 +44,6 @@ export function useCanPreviewRole(): boolean {
   return hasFullOrgAccess(usePermissions().orgRole);
 }
 
-/** Organization catalog administration follows the effective organization role. */
-export function useCanManageOrgCatalog(): boolean {
-  return hasFullOrgAccess(usePermissions().orgRole);
-}
-
 /**
  * Display name of a package's home space, or `null` when there is none to show.
  *
@@ -59,8 +54,7 @@ export function useCanManageOrgCatalog(): boolean {
  * package's own read, computed server-side.
  */
 export function useHomeSpaceName(homeSpaceId: string | null | undefined): string | null {
-  const { data: spaces } = useSpaces();
-  return (homeSpaceId && spaces?.find((s) => s.id === homeSpaceId)?.name) || null;
+  return useSpaceLabelOf()(homeSpaceId) ?? null;
 }
 
 /**
@@ -113,8 +107,8 @@ export function usePermissions() {
 }
 
 /**
- * The caller's standing in ONE named space, in the shape the activation verdict
- * reads (`maySetPackageActive`). Activating a package is judged in the TARGET
+ * The caller's standing in ONE named space, in the shape the chat access rows
+ * read (`maySetPackageActive`). Activating a package is judged in the TARGET
  * space and nowhere else, and owning that space is its own authorization —
  * neither fact survives the org∪space union `can` computes, so the row itself
  * travels.

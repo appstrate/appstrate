@@ -6,9 +6,9 @@ import { Trash2, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
-import { SectionCard } from "../section-card";
-import { StringListInput } from "./string-list-input";
+import { FormItem } from "@/components/app-ui/form-item";
+import { EditorSection, type EditorSurface } from "./editor-section";
+import { RequiredScopesField } from "./required-scopes-field";
 import {
   getAllowUndeclaredTools,
   getAuths,
@@ -19,11 +19,17 @@ import {
 } from "./utils";
 
 interface ToolsPolicySectionProps {
+  /** `settings` inside the edit panel, `card` on the editor page. */
+  surface?: EditorSurface;
   manifest: Record<string, unknown>;
   onChange: (manifest: Record<string, unknown>) => void;
 }
 
-export function ToolsPolicySection({ manifest, onChange }: ToolsPolicySectionProps) {
+export function ToolsPolicySection({
+  manifest,
+  onChange,
+  surface = "card",
+}: ToolsPolicySectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   // Local row state preserves in-progress rows (empty tool name) that
   // setToolsPolicy drops from the manifest — without it, "Add" would write a
@@ -53,13 +59,11 @@ export function ToolsPolicySection({ manifest, onChange }: ToolsPolicySectionPro
   const update = (idx: number, patch: Partial<ToolPolicyState>) =>
     commit(rows.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
 
-  const setAuthScopes = (idx: number, authKey: string, scopes: string[]) =>
-    update(idx, { requiredScopes: { ...rows[idx]!.requiredScopes, [authKey]: scopes } });
-
   const addPolicy = () => commit([...rows, { name: "", requiredScopes: {} }]);
 
   return (
-    <SectionCard
+    <EditorSection
+      surface={surface}
       title={t("integrationEditor.toolsPolicy.title")}
       headerRight={
         <Button type="button" size="sm" variant="outline" onClick={addPolicy}>
@@ -104,52 +108,36 @@ export function ToolsPolicySection({ manifest, onChange }: ToolsPolicySectionPro
       {rows.map((policy, idx) => (
         <div key={idx} className="border-border space-y-3 rounded-md border p-3">
           <div className="flex items-center gap-2">
-            <div className="flex-1">
-              <Label htmlFor={`tp-name-${idx}`}>
-                {t("integrationEditor.toolsPolicy.toolName")}
-              </Label>
+            <FormItem
+              id={`tp-name-${idx}`}
+              label={t("integrationEditor.toolsPolicy.toolName")}
+              className="flex-1"
+            >
               <Input
-                id={`tp-name-${idx}`}
                 value={policy.name}
                 onChange={(e) => update(idx, { name: e.target.value })}
                 placeholder="list_issues"
-                className="mt-1 font-mono"
+                className="font-mono"
               />
-            </div>
+            </FormItem>
             <Button
               type="button"
               size="icon"
               variant="ghost"
-              className="mt-5"
+              className="mt-7"
               onClick={() => commit(rows.filter((_, i) => i !== idx))}
             >
               <Trash2 size={14} className="text-destructive" />
             </Button>
           </div>
 
-          <div className="space-y-2">
-            <Label>{t("integrationEditor.toolsPolicy.requiredScopes")}</Label>
-            <p className="text-muted-foreground text-xs">
-              {t("integrationEditor.toolsPolicy.requiredScopesDesc")}
-            </p>
-            {authKeys.length === 0 ? (
-              <p className="text-muted-foreground text-xs italic">
-                {t("integrationEditor.toolsPolicy.noAuths")}
-              </p>
-            ) : (
-              authKeys.map((k) => (
-                <StringListInput
-                  key={k}
-                  label={k}
-                  values={policy.requiredScopes[k] ?? []}
-                  onChange={(scopes) => setAuthScopes(idx, k, scopes)}
-                  placeholder="read"
-                />
-              ))
-            )}
-          </div>
+          <RequiredScopesField
+            authKeys={authKeys}
+            value={policy.requiredScopes}
+            onChange={(requiredScopes) => update(idx, { requiredScopes })}
+          />
         </div>
       ))}
-    </SectionCard>
+    </EditorSection>
   );
 }

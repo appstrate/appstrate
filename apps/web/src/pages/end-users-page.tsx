@@ -1,72 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, Users } from "lucide-react";
+import { Plus, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
-import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
-import { Badge } from "@appstrate/ui/components/badge";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
-import { useEndUsers, type EndUserInfo } from "../hooks/use-end-users";
+  useDeleteEndUser,
+  useEndUser,
+  useEndUsersPaged,
+  type EndUserInfo,
+} from "../hooks/use-end-users";
+import { useDebouncedValue } from "../hooks/use-debounced-value";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { ErrorState, EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
+import { SettingsSkeleton } from "../components/loading-skeletons";
+import { useModalParam } from "../hooks/use-modal-param";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
-import { formatDateField } from "../lib/format-date";
+import { ConfirmModal } from "../components/confirm-modal";
+import { Modal } from "../components/modal";
+import { DataTable } from "../components/data-table";
+import { columnMenu, visibleColumns } from "../lib/column-visibility";
+import { ListToolbar } from "../components/list-toolbar";
+import { SettingsPageActions } from "../components/settings/settings-page-actions";
+import type { MenuAction } from "../lib/menu-action";
+import { useColumnVisibility } from "../stores/column-visibility-store";
+import { endUserLabel } from "../lib/members";
+import { useEndUserColumns } from "./end-user-columns";
 
-/** Deterministic color from ID hash for the avatar circle. */
-const AVATAR_COLORS = [
-  "bg-blue-500/20 text-blue-600 dark:text-blue-400",
-  "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400",
-  "bg-violet-500/20 text-violet-600 dark:text-violet-400",
-  "bg-amber-500/20 text-amber-600 dark:text-amber-400",
-  "bg-rose-500/20 text-rose-600 dark:text-rose-400",
-  "bg-cyan-500/20 text-cyan-600 dark:text-cyan-400",
-  "bg-fuchsia-500/20 text-fuchsia-600 dark:text-fuchsia-400",
-  "bg-orange-500/20 text-orange-600 dark:text-orange-400",
-];
-
-function hashCode(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function getInitials(name: string | null, email: string | null): string {
-  if (name) {
-    const parts = name.trim().split(/\s+/);
-    if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
-    return name.slice(0, 2).toUpperCase();
-  }
-  if (email) return email.slice(0, 2).toUpperCase();
-  return "?";
-}
-
-function EndUserAvatar({ user }: { user: EndUserInfo }) {
-  const color = AVATAR_COLORS[hashCode(user.id) % AVATAR_COLORS.length]!;
-  return (
-    <div
-      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[0.7rem] font-semibold ${color}`}
-    >
-      {getInitials(user.name, user.email)}
-    </div>
-  );
-}
+const END_USER_PARAM = "endUser";
+const EDIT_END_USER_PARAM = "editEndUser";
 
 export function EndUsersPage() {
-  // Remount on space switch so cursor + loadedPages (and the rest of the
-  // page state) reset — otherwise space A's accumulated "Load more" pages would
-  // bleed into space B's list.
+  // Remount on space switch so the loaded pages (and the rest of the page state)
+  // reset — otherwise space A's pages would bleed into space B's list.
   const spaceId = useCurrentSpaceId();
   return <EndUsersPageContent key={spaceId ?? "none"} />;
 }
@@ -74,179 +42,151 @@ export function EndUsersPage() {
 function EndUsersPageContent() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
+  const canWrite = can("end-users:write");
   const spaceId = useCurrentSpaceId();
 
   const [search, setSearch] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<EndUserInfo | null>(null);
-  const [cursor, setCursor] = useState<string | undefined>(undefined);
-  // Pages loaded before the current cursor. "Load more" appends the current
-  // page here and advances the cursor, so the list accumulates across pages
-  // instead of the newest page replacing the previous one.
-  const [loadedPages, setLoadedPages] = useState<EndUserInfo[]>([]);
+  const newEndUser = useModalParam("newEndUser");
+  const [pendingDelete, setPendingDelete] = useState<EndUserInfo | null>(null);
+  const query = useDebouncedValue(search).trim();
 
-  const { data, isLoading, error } = useEndUsers({
-    limit: 25,
-    startingAfter: cursor,
+  const { data, isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } =
+    useEndUsersPaged({ search: query });
+  const endUsers = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
+  // The detail and the edition are two addresses of one modal: `?endUser=<id>`
+  // shows, `?editEndUser=<id>` edits, and switching hands one over to the other.
+  const detailParam = useModalParam(END_USER_PARAM);
+  const editParam = useModalParam(EDIT_END_USER_PARAM);
+  const selectedUserId = editParam.value ?? detailParam.value;
+  const {
+    data: selectedUserDetail,
+    isLoading: selectedUserLoading,
+    error: selectedUserError,
+  } = useEndUser(selectedUserId ?? "");
+  const deleteMutation = useDeleteEndUser();
+
+  const selectedUser = selectedUserId
+    ? (selectedUserDetail ?? endUsers.find((user) => user.id === selectedUserId) ?? null)
+    : null;
+
+  const closeUser = editParam.value !== null ? editParam.close : detailParam.close;
+
+  const allColumns = useEndUserColumns({
+    deletingUserId: deleteMutation.isPending
+      ? (deleteMutation.variables?.params.path.id ?? null)
+      : null,
+    onEdit: (user) => editParam.open(user.id),
+    onDelete: setPendingDelete,
   });
+  const visibility = useColumnVisibility("end-users");
+  const columns = visibleColumns(allColumns, visibility.hidden);
 
-  const currentPage = useMemo(() => data?.data ?? [], [data?.data]);
-  const hasMore = data?.hasMore ?? false;
-
-  // Merge accumulated pages with the current one, deduping by id (the current
-  // page briefly overlaps the accumulator between "Load more" and the next
-  // fetch settling).
-  const endUsers = useMemo(() => {
-    const seen = new Set<string>();
-    const out: EndUserInfo[] = [];
-    for (const u of [...loadedPages, ...currentPage]) {
-      if (!seen.has(u.id)) {
-        seen.add(u.id);
-        out.push(u);
-      }
-    }
-    return out;
-  }, [loadedPages, currentPage]);
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return endUsers;
-    const q = search.toLowerCase();
-    return endUsers.filter(
-      (u) =>
-        u.name?.toLowerCase().includes(q) ||
-        u.email?.toLowerCase().includes(q) ||
-        u.externalId?.toLowerCase().includes(q) ||
-        u.id.toLowerCase().includes(q),
-    );
-  }, [endUsers, search]);
+  const create: MenuAction = {
+    id: "create",
+    icon: Plus,
+    label: t("spaces.newEndUser"),
+    onSelect: () => newEndUser.open(),
+    hidden: !canWrite,
+  };
 
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={Users} />;
-  if (error) return <ErrorState error={error} />;
 
+  // Reading is the route's gate (`end-users:read`); creating and editing need
+  // `end-users:write`, deleting `end-users:delete` (the row menu checks it).
   return (
-    <div className="p-6">
-      <PageHeader
-        title={t("endUsers.pageTitle")}
-        emoji="👥"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("endUsers.pageTitle") },
-        ]}
-        actions={
-          can("end-users:write") ? (
-            <Button onClick={() => setCreateOpen(true)}>{t("spaces.newEndUser")}</Button>
-          ) : undefined
+    <div>
+      <SettingsPageActions actions={[create]} />
+
+      <ListToolbar
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: t("spaces.searchEndUsers"),
+        }}
+        columns={columnMenu(allColumns, visibility)}
+      />
+
+      <DataTable
+        tableId="end-users"
+        label={t("endUsers.pageTitle")}
+        columns={columns}
+        rows={endUsers}
+        rowKey={(user) => user.id}
+        rowAction={(user) => detailParam.open(user.id)}
+        rowLabel={(user) =>
+          t("spaces.openEndUser", {
+            name: endUserLabel(user, t("spaces.anonymousUser")),
+          })
+        }
+        isLoading={isLoading && endUsers.length === 0}
+        failure={error}
+        empty={
+          query ? (
+            <NoMatchState message={t("spaces.noMatchingEndUsers")} />
+          ) : (
+            <EmptyState
+              message={t("spaces.noEndUsers")}
+              hint={t("spaces.noEndUsersHint")}
+              icon={Users}
+              compact
+            >
+              <EmptyStateAction action={create} />
+            </EmptyState>
+          )
         }
       />
 
-      <div className="relative mb-4">
-        <Search
-          size={16}
-          className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2"
-        />
-        <Input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={t("spaces.searchEndUsers")}
-          className="pl-9"
-        />
-      </div>
-
-      {isLoading ? (
-        <LoadingState />
-      ) : filtered.length === 0 ? (
-        <EmptyState message={t("spaces.noEndUsers")} hint={t("spaces.noEndUsersHint")} icon={Users}>
-          <Button onClick={() => setCreateOpen(true)}>{t("spaces.newEndUser")}</Button>
-        </EmptyState>
-      ) : (
-        <TooltipProvider delayDuration={300}>
-          <div className="flex flex-col gap-2">
-            {filtered.map((user) => {
-              const metaCount = user.metadata ? Object.keys(user.metadata).length : 0;
-              return (
-                <div
-                  key={user.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelectedUser(user)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") setSelectedUser(user);
-                  }}
-                  className="border-border bg-card hover:border-primary/30 cursor-pointer rounded-lg border px-4 py-3 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <EndUserAvatar user={user} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-semibold">
-                          {user.name || user.email || t("spaces.anonymousUser")}
-                        </span>
-                        {user.email && user.name && (
-                          <span className="text-muted-foreground truncate text-sm">
-                            {user.email}
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Badge
-                              variant="secondary"
-                              className="cursor-default px-1.5 py-0 text-[0.65rem] opacity-60"
-                            >
-                              {user.id.length > 20 ? `${user.id.slice(0, 20)}...` : user.id}
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            <span className="font-mono text-xs">{user.id}</span>
-                          </TooltipContent>
-                        </Tooltip>
-                        {user.externalId && (
-                          <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
-                            {user.externalId}
-                          </Badge>
-                        )}
-                        {metaCount > 0 && (
-                          <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
-                            {t("spaces.metadataCount", { count: metaCount })}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    <span className="text-muted-foreground shrink-0 text-xs">
-                      {formatDateField(user.createdAt, "date")}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-
-            {hasMore && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const last = currentPage[currentPage.length - 1];
-                  if (last) {
-                    setLoadedPages((prev) => [...prev, ...currentPage]);
-                    setCursor(last.id);
-                  }
-                }}
-                className="mt-2"
-              >
-                {t("spaces.loadMore")}
-              </Button>
-            )}
-          </div>
-        </TooltipProvider>
+      {hasNextPage && !isLoading && !error && (
+        <PendingButton
+          variant="outline"
+          pending={isFetchingNextPage}
+          onClick={() => void fetchNextPage()}
+          className="mt-3 w-full"
+        >
+          {t("spaces.loadMore")}
+        </PendingButton>
       )}
 
-      <EndUserCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      {canWrite && newEndUser.value !== null && <EndUserCreateModal onClose={newEndUser.close} />}
 
-      <EndUserDetailModal
-        open={!!selectedUser}
-        onClose={() => setSelectedUser(null)}
-        endUser={selectedUser}
+      {selectedUserId && selectedUser && (
+        <EndUserDetailModal
+          key={selectedUserId}
+          onClose={closeUser}
+          endUser={selectedUser}
+          editing={canWrite && editParam.value !== null}
+          onEdit={() => editParam.open(selectedUserId, END_USER_PARAM)}
+          onShowDetail={() => detailParam.open(selectedUserId, EDIT_END_USER_PARAM)}
+        />
+      )}
+
+      {selectedUserId && !selectedUser && (
+        <Modal open onClose={closeUser} title={t("spaces.endUserDetail")}>
+          {selectedUserLoading ? (
+            <SettingsSkeleton />
+          ) : (
+            <ErrorState error={selectedUserError} compact />
+          )}
+        </Modal>
+      )}
+
+      <ConfirmModal
+        open={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        title={t("spaces.deleteEndUserTitle")}
+        confirmLabel={t("common:btn.delete")}
+        description={t("spaces.deleteEndUserConfirm")}
+        isPending={deleteMutation.isPending}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          const user = pendingDelete;
+          try {
+            await deleteMutation.mutateAsync({ params: { path: { id: user.id } } });
+            setPendingDelete(null);
+          } catch {
+            // The mutation cache toasts the refusal and the dialog closes on it.
+          }
+        }}
       />
     </div>
   );

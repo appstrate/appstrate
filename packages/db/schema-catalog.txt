@@ -409,6 +409,7 @@ column organizations.deleting_at timestamp with time zone
 column organizations.files_bytes_limit bigint
 column organizations.files_bytes_used bigint not null default 0
 column organizations.id uuid not null default gen_random_uuid()
+column organizations.logo text
 column organizations.name text not null
 column organizations.org_settings jsonb not null default '{}'::jsonb
 column organizations.slug text not null
@@ -526,6 +527,9 @@ column runs.last_heartbeat_at timestamp with time zone not null default now()
 column runs.metadata jsonb
 column runs.model_cost jsonb
 column runs.model_credential_id uuid
+column runs.model_error_category text
+column runs.model_error_message text
+column runs.model_error_status integer
 column runs.model_id text
 column runs.model_label text
 column runs.model_source credential_source
@@ -888,6 +892,9 @@ constraint runs runs_cost_non_negative CHECK ((cost >= (0)::double precision))
 constraint runs runs_cost_pricing_status_valid CHECK ((cost_pricing_status = ANY (ARRAY['priced'::text, 'partial'::text, 'unpriced'::text])))
 constraint runs runs_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE SET NULL
 constraint runs runs_model_credential_id_model_provider_credentials_id_fk FOREIGN KEY (model_credential_id) REFERENCES model_provider_credentials(id) ON DELETE SET NULL
+constraint runs runs_model_error_category_valid CHECK ((model_error_category = ANY (ARRAY['credential_unavailable'::text, 'rate_limited'::text, 'upstream_unavailable'::text, 'invalid_request'::text, 'unknown'::text])))
+constraint runs runs_model_error_detail_has_category CHECK (((model_error_category IS NOT NULL) OR ((model_error_status IS NULL) AND (model_error_message IS NULL))))
+constraint runs runs_model_error_status_http CHECK (((model_error_status >= 100) AND (model_error_status <= 599)))
 constraint runs runs_open_sink_has_secret CHECK (((sink_expires_at IS NULL) OR (sink_secret_encrypted IS NOT NULL)))
 constraint runs runs_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint runs runs_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE SET NULL

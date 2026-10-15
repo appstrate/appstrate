@@ -123,6 +123,10 @@ describe("persona-sensitive call sites", () => {
           "mints a token's scope CEILING from the subject's role; a preview narrows per request, under it",
         ],
         [
+          "apps/api/src/routes/org-roles.ts",
+          "describes each role's grants, not the caller: a persona has nothing to narrow",
+        ],
+        [
           "apps/api/src/services/model-providers/credentials.ts",
           "the pairing redeem carries no request principal, hence no persona: it judges the minter's live role",
         ],

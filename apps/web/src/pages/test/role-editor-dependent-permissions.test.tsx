@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Issue #1513 in the role editor: ticking an action ticks its read, which stays locked —
- * focusable, `aria-disabled`, hinted — while a selected action depends on it alone.
+ * Dependent reads in the role editor: ticking an action ticks its read, which stays held —
+ * unticking it is undone, and its note names what needs it — while a selected action
+ * depends on it alone. The picker is a closed popover under a static render, so the
+ * decisions are pinned here, on the pure functions the editor feeds it.
  */
 
 import { describe, it, expect } from "bun:test";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
+import { ScopeMultiSelect } from "../../components/scope-multi-select.tsx";
 import {
+  dependentsLabel,
   lockedReads,
-  togglePermission,
+  withRequiredReads,
   type RoleVocabularyEntry,
 } from "../../lib/role-permission-dependencies.ts";
-import { PermissionGroups } from "../org-settings/roles.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
+const t = i18n.getFixedT("fr", "settings");
 
 function entry(permission: string, requires_one_of: string[] = []): RoleVocabularyEntry {
   return {
@@ -40,118 +44,93 @@ const runs = [
 const agentsRun = entry("agents:run", ["runs:read", "runs:read-all"]);
 const connect = entry("integrations:connect");
 const vocabulary = [...schedules, ...runs, agentsRun, connect];
-const byPermission = new Map(vocabulary.map((e) => [e.permission, e]));
-const pick = (permission: string) => byPermission.get(permission)!;
 
-function picker(selected: Set<string>, disabled = false): string {
-  return render(
-    <PermissionGroups
-      groups={[
-        { resource: "schedules", permissions: schedules },
-        { resource: "runs", permissions: runs },
-      ]}
-      selected={selected}
-      locked={lockedReads(selected, vocabulary)}
-      disabled={disabled}
-      onToggle={() => {}}
-    />,
-  );
-}
-
-function checkbox(selected: Set<string>, permission: string, disabled = false): string {
-  const tag = picker(selected, disabled).match(
-    new RegExp(`<button[^>]*id="perm-${permission}"[^>]*>`),
-  );
-  expect(tag, permission).not.toBeNull();
-  return tag![0];
-}
-
-function label(selected: Set<string>, permission: string): string {
-  const tag = picker(selected).match(new RegExp(`<label[^>]*for="perm-${permission}"[^>]*>`));
-  expect(tag, permission).not.toBeNull();
-  return tag![0];
-}
+const complete = (permissions: string[]) =>
+  [...withRequiredReads(new Set(permissions), vocabulary)].sort();
 
 describe("ticking an action", () => {
   it("also ticks its read", () => {
-    expect([...togglePermission(new Set(), pick("schedules:write"))].sort()).toEqual([
-      "schedules:read",
-      "schedules:write",
-    ]);
+    expect(complete(["schedules:write"])).toEqual(["schedules:read", "schedules:write"]);
   });
 
   it("ticks nothing else for a read-free action", () => {
-    expect([...togglePermission(new Set(), connect)]).toEqual(["integrations:connect"]);
+    expect(complete(["integrations:connect"])).toEqual(["integrations:connect"]);
   });
 
   it("adds no read when one it accepts is already held", () => {
-    expect([...togglePermission(new Set(["runs:read-all"]), pick("runs:cancel"))].sort()).toEqual([
-      "runs:cancel",
-      "runs:read-all",
-    ]);
+    expect(complete(["runs:read-all", "runs:cancel"])).toEqual(["runs:cancel", "runs:read-all"]);
   });
 });
 
 describe("a read a selected action depends on", () => {
-  it("is locked, focusable, and described by a hint naming its dependents", () => {
-    const selected = togglePermission(
-      togglePermission(new Set(), pick("schedules:write")),
-      pick("schedules:delete"),
+  it("is locked, and its note names its dependents", () => {
+    const selected = withRequiredReads(
+      new Set(["schedules:write", "schedules:delete"]),
+      vocabulary,
     );
-    const read = checkbox(selected, "schedules:read");
-    expect(read).toContain('aria-checked="true"');
-    expect(read).toContain('aria-disabled="true"');
-    expect(read).not.toContain('disabled=""');
-    expect(read).toContain('aria-describedby="perm-schedules:read-required-by"');
-    expect(label(selected, "schedules:read")).toContain("text-sm cursor-not-allowed");
-    const write = checkbox(selected, "schedules:write");
-    expect(write).not.toContain('aria-disabled="true"');
-    expect(write).not.toContain("aria-describedby=");
-    expect(
-      render(
-        <PermissionGroups
-          groups={[{ resource: "schedules", permissions: schedules }]}
-          selected={selected}
-          locked={lockedReads(selected, vocabulary)}
-          disabled={false}
-          onToggle={() => {}}
-        />,
-      ),
-    ).toContain(
-      '<span id="perm-schedules:read-required-by" class="text-muted-foreground text-xs">Requis par delete, write.</span>',
+    const locked = lockedReads(selected, vocabulary);
+    expect([...locked.keys()]).toEqual(["schedules:read"]);
+    expect(locked.has("schedules:write")).toBe(false);
+    expect(dependentsLabel(locked.get("schedules:read")!, t)).toBe(
+      "Supprimer des planifications, Créer et modifier des planifications",
     );
   });
 
-  it("names a dependent of another resource in full", () => {
-    const selected = togglePermission(new Set(), agentsRun);
+  it("cannot be unticked while it is locked", () => {
+    // Unticking hands the editor the selection minus the read; the editor's
+    // completion puts it back, and it stays locked.
+    const held = withRequiredReads(new Set(["schedules:write"]), vocabulary);
+    const unticked = new Set([...held].filter((permission) => permission !== "schedules:read"));
+    const next = withRequiredReads(unticked, vocabulary);
+    expect([...next].sort()).toEqual(["schedules:read", "schedules:write"]);
+    expect(lockedReads(next, vocabulary).has("schedules:read")).toBe(true);
+  });
+
+  it("is a free untick for a read no selected action needs", () => {
+    const held = withRequiredReads(new Set(["schedules:read", "runs:read"]), vocabulary);
+    const unticked = new Set([...held].filter((permission) => permission !== "runs:read"));
+    expect([...withRequiredReads(unticked, vocabulary)]).toEqual(["schedules:read"]);
+  });
+
+  it("names a dependent of another resource by its label", () => {
+    const selected = withRequiredReads(new Set(["agents:run"]), vocabulary);
     expect([...selected].sort()).toEqual(["agents:run", "runs:read"]);
-    expect(picker(selected)).toContain(
-      '<span id="perm-runs:read-required-by" class="text-muted-foreground text-xs">Requis par agents:run.</span>',
-    );
+    const locked = lockedReads(selected, vocabulary);
+    expect(dependentsLabel(locked.get("runs:read")!, t)).toBe("Lancer les agents");
   });
 
-  it("is truly disabled, like every box, while a save is pending", () => {
-    const selected = togglePermission(new Set(), pick("schedules:write"));
-    const read = checkbox(selected, "schedules:read", true);
-    expect(read).toContain('disabled=""');
-    expect(read).not.toContain('aria-disabled="true"');
-    expect(checkbox(selected, "schedules:write", true)).toContain('disabled=""');
-  });
-
-  it("is enabled again once the action is unticked", () => {
-    const ticked = togglePermission(new Set(), pick("schedules:write"));
-    const unticked = togglePermission(ticked, pick("schedules:write"));
+  it("is free again once the action is unticked", () => {
+    const unticked = withRequiredReads(new Set(["schedules:read"]), vocabulary);
     expect([...unticked]).toEqual(["schedules:read"]);
     expect(lockedReads(unticked, vocabulary).size).toBe(0);
-    expect(checkbox(unticked, "schedules:read")).not.toContain('aria-disabled="true"');
+    expect(complete([])).toEqual([]);
   });
 
   it("stays free while another read it accepts is held", () => {
-    const selected = new Set(["runs:read", "runs:read-all", "runs:cancel"]);
-    expect(checkbox(selected, "runs:read")).not.toContain('aria-disabled="true"');
-    expect(checkbox(selected, "runs:read-all")).not.toContain('aria-disabled="true"');
+    const both = lockedReads(new Set(["runs:read", "runs:read-all", "runs:cancel"]), vocabulary);
+    expect(both.size).toBe(0);
     // Unticking `runs:read` leaves `runs:read-all` alone holding the action.
-    const withoutRead = new Set(["runs:read-all", "runs:cancel"]);
-    expect(checkbox(withoutRead, "runs:read-all")).toContain('aria-disabled="true"');
+    const alone = lockedReads(new Set(["runs:read-all", "runs:cancel"]), vocabulary);
+    expect([...alone.keys()]).toEqual(["runs:read-all"]);
+  });
+});
+
+describe("the permission picker", () => {
+  const picker = (disabled?: boolean) =>
+    render(
+      <ScopeMultiSelect
+        available={["schedules:read", "schedules:write"]}
+        selected={["schedules:read"]}
+        onChange={() => {}}
+        disabled={disabled}
+      />,
+    );
+
+  it("cannot be opened while a save is pending", () => {
+    expect(picker(true)).toMatch(/<button[^>]*disabled=""/);
+  });
+
+  it("opens otherwise", () => {
+    expect(picker()).not.toContain('disabled=""');
   });
 });

@@ -44,7 +44,9 @@ async function leaveFromSettings(page: Page, orgId: string): Promise<void> {
       response.request().method() === "POST" && response.url().endsWith(`/api/orgs/${orgId}/leave`),
   );
   await page
+    // Settings are a dialog themselves: the confirm is the one on top.
     .getByRole("dialog")
+    .last()
     .getByRole("button", { name: /Quitter l'organisation|Leave organization/ })
     .click();
   expect((await left).status()).toBe(204);
@@ -128,7 +130,9 @@ test.describe("Leaving an organization", () => {
         response.request().method() === "DELETE" && response.url().endsWith(`/api/orgs/${orgId}`),
     );
     await page
+      // Settings are a dialog themselves: the confirm is the one on top.
       .getByRole("dialog")
+      .last()
       .getByRole("button", { name: /^(Confirmer|Confirm)$/ })
       .click();
     expect((await deleted).status()).toBe(204);

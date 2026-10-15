@@ -3,7 +3,7 @@
 import type { AgentDetail } from "@appstrate/shared-types";
 import { useAgentModel, useModels, type OrgModelInfo } from "./use-models";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
-import { isModelSelectable } from "../lib/model-selectability";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
 
 /**
  * Will a run get a model? Mirrors the server cascade (`resolveModel`): the
@@ -35,6 +35,16 @@ type AgentLaunchRefusal = "detail.titleNotActive" | "detail.titleNeverPublished"
 type AgentModelBlocker = "detail.titleModel" | "detail.titleNoDefaultModel";
 type AgentRunBlocker =
   AgentLaunchRefusal | "detail.titleEmptyPrompt" | "detail.titleMissingSkill" | AgentModelBlocker;
+
+/** Every blocker key, checked exhaustive by `satisfies`: the run button renders `t(blocker)`, so a test holds each in both locales. */
+export const AGENT_RUN_BLOCKERS = Object.keys({
+  "detail.titleNotActive": true,
+  "detail.titleNeverPublished": true,
+  "detail.titleEmptyPrompt": true,
+  "detail.titleMissingSkill": true,
+  "detail.titleModel": true,
+  "detail.titleNoDefaultModel": true,
+} satisfies Record<AgentRunBlocker, true>);
 
 /**
  * The refusals no launch option can cure, as i18n keys (namespace `agents`).
@@ -80,8 +90,9 @@ export function agentRunBlocker(
   return modelBlocker;
 }
 
-export function useAgentModelBlocker(packageId: string): AgentModelBlocker | null {
-  const { data: orgModels } = useModels();
+/** `undefined` for a page that is not an agent's: neither read is made. */
+export function useAgentModelBlocker(packageId: string | undefined): AgentModelBlocker | null {
+  const { data: orgModels } = useModels(packageId !== undefined);
   const { data: agentModel } = useAgentModel(packageId);
   return agentModelBlocker(orgModels, agentModel?.modelId);
 }

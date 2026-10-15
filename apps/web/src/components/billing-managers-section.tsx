@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Plus, UserCog } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import {
@@ -15,8 +16,7 @@ import {
   CommandItem,
   CommandList,
 } from "@appstrate/ui/components/command";
-import { $api } from "../api/client";
-import { useCurrentOrgId } from "../hooks/use-org";
+import { useOrgDetail } from "../hooks/use-org";
 import { roleI18nKey } from "../hooks/use-permissions";
 import {
   useBillingManagers,
@@ -28,13 +28,13 @@ import {
   billingManagerRows,
   billingManagersBody,
   eligibleBillingManagers,
-  memberLabel,
   sameBillingManagers,
   type BillingManagerStatus,
 } from "../lib/billing-managers";
-import { LoadingState, ErrorState } from "./page-states";
+import { memberLabel } from "../lib/members";
+import { ErrorState } from "./page-states";
+import { SettingsSkeleton } from "./loading-skeletons";
 import { SectionCard } from "./section-card";
-import { Spinner } from "./spinner";
 
 /** What a row the server would now refuse says about itself. */
 const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, string]> = {
@@ -56,27 +56,19 @@ const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, str
 export function BillingManagersSection() {
   const { t } = useTranslation(["settings", "common"]);
   const queryClient = useQueryClient();
-  const orgId = useCurrentOrgId();
   const managersQuery = useBillingManagers();
   const managersKey = useBillingManagersKey();
   const replace = useReplaceBillingManagers();
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // The same read the members page uses, with the same init — so the two share
-  // one cache entry instead of fetching the org twice.
-  const orgQuery = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
+  const orgQuery = useOrgDetail();
 
   // `null` while the section shows exactly what the server holds; an array as
   // soon as the operator has edited the list. Derived rather than mirrored into
   // an effect, so a refetch cannot silently overwrite an unsaved edit.
   const [draft, setDraft] = useState<string[] | null>(null);
 
-  if (managersQuery.isLoading || orgQuery.isLoading) return <LoadingState />;
+  if (managersQuery.isLoading || orgQuery.isLoading) return <SettingsSkeleton rows={1} />;
   if (managersQuery.error) return <ErrorState error={managersQuery.error} />;
   // Without the roster every saved manager reads as gone, so Save would PUT {}.
   if (orgQuery.error) return <ErrorState error={orgQuery.error} />;
@@ -125,7 +117,7 @@ export function BillingManagersSection() {
                 <div className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium">{row.label}</span>
-                    {stale && <Badge variant="pending">{t(stale[0])}</Badge>}
+                    {stale && <ToneBadge variant="pending">{t(stale[0])}</ToneBadge>}
                   </span>
                   {row.email && (
                     <span className="text-muted-foreground block truncate text-sm">
@@ -178,7 +170,7 @@ export function BillingManagersSection() {
                     }}
                   >
                     <span className="min-w-0 flex-1 truncate">{memberLabel(member)}</span>
-                    <Badge variant="pending">{t(roleI18nKey(member.role))}</Badge>
+                    <ToneBadge variant="pending">{t(roleI18nKey(member.role))}</ToneBadge>
                   </CommandItem>
                 ))}
               </CommandList>
@@ -198,10 +190,9 @@ export function BillingManagersSection() {
             {t("btn.cancel", { ns: "common" })}
           </Button>
         )}
-        <Button size="sm" disabled={!dirty || replace.isPending} onClick={handleSave}>
-          {replace.isPending && <Spinner />}
+        <PendingButton size="sm" pending={replace.isPending} disabled={!dirty} onClick={handleSave}>
           {t("btn.save", { ns: "common" })}
-        </Button>
+        </PendingButton>
       </div>
     </SectionCard>
   );

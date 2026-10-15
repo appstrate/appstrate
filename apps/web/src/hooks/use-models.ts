@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type MutationMeta } from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -12,8 +12,13 @@ import { packageSightPermissions } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { ModelFormSubmission, ModelFormSubmitOutcome } from "../lib/model-form-payload";
 import { submitModelForm } from "../lib/model-form-submit";
-import { useCreateModelProviderCredential } from "./use-model-provider-credentials";
+import { useApplyModelChoice } from "./use-apply-model-choice";
+import {
+  invalidateCredentialsAndModels,
+  useCreateModelProviderCredential,
+} from "./use-model-provider-credentials";
 import { agentModelKeys, packageKeys } from "../lib/query-keys";
+import { useInvalidatePaths } from "./use-invalidate-paths";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /** Wire shape from the OpenAPI spec (components.schemas.OrgModel). */
@@ -29,32 +34,8 @@ export function useModels(enabled = true) {
   );
 }
 
-/** openapi-react-query keys are [method, path, init] — invalidate the literal spec path. */
-function useInvalidateModels() {
-  const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
-  };
-}
-
-/** A saved OAuth model test may rotate or terminally flag its backing credential. */
-export async function invalidateModelConnectionTestQueries(qc: QueryClient): Promise<void> {
-  await Promise.all([
-    qc.invalidateQueries({ queryKey: ["get", "/api/models"] }),
-    qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] }),
-  ]);
-}
-
-function useCreateModel() {
-  const invalidate = useInvalidateModels();
-  return $api.useMutation("post", "/api/models", {
-    meta: { errorHandledByCaller: true },
-    onSuccess: invalidate,
-  });
-}
-
 function useUpdateModel() {
-  const invalidate = useInvalidateModels();
+  const invalidate = useInvalidatePaths("/api/models");
   return $api.useMutation("patch", "/api/models/{id}", {
     meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
@@ -62,20 +43,21 @@ function useUpdateModel() {
 }
 
 export function useDeleteModel() {
-  const invalidate = useInvalidateModels();
+  const invalidate = useInvalidatePaths("/api/models");
   return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });
 }
 
-export function useSetDefaultModel() {
-  const invalidate = useInvalidateModels();
-  return $api.useMutation("put", "/api/models/default", { onSuccess: invalidate });
+export function useSetDefaultModel(meta?: MutationMeta) {
+  const invalidate = useInvalidatePaths("/api/models");
+  return $api.useMutation("put", "/api/models/default", { meta, onSuccess: invalidate });
 }
 
+/** The test answers inline; it runs through the model's key, which it may rotate or flag dead. */
 export function useTestModel() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/models/{id}/test", {
     meta: { errorHandledByCaller: true },
-    onSuccess: () => invalidateModelConnectionTestQueries(qc),
+    onSuccess: () => invalidateCredentialsAndModels(qc),
   });
 }
 
@@ -162,26 +144,26 @@ export function useSetAgentModel(packageId: string) {
 }
 
 /**
- * ModelFormModal submission: the inline key first if any, then one create or
- * update — or, for a batch, one create per entry against that one key.
+ * ModelFormModal submission: a creation (the inline key, the model or the batch) is ONE
+ * `POST /api/models/apply`; an edit is one `PATCH`, the inline key minted first if any.
  */
 export function useModelFormHandler(opts: {
   editModel?: OrgModelInfo | null;
   onSuccess: () => void;
 }) {
-  const createModel = useCreateModel();
+  const applyChoice = useApplyModelChoice();
   const updateModel = useUpdateModel();
   const createCredential = useCreateModelProviderCredential({ errorHandledByCaller: true });
 
   // Spans the whole submission: the per-mutation flags drop between calls.
   const [submitPending, setSubmitPending] = useState(false);
   const isPending =
-    submitPending || createModel.isPending || updateModel.isPending || createCredential.isPending;
+    submitPending || applyChoice.isPending || updateModel.isPending || createCredential.isPending;
 
   const submit = submitModelForm({
     writes: {
+      applyChoice: applyChoice.applyBody,
       createCredential: (body) => createCredential.mutateAsync({ body }),
-      createModel: (body) => createModel.mutateAsync({ body }),
       updateModel: (id, body) => updateModel.mutateAsync({ params: { path: { id } }, body }),
     },
     editModelId: opts.editModel?.id ?? null,

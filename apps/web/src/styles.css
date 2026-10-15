@@ -33,7 +33,7 @@
   --color-ring: var(--ring);
   --color-success: var(--success);
   --color-warning: var(--warning);
-  --radius: 0.5rem;
+  --radius: 9px;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -46,63 +46,160 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  /* Page canvas — the grey the whole chrome sits on. Distinct from
+     `--background`, which stays white: that one is the COMPONENT surface
+     (dialogs, popovers, outline buttons, the active tab pill), and those stay
+     white on top of the grey. */
+  --color-canvas: var(--canvas);
+  /* The coral of the Appstrate lightning bolt. Chrome accent only — the
+     notification count and the profile avatar — never a primary action, which
+     is what the blue means. */
+  --color-spark: var(--spark);
+  --color-spark-foreground: var(--spark-foreground);
+  /* Soft tints of the brand blue and the spark. Selection
+     fills in the switcher, where two dimensions are picked side by side and
+     need to be told apart at a glance. */
+  --color-primary-soft: var(--primary-soft);
+  --color-spark-soft: var(--spark-soft);
+  /* Person palette — the colour an end-user's initials sit in, hashed from
+     their id so the same person is always the same colour. Eight hues that
+     tell people apart in a list; never a status, which is what success,
+     warning and destructive say. */
+  --color-avatar-1: var(--avatar-1);
+  --color-avatar-2: var(--avatar-2);
+  --color-avatar-3: var(--avatar-3);
+  --color-avatar-4: var(--avatar-4);
+  --color-avatar-5: var(--avatar-5);
+  --color-avatar-6: var(--avatar-6);
+  --color-avatar-7: var(--avatar-7);
+  --color-avatar-8: var(--avatar-8);
+  /* Page frame — a fluid gutter and a 1300px column. The
+     header shares the gutter and not the column: it runs edge to edge, so its
+     trail lines up with the content's left edge until the page is wider than
+     the column. */
+  --spacing-gutter: clamp(1.25rem, 3vw, 2.75rem);
+  --container-page: 1300px;
+  /* The header's height. A constant: surfaces that own their own height
+     subtract it, so a header that changed height on sidebar collapse would
+     leave them overflowing. */
+  --spacing-header: 3.5rem;
+}
+
+/* Motion scale: three durations, one surface easing. Deliberately NOT inline:
+   `duration-fast` and `ease-surface` then emit `var(--…)`, so the scale is
+   tuned here and in devtools, in one place. tw-animate-css reads the same
+   `--tw-duration` / `--tw-ease` the utilities set, so `animate-in` follows.
+   Rule of use (apps/web/DESIGN_SYSTEM.md, "Motion"): a surface opens on `base`
+   and closes on `fast`, a sheet opens on `slow`; anything that moves uses
+   `ease-surface`; hover and state feedback keep Tailwind's default
+   transition (150ms, ease-in-out), which is `fast` already. */
+@theme {
+  --transition-duration-fast: 150ms;
+  --transition-duration-base: 250ms;
+  --transition-duration-slow: 400ms;
+  --ease-surface: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* Two systematic shifts against the stock shadcn neutrals: every grey
+     carries a slight violet cast (hue ~286 instead of chroma 0), and the
+     brand blue is #2F6FED rather than the shadcn default. In shadcn's
+     semantics the brand blue is `--primary`; `--accent` is the subtle hover
+     surface, not a brand colour. */
+  --background: oklch(1 0 0); /* #FFFFFF */
+  --foreground: oklch(0.21 0.006 285.9); /* #18181B */
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.21 0.006 285.9);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.623 0.214 259);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.556 0 0);
-  --success: oklch(0.696 0.17 142);
-  --warning: oklch(0.769 0.188 70);
-  --sidebar: hsl(0 0% 98%);
-  --sidebar-foreground: hsl(240 5.3% 26.1%);
-  --sidebar-primary: hsl(240 5.9% 10%);
-  --sidebar-primary-foreground: hsl(0 0% 98%);
-  --sidebar-accent: hsl(240 4.8% 95.9%);
-  --sidebar-accent-foreground: hsl(240 5.9% 10%);
-  --sidebar-border: hsl(220 13% 91%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+  --popover-foreground: oklch(0.21 0.006 285.9);
+  --primary: oklch(0.574 0.202 262); /* #2F6FED */
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.953 0.005 286.3); /* #EFEFF3 */
+  --secondary-foreground: oklch(0.21 0.006 285.9);
+  --muted: oklch(0.953 0.005 286.3);
+  --muted-foreground: oklch(0.551 0.023 264.4); /* #6B7280 */
+  --accent: oklch(0.953 0.005 286.3);
+  --accent-foreground: oklch(0.21 0.006 285.9);
+  --destructive: oklch(0.543 0.174 29.7); /* #C0392B */
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.929 0.005 286.3); /* #E7E7EB */
+  --input: oklch(0.929 0.005 286.3);
+  --ring: oklch(0.574 0.202 262); /* focus halo picks up the brand blue */
+  --success: oklch(0.526 0.128 153); /* #157F45 */
+  --warning: oklch(0.563 0.112 76.7); /* #9A6B12 */
+  --canvas: oklch(0.985 0 0); /* #FAFAFA */
+  --spark: oklch(0.682 0.18 37.9); /* #F2683C */
+  --spark-foreground: oklch(1 0 0);
+  --primary-soft: oklch(0.957 0.019 263); /* #EAF1FE */
+  --spark-soft: oklch(0.956 0.021 51.5); /* #FDEDE4 */
+  --avatar-1: oklch(0.546 0.215 263);
+  --avatar-2: oklch(0.596 0.145 163);
+  --avatar-3: oklch(0.541 0.281 293);
+  --avatar-4: oklch(0.666 0.179 58);
+  --avatar-5: oklch(0.586 0.253 18);
+  --avatar-6: oklch(0.609 0.126 222);
+  --avatar-7: oklch(0.591 0.293 323);
+  --avatar-8: oklch(0.646 0.222 41);
+  --sidebar: oklch(0.985 0 0); /* #FAFAFA — merges with the canvas, split only by its border */
+  --sidebar-foreground: oklch(0.21 0.006 285.9);
+  /* Stays near-black, not the brand blue: it fills the organization avatar,
+     and a blue avatar would compete with the one blue that means "primary
+     action". */
+  --sidebar-primary: oklch(0.21 0.006 285.9);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.929 0.005 286.3); /* hover/active nav surface */
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.9);
+  --sidebar-border: oklch(0.929 0.005 286.3);
+  --sidebar-ring: oklch(0.574 0.202 262);
 }
 
 .dark {
-  --background: oklch(0.13 0 0);
+  /* Structure and lightness steps are those of a neutral dark theme, with the
+     same two shifts as the light theme — the violet cast on the neutrals, and
+     the brand blue, lifted to oklch L .68 so it holds contrast on a dark
+     surface. */
+  --background: oklch(0.145 0.004 286);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.17 0 0);
+  --card: oklch(0.18 0.004 286);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.17 0 0);
+  --popover: oklch(0.18 0.004 286);
   --popover-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.269 0 0);
+  --primary: oklch(0.68 0.17 262);
+  --primary-foreground: oklch(0.145 0.004 286);
+  --secondary: oklch(0.28 0.005 286);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+  --muted: oklch(0.28 0.005 286);
+  --muted-foreground: oklch(0.712 0.019 261);
+  --accent: oklch(0.28 0.005 286);
   --accent-foreground: oklch(0.985 0 0);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --sidebar: hsl(240 5.9% 10%);
-  --sidebar-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-primary: hsl(224.3 76.3% 48%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(240 3.7% 15.9%);
-  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-border: hsl(240 3.7% 15.9%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+  --border: oklch(0.28 0.005 286);
+  --input: oklch(0.28 0.005 286);
+  --ring: oklch(0.68 0.17 262);
+  --success: oklch(0.7 0.14 153);
+  --warning: oklch(0.78 0.13 77);
+  --canvas: oklch(0.145 0.004 286);
+  --spark: oklch(0.72 0.16 38);
+  --spark-foreground: oklch(0.145 0.004 286);
+  --primary-soft: oklch(0.3 0.06 262);
+  --spark-soft: oklch(0.3 0.06 38);
+  --avatar-1: oklch(0.707 0.165 255);
+  --avatar-2: oklch(0.765 0.177 163);
+  --avatar-3: oklch(0.702 0.183 294);
+  --avatar-4: oklch(0.828 0.189 84);
+  --avatar-5: oklch(0.712 0.194 13);
+  --avatar-6: oklch(0.789 0.154 212);
+  --avatar-7: oklch(0.74 0.238 322);
+  --avatar-8: oklch(0.75 0.183 56);
+  --sidebar: oklch(0.145 0.004 286);
+  --sidebar-foreground: oklch(0.96 0.002 286);
+  /* Mirrors the light theme's org-avatar contrast (dark chip / light text)
+     rather than turning it into the brand blue. */
+  --sidebar-primary: oklch(0.96 0.002 286);
+  --sidebar-primary-foreground: oklch(0.21 0.006 285.9);
+  --sidebar-accent: oklch(0.28 0.005 286);
+  --sidebar-accent-foreground: oklch(0.96 0.002 286);
+  --sidebar-border: oklch(0.28 0.005 286);
+  --sidebar-ring: oklch(0.68 0.17 262);
 }
 
 @layer base {
@@ -110,7 +207,7 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-canvas text-foreground;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     line-height: 1.6;
     min-height: 100vh;
@@ -134,10 +231,14 @@
     @apply text-muted-foreground mb-1 block text-sm;
   }
 
-  /* Base button styling for unstyled buttons */
+  /* Base button styling for unstyled buttons. No hover background and no
+     padding: a raw <button> is a row, a chip, a title or an icon inside a
+     surface that draws its own hover, and a base fill lit up a second block
+     inside it. A button that wants a surface says so (`<Button>`, or its own
+     `hover:bg-*` and `p-*`). */
   button {
-    @apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors;
-    @apply text-muted-foreground hover:text-foreground hover:bg-accent;
+    @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors;
+    @apply text-muted-foreground hover:text-foreground;
   }
   button:disabled {
     @apply pointer-events-none opacity-50;
@@ -148,16 +249,32 @@
     @apply w-auto;
   }
 
-  /* Radix Checkbox/Switch/Radio renders as <button> — reset global button padding */
-  button[role="checkbox"],
-  button[role="switch"],
-  button[role="radio"] {
-    @apply p-0;
-  }
-
   /* Links */
   a {
     @apply text-inherit no-underline;
+  }
+
+  /* Reduced motion removes MOVEMENT, not feedback. Surfaces still fade (that
+     says where they came from) but do not slide, zoom or rotate: the
+     tw-animate-css enter/exit keyframes read these variables, so pinning them
+     neutral covers every `animate-in` / `animate-out` at once. Transitions
+     (sidebar width, switch thumb, chevrons) become instant. Spinners and
+     pulses are left alone: a loop that says "still working" is information. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      --tw-enter-translate-x: 0 !important;
+      --tw-enter-translate-y: 0 !important;
+      --tw-exit-translate-x: 0 !important;
+      --tw-exit-translate-y: 0 !important;
+      --tw-enter-scale: 1 !important;
+      --tw-exit-scale: 1 !important;
+      --tw-enter-rotate: 0 !important;
+      --tw-exit-rotate: 0 !important;
+      transition-duration: 0s !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -184,4 +301,14 @@
 .monaco-editor,
 .monaco-editor .overflow-guard {
   border-radius: 0.5rem;
+}
+
+/* Dialogs and sheets stack: settings and the catalogue are overlays, and their
+   pages open dialogs of their own. Each portal is a child of `body`, so a later
+   overlay is a sibling of the first one. Dimming twice turns the margin nearly
+   black and leaves the dialog underneath as a lighter, rounded block, so only
+   the first overlay dims. Unlayered on purpose: it must beat the overlay's
+   `bg-black/80` utility. */
+[data-slot="dialog-overlay"] ~ [data-slot="dialog-overlay"] {
+  background-color: transparent;
 }

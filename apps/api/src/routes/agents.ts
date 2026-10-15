@@ -33,6 +33,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { parseScopedName } from "@appstrate/core/naming";
+import { readAgentAppearance } from "@appstrate/core/validation";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
 import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
@@ -210,8 +211,10 @@ export function createAgentsRouter() {
     const agentList = rows.map((row) => {
       const manifest = asRecord(row.draftManifest) as AgentManifest;
       const parsed = parseScopedName(manifest.name);
+      const appearance = readAgentAppearance(manifest as Record<string, unknown>);
       return {
         id: row.id,
+        ...appearance,
         display_name: manifest.display_name,
         description: manifest.description,
         schema_version: manifest.schema_version,

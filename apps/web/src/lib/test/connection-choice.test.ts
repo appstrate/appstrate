@@ -4,14 +4,17 @@ import { describe, it, expect } from "bun:test";
 import { ApiError } from "../../api/errors.ts";
 import {
   integrationIdOfField,
+  isChoiceRequest,
   pendingConnectionChoices,
   picksAfterActorChange,
   refusalForActor,
   refusalReasonKey,
+  refusedScheduleWrite,
   retryDecision,
   scheduleConnectionChoices,
   withConnectionPickAs,
   type ConnectionChoice,
+  type ConnectionRefusal,
   type MissingIntegrationFieldError,
 } from "../connection-choice.ts";
 
@@ -201,20 +204,60 @@ describe("refusalForActor", () => {
   });
 });
 
+describe("refusedScheduleWrite", () => {
+  const outranked = missingConnection([
+    { field: "integrations.@acme/gmail", code: "override_outranked", message: "pinned" },
+  ]);
+  const stored = { actor: ALICE, picks: ALICE_PICKS };
+
+  it("answers a write of any field: a cron change is judged with the stored picks, as Alice", () => {
+    expect(refusedScheduleWrite(outranked, { cron_expression: "0 8 * * *" }, stored)).toEqual({
+      choices: [{ integrationId: "@acme/gmail", code: "override_outranked", candidates: [] }],
+      runsAs: ALICE,
+      picks: ALICE_PICKS,
+    });
+  });
+
+  it("is judged with the picks the write sent, for the actor it moved to", () => {
+    const sent = { actor: BOB, connection_overrides: null };
+    expect(refusedScheduleWrite(outranked, sent, stored)).toMatchObject({ runsAs: BOB, picks: {} });
+    const named = { connection_overrides: BOB_PICKS };
+    expect(refusedScheduleWrite(outranked, named, stored)?.picks).toBe(BOB_PICKS);
+  });
+
+  it("is null for any other outcome", () => {
+    const write = { cron_expression: "0 8 * * *" };
+    expect(refusedScheduleWrite(null, write, stored)).toBeNull();
+    expect(refusedScheduleWrite(new ApiError("forbidden", "no", 403), write, stored)).toBeNull();
+    const notConnected = missingConnection([
+      { field: "integrations.@acme/slack", code: "not_connected", message: "connect" },
+    ]);
+    expect(refusedScheduleWrite(notConnected, write, stored)).toBeNull();
+  });
+});
+
 describe("refusalReasonKey", () => {
-  const key = (code: ConnectionChoice["code"], candidates = [CANDIDATE]) =>
-    refusalReasonKey({ integrationId: "@acme/gmail", code, candidates });
+  const key = (code: ConnectionRefusal["code"]) =>
+    refusalReasonKey({ integrationId: "@acme/gmail", code, candidates: [] });
 
   it("tells each refusal apart", () => {
-    expect(key("must_choose_connection")).toBe("schedule.connectionOverrides.mustChoose");
     expect(key("override_connection_unavailable")).toBe("schedule.connectionOverrides.unavailable");
     expect(key("auth_serves_no_selected_tool")).toBe("error.authServesNoSelectedTool");
     expect(key("override_outranked")).toBe("error.overrideOutranked");
     expect(key("required_integration_unbound")).toBe("error.requiredIntegrationUnbound");
   });
+});
 
-  it("an open choice with nothing the caller may name is the actor's (or an admin's) to make", () => {
-    expect(key("must_choose_connection", [])).toBe("schedule.connectionOverrides.actorMustChoose");
+describe("isChoiceRequest", () => {
+  it("is a request for a choice, never a fault, only for a connection left to choose", () => {
+    const choice = (code: ConnectionChoice["code"]): ConnectionChoice => ({
+      integrationId: "@acme/gmail",
+      code,
+      candidates: [],
+    });
+    expect(isChoiceRequest(choice("must_choose_connection"))).toBe(true);
+    expect(isChoiceRequest(choice("override_connection_unavailable"))).toBe(false);
+    expect(isChoiceRequest(choice("required_integration_unbound"))).toBe(false);
   });
 });
 

@@ -56,7 +56,7 @@ export const PUBLISHED_FILE_LOG_EVENT = "file";
  * is a member of the two-value wire enum in TYPE position
  * (`"user_upload" | "agent_output"` in `lib/files.ts` and `hooks/use-files.ts`),
  * an i18n key suffix in the gallery filter domain
- * (`components/file-list-panel.tsx`, where `files:filter.<value>` is looked up
+ * (`components/document-list-panel.tsx`, where `files:filter.<value>` is looked up
  * and `"all"` sits beside the two wire values), a generated `api/schema.d.ts`,
  * or a test fixture asserting the wire value. In all four, swapping one member
  * for a constant while its sibling stays a literal reads worse than the pair —

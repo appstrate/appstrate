@@ -89,7 +89,7 @@ export async function startTestServer(
             } else {
               const buf = new Uint8Array(await v.arrayBuffer());
               fields[k] = {
-                name: "name" in v ? (v as File).name : undefined,
+                name: "name" in v ? (v as { name: string }).name : undefined,
                 size: v.size,
                 type: v.type,
                 sha256: createHash("sha256").update(buf).digest("hex"),

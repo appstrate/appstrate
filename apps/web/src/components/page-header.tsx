@@ -1,72 +1,69 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@appstrate/ui/components/breadcrumb";
-import { useCanReach } from "../hooks/use-can-reach";
-
-export interface BreadcrumbEntry {
-  label: string;
-  href?: string;
-  node?: ReactNode;
-}
+import { cn } from "@appstrate/ui/cn";
+import type { BreadcrumbEntry } from "@/stores/breadcrumb-store";
+import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 
 interface PageHeaderProps {
   title: string;
-  emoji?: string;
-  /** Custom leading icon node; takes precedence over `emoji` when provided. */
+  /** Level-one collection pages use a larger destination title. */
+  variant?: "default" | "collection";
+  titleClassName?: string;
+  /** Custom leading icon node. */
   icon?: ReactNode;
   breadcrumbs?: BreadcrumbEntry[];
   actions?: ReactNode;
+  /** Lets an action group move below the title when the container is genuinely too narrow. */
+  wrapActions?: boolean;
   children?: ReactNode;
 }
 
+/** The page's title: its one `<h1>`, every section below it an `<h2>`. */
 export function PageHeader({
   title,
-  emoji,
+  variant = "default",
+  titleClassName,
   icon,
   breadcrumbs,
   actions,
+  wrapActions = false,
   children,
 }: PageHeaderProps) {
-  const canReach = useCanReach();
+  // Pages declare their trail here, next to the code that knows the dynamic
+  // labels; the shell header draws it.
+  usePageBreadcrumb(breadcrumbs ?? []);
+
   return (
-    <div className="mb-4">
-      {breadcrumbs && breadcrumbs.length > 0 && (
-        <Breadcrumb className="mb-2">
-          <BreadcrumbList>
-            {breadcrumbs.map((crumb, i) => (
-              <BreadcrumbItem key={i}>
-                {i > 0 && <BreadcrumbSeparator />}
-                {crumb.node ? (
-                  crumb.node
-                ) : !crumb.href ? (
-                  <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
-                ) : canReach(crumb.href) ? (
-                  <BreadcrumbLink asChild>
-                    <Link to={crumb.href}>{crumb.label}</Link>
-                  </BreadcrumbLink>
-                ) : (
-                  <span>{crumb.label}</span>
-                )}
-              </BreadcrumbItem>
-            ))}
-          </BreadcrumbList>
-        </Breadcrumb>
-      )}
-      <div className="flex min-h-9 items-center justify-between gap-4">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          {icon ?? (emoji && <span>{emoji}</span>)}
+    <div data-page-header className="mb-4">
+      <div
+        className={
+          wrapActions
+            ? "flex min-h-9 flex-wrap items-center justify-between gap-3"
+            : "flex min-h-9 items-center justify-between gap-4"
+        }
+      >
+        <h1
+          className={cn(
+            "flex items-center gap-2 font-semibold",
+            variant === "collection" ? "text-lg md:text-2xl" : "text-lg",
+            titleClassName,
+          )}
+        >
+          {icon}
           {title}
-        </h2>
-        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+        </h1>
+        {actions && (
+          <div
+            data-page-actions
+            className={cn(
+              "flex items-center gap-2",
+              wrapActions ? "max-w-full flex-wrap" : "shrink-0",
+            )}
+          >
+            {actions}
+          </div>
+        )}
       </div>
       {children}
     </div>

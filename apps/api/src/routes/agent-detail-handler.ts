@@ -28,6 +28,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId, sendPackageDetail, type PackageDetail } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getSpaceScope } from "../lib/scope.ts";
+import { readAgentAppearance } from "@appstrate/core/validation";
 import {
   agentReadIsSummary,
   draftNotWritable,
@@ -227,6 +228,7 @@ export async function buildAgentDetailDto(
   ]);
 
   const parsed = parseScopedName(m.name);
+  const appearance = readAgentAppearance(m as Record<string, unknown>);
 
   const hasUnarchivedChanges = computeHasUnpublishedChanges(
     agent.source,
@@ -238,6 +240,7 @@ export async function buildAgentDetailDto(
   const authoring = agent.source !== "system" && rawItem !== null && !summaryOnly;
   const body = {
     id: agent.id,
+    ...appearance,
     display_name: m.display_name,
     description: m.description,
     source: agent.source,

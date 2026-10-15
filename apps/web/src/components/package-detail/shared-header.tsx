@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
-import { packageListPath } from "../../lib/package-paths";
+import { Badge } from "@appstrate/ui/components/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
+import { packageDetailPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
 import { PageHeader } from "../page-header";
-import { IntegrationIcon } from "../integration-icon";
-
-const emojiMap: Record<PackageType, string> = {
-  agent: "⚡",
-  skill: "🧠",
-  "mcp-server": "🔌",
-  integration: "🧩",
-};
+import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
+import { PackageIcon } from "../package-icon";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 interface SharedHeaderDetail {
   id: string;
@@ -22,8 +20,15 @@ interface SharedHeaderDetail {
   source: string;
   type: PackageType;
   version?: string | null;
-  /** Raw AFPS manifest `icon` (image URL or Iconify id); integrations only. */
+  /**
+   * The page shows the latest PUBLISHED version, not the draft: what a caller
+   * who may not write the package reads (`definition: "published"`).
+   */
+  readsPublished?: boolean;
+  /** AFPS icon token for agents, raw image URL or Iconify id for integrations. */
   icon?: string;
+  /** Appstrate Agent presentation colour token. */
+  color?: string;
   /**
    * Name of the space this package lives in — the one whose permissions decide
    * who may edit it. Absent for the org catalog and for a home the reader
@@ -36,68 +41,124 @@ export function SharedHeader({
   detail,
   isHistoricalVersion,
   hasUnarchivedChanges,
+  draftVerdictPending,
+  latestPublishedVersion,
+  activeSubpage,
   actionsLeft,
   actionsRight,
 }: {
   detail: SharedHeaderDetail;
   isHistoricalVersion: boolean;
   hasUnarchivedChanges?: boolean;
+  /** The draft-vs-published comparison is still being read: the badge holds its place. */
+  draftVerdictPending?: boolean;
+  latestPublishedVersion?: string | null;
+  activeSubpage?: { label: string };
   actionsLeft?: React.ReactNode;
   actionsRight?: React.ReactNode;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
+  const listCrumb = usePackageListCrumb(detail.type);
 
-  const breadcrumbPath = packageListPath(detail.type);
-  const breadcrumbLabel =
-    detail.type === "agent"
-      ? t("detail.breadcrumb")
-      : t(`packages.type.${detail.type}s`, { ns: "settings" });
-
-  const iconNode =
-    detail.type === "integration" && detail.icon ? (
-      <IntegrationIcon src={detail.icon} />
-    ) : undefined;
+  const iconNode = <PackageIcon type={detail.type} icon={detail.icon} color={detail.color} />;
 
   return (
     <>
       <PageHeader
         title={detail.displayName}
-        emoji={emojiMap[detail.type]}
+        titleClassName="text-xl"
         icon={iconNode}
+        wrapActions
         breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: breadcrumbLabel, href: breadcrumbPath },
-          { label: detail.displayName },
+          listCrumb,
+          {
+            label: detail.displayName,
+            href: activeSubpage ? packageDetailPath(detail.type, detail.id) : undefined,
+          },
+          ...(activeSubpage ? [activeSubpage] : []),
         ]}
         actions={
           <>
-            {detail.source === "system" && (
-              <span title={t("packages.sourceBuiltIn", { ns: "settings" })}>
-                <ShieldCheck className="text-muted-foreground h-4 w-4" />
-              </span>
+            {detail.type !== "agent" && detail.source === "system" && (
+              <Badge variant="secondary" className="gap-1.5">
+                <ShieldCheck className="size-3" aria-hidden />
+                {t("packages.sourceBuiltIn", { ns: "settings" })}
+              </Badge>
             )}
+            {/* Where the package LIVES, which is where it may be edited. A
+                badge like the ones beside it rather than a bare span: the
+                header speaks one vocabulary. */}
             {detail.homeSpaceName && (
-              <span
-                className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
-                title={t("packages.homeSpaceHint", { ns: "settings" })}
-              >
+              <Badge variant="secondary">
                 {t("packages.homeSpace", { ns: "settings", space: detail.homeSpaceName })}
-              </span>
+              </Badge>
             )}
-            {detail.version && (
-              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[0.65rem] font-medium">
+            {detail.type !== "agent" && detail.version && (
+              <Badge variant="secondary" className="font-mono">
                 v{detail.version}
-              </span>
+              </Badge>
             )}
-            {hasUnarchivedChanges && !isHistoricalVersion && (
-              <span className="bg-warning/15 text-warning rounded px-1.5 py-0.5 text-[0.65rem] font-medium">
-                {t("version.modified")}
-              </span>
+            {detail.type !== "agent" && hasUnarchivedChanges && !isHistoricalVersion && (
+              <ToneBadge variant="warning">{t("version.modified")}</ToneBadge>
             )}
-            {isHistoricalVersion && (
-              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.65rem] font-medium">
-                {t("version.readOnly")}
-              </span>
+            {detail.type !== "agent" && isHistoricalVersion && (
+              <Badge variant="secondary">{t("version.readOnly")}</Badge>
+            )}
+            {detail.type === "agent" && detail.source === "system" && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0}>
+                    <Badge variant="secondary" className="gap-1.5">
+                      <ShieldCheck className="size-3" aria-hidden />
+                      <span className="hidden sm:inline">{t("ownership.systemAgent")}</span>
+                    </Badge>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-80">
+                  {t("ownership.systemAgentTooltip")}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {detail.type === "agent" && detail.readsPublished && !isHistoricalVersion && (
+              <Badge variant="secondary" className="font-mono">
+                v{detail.version}
+              </Badge>
+            )}
+            {/* A draft that says what the last published version already says is not worth a
+                badge of its own: the version is. "Draft" means it differs, or nothing is published. */}
+            {detail.type === "agent" &&
+              detail.source !== "system" &&
+              !detail.readsPublished &&
+              !isHistoricalVersion &&
+              (draftVerdictPending ? (
+                <Skeleton className="h-5 w-14" />
+              ) : hasUnarchivedChanges || !detail.version ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0}>
+                      <Badge variant="secondary">{t("version.draft")}</Badge>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-80">
+                    {latestPublishedVersion
+                      ? t("version.draftTooltip", { version: latestPublishedVersion })
+                      : t("version.draftTooltipNoVersion")}
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <Badge variant="secondary" className="font-mono">
+                  v{detail.version}
+                </Badge>
+              ))}
+            {detail.type === "agent" && isHistoricalVersion && detail.version && (
+              <Badge variant="secondary" className="font-mono">
+                v{detail.version} · <span className="font-sans">{t("version.readOnly")}</span>
+              </Badge>
+            )}
+            {detail.type === "agent" && detail.source === "system" && detail.version && (
+              <Badge variant="secondary" className="font-mono">
+                v{detail.version}
+              </Badge>
             )}
             {actionsLeft}
             {actionsRight}

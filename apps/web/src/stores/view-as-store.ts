@@ -15,6 +15,7 @@ import { createStore } from "zustand/vanilla";
 import type { components } from "../api/schema";
 import { queryClient } from "../lib/query-client";
 import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
+import { persistedJson, persistedValue } from "./local-storage";
 import { getCurrentOrgId, orgStore } from "./org-store";
 
 export const STORAGE_KEY = "appstrate_view_as";
@@ -50,36 +51,30 @@ interface ViewAsState {
   commit: (persona: ViewAsPersona | null, stoppedReason: string | null) => void;
 }
 
-/** A stored value that no longer parses is dropped, never sent as a malformed header. */
-export function readPersistedPersona(): ViewAsPersona | null {
-  // The store itself, not `window`: the SSR harness has one without the other.
-  if (typeof localStorage === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = personaSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
+/**
+ * A stored value that no longer parses is dropped, never sent as a malformed
+ * header. Blocked storage keeps the preview for this tab only.
+ */
+const persistedPersona = persistedJson<ViewAsPersona | null>(STORAGE_KEY, (value) => {
+  const parsed = personaSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+});
 
-function persist(persona: ViewAsPersona | null): void {
-  try {
-    if (persona) localStorage.setItem(STORAGE_KEY, JSON.stringify(persona));
-    else localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Storage blocked (private mode, sandboxed iframe): the preview works for
-    // this tab, it just does not survive a reload.
-  }
-}
+export const readPersistedPersona = persistedPersona.read;
+
+/**
+ * The space the previewer stood in before the preview moved them into the
+ * persona's: "Quitter" brings them back there rather than leaving the admin in
+ * a space they only visited as someone else.
+ */
+const returnSpace = persistedValue<string | null>("appstrate_view_as_return", (raw) => raw || null);
 
 export const viewAsStore = createStore<ViewAsState>()((set) => ({
   persona: readPersistedPersona(),
   stoppedReason: null,
   commit: (persona, stoppedReason) => {
     set({ persona, stoppedReason });
-    persist(persona);
+    persistedPersona.write(persona);
   },
 }));
 
@@ -141,8 +136,14 @@ export function toViewAsPersona(
  * alone would present the previewer's own authority as the persona's; loading
  * first also means a load that fails starts no preview at all.
  */
-export function enterViewAs(persona: ViewAsPersona, orgs: Organization[]): void {
+export function enterViewAs(
+  persona: ViewAsPersona,
+  orgs: Organization[],
+  returnSpaceId: string | null = null,
+): void {
   viewAsStore.getState().commit(persona, null);
+  // A preview replacing another keeps the first one's way home.
+  if (returnSpace.read() === null) returnSpace.write(returnSpaceId);
   // Seeding cancels nothing, and `["orgs"]` is the one query the reset below
   // spares: an `/api/orgs` still in flight under the PREVIOUS authority would
   // land afterwards and write the previewer's permissions over the persona's.
@@ -152,14 +153,21 @@ export function enterViewAs(persona: ViewAsPersona, orgs: Organization[]): void 
   removeOrgScopedQueries(queryClient);
 }
 
-/** The ONE exit path — "Quitter", org switch, sign-out and a refused persona. */
-export function exitViewAs(reason?: string): void {
-  if (!viewAsStore.getState().persona) return;
+/**
+ * The ONE exit path — "Quitter", org switch, sign-out and a refused persona.
+ * Answers the space the preview moved the previewer out of, for the caller
+ * that takes them back ("Quitter"); the others have somewhere else to be.
+ */
+export function exitViewAs(reason?: string): string | null {
+  const back = returnSpace.read();
+  returnSpace.write(null);
+  if (!viewAsStore.getState().persona) return null;
   viewAsStore.getState().commit(null, reason ?? null);
   removeOrgScopedQueries(queryClient);
   // Invalidated, not refetched: a failed refetch would leave the persona's
   // reduced row serving the caller for good. Exit must need no network.
   void queryClient.invalidateQueries({ queryKey: orgKeys.all });
+  return back;
 }
 
 /** The `X-View-As` grammar the server parses; `; ` separated `key=value` pairs. */

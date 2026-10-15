@@ -16,10 +16,13 @@ import {
   INTEGRATION_CONNECT_MESSAGE_TYPE,
   acceptsCompletionMessage,
   buildIntegrationConnectCompletion,
+  CONNECT_POPUP_FEATURES,
   completionMatches,
+  connectPopupName,
   integrationConnectOrigin,
   isIntegrationConnectCompletion,
   isIntegrationConnectMessage,
+  listenConnectCompletion,
   type IntegrationConnectCompletion,
 } from "../src/connect-handshake.ts";
 
@@ -504,5 +507,97 @@ describe("acceptsCompletionMessage", () => {
     // parseable origin — fail closed rather than throw out of the listener.
     const genuine = { origin: SELF, data: detail(TARGET) };
     expect(acceptsCompletionMessage(genuine, "null", TARGET)).toBe(false);
+  });
+});
+
+describe("connectPopupName", () => {
+  it("gives each integration its own window, so two connects cannot hijack each other", () => {
+    expect(connectPopupName("@appstrate/gmail")).toBe("appstrate_oauth__appstrate_gmail");
+    expect(connectPopupName("@appstrate/gmail")).not.toBe(connectPopupName("@appstrate/clickup"));
+    expect(connectPopupName(undefined)).toBe("appstrate_oauth");
+  });
+
+  it("is a valid window target token", () => {
+    expect(connectPopupName("@sc-ope/na.me")).toMatch(/^[A-Za-z0-9_]+$/);
+    expect(CONNECT_POPUP_FEATURES).toBe("width=600,height=700");
+  });
+});
+
+describe("listenConnectCompletion", () => {
+  type Listener = (event: { origin: string; data: unknown }) => void;
+
+  function fakeHost(withChannel = true) {
+    const listeners = new Set<Listener>();
+    const channels: { onmessage: ((e: { data: unknown }) => void) | null; closed: boolean }[] = [];
+    class FakeChannel {
+      onmessage: ((e: { data: unknown }) => void) | null = null;
+      closed = false;
+      constructor(public name: string) {
+        channels.push(this);
+      }
+      close() {
+        this.closed = true;
+      }
+    }
+    const host = {
+      location: { origin: SELF },
+      addEventListener: (_: "message", l: Listener) => void listeners.add(l),
+      removeEventListener: (_: "message", l: Listener) => void listeners.delete(l),
+      ...(withChannel ? { BroadcastChannel: FakeChannel } : {}),
+    };
+    return { host, listeners, channels };
+  }
+
+  const TARGET = { packageId: "@appstrate/gmail" };
+  const ok = buildIntegrationConnectCompletion({ ok: true, packageId: "@appstrate/gmail" });
+
+  it("delivers a same-origin message addressed to the target, failures included", () => {
+    const { host, listeners } = fakeHost();
+    const got: IntegrationConnectCompletion[] = [];
+    listenConnectCompletion(TARGET, (c) => got.push(c), host);
+    const failure = buildIntegrationConnectCompletion({
+      ok: false,
+      packageId: "@appstrate/gmail",
+    });
+    for (const l of listeners) {
+      l({ origin: SELF, data: ok });
+      l({ origin: SELF, data: failure });
+    }
+    expect(got).toEqual([ok, failure]);
+  });
+
+  it("drops a foreign-origin message and one for another integration", () => {
+    const { host, listeners } = fakeHost();
+    const got: unknown[] = [];
+    listenConnectCompletion(TARGET, (c) => got.push(c), host);
+    const other = buildIntegrationConnectCompletion({ ok: true, packageId: "@appstrate/clickup" });
+    for (const l of listeners) {
+      l({ origin: "https://evil.example", data: ok });
+      l({ origin: SELF, data: other });
+    }
+    expect(got).toEqual([]);
+  });
+
+  it("listens on the BroadcastChannel with the same correlation", () => {
+    const { host, channels } = fakeHost();
+    const got: unknown[] = [];
+    listenConnectCompletion(TARGET, (c) => got.push(c), host);
+    channels[0]?.onmessage?.({ data: ok });
+    channels[0]?.onmessage?.({
+      data: buildIntegrationConnectCompletion({ ok: true, packageId: "@appstrate/clickup" }),
+    });
+    expect(got).toEqual([ok]);
+  });
+
+  it("removes both listeners on cleanup, and works without BroadcastChannel", () => {
+    const withChannel = fakeHost();
+    const stop = listenConnectCompletion(TARGET, () => {}, withChannel.host);
+    stop();
+    expect(withChannel.listeners.size).toBe(0);
+    expect(withChannel.channels[0]?.closed).toBe(true);
+
+    const bare = fakeHost(false);
+    listenConnectCompletion(TARGET, () => {}, bare.host)();
+    expect(bare.listeners.size).toBe(0);
   });
 });

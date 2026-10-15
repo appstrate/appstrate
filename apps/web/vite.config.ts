@@ -84,6 +84,28 @@ function i18nBootPreload(): Plugin {
 export default defineConfig({
   plugins: [react(), tailwindcss(), i18nBootPreload()],
   envDir: "../../",
+  // Hot-reload dev server (`bun run dev:hmr`). `dev`/`build` emit into
+  // `dist/`, which the API serves; this block only applies to `vite dev`,
+  // which serves the SPA itself and swaps edited modules into the running page
+  // instead of rebuilding the whole bundle and reloading the tab.
+  //
+  // `proxy` forwards API + auth + SSE traffic to the local backend so the
+  // cookie and the `/api` paths keep working from port 5173. Two limits:
+  // - the browser's Origin stays `http://localhost:5173`, which Better Auth
+  //   refuses unless the API runs with `TRUSTED_ORIGINS=http://localhost:5173`;
+  // - `window.__APP_CONFIG__` is injected only into the `index.html` the API
+  //   serves, so this page runs on `useAppConfig()`'s defaults: social sign-in,
+  //   SMTP, OIDC and module features (the chat included) read as off.
+  server: {
+    port: 5173,
+    proxy: {
+      "/api": {
+        target: process.env.VITE_API_ORIGIN ?? "http://localhost:3000",
+        changeOrigin: false,
+        ws: true,
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

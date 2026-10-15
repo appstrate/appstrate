@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
 import {
   OnboardingLayout,
   useOnboardingGuard,
   useOnboardingNav,
 } from "../../components/onboarding-layout";
+import { useModalParam } from "../../hooks/use-modal-param";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { OnboardingQuickConnect } from "../../components/onboarding-quick-connect";
 import { quickConnectProviders } from "../../lib/provider-registry-helpers";
@@ -18,6 +18,7 @@ import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { getModelIcon } from "../../components/icons";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
+import { TextSkeleton } from "../../components/loading-skeletons";
 
 export function OnboardingModelStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -25,16 +26,25 @@ export function OnboardingModelStep() {
   const orgId = useOnboardingGuard();
   const { nextRoute } = useOnboardingNav("model");
 
-  const [modalOpen, setModalOpen] = useState(false);
+  const newModel = useModalParam("newModel");
   const { data: models } = useModels();
   const { data: registry } = useProvidersRegistry();
   const { onSubmit, isPending } = useModelFormHandler({
-    onSuccess: () => setModalOpen(false),
+    onSuccess: newModel.close,
   });
 
   const goNext = () => nextRoute && navigate(nextRoute);
 
-  if (!orgId) return null;
+  if (!orgId)
+    return (
+      <OnboardingLayout
+        step="model"
+        title={t("onboarding.modelTitle")}
+        subtitle={t("onboarding.modelSubtitle")}
+      >
+        <TextSkeleton lines={3} className="py-4" />
+      </OnboardingLayout>
+    );
 
   const hasModels = models && models.length > 0;
   const hasQuickConnect = quickConnectProviders(registry).length > 0;
@@ -80,9 +90,9 @@ export function OnboardingModelStep() {
                         so a dead one must say so rather than look configured. */}
                     {m.needs_reconnection && <ModelUnavailableBadge className="shrink-0" />}
                     {m.is_default && (
-                      <Badge variant="success" className="shrink-0 text-[0.65rem]">
+                      <ToneBadge variant="success" className="shrink-0 text-[0.65rem]">
                         {t("models.default")}
-                      </Badge>
+                      </ToneBadge>
                     )}
                   </div>
                 );
@@ -107,24 +117,20 @@ export function OnboardingModelStep() {
           </div>
         )}
 
-        <Button
-          variant="outline"
-          size="sm"
-          className="self-center"
-          onClick={() => setModalOpen(true)}
-        >
+        <Button variant="outline" size="sm" className="self-center" onClick={() => newModel.open()}>
           <Plus className="mr-1.5 size-3.5" />
           {hasModels ? t("onboarding.modelSeed.addAnother") : t("models.add")}
         </Button>
       </div>
 
-      <ModelFormModal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        model={null}
-        isPending={isPending}
-        onSubmit={onSubmit}
-      />
+      {newModel.value !== null && (
+        <ModelFormModal
+          onClose={newModel.close}
+          model={null}
+          isPending={isPending}
+          onSubmit={onSubmit}
+        />
+      )}
     </OnboardingLayout>
   );
 }

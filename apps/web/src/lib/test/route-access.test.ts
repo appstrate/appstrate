@@ -10,7 +10,15 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ROUTE_ACCESS, routeVerdict, type RoutePath } from "../route-access.ts";
+import { matchRoutes } from "react-router-dom";
+import {
+  isOverlayPath,
+  OVERLAY_NOT_FOUND_PATHS,
+  OVERLAY_PREFIXES,
+  ROUTE_ACCESS,
+  routeVerdict,
+  type RoutePath,
+} from "../route-access.ts";
 import { routeOf } from "../route-match.ts";
 
 const source = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
@@ -18,25 +26,27 @@ const source = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.m
 describe("route declarations", () => {
   const declared = new Set(Object.keys(ROUTE_ACCESS));
 
-  it("mounts every main-layout route from the PAGES table, never by hand", () => {
+  it("mounts every declared route from the PAGES table, never by hand", () => {
     // `PAGES: Record<RoutePath, …>` pairs each route with its declaration at
-    // compile time; a hand-written `<Route path=…>` there would bypass it.
+    // compile time; a hand-written `<Route path=…>` in the main layout or the
+    // overlay tree would bypass it.
     const app = source("../../app.tsx");
-    const mainLayout = app.slice(app.indexOf("<MainLayout />"));
-    expect(mainLayout.match(/<Route\s+path=/g)).toEqual(["<Route path="]);
-    expect(mainLayout).toContain('<Route path="*"');
+    const mounted = app.slice(app.indexOf("<MainLayout />"));
+    expect(mounted.match(/<Route\s+path=/g)).toEqual(["<Route path="]);
+    expect(mounted).toContain('<Route path="*"');
     expect(app).toMatch(/const PAGES: Record<RoutePath, ReactNode> =/);
   });
 
   /** The shell: whatever renders on every page and links into the registry. */
   const SHELL = [
     "components/nav-org.tsx",
-    "pages/org-settings/layout.tsx",
     "components/org-switcher.tsx",
     "components/notification-bell.tsx",
-    "components/sidebar-billing.tsx",
     "components/nav-user.tsx",
     "components/app-sidebar.tsx",
+    "components/shell-frame.tsx",
+    "components/product-tabs.tsx",
+    "components/shell-breadcrumb.tsx",
   ].map((file) => ({ file, text: source(`../../${file}`) }));
   /** Routes outside `MainLayout`, which no declaration covers. */
   const OUTSIDE_MAIN_LAYOUT = new Set(["/onboarding/create"]);
@@ -49,7 +59,25 @@ describe("route declarations", () => {
       ...reached(text),
       ...[...text.matchAll(/(?:path|landsOn): "([^"]+)"/g)].map((m) => m[1]!),
     ]);
-    expect(targets.length).toBeGreaterThan(40);
+    // Pinned, so a shell link that moves out of these files or out of reach of
+    // the patterns above is a diff here. The settings rail, not the shell,
+    // links every settings page.
+    expect([...new Set(targets)].sort()).toEqual([
+      "/",
+      "/agents",
+      "/agents/:scope/:name/runs/:runId",
+      "/catalogue",
+      "/catalogue/:reading/:type",
+      "/chat",
+      "/files",
+      "/integrations",
+      "/org-settings",
+      "/preferences",
+      "/runs",
+      "/schedules",
+      "/skills",
+      "/workspace-settings",
+    ]);
     expect(targets.filter((t) => !declared.has(t) && !OUTSIDE_MAIN_LAYOUT.has(t))).toEqual([]);
   });
 
@@ -66,8 +94,18 @@ describe("route declarations", () => {
   });
 
   it("leaves shell visibility to the declarations, never to a local permission or flag check", () => {
+    // A deed is not a destination: the switcher's "add a workspace" asks for the
+    // right to CREATE one (`spaces:write`), which no route declaration says; the
+    // Chat tab asks whether there is anything to DO there (`chat:write`, else a
+    // conversation of one's own to reread), on top of the route's own verdict.
+    const DEEDS: Record<string, string[]> = {
+      "components/org-switcher.tsx": ["usePermissions(", "can("],
+      "components/product-tabs.tsx": ["usePermissions(", "can("],
+    };
     const local = SHELL.flatMap(({ file, text }) =>
-      (text.match(/\busePermissions\(|\bcan\(|\bfeatures\./g) ?? []).map((m) => `${file}: ${m}`),
+      (text.match(/\busePermissions\(|\bcan\(|\bfeatures\./g) ?? [])
+        .filter((m) => !DEEDS[file]?.includes(m))
+        .map((m) => `${file}: ${m}`),
     );
     expect(local).toEqual([]);
   });
@@ -93,22 +131,60 @@ describe("routeVerdict", () => {
     // still answers 409 `personal_space_*` to every write behind these pages.
     const all = () => true;
     const teamSpaceOnly: RoutePath[] = [
-      "/org-settings/space/members",
-      "/org-settings/space/api-keys",
-      "/org-settings/space/oauth",
-      "/end-users",
+      "/workspace-settings/members",
+      "/workspace-settings/api-keys",
+      "/workspace-settings/oauth",
+      "/workspace-settings/end-users",
     ];
     for (const path of teamSpaceOnly) {
       expect(routeVerdict(path, all, { oidc: true }, true)).toBe("absent");
       expect(routeVerdict(path, all, { oidc: true }, false)).toBe("granted");
     }
-    expect(routeVerdict("/org-settings/space/general", all, {}, true)).toBe("granted");
+    expect(routeVerdict("/workspace-settings/general", all, {}, true)).toBe("granted");
+    // Its deletes stay open there, so a row the space holds can always be removed.
+    expect(routeVerdict("/workspace-settings/auth", all, { oidc: true }, true)).toBe("granted");
     expect(routeVerdict("/agents", all, {}, true)).toBe("granted");
   });
 
   it("opens an ungated route to a caller holding nothing", () => {
-    const open: RoutePath[] = ["/", "/agents/:scope/:name/edit", "/preferences/general"];
+    const open: RoutePath[] = ["/", "/org-settings", "/preferences/general"];
     for (const path of open) expect(routeVerdict(path, none, {}, false)).toBe("granted");
+  });
+});
+
+describe("overlay paths", () => {
+  it("are the overlay prefixes, segment by segment", () => {
+    expect(isOverlayPath("/org-settings")).toBe(true);
+    expect(isOverlayPath("/workspace-settings/webhooks/wh_1")).toBe(true);
+    expect(isOverlayPath("/preferences/x")).toBe(true);
+    expect(isOverlayPath("/catalogueX")).toBe(false);
+    expect(isOverlayPath("/org-settingsfoo")).toBe(false);
+  });
+
+  // The overlay tree as `app.tsx` mounts it: the declared overlay pages, then the not-found routes.
+  const routes = [
+    ...Object.keys(ROUTE_ACCESS)
+      .filter(isOverlayPath)
+      .map((path) => ({ path })),
+    ...OVERLAY_NOT_FOUND_PATHS.map((path) => ({ path })),
+  ];
+  const matched = (url: string) => matchRoutes(routes, url)?.[0]?.route.path;
+
+  it("answer an unknown address under every overlay inside that overlay", () => {
+    for (const prefix of OVERLAY_PREFIXES) {
+      expect(matched(`${prefix}/no-such-page`)).toBe(`${prefix}/*`);
+    }
+    // Below a declared page too: no prefix of it stands in.
+    expect(matched("/org-settings/general/no-such-page")).toBe("/org-settings/*");
+    // Outside the overlays the main tree answers.
+    expect(matched("/agents/no-such-page")).toBeUndefined();
+  });
+
+  it("leave every declared overlay page ahead of the not-found catch-all", () => {
+    expect(matched("/org-settings/general")).toBe("/org-settings/general");
+    expect(matched("/workspace-settings/webhooks/wh_1")).toBe("/workspace-settings/webhooks/:id");
+    expect(matched("/catalogue/discover/agent")).toBe("/catalogue/:reading/:type");
+    expect(matched("/preferences/x")).toBe("/preferences/*");
   });
 });
 
@@ -120,7 +196,6 @@ describe("routeOf", () => {
   it("ranks a concrete URL the way the router does: static segments first", () => {
     expect(routeOf("/agents/new")).toBe("/agents/new");
     expect(routeOf("/agents/@acme/triage")).toBe("/agents/:scope/:name");
-    expect(routeOf("/agents/@acme/triage/edit")).toBe("/agents/:scope/:name/edit");
     expect(routeOf("/agents/@acme/triage/1.2.0")).toBe("/agents/:scope/:name/:version");
     expect(routeOf("/agents/@acme/triage/runs/run_1?tab=logs#x")).toBe(
       "/agents/:scope/:name/runs/:runId",

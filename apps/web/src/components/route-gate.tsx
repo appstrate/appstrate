@@ -1,24 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
-import { Navigate, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Lock } from "lucide-react";
-import { usePermissions, useCanManageOrgCatalog } from "../hooks/use-permissions";
+import { Lock, SearchX } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
+import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
-import { EmptyState, LoadingState } from "./page-states";
+import { EmptyState } from "./page-states";
 
 /**
  * Route-level gate, read off the route's declaration in `lib/route-access.ts`:
  * it refuses to MOUNT the page, so its queries never fire a row of 403s behind
  * a blank panel. Not a security boundary — the server's guards are. A route
  * that does not exist here (module not loaded, team-space page in a personal
- * space) falls back to the space's settings or the dashboard. Asked of the
- * page the URL lands on too: a layout mounts before its child's gate.
+ * space) says so, never a silent redirect. Asked of the page the URL lands on
+ * too: a layout mounts before its child's gate.
  */
-export function RouteGate({ path, children }: { path: RoutePath; children: ReactNode }) {
+export function RouteGate({
+  path,
+  pending,
+  children,
+}: {
+  path: RoutePath;
+  /** Drawn while the permissions load: the page's own skeleton. */
+  pending: ReactNode;
+  children: ReactNode;
+}) {
   const { can, ready, inPersonalSpace } = usePermissions();
   const { features } = useAppConfig();
   const verdict = routeVerdict(path, can, features, inPersonalSpace);
@@ -31,14 +41,12 @@ export function RouteGate({ path, children }: { path: RoutePath; children: React
         : null;
 
   if (absent) {
-    const fallback = absent.startsWith("/org-settings/space/")
-      ? "/org-settings/space/general"
-      : "/";
-    return <Navigate to={fallback} replace />;
+    return <UnavailableState />;
   }
   if (verdict === "granted") return <>{children}</>;
   // An unloaded permission set answers `false` for everything.
-  return ready ? <NoAccessState /> : <LoadingState />;
+  if (!ready) return <>{pending}</>;
+  return <NoAccessState />;
 }
 
 /**
@@ -52,10 +60,24 @@ export function NoAccessState() {
   return <EmptyState message={t("access.denied")} hint={t("access.deniedHint")} icon={Lock} />;
 }
 
-/** The organization library is administrative even when the caller manages a space. */
-export function RequireOrgCatalogAdmin({ children }: { children: ReactNode }) {
-  const { ready } = usePermissions();
-  const allowed = useCanManageOrgCatalog();
-  if (!ready) return <LoadingState />;
-  return allowed ? <>{children}</> : <NoAccessState />;
+/** "This page does not exist here": a typo, a module the instance does not load, a team-space page in a personal space. */
+export function UnavailableState({ children }: { children?: ReactNode }) {
+  const { t } = useTranslation("common");
+  return (
+    <EmptyState message={t("access.unavailable")} hint={t("access.unavailableHint")} icon={SearchX}>
+      {children}
+    </EmptyState>
+  );
+}
+
+/** The address matches no route: said, with the way back, instead of landing on the dashboard unexplained. */
+export function NotFoundPage() {
+  const { t } = useTranslation("common");
+  return (
+    <UnavailableState>
+      <Button asChild variant="outline" size="sm">
+        <Link to="/">{t("nav.dashboard")}</Link>
+      </Button>
+    </UnavailableState>
+  );
 }

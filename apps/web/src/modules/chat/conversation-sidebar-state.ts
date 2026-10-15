@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type ConversationSidebarTab = "preview" | "runs" | "files" | "info";
+export type ConversationSidebarTab = "runs" | "files" | "info";
 
 export interface SidebarFile {
   id: string;
@@ -10,29 +10,32 @@ export interface SidebarFile {
 export interface ConversationSidebarState {
   expanded: boolean;
   activeTab: ConversationSidebarTab;
+  /** The file shown over the Files tab, null when the tab shows its list. */
   selectedFile: SidebarFile | null;
-  modalFile: SidebarFile | null;
+  /** The shown file was opened from the list: closing it goes back to the list. */
+  fileFromList: boolean;
 }
 
 export type ConversationSidebarAction =
   | { type: "toggle" }
   | { type: "select-tab"; tab: ConversationSidebarTab }
-  | { type: "show-file"; file: SidebarFile }
-  | { type: "open-modal" }
-  | { type: "close-modal" }
+  | { type: "show-file"; file: SidebarFile; fromList?: boolean }
+  | { type: "close-file" }
   | { type: "conversation-change" };
 
 export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
   expanded: false,
-  activeTab: "preview",
+  activeTab: "files",
   selectedFile: null,
-  modalFile: null,
+  fileFromList: false,
 };
 
 /**
- * State behind the chat's one context surface. `show-file` deliberately
- * carries no source: a click and the single file a run just produced are the
- * exact same event once they cross the module boundary.
+ * State behind the chat's one context surface. A file is always shown in the
+ * Files tab, over its list. Opened from the thread (a click on a run's file, or
+ * the single file a run just produced), closing it closes the panel; opened from
+ * the list, closing it goes back to the list. Choosing a tab shows that tab's
+ * own content, so the Files tab shows its list again.
  */
 export function conversationSidebarReducer(
   state: ConversationSidebarState,
@@ -42,19 +45,20 @@ export function conversationSidebarReducer(
     case "toggle":
       return { ...state, expanded: !state.expanded };
     case "select-tab":
-      return { ...state, expanded: true, activeTab: action.tab };
+      return { ...state, expanded: true, activeTab: action.tab, selectedFile: null };
     case "show-file":
       return {
         ...state,
         expanded: true,
-        activeTab: "preview",
+        activeTab: "files",
         selectedFile: action.file,
+        fileFromList: action.fromList === true,
       };
-    case "open-modal":
-      return state.selectedFile ? { ...state, modalFile: state.selectedFile } : state;
-    case "close-modal":
-      return state.modalFile ? { ...state, modalFile: null } : state;
+    case "close-file":
+      return state.fileFromList
+        ? { ...state, selectedFile: null }
+        : { ...state, expanded: false, selectedFile: null };
     case "conversation-change":
-      return { ...state, selectedFile: null, modalFile: null };
+      return { ...state, selectedFile: null };
   }
 }

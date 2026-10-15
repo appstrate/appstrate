@@ -13,12 +13,13 @@
  * (which the next request rebuilds with `bootstrapTokenPending: false`).
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AuthLayout } from "../components/auth-layout";
-import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { FormItem } from "@/components/app-ui/form-item";
 import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 import { client } from "../api/client";
 import { errorMessage } from "../lib/mutation-error";
@@ -65,10 +66,8 @@ export function ClaimPage() {
         </div>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="claim-token">{t("claim.tokenLabel")}</Label>
+          <FormItem id="claim-token" label={t("claim.tokenLabel")} hint={t("claim.tokenHelp")}>
             <Input
-              id="claim-token"
               type="text"
               autoComplete="off"
               spellCheck={false}
@@ -79,13 +78,10 @@ export function ClaimPage() {
               onChange={(e) => setToken(e.target.value)}
               placeholder={t("claim.tokenPlaceholder")}
             />
-            <p className="text-muted-foreground text-xs">{t("claim.tokenHelp")}</p>
-          </div>
+          </FormItem>
 
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="claim-name">{t("claim.nameLabel")}</Label>
+          <FormItem id="claim-name" label={t("claim.nameLabel")}>
             <Input
-              id="claim-name"
               type="text"
               required
               minLength={1}
@@ -93,24 +89,24 @@ export function ClaimPage() {
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
-          </div>
+          </FormItem>
 
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="claim-email">{t("claim.emailLabel")}</Label>
+          <FormItem id="claim-email" label={t("claim.emailLabel")}>
             <Input
-              id="claim-email"
               type="email"
               required
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-          </div>
+          </FormItem>
 
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="claim-password">{t("claim.passwordLabel")}</Label>
+          <FormItem
+            id="claim-password"
+            label={t("claim.passwordLabel")}
+            hint={t("claim.passwordHelp", { min: MIN_PASSWORD_LENGTH })}
+          >
             <Input
-              id="claim-password"
               type="password"
               required
               autoComplete="new-password"
@@ -118,23 +114,17 @@ export function ClaimPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-            <p className="text-muted-foreground text-xs">
-              {t("claim.passwordHelp", { min: MIN_PASSWORD_LENGTH })}
-            </p>
-          </div>
+          </FormItem>
 
           {errorMsg && (
-            <div
-              role="alert"
-              className="border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-3 py-2 text-sm"
-            >
-              {errorMsg}
-            </div>
+            <Alert variant="destructive">
+              <AlertDescription>{errorMsg}</AlertDescription>
+            </Alert>
           )}
 
-          <Button type="submit" disabled={submitting}>
+          <PendingButton type="submit" pending={submitting}>
             {submitting ? t("claim.submitting") : t("claim.submit")}
-          </Button>
+          </PendingButton>
         </form>
 
         <p className="text-muted-foreground text-center text-xs">{t("claim.docs")}</p>

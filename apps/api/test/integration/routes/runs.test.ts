@@ -504,6 +504,64 @@ describe("Runs API", () => {
       expect(found).toBeDefined();
     });
 
+    it("filters an agent's runs by several statuses", async () => {
+      const packageId = "@runorg/filtered-agent";
+      await seedAgent({ id: packageId, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, packageId);
+      for (const status of ["success", "failed", "timeout"] as const) {
+        await seedRun({
+          packageId,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          userId: ctx.user.id,
+          status,
+        });
+      }
+
+      const res = await app.request(`/api/agents/${packageId}/runs?status=failed,timeout`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ status: string }>; total: number };
+      expect(body.total).toBe(2);
+      expect(body.data.map((run) => run.status).sort()).toEqual(["failed", "timeout"]);
+    });
+
+    it("searches an agent's runs by error text and run number", async () => {
+      const packageId = "@runorg/searched-agent";
+      await seedAgent({ id: packageId, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, packageId);
+      const seed = (overrides: { error?: string; runNumber?: number }) =>
+        seedRun({
+          packageId,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          userId: ctx.user.id,
+          status: "failed",
+          ...overrides,
+        });
+      const errored = await seed({ error: "clicSEQUR refused the 2FA code", runNumber: 1 });
+      const numbered = await seed({ runNumber: 77 });
+
+      const ids = async (query: string) => {
+        const res = await app.request(`/api/agents/${packageId}/runs?${query}`, {
+          headers: authHeaders(ctx),
+        });
+        expect(res.status, await res.clone().text()).toBe(200);
+        return ((await res.json()) as { data: { id: string }[] }).data.map((r) => r.id);
+      };
+
+      expect(await ids("q=clicsequr")).toEqual([errored.id]);
+      expect(await ids("q=%2377")).toEqual([numbered.id]);
+      // A number int4 cannot hold names no run; it is not a server error.
+      expect(await ids("q=99999999999")).toEqual([]);
+      const tooLong = await app.request(`/api/agents/${packageId}/runs?q=${"x".repeat(201)}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(tooLong.status).toBe(400);
+    });
+
     it("respects org isolation", async () => {
       const otherCtx = await createTestContext({ orgSlug: "otherorg" });
       await seedAgent({ id: "@otherorg/secret-agent", orgId: otherCtx.orgId });
@@ -701,6 +759,206 @@ describe("Runs API", () => {
       const body = (await res.json()) as { data: { userId: string }[]; total: number };
       expect(body.total).toBe(1);
       expect(body.data[0]!.userId).toBe(ctx.user.id);
+    });
+
+    it("combines ?user=me with the other filters instead of dropping them", async () => {
+      // `?user=me` narrows the same query as `kind`, `status` and the date
+      // range: "my failed runs" must not answer "my runs", or a UI showing both
+      // filters as active shows a filter the server never applied.
+      const otherUser = await createTestUser();
+      await addOrgMember(ctx.orgId, otherUser.id);
+      await seedAgent({ id: "@runorg/combined-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const mineFailed = await seedRun({
+        packageId: "@runorg/combined-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "failed",
+      });
+      await seedRun({
+        packageId: "@runorg/combined-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+      await seedRun({
+        packageId: "@runorg/combined-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: otherUser.id,
+        status: "failed",
+      });
+
+      const res = await app.request("/api/runs?user=me&status=failed", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string }[]; total: number };
+      expect(body.total).toBe(1);
+      expect(body.data[0]!.id).toBe(mineFailed.id);
+    });
+
+    it("leaves the unattributed runs to runs:read-all under ?user=me", async () => {
+      // `?user=me` is `ownRunsFilter` (`actorFilter`), the narrow half of the
+      // run-visibility rule: "mine" is the runs this principal launched. A row
+      // with no actor (no live launch path writes one; a schedule's runs carry
+      // the schedule's frozen actor) is a `runs:read-all` row, because the
+      // `user_id IS NULL` arm of `actorScopeFilter` would also match every
+      // end-user's run for a member (RBAC spec §3.4).
+      await seedAgent({
+        id: "@runorg/unattributed-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const unattributed = await seedRun({
+        packageId: "@runorg/unattributed-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: null,
+        status: "success",
+      });
+
+      const mine = await app.request("/api/runs?user=me", { headers: authHeaders(ctx) });
+      expect(mine.status).toBe(200);
+      const mineBody = (await mine.json()) as { data: { id: string }[] };
+      expect(mineBody.data.map((r) => r.id)).not.toContain(unattributed.id);
+
+      const all = await app.request("/api/runs", { headers: authHeaders(ctx) });
+      const allBody = (await all.json()) as { data: { id: string }[] };
+      expect(allBody.data.map((r) => r.id)).toContain(unattributed.id);
+    });
+
+    it("takes several statuses at once", async () => {
+      // "Everything that broke" is one question. Asking it as two requests and
+      // stitching the pages together gets the ordering and the total wrong.
+      await seedAgent({
+        id: "@runorg/multistatus-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const failed = await seedRun({
+        packageId: "@runorg/multistatus-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "failed",
+      });
+      const timedOut = await seedRun({
+        packageId: "@runorg/multistatus-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "timeout",
+      });
+      await seedRun({
+        packageId: "@runorg/multistatus-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      const res = await app.request("/api/runs?status=failed,timeout", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string }[]; total: number };
+      expect(body.total).toBe(2);
+      expect(body.data.map((r) => r.id).sort()).toEqual([failed.id, timedOut.id].sort());
+    });
+
+    it("rejects the whole list when one member is unknown, never just that member", async () => {
+      // Dropping the bad member would WIDEN the answer for a caller reading it
+      // as narrowed — the failure mode this endpoint spends 400s to avoid.
+      const res = await app.request("/api/runs?status=failed,succes", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { param?: string };
+      expect(body.param).toBe("status");
+    });
+
+    it("matches the agent and the error on ?q, and combines with the rest", async () => {
+      await seedAgent({ id: "@runorg/search-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const byName = await seedRun({
+        packageId: "@runorg/search-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+        agentScope: "@runorg",
+        agentName: "quarterly-books",
+      });
+      const byError = await seedRun({
+        packageId: "@runorg/search-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "failed",
+        agentScope: "@runorg",
+        agentName: "something-else",
+        error: "clicSEQUR refused the 2FA code",
+      });
+
+      const onName = await app.request("/api/runs?q=quarter", { headers: authHeaders(ctx) });
+      const named = (await onName.json()) as { data: { id: string }[] };
+      expect(named.data.map((r) => r.id)).toEqual([byName.id]);
+
+      // Case-insensitive, and anywhere in the value.
+      const onError = await app.request("/api/runs?q=CLICSEQUR", { headers: authHeaders(ctx) });
+      const errored = (await onError.json()) as { data: { id: string }[] };
+      expect(errored.data.map((r) => r.id)).toEqual([byError.id]);
+
+      // Combined with a status: text AND status, like every other pair.
+      const both = await app.request("/api/runs?q=@runorg&status=failed", {
+        headers: authHeaders(ctx),
+      });
+      const combined = (await both.json()) as { data: { id: string }[] };
+      expect(combined.data.map((r) => r.id)).toEqual([byError.id]);
+    });
+
+    it("reads a numeric ?q as the run number", async () => {
+      await seedAgent({ id: "@runorg/numeric-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      // `runNumber` is stamped by the run pipeline, not by a column default,
+      // so a seeded row has none unless it is given one.
+      const run = await seedRun({
+        packageId: "@runorg/numeric-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+        runNumber: 4242,
+      });
+
+      const res = await app.request("/api/runs?q=%234242", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string }[] };
+      expect(body.data.map((r) => r.id)).toContain(run.id);
+    });
+
+    it("treats LIKE wildcards as characters, not patterns", async () => {
+      // `%` matches everything in LIKE. Typed by a user it means a percent sign,
+      // and a search that silently returns the whole list is the widening this
+      // endpoint spends 400s avoiding elsewhere.
+      await seedAgent({ id: "@runorg/wildcard-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedRun({
+        packageId: "@runorg/wildcard-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      const res = await app.request("/api/runs?q=%25", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { total: number };
+      expect(body.total).toBe(0);
     });
 
     it("lists all org runs when no ?user param is given", async () => {

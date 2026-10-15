@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { realtimeRunsUrl } from "@appstrate/core/realtime-url";
 import { useEffect, useRef } from "react";
 import { useQueryClient, type InvalidateOptions, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
@@ -12,7 +13,6 @@ import { parseSseFrames } from "@appstrate/core/sse";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { SESSIONS_QUERY_KEY as CHAT_SESSIONS_QUERY_KEY } from "@appstrate/module-chat/unread";
 import { chatSessionUpdateEventSchema } from "@appstrate/shared-types";
-import { withViewAsParam } from "../lib/scoping-headers";
 import { endPreviewIfRefused } from "../lib/view-as-refusal";
 import { useViewAsHeader } from "../stores/view-as-store";
 import {
@@ -21,6 +21,8 @@ import {
   packageKeys,
   agentsKeys,
   scheduleKeys,
+  persistenceKeys,
+  invalidatePaths,
 } from "../lib/query-keys";
 import {
   type EnrichedRun,
@@ -66,7 +68,8 @@ function handleConnectionUpdate(qc: QueryClient) {
  *    whose path id is this session.
  *  - the typed file list, `["get","/api/files",init]` with
  *    `init.params.query.context_chat_session_id` — only the page filtered on
- *    this session. A run's file tab (`runId` filter), the gallery (no
+ *    this session. The gallery's paged key (`["get","/api/files","paged",…]`)
+ *    carries no such id, so it never matches. A run's file tab (`runId` filter), the gallery (no
  *    filter) or another conversation's sidebar must not refetch on every
  *    frame of a turn that is not theirs (≥5 frames per turn).
  *
@@ -153,8 +156,7 @@ interface BroadInvalidator {
 
 /**
  * Exported for its test. The budget this buys: under sustained traffic at most
- * 4 broad invalidations per `delayMs` per open tab — one per `broadRunKeys`
- * entry — against zero under the debounce it replaced, which never flushed.
+ * one invalidation per `broadRunKeys` entry per `delayMs` per open tab.
  */
 export function createBroadInvalidator(
   getQueryClient: () => QueryClient,
@@ -326,10 +328,11 @@ function handleSSEMessage(
     qc.invalidateQueries({ queryKey: runKeys.all });
     // A terminal run has completed its output sweep; refresh every scoped
     // file collection, including conversation-context filters.
-    qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
-    // openapi-react-query keys are [method, path, init] — invalidating the
-    // literal spec path reaches the entry whatever org rides in its init.
-    qc.invalidateQueries({ queryKey: ["get", "/api/billing"] });
+    void invalidatePaths(qc, ["/api/files"]);
+    // So has its memory: the pinned slots and notes it wrote count on the run
+    // page and list in the agent's Mémoire tab.
+    qc.invalidateQueries({ queryKey: persistenceKeys.all });
+    void invalidatePaths(qc, ["/api/billing"]);
   }
 }
 
@@ -430,10 +433,7 @@ export function useGlobalRunSync() {
       const res = await fetch(
         // `verbose` is deliberately absent: it only affects `run_log`, which
         // we no longer subscribe to.
-        withViewAsParam(
-          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=${channels}`,
-          viewAs,
-        ),
+        realtimeRunsUrl({ orgId, spaceId, channels: channels.split(","), viewAs }),
         {
           credentials: "include",
           signal: controller.signal,

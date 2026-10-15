@@ -28,6 +28,7 @@
  * to start without a connection; unset (an absent key), it starts without the integration.
  */
 
+import { toggleValue } from "../../lib/toggle-value";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -44,9 +45,11 @@ import {
   toggleApiCallToolSelection,
 } from "./tool-selection.ts";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Spinner } from "../spinner";
+import { Button } from "@appstrate/ui/components/button";
+import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
 import type { ResourceEntry } from "./types";
+import { TextSkeleton } from "../loading-skeletons";
 
 interface IntegrationToolPickerProps {
   packageId: string;
@@ -99,11 +102,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   if (isLoading) {
-    return (
-      <div className="mt-2 flex items-center justify-center py-2">
-        <Spinner />
-      </div>
-    );
+    return <TextSkeleton lines={2} className="mt-2" />;
   }
   if (!detail) {
     return (
@@ -278,7 +277,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
     // wildcard with an array. Treat `"*"` as no-op here.
     if (wildcardSelected) return;
     const current = arrayTools;
-    const next = current.includes(name) ? current.filter((t) => t !== name) : [...current, name];
+    const next = toggleValue(current, name);
     onChange({ ...entry, tools: next });
   };
 
@@ -305,7 +304,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
 
   const toggleScope = (value: string) => {
     const current = entry.scopes ?? [];
-    const next = current.includes(value) ? current.filter((s) => s !== value) : [...current, value];
+    const next = toggleValue(current, value);
     onChange({ ...entry, scopes: next.length > 0 ? next : undefined });
   };
 
@@ -353,7 +352,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
           className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="bg-background rounded-md border-l-2 border-amber-500/30 p-2">
+          <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
             <label
               className="flex cursor-pointer items-start gap-2"
               data-testid={`integ-wildcard-${packageId}`}
@@ -396,10 +395,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
       {/* Sits above the pickers because it applies to the whole integration,
           not to the native slice alone. */}
       {selectsNothing && (
-        <p
-          className="text-[11px] text-amber-600 dark:text-amber-500"
-          data-testid={`integ-no-tools-${packageId}`}
-        >
+        <p className="text-warning text-[11px]" data-testid={`integ-no-tools-${packageId}`}>
           {t("agentEditor.integrations.tools.noneNotice")}
         </p>
       )}
@@ -426,7 +422,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
         </div>
       )}
       {wildcardEnabled && (
-        <div className="bg-background rounded-md border-l-2 border-amber-500/30 p-2">
+        <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
           <label
             className="flex cursor-pointer items-start gap-2"
             data-testid={`integ-wildcard-${packageId}`}
@@ -503,61 +499,39 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
               {t("agentEditor.integrations.tools.title")}
             </span>
             <div className="flex items-center gap-2">
-              <button
+              <Button
                 type="button"
-                className="text-muted-foreground hover:text-foreground text-[10px] underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
+                variant="ghost"
+                size="sm"
                 onClick={selectAllTools}
                 disabled={allSelected}
                 data-testid={`integ-tools-select-all-${packageId}`}
               >
                 {t("agentEditor.integrations.tools.selectAll")}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="text-muted-foreground hover:text-foreground text-[10px] underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
+                variant="ghost"
+                size="sm"
                 onClick={selectNoTools}
                 disabled={noneSelected}
                 data-testid={`integ-tools-select-none-${packageId}`}
               >
                 {t("agentEditor.integrations.tools.selectNone")}
-              </button>
+              </Button>
             </div>
           </div>
           <p className="text-muted-foreground mb-2 text-[11px]">
             {t("agentEditor.integrations.tools.explicitNotice")}
           </p>
-          <div className="grid gap-1.5">
-            {nativeCatalog.map((entry) => {
-              const requiredScopes = [
-                ...new Set(Object.values(entry.policy?.required_scopes ?? {}).flat()),
-              ];
-              return (
-                <label
-                  key={entry.name}
-                  className="flex cursor-pointer items-start gap-2 text-xs"
-                  data-testid={`integ-tool-${packageId}-${entry.name}`}
-                >
-                  <Checkbox
-                    checked={selectedTools.has(entry.name)}
-                    onCheckedChange={() => toggleTool(entry.name)}
-                    className="mt-0.5"
-                  />
-                  <span className="flex min-w-0 flex-col">
-                    <span className="font-mono">{entry.name}</span>
-                    {entry.description && (
-                      <span className="text-muted-foreground text-[11px]">{entry.description}</span>
-                    )}
-                    {requiredScopes.length > 0 && (
-                      <span className="text-muted-foreground">
-                        {t("agentEditor.integrations.tools.requires")}{" "}
-                        <span className="font-mono">{requiredScopes.join(", ")}</span>
-                      </span>
-                    )}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
+          <PackageToolCatalog
+            tools={nativeCatalog.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              permissions: tool.policy?.required_scopes,
+            }))}
+            selection={{ values: selectedTools, onToggle: toggleTool }}
+          />
         </div>
       )}
 

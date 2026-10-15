@@ -7,7 +7,9 @@ import {
   uploadedFileOperation,
   packageCreateBody,
   newPackageContent,
+  importRefusal,
 } from "../package-file-drafts";
+import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import type { PackageFileEntry } from "../package-file-tree";
 const entries: PackageFileEntry[] = [
   { path: "SKILL.md", size: 4, media_kind: "text", inline: "body" },
@@ -136,5 +138,36 @@ describe("package draft operations", () => {
         "integration",
       ),
     ).toEqual([]);
+  });
+});
+
+describe("importRefusal", () => {
+  const file = (name: string, size = 1) => ({ name, size });
+  it("accepts new names and a replacement of an existing path", () => {
+    expect(importRefusal(entries, [file("a.md"), file("b.md")], false)).toBeNull();
+    expect(importRefusal(entries, [file("notes.md")], true)).toBeNull();
+  });
+  it("refuses any file over the inline limit, replacement included", () => {
+    const big = file("big.bin", PACKAGE_FILE_INLINE_MAX_BYTES + 1);
+    expect(importRefusal(entries, [file("a.md"), big], false)).toEqual({
+      key: "files.errorTooLarge",
+    });
+    expect(importRefusal(entries, [big], true)).toEqual({ key: "files.errorTooLarge" });
+  });
+  it("names the file that collides, with the tree or with the selection itself", () => {
+    expect(importRefusal(entries, [file("notes.md")], false)).toEqual({
+      key: "files.errorImportConflict",
+      path: "notes.md",
+    });
+    expect(importRefusal(entries, [file("x.md"), file("x.md")], false)).toEqual({
+      key: "files.errorImportConflict",
+      path: "x.md",
+    });
+  });
+  it("refuses the manifest's name with its own message", () => {
+    expect(importRefusal(entries, [file("manifest.json")], false)).toEqual({
+      key: "files.errorReserved",
+      path: "manifest.json",
+    });
   });
 });

@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Check, Copy } from "lucide-react";
-import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { cn } from "@appstrate/ui/cn";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
 
 /**
  * Read-only value with a copy button.
@@ -33,8 +31,6 @@ export function CopyBlock({
   className?: string;
   testId?: string;
 }) {
-  const { t } = useTranslation("common");
-  const { copied, copy } = useCopyToClipboard();
   return (
     <div
       className="border-border bg-muted/50 relative rounded-md border"
@@ -47,18 +43,10 @@ export function CopyBlock({
       >
         {value}
       </code>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className={`text-muted-foreground hover:text-foreground absolute ${
-          dense ? "top-0.5 right-0.5 h-6 w-6" : "top-1 right-1 h-7 w-7"
-        }`}
-        aria-label={t("btn.copy")}
-        onClick={() => copy(value)}
-      >
-        {copied ? <Check className="text-primary" /> : <Copy />}
-      </Button>
+      <CopyButton
+        value={value}
+        className={cn("absolute", dense ? "top-0.5 right-0.5 h-6 w-6" : "top-1 right-1")}
+      />
     </div>
   );
 }

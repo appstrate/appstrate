@@ -1,403 +1,170 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2, Pencil, Check, X } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
-import { Input } from "@appstrate/ui/components/input";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@appstrate/ui/components/table";
-import { ConfirmModal } from "../confirm-modal";
-import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
-import { ConnectionTeardownSteps } from "../integration-connect/connection-teardown-steps";
-import { ConnectionDeleteImpact } from "../integration-connect/connection-delete-impact";
-import { ConnectionVariablesLine } from "../integration-connect/connection-variables-line";
-import { InlineConnectButton } from "../integration-connect/inline-connect-button";
-import {
-  connectionLockHintKey,
-  isConnectionOwnedBy,
-} from "../integration-connect/connection-ownership";
-import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
-import { ConnectionScopeBadge } from "../integration-connect/connection-scope-badge";
-import { ConnectionShareEditor } from "../integration-connect/connection-share-editor";
-import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
-import { isQueryInFlight } from "../../lib/query-state";
+import { Plug } from "lucide-react";
+import { DataTable } from "../data-table";
+import { EmptyState } from "../page-states";
+import { ListToolbar } from "../list-toolbar";
+import { AddIntegrationConnection } from "../integration-connect/add-integration-connection";
+import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-keys";
 import { usePermissions } from "../../hooks/use-permissions";
-import { useOrgSpaces } from "../../hooks/use-spaces";
-import {
-  useRenameIntegrationConnection,
-  useConnectionShare,
-  type IntegrationAuthType,
-  type IntegrationConnection,
-  type IntegrationManifestView,
-} from "../../hooks/use-integrations";
-import {
-  useConnectionDeleteImpact,
-  useDisconnectIntegrationConnection,
-} from "../../hooks/use-me-connections";
-import { useCurrentOrgId } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { authMethodLabel } from "../../lib/integration-presentation";
+import { connectionOptionLabel } from "../../lib/connection-set";
+import { useConsumedSearchParam } from "../../hooks/use-consumed-search-param";
+import { useLocalListParams } from "../../lib/list-params";
+import { matchesSearch } from "../../lib/strings";
+import { useConnectionColumns } from "./integration-columns";
+import type {
+  IntegrationAuthStatus,
+  IntegrationConnection,
+  IntegrationDetailWire,
+} from "../../hooks/use-integrations";
 
 /**
- * Connected accounts for one auth, as a table. Empty → a muted line. Columns:
- * account (with inline rename), status (+ reconnect when stale), granted scopes,
- * scope and the spaces it is shared into, and a disconnect action.
+ * Connected accounts across all authentication methods.
+ *
+ * The rows come from the detail query the page already awaits, so the table has
+ * no loading or failure of its own to draw — an empty auth is an ANSWER, and it
+ * is the only state left for the body to show. Every control on a row lives in
+ * its column (`integration-columns.tsx`), which is where the ownership rules
+ * that gate them are written down.
  */
 export function ConnectionsTable({
   packageId,
-  authKey,
-  authType,
-  manifest,
-  connections,
-  canRenew,
+  detail,
+  canConfigure,
+  onConfigure,
 }: {
   packageId: string;
-  authKey: string;
-  authType: IntegrationAuthType;
-  /** Names the granted scopes by the auth's `scope_catalog`. */
-  manifest: IntegrationManifestView;
-  connections: IntegrationConnection[];
-  canRenew: boolean;
+  detail: IntegrationDetailWire;
+  canConfigure: boolean;
+  onConfigure: (authKey?: string) => void;
 }) {
   const { t } = useTranslation("settings");
-  if (connections.length === 0)
-    return <p className="text-muted-foreground text-sm">{t("integration.auth.noConnection")}</p>;
-  return (
-    <div className="overflow-hidden rounded-md border" data-testid={`connections-table-${authKey}`}>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="text-xs">{t("integration.connection.col.account")}</TableHead>
-            <TableHead className="text-xs">{t("integration.connection.col.status")}</TableHead>
-            <TableHead className="text-xs">{t("integration.connection.col.scopes")}</TableHead>
-            <TableHead className="text-xs">{t("integration.connection.col.shared")}</TableHead>
-            <TableHead className="w-px text-right text-xs">
-              {t("integration.connection.col.actions")}
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {connections.map((c) => (
-            <ConnectionTableRow
-              key={c.id}
-              connection={c}
-              packageId={packageId}
-              authKey={authKey}
-              authType={authType}
-              manifest={manifest}
-              canRenew={canRenew}
-            />
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
-}
-
-function ConnectionTableRow({
-  connection,
-  packageId,
-  authKey,
-  authType,
-  manifest,
-  canRenew,
-}: {
-  connection: IntegrationConnection;
-  packageId: string;
-  /** Auth key the connection is bound to — forwarded to the renew CTA. */
-  authKey: string;
-  /** Auth type from the manifest — gates the renew CTA to oauth2 only. */
-  authType: IntegrationAuthType;
-  manifest: IntegrationManifestView;
-  /** False when no OAuth client is usable yet — admin must set one up first. */
-  canRenew: boolean;
-}) {
-  const { t } = useTranslation("settings");
-  const renameConnection = useRenameIntegrationConnection();
-  const shareConnection = useConnectionShare("share", packageId);
-  const unshareConnection = useConnectionShare("unshare", packageId);
-  const disconnect = useDisconnectIntegrationConnection();
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
-  const { user } = useAuth();
   const { can } = usePermissions();
-  const [editing, setEditing] = useState(false);
-  const [draftLabel, setDraftLabel] = useState(connection.label);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const deleteImpact = useConnectionDeleteImpact(confirmDelete ? connection.id : undefined);
-  // `label` is the single source of truth (set at creation to the identity or
-  // "Connexion N"); render it verbatim.
-  const name = connection.label;
-  // The list holds connections other members share into the space: every write control is gated
-  // on the row's `allowed_actions`, which the API computes. Delete stays on ownership alone
-  // (`DELETE /api/me/connections/:id` has no admin escape hatch by design).
-  const isOwn = isConnectionOwnedBy(connection, user?.id);
-  const actions = connection.allowed_actions ?? [];
-  const canRename = actions.includes("rename");
-  const canShare = actions.includes("share");
-  const canUnshareHere = actions.includes("unshare_here");
-  // Reconnect writes the connection, which guards on `integrations:connect` whoever owns it.
   const canConnect = can("integrations:connect");
-  // Share targets: the spaces the owner may share into, plus those it is already shared into
-  // (named by the org's spaces). Only the owner carries either list.
-  const { data: orgSpaces } = useOrgSpaces(canShare ? orgId : null);
-  const shareTargets = useMemo(() => {
-    const names = new Map((orgSpaces ?? []).map((s) => [s.id, s.name]));
-    const shareable = connection.shareable_spaces ?? [];
-    const sharedOnly = (connection.shared_space_ids ?? []).filter(
-      (id) => !shareable.some((s) => s.id === id),
+  // The space's `block_user_connections` gate: the server answers 403
+  // `connection_blocked_by_admin`, and `integrations:configure` is exempt.
+  const blockedByAdmin = detail.block_user_connections && !canConfigure;
+  // `?connectionMethod` opens the table filtered once (« see the connections » of a method); the
+  // table is remounted at every tab switch, so the parameter is consumed rather than re-applied.
+  const method = useConsumedSearchParam("connectionMethod");
+  const list = useLocalListParams(
+    detail.auths.some((auth) => auth.auth_key === method) ? { method: [method!] } : {},
+  );
+  const sharing = list.values("sharing", ["shared", "private"] as const);
+  const methods = list.values(
+    "method",
+    detail.auths.map((auth) => auth.auth_key),
+  );
+  const { user } = useAuth();
+  const connections = detail.auths.flatMap((auth) =>
+    auth.connections.map((connection) => ({ ...connection, auth_key: auth.auth_key })),
+  );
+  const labelFor = (auth: IntegrationAuthStatus) =>
+    authMethodLabel(auth, detail.auths, t(`integration.auth.type.${auth.type}`));
+  const authOf = (connection: IntegrationConnection) =>
+    detail.auths.find((item) => item.auth_key === connection.auth_key);
+  const columns = useConnectionColumns({
+    packageId,
+    manifest: detail.manifest,
+    userId: user?.id,
+    isAdmin: canConfigure,
+    methodLabel: (connection) => {
+      const auth = authOf(connection);
+      return auth ? labelFor(auth) : connection.auth_key;
+    },
+    authForConnection: (connection) => {
+      const auth = authOf(connection);
+      return {
+        authKey: connection.auth_key,
+        authType: auth?.type ?? "custom",
+        canRenew: auth?.type === "oauth2" && isOauthAuthConnectable(auth),
+      };
+    },
+  });
+  const rows = connections.filter((connection) => {
+    const auth = authOf(connection);
+    return (
+      matchesSearch(list.search, [
+        connectionOptionLabel(connection),
+        connection.owner_name,
+        auth ? labelFor(auth) : null,
+      ]) &&
+      (sharing.length === 0 || sharing.includes(connection.shared_here ? "shared" : "private")) &&
+      (methods.length === 0 || methods.includes(connection.auth_key))
     );
-    return [...shareable, ...sharedOnly.map((id) => ({ id, name: names.get(id) ?? id }))];
-  }, [orgSpaces, connection.shareable_spaces, connection.shared_space_ids]);
-  // A pin or default names the row (in any space, for its owner): delete answers 409.
-  const lockKey = connectionLockHintKey(connection.locked_by);
-  const lockHint = lockKey ? t(lockKey) : null;
-  const startEdit = () => {
-    setDraftLabel(connection.label);
-    setEditing(true);
-  };
-  const cancelEdit = () => {
-    setEditing(false);
-    setDraftLabel(connection.label);
-  };
-  const submitLabel = () => {
-    const next = draftLabel.trim();
-    // A run addresses each bound connection by its label, so the label cannot
-    // be cleared: an empty field cancels the edit.
-    if (next === "" || next === connection.label) {
-      setEditing(false);
-      return;
-    }
-    renameConnection.mutate(
-      {
-        params: { path: { packageId, connectionId: connection.id } },
-        body: { label: next },
-      },
-      { onSuccess: () => setEditing(false) },
-    );
-  };
-  const onDelete = () => {
-    if (!orgId || !spaceId) return;
-    setConfirmDelete(true);
-  };
+  });
   return (
-    <>
-      <TableRow data-testid={`connection-row-${connection.id}`}>
-        {/* Account — inline rename */}
-        <TableCell>
-          {editing ? (
-            <div className="flex items-center gap-1">
-              <Input
-                value={draftLabel}
-                onChange={(e) => setDraftLabel(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submitLabel();
-                  if (e.key === "Escape") cancelEdit();
-                }}
-                placeholder={t("integration.connection.labelPlaceholder")}
-                className="h-7 max-w-xs text-sm"
-                autoFocus
-                data-testid={`label-input-${connection.id}`}
-              />
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-7"
-                onClick={submitLabel}
-                disabled={renameConnection.isPending}
-                title={t("integration.connection.labelSave")}
-                data-testid={`label-save-${connection.id}`}
-              >
-                <Check className="size-3.5" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-7"
-                onClick={cancelEdit}
-                disabled={renameConnection.isPending}
-                title={t("integration.connection.labelCancel")}
-              >
-                <X className="size-3.5" />
-              </Button>
-            </div>
-          ) : (
-            <div className="flex min-w-0 items-center gap-1">
-              <span className="min-w-0 truncate font-medium">{name}</span>
-              {!isOwn && (
-                <Badge
-                  variant="secondary"
-                  className="shrink-0 text-[0.6rem] whitespace-nowrap"
-                  data-testid={`connection-owner-${connection.id}`}
-                >
-                  {connection.owner_name
-                    ? t("integration.connection.sharedByOwner", { owner: connection.owner_name })
-                    : t("integration.connection.sharedByUnknown")}
-                </Badge>
-              )}
-              {canRename && (
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-6"
-                  onClick={startEdit}
-                  title={t("integration.connection.labelEdit")}
-                  data-testid={`label-edit-${connection.id}`}
-                >
-                  <Pencil className="size-3" />
-                </Button>
-              )}
-            </div>
-          )}
-          <ConnectionVariablesLine
-            variables={connection.variables}
-            testId={`connection-variables-${connection.id}`}
-          />
-        </TableCell>
-
-        {/* Status — connected / needs reconnection (+ renew) + expiry */}
-        <TableCell>
-          <div className="flex flex-col gap-1">
-            <div className="flex flex-wrap items-center gap-2">
-              {connection.needs_reconnection ? (
-                <>
-                  <ConnectionStatusBadge tone="needsReconnection">
-                    {t("integration.auth.needsReconnection")}
-                  </ConnectionStatusBadge>
-                  {/* Owner-only: the reconnect writes through
-                      `persistCredentialBundle` kind `update-owned`, whose WHERE
-                      carries the actor identity — a non-owner reconnect 404s.
-                      Only the owner can re-authenticate their own credential,
-                      so others see the state without a dead CTA. */}
-                  {isOwn && canConnect && canRenew && authType === "oauth2" && (
-                    <InlineConnectButton
-                      packageId={packageId}
-                      authKey={authKey}
-                      // Threading the existing row id is what makes the OAuth
-                      // callback UPDATE-in-place rather than INSERT a duplicate
-                      // (integration-connections.ts:721 "explicit connectionId
-                      // = update; no id = insert").
-                      connectionId={connection.id}
-                    />
-                  )}
-                </>
-              ) : (
-                <ConnectionStatusBadge tone="connected">
-                  {t("integration.connection.statusConnected")}
-                </ConnectionStatusBadge>
-              )}
-            </div>
-            {connection.expiresAt && (
-              <p className="text-muted-foreground text-[0.65rem]">
-                {t("integration.auth.expiresAt", {
-                  date: new Date(connection.expiresAt).toLocaleDateString(),
-                })}
-              </p>
-            )}
-          </div>
-        </TableCell>
-
-        {/* Granted scopes */}
-        <TableCell className="max-w-[16rem]">
-          {connection.scopes_granted.length > 0 ? (
-            <ScopeSummaryText
-              manifest={manifest}
-              authKey={authKey}
-              scopes={connection.scopes_granted}
-              className="text-muted-foreground block truncate text-[0.65rem]"
+    <div data-testid="integration-connections-table">
+      <ListToolbar
+        placement="panel"
+        search={{
+          value: list.search,
+          onChange: list.setSearch,
+          placeholder: t("detail.connectionsTable.search", { ns: "agents" }),
+        }}
+        filters={[
+          {
+            id: "sharing",
+            label: t("integration.connection.col.shared"),
+            values: sharing,
+            options: [
+              { value: "shared", label: t("detail.sharingShared", { ns: "agents" }) },
+              { value: "private", label: t("detail.sharingPrivate", { ns: "agents" }) },
+            ],
+            onChange: list.setValues("sharing"),
+          },
+          ...(detail.auths.length > 1
+            ? [
+                {
+                  id: "method",
+                  label: t("integration.presentation.method"),
+                  values: methods,
+                  options: detail.auths.map((auth) => ({
+                    value: auth.auth_key,
+                    label: labelFor(auth),
+                  })),
+                  onChange: list.setValues("method"),
+                },
+              ]
+            : []),
+        ]}
+        onReset={list.reset}
+        actions={
+          canConfigure || canConnect ? (
+            <AddIntegrationConnection
+              packageId={packageId}
+              detail={detail}
+              userId={user?.id}
+              onConfigure={onConfigure}
+              canConfigure={canConfigure}
+              canConnect={canConnect}
+              blockedReason={blockedByAdmin ? t("integration.auth.blockedByAdminHint") : undefined}
             />
-          ) : (
-            <span className="text-muted-foreground text-xs">—</span>
-          )}
-        </TableCell>
-
-        {/* Scope + share targets — sharing is the owner's consent, a governor can only withdraw it */}
-        <TableCell>
-          <div className="flex flex-col items-start gap-1.5">
-            <ConnectionScopeBadge
-              scope={connection.scope}
-              testId={`connection-scope-${connection.id}`}
-            />
-            <ConnectionShareEditor
-              connectionId={connection.id}
-              scope={connection.scope}
-              rowSpaceId={connection.spaceId}
-              hereSpaceId={spaceId}
-              targets={shareTargets}
-              sharedSpaceIds={connection.shared_space_ids ?? []}
-              sharedHere={connection.shared_here}
-              canShare={canShare}
-              canUnshareHere={canUnshareHere}
-              lockHint={lockHint}
-              pending={shareConnection.isPending || unshareConnection.isPending}
-              onShare={(targetSpaceId) =>
-                shareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
-              }
-              onUnshare={(targetSpaceId) =>
-                unshareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
-              }
-            />
-          </div>
-          {lockHint && (isOwn || canUnshareHere) && (
-            <p
-              className="text-muted-foreground mt-1 max-w-[16rem] text-[0.65rem] whitespace-normal"
-              data-testid={`connection-lock-reason-${connection.id}`}
-            >
-              {lockHint}
-            </p>
-          )}
-        </TableCell>
-
-        {/* Disconnect — owner-only: the endpoint is `/api/me/connections` */}
-        <TableCell className="text-right">
-          {isOwn ? (
-            <DisabledReasonTooltip reason={lockHint}>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-7"
-                onClick={onDelete}
-                disabled={disconnect.isPending || !!lockHint}
-                title={lockHint ? undefined : t("integration.connection.delete")}
-                data-testid={`connection-delete-${connection.id}`}
-              >
-                <Trash2 className="text-destructive size-3.5" />
-              </Button>
-            </DisabledReasonTooltip>
-          ) : (
-            <span className="text-muted-foreground text-xs">—</span>
-          )}
-        </TableCell>
-      </TableRow>
-      <ConfirmModal
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        title={t("btn.confirm", { ns: "common" })}
-        description={t("integration.connection.deleteConfirm")}
-        isPending={disconnect.isPending}
-        confirmDisabled={isQueryInFlight(deleteImpact)}
-        onConfirm={() =>
-          disconnect.mutate(
-            { params: { path: { connectionId: connection.id } } },
-            { onSuccess: () => setConfirmDelete(false) },
-          )
+          ) : undefined
         }
-      >
-        {confirmDelete && (
-          <>
-            <ConnectionDeleteImpact impact={deleteImpact} />
-            <ConnectionTeardownSteps connectionId={connection.id} />
-          </>
-        )}
-      </ConfirmModal>
-    </>
+      />
+      <DataTable
+        tableId="integration-connections"
+        surface="integrated"
+        label={t("integration.connection.tableLabel")}
+        columns={columns}
+        rows={rows}
+        rowKey={(connection) => connection.id}
+        empty={
+          <EmptyState
+            message={t(
+              list.search || sharing.length || methods.length
+                ? "integration.presentation.noMatch"
+                : "integration.auth.noConnection",
+            )}
+            icon={Plug}
+            compact
+          />
+        }
+      />
+    </div>
   );
 }

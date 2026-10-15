@@ -3,7 +3,7 @@
 import type { ResourceEntry } from "./types";
 import type { EditorState } from "../../hooks/use-editor-state";
 import type { MetadataState } from "./metadata-section";
-import type { SchemaField } from "./schema-section";
+import type { SchemaField } from "./types";
 import {
   getOrderedKeys,
   isFileField,
@@ -198,6 +198,20 @@ export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): vo
   }
 }
 
+/**
+ * An agent that declares an output schema must be able to return its result: the server
+ * refuses a manifest whose schema has no `output` runtime tool. Declaring the schema turns the
+ * tool on, so the author never meets that refusal. Returns the same reference when the tool
+ * is already there.
+ */
+export function withOutputTool(m: Record<string, unknown>): Record<string, unknown> {
+  const tools = getRuntimeTools(m);
+  if (tools.includes("output")) return m;
+  const next = { ...m };
+  setRuntimeTools(next, [...tools, "output"]);
+  return next;
+}
+
 // ─── Manifest accessors ─────────────────────────────────────
 
 export function getManifestName(m: Record<string, unknown>): { scope: string; id: string } {
@@ -273,8 +287,6 @@ export function setResourceEntries(
   type: "skills" | "integrations",
   entries: ResourceEntry[],
 ): void {
-  if (!m.dependencies) m.dependencies = {};
-  const deps = m.dependencies as Record<string, unknown>;
   if (type === "integrations") {
     writeManifestIntegrations(
       m,
@@ -287,21 +299,13 @@ export function setResourceEntries(
     if (e.id) record[e.id] = e.version ?? "*";
   }
   if (Object.keys(record).length > 0) {
-    deps[type] = record;
-  } else {
-    delete deps[type];
+    if (!m.dependencies) m.dependencies = {};
+    (m.dependencies as Record<string, unknown>)[type] = record;
+  } else if (m.dependencies) {
+    // An empty group writes nothing: a manifest that declares no
+    // `dependencies` stays that way, so the editor does not read as dirty.
+    delete (m.dependencies as Record<string, unknown>)[type];
   }
-}
-
-// ─── Resource entry helper ──────────────────────────────────
-
-export function toResourceEntry(r: {
-  id: string;
-  version?: string;
-  name?: string;
-  description?: string;
-}): ResourceEntry {
-  return { id: r.id, version: r.version ?? "*", name: r.name, description: r.description };
 }
 
 // ─── Manifest → SchemaFields (used by AgentEditorInner) ─────

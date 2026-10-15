@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError } from "@appstrate/ui/components/field";
 import { ApiError, client, type paths } from "../api/client";
 import { useAuth } from "../hooks/use-auth";
 import { useHostedAuthRedirect, isHostedAuthEnabled } from "../hooks/use-hosted-auth-redirect";
 import { orgStore } from "../stores/org-store";
-import { Spinner } from "../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { AuthLayout } from "../components/auth-layout";
+import { AuthLink } from "../components/auth-message";
 import { RegisterForm } from "../components/register-form";
 import { LoginForm } from "../components/login-form";
 import { roleI18nKey } from "../hooks/use-permissions";
@@ -142,7 +145,7 @@ export function InviteAcceptPage() {
               <span>App</span>strate
             </h1>
           </div>
-          <p className="text-destructive text-center text-sm">{serverError}</p>
+          <FieldError className="text-center">{serverError}</FieldError>
           <Button className="w-full" onClick={() => navigate("/")}>
             {t("invite.goHome")}
           </Button>
@@ -184,12 +187,12 @@ export function InviteAcceptPage() {
         <AuthLayout>
           <div className="flex flex-col gap-6">
             {inviteBanner}
-            <p className="text-destructive text-center text-sm">
+            <FieldError className="text-center">
               {t("invite.emailMismatch", {
                 userEmail: user.email,
                 inviteEmail: info.email,
               })}
-            </p>
+            </FieldError>
             <Button
               variant="outline"
               className="w-full"
@@ -218,10 +221,10 @@ export function InviteAcceptPage() {
       <AuthLayout>
         <div className="flex flex-col gap-6">
           {inviteBanner}
-          {serverError && <p className="text-destructive text-sm">{serverError}</p>}
-          <Button className="w-full" onClick={handleAcceptAuthenticated} disabled={accepting}>
-            {accepting ? <Spinner /> : t("invite.joinOrg", { org: info.org_name })}
-          </Button>
+          <FieldError>{serverError}</FieldError>
+          <PendingButton className="w-full" onClick={handleAcceptAuthenticated} pending={accepting}>
+            {t("invite.joinOrg", { org: info.org_name })}
+          </PendingButton>
         </div>
       </AuthLayout>
     );
@@ -236,7 +239,7 @@ export function InviteAcceptPage() {
         <AuthLayout>
           <div className="flex flex-col gap-6">
             {inviteBanner}
-            <p className="text-destructive text-center text-sm">{serverError}</p>
+            <FieldError className="text-center">{serverError}</FieldError>
             <Button className="w-full" onClick={() => navigate("/")}>
               {t("invite.goHome")}
             </Button>
@@ -260,32 +263,28 @@ export function InviteAcceptPage() {
   const switchToLogin = (
     <span className="text-muted-foreground text-center text-sm">
       {t("invite.hasAccount")}{" "}
-      <button
-        type="button"
-        className="hover:text-primary underline underline-offset-4"
+      <AuthLink
         onClick={() => {
           setServerError(null);
           setMode("login");
         }}
       >
         {t("login.login")}
-      </button>
+      </AuthLink>
     </span>
   );
 
   const switchToRegister = (
     <span className="text-muted-foreground text-center text-sm">
       {t("invite.noAccount")}{" "}
-      <button
-        type="button"
-        className="hover:text-primary underline underline-offset-4"
+      <AuthLink
         onClick={() => {
           setServerError(null);
           setMode("register");
         }}
       >
         {t("login.signup")}
-      </button>
+      </AuthLink>
     </span>
   );
 
@@ -294,9 +293,9 @@ export function InviteAcceptPage() {
       <div className="flex flex-col gap-6">
         {inviteBanner}
         {verificationLinkFailed && (
-          <p className="text-destructive text-sm">{t("preferences.verificationLinkExpired")}</p>
+          <FieldError>{t("preferences.verificationLinkExpired")}</FieldError>
         )}
-        {serverError && <p className="text-destructive text-sm">{serverError}</p>}
+        <FieldError>{serverError}</FieldError>
         {mode === "register" ? (
           <RegisterForm
             fixedEmail={info.email}

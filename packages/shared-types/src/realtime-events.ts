@@ -23,9 +23,10 @@ import { tokenUsageSchema } from "@appstrate/core/token-usage";
 // drizzle-orm + the whole table schema into the browser.
 import { runStatusValues } from "@appstrate/core/run-status";
 import { pricingStatusValues } from "@appstrate/db/pricing-status";
-import type { RunWireDto } from "./index.ts";
+import { runModelErrorWire, type RunWireDto } from "./index.ts";
+import { MODEL_ERROR_CATEGORIES } from "@appstrate/core/model-error";
 
-/** `run_update` — emitted by the `notify_run_change` trigger (13 fields). */
+/** `run_update` — emitted by the `notify_run_change` trigger (14 fields). */
 export const runUpdateEventSchema = z.object({
   operation: z.enum(["INSERT", "UPDATE"]),
   id: z.string(),
@@ -37,6 +38,14 @@ export const runUpdateEventSchema = z.object({
   spaceId: z.string(),
   scheduleId: z.string().nullable(),
   error: z.string().nullable(),
+  // The `model_error_*` columns, when the run failed on a model call (`RunModelError`).
+  modelError: z
+    .object({
+      category: z.enum(MODEL_ERROR_CATEGORIES),
+      status: z.number().int().nullable(),
+      message: z.string().nullable(),
+    })
+    .nullable(),
   startedAt: z.string().nullable(),
   completedAt: z.string().nullable(),
   duration: z.number().nullable(),
@@ -166,6 +175,11 @@ export function runUpdateToRunPatch(evt: RunUpdateEvent): Partial<RunWireDto> {
     spaceId: evt.spaceId,
     scheduleId: evt.scheduleId,
     error: evt.error,
+    model_error: runModelErrorWire({
+      category: evt.modelError?.category ?? null,
+      status: evt.modelError?.status ?? null,
+      message: evt.modelError?.message ?? null,
+    }),
     started_at: evt.startedAt,
     completed_at: evt.completedAt,
     duration: evt.duration,

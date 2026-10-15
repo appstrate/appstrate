@@ -11,6 +11,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient, type QueryCache } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
+import settingsFr from "../../locales/fr/settings.json";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -41,7 +42,7 @@ function observerEnabledFlags(cache: QueryCache, path: string): unknown[] {
 }
 
 /** Render the page for a caller holding exactly `permissions`. */
-function renderFor(permissions: string[]): { html: string; credentialFlags: unknown[] } {
+function renderFor(permissions: string[], tab = ""): { html: string; credentialFlags: unknown[] } {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   queryClient.setQueryData(
     ["orgs"],
@@ -56,13 +57,21 @@ function renderFor(permissions: string[]): { html: string; credentialFlags: unkn
       },
     ],
   );
+  // The personal tab waits on the org's settings before drawing its table.
+  queryClient.setQueryData(
+    ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
+    { personal_model_credentials: true },
+  );
   const credentialFlags = observerEnabledFlags(queryClient.getQueryCache(), CREDENTIALS_PATH);
   const snapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
     ...orgStore.getInitialState(),
     id: ORG_ID,
   });
   try {
-    return { html: render(<OrgSettingsModelsPage />, { queryClient }), credentialFlags };
+    return {
+      html: render(<OrgSettingsModelsPage />, { queryClient, initialEntries: [`/${tab}`] }),
+      credentialFlags,
+    };
   } finally {
     snapshot.mockRestore();
   }
@@ -83,14 +92,31 @@ describe("the models page for a member who can only read models", () => {
     expect(credentialFlags.filter((enabled) => enabled !== false)).toEqual([]);
   });
 
-  it("renders the models tab, and offers no credentials tab to open", () => {
+  it("reads both tabs, the organization's keys first", () => {
     const { html } = renderFor(MEMBER);
-    expect(html).toContain("Modèles");
-    expect(html).not.toContain("Clés de providers de modèles");
+    expect(html).toContain(settingsFr["providers.tabOrg"]);
+    expect(html).toContain(settingsFr["providers.tabPersonal"]);
+    expect(html).toContain(`aria-label="${settingsFr["providers.tableLabel"]}"`);
+    expect(html).not.toContain(settingsFr["providers.personalTableLabel"]);
+  });
+
+  it("reads the personal keys tab too, with no setting to change and no Actions menu", () => {
+    const { html } = renderFor(MEMBER, "?tab=personal");
+    expect(html).toContain(`aria-label="${settingsFr["providers.personalTableLabel"]}"`);
+    expect(html).not.toContain(settingsFr["orgSettings.personalModelCredentialsTitle"]);
+    expect(html).not.toContain("data-page-actions-trigger");
   });
 });
 
 describe("the models page for an admin who holds the credentials permission", () => {
+  it("offers the setting that opens the models to personal keys, on the personal keys tab", () => {
+    const { html } = renderFor(ADMIN, "?tab=personal");
+    expect(html).toContain(settingsFr["orgSettings.personalModelCredentialsTitle"]);
+    const orgTab = renderFor(ADMIN).html;
+    expect(orgTab).not.toContain(settingsFr["orgSettings.personalModelCredentialsTitle"]);
+    expect(orgTab).toContain("data-page-actions-trigger");
+  });
+
   it("CONTROL: registers the credentials list enabled, so the gate is the permission", () => {
     const { credentialFlags } = renderFor(ADMIN);
     expect(credentialFlags.length).toBeGreaterThan(0);

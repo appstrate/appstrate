@@ -6,9 +6,11 @@ import {
   type ConnectionPickerOptions,
   type ConnectionPickerPersistence,
 } from "./use-connection-picker";
+import { useIntegrationDetail, useIntegrationReadinessEntry } from "../../hooks/use-integrations";
 import { PickerMenu } from "./connection-picker-menu";
 import {
   BlockedPicker,
+  FailedPicker,
   LoadingPicker,
   LockedPicker,
   NoClientPicker,
@@ -41,13 +43,56 @@ const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
  * differs.
  */
 export function IntegrationConnectionPicker({
-  persistence = DEFAULT_PERSISTENCE,
-  ...options
-}: Omit<ConnectionPickerOptions, "persistence"> & { persistence?: ConnectionPickerPersistence }) {
-  const { t } = useTranslation(["agents", "settings"]);
-  const { integrationId } = options;
-  const picker = useConnectionPicker({ ...options, persistence });
+  integration,
+  ...rest
+}: Omit<
+  LoadedPickerProps,
+  "integrationId" | "manifest" | "authStatuses" | "agentTools" | "agentScopes"
+> & {
+  /** The agent's dependency: its manifest and auths are read here (one deduped query). */
+  integration: { id: string; tools?: string[] | "*"; scopes?: string[] };
+}) {
+  const { data: detail, isError } = useIntegrationDetail(integration.id);
+  if (!detail)
+    return isError ? (
+      <FailedPicker integrationId={integration.id} />
+    ) : (
+      <LoadingPicker integrationId={integration.id} />
+    );
+  return (
+    <LoadedPicker
+      {...rest}
+      integrationId={integration.id}
+      manifest={detail.manifest}
+      authStatuses={detail.auths}
+      agentTools={integration.tools}
+      agentScopes={integration.scopes}
+    />
+  );
+}
 
+type LoadedPickerProps = Omit<ConnectionPickerOptions, "persistence"> & {
+  persistence?: ConnectionPickerPersistence;
+  /** Inside a URL-param modal: the way out to the integration page leaves it (`useModalParam.leave`). */
+  onLeave?: (to: string) => void;
+};
+
+function LoadedPicker({
+  persistence = DEFAULT_PERSISTENCE,
+  onLeave,
+  ...options
+}: LoadedPickerProps) {
+  const { t } = useTranslation(["agents", "settings"]);
+  const { integrationId, agentPackageId, version } = options;
+  const picker = useConnectionPicker({ ...options, persistence });
+  // Same query the hook reads, deduped: it only answers whether that read failed.
+  const { isError } = useIntegrationReadinessEntry(integrationId, agentPackageId, version);
+
+  // Failure first, then loading — the order `collection.ts` owns, applied to a
+  // CONTROL rather than to a body. `isPending` is false once a query has
+  // failed, so a missing verdict alone would spin forever on a resolution that
+  // was never coming.
+  if (isError) return <FailedPicker integrationId={integrationId} />;
   if (!picker) return <LoadingPicker integrationId={integrationId} />;
 
   const {
@@ -99,7 +144,7 @@ export function IntegrationConnectionPicker({
 
   return (
     <div data-testid={`member-picker-${integrationId}`}>
-      <PickerMenu integrationId={integrationId} picker={picker} />
+      <PickerMenu integrationId={integrationId} picker={picker} onLeave={onLeave} />
       {/* A stored member is unusable: the run is refused until the set is re-picked
           — or, for the space default, until the member picks their own or an
           admin fixes the default. */}

@@ -1,0 +1,149 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * THE frame every shown file wears: the run's featured deliverable, the preview
+ * modal and the chat's side panel, so the same file reads the same wherever it
+ * is opened.
+ *
+ * Header: type icon and kind, name, size, retention. Actions: copy (text kinds
+ * only), download (when the caller may), open in a new tab (when the server
+ * minted a preview URL), full screen. The body is `FileViewer`,
+ * strict HTML sandbox included.
+ *
+ * Full screen is the browser's own (`requestFullscreen` on the frame), not a
+ * second modal: it works the same inside a page, a modal or a panel, and Escape
+ * leaves it natively.
+ */
+
+import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  Maximize2Icon,
+  Minimize2Icon,
+  XIcon,
+} from "lucide-react";
+import { formatBytes } from "../lib/format-bytes";
+import {
+  Artifact,
+  ArtifactAction,
+  ArtifactActions,
+  ArtifactContent,
+  ArtifactDescription,
+  ArtifactHeader,
+  ArtifactTitle,
+} from "@appstrate/ui/components/artifact";
+import { useFileDownload, useFileTextCopy } from "../hooks/use-files";
+import { mimeKind } from "../lib/files";
+import { ExpiryBadge, MimeIcon } from "./file-badges";
+import { FileViewer, type ViewableFile } from "./file-viewer";
+
+export function FileArtifact({
+  fileId,
+  file,
+  isLoading,
+  error,
+  fallbackName = "",
+  showName = true,
+  onClose,
+  className,
+}: {
+  fileId: string;
+  file?: ViewableFile & {
+    expiresAt: string | null;
+    capabilities: { download: boolean };
+  };
+  isLoading: boolean;
+  error: unknown;
+  /** The name to show before (or without) the fetched DTO. */
+  fallbackName?: string;
+  /** Off where the container already titles the file (the preview modal). */
+  showName?: boolean;
+  /** Where the frame IS the container (the chat's side panel): closing it closes that. */
+  onClose?: { label: string; onClick: () => void };
+  className?: string;
+}) {
+  const { t } = useTranslation("files");
+  const frameRef = useRef<HTMLDivElement>(null);
+  const download = useFileDownload();
+  const copyText = useFileTextCopy();
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    const sync = () => setFullscreen(document.fullscreenElement === frameRef.current);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
+
+  const name = fallbackName || file?.name || "";
+  const canDownload = file?.capabilities.download === true;
+  const canCopy = canDownload && file?.preview_kind === "text";
+  const previewUrl = file?.preview_url;
+
+  return (
+    <Artifact ref={frameRef} className={className}>
+      <ArtifactHeader>
+        <div className="flex min-w-0 items-center gap-2.5">
+          {file && <MimeIcon mime={file.mime} className="text-muted-foreground size-4 shrink-0" />}
+          <div className="min-w-0">
+            {showName && <ArtifactTitle title={name}>{name}</ArtifactTitle>}
+            {file && (
+              <ArtifactDescription className="flex flex-wrap items-center gap-x-2">
+                <span>{t(`type.${mimeKind(file.mime)}`)}</span>
+                <span className="tabular-nums">{formatBytes(file.size)}</span>
+                <ExpiryBadge expiresAt={file.expiresAt} />
+              </ArtifactDescription>
+            )}
+          </div>
+        </div>
+        <ArtifactActions>
+          {canCopy && (
+            <ArtifactAction
+              icon={copyText.copied ? CheckIcon : CopyIcon}
+              label={copyText.copied ? t("artifact.copied") : t("artifact.copy")}
+              onClick={() => void copyText.copy(fileId)}
+            />
+          )}
+          {canDownload && (
+            <ArtifactAction
+              icon={DownloadIcon}
+              label={t("row.download")}
+              onClick={() => void download(fileId, name)}
+            />
+          )}
+          {previewUrl && (
+            <ArtifactAction
+              icon={ExternalLinkIcon}
+              label={t("artifact.openInNewTab")}
+              // The preview route carries its own CSP `sandbox`, so the page stays
+              // opaque-origin at top level too; no opener, no Referer (signed URL).
+              onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
+            />
+          )}
+          <ArtifactAction
+            icon={fullscreen ? Minimize2Icon : Maximize2Icon}
+            label={fullscreen ? t("artifact.exitFullscreen") : t("artifact.fullscreen")}
+            onClick={() =>
+              void (fullscreen ? document.exitFullscreen() : frameRef.current?.requestFullscreen())
+            }
+          />
+          {onClose && (
+            <ArtifactAction icon={XIcon} label={onClose.label} onClick={onClose.onClick} />
+          )}
+        </ArtifactActions>
+      </ArtifactHeader>
+      <ArtifactContent>
+        <FileViewer
+          fileId={fileId}
+          file={file}
+          isLoading={isLoading}
+          error={error}
+          className="rounded-none border-0"
+        />
+      </ArtifactContent>
+    </Artifact>
+  );
+}

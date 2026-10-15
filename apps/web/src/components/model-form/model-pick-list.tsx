@@ -6,51 +6,104 @@
  * described it.
  */
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Badge } from "@appstrate/ui/components/badge";
+import { Star } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { Spinner } from "../spinner";
+import { cn } from "@appstrate/ui/cn";
 import type { ModelPickRow } from "@/lib/model-source";
+import { TextSkeleton } from "../loading-skeletons";
+
+/** What a row can offer beyond its tick, once the list is told how (the provider's models dialog). */
+interface RowExtras {
+  /** The upstream id starred as the organization's default. */
+  defaultId?: string | null;
+  onDefaultChange?: (id: string) => void;
+  /** The key needs reconnecting: the server refuses any of its models as the default. */
+  defaultUnavailable?: boolean;
+  /** The row that cannot be unticked: the organization's default model keeps its access. */
+  lockedId?: string | null;
+  /** The rows already saved, whose finer settings open in the model form. */
+  advancedIds?: ReadonlySet<string>;
+  onAdvanced?: (id: string) => void;
+}
 
 function PickRow({
   id,
   row,
   checked,
   onCheckedChange,
+  extras,
 }: {
   id: string;
   row: ModelPickRow;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
+  extras: RowExtras;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const sourceLabel =
-    row.source === "catalog"
-      ? t("models.form.discoverSourceCatalog")
-      : row.source === "endpoint"
-        ? t("models.form.discoverSourceEndpoint")
-        : null;
-
+  const locked = extras.lockedId === row.id;
+  const isDefault = extras.defaultId === row.id;
+  const starBlocked = extras.defaultUnavailable === true && !isDefault;
   return (
     <div className="flex items-center gap-2 px-3 py-2">
-      <Checkbox id={id} checked={checked} onCheckedChange={(v) => onCheckedChange(Boolean(v))} />
+      <span title={locked ? t("models.choice.defaultLocked") : undefined} className="inline-flex">
+        <Checkbox
+          id={id}
+          checked={checked}
+          disabled={locked}
+          onCheckedChange={(v) => onCheckedChange(Boolean(v))}
+        />
+      </span>
       <Label htmlFor={id} className="min-w-0 flex-1 cursor-pointer font-normal">
         <span className="block truncate">{row.label ?? row.id}</span>
         {row.label && (
           <span className="text-muted-foreground block truncate font-mono text-xs">{row.id}</span>
         )}
       </Label>
-      {sourceLabel && (
-        <Badge variant="secondary" className="shrink-0">
-          {sourceLabel}
-        </Badge>
-      )}
       {row.contextWindow !== null && (
         <span className="text-muted-foreground shrink-0 text-xs">
           {Math.round(row.contextWindow / 1000)}k
         </span>
+      )}
+      {extras.onAdvanced && extras.advancedIds?.has(row.id) && (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto shrink-0 p-0 text-xs"
+          onClick={() => extras.onAdvanced?.(row.id)}
+        >
+          {t("models.choice.advanced")}
+        </Button>
+      )}
+      {extras.onDefaultChange && checked && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7 shrink-0"
+          aria-pressed={isDefault}
+          aria-label={
+            isDefault
+              ? t("models.choice.isDefault", { name: row.label ?? row.id })
+              : t("models.choice.setDefault", { name: row.label ?? row.id })
+          }
+          title={starBlocked ? t("credentials.unavailableHint") : t("models.default")}
+          disabled={starBlocked}
+          onClick={() => extras.onDefaultChange?.(row.id)}
+        >
+          <Star
+            className={cn(
+              "size-4",
+              isDefault ? "fill-warning text-warning" : "text-muted-foreground",
+            )}
+          />
+        </Button>
       )}
     </div>
   );
@@ -63,10 +116,11 @@ export function ModelPickList({
   search,
   onSearchChange,
   isLoading,
-  loadingText,
   emptyText,
   grouped,
-}: {
+  footer,
+  ...extras
+}: RowExtras & {
   rows: readonly ModelPickRow[];
   selectedIds: readonly string[];
   /** The shown rows the operator just checked or unchecked. */
@@ -74,10 +128,11 @@ export function ModelPickList({
   search: string;
   onSearchChange: (value: string) => void;
   isLoading: boolean;
-  loadingText: string;
   emptyText: string;
   /** Split into the provider's curated group and the rest — catalog only. */
   grouped?: boolean;
+  /** The last line of the list, inside its frame (« Ajouter un identifiant de modèle »). */
+  footer?: ReactNode;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   // `mdl-pick-N` names the Nth row currently shown: grouping cannot renumber
@@ -101,6 +156,7 @@ export function ModelPickList({
           row={row}
           checked={selectedIds.includes(row.id)}
           onCheckedChange={(checked) => onSelectionChange([row], checked)}
+          extras={extras}
         />
       ))}
     </>
@@ -115,31 +171,27 @@ export function ModelPickList({
         onChange={(e) => onSearchChange(e.target.value)}
         placeholder={t("models.form.modelSearchPlaceholder")}
       />
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id="mdl-pick-all"
-          checked={allSelected}
-          onCheckedChange={(v) => onSelectionChange([...rows], Boolean(v))}
-        />
-        <Label htmlFor="mdl-pick-all" className="cursor-pointer font-normal">
-          {t("models.form.discoverSelectAll")}
-        </Label>
-      </div>
-      <div className="max-h-64 divide-y overflow-y-auto rounded-md border">
-        {isLoading ? (
-          <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
-            <Spinner className="size-3" />
-            {loadingText}
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="text-muted-foreground px-3 py-6 text-center text-sm">{emptyText}</div>
-        ) : (
-          <>
-            {featured.length > 0 && section(featured, t("models.form.modelGroupFeatured"))}
-            {rest.length > 0 &&
-              section(rest, featured.length > 0 ? t("models.form.modelGroupAll") : null)}
-          </>
-        )}
+      <CheckboxField
+        id="mdl-pick-all"
+        label={t("models.form.discoverSelectAll")}
+        checked={allSelected}
+        onCheckedChange={(v) => onSelectionChange([...rows], Boolean(v))}
+      />
+      <div className="divide-y rounded-md border">
+        <div className="max-h-64 divide-y overflow-y-auto">
+          {isLoading ? (
+            <TextSkeleton lines={4} className="p-3" />
+          ) : rows.length === 0 ? (
+            <div className="text-muted-foreground px-3 py-6 text-center text-sm">{emptyText}</div>
+          ) : (
+            <>
+              {featured.length > 0 && section(featured, t("models.form.modelGroupFeatured"))}
+              {rest.length > 0 &&
+                section(rest, featured.length > 0 ? t("models.form.modelGroupAll") : null)}
+            </>
+          )}
+        </div>
+        {footer}
       </div>
     </div>
   );

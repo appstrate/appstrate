@@ -13,6 +13,11 @@ export function TranslatedUiLabels({ children }: { children: ReactNode }) {
       sidebar: t("nav.sidebar"),
       sidebarDescription: t("nav.sidebarDescription"),
       toggleSidebar: t("nav.toggleSidebar"),
+      carouselPrevious: t("carousel.previous"),
+      carouselNext: t("carousel.next"),
+      copy: t("btn.copy"),
+      copied: t("btn.copied"),
+      copyFailed: t("error.copyFailed"),
     }),
     [t],
   );

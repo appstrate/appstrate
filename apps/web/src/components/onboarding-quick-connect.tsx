@@ -18,16 +18,14 @@
  * accidentally create extra rows.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useModalTarget } from "../hooks/use-modal-param";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, Plug } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@appstrate/ui/cn";
-import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
-import { OAuthPairingBody } from "./oauth-pairing-body";
-import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
+import { Spinner } from "@appstrate/ui/components/spinner";
+import { PairingModal } from "./pairing-modal";
 import { PROVIDER_ICONS } from "./icons";
 import {
   useModelProviderCredentials,
@@ -41,15 +39,23 @@ import { hasOrgSubscription } from "../lib/oauth-pairing";
 interface CardProps {
   entry: ProviderRegistryEntry;
   alreadyConnected: boolean;
+  /** The pairing modal is open: `?connectProvider=<providerId>` names this card. */
+  dialogOpen: boolean;
+  onOpenDialog: () => void;
+  onCloseDialog: () => void;
 }
 
-function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
+function QuickConnectCard({
+  entry,
+  alreadyConnected,
+  dialogOpen,
+  onOpenDialog,
+  onCloseDialog,
+}: CardProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { seed } = useAutoSeedFeaturedModels();
 
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [working, setWorking] = useState(false);
-  const oauthDismiss = usePairingDismissConfirm(() => setDialogOpen(false));
 
   // Inline lookup to satisfy `react-hooks/static-components` — the rule
   // flags PascalCase consts assigned from helper calls. Equivalent to
@@ -58,7 +64,7 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
 
   const openDialog = () => {
     if (alreadyConnected || working) return;
-    setDialogOpen(true);
+    onOpenDialog();
   };
 
   const handleConnected = async (newId: string) => {
@@ -126,28 +132,17 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
       </button>
 
       {dialogOpen && (
-        <Modal
-          open
-          onClose={oauthDismiss.requestClose}
+        <PairingModal
           title={t("credentials.oauth.cliStageTitle")}
-          actions={
-            <Button variant="ghost" onClick={oauthDismiss.requestClose}>
-              {t("credentials.oauth.close")}
-            </Button>
-          }
-        >
-          <OAuthPairingBody
-            providerId={entry.providerId}
-            target={{ ownerType: "org" }}
-            onConnected={(newId) => {
-              setDialogOpen(false);
-              void handleConnected(newId);
-            }}
-            onBusyChange={oauthDismiss.onBusyChange}
-          />
-        </Modal>
+          onClose={onCloseDialog}
+          providerId={entry.providerId}
+          target={{ ownerType: "org" }}
+          onConnected={(newId) => {
+            onCloseDialog();
+            void handleConnected(newId);
+          }}
+        />
       )}
-      {oauthDismiss.confirmDialog}
     </>
   );
 }
@@ -157,17 +152,50 @@ export function OnboardingQuickConnect() {
   const credentialsQuery = useModelProviderCredentials();
 
   const entries = quickConnectProviders(registryQuery.data);
+  // A pairing has an address. Its token lives in memory, so a reload does not resume it:
+  // the modal opens again and starts a fresh pairing (the old token expires on its own).
+  const connect = useModalTarget(
+    "connectProvider",
+    registryQuery.data && entries,
+    (entry) => entry.providerId,
+  );
+
+  // Only an organization subscription can serve the models the onboarding seeds: a member's
+  // own one does not make the card connected.
+  const isConnected = (providerId: string) => hasOrgSubscription(credentialsQuery.data, providerId);
+
+  // A link to a pairing for a provider that is already connected has nothing
+  // to pair: the modal closes. Judged ONCE, when the modal opens and the
+  // credentials are known: a connection that arrives DURING the pairing is
+  // `onConnected`'s to finish (it seeds the models), not this effect's to cut.
+  const judged = useRef<string | null>(null);
+  const { value: connectValue, target: connectTarget, close: closeConnect } = connect;
+  const credentialsKnown = credentialsQuery.data !== undefined;
+  const connectedAtOpen = connectTarget ? isConnected(connectTarget.providerId) : false;
+  useEffect(() => {
+    if (connectValue === null) {
+      judged.current = null;
+      return;
+    }
+    if (!connectTarget || !credentialsKnown || judged.current === connectValue) return;
+    judged.current = connectValue;
+    if (connectedAtOpen) closeConnect();
+  }, [connectValue, connectTarget, credentialsKnown, connectedAtOpen, closeConnect]);
 
   if (entries.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-2">
       {entries.map((entry) => {
+        const alreadyConnected = isConnected(entry.providerId);
         return (
           <QuickConnectCard
             key={entry.providerId}
             entry={entry}
-            alreadyConnected={hasOrgSubscription(credentialsQuery.data, entry.providerId)}
+            alreadyConnected={alreadyConnected}
+            dialogOpen={connect.target?.providerId === entry.providerId}
+            onOpenDialog={() => connect.open(entry.providerId)}
+            onCloseDialog={connect.close}
           />
         );
       })}

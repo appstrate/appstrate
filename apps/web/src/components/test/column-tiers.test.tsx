@@ -1,0 +1,415 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Every column set, measured against the thresholds it degrades on.
+ *
+ * A tier is a promise: "once the table reaches 36rem, these columns fit". That
+ * promise is arithmetic — the sum of the tier's floors plus its gaps and
+ * padding — and nothing in the type system checks it. Unchecked, it lets eight
+ * columns crush into 700px with the agent name, the only thing naming a run,
+ * at 6px.
+ *
+ * So the arithmetic is done here, on the real sets, at the real thresholds.
+ * A column set that does not fit fails a test instead of a screen.
+ */
+
+import { describe, it, expect } from "bun:test";
+import type { ReactElement } from "react";
+import type { IntegrationManifestView } from "../../hooks/use-integrations.ts";
+import type { DataColumn } from "../data-table.tsx";
+import { useRunColumns } from "../run-columns.tsx";
+import { useScheduleColumns } from "../schedule-columns.tsx";
+import { usePackageColumns } from "../package-columns.tsx";
+import { useProxyColumns } from "../../pages/org-settings/proxy-columns.tsx";
+import {
+  useConnectionColumns,
+  useIntegrationClientColumns,
+} from "../integration-detail/integration-columns.tsx";
+import { useMemberColumns } from "../../pages/org-settings/member-columns.tsx";
+import { useRoleColumns } from "../../pages/org-settings/role-columns.tsx";
+import { useSpaceMemberColumns } from "../../pages/workspace-settings/space-member-columns.tsx";
+import { useInvitationColumns } from "../invitation-columns.tsx";
+import {
+  useCatalogueActionsColumn,
+  useCatalogueOriginColumn,
+  useCatalogueSelectColumn,
+  useCatalogueSpaceColumns,
+} from "../catalogue-columns.tsx";
+import { useUserSpaceColumns } from "../../pages/org-settings/user-space-columns.tsx";
+import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
+import { useProviderColumns } from "../provider-columns.tsx";
+import { usePersonalServiceColumns } from "../personal-service-columns.tsx";
+import { useOAuthClientColumns } from "../../modules/oidc/components/oauth-client-columns.tsx";
+import { useCliSessionColumns } from "../cli-session-columns.tsx";
+import { useEndUserColumns } from "../../pages/end-user-columns.tsx";
+import { useWebhookColumns } from "../../modules/webhooks/components/webhook-columns.tsx";
+import { useDocumentColumns } from "../document-columns.tsx";
+import { useIntegrationListColumns } from "../../pages/integration-list-columns.tsx";
+import { useApiKeyColumns } from "../../pages/api-key-columns.tsx";
+import { useMemoryColumns } from "../persistence/memory-columns.tsx";
+import { usePackageFileColumns } from "../package-files/package-files-columns.tsx";
+import { useCatalogueSharedColumns } from "../catalogue-shared-columns.tsx";
+import { usePinColumns } from "../integration-detail/pin-columns.tsx";
+import i18n, { i18nReady } from "../../i18n.ts";
+import { render } from "../../test/render.tsx";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
+
+/**
+ * Tailwind's `@xl` and `@4xl`, the two container widths `DataTable` reads —
+ * written out here rather than imported from it ON PURPOSE. A test that shares
+ * the number it is checking tests nothing: it is the translation of the class
+ * name into pixels, knowledge that lives in Tailwind, and the day someone moves
+ * a column to a different tier this file has to disagree with them.
+ */
+const THRESHOLD = { 2: 36 * 16, 3: 56 * 16 } as const;
+/** `px-3 gap-3` below `@xl`, `px-4 gap-4` from there up. */
+const SPACING = { 1: 12, 2: 16, 3: 16 } as const;
+
+/** All a tier measurement needs from a column, and the nature it declares. */
+type Track = Pick<DataColumn<never>, "width" | "tier" | "control"> & { header?: string };
+
+/** The narrowest the browser will let a track be. */
+function floor(width: string): number {
+  const fixed = /^(\d+)px$/.exec(width);
+  if (fixed) return Number(fixed[1]);
+  const elastic = /^minmax\((\d+)px,/.exec(width);
+  if (elastic) return Number(elastic[1]);
+  throw new Error(`unreadable track: ${width}`);
+}
+
+function widthOf(columns: Track[], tier: 1 | 2 | 3): number {
+  const shown = columns.filter((c) => (c.tier ?? 1) <= tier);
+  const space = SPACING[tier];
+  return shown.reduce((sum, c) => sum + floor(c.width), 0) + space * (shown.length + 1);
+}
+
+/** Runs the hook the way a screen does, and hands back what it returned. */
+function columnsFrom<T>(useColumns: () => DataColumn<T>[]): Track[] {
+  let captured: Track[] = [];
+  function Probe(): ReactElement | null {
+    captured = useColumns();
+    return null;
+  }
+  render(<Probe />);
+  return captured;
+}
+
+const SETS = {
+  // Composed exactly as `OrgCatalogueModal` composes it: the tick, the list's
+  // own set minus what a catalogue cannot answer, then provenance, one column
+  // per space, and the one deed.
+  packageCatalogue: () => {
+    return columnsFrom(() => [
+      useCatalogueSelectColumn({
+        selected: new Set<string>(),
+        allSelected: false,
+        selectable: () => true,
+        onToggle: () => {},
+        onToggleAll: () => {},
+      }),
+      ...usePackageColumns("agent").filter(
+        (c) => !["state", "actions", "origin", "keywords"].includes(c.id),
+      ),
+      // The organization view, the wider of the two: provenance, then one
+      // column per space the caller reaches — three here, which is what the
+      // arithmetic below has to hold.
+      useCatalogueOriginColumn("Globex"),
+      ...useCatalogueSpaceColumns({
+        spaces: [
+          { id: "spc_a", name: "Default" },
+          { id: "spc_b", name: "Production" },
+          { id: "spc_c", name: "Bac à sable" },
+        ],
+        // The space the app stands in carries an "ici" pill beside its name:
+        // the widest head this column set can draw.
+        currentSpaceId: "spc_a",
+        placementOf: () => undefined,
+        gateOf: () => ({ allowed: true, refusal: null }),
+        busy: false,
+        onSetActive: () => {},
+      }),
+      useCatalogueActionsColumn({
+        isPending: false,
+        deedsOf: () => ({ moveHome: true, share: true, revokeFrom: [] }),
+        spaceNameOf: (id) => id,
+        onOpen: () => {},
+        onMoveHome: () => {},
+        onShare: () => {},
+        onRevoke: () => {},
+      }),
+    ]);
+  },
+  userSpaces: () =>
+    columnsFrom(() =>
+      useUserSpaceColumns({
+        member: { userId: "usr_x", role: "member" },
+        editable: () => true,
+        roles: [],
+        roleOptions: [],
+        isChangingRole: false,
+        onChangeRole: () => {},
+      }),
+    ),
+  roles: () =>
+    columnsFrom(() =>
+      useRoleColumns({ canDelete: () => true, isDeleting: false, onDelete: () => {} }),
+    ),
+  spaceMembers: () =>
+    columnsFrom(() =>
+      useSpaceMemberColumns({
+        editable: () => true,
+        roles: [],
+        roleOptions: [],
+        isChangingRole: false,
+        onChangeRole: () => {},
+        removal: () => "remove",
+        isRemoving: false,
+        removeDisabled: false,
+        onRemove: () => {},
+      }),
+    ),
+  invitations: () =>
+    columnsFrom(() =>
+      useInvitationColumns({
+        assignments: () => [],
+        canEdit: true,
+        isCanceling: false,
+        onEdit: () => {},
+        onCopyLink: () => {},
+        onCancel: () => {},
+      }),
+    ),
+  runs: () => columnsFrom(() => useRunColumns({ agentName: () => "Compta trimestrielle" })),
+  schedules: () => columnsFrom(() => useScheduleColumns({ agentName: () => "Wiki-brain" })),
+  packages: () => columnsFrom(() => usePackageColumns("agent")),
+  // The organization's providers table, no Type column.
+  providers: () =>
+    columnsFrom(() =>
+      useProviderColumns({
+        registry: undefined,
+        testingIds: new Set(),
+        testResults: {},
+        renamingId: null,
+        onRenamingChange: () => {},
+        onTest: () => {},
+        onRename: async () => {},
+        onChooseModels: () => {},
+        onChangeKey: () => {},
+        onReconnect: () => {},
+        onDelete: () => {},
+        onSetDefault: () => {},
+        canWriteModels: true,
+      }),
+    ),
+  // Preferences: the caller's own providers, with the kind of each.
+  myProviders: () =>
+    columnsFrom(() =>
+      useProviderColumns({
+        registry: undefined,
+        testingIds: new Set(),
+        testResults: {},
+        renamingId: null,
+        onRenamingChange: () => {},
+        onTest: () => {},
+        onRename: async () => {},
+        onChangeKey: () => {},
+        onReconnect: () => {},
+        onDelete: () => {},
+        canWriteModels: false,
+        showType: true,
+      }),
+    ),
+  // The services open to personal keys (Settings › Models › Clés perso).
+  personalServices: () =>
+    columnsFrom(() =>
+      usePersonalServiceColumns({ canWriteModels: true, onChooseModels: () => {} }),
+    ),
+  proxies: () =>
+    columnsFrom(() =>
+      useProxyColumns({
+        testingIds: new Set(),
+        testResults: {},
+        settingDefaultId: null,
+        onTest: () => {},
+        onEdit: () => {},
+        onDelete: () => {},
+        onSetDefault: () => {},
+      }),
+    ),
+  integrationClients: () =>
+    columnsFrom(() =>
+      useIntegrationClientColumns({
+        canUseHere: true,
+        canManageOrg: true,
+        canChooseOrgDefault: true,
+        pendingClientRef: null,
+        onUseHere: () => {},
+        onUseForOrg: () => {},
+        onEdit: () => {},
+        onPromote: () => {},
+        onDelete: () => {},
+      }),
+    ),
+  members: () =>
+    columnsFrom(() =>
+      useMemberColumns({
+        assignableRoles: () => ["admin", "member"],
+        canRemove: () => true,
+        isChangingRole: false,
+        isRemoving: false,
+        onChangeRole: () => {},
+        onRemove: () => {},
+        spaces: () => ["Production"],
+      }),
+    ),
+  spaces: () => columnsFrom(() => useSpaceColumns({ defaultLabel: "Défaut" })),
+  connections: () =>
+    columnsFrom(() =>
+      useConnectionColumns({
+        packageId: "@appstrate/google-drive",
+        manifest: {} as IntegrationManifestView,
+        userId: "user_1",
+        isAdmin: true,
+        authForConnection: () => ({ authKey: "drive", authType: "oauth2", canRenew: true }),
+        methodLabel: () => "OAuth",
+      }),
+    ),
+  oauthClients: () =>
+    columnsFrom(() =>
+      useOAuthClientColumns({
+        onEdit: () => {},
+      }),
+    ),
+  cliSessions: () =>
+    columnsFrom(() =>
+      useCliSessionColumns({
+        revokingFamilyId: null,
+        onRevoke: () => {},
+      }),
+    ),
+  endUsers: () =>
+    columnsFrom(() =>
+      useEndUserColumns({
+        deletingUserId: null,
+        onEdit: () => {},
+        onDelete: () => {},
+      }),
+    ),
+  webhooks: () => columnsFrom(() => useWebhookColumns()),
+  documents: () =>
+    columnsFrom(() =>
+      useDocumentColumns({
+        pendingKeepId: null,
+        showRunLink: true,
+        onDownload: () => {},
+        onKeep: () => {},
+        onDelete: () => {},
+      }),
+    ),
+  integrations: () => columnsFrom(() => useIntegrationListColumns()),
+  memory: () =>
+    columnsFrom(() =>
+      useMemoryColumns({ isDeleting: () => false, onCopy: () => {}, onDelete: () => {} }),
+    ),
+  packageFiles: () => columnsFrom(() => usePackageFileColumns("agent", {})),
+  catalogueShared: () =>
+    columnsFrom(() =>
+      useCatalogueSharedColumns({
+        spaceNameOf: (id) => id,
+        mayActivateIn: () => true,
+        busy: false,
+        onActivate: () => {},
+      }),
+    ),
+  integrationPins: () =>
+    columnsFrom(() =>
+      usePinColumns({
+        agentName: (pin) => pin.agent_package_id,
+        pinnable: [],
+        connections: [],
+        isDeleting: () => false,
+        onDelete: () => {},
+      }),
+    ),
+  apiKeys: () =>
+    columnsFrom(() =>
+      useApiKeyColumns({
+        availableScopes: ["agents:read", "agents:run", "runs:read"],
+        revokingKeyId: null,
+        onRevoke: () => {},
+      }),
+    ),
+};
+
+/**
+ * Tables that scroll sideways whatever the width (`columnMode="scroll"`): the
+ * tier arithmetic below is the promise of a table that DROPS columns, and this
+ * one drops none.
+ */
+const SCROLLS = new Set(["packageCatalogue"]);
+
+describe.each(Object.entries(SETS))("the %s column set", (name, load) => {
+  const columns = load();
+
+  /**
+   * The narrowest container a table of this family is actually given, MEASURED
+   * rather than assumed. Not 390 — the window — because the shell's gutter
+   * takes the difference: at a 390px window every table on a page is 348px
+   * wide, and one inside the settings dialog is 340. A set that fits 390 but
+   * not 340 clips its last column inside a frame that is `overflow-hidden`.
+   *
+   * One number for both containers, the tighter of the two. A set that fits 340
+   * is safe on a page and in the dialog, and nobody has to remember which is
+   * which.
+   */
+  const TIER_ONE_BUDGET = 340;
+
+  /**
+   * A column that carries a control (a select, a switch, a button, an action
+   * link) is never hidden for lack of room: a person who cannot see it cannot
+   * act, and a table that does not fit scrolls sideways instead. So it declares
+   * `control: true`, and a control with a `tier` is the defect this catches.
+   * The `DataColumn` type forbids it as well; this check also holds when a
+   * column set is built with a cast.
+   */
+  it("never gives a control, or the row's end, a tier to hide at", () => {
+    for (const column of columns) {
+      if (column.control) expect(column.tier).toBeUndefined();
+      // The row's end has no head and holds the row's actions.
+      if (column.header === "") expect(column.tier).toBeUndefined();
+    }
+  });
+
+  /**
+   * The controls are left out of the phone budget on purpose: they are never
+   * hidden, so on a phone a table that carries one scrolls sideways (its name
+   * and its row's end held in place) rather than crushing it or taking it away.
+   * What has to fit is what a phone is promised without scrolling: the rest.
+   */
+  it.skipIf(SCROLLS.has(name))(
+    "fits its tier-one floors, bar the controls, in the narrowest container it is given",
+    () => {
+      expect(
+        widthOf(
+          columns.filter((c) => !c.control),
+          1,
+        ),
+      ).toBeLessThanOrEqual(TIER_ONE_BUDGET);
+    },
+  );
+
+  it.skipIf(SCROLLS.has(name)).each([2, 3] as const)(
+    "fits the tier-%i floors inside the tier-%i threshold",
+    (tier) => {
+      expect(widthOf(columns, tier)).toBeLessThanOrEqual(THRESHOLD[tier]);
+    },
+  );
+
+  it("was actually read", () => {
+    // A hook that threw would hand back an empty array, and every width
+    // assertion above would pass on nothing at all.
+    expect(columns.length).toBeGreaterThan(2);
+  });
+});

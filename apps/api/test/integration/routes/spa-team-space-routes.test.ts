@@ -46,7 +46,7 @@ const CREATE_IN_PERSONAL_SPACE: Record<
   string,
   (ctx: TestContext, personalId: string) => Response | Promise<Response>
 > = {
-  "/org-settings/space/members": async (ctx, personalId) => {
+  "/workspace-settings/members": async (ctx, personalId) => {
     const colleague = await createTestUser();
     await addOrgMember(ctx.orgId, colleague.id, "member");
     return app.request(`/api/spaces/${personalId}/members`, {
@@ -55,13 +55,13 @@ const CREATE_IN_PERSONAL_SPACE: Record<
       body: JSON.stringify({ userId: colleague.id, preset_role: "viewer" }),
     });
   },
-  "/org-settings/space/api-keys": (ctx, personalId) =>
+  "/workspace-settings/api-keys": (ctx, personalId) =>
     app.request("/api/api-keys", {
       method: "POST",
       headers: json(ctx, personalId),
       body: JSON.stringify({ name: "headless", scopes: ["agents:read"] }),
     }),
-  "/end-users": (ctx, personalId) =>
+  "/workspace-settings/end-users": (ctx, personalId) =>
     app.request("/api/end-users", {
       method: "POST",
       headers: json(ctx, personalId),
@@ -105,8 +105,8 @@ describe("SPA teamSpaceOnly routes ↔ personal-space refusals", () => {
   }
 
   it("CONTROL: an unflagged space page keeps its write in a personal space", async () => {
-    // `/org-settings/space/general` stays: renaming one's own space is allowed.
-    expect("teamSpaceOnly" in ROUTE_ACCESS["/org-settings/space/general"]).toBe(false);
+    // `/workspace-settings/general` stays: renaming one's own space is allowed.
+    expect("teamSpaceOnly" in ROUTE_ACCESS["/workspace-settings/general"]).toBe(false);
     const res = await app.request(`/api/spaces/${personalId}`, {
       method: "PATCH",
       headers: json(ctx, personalId),

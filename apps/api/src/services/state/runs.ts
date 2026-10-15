@@ -19,6 +19,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
+import { runListConditions } from "../../lib/run-list-filters.ts";
 import { db, type Db } from "@appstrate/db/client";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import {
@@ -69,6 +70,7 @@ import {
 } from "@appstrate/core/integration";
 import type { z } from "zod";
 import { tokenUsageSchema, type TokenUsage } from "@appstrate/core/token-usage";
+import { runModelErrorWire } from "@appstrate/shared-types";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
@@ -171,6 +173,9 @@ const enrichedRunColumns = {
   artifacts: runs.artifacts,
   checkpoint: runs.checkpoint,
   error: runs.error,
+  modelErrorCategory: runs.modelErrorCategory,
+  modelErrorStatus: runs.modelErrorStatus,
+  modelErrorMessage: runs.modelErrorMessage,
   metadata: runs.metadata,
   startedAt: runs.startedAt,
   completedAt: runs.completedAt,
@@ -308,6 +313,11 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     artifacts: row.artifacts ?? null,
     checkpoint: row.checkpoint,
     error: row.error,
+    model_error: runModelErrorWire({
+      category: row.modelErrorCategory,
+      status: row.modelErrorStatus,
+      message: row.modelErrorMessage,
+    }),
     metadata: row.metadata,
     started_at: row.startedAt?.toISOString() ?? null,
     completed_at: row.completedAt?.toISOString() ?? null,
@@ -1704,17 +1714,28 @@ export async function listPackageRuns(
     limit?: number;
     offset?: number;
     actor?: Actor | null;
+    status?: RunStatus[];
+    search?: string;
     /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
     visibility?: SQL;
     canReadAgentInput?: boolean;
   } = {},
 ) {
-  const { limit = 50, offset = 0, actor = null, visibility, canReadAgentInput = false } = options;
+  const {
+    limit = 50,
+    offset = 0,
+    actor = null,
+    status,
+    search,
+    visibility,
+    canReadAgentInput = false,
+  } = options;
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     eq(runs.spaceId, scope.spaceId),
   ];
+  conditions.push(...runListConditions({ status, search }));
   if (visibility) conditions.push(visibility);
   return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
 }
@@ -1737,16 +1758,20 @@ interface ListGlobalRunsOptions {
   offset?: number;
   kind?: GlobalRunKind;
   /**
-   * `RunStatus`, not `string`. This used to take a `string` and quietly drop
-   * anything outside the enum (`if (status && isRunStatus(status))`), which
-   * turned a typo into "no status filter" — the whole list, read as filtered.
-   * The route now rejects an unknown value with a 400; the narrow type is what
-   * keeps a future caller from re-opening that hole.
+   * Any of these statuses — "everything that broke" is `["failed", "timeout"]`.
+   * `RunStatus`, not `string`: the route refuses an unknown value with a 400,
+   * and the narrow type keeps a caller from turning a typo into no filter.
    */
-  status?: RunStatus;
+  status?: RunStatus[];
   startDate?: Date;
   endDate?: Date;
   chatSessionId?: string;
+  /**
+   * Free text: the agent a run executed (its scope and name, as stamped on the
+   * run) and the error it ended on; digits also match the run number
+   * (`runSearchCondition`). A substring match inside one space, unindexed.
+   */
+  search?: string;
   actor?: Actor | null;
   /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
   visibility?: SQL;
@@ -1765,6 +1790,7 @@ export async function listGlobalRuns(
     startDate,
     endDate,
     chatSessionId,
+    search,
     actor = null,
     visibility,
     canReadAgentInput = false,
@@ -1772,7 +1798,7 @@ export async function listGlobalRuns(
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
   if (visibility) conditions.push(visibility);
-  if (status) conditions.push(eq(runs.status, status));
+  conditions.push(...runListConditions({ status, search }));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (chatSessionId) {
@@ -1818,16 +1844,29 @@ export async function listScheduleRuns(
     limit?: number;
     offset?: number;
     actor?: Actor | null;
+    status?: RunStatus[];
+    search?: string;
     visibility?: SQL;
     canReadAgentInput?: boolean;
   } = {},
 ) {
-  const { limit = 20, offset = 0, actor = null, visibility, canReadAgentInput = false } = options;
+  const {
+    limit = 20,
+    offset = 0,
+    actor = null,
+    status,
+    search,
+    visibility,
+    canReadAgentInput = false,
+  } = options;
+  const conditions = [eq(runs.scheduleId, scheduleId)];
+  conditions.push(...runListConditions({ status, search }));
+  if (visibility) conditions.push(visibility);
   return listRunsWithFilter(
     scopedWhere(runs, {
       orgId: scope.orgId,
       spaceId: scope.spaceId,
-      extra: [eq(runs.scheduleId, scheduleId), ...(visibility ? [visibility] : [])],
+      extra: conditions,
     })!,
     limit,
     offset,

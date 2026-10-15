@@ -18,16 +18,13 @@ import {
   AuiIf,
   useAuiEvent,
   useAuiState,
-  type ReasoningGroupComponent,
-  type ReasoningMessagePartComponent,
+  unstable_useComposerInput,
 } from "@assistant-ui/react";
 import {
   AlertTriangleIcon,
   ArrowDownIcon,
   CheckIcon,
-  ChevronRightIcon,
   CopyIcon,
-  FileIcon,
   PaperclipIcon,
   RotateCcwIcon,
   SendHorizontalIcon,
@@ -36,12 +33,8 @@ import {
 } from "lucide-react";
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@appstrate/ui/components/collapsible";
-import { MarkdownText } from "./markdown-text.tsx";
+import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
+import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
   InvokeOperationToolUI,
@@ -51,7 +44,7 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
-import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
+import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
@@ -59,11 +52,24 @@ import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
 import { isImageMime } from "@appstrate/core/mime";
+import { takesDraft } from "./composer-draft.ts";
 
-export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
+export function Thread({
+  composerSlot,
+  initialComposerDraft,
+}: {
+  composerSlot?: React.ReactNode;
+  initialComposerDraft?: string;
+}) {
+  // Held above the welcome and footer composers: the draft seeds the conversation once.
+  const draftSeededRef = React.useRef(false);
   return (
     <ThreadPrimitive.Root
-      className="bg-background flex h-full flex-col"
+      // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
+      // this shell are grey with white cards on top (the composer, the tool
+      // cards). `background` is shadcn's component surface, which would make
+      // the chat the one flat white screen in the product.
+      className="bg-canvas flex h-full flex-col"
       style={{ ["--thread-max-width" as string]: "42rem" }}
     >
       {/* Register the rich tool cards (these render nothing themselves). */}
@@ -75,7 +81,11 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
       <AuiIf condition={(s) => s.thread.isEmpty}>
-        <ThreadWelcome composerSlot={composerSlot} />
+        <ThreadWelcome
+          composerSlot={composerSlot}
+          initialComposerDraft={initialComposerDraft}
+          draftSeededRef={draftSeededRef}
+        />
       </AuiIf>
 
       <AuiIf condition={(s) => !s.thread.isEmpty}>
@@ -91,9 +101,13 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
 
           <div className="min-h-6 flex-grow" />
 
-          <ThreadPrimitive.ViewportFooter className="bg-background sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
+          <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
             <ScrollToBottom />
-            <Composer slot={composerSlot} />
+            <Composer
+              slot={composerSlot}
+              initialDraft={initialComposerDraft}
+              draftSeededRef={draftSeededRef}
+            />
             <Disclaimer />
           </ThreadPrimitive.ViewportFooter>
         </ThreadPrimitive.Viewport>
@@ -111,7 +125,15 @@ const WELCOME_SUGGESTION_KEYS = [
   "welcome.suggestion.files",
 ];
 
-function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
+function ThreadWelcome({
+  composerSlot,
+  initialComposerDraft,
+  draftSeededRef,
+}: {
+  composerSlot?: React.ReactNode;
+  initialComposerDraft?: string;
+  draftSeededRef: React.RefObject<boolean>;
+}) {
   const { can, t } = useChatHost();
   const canWrite = can("chat:write");
   return (
@@ -119,9 +141,16 @@ function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
       <div className="flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
         <div className="text-center">
           <p className="text-lg font-medium">Appstrate Chat</p>
-          <p className="text-muted-foreground mt-1 text-sm">{t("welcome.hint")}</p>
+          <p className="text-muted-foreground mt-1 text-sm">
+            {/* A reader asks nothing: what there is to do is reread. */}
+            {t(canWrite ? "welcome.hint" : "welcome.readOnly")}
+          </p>
         </div>
-        <Composer slot={composerSlot} />
+        <Composer
+          slot={composerSlot}
+          initialDraft={initialComposerDraft}
+          draftSeededRef={draftSeededRef}
+        />
         {canWrite && (
           <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
             {WELCOME_SUGGESTION_KEYS.map((key) => (
@@ -134,7 +163,7 @@ function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
               >
                 <button
                   type="button"
-                  className="hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
+                  className="bg-card hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
                 >
                   {t(key)}
                 </button>
@@ -147,9 +176,13 @@ function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
   );
 }
 
-/** Honest, action-aware disclaimer — the chat triggers real runs. */
+/**
+ * Honest, action-aware disclaimer — the chat triggers real runs. A reader
+ * triggers none, so it is not said to them.
+ */
 function Disclaimer() {
-  const { t } = useChatHost();
+  const { can, t } = useChatHost();
+  if (!can("chat:write")) return null;
   return (
     <p className="text-muted-foreground/70 px-4 text-center text-xs">{t("thread.disclaimer")}</p>
   );
@@ -178,19 +211,26 @@ function ComposerAttachmentChip() {
   const size = useAuiState((s) => s.attachment.file?.size ?? 0);
   const { formatBytes, t } = useChatHost();
   return (
-    <AttachmentPrimitive.Root className="bg-muted flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs">
-      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="max-w-40 truncate font-medium">{name}</span>
-      {size > 0 && <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>}
-      <AttachmentPrimitive.Remove asChild>
-        <button
-          type="button"
-          aria-label={t("composer.removeAttachment")}
-          className="text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
-        >
-          <XIcon className="size-3.5" />
-        </button>
-      </AttachmentPrimitive.Remove>
+    <AttachmentPrimitive.Root className="inline-flex">
+      <InertAttachmentChip
+        name={name}
+        trailing={
+          <>
+            {size > 0 && (
+              <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
+            )}
+            <AttachmentPrimitive.Remove asChild>
+              <button
+                type="button"
+                aria-label={t("composer.removeAttachment")}
+                className="text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </AttachmentPrimitive.Remove>
+          </>
+        }
+      />
     </AttachmentPrimitive.Root>
   );
 }
@@ -200,11 +240,10 @@ function ComposerAttachmentChip() {
  * (ai-SDK `FileUIPart`) carries no byte size, so the chip shows the name + icon
  * only (the composer chip shows the size, read from the picked File).
  */
-function FileAttachmentPart(props: { filename?: string }) {
+function FileAttachmentPart({ filename }: { filename?: string }) {
   return (
-    <div className="bg-background text-foreground mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs">
-      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="max-w-52 truncate font-medium">{props.filename ?? UNNAMED_FILE}</span>
+    <div className="mt-1">
+      <InertAttachmentChip name={filename ?? ""} />
     </div>
   );
 }
@@ -262,8 +301,23 @@ function ComposerAttachmentError() {
   );
 }
 
-function Composer({ slot }: { slot?: React.ReactNode }) {
+function Composer({
+  slot,
+  initialDraft,
+  draftSeededRef,
+}: {
+  slot?: React.ReactNode;
+  initialDraft?: string;
+  draftSeededRef: React.RefObject<boolean>;
+}) {
   const { can, t } = useChatHost();
+  const composer = unstable_useComposerInput();
+  React.useEffect(() => {
+    if (!takesDraft(initialDraft, { seeded: draftSeededRef.current, typed: composer.value }))
+      return;
+    draftSeededRef.current = true;
+    composer.setText(initialDraft);
+  }, [composer, initialDraft, draftSeededRef]);
   // Sending, stopping and attaching all guard on `chat:write`.
   if (!can("chat:write")) {
     return (
@@ -389,7 +443,10 @@ function UserMessage() {
       {/* The text bubble. Guarded on content so an attachment-only message (no
           text part) doesn't paint an empty grey pill. */}
       <MessagePrimitive.If hasContent>
-        <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">
+        {/* A white card on the canvas, like every other surface in the thread
+            (the composer, the tool cards). `bg-muted` was a hollow on white and
+            reads as a smudge on grey — 3 points of luminance from the page. */}
+        <div className="bg-card text-foreground max-w-[80%] rounded-2xl border px-4 py-2 text-sm whitespace-pre-wrap shadow-sm">
           <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
         </div>
       </MessagePrimitive.If>
@@ -403,63 +460,11 @@ function UserMessage() {
 // branches that aren't persisted — corrupting history on reload — so they're
 // intentionally absent.
 
-/** The turn's one status region. h-6 = one prose-sm line: whatever replaces it shifts 0px. */
-function ThinkingStatus() {
-  const { t } = useChatHost();
-  return (
-    <div
-      className="flex h-6 items-center gap-1"
-      role="status"
-      aria-label={t("thinking.status")}
-      data-testid="chat-thinking-status"
-    >
-      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.3s]" />
-      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.15s]" />
-      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full" />
-    </div>
-  );
-}
-
 /** Gated on running: a dead message with no visible parts must not animate "thinking" forever. */
 function ThinkingIndicator() {
   const running = useAuiState((s) => s.message.status?.type === "running");
   return running ? <ThinkingStatus /> : null;
 }
-
-/**
- * Takes over from the dots (assistant-ui hides `Empty` once the last part is reasoning).
- * Running = message running ∧ this group is its tail, so the dots stop once a text or
- * tool part follows. Collapsed, the parts are not mounted: a delta costs one selector.
- */
-const ReasoningGroup: ReasoningGroupComponent = ({ endIndex, children }) => {
-  const { t } = useChatHost();
-  const running = useAuiState(
-    (s) => s.message.status?.type === "running" && endIndex === s.message.parts.length - 1,
-  );
-  return (
-    <Collapsible>
-      <div className="flex h-6 items-center gap-2">
-        <CollapsibleTrigger className="group/reasoning text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded-sm text-xs transition-colors outline-none focus-visible:ring-1">
-          <ChevronRightIcon
-            aria-hidden="true"
-            className="size-3.5 shrink-0 transition-transform group-data-[state=open]/reasoning:rotate-90"
-          />
-          {running ? t("reasoning.running") : t("reasoning.done")}
-        </CollapsibleTrigger>
-        {/* A sibling of the trigger, not a child: a button's content is
-            presentational, so a live region inside it is not exposed. */}
-        {running ? <ThinkingStatus /> : null}
-      </div>
-      <CollapsibleContent className="text-muted-foreground mt-1 mb-2 ml-1.5 space-y-2 border-l-2 pl-3 text-xs leading-relaxed">
-        {children}
-      </CollapsibleContent>
-    </Collapsible>
-  );
-};
-
-const ReasoningText: ReasoningMessagePartComponent = ({ text }) => (
-  <p className="break-words whitespace-pre-wrap">{text}</p>
-);
 
 /** Always shown, not on hover, so a mid-conversation model switch is visible. */
 function TurnModelBadge() {

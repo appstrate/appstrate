@@ -2,7 +2,7 @@
 
 /**
  * The strings the design system renders by itself — a JSON-Schema form's validation messages,
- * the sidebar's screen-reader chrome — follow the active language instead of staying in the
+ * the copy button — follow the active language instead of staying in the
  * package's English defaults.
  *
  * `@appstrate/ui/schema-form` is deliberately NOT imported here: the SPA loads it through
@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { SidebarProvider, SidebarTrigger } from "@appstrate/ui/components/sidebar";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels.ts";
@@ -47,15 +47,12 @@ describe("SchemaForm in French", () => {
 });
 
 describe("design-system chrome in French", () => {
-  it("labels the sidebar trigger", () => {
+  it("labels the copy button", () => {
     const html = render(
       <TranslatedUiLabels>
-        <SidebarProvider>
-          <SidebarTrigger />
-        </SidebarProvider>
+        <CopyButton value="x" />
       </TranslatedUiLabels>,
     );
-    expect(html).toContain(i18n.t("common:nav.toggleSidebar"));
-    expect(html).not.toContain("Toggle Sidebar");
+    expect(html).toContain(i18n.t("common:btn.copy"));
   });
 });

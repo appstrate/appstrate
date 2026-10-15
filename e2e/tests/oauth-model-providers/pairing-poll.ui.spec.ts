@@ -30,6 +30,7 @@ import {
   deleteCredential,
   helperRedeem,
   helperRedeemRefused,
+  openModelToPersonalKeys,
   openPairingModal,
   readStore,
 } from "../../helpers/pairing.ts";
@@ -92,6 +93,7 @@ async function answerStatusPolls(
 
 test.describe("OAuth Model Providers — pairing poll @smoke", () => {
   test("keeps polling through a 502", async ({ authedPage: page, apiClient }) => {
+    await openModelToPersonalKeys(apiClient);
     await page.goto(SETTINGS_PATH);
     const { token } = await openPairingModal(page);
     await closePairingModal(page);
@@ -116,6 +118,7 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
     authedPage: page,
     apiClient,
   }) => {
+    await openModelToPersonalKeys(apiClient);
     await page.goto(SETTINGS_PATH);
     const { token } = await openPairingModal(page);
     await closePairingModal(page);
@@ -128,7 +131,7 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
     }, STORAGE_KEY);
 
     await page.reload();
-    await expect(page.getByRole("tab", { name: "Modèles", exact: true })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Mes clés de modèles" })).toBeVisible({
       timeout: 15_000,
     });
 
@@ -151,6 +154,7 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
       if (r.method() === "POST" && new URL(r.url()).pathname === MINT_PATH) mints += 1;
     });
 
+    await openModelToPersonalKeys(apiClient);
     await page.goto(SETTINGS_PATH);
     const minted = await openPairingModal(page);
     await closePairingModal(page);
@@ -179,7 +183,9 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
 
   test("a refused redeem is told once, by the modal that shows it", async ({
     authedPage: page,
+    apiClient,
   }) => {
+    await openModelToPersonalKeys(apiClient);
     await page.goto(SETTINGS_PATH);
     const { token } = await openPairingModal(page);
     await helperRedeemRefused(page, token);
@@ -196,7 +202,9 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
 
   test("a refused redeem is told by a toast once the modal is closed", async ({
     authedPage: page,
+    apiClient,
   }) => {
+    await openModelToPersonalKeys(apiClient);
     await page.goto(SETTINGS_PATH);
     const { token } = await openPairingModal(page);
     await closePairingModal(page);
@@ -206,7 +214,11 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
     await expect.poll(() => readStore(page), { timeout: 15_000 }).toBeNull();
   });
 
-  test("a pairing the server no longer states ends the poll", async ({ authedPage: page }) => {
+  test("a pairing the server no longer states ends the poll", async ({
+    authedPage: page,
+    apiClient,
+  }) => {
+    await openModelToPersonalKeys(apiClient);
     await page.goto(SETTINGS_PATH);
     await openPairingModal(page);
 

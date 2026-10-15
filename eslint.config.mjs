@@ -875,5 +875,20 @@ export default tseslint.config(
       "@typescript-eslint/await-thenable": "error",
     },
   },
+  {
+    // The shadcn primitives are the registry's own source, kept verbatim so a
+    // `shadcn add` diff stays a diff of upstream: they are not rewritten to
+    // satisfy the React-compiler purity rules, which the registry predates.
+    // Everything the product adds around them lives in `apps/web`, not here.
+    files: [
+      "packages/ui/src/components/{alert,avatar,badge,breadcrumb,button,carousel,checkbox,collapsible,command,dialog,dropdown-menu,field,input,label,popover,radio-group,scroll-area,select,separator,sheet,sidebar,skeleton,slider,sonner,spinner,switch,table,tabs,textarea,toggle-group,toggle,tooltip}.tsx",
+    ],
+    rules: {
+      "react-hooks/purity": "off",
+      "react-hooks/set-state-in-effect": "off",
+      "react/jsx-no-constructed-context-values": "off",
+      "react-refresh/only-export-components": "off",
+    },
+  },
   eslintConfigPrettier,
 );

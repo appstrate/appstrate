@@ -74,7 +74,7 @@ import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
-import { runStatusValues } from "@appstrate/core/run-status";
+import { parseRunListFilters } from "../lib/run-list-filters.ts";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -473,10 +473,16 @@ export function createRunsRouter() {
     const agent = c.get("package");
     const scope = getSpaceScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
+    const { status, search } = parseRunListFilters({
+      status: c.req.query("status"),
+      q: c.req.query("q"),
+    });
     const result = await listPackageRuns(scope, agent.id, {
       limit,
       offset,
       actor: getActor(c),
+      status,
+      search,
       visibility: runVisibilityFilter(c),
       canReadAgentInput: !agentReadIsSummary(c),
     });
@@ -486,11 +492,11 @@ export function createRunsRouter() {
 
   // GET /api/runs — global paginated run list across the space.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
-  // for inline-run filtering, ?status, ?start_date/?end_date, and
+  // for inline-run filtering, ?status, ?q, ?start_date/?end_date, and
   // ?chat_session_id for the conversation context sidebar.
   //
-  // `user`, `kind` and `status` are all closed sets and all go through
-  // `closedSetQuery`: an unrecognised value is a 400, not a dropped filter.
+  // `user`, `kind` and `status` are all closed sets: an unrecognised value is
+  // a 400, not a dropped filter.
   // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
   // size returns the first page, which narrows rather than widens, and callers
   // paging by `Link` headers never construct them by hand.
@@ -511,7 +517,10 @@ export function createRunsRouter() {
     const visibility = userFilter === "me" ? ownRunsFilter(actor) : runVisibilityFilter(c);
 
     const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
-    const status = closedSetQuery(c, "status", runStatusValues);
+    const { status, search } = parseRunListFilters({
+      status: c.req.query("status"),
+      q: c.req.query("q"),
+    });
     const startDateRaw = c.req.query("start_date");
     const endDateRaw = c.req.query("end_date");
     const chatSessionId = c.req.query("chat_session_id") || undefined;
@@ -532,6 +541,7 @@ export function createRunsRouter() {
       startDate,
       endDate,
       chatSessionId,
+      search,
       actor,
       visibility,
       canReadAgentInput: !agentReadIsSummary(c),

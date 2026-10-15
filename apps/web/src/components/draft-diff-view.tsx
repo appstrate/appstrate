@@ -33,6 +33,19 @@ export function DraftDiffView({
       )}
       <DiffEditor
         height="400px"
+        // The wrapper would dispose the models before the widget lets go of
+        // them ("TextModel got disposed…"); they are disposed once it has.
+        keepCurrentOriginalModel
+        keepCurrentModifiedModel
+        onMount={(diff) => {
+          const models = diff.getModel();
+          diff.onDidDispose(() =>
+            setTimeout(() => {
+              models?.original.dispose();
+              models?.modified.dispose();
+            }),
+          );
+        }}
         theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
         language={language}
         original={original}

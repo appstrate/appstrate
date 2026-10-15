@@ -2,26 +2,26 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@appstrate/ui/components/table";
+import { OptionSelect } from "@/components/app-ui/option-select";
+import { SettingsHeading } from "../settings/settings-heading";
+import { ConfirmModal } from "../confirm-modal";
+import { DataTable } from "../data-table";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import type { IntegrationPin } from "@appstrate/shared-types";
+import { usePinColumns } from "./pin-columns";
 import {
   useIntegrationPins,
   useIntegrationConnections,
+  type IntegrationConnection,
   useAgentsConsumingIntegration,
   useUpsertIntegrationPin,
   useDeleteIntegrationPin,
 } from "../../hooks/use-integrations";
-import { connectionOptionLabel, type ConnectionSet } from "../../lib/connection-set";
-import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-checklist";
+import type { ConnectionSet } from "../../lib/connection-set";
+import { ConnectionSetPicker } from "../integration-connect/connection-choice-menu";
+import { connectionSetOption } from "../integration-connect/connection-set-option";
 
 /**
  * Per-agent pins: one per (agent, integration), holding the whole bound SET, replaced on
@@ -29,37 +29,29 @@ import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-
  * "no connection"; whether that blocks a run is the running version's `required` to say.
  */
 export function PinManagementSection({ packageId }: { packageId: string }) {
-  const { t } = useTranslation("settings");
-  const { data: pins } = useIntegrationPins(packageId);
-  const { data: connections } = useIntegrationConnections(packageId);
-  const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
-  const upsertPin = useUpsertIntegrationPin();
+  const { t } = useTranslation(["settings", "agents"]);
+  const { data: pins, isLoading: pinsLoading, error: pinsError } = useIntegrationPins(packageId);
+  const { data: connections, isLoading: connectionsLoading } = useIntegrationConnections(packageId);
+  const { data: consumingAgents, isLoading: agentsLoading } =
+    useAgentsConsumingIntegration(packageId);
   const deletePin = useDeleteIntegrationPin();
 
-  const [newAgent, setNewAgent] = useState("");
-  const [newConnectionIds, setNewConnectionIds] = useState<ConnectionSet>(null);
+  const [adding, setAdding] = useState(false);
+  const [toDelete, setToDelete] = useState<IntegrationPin | null>(null);
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_here);
 
   // Lookup helpers for the table
-  const agentDisplayName = (id: string): string =>
+  const agentDisplayName = (id: string) =>
     consumingAgents?.find((a) => a.agent_package_id === id)?.display_name ?? id;
 
-  const onSubmitNewPin = () => {
-    if (!newAgent || newConnectionIds === null) return;
-    upsertPin.mutate(
-      {
-        params: { path: { packageId, agentPackageId: newAgent } },
-        body: { connection_ids: newConnectionIds },
-      },
-      {
-        onSuccess: () => {
-          setNewAgent("");
-          setNewConnectionIds(null);
-        },
-      },
-    );
-  };
+  const columns = usePinColumns({
+    agentName: (pin) => agentDisplayName(pin.agent_package_id),
+    pinnable: pinnableConnections,
+    connections,
+    isDeleting: (pin) => deletePin.isPending && toDelete?.agent_package_id === pin.agent_package_id,
+    onDelete: setToDelete,
+  });
 
   // Only include agents not already pinned.
   const alreadyPinnedAgentIds = new Set(
@@ -72,144 +64,145 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
   );
 
   return (
-    <div
-      className="border-border bg-muted/30 mb-6 rounded-md border p-4"
-      data-testid="pin-management-section"
-    >
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold">{t("integration.admin.exceptions.title")}</h3>
-        <p className="text-muted-foreground mt-1 text-xs">
-          {t("integration.admin.exceptions.help")}
-        </p>
+    <div className="pb-0" data-testid="pin-management-section">
+      <SettingsHeading
+        level="group"
+        title={t("integration.admin.exceptions.title")}
+        description={t("integration.admin.exceptions.help")}
+      />
+
+      <div className="mb-4">
+        <DataTable
+          tableId="integration-pins"
+          label={t("integration.admin.exceptions.title")}
+          columns={columns}
+          rows={pins ?? []}
+          rowKey={(pin) => pin.agent_package_id}
+          isLoading={pinsLoading || agentsLoading}
+          failure={pinsError}
+          empty={
+            <p className="text-muted-foreground px-3 py-3 text-xs italic">
+              {t("integration.admin.pinManagement.empty")}
+            </p>
+          }
+        />
       </div>
 
-      {/* Existing pins */}
-      {(pins ?? []).length > 0 ? (
-        <div className="border-border bg-background mb-3 overflow-hidden rounded-md border">
-          <Table className="text-xs">
-            <TableHeader className="bg-muted/40">
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="h-auto px-3 py-2">
-                  {t("integration.admin.pinManagement.colAgent")}
-                </TableHead>
-                <TableHead className="h-auto px-3 py-2">
-                  {t("integration.admin.pinManagement.colConnections")}
-                </TableHead>
-                <TableHead className="h-auto w-12 px-3 py-2" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(pins ?? []).map((p) => (
-                <TableRow key={p.agent_package_id} data-testid={`pin-row-${p.agent_package_id}`}>
-                  <TableCell className="px-3 py-2">
-                    {agentDisplayName(p.agent_package_id)}
-                  </TableCell>
-                  <TableCell className="px-3 py-2">
-                    {p.connection_ids.length === 0 && (
-                      <span className="text-muted-foreground">
-                        {t("agents:detail.integrationMemberPicker.none")}
-                      </span>
-                    )}
-                    {p.connection_ids.map((id, i) => {
-                      const c = pinnableConnections.find((x) => x.id === id);
-                      return (
-                        <span key={id}>
-                          {i > 0 && " · "}
-                          {c ? (
-                            connectionOptionLabel(c)
-                          ) : connections === undefined ? null : (
-                            // No longer shared or deleted: every run of this agent is refused.
-                            <span className="text-amber-700 dark:text-amber-300">
-                              {t("integration.admin.unavailableConnection")}
-                            </span>
-                          )}
-                        </span>
-                      );
-                    })}
-                  </TableCell>
-                  <TableCell className="px-3 py-2">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-6 w-6"
-                      disabled={deletePin.isPending}
-                      onClick={() =>
-                        deletePin.mutate({
-                          params: { path: { packageId, agentPackageId: p.agent_package_id } },
-                        })
-                      }
-                      title={t("integration.admin.pinManagement.delete")}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <p className="text-muted-foreground mb-3 text-xs italic">
-          {t("integration.admin.pinManagement.empty")}
-        </p>
-      )}
-
       {/* Add new pin — "no connection" needs no shared connection. */}
-      {pinnableAgents.length === 0 ? (
+      {agentsLoading || connectionsLoading || pinsLoading ? (
+        <Skeleton className="h-8 w-32" />
+      ) : pinnableAgents.length === 0 ? (
         <p className="text-muted-foreground text-xs italic">
           {t("integration.admin.pinManagement.noConsumingAgents")}
         </p>
+      ) : !adding ? (
+        <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+          {t("integration.admin.pinManagement.add")}
+        </Button>
       ) : (
-        <div className="border-border bg-background flex flex-wrap items-end gap-2 rounded-md border p-3">
-          <div className="min-w-[12rem] flex-1">
-            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
-              {t("integration.admin.pinManagement.colAgent")}
-            </Label>
-            <select
-              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
-              value={newAgent}
-              onChange={(e) => setNewAgent(e.target.value)}
-              data-testid="pin-add-agent"
-            >
-              <option value="">—</option>
-              {pinnableAgents.map((a) => (
-                <option key={a.agent_package_id} value={a.agent_package_id}>
-                  {a.display_name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="min-w-[12rem] flex-1">
-            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
-              {t("integration.admin.pinManagement.colConnections")}
-            </Label>
-            {pinnableConnections.length === 0 && (
-              <p className="text-muted-foreground mb-1 text-xs italic">
-                {t("integration.admin.pinManagement.noPinnableConnections")}
-              </p>
-            )}
-            <ConnectionSetChecklist
-              options={pinnableConnections.map((c) => ({
-                id: c.id,
-                label: <ConnectionOptionLabel connection={c} />,
-              }))}
-              value={newConnectionIds}
-              onChange={setNewConnectionIds}
-              idPrefix="pin-add-connection"
-              allowNone
-              noneHint={t("integration.admin.pinManagement.noneHint")}
-            />
-          </div>
-          <Button
-            size="sm"
-            onClick={onSubmitNewPin}
-            disabled={!newAgent || newConnectionIds === null || upsertPin.isPending}
-            data-testid="pin-add-submit"
-          >
-            {t("integration.admin.pinManagement.add")}
-          </Button>
-        </div>
+        <NewPinForm
+          packageId={packageId}
+          agents={pinnableAgents}
+          connections={pinnableConnections}
+          onDone={() => setAdding(false)}
+        />
       )}
+
+      <ConfirmModal
+        open={toDelete !== null}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => {
+          if (!toDelete) return;
+          deletePin.mutate(
+            { params: { path: { packageId, agentPackageId: toDelete.agent_package_id } } },
+            { onSuccess: () => setToDelete(null) },
+          );
+        }}
+        title={t("integration.admin.pinManagement.delete")}
+        description={t("integration.admin.pinManagement.deleteConfirm", {
+          agent: toDelete ? agentDisplayName(toDelete.agent_package_id) : "",
+        })}
+        confirmLabel={t("btn.delete", { ns: "common" })}
+        isPending={deletePin.isPending}
+      />
+    </div>
+  );
+}
+
+/** Pins one agent to a set of connections, or to none; `onDone` closes it. */
+export function NewPinForm({
+  packageId,
+  agents,
+  connections,
+  onDone,
+}: {
+  packageId: string;
+  agents: { agent_package_id: string; display_name: string }[];
+  connections: IntegrationConnection[];
+  onDone: () => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  const upsertPin = useUpsertIntegrationPin();
+  const [newAgent, setNewAgent] = useState("");
+  const [newConnectionIds, setNewConnectionIds] = useState<ConnectionSet>(null);
+
+  const onSubmitNewPin = () => {
+    if (!newAgent || newConnectionIds === null) return;
+    upsertPin.mutate(
+      {
+        params: { path: { packageId, agentPackageId: newAgent } },
+        body: { connection_ids: newConnectionIds },
+      },
+      { onSuccess: onDone },
+    );
+  };
+
+  return (
+    <div className="flex flex-wrap items-end gap-3">
+      <div className="min-w-[12rem] flex-1">
+        <Label htmlFor="pin-add-agent" className="mb-2 block text-sm">
+          {t("integration.admin.pinManagement.colAgent")}
+        </Label>
+        <OptionSelect
+          id="pin-add-agent"
+          value={newAgent}
+          onValueChange={setNewAgent}
+          placeholder={t("integration.admin.pinManagement.colAgent")}
+          data-testid="pin-add-agent"
+          options={agents.map((a) => ({ value: a.agent_package_id, label: a.display_name }))}
+        />
+      </div>
+      <div className="min-w-[12rem] flex-1">
+        <p className="mb-2 block text-sm font-medium">
+          {t("integration.admin.pinManagement.colConnections")}
+        </p>
+        {connections.length === 0 && (
+          <p className="text-muted-foreground mb-1 text-xs italic">
+            {t("integration.admin.pinManagement.noPinnableConnections")}
+          </p>
+        )}
+        <ConnectionSetPicker
+          options={connections.map(connectionSetOption)}
+          value={newConnectionIds}
+          onChange={setNewConnectionIds}
+          testPrefix="pin-add-pick"
+          testKey="connections"
+          allowNone
+          noneHint={t("integration.admin.pinManagement.noneHint")}
+        />
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onSubmitNewPin}
+        disabled={!newAgent || newConnectionIds === null || upsertPin.isPending}
+        data-testid="pin-add-submit"
+      >
+        {t("integration.admin.pinManagement.add")}
+      </Button>
+      <Button variant="ghost" size="sm" disabled={upsertPin.isPending} onClick={onDone}>
+        {t("btn.cancel", { ns: "common" })}
+      </Button>
     </div>
   );
 }

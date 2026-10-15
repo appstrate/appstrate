@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -13,16 +14,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
-import { $api } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import { Modal } from "../modal";
-import { Spinner } from "../spinner";
+import { SpaceRoleSelect } from "../space-role-select";
 import { splitPackageRef } from "../../lib/package-paths";
-import { useCurrentOrgId } from "../../hooks/use-org";
+import { useOrgDetail } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useSpaceGrant } from "../../hooks/use-permissions";
 import { coeditVerdict } from "../../lib/package-permissions";
@@ -32,14 +33,17 @@ import {
   spaceRoleAssignment,
   useSpaceRoleOptions,
 } from "../../hooks/use-roles";
-import { useCreateVersion } from "../../hooks/use-packages";
+import { useCreateVersion, usePackageDetail } from "../../hooks/use-packages";
+import { useIntegrationsById } from "../../hooks/use-integrations";
 import {
   shareTargetHandle,
   usePackageShares,
   useRevokePackageShare,
   useSharePackage,
 } from "../../hooks/use-package-shares";
+import { memberLabel } from "../../lib/members";
 import { toastError } from "../../lib/mutation-error";
+import { TextSkeleton } from "../loading-skeletons";
 
 /** The subject of one offer, as the picker encodes it. */
 type ShareTarget = { kind: "user"; userId: string } | { kind: "space"; spaceId: string };
@@ -64,6 +68,9 @@ function parseTargetValue(value: string): ShareTarget | null {
   return null;
 }
 
+/** The URL parameter that opens the dialog; its value is the package. */
+export const SHARE_PARAM = "share";
+
 /**
  * The two things "sharing" can mean, named separately.
  *
@@ -84,7 +91,6 @@ function parseTargetValue(value: string): ShareTarget | null {
  * in one `TabsList`.
  */
 export function SharePackageDialog({
-  open,
   onClose,
   packageId,
   type,
@@ -92,7 +98,6 @@ export function SharePackageDialog({
   canPublish,
   onMoveHome,
 }: {
-  open: boolean;
   onClose: () => void;
   packageId: string;
   /** Publishing is per-type — the version routes are `/api/packages/<type>/…`. */
@@ -114,15 +119,20 @@ export function SharePackageDialog({
   onMoveHome?: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const orgId = useCurrentOrgId();
-  const { data: shares, isLoading } = usePackageShares(packageId, open);
-  const { data: spaces } = useSpaces(open);
-  const { data: org } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: open && !!orgId },
-  );
+  const { data: shares, isLoading } = usePackageShares(packageId, true);
+  const { data: spaces } = useSpaces();
+  const { data: org } = useOrgDetail();
+  // Only an AGENT declares integrations; the other families have no closure a
+  // recipient has to hold.
+  const detail = usePackageDetail("agent", type === "agent" ? packageId : undefined);
+  // The names as a reader knows them, not the ids: one read of exactly the
+  // declared integrations.
+  const declared = detail.data?.dependencies.integrations ?? [];
+  const { data: integrationRows } = useIntegrationsById(declared.map((entry) => entry.id));
+  const declaredIntegrations = declared.map((entry) => {
+    const row = integrationRows?.find((candidate) => candidate.id === entry.id);
+    return row?.manifest.display_name ?? entry.id.split("/").pop() ?? entry.id;
+  });
   const share = useSharePackage();
   const revoke = useRevokePackageShare();
   const publish = useCreateVersion(type, packageId);
@@ -215,7 +225,7 @@ export function SharePackageDialog({
 
   return (
     <Modal
-      open={open}
+      open
       onClose={close}
       title={t("packages.shareTitle")}
       actions={
@@ -245,7 +255,7 @@ export function SharePackageDialog({
                         key={member.userId}
                         value={targetValue({ kind: "user", userId: member.userId })}
                       >
-                        {member.displayName || member.email || member.userId}
+                        {memberLabel(member)}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -265,13 +275,14 @@ export function SharePackageDialog({
                 )}
               </SelectContent>
             </Select>
-            <Button
+            <PendingButton
               type="button"
-              disabled={!selected || share.isPending}
+              pending={share.isPending}
+              disabled={!selected}
               onClick={() => selected && submit(selected)}
             >
-              {share.isPending ? <Spinner /> : t("packages.shareSubmit")}
-            </Button>
+              {t("packages.shareSubmit")}
+            </PendingButton>
           </div>
           {/*
             One picker, two outcomes: what the recipient gets differs by KIND,
@@ -285,22 +296,37 @@ export function SharePackageDialog({
                 ? t("packages.shareSpaceHint")
                 : t("packages.shareUseHint")}
           </p>
+          {/* What the recipient will have to do, said BEFORE the offer goes
+              out. An agent's skills travel with it — they are judged from its
+              home space — but its integrations are judged where the run starts,
+              so a recipient without them gets `integration_not_active` and no
+              explanation. This is the first failure of every share, and it is
+              avoidable with one sentence. */}
+          {declaredIntegrations.length > 0 && (
+            <p className="text-muted-foreground text-sm">
+              {t("packages.shareIntegrationsHint", {
+                count: declaredIntegrations.length,
+                list: declaredIntegrations.join(", "),
+              })}
+            </p>
+          )}
 
           {needsVersion && (
             <div
               data-testid="share-needs-version"
-              className="mt-4 space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+              className="border-warning/40 bg-warning/10 mt-4 space-y-2 rounded-md border p-3 text-sm"
             >
               <p>{t("packages.shareNeedsVersion")}</p>
               {canPublish ? (
-                <Button
+                <PendingButton
                   type="button"
                   size="sm"
-                  disabled={publish.isPending || share.isPending}
+                  pending={publish.isPending}
+                  disabled={share.isPending}
                   onClick={() => void publishAndShare()}
                 >
-                  {publish.isPending ? <Spinner /> : t("packages.sharePublishAndShare")}
-                </Button>
+                  {t("packages.sharePublishAndShare")}
+                </PendingButton>
               ) : (
                 <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
               )}
@@ -310,7 +336,7 @@ export function SharePackageDialog({
           <div className="mt-4 space-y-1 border-t pt-4">
             <p className="text-sm font-medium">{t("packages.shareCurrent")}</p>
             {isLoading ? (
-              <Spinner />
+              <TextSkeleton lines={2} className="py-1.5" />
             ) : (shares ?? []).length === 0 ? (
               <p className="text-muted-foreground text-sm">{t("packages.shareEmpty")}</p>
             ) : (
@@ -357,7 +383,6 @@ export function SharePackageDialog({
         </TabsContent>
         <TabsContent value="coedit">
           <CoeditTab
-            open={open}
             homeSpaceId={homeSpaceId}
             orgMembers={org?.members ?? []}
             onMoveHome={onMoveHome}
@@ -378,19 +403,17 @@ export function SharePackageDialog({
  * is standing in, which is rarely this one.
  */
 function CoeditTab({
-  open,
   homeSpaceId,
   orgMembers,
   onMoveHome,
 }: {
-  open: boolean;
   homeSpaceId: string | null | undefined;
   orgMembers: Array<{ userId: string; displayName?: string | null; email?: string | null }>;
   onMoveHome?: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const home = useSpaceGrant(homeSpaceId);
-  const homeName = (useSpaces(open).data ?? []).find((space) => space.id === homeSpaceId)?.name;
+  const homeName = (useSpaces().data ?? []).find((space) => space.id === homeSpaceId)?.name;
   const verdict = coeditVerdict(home);
   const mayInvite = verdict === "invite";
   const mayRead = home?.permissions.includes("space-members:read") ?? false;
@@ -398,8 +421,8 @@ function CoeditTab({
   // space_member_exists`: `space-members:read` is a separate grant from
   // `invite`, so when it is missing the list is simply not narrowed and the
   // refusal does the talking.
-  const { data: existing } = useSpaceMembers(homeSpaceId ?? "", open && mayInvite && mayRead);
-  const roles = useSpaceRoleOptions(homeSpaceId ?? undefined, open && mayInvite);
+  const { data: existing } = useSpaceMembers(homeSpaceId ?? "", mayInvite && mayRead);
+  const roles = useSpaceRoleOptions(homeSpaceId ?? undefined, mayInvite);
   const addMember = useAddSpaceMember({ errorHandledByCaller: true });
   const [member, setMember] = useState("");
   const [role, setRole] = useState(DEFAULT_SPACE_ROLE_VALUE);
@@ -411,7 +434,7 @@ function CoeditTab({
   const reached = useMemo(() => new Set((existing ?? []).map((row) => row.userId)), [existing]);
   const candidates = orgMembers.filter((candidate) => !reached.has(candidate.userId));
 
-  if (verdict === "unknown") return <Spinner />;
+  if (verdict === "unknown") return <TextSkeleton lines={2} />;
 
   // A personal space belongs to ONE member and takes no others
   // (`personal_space_has_no_members`), and it is never converted while it lives
@@ -468,37 +491,34 @@ function CoeditTab({
     <div className="space-y-2" data-testid="coedit-invite">
       <Label htmlFor="coedit-member">{t("packages.coeditLabel")}</Label>
       <div className="flex gap-2">
-        <Select value={member || undefined} onValueChange={setMember}>
-          <SelectTrigger id="coedit-member" className="w-full">
-            <SelectValue placeholder={t("packages.coeditPlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            {candidates.map((candidate) => (
-              <SelectItem key={candidate.userId} value={candidate.userId}>
-                {candidate.displayName || candidate.email || candidate.userId}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={role} onValueChange={setRole}>
-          <SelectTrigger
-            id="coedit-role"
-            className="w-48"
-            aria-label={t("packages.coeditRoleLabel")}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {roles.options.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button type="button" disabled={!member || addMember.isPending} onClick={submit}>
-          {addMember.isPending ? <Spinner /> : t("packages.coeditSubmit")}
-        </Button>
+        <OptionSelect
+          id="coedit-member"
+          value={member || undefined}
+          onValueChange={setMember}
+          placeholder={t("packages.coeditPlaceholder")}
+          className="w-full"
+          options={candidates.map((candidate) => ({
+            value: candidate.userId,
+            label: memberLabel(candidate),
+          }))}
+        />
+        <SpaceRoleSelect
+          id="coedit-role"
+          value={role}
+          options={roles.options}
+          fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
+          className="w-48"
+          ariaLabel={t("packages.coeditRoleLabel")}
+          onValueChange={setRole}
+        />
+        <PendingButton
+          type="button"
+          pending={addMember.isPending}
+          disabled={!member}
+          onClick={submit}
+        >
+          {t("packages.coeditSubmit")}
+        </PendingButton>
       </div>
       <p className="text-muted-foreground text-sm">
         {candidates.length === 0

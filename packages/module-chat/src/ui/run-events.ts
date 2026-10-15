@@ -27,8 +27,10 @@ import {
   parseFileUri,
   PUBLISHED_FILE_LOG_EVENT,
 } from "@appstrate/core/file-uri";
-import { VIEW_AS_HEADER, VIEW_AS_QUERY } from "@appstrate/core/permissions";
-import { asRecord, unwrapResult } from "./tool-result.ts";
+import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
+import { realtimeRunsUrl } from "@appstrate/core/realtime-url";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
+import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 
 /** Operation ids whose result launches a run we can follow. */
 const RUN_LAUNCH_OPS = ["runAgent", "runInline", "run_and_wait"] as const;
@@ -149,9 +151,9 @@ const runResourceLiteSchema = runUpdateLiteSchema
  * so an unrelated id (e.g. a connection id) can never spin up run progress UI.
  */
 export function extractRunId(result: unknown): string | undefined {
-  const unwrapped = asRecord(unwrapResult(result));
+  const unwrapped = asRecordOrNull(unwrapMcpResult(result));
   if (!unwrapped) return undefined;
-  const fromBody = asRecord(unwrapped.body)?.id;
+  const fromBody = asRecordOrNull(unwrapped.body)?.id;
   if (typeof fromBody === "string" && fromBody.startsWith("run_")) return fromBody;
   const top = unwrapped.id;
   if (typeof top === "string" && top.startsWith("run_")) return top;
@@ -164,9 +166,9 @@ export function extractRunId(result: unknown): string | undefined {
  * string — callers decide whether it is a known/terminal status.
  */
 export function extractRunStatus(result: unknown): string | undefined {
-  const unwrapped = asRecord(unwrapResult(result));
+  const unwrapped = asRecordOrNull(unwrapMcpResult(result));
   if (!unwrapped) return undefined;
-  const fromBody = asRecord(unwrapped.body)?.status;
+  const fromBody = asRecordOrNull(unwrapped.body)?.status;
   if (typeof fromBody === "string") return fromBody;
   // Top-level `status` is the run's own status only when no HTTP envelope wraps
   // it — guard against the envelope's numeric HTTP `status`.
@@ -214,7 +216,7 @@ export function parseRunResource(body: unknown): RunUpdateLite | undefined {
  * into log lines, dropping any malformed row rather than failing the batch.
  */
 export function parseLogListResponse(body: unknown): RunLogLine[] {
-  const data = asRecord(body)?.data;
+  const data = asRecordOrNull(body)?.data;
   if (!Array.isArray(data)) return [];
   const out: RunLogLine[] = [];
   for (const row of data) {
@@ -243,8 +245,9 @@ export function mergeLogs(
 /**
  * Build the per-run SSE URL. Returns `undefined` when org/space context is
  * missing (the caller then renders the static card instead of live run progress).
- * `verbose=true` is REQUIRED: the server strips `run_log.data` for non-verbose
- * subscribers, so without it the panel would show empty lines.
+ * `verbose` is REQUIRED: the server strips `run_log.data` for non-verbose
+ * subscribers, so without it the panel would show empty lines. Only the two
+ * channels the panel reads are declared.
  */
 export function buildRunSseUrl(args: {
   runId: string;
@@ -255,13 +258,14 @@ export function buildRunSseUrl(args: {
 }): string | undefined {
   const { runId, orgId, spaceId, viewAs } = args;
   if (!orgId || !spaceId) return undefined;
-  const qs = new URLSearchParams({
+  return realtimeRunsUrl({
     orgId,
     spaceId,
-    verbose: "true",
+    runId,
+    verbose: true,
+    channels: ["run_update", "run_log"],
+    viewAs,
   });
-  if (viewAs) qs.set(VIEW_AS_QUERY, viewAs);
-  return `/api/realtime/runs/${encodeURIComponent(runId)}?${qs.toString()}`;
 }
 
 /** Read the scoping context out of the chat host's forwarded headers (case-tolerant). */
@@ -291,12 +295,12 @@ function nonEmptyString(value: unknown): string | undefined {
  */
 export function extractAgentLabel(args: Record<string, unknown> | undefined): string | undefined {
   if (!args) return undefined;
-  const pathParams = asRecord(args.path_params);
+  const pathParams = asRecordOrNull(args.path_params);
   const scope = nonEmptyString(pathParams?.scope) ?? nonEmptyString(args.scope);
   const name = nonEmptyString(pathParams?.name) ?? nonEmptyString(args.name);
   if (scope && name) return `${scope}/${name}`;
 
-  const manifest = asRecord(args.manifest);
+  const manifest = asRecordOrNull(args.manifest);
   const manifestName = nonEmptyString(manifest?.display_name) ?? nonEmptyString(manifest?.name);
   if (manifestName) return manifestName;
 
@@ -379,7 +383,7 @@ export interface ChatRunFile {
 export const UNNAMED_FILE = "file";
 
 function asChatRunFile(raw: unknown): ChatRunFile | undefined {
-  const r = asRecord(raw);
+  const r = asRecordOrNull(raw);
   if (!r) return undefined;
   // `id` in the tool result; `file_id` in the `file.published` log frame.
   const id = nonEmptyString(r.id) ?? nonEmptyString(r.file_id);
@@ -409,9 +413,9 @@ function rawFileList(record: Record<string, unknown> | null | undefined): unknow
  * reads the persisted message part, not live state.
  */
 export function extractRunFiles(result: unknown): ChatRunFile[] {
-  const unwrapped = asRecord(unwrapResult(result));
+  const unwrapped = asRecordOrNull(unwrapMcpResult(result));
   if (!unwrapped) return [];
-  const raw = rawFileList(unwrapped) ?? rawFileList(asRecord(unwrapped.body)) ?? [];
+  const raw = rawFileList(unwrapped) ?? rawFileList(asRecordOrNull(unwrapped.body)) ?? [];
   const out: ChatRunFile[] = [];
   for (const item of raw) {
     const file = asChatRunFile(item);
@@ -491,12 +495,12 @@ export function producedFilesFromFileList(
   payload: unknown,
   runId: string,
 ): ProducedFileList | undefined {
-  const envelope = asRecord(payload);
+  const envelope = asRecordOrNull(payload);
   const rows = envelope?.data;
   if (!Array.isArray(rows)) return undefined;
   const out: ChatRunFile[] = [];
   for (const row of rows) {
-    const r = asRecord(row);
+    const r = asRecordOrNull(row);
     if (!r) continue;
     if (!isFileProducedByRun(r, runId)) continue;
     const file = asChatRunFile(r);
@@ -630,17 +634,31 @@ export function resolveAttachmentContent(
   return typeof uri === "string" ? { kind: "inert", uri } : { kind: "inert" };
 }
 
+/**
+ * The run's structured output from a launch result, when it carries one:
+ * `run_and_wait` answers `result.output` at the top level, a run resource read
+ * through `invoke_operation` nests it under `body`. An empty object is no output.
+ */
+export function extractRunOutput(result: unknown): Record<string, unknown> | undefined {
+  const unwrapped = asRecordOrNull(unwrapMcpResult(result));
+  if (!unwrapped) return undefined;
+  const output =
+    asRecordOrNull(asRecordOrNull(unwrapped.result)?.output) ??
+    asRecordOrNull(asRecordOrNull(asRecordOrNull(unwrapped.body)?.result)?.output);
+  return output && Object.keys(output).length > 0 ? output : undefined;
+}
+
 /** Run package id from a launch result (`body.packageId`, then top-level). */
 export function extractRunPackageId(result: unknown): string | undefined {
-  const unwrapped = asRecord(unwrapResult(result));
+  const unwrapped = asRecordOrNull(unwrapMcpResult(result));
   if (!unwrapped) return undefined;
-  const body = asRecord(unwrapped.body);
+  const body = asRecordOrNull(unwrapped.body);
   return nonEmptyString(body?.packageId) ?? nonEmptyString(unwrapped.packageId);
 }
 
 /**
  * Build the in-app run-detail URL (`/agents/{packageId}/runs/{runId}`, the same
- * route `run-row.tsx` links to). `undefined` when the run has no package id
+ * route the run table links to). `undefined` when the run has no package id
  * (orphaned) so the caller can omit the link. `packageId` keeps its `@scope/name`
  * slashes literal to match the route; only the run id is encoded.
  */

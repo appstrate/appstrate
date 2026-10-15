@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useTranslation } from "react-i18next";
+import { PendingButton } from "@/components/app-ui/pending-button";
+import { Trans, useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import type { PackageType } from "@appstrate/core/validation";
 import { bumpVersion, planPublishVersion, type VersionBump } from "@appstrate/core/semver";
 import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
+import { FieldError } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
-import { Spinner } from "./spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
 import { ApiError } from "../api/errors";
 import { errorMessage } from "../lib/mutation-error";
 
 interface CreateVersionModalProps {
-  open: boolean;
   onClose: () => void;
   type: PackageType;
   packageId: string;
@@ -25,7 +24,6 @@ interface CreateVersionModalProps {
 type FormData = { selectedBump: VersionBump };
 
 export function CreateVersionModal({
-  open,
   onClose,
   type,
   packageId,
@@ -92,29 +90,41 @@ export function CreateVersionModal({
 
   return (
     <Modal
-      open={open}
+      open
       onClose={onClose}
       title={t("version.createVersion")}
       actions={
-        <Button onClick={handleFormSubmit} disabled={!canCreate || createVersion.isPending}>
-          {createVersion.isPending && <Spinner />}{" "}
+        <PendingButton
+          onClick={handleFormSubmit}
+          pending={createVersion.isPending}
+          disabled={!canCreate}
+        >
           {targetVersion && hasUnarchivedChanges
             ? t("version.createVersionX", { version: targetVersion })
             : t("version.createVersion")}
-        </Button>
+        </PendingButton>
       }
     >
       <div className="space-y-4">
         <div className="space-y-2">
           {latestVersion && (
             <Label className="block text-sm">
-              {t("version.latestPublished")}: <strong>{latestVersion}</strong>
+              <Trans
+                t={t}
+                i18nKey="version.latestPublished"
+                values={{ version: latestVersion }}
+                components={{ b: <strong /> }}
+              />
             </Label>
           )}
           {!needsBump && (
             <Label className="block text-sm">
-              {t("version.activeVersionLabel")}:{" "}
-              <strong>{activeVersion ?? t("version.noVersion")}</strong>
+              <Trans
+                t={t}
+                i18nKey="version.activeVersionLabel"
+                values={{ version: activeVersion ?? t("version.noVersion") }}
+                components={{ b: <strong /> }}
+              />
             </Label>
           )}
         </div>
@@ -130,6 +140,7 @@ export function CreateVersionModal({
                   <button
                     key={opt.type}
                     type="button"
+                    aria-pressed={isSelected}
                     onClick={() => setValue("selectedBump", opt.type)}
                     className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${
                       isSelected
@@ -137,10 +148,10 @@ export function CreateVersionModal({
                         : "border-border hover:border-muted-foreground"
                     }`}
                   >
-                    <div className="font-medium">{opt.label}</div>
-                    <div className="text-muted-foreground mt-0.5 text-xs">
+                    <span className="block font-medium">{opt.label}</span>{" "}
+                    <span className="text-muted-foreground mt-0.5 block text-xs">
                       {latestVersion} &rarr; {bumped}
-                    </div>
+                    </span>
                   </button>
                 );
               })}
@@ -155,9 +166,7 @@ export function CreateVersionModal({
         {!activeVersion && (
           <p className="text-warning text-sm">{t("version.noVersionInManifest")}</p>
         )}
-        {errors.root?.message && (
-          <div className="text-destructive text-sm">{errors.root.message}</div>
-        )}
+        {errors.root?.message && <FieldError>{errors.root.message}</FieldError>}
       </div>
     </Modal>
   );

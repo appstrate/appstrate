@@ -14,6 +14,8 @@ export interface SchemaFormLabels extends FileWidgetLabels {
   removeItem?: string;
   moveItemUp?: string;
   moveItemDown?: string;
+  /** Shown in an open select when what was typed matches no option. */
+  noOptions?: string;
   /** Sentence for a failed JSON Schema keyword and its Ajv `params`; `undefined` keeps Ajv's. */
   validationError?: (keyword: string, params: Record<string, unknown>) => string | undefined;
 }

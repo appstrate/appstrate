@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Mail } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { AuthLayout } from "../components/auth-layout";
-import { AuthSuccessState } from "../components/auth-success-state";
+import { AuthLink, AuthMessage } from "../components/auth-message";
 import { useAuth } from "../hooks/use-auth";
 
 export function ForgotPasswordPage() {
@@ -35,7 +35,7 @@ export function ForgotPasswordPage() {
   if (state === "sent") {
     return (
       <AuthLayout>
-        <AuthSuccessState
+        <AuthMessage
           icon={Mail}
           title={t("forgotPassword.sentTitle")}
           description={t("forgotPassword.sentDescription")}
@@ -56,10 +56,8 @@ export function ForgotPasswordPage() {
           </p>
         </div>
         <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-sm flex-col gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="email">{t("login.email")}</Label>
+          <FormItem id="email" label={t("login.email")}>
             <Input
-              id="email"
               type="email"
               placeholder="email@example.com"
               autoComplete="email"
@@ -67,18 +65,15 @@ export function ForgotPasswordPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-          </div>
-          {error && <p className="text-destructive text-sm">{error}</p>}
+          </FormItem>
+          <FieldError>{error}</FieldError>
           <Button type="submit" className="w-full" disabled={state === "submitting"}>
             {state === "submitting" ? t("loading") : t("forgotPassword.submit")}
           </Button>
         </form>
-        <Link
-          to="/login"
-          className="text-muted-foreground hover:text-primary text-center text-sm underline underline-offset-4"
-        >
+        <AuthLink to="/login" className="text-center">
           {t("forgotPassword.backToLogin")}
-        </Link>
+        </AuthLink>
       </div>
     </AuthLayout>
   );

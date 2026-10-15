@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
 import { createConfirmer } from "../lib/confirm-settle";
 
 interface ConfirmModalProps {
@@ -57,15 +57,21 @@ export function ConfirmModal({
     <Modal
       open={open}
       onClose={onClose}
+      preventClose={isPending}
       title={title}
       actions={
         <>
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button variant={variant} onClick={confirm} disabled={isPending || confirmDisabled}>
-            {isPending ? <Spinner /> : (confirmLabel ?? t("btn.confirm"))}
-          </Button>
+          <PendingButton
+            variant={variant}
+            onClick={confirm}
+            pending={isPending}
+            disabled={confirmDisabled}
+          >
+            {confirmLabel ?? t("btn.confirm")}
+          </PendingButton>
         </>
       }
     >

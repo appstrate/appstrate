@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneAlert } from "@/components/app-ui/status-variants";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -7,35 +8,50 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useCanReach } from "../hooks/use-can-reach";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { Badge as UIBadge } from "@appstrate/ui/components/badge";
+import { AlertDescription } from "@appstrate/ui/components/alert";
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@appstrate/ui/components/dropdown-menu";
+  DetailTabs,
+  DetailTabBar,
+  DetailTabPanel,
+  type DetailTab,
+} from "../components/detail-tabs";
+import { DetailSectionCard } from "../components/detail-section-card";
+import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
+import { ManifestFacts } from "../components/package-manifest/manifest-fact";
+import { RoleLimitNotice } from "../components/role-limit-notice";
+import { PageActionsMenu } from "../components/page-actions-menu";
 import { PageHeader } from "../components/page-header";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
-import { LoadingState, ResourceErrorState, EmptyState } from "../components/page-states";
+import { ResourceErrorState, EmptyState } from "../components/page-states";
+import { ScheduleDetailSkeleton, SettingsSkeleton } from "../components/loading-skeletons";
 import { JsonView } from "../components/json-view";
-import { RunList } from "../components/run-list";
+import { ActorLabel } from "../components/actor-label";
+import { Badge } from "@appstrate/ui/components/badge";
+import { ScopedRunList } from "../components/scoped-run-list";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
-import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
+import { useScheduleById, useDeleteSchedule } from "../hooks/use-schedules";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { isQueryInFlight } from "../lib/query-state";
-import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
+import { ScheduleActionsMenu, ScheduleSettings } from "../components/schedule-settings";
+import {
+  scheduleNextRunAt,
+  scheduleSettingsHref,
+  type ScheduleSettingsSection,
+} from "../lib/schedule-options";
 import { formatDateField } from "../lib/format-date";
-import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock, Lock } from "lucide-react";
+import { parseCron } from "../lib/cron-frequency";
+import { describeFrequency } from "../lib/frequency-summary";
+import { scheduleDetailPath } from "../lib/package-paths";
+import { Pause, Clock, CalendarClock, FileInput, CirclePlay } from "lucide-react";
 
-type ScheduleTab = "runs" | "details";
+type ScheduleTab = "details" | "runs" | "settings";
+const SCHEDULE_TABS: readonly ScheduleTab[] = ["details", "runs", "settings"];
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -45,117 +61,120 @@ export function ScheduleDetailPage() {
 
   const scheduleQuery = useScheduleById(id);
   const { data: schedule, error } = scheduleQuery;
-  const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
   const mayWrite = useCanWriteSchedule(schedule);
 
   // A schedule's runs are runs: `schedules:read` alone does not list them.
+  // The tab stays for every role; without the permission its content says so.
   const readsRuns = canReadRuns(can);
-  const tabs: readonly ScheduleTab[] = readsRuns ? ["runs", "details"] : ["details"];
-  const [activeTab, setActiveTab] = useTabWithHash(tabs, readsRuns ? "runs" : "details");
+  const [activeTab, setActiveTab] = useTabWithHash(SCHEDULE_TABS, "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  if (isQueryInFlight(scheduleQuery)) return <LoadingState />;
+  if (isQueryInFlight(scheduleQuery)) return <ScheduleDetailSkeleton />;
   if (error || !schedule) return <ResourceErrorState error={error} />;
+  const tabs: DetailTab<ScheduleTab>[] = [
+    { value: "details", label: t("detail.overview.summary") },
+    { value: "runs", label: t("schedule.tabRuns") },
+    { value: "settings", label: t("schedule.tabSettings") },
+  ];
   const disabledReason = schedule.disabled_reason
     ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
     : null;
 
-  const handleToggle = () => {
-    updateSchedule.mutate(
-      { id: schedule.id, enabled: !schedule.enabled },
-      { onError: toastScheduleConnectionChoice },
-    );
-  };
-
   return (
-    <div className="p-6">
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScheduleTab)}>
+    <div>
+      <DetailTabs value={activeTab} onChange={setActiveTab}>
         <PageHeader
           title={schedule.name || t("schedule.unnamed")}
-          emoji="📅"
+          titleClassName="text-xl"
+          wrapActions
+          icon={
+            <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-[10px]">
+              <CalendarClock className="size-5" aria-hidden />
+            </span>
+          }
           breadcrumbs={[
-            { label: t("nav.orgSection", { ns: "common" }), href: "/" },
             { label: t("schedule.breadcrumbList"), href: "/schedules" },
-            { label: schedule.name || t("schedule.unnamed") },
+            {
+              label: schedule.name || t("schedule.unnamed"),
+              href: scheduleDetailPath(schedule.id),
+            },
+            { label: tabs.find((item) => item.value === activeTab)?.label ?? activeTab },
           ]}
           actions={
             <>
               <ScheduleStatusBadge schedule={schedule} />
+              {/* A schedule running as ANOTHER member is an org owner/admin
+                  act: the page deed stays where it always is, disabled,
+                  and says why. */}
               {can("schedules:write") && !mayWrite && (
                 <DisabledReasonTooltip reason={t("schedule.memberGoverned")}>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    disabled
-                    aria-label={t("schedule.memberGoverned")}
-                  >
-                    <Lock size={16} />
-                  </Button>
+                  <PageActionsMenu disabled />
                 </DisabledReasonTooltip>
               )}
               {can("schedules:write") && mayWrite && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon">
-                      <MoreHorizontal size={16} />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onSelect={() => navigate(`/schedules/${id}/edit`)}>
-                      <Pencil size={14} />
-                      {t("schedule.edit")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={handleToggle} disabled={updateSchedule.isPending}>
-                      {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
-                      {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
-                    </DropdownMenuItem>
-                    {can("schedules:delete") && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onSelect={() => setConfirmOpen(true)}
-                          disabled={deleteSchedule.isPending}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Trash2 size={14} />
-                          {t("schedule.delete")}
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <ScheduleActionsMenu
+                  schedule={schedule}
+                  onDelete={() => setConfirmOpen(true)}
+                  deletePending={deleteSchedule.isPending}
+                />
               )}
             </>
           }
-        >
-          <TabsList className="mt-3">
-            {readsRuns && <TabsTrigger value="runs">{t("schedule.tabRuns")}</TabsTrigger>}
-            <TabsTrigger value="details">{t("schedule.tabDetails")}</TabsTrigger>
-          </TabsList>
-        </PageHeader>
-
+        />
+        {/* Disabled by the platform, not by a person: say why in the band
+            between the header and the tabs, where the agent page says what
+            blocks it. A lost connection is repaired in the form's connection
+            choice, so the alert opens it. */}
         {disabledReason && (
-          <p className="border-border bg-muted/30 text-muted-foreground mb-4 rounded-lg border p-4 text-sm">
-            {disabledReason}
-          </p>
+          <ToneAlert variant="warning" className="mb-4">
+            <Pause aria-hidden />
+            <AlertDescription className="flex items-start justify-between gap-3">
+              <span className="min-w-0">{disabledReason}</span>
+              {mayWrite && schedule.disabled_reason?.startsWith("connection_") && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="-my-1.5 shrink-0"
+                  onClick={() => navigate(scheduleSettingsHref(schedule.id, "connections"))}
+                >
+                  {t("schedule.chooseConnections")}
+                </Button>
+              )}
+            </AlertDescription>
+          </ToneAlert>
         )}
+        <DetailTabBar tabs={tabs} />
 
-        {readsRuns && (
-          <TabsContent value="runs">
+        <DetailTabPanel value="runs">
+          {readsRuns ? (
             <ScheduleHistory schedule={schedule} />
-          </TabsContent>
-        )}
+          ) : (
+            <RoleLimitNotice>{t("schedule.roleLimit.runs")}</RoleLimitNotice>
+          )}
+        </DetailTabPanel>
 
-        <TabsContent value="details">
+        <DetailTabPanel value="details">
           <ScheduleParams schedule={schedule} />
-        </TabsContent>
-      </Tabs>
+        </DetailTabPanel>
+
+        <DetailTabPanel value="settings" flush>
+          {/* The settings seed their fields once: never from a list row that may be stale. */}
+          {scheduleQuery.isPlaceholderData ? (
+            <div className="p-6">
+              <SettingsSkeleton />
+            </div>
+          ) : (
+            <ScheduleSettings schedule={schedule} />
+          )}
+        </DetailTabPanel>
+      </DetailTabs>
 
       <ConfirmModal
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("schedule.deleteTitle")}
+        confirmLabel={t("schedule.delete")}
         description={t("schedule.deleteConfirm")}
         isPending={deleteSchedule.isPending}
         onConfirm={() => {
@@ -179,78 +198,109 @@ function ScheduleParams({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["agents"]);
-  const { data: agents } = useAgents();
+  const agentsQuery = useAgents();
+  const { data: agents } = agentsQuery;
+  const agentsPending = isQueryInFlight(agentsQuery);
   const canReach = useCanReach();
   const agentPath = `/agents/${schedule.packageId}`;
+  const nextRunAt = scheduleNextRunAt(schedule);
   const agentDisplayName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
   const input = schedule.input;
+  const navigate = useNavigate();
+  const open = (section: ScheduleSettingsSection) => ({
+    label: t("schedule.settings.open"),
+    onClick: () => navigate(scheduleSettingsHref(schedule.id, section)),
+  });
 
   return (
-    <>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramActor")}</p>
-          <p className="inline-flex items-center gap-1.5 text-sm font-medium">
-            <ActorLabel
-              actor_type={schedule.actor_type}
-              actor_name={schedule.actor_name}
-              iconSize="size-3.5"
-            />
-            {schedule.actor_type && (
-              <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
-                {schedule.actor_type}
-              </UIBadge>
+    <div className="grid items-start gap-6 lg:grid-cols-2">
+      <DetailSectionCard
+        title={t("run.infoExecution")}
+        icon={CirclePlay}
+        headerAction={open("execution")}
+      >
+        <FactGrid columns={2}>
+          <Fact label={t("schedule.paramAgent")}>
+            {agentsPending ? (
+              <Skeleton className="h-4 w-32" />
+            ) : canReach(agentPath) ? (
+              <Link className="text-primary hover:underline" to={agentPath}>
+                {agentDisplayName}
+              </Link>
+            ) : (
+              agentDisplayName
             )}
-          </p>
-        </div>
-
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramAgent")}</p>
-          {canReach(agentPath) ? (
-            <Link to={agentPath} className="text-sm font-medium hover:underline">
-              {agentDisplayName}
-            </Link>
-          ) : (
-            <p className="text-sm font-medium">{agentDisplayName}</p>
-          )}
-        </div>
-
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramCron")}</p>
-          <p className="font-mono text-sm">{schedule.cron_expression}</p>
-        </div>
-
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramTimezone")}</p>
-          <p className="text-sm font-medium">{schedule.timezone}</p>
-        </div>
-
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramNextRun")}</p>
-          <p className="text-sm font-medium">
-            {schedule.next_run_at ? formatDateField(schedule.next_run_at) : "-"}
-          </p>
-        </div>
-
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramLastRun")}</p>
-          <p className="text-sm font-medium">
-            {schedule.last_run_at ? formatDateField(schedule.last_run_at) : "-"}
-          </p>
-        </div>
-      </div>
-
-      {/* Input data */}
-      {input && Object.keys(input).length > 0 && (
-        <div className="mt-6">
-          <h3 className="text-muted-foreground mb-3 text-sm font-medium">
-            {t("schedule.tabInput")}
-          </h3>
+          </Fact>
+          <Fact label={t("schedule.paramActor")}>
+            {schedule.actor_name ? (
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                <ActorLabel
+                  actor_type={schedule.actor_type}
+                  actor_name={schedule.actor_name}
+                  iconSize="size-3.5"
+                />
+                {schedule.actor_type && (
+                  <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                    {t(
+                      schedule.actor_type === "end_user"
+                        ? "actorSelect.badgeEndUser"
+                        : "actorSelect.badgeMember",
+                    )}
+                  </Badge>
+                )}
+              </span>
+            ) : (
+              "–"
+            )}
+          </Fact>
+          <Fact label={t("run.infoVersion")}>
+            {schedule.version_override || t("schedule.inheritedVersion")}
+          </Fact>
+        </FactGrid>
+      </DetailSectionCard>
+      <DetailSectionCard
+        title={t("schedule.timing")}
+        icon={CalendarClock}
+        headerAction={open("recurrence")}
+      >
+        <ManifestFacts
+          facts={[
+            {
+              labelKey: "schedule.settings.recurrence",
+              value:
+                describeFrequency(parseCron(schedule.cron_expression)) ?? schedule.cron_expression,
+            },
+            { labelKey: "schedule.paramTimezone", value: schedule.timezone },
+            {
+              labelKey: "schedule.paramNextRun",
+              value: nextRunAt
+                ? formatDateField(nextRunAt, "datetime", schedule.timezone)
+                : t("schedule.noNextRun"),
+            },
+            {
+              labelKey: "schedule.paramLastRun",
+              value: schedule.last_run_at
+                ? formatDateField(schedule.last_run_at, "datetime", schedule.timezone)
+                : t("schedule.notRunYet"),
+            },
+          ]}
+        />
+      </DetailSectionCard>
+      <DetailSectionCard
+        title={t("schedule.tabInput")}
+        icon={FileInput}
+        headerAction={open("inputs")}
+        className="lg:col-span-2"
+      >
+        <p className="text-muted-foreground mb-4 text-sm">{t("schedule.inputHint")}</p>
+        {input && Object.keys(input).length > 0 ? (
           <JsonView data={input} />
-        </div>
-      )}
-    </>
+        ) : (
+          <p className="text-muted-foreground text-sm">{t("schedule.noInput")}</p>
+        )}
+      </DetailSectionCard>
+    </div>
   );
 }
 
@@ -261,20 +311,22 @@ function ScheduleHistory({
 }: {
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
-  const { t } = useTranslation(["agents"]);
+  const { t } = useTranslation(["agents", "common"]);
   const { data: agents } = useAgents();
   const agentName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
 
   const isActive = schedule.enabled;
 
-  // Use the same hook as RunList so React Query deduplicates the fetch.
+  // The same query ScopedRunList makes for its first page (12 rows), so React
+  // Query serves both from one fetch.
   // We only need the first run for the "next run" preview row.
-  const { data } = usePaginatedRuns({
+  const runsQuery = usePaginatedRuns({
     scheduleId: schedule.id,
-    limit: 20,
+    limit: 12,
     offset: 0,
   });
+  const { data } = runsQuery;
   const firstExec = data?.data?.[0];
 
   // Show the fake "next run" row only if the last run started > 30s ago.
@@ -298,28 +350,26 @@ function ScheduleHistory({
   }, [lastStartedAt]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  const nextRunAt = scheduleNextRunAt(schedule);
   const previewRow =
-    isActive && showNext && schedule.next_run_at ? (
+    isActive && showNext && nextRunAt ? (
       <NextRunPreview
-        runNumber={(firstExec?.runNumber ?? 0) + 1}
+        // The last run's + 1: unknown while the runs load.
+        runNumber={isQueryInFlight(runsQuery) ? null : (firstExec?.runNumber ?? 0) + 1}
         agentName={agentName}
         schedule_name={schedule.name || t("schedule.unnamed")}
-        next_run_at={schedule.next_run_at}
+        next_run_at={nextRunAt}
+        timezone={schedule.timezone}
       />
     ) : null;
 
   return (
-    <RunList
-      scheduleId={schedule.id}
-      pageSize={12}
-      fixedAgentName={agentName}
-      firstPageBanner={previewRow}
+    <ScopedRunList
+      scope={{ scheduleId: schedule.id, agentName }}
+      banner={previewRow}
       emptyState={
-        <div className="border-border rounded-md border">
-          {previewRow}
-          <div className="p-6">
-            <EmptyState message={t("schedule.noRuns")} icon={Clock} compact />
-          </div>
+        <div className="p-6">
+          <EmptyState message={t("schedule.noRuns")} icon={Clock} compact />
         </div>
       }
     />

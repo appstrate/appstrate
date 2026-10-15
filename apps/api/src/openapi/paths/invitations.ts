@@ -125,6 +125,7 @@ export const invitationsPaths = {
                 id: "550e8400-e29b-41d4-a716-446655440000",
                 name: "Acme Corp",
                 slug: "acme-corp",
+                logo: null,
                 role: "member",
                 permissions: ["org:read", "spaces:read"],
                 createdAt: "2026-01-10T08:00:00Z",

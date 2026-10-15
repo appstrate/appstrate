@@ -4,10 +4,11 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Loader2, Lock, Plus, RefreshCw } from "lucide-react";
+import { AlertTriangle, Lock, Plus, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { unavailableConnectionIds } from "../../lib/connection-set";
 import { ConfirmModal } from "../confirm-modal";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
@@ -16,12 +17,13 @@ import { NoConnectionLabel } from "./no-connection-label";
 import type { IntegrationCandidate } from "../../hooks/use-integrations";
 import type { ConnectionPicker } from "./use-connection-picker";
 
-export const AMBER_TEXT = "text-amber-600 dark:text-amber-400";
+/** The warning tone of a picker line (the constant keeps the name its callers import). */
+export const AMBER_TEXT = "text-warning";
 
 export function PickerWarning({ testId, children }: { testId: string; children: ReactNode }) {
   return (
     <div
-      className="mt-1.5 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+      className="border-warning/40 bg-warning/10 text-warning mt-1.5 flex items-center gap-1.5 rounded-md border p-2 text-[0.7rem]"
       data-testid={testId}
     >
       <AlertTriangle className="size-3 shrink-0" />
@@ -33,8 +35,26 @@ export function PickerWarning({ testId, children }: { testId: string; children: 
 export function LoadingPicker({ integrationId }: { integrationId: string }) {
   return (
     <div data-testid={`member-picker-${integrationId}`}>
-      <Button variant="outline" size="sm" disabled className="h-7 gap-1.5 text-xs">
-        <Loader2 className="size-3 animate-spin" />
+      <Skeleton className="h-7 w-32 rounded-md" />
+    </div>
+  );
+}
+
+/** The verdict could not be read: a disabled button that says so, never a spinner. */
+export function FailedPicker({ integrationId }: { integrationId: string }) {
+  const { t } = useTranslation(["agents", "settings"]);
+  return (
+    <div data-testid={`member-picker-${integrationId}`}>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled
+        className="h-7 justify-start gap-1.5 text-xs"
+        title={t("detail.integrationMemberPicker.resolutionFailedHint")}
+        data-testid={`member-pick-failed-${integrationId}`}
+      >
+        <AlertTriangle className="text-destructive size-3" />
+        <span className="truncate">{t("detail.integrationMemberPicker.resolutionFailed")}</span>
       </Button>
     </div>
   );
@@ -50,7 +70,7 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
           variant="outline"
           size="sm"
           disabled
-          className="h-7 justify-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
+          className="text-warning h-7 justify-start gap-1.5 text-xs"
           data-testid={`member-pick-reconfigure-${integrationId}`}
         >
           <AlertTriangle className="size-3" />
@@ -247,7 +267,7 @@ export function UnderScopedWarning({
   const canUpgrade = canConnect && conn.is_own && auths[conn.auth_key]?.type === "oauth2";
   return (
     <div
-      className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+      className="border-warning/40 bg-warning/10 text-warning mt-1.5 flex flex-col gap-1.5 rounded-md border p-2 text-[0.7rem]"
       data-testid={`member-pick-scope-warning-${conn.id}`}
     >
       <div className="flex items-center gap-1.5">

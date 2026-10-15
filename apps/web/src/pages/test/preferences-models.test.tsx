@@ -2,7 +2,7 @@
 
 /**
  * The Preferences models page as a member sees it: their own credentials through
- * the organization's shared table, with no owner column, and the add button only
+ * the organization's shared table, with no owner column, and the add action only
  * for a caller who holds `model-provider-credentials:connect`.
  */
 
@@ -44,6 +44,7 @@ function credential(over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
     created_by: "usr_admin",
     allowed_actions: [],
     bindable: false,
+    serves_model_ids: [],
     needs_reconnection: false,
     createdAt: CREATED,
     updatedAt: CREATED,
@@ -106,6 +107,9 @@ function renderFor(permissions: string[], settingsLoaded = true): string {
     ["get", "/api/model-provider-credentials", { params: { header: { "X-Org-Id": ORG_ID } } }],
     { data: [ORG_KEY, MY_KEY, MY_SUBSCRIPTION, ALICE_KEY] },
   );
+  queryClient.setQueryData(["get", "/api/models", { params: { header: { "X-Org-Id": ORG_ID } } }], {
+    data: [],
+  });
   if (settingsLoaded) {
     queryClient.setQueryData(
       ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
@@ -128,50 +132,61 @@ function renderFor(permissions: string[], settingsLoaded = true): string {
   }
 }
 
-/** One table row, from its marker to the next row, so a cell is read off its own row. */
-function rowOf(html: string, marker: string): string {
-  const start = html.indexOf(marker);
-  const next = html.indexOf("<tr", start + 1);
-  return html.slice(start, next === -1 ? undefined : next);
+/** The table row holding `text`, up to the next row, so a cell is read off its own row. */
+function rowOf(html: string, text: string): string {
+  const at = html.indexOf(text);
+  if (at === -1) throw new Error(`no row holds "${text}"`);
+  const next = html.indexOf("<tr", at);
+  return html.slice(html.lastIndexOf("<tr", at), next === -1 ? undefined : next);
 }
+
+/** What a name shows when a click on it would rename it: it never does, the menu renames. */
+const RENAMABLE = "cursor-pointer";
 
 describe("the Preferences models page, for a member who holds connect", () => {
   const html = renderFor(["model-provider-credentials:connect"]);
-  const row = (id: string) => rowOf(html, `data-testid="credential-row-${id}"`);
+  const row = (credential: ModelProviderCredentialInfo) => rowOf(html, credential.label);
 
   it("shows the caller's own credentials and none of the others", () => {
-    expect(html).toContain(`data-testid="credential-row-${MY_KEY.id}"`);
-    expect(html).toContain(`data-testid="credential-row-${MY_SUBSCRIPTION.id}"`);
-    expect(html).not.toContain(`data-testid="credential-row-${ORG_KEY.id}"`);
-    expect(html).not.toContain(`data-testid="credential-row-${ALICE_KEY.id}"`);
+    expect(html).toContain(`aria-label="${settingsFr["preferences.tabModels"]}"`);
+    expect(html).toContain(MY_KEY.label);
+    expect(html).toContain(MY_SUBSCRIPTION.label);
+    expect(html).not.toContain(ORG_KEY.label);
+    expect(html).not.toContain(ALICE_KEY.label);
   });
 
-  it("drops the owner column, since every row is the caller's own", () => {
-    expect(html).not.toContain(settingsFr["credentials.col.owner"]);
+  it("has no owner column, since every row is the caller's own, and says the kind of key", () => {
+    expect(html).not.toContain("Appartient à");
+    expect(html).toContain(settingsFr["providers.type.personalKey"]);
+    expect(html).toContain(settingsFr["providers.col.state"]);
   });
 
-  it("lets the caller rename and test their own key", () => {
-    expect(row(MY_KEY.id)).toContain(`aria-label="${settingsFr["credentials.edit"]}"`);
-    expect(row(MY_KEY.id)).toContain(settingsFr["credentials.test"]);
+  const menu = (credential: ModelProviderCredentialInfo) =>
+    `aria-label="${settingsFr["providers.moreActions"].replace("{{name}}", credential.label)}"`;
+
+  it("lets the caller rename an own key and an own subscription, from the menu only", () => {
+    expect(row(MY_KEY)).toContain(menu(MY_KEY));
+    expect(row(MY_KEY)).not.toContain(RENAMABLE);
+    expect(row(MY_SUBSCRIPTION)).toContain(menu(MY_SUBSCRIPTION));
+    expect(row(MY_SUBSCRIPTION)).not.toContain(RENAMABLE);
   });
 
-  it("offers the reconnect and delete of an own subscription that needs it", () => {
-    expect(row(MY_SUBSCRIPTION.id)).toContain(settingsFr["credentials.oauth.reconnect"]);
-    expect(row(MY_SUBSCRIPTION.id)).toContain(
-      `aria-label="${settingsFr["credentials.oauth.disconnect"]}"`,
-    );
+  it("keeps every deed in the menu: no pencil on the row", () => {
+    expect(row(MY_KEY)).not.toContain(`aria-label="${settingsFr["credentials.edit"]}"`);
+    expect(row(MY_SUBSCRIPTION)).not.toContain(settingsFr["credentials.oauth.reconnect"]);
   });
 
-  it("offers the add button", () => {
-    expect(html).toContain(settingsFr["credentials.add"]);
+  it("offers the add deed in the Actions menu, and repeats nothing while the list has rows", () => {
+    expect(html).toContain("data-page-actions-trigger");
+    expect(html).not.toContain(settingsFr["credentials.addPersonal"]);
   });
 });
 
 describe("the Preferences models page, before the org settings load", () => {
   const html = renderFor(["model-provider-credentials:connect"], false);
 
-  it("withholds the add button and claims no policy", () => {
-    expect(html).not.toContain(settingsFr["credentials.add"]);
+  it("withholds the Actions menu and claims no policy", () => {
+    expect(html).not.toContain("data-page-actions-trigger");
     expect(html).not.toContain(settingsFr["modelCredentials.policyDisabled"]);
   });
 });
@@ -180,10 +195,10 @@ describe("the Preferences models page, for a caller without connect", () => {
   const html = renderFor([]);
 
   it("still lists the caller's own credentials", () => {
-    expect(html).toContain(`data-testid="credential-row-${MY_KEY.id}"`);
+    expect(html).toContain(MY_KEY.label);
   });
 
-  it("offers no add button", () => {
-    expect(html).not.toContain(settingsFr["credentials.add"]);
+  it("offers no Actions menu", () => {
+    expect(html).not.toContain("data-page-actions-trigger");
   });
 });

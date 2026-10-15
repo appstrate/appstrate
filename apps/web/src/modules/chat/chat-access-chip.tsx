@@ -21,6 +21,7 @@ import { BotOffIcon, CheckIcon, EyeIcon, ShieldIcon, XIcon } from "lucide-react"
 import { useAgentAuthoringEnabled } from "@appstrate/module-chat/agent-authoring";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { roleI18nKey, useCurrentSpaceGrant, usePermissions } from "../../hooks/use-permissions";
@@ -41,8 +42,8 @@ export function ChatAccessChip() {
   // Nothing truthful to say until both lists have landed: `can` answers
   // `false` for a set still in flight, which renders exactly like a denial.
   // A chip that flashes "you may do nothing" on every hard reload would be
-  // worse than one that appears a beat late.
-  if (!ready || orgRole === null) return null;
+  // worse than one that appears a beat late — so its box is held meanwhile.
+  if (!ready || orgRole === null) return <Skeleton className="h-7 w-24 rounded-md" />;
 
   const spaceRole = spaceRoleLabel(spaces?.find((s) => s.id === spaceId)?.role, (key) => t(key));
   const orgRoleLabel = t(`settings:${roleI18nKey(orgRole)}`);
@@ -119,10 +120,7 @@ export function ChatCapabilityList({
             {off ? (
               <BotOffIcon aria-hidden="true" className="text-muted-foreground size-3.5 shrink-0" />
             ) : granted ? (
-              <CheckIcon
-                aria-hidden="true"
-                className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-              />
+              <CheckIcon aria-hidden="true" className="text-success size-3.5 shrink-0" />
             ) : (
               <XIcon aria-hidden="true" className="text-muted-foreground/60 size-3.5 shrink-0" />
             )}
@@ -136,11 +134,11 @@ export function ChatCapabilityList({
               )}
             >
               {t(`chat:${capability.labelKey}`)}
-              {off && ` — ${t("chat:access.turnedOff")}`}
+              {off && ` (${t("chat:access.turnedOff")})`}
             </span>
             {!off && (
               <span className="sr-only">
-                {" — "}
+                {", "}
                 {t(granted ? "chat:access.granted" : "chat:access.denied")}
               </span>
             )}

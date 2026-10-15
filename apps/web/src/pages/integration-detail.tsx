@@ -1,79 +1,303 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration detail page.
- *
- * Shares the unified package layout (SharedHeader + PackageActionsDropdown)
- * with agents and skills. The activate/deactivate toggle lives in the header
- * (left action); download / fork / delete live in the actions dropdown. The
- * manifest's metadata is rendered by the À propos tab. Integrations are
- * import-only — there is no in-app editor.
- *
- * Tabs:
- *   - Connexions — per-auth connect CTA (always the resolved default client —
- *     the org's custom client when registered, else the system client) and a
- *     table of connected accounts with rename / share / reconnect / disconnect.
- *     Runtime view, visible to members.
- *   - Configuration (admin) — per-auth metadata (scopes, resource, authorized
- *     URIs), the OAuth clients table (system + org + space custom), the org's
- *     own clients table (org admins), the BYO-app registration form, the org-wide access rules (block member connections,
- *     default connection, per-agent pins), and the publisher setup guide.
- *   - Outils — read-only catalog of tools the integration exposes (resolved
- *     server-side via `resolveIntegrationToolCatalog`: MCPB-canonical from
- *     the referenced mcp-server minus `hidden_tools` and connect.tool
- *     primitives). Per-tool description + required scopes + URL patterns.
- *   - À propos — metadata (version, author, license, repo, …), privacy policy,
- *     keywords.
- *   - Contenu — the artifact's own files, read-only, opening on
- *     INTEGRATION.md. This is where `manifest.json` is readable verbatim: an
- *     admin auditing a third-party integration before granting it OAuth scopes
- *     must not have to download the `.afps` and unzip it.
- *   - Versions — read-only release history (non-system packages only).
- *
- * Connect drives a popup through the hosted connect portal —
- * mint `/connect/session`, open the returned `connect_url` (which dispatches to
- * the provider OAuth screen or the hosted credential form), then refetch the
- * detail to surface the new connection row.
+ * Integration detail: capabilities and usage, connected accounts, tools,
+ * authentication/access settings, and the read-only artifact. Technical auth
+ * identifiers never stand in for navigation or capability activation.
+ * OAuth clients are listed in one table across tiers (the space's own, the
+ * organization's, the system's); client and connection mutations retain their
+ * ownership gates. The sections live in `components/integration-detail/`.
  */
 
-import { useState } from "react";
+import { ToneBadge } from "@/components/app-ui/status-variants";
+import { lazy, Suspense } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import { ManifestOverview } from "../components/package-manifest/manifest-overview";
-import { FileExplorer } from "../components/package-files/file-explorer";
+import { IntegrationOverview } from "../components/package-detail/integration-overview";
+import { IntegrationFunctioning } from "../components/package-detail/integration-structure";
+import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 
-/** Tab ids, also the URL fragments that select them. `content` is the same id
- *  the unified package page uses for its file explorer, so a deep link reads
- *  the same on either page. */
-const INTEGRATION_TABS = [
-  "connections",
-  "configuration",
-  "tools",
-  "about",
-  "content",
-  "versions",
-] as const;
+const INTEGRATION_TABS = ["overview", "connections", "configuration"] as const;
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useLocation, useNavigate } from "react-router-dom";
+import type { OrgPackageItemDetail } from "@appstrate/shared-types";
+import type { IntegrationDefinitionSection } from "./package-editor";
+import {
+  ShieldCheck,
+  KeyRound,
+  Plug,
+  FolderTree,
+  Wrench,
+  History,
+  FileArchive,
+  IdCard,
+  Server,
+} from "lucide-react";
+import { authMethodLabel } from "../lib/integration-presentation";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
-import { LoadingState, ErrorState, ResourceErrorState } from "../components/page-states";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { ErrorState, ResourceErrorState } from "../components/page-states";
+import { SettingsSkeleton } from "../components/loading-skeletons";
+import { DetailTabs, DetailTabBar, DetailTabPanel } from "../components/detail-tabs";
+import { SettingsHeading } from "../components/settings/settings-heading";
+import type { SectionRailItem } from "../components/settings/section-rail";
+import {
+  SettingsRailView,
+  type SettingsRailGroup,
+} from "../components/settings/settings-rail-view";
 import { SharedHeader } from "../components/package-detail/shared-header";
+import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
-import { VersionHistory } from "../components/version-history";
-import { ForkPackageModal } from "../components/fork-package-modal";
-import { ConfirmModal } from "../components/confirm-modal";
-import { ConnectAuthBlock } from "../components/integration-detail/connect-auth-block";
+import { PackageCommonSection } from "../components/package-detail/package-common-section";
+import { isOwnedSource } from "../components/package-detail/owned-source";
+import { PackageOwnershipNotice } from "../components/package-detail/package-ownership";
 import { ConfigAuthBlock } from "../components/integration-detail/config-auth-block";
 import { AccessRulesSection } from "../components/integration-detail/access-rules-section";
-import { usePermissions, useHomeSpaceName, useCurrentSpaceGrant } from "../hooks/use-permissions";
-import { maySetPackageActive } from "../lib/package-permissions";
-import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
-import { useIntegrationDetail } from "../hooks/use-integrations";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { ConnectionsTable } from "../components/integration-detail/connections-table";
+import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
+import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
+import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
-import { useSetPackageActive } from "../hooks/use-library";
+import { usePackageActivation } from "../hooks/use-library";
+import {
+  integrationSettingsHref,
+  isPackageCommonSection,
+  type IntegrationSettingsSection,
+} from "../lib/settings-section-href";
+
+const IntegrationDefinitionEditor = lazy(() =>
+  import("./package-editor").then((module) => ({
+    default: module.IntegrationDefinitionEditor,
+  })),
+);
+
+/** Rail id → editor section. Contenu (`bundle`) is not one: it reads the bundle. */
+type DefinitionRailEntry = [IntegrationSettingsSection, IntegrationDefinitionSection];
+const DEFINITION_RAIL: readonly DefinitionRailEntry[] = [
+  ["identity", "general"],
+  ["source", "source"],
+  ["auth-methods", "auths"],
+  ["tools", "tools"],
+];
+const DEFINITION_SECTIONS: readonly string[] = DEFINITION_RAIL.map(([id]) => id);
+
+function IntegrationGeneral({ detail }: { detail: IntegrationDetailWire }) {
+  return <IntegrationFunctioning detail={detail} />;
+}
+
+function IntegrationSettings({
+  packageId,
+  detail,
+  blockUserConnections,
+  canConfigure,
+  definition,
+  isOwned,
+  versionGrants,
+}: {
+  packageId: string;
+  detail: NonNullable<ReturnType<typeof useIntegrationDetail>["data"]>;
+  blockUserConnections: boolean;
+  canConfigure: boolean;
+  /**
+   * The package draft, present when the reader may change the definition: its
+   * sections are then edited here, in place. Absent, Définition stays a read.
+   */
+  definition?: Versioned<OrgPackageItemDetail>;
+  /** A system integration has no version history of its own. */
+  isOwned: boolean;
+  /** What the version history may do: restore needs the home space's write, delete its delete. */
+  versionGrants: { canRestore: boolean; canDelete: boolean };
+}) {
+  const { t } = useTranslation(["settings", "agents"]);
+  const navigate = useNavigate();
+  const resolve = (requested: string | null): IntegrationSettingsSection =>
+    requested === "tools" ||
+    requested === "functioning" ||
+    (requested === "versions" && isOwned) ||
+    requested === "bundle" ||
+    (definition && requested && DEFINITION_SECTIONS.includes(requested))
+      ? (requested as IntegrationSettingsSection)
+      : requested === "files" || !canConfigure
+        ? "files"
+        : requested === "access"
+          ? "access"
+          : "authentication";
+  const steps = detail.manifest.setup_guide?.steps ?? [];
+  // Same order as an agent's: Explorer (see it: files, versions), then
+  // what is set here, then the AFPS package, what the integration IS for every
+  // space, edited in place when the reader may. The tool catalogue belongs to
+  // the package: nothing about it is set per organization or per space.
+  const item = (
+    id: IntegrationSettingsSection,
+    icon: SectionRailItem["icon"],
+    label: string,
+  ): SettingsRailGroup<IntegrationSettingsSection>["items"][number] => ({ id, icon, label });
+  const groups = [
+    {
+      title: t("detail.settings.exploreGroup", { ns: "agents" }),
+      items: [
+        item("files", FolderTree, t("detail.overview.explorer", { ns: "agents" })),
+        ...(isOwned
+          ? [item("versions", History, t("detail.settings.versions", { ns: "agents" }))]
+          : []),
+      ],
+    },
+    ...(canConfigure
+      ? [
+          {
+            title: t("detail.settings.configurationGroup", { ns: "agents" }),
+            items: [
+              item("authentication", KeyRound, t("integration.presentation.authentication")),
+              item("access", ShieldCheck, t("integration.admin.accessRules.title")),
+            ],
+          },
+        ]
+      : []),
+    {
+      title: t("detail.settings.definitionGroup", { ns: "agents" }),
+      items: [
+        ...(definition
+          ? [
+              item("identity", IdCard, t("editor.tabGeneral", { ns: "agents" })),
+              item("source", Server, t("integrationEditor.tabSource", { ns: "agents" })),
+              item(
+                "auth-methods",
+                KeyRound,
+                t("integrationEditor.tabAuthMethods", { ns: "agents" }),
+              ),
+            ]
+          : [item("functioning", Plug, t("integration.structure.functioning"))]),
+        item("tools", Wrench, t("integrationEditor.tabTools", { ns: "agents" })),
+        item("bundle", FileArchive, t("editor.tabPackageFiles", { ns: "agents" })),
+      ],
+    },
+  ];
+  return (
+    <SettingsRailView
+      param="integrationSettings"
+      tab="configuration"
+      label={t("integration.tabs.configuration")}
+      groups={groups}
+      resolve={resolve}
+      definitionSections={DEFINITION_SECTIONS}
+    >
+      {({ active, file, href }) => {
+        const definitionSection = definition
+          ? DEFINITION_RAIL.find(([id]) => id === active)?.[1]
+          : undefined;
+        return definition && definitionSection ? (
+          <Suspense fallback={<SettingsSkeleton />}>
+            <IntegrationDefinitionEditor
+              detail={definition}
+              section={definitionSection}
+              onSection={(next) => {
+                const railId = DEFINITION_RAIL.find(([, section]) => section === next)?.[0];
+                if (railId) void navigate(href(railId));
+              }}
+              toolCatalog={detail.tool_catalog ?? []}
+            />
+          </Suspense>
+        ) : isPackageCommonSection(active) ? (
+          <PackageCommonSection
+            section={active}
+            type="integration"
+            packageId={packageId}
+            manifest={detail.manifest}
+            file={file}
+            href={href}
+            manifestSection={definition ? "identity" : undefined}
+            versions={versionGrants}
+          />
+        ) : active === "functioning" ? (
+          <div className="p-6">
+            <SettingsHeading title={t("integration.structure.functioning")} description={null} />
+            <IntegrationGeneral detail={detail} />
+          </div>
+        ) : active === "tools" ? (
+          <div className="p-6">
+            <SettingsHeading
+              title={t("integrationEditor.tabTools", { ns: "agents" })}
+              description={t("integrationEditor.description.tools", { ns: "agents" })}
+            />
+            <IntegrationToolsSection
+              tools={detail.tool_catalog ?? []}
+              allowUndeclaredTools={detail.allow_undeclared_tools}
+            />
+          </div>
+        ) : !detail.active ? (
+          <div className="p-6">
+            <ActivationHint packageId={packageId} />
+          </div>
+        ) : (
+          <div className="p-6">
+            <SettingsHeading
+              title={t(
+                active === "access"
+                  ? "integration.admin.accessRules.title"
+                  : "integration.presentation.authentication",
+              )}
+              description={t(
+                active === "access"
+                  ? "integration.config.accessDescription"
+                  : "integration.presentation.authenticationDescription",
+              )}
+            />
+            {active === "authentication" && (
+              <div className="space-y-6">
+                <SetupGuideSteps steps={steps} />
+                {detail.auths.length === 0 && (
+                  <p className="text-sm">{t("integration.auth.none")}</p>
+                )}
+                <div className="space-y-8">
+                  {detail.auths.map((status) => {
+                    const authDecl = detail.manifest.auths?.[status.auth_key];
+                    if (!authDecl) return null;
+                    return (
+                      <section
+                        key={status.auth_key}
+                        id={`auth-${status.auth_key}`}
+                        className="min-w-0"
+                      >
+                        <div className="mb-4 flex items-center gap-3">
+                          <h3 className="text-base font-semibold">
+                            {authMethodLabel(
+                              status,
+                              detail.auths,
+                              t(`integration.auth.type.${status.type}`),
+                            )}
+                          </h3>
+                          <Badge variant="secondary">
+                            {t(
+                              status.required
+                                ? "integration.auth.required"
+                                : "integration.auth.optional",
+                            )}
+                          </Badge>
+                        </div>
+                        <ConfigAuthBlock
+                          packageId={packageId}
+                          status={status}
+                          authDecl={authDecl}
+                        />
+                      </section>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {active === "access" && (
+              <AccessRulesSection
+                packageId={packageId}
+                blockUserConnections={blockUserConnections}
+              />
+            )}
+          </div>
+        );
+      }}
+    </SettingsRailView>
+  );
+}
 
 // ─────────────────────────────────────────────
 // Page
@@ -84,25 +308,23 @@ import { useSetPackageActive } from "../hooks/use-library";
  * yet active — connecting and governance are meaningless until the
  * integration is activated for this space.
  */
-function ActivationHint({
-  onActivate,
-  pending,
-  canActivate,
-}: {
-  onActivate: () => void;
-  pending: boolean;
-  /** The page's one activation verdict — the hint must not offer what the header hides. */
-  canActivate: boolean;
-}) {
+function ActivationHint({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings", "common"]);
+  // The hint names no button the route would refuse.
+  const { mayActivate, activate, pending } = usePackageActivation(packageId);
   return (
     <div
       className="border-border bg-muted/30 rounded-md border p-6 text-center"
       data-testid="activation-hint"
     >
       <p className="text-muted-foreground mb-3 text-sm">{t("integrations.activate.hint")}</p>
-      {canActivate && (
-        <Button size="sm" onClick={onActivate} disabled={pending} data-testid="detail-activate-btn">
+      {mayActivate && (
+        <Button
+          size="sm"
+          onClick={() => activate()}
+          disabled={pending}
+          data-testid="detail-activate-btn"
+        >
           {t("integrations.btn.activate")}
         </Button>
       )}
@@ -119,13 +341,7 @@ export function IntegrationDetailPage() {
     "integration",
     packageId || undefined,
   );
-  // ONE pair of doors for every package family: an integration is activated in
-  // a space by `POST /api/spaces/{id}/packages` and switched off by its
-  // `DELETE`, exactly like an agent or a skill. The row and its settings
-  // survive the deactivation — connections were never held there anyway.
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
-  const deletePkg = useDeletePackage("integration");
+  const activation = usePackageActivation(packageId);
   const downloadPackage = usePackageDownload(scope, name);
   const { can } = usePermissions();
   // The package's own detail response is the authority on its home — both the
@@ -133,29 +349,27 @@ export function IntegrationDetailPage() {
   const homeSpaceId = pkg?.home_space_id;
   const homeWritable = pkg?.home_writable;
   const homeDeletable = pkg?.home_deletable;
-  const homeShareable = pkg?.home_shareable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
   const canConfigure = can("integrations:configure");
-  // The tree's ONE activation verdict, and deliberately not
-  // `can("integrations:install")`: `can()` unions the org and space permission
-  // sets, and that union does not carry RBAC §3.6 — owning the space IS the
-  // authorization, so a guest in their own personal space holds `operator`,
-  // no `integrations:install`, and the route accepts all the same. A second
-  // spelling here hides a control the server takes, right beside the dropdown
-  // below, which asks `maySetPackageActive` and would offer its mirror image.
-  const spaceGrant = useCurrentSpaceGrant();
-  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if
   // it can point at the screen where that happens.
-  const [tab, setTab] = useTabWithHash(INTEGRATION_TABS, "connections");
-  const [forkOpen, setForkOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [tab, setTab] = useTabWithHash(INTEGRATION_TABS, "overview");
+  const navigate = useNavigate();
+  const location = useLocation();
+  const openAuthentication = () =>
+    void navigate(integrationSettingsHref(location.pathname, "authentication"));
+  const openConnections = (authKey?: string) => {
+    const params = new URLSearchParams(location.search);
+    if (authKey) params.set("connectionMethod", authKey);
+    else params.delete("connectionMethod");
+    void navigate({ search: params.toString(), hash: "connections" });
+  };
   const canBrowseIntegrations = useCanReach()("/integrations");
 
-  // `source` (system or local) comes from the package detail only: wait for it.
-  if (isLoading || pkgLoading) return <LoadingState />;
+  // Only the integration detail gates the page; the package detail brings `source` and
+  // follows in place (badges, read-only alert, actions menu).
+  if (isLoading) return <PackageDetailSkeleton type="integration" />;
   if (error) {
     // Not placed in this space, or gone: one answer for both, and what the
     // member can do about either.
@@ -173,20 +387,13 @@ export function IntegrationDetailPage() {
 
   const active = detail.active;
   const m = detail.manifest;
-  // Only the package detail knows the source. Unknown (read refused or failed) is not owned.
+  // Only the package detail knows the source.
   const source = pkg?.source;
-  const version = pkg?.version ?? m.version;
-  const isBuiltIn = source === "system";
-  // Org-owned packages are editable regardless of scope name; only system packages are read-only.
-  const isOwned = source === "local";
-  const setActivation = (next: boolean, onSuccess?: () => void) => {
-    if (!currentSpaceId) return;
-    setActive.mutate({ spaceId: currentSpaceId, packageId, active: next }, { onSuccess });
-  };
-  const onActivate = () => setActivation(true);
+  const version = pkgLoading ? undefined : (pkg?.version ?? m.version);
+  const isOwned = isOwnedSource(source);
 
   return (
-    <div className="p-6">
+    <div>
       <SharedHeader
         detail={{
           id: packageId,
@@ -199,314 +406,112 @@ export function IntegrationDetailPage() {
           homeSpaceName,
         }}
         isHistoricalVersion={false}
+        activeSubpage={{
+          label: t(`integration.tabs.${tab}`),
+        }}
         actionsLeft={
-          <span
-            className={
-              active
-                ? "rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500"
-                : "bg-warning/10 text-warning rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
-            }
-          >
-            {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
-          </span>
+          <>
+            {pkgLoading && <Skeleton className="h-5 w-16" />}
+            <ToneBadge variant={active ? "success" : "warning"}>
+              {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
+            </ToneBadge>
+          </>
         }
         actionsRight={
           <>
-            {!active && canActivate && (
+            {!active && activation.mayActivate && (
               <Button
                 size="sm"
-                onClick={onActivate}
-                disabled={setActive.isPending}
+                onClick={() => activation.activate()}
+                disabled={activation.pending}
                 data-testid="detail-activate-btn"
               >
                 {t("integrations.btn.activate")}
               </Button>
             )}
-            <PackageActionsDropdown
-              packageId={packageId}
-              type="integration"
-              isOwned={isOwned}
-              isBuiltIn={isBuiltIn}
-              isHistoricalVersion={false}
-              homeSpaceId={homeSpaceId}
-              homeWritable={homeWritable}
-              homeDeletable={homeDeletable}
-              homeShareable={homeShareable}
-              downloadVersion={version}
-              onDownload={downloadPackage}
-              onFork={() => setForkOpen(true)}
-              canDeactivate={active}
-              onDeactivate={() => setConfirmDeactivate(true)}
-              activationPending={setActive.isPending}
-              canDeletePackage={!!pkg && pkg.agents.length === 0}
-              onDeletePackage={() => setConfirmDelete(true)}
-            />
+            {pkgLoading ? (
+              <Skeleton className="size-8 rounded-md" />
+            ) : (
+              <PackageActionsDropdown
+                packageId={packageId}
+                type="integration"
+                detail={pkg}
+                isHistoricalVersion={false}
+                downloadVersion={version}
+                onDownload={downloadPackage}
+                isActiveHere={active}
+              />
+            )}
           </>
         }
       />
 
-      {isBuiltIn && (
-        <div className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm text-blue-400">
-          {t("ownership.readOnly", { ns: "agents" })}
-        </div>
-      )}
+      <PackageOwnershipNotice
+        type="integration"
+        isOwned={isOwned}
+        forkedFrom={pkg?.forked_from ?? null}
+        draftReadOnly={pkg?.definition === "draft" && !homeWritable}
+      />
 
-      <Tabs
-        value={tab}
-        onValueChange={(v) => setTab(v as (typeof INTEGRATION_TABS)[number])}
-        className="mt-2"
-      >
-        <div className="max-w-full overflow-x-auto pb-1">
-          <TabsList className="w-max">
-            <TabsTrigger value="connections" data-testid="tab-connections">
-              {t("integration.tabs.connections")}
-            </TabsTrigger>
-            {canConfigure && (
-              <TabsTrigger value="configuration" data-testid="tab-configuration">
-                {t("integration.tabs.configuration")}
-              </TabsTrigger>
-            )}
-            <TabsTrigger value="tools" data-testid="tab-tools">
-              {t("integration.tabs.tools")}
-              {detail.tool_catalog && detail.tool_catalog.length > 0 && (
-                <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
-                  {detail.tool_catalog.length}
-                  {detail.allow_undeclared_tools ? "+" : ""}
-                </Badge>
-              )}
-              {detail.tool_catalog &&
-                detail.tool_catalog.length === 0 &&
-                detail.allow_undeclared_tools && (
-                  <Badge
-                    variant="outline"
-                    className="ml-1.5 text-[0.65rem]"
-                    data-testid="tab-tools-wildcard-badge"
-                  >
-                    *
-                  </Badge>
-                )}
-            </TabsTrigger>
-            <TabsTrigger value="about" data-testid="tab-about">
-              {t("integration.tabs.about")}
-            </TabsTrigger>
-            <TabsTrigger value="content" data-testid="tab-content">
-              {t("detail.tabFiles", { ns: "agents" })}
-            </TabsTrigger>
-            {isOwned && (
-              <TabsTrigger value="versions" data-testid="tab-versions">
-                {t("integration.tabs.versions")}
-              </TabsTrigger>
-            )}
-          </TabsList>
-        </div>
+      <DetailTabs value={tab} onChange={setTab}>
+        <DetailTabBar
+          tabs={[
+            { value: "overview", label: t("integration.tabs.overview") },
+            { value: "connections", label: t("integration.tabs.connections") },
+            { value: "configuration", label: t("integration.tabs.configuration") },
+          ]}
+        />
 
-        {/* ─── Connexions (per-auth connect CTA + accounts table) ─── */}
-        <TabsContent value="connections" className="mt-4 space-y-4">
+        {/* One connected-accounts table, with each row retaining its auth context. */}
+        <DetailTabPanel value="connections">
           {!active ? (
-            <ActivationHint
-              onActivate={onActivate}
-              pending={setActive.isPending}
-              canActivate={canActivate}
-            />
+            <ActivationHint packageId={packageId} />
           ) : detail.auths.length === 0 ? (
             <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
           ) : (
-            detail.auths.map((authStatus) => (
-              <ConnectAuthBlock
-                key={authStatus.auth_key}
-                packageId={packageId}
-                status={authStatus}
-                manifest={detail.manifest}
-                personalConnectionsBlocked={detail.block_user_connections}
-              />
-            ))
+            <ConnectionsTable
+              packageId={packageId}
+              detail={detail}
+              canConfigure={canConfigure}
+              onConfigure={openAuthentication}
+            />
           )}
-        </TabsContent>
+        </DetailTabPanel>
 
-        {/* ─── Configuration (admin: OAuth clients, auth metadata, access
-            rules, publisher setup guide). Separated from the runtime
-            Connexions view so client setup and connected accounts no longer
-            share one crowded card. ─── */}
-        {canConfigure && (
-          <TabsContent value="configuration" className="mt-4 space-y-4">
-            {!active ? (
-              <ActivationHint
-                onActivate={onActivate}
-                pending={setActive.isPending}
-                canActivate={canActivate}
-              />
-            ) : (
-              <>
-                {/* AFPS §7.10 — publisher-authored prerequisites (OAuth app
-                    creation, redirect URI registration, …): admin setup, so it
-                    belongs with the client configuration. */}
-                {(m as { setup_guide?: { steps?: Array<{ label: string; url?: string }> } })
-                  .setup_guide?.steps &&
-                  (m as { setup_guide?: { steps?: Array<{ label: string; url?: string }> } })
-                    .setup_guide!.steps!.length > 0 && (
-                    <SetupGuideSteps
-                      steps={
-                        (
-                          m as {
-                            setup_guide?: { steps?: Array<{ label: string; url?: string }> };
-                          }
-                        ).setup_guide!.steps!
-                      }
-                    />
-                  )}
-                {detail.auths.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
-                ) : (
-                  detail.auths.map((authStatus) => {
-                    const declared = (m.auths ?? {})[authStatus.auth_key];
-                    if (!declared) return null;
-                    return (
-                      <ConfigAuthBlock
-                        key={authStatus.auth_key}
-                        packageId={packageId}
-                        status={authStatus}
-                        authDecl={declared}
-                      />
-                    );
-                  })
-                )}
-                <AccessRulesSection
-                  packageId={packageId}
-                  blockUserConnections={detail.block_user_connections}
-                />
-              </>
-            )}
-          </TabsContent>
-        )}
+        {/* Configuration is admin-only; package files stay readable for every member. */}
+        <DetailTabPanel value="configuration" flush>
+          {/* Its rail (definition, versions) depends on the package's source. */}
+          {pkgLoading ? (
+            <SettingsSkeleton className="p-6" />
+          ) : (
+            <IntegrationSettings
+              packageId={packageId}
+              detail={detail}
+              blockUserConnections={detail.block_user_connections}
+              canConfigure={canConfigure}
+              // Write authority is the package's HOME space, never the space being browsed.
+              definition={homeWritable && pkg ? pkg : undefined}
+              isOwned={isOwned}
+              versionGrants={{
+                canRestore: isOwned && !!homeWritable,
+                canDelete: isOwned && !!homeDeletable,
+              }}
+            />
+          )}
+        </DetailTabPanel>
 
         {/* ─── Outils (effective tool catalog — read-only) ─── */}
-        <TabsContent value="tools" className="mt-4">
-          <div className="max-w-2xl space-y-3">
-            <p className="text-muted-foreground text-xs">{t("integration.tools.intro")}</p>
-            {detail.allow_undeclared_tools && (
-              <div
-                className="rounded-md border-l-2 border-amber-500/30 bg-amber-500/5 p-3 text-xs"
-                data-testid="integration-tools-wildcard-notice"
-              >
-                <p className="font-medium">{t("integration.tools.wildcardNotice.title")}</p>
-                <p className="text-muted-foreground mt-1">
-                  {t("integration.tools.wildcardNotice.body")}
-                </p>
-              </div>
-            )}
-            {(detail.tool_catalog ?? []).length === 0 ? (
-              <p className="text-muted-foreground text-sm">{t("integration.tools.none")}</p>
-            ) : (
-              <div className="grid gap-2">
-                {(detail.tool_catalog ?? []).map((tool) => {
-                  const scopesByAuth = Object.entries(tool.policy?.required_scopes ?? {}).filter(
-                    ([, s]) => s.length > 0,
-                  );
-                  return (
-                    <div
-                      key={tool.name}
-                      className="bg-muted/30 rounded-md border p-3 text-xs"
-                      data-testid={`integration-tool-${tool.name}`}
-                    >
-                      <div className="flex flex-wrap items-baseline gap-2">
-                        <span className="font-mono text-sm font-semibold">{tool.name}</span>
-                      </div>
-                      {tool.description && (
-                        <p className="text-muted-foreground mt-1">{tool.description}</p>
-                      )}
-                      {scopesByAuth.map(([authKey, scopes]) => (
-                        <p key={authKey} className="text-muted-foreground mt-2">
-                          {t("integration.tools.requires")}{" "}
-                          <Badge variant="outline" className="mr-1 font-mono text-[0.65rem]">
-                            {authKey}
-                          </Badge>
-                          {scopes.map((s) => (
-                            <Badge
-                              key={s}
-                              variant="secondary"
-                              className="mr-1 font-mono text-[0.65rem]"
-                            >
-                              {s}
-                            </Badge>
-                          ))}
-                        </p>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </TabsContent>
 
-        {/* ─── À propos (manifest, rendered) ───
-            The same component the Aperçu tab of the unified package page
-            mounts. It replaced a local metadata block that built
-            `<a href={manifest.repository}>` with no protocol check — a
-            published integration carrying `"repository": "javascript:…"` ran
-            on the platform origin as soon as someone clicked it. The href is
-            now gated on `normalizeHttpUrl`. */}
-        <TabsContent value="about" className="mt-4">
-          <div className="max-w-2xl">
-            <ManifestOverview manifest={m} type="integration" />
-          </div>
-        </TabsContent>
-
-        {/* ─── Contenu (the artifact's own files, read-only) ───
-            Same generic explorer the unified package page mounts; the type
-            only decides which file opens first (INTEGRATION.md here). No
-            `version` prop: this page has no historical-version view, so the
-            explorer reads the live draft. */}
-        <TabsContent value="content" className="mt-4">
-          <FileExplorer packageId={packageId} type="integration" />
-        </TabsContent>
-
-        {/* ─── Versions (read-only history; non-system only) ─── */}
-        {isOwned && (
-          <TabsContent value="versions" className="mt-4">
-            <VersionHistory
-              packageId={packageId}
-              type="integration"
-              canRestore={isOwned && !!homeWritable}
-              canDelete={isOwned && !!homeDeletable}
-            />
-          </TabsContent>
-        )}
-      </Tabs>
-
-      <ForkPackageModal
-        open={forkOpen}
-        onClose={() => setForkOpen(false)}
-        packageId={packageId}
-        defaultName={name ?? ""}
-        type="integration"
-      />
-
-      <ConfirmModal
-        open={confirmDeactivate}
-        onClose={() => setConfirmDeactivate(false)}
-        title={t("btn.confirm", { ns: "common" })}
-        description={t("integrations.deactivate.confirm")}
-        variant="default"
-        isPending={setActive.isPending}
-        onConfirm={() => setActivation(false, () => setConfirmDeactivate(false))}
-      />
-
-      <ConfirmModal
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        title={t("btn.confirm", { ns: "common" })}
-        description={t("packages.deleteConfirm", {
-          type: t("packages.type.integration"),
-          name: m.display_name ?? packageId,
-        })}
-        isPending={deletePkg.isPending}
-        onConfirm={() =>
-          deletePkg.mutate(packageId, {
-            onSuccess: () => setConfirmDelete(false),
-          })
-        }
-      />
+        {/* Capabilities, connected accounts and package usage are distinct concepts. */}
+        <DetailTabPanel value="overview">
+          <IntegrationOverview
+            detail={detail}
+            dependentIds={pkg?.agents.map((agent) => agent.id)}
+            onOpenConnections={openConnections}
+            onConfigureAuth={canConfigure ? openAuthentication : undefined}
+          />
+        </DetailTabPanel>
+      </DetailTabs>
     </div>
   );
 }

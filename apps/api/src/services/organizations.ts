@@ -45,6 +45,7 @@ import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
+import { orgLogoDeletionJob } from "./org-logo.ts";
 import { orgApiVersionCache } from "./org-settings-cache.ts";
 import { clearResolvedModelCache } from "./resolved-model-cache.ts";
 import {
@@ -64,6 +65,7 @@ interface OrgResult {
   id: string;
   name: string;
   slug: string;
+  logo: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -90,6 +92,7 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     id: row.id,
     name: row.name,
     slug: row.slug,
+    logo: row.logo,
     createdBy: row.createdBy ?? "",
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
@@ -833,6 +836,9 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // cannot purge another org's or the system catalog's artifacts even though
     // `agent-packages` keys are not org-prefixed (see the module doc).
     storageJobs.push(...(await orgPackageStorageDeletionJobs(tx, orgId, "org_deleted")));
+    // The logo image, whether or not one was ever uploaded: an org id is never reused,
+    // so the key can hold no successor's bytes.
+    storageJobs.push(orgLogoDeletionJob(orgId, "org_deleted"));
     await enqueueStorageDeletion(tx, storageJobs);
 
     // run_logs → runs (cascade exists, but org_id FK needs manual delete)

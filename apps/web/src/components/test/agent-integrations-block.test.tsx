@@ -164,14 +164,14 @@ describe("AgentIntegrationsBlock — required", () => {
     const required = { required: true, blocking: true };
     const admin = renderCard(unbound({ ...refused, source: "admin_pin" }), required);
     expect(admin).toContain(label("integrationRequiredNoneBy", by("adminPin")));
-    // The subtitle itself takes the picker's warning tone.
-    expect(admin).toContain(`${AMBER_TEXT} mt-0.5`);
+    // The note under the picker takes the picker's warning tone.
+    expect(admin).toContain(`${AMBER_TEXT} mt-1`);
     expect(admin).not.toContain(label("integrationUnboundNoneBy", by("adminPin")));
     expect(admin).toContain(`member-picker-${GMAIL}`);
 
     const member = renderCard(unbound({ ...refused, source: "member_pin" }), required);
     expect(member).toContain(label("integrationRequiredNoneBy", by("memberPin")));
-    expect(member).toContain(`${AMBER_TEXT} mt-0.5`);
+    expect(member).toContain(`${AMBER_TEXT} mt-1`);
     expect(member).toContain(`member-picker-${GMAIL}`);
   });
 });
@@ -212,7 +212,7 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
     );
     expect(admin).toContain(label("integrationUnboundNoneBy", by("adminPin")));
     expect(admin).not.toContain(label("integrationUnbound"));
-    expect(admin).not.toContain(`${AMBER_TEXT} mt-0.5`);
+    expect(admin).not.toContain(`${AMBER_TEXT} mt-1`);
     expect(
       renderCard(unbound({ warning: warning("integration_unbound", { source: "member_pin" }) })),
     ).toContain(label("integrationUnboundNoneBy", by("memberPin")));
@@ -288,29 +288,29 @@ describe("AgentIntegrationsBlock — the integration's own detail does not land"
     );
   }
 
-  it("spins while the detail is being fetched", () => {
-    expect(renderWith({ fetching: true })).toContain("animate-spin");
+  it("holds the cell's place while the detail is being fetched", () => {
+    expect(renderWith({ fetching: true })).toContain("animate-pulse");
   });
 
-  it("never spins on a read that does not run: the card shows without a picker", () => {
+  it("never waits on a read that does not run: the card shows without a picker", () => {
     const html = renderWith(null);
-    expect(html).not.toContain("animate-spin");
+    expect(html).not.toContain("animate-pulse");
     expect(html).toContain(GMAIL);
     expect(html).not.toContain(`member-picker-${GMAIL}`);
   });
 
   it("offers the activation when the detail answers 404: not placed in this space", () => {
     const html = renderWith({ error: new ApiError("not_found", "no such integration", 404) });
-    expect(html).not.toContain("animate-spin");
+    expect(html).not.toContain("animate-pulse");
     expect(html).toContain(`integration-activate-${GMAIL}`);
   });
 
   it("names any other failure, in the warning tone, and claims no inactivity", () => {
     const failure = new ApiError("internal_error", "boom", 500);
     const html = renderWith({ error: failure });
-    expect(html).not.toContain("animate-spin");
+    expect(html).not.toContain("animate-pulse");
     expect(html).not.toContain(`integration-activate-${GMAIL}`);
     expect(html).toContain(errorMessage(failure));
-    expect(html).toContain(`${AMBER_TEXT} mt-0.5`);
+    expect(html).toContain(`${AMBER_TEXT} text-xs`);
   });
 });

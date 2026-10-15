@@ -1,48 +1,49 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy } from "lucide-react";
 import { jsonText } from "@appstrate/afps-shared/json-text";
 import { Modal } from "./modal";
+import { FormModal } from "./form-modal";
 import { ConfirmModal } from "./confirm-modal";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Spinner } from "./spinner";
 import { useDeleteEndUser, useUpdateEndUser, type EndUserInfo } from "../hooks/use-end-users";
 import { usePermissions } from "../hooks/use-permissions";
+import { endUserLabel } from "../lib/members";
 import { formatDateField } from "../lib/format-date";
-import { EndUserMetadataEditor } from "./end-user-metadata-editor";
-import { entriesToMetadata, metadataToEntries, type MetadataEntry } from "../lib/end-user-metadata";
+import { EndUserFields, type EndUserFormValues } from "./end-user-fields";
+import { entriesToMetadata, metadataToEntries } from "../lib/end-user-metadata";
 import { errorMessage } from "../lib/mutation-error";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 
 interface Props {
-  open: boolean;
   onClose: () => void;
   endUser: EndUserInfo | null;
+  /** The edition is its own address (`?editEndUser=<id>`); the host owns both. */
+  editing: boolean;
+  onEdit: () => void;
+  /** Leaves the edition for the detail it was entered from. */
+  onShowDetail: () => void;
+}
+
+function formValues(endUser: EndUserInfo | null): EndUserFormValues {
+  return {
+    name: endUser?.name ?? "",
+    email: endUser?.email ?? "",
+    externalId: endUser?.externalId ?? "",
+    metadata: metadataToEntries(endUser?.metadata ?? null),
+  };
 }
 
 function CopyableField({ label, value }: { label: string; value: string }) {
-  const { copied, copy } = useCopyToClipboard(1500);
-  const { t } = useTranslation("common");
-
-  const handleCopy = () => void copy(value);
-
   return (
     <div className="space-y-1">
       <Label className="text-muted-foreground text-xs">{label}</Label>
       <div className="flex items-center gap-2">
         <span className="text-sm break-all">{value}</span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="text-muted-foreground hover:text-foreground shrink-0 transition-colors"
-        >
-          {copied ? <span className="text-xs">{t("btn.copied")}</span> : <Copy size={12} />}
-        </button>
+        <CopyButton value={value} />
       </div>
     </div>
   );
@@ -58,153 +59,95 @@ function ReadOnlyField({ label, value }: { label: string; value: string | null |
   );
 }
 
-export function EndUserDetailModal({ open, onClose, endUser }: Props) {
+export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDetail }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const deleteMutation = useDeleteEndUser();
   const updateMutation = useUpdateEndUser();
+  const mounted = useRef(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
+  // An edition reached from the detail returns to it; one opened from the list's
+  // deed, or straight from its address, closes.
+  const [enteredFromDetail] = useState(!editing);
 
-  const [editName, setEditName] = useState("");
-  const [editEmail, setEditEmail] = useState("");
-  const [editExternalId, setEditExternalId] = useState("");
-  const [editMetadata, setEditMetadata] = useState<MetadataEntry[]>([]);
+  const [editValues, setEditValues] = useState(() => formValues(endUser));
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const startEditing = () => {
     if (!endUser) return;
-    setEditName(endUser.name ?? "");
-    setEditEmail(endUser.email ?? "");
-    setEditExternalId(endUser.externalId ?? "");
-    setEditMetadata(metadataToEntries(endUser.metadata));
+    setEditValues(formValues(endUser));
     updateMutation.reset();
-    setEditing(true);
+    onEdit();
   };
 
-  const handleClose = () => {
-    setEditing(false);
-    onClose();
-  };
+  const stopEditing = enteredFromDetail ? onShowDetail : onClose;
 
   if (!endUser) return null;
 
   const metadata = endUser.metadata;
   const metaEntries = metadata ? Object.entries(metadata) : [];
 
-  const handleSave = () => {
-    updateMutation.mutate(
-      {
+  const handleSave = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      await updateMutation.mutateAsync({
         params: { path: { id: endUser.id } },
         body: {
-          name: editName.trim() || undefined,
-          email: editEmail.trim() || undefined,
-          externalId: editExternalId.trim() || undefined,
-          metadata: entriesToMetadata(editMetadata),
+          name: editValues.name.trim() || undefined,
+          email: editValues.email.trim() || undefined,
+          externalId: editValues.externalId.trim() || undefined,
+          metadata: entriesToMetadata(editValues.metadata),
         },
-      },
-      {
-        onSuccess: () => {
-          setEditing(false);
-        },
-      },
-    );
+      });
+      if (!mounted.current) return;
+      stopEditing();
+    } catch {
+      // Shown inline under the form (`errorHandledByCaller`).
+    }
   };
 
   if (editing) {
     return (
-      <>
-        <Modal
-          open={open}
-          onClose={handleClose}
-          title={t("spaces.editEndUser")}
-          actions={
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setEditing(false)}
-                disabled={updateMutation.isPending}
-              >
-                {t("common:btn.cancel")}
-              </Button>
-              <Button type="submit" form="edit-end-user-form" disabled={updateMutation.isPending}>
-                {updateMutation.isPending ? <Spinner /> : t("common:btn.save")}
-              </Button>
-            </>
-          }
-        >
-          <form
-            id="edit-end-user-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSave();
-            }}
-            className="space-y-4"
-          >
-            <div className="space-y-2">
-              <Label htmlFor="eu-edit-name">{t("spaces.endUserName")}</Label>
-              <Input
-                id="eu-edit-name"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                placeholder={t("spaces.endUserNamePlaceholder")}
-                autoFocus
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="eu-edit-email">{t("spaces.endUserEmail")}</Label>
-              <Input
-                id="eu-edit-email"
-                type="email"
-                value={editEmail}
-                onChange={(e) => setEditEmail(e.target.value)}
-                placeholder="alice@example.com"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="eu-edit-extid">{t("spaces.endUserExternalId")}</Label>
-              <Input
-                id="eu-edit-extid"
-                value={editExternalId}
-                onChange={(e) => setEditExternalId(e.target.value)}
-                placeholder="my_user_123"
-              />
-            </div>
-
-            <EndUserMetadataEditor entries={editMetadata} onChange={setEditMetadata} />
-
-            {updateMutation.error && (
-              <p className="text-destructive text-sm">{errorMessage(updateMutation.error)}</p>
-            )}
-          </form>
-        </Modal>
-      </>
+      <FormModal
+        onClose={stopEditing}
+        title={t("spaces.editEndUser")}
+        onSubmit={handleSave}
+        isPending={updateMutation.isPending}
+        error={updateMutation.error ? errorMessage(updateMutation.error) : null}
+      >
+        <EndUserFields values={editValues} onChange={setEditValues} />
+      </FormModal>
     );
   }
 
   return (
     <>
       <Modal
-        open={open}
-        onClose={handleClose}
-        title={endUser.name || endUser.email || t("spaces.endUserDetail")}
+        open
+        onClose={onClose}
+        title={endUserLabel(endUser, t("spaces.endUserDetail"))}
         actions={
-          <>
-            {can("end-users:delete") && (
-              <Button variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
-                {t("common:btn.delete")}
-              </Button>
-            )}
-            <div className="flex-1" />
-            {can("end-users:write") && (
-              <Button variant="outline" onClick={startEditing}>
-                {t("common:btn.edit")}
-              </Button>
-            )}
-            <Button variant="outline" onClick={handleClose}>
-              {t("common:btn.close")}
-            </Button>
-          </>
+          can("end-users:delete") || can("end-users:write") ? (
+            <>
+              {can("end-users:delete") && (
+                <Button variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
+                  {t("common:btn.delete")}
+                </Button>
+              )}
+              <div className="flex-1" />
+              {can("end-users:write") && (
+                <Button variant="outline" onClick={startEditing}>
+                  {t("common:btn.edit")}
+                </Button>
+              )}
+            </>
+          ) : undefined
         }
       >
         <div className="space-y-4">
@@ -237,19 +180,19 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
       <ConfirmModal
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title={t("common:btn.confirm")}
+        title={t("spaces.deleteEndUserTitle")}
+        confirmLabel={t("common:btn.delete")}
         description={t("spaces.deleteEndUserConfirm")}
         isPending={deleteMutation.isPending}
-        onConfirm={() => {
-          deleteMutation.mutate(
-            { params: { path: { id: endUser.id } } },
-            {
-              onSuccess: () => {
-                setConfirmOpen(false);
-                handleClose();
-              },
-            },
-          );
+        onConfirm={async () => {
+          try {
+            await deleteMutation.mutateAsync({ params: { path: { id: endUser.id } } });
+            if (!mounted.current) return;
+            setConfirmOpen(false);
+            onClose();
+          } catch {
+            // The mutation cache toasts the refusal and the dialog closes on it.
+          }
         }}
       />
     </>

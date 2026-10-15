@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  MODEL_ERROR_RETRYABLE_BY_CATEGORY,
+  type ModelErrorCategory,
+} from "@appstrate/core/model-error";
 import type { z } from "zod";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
@@ -77,6 +81,32 @@ import type { PricingStatus as _PricingStatus } from "@appstrate/db/pricing-stat
  * DB-convention names (`id`, `packageId`, `createdAt`, `runOrigin`, …) stay
  * camelCase — by their literal name, never by suffix.
  */
+/** A model-call failure as a run carries it on the wire. */
+export interface RunModelError {
+  category: ModelErrorCategory;
+  /** Whether a new attempt, unchanged, might succeed — derived from `category`. */
+  retryable: boolean;
+  /** The provider's HTTP status, when the failure carried one. */
+  status: number | null;
+  /** The provider's own sentence, when its response body carried one. */
+  message: string | null;
+}
+
+/** The one projection of the `model_error_*` columns onto {@link RunModelError}. */
+export function runModelErrorWire(columns: {
+  category: ModelErrorCategory | null;
+  status: number | null;
+  message: string | null;
+}): RunModelError | null {
+  if (!columns.category) return null;
+  return {
+    category: columns.category,
+    retryable: MODEL_ERROR_RETRYABLE_BY_CATEGORY[columns.category],
+    status: columns.status,
+    message: columns.message,
+  };
+}
+
 export interface RunWireDto {
   id: string;
   packageId: string | null;
@@ -100,6 +130,12 @@ export interface RunWireDto {
   artifacts: RunArtifactsSummary | null;
   checkpoint: unknown;
   error: string | null;
+  /**
+   * What a run that failed on a model call failed on, classified once at finalize
+   * ({@link RunModelError}); `null` on every other run, and on a run finalized before the
+   * platform recorded it. Read this, never `error`'s text, to say why.
+   */
+  model_error: RunModelError | null;
   metadata: unknown;
   started_at: string | null;
   completed_at: string | null;
@@ -409,6 +445,16 @@ export interface OrganizationMember {
   joinedAt: string;
   displayName?: string;
   email?: string;
+  /** The spaces this member reaches, among those whose member list the caller may read. */
+  spaces: OrganizationMemberSpace[];
+}
+
+/** One space an org member reaches — the per-member projection of `GET /api/spaces/:id/members`. */
+export interface OrganizationMemberSpace {
+  id: string;
+  name: string;
+  source: SpaceMember["source"];
+  role: SpaceMember["role"];
 }
 
 /** Mirrored by an OpenAPI response schema and reached only by name — see
@@ -514,6 +560,10 @@ export interface BasePackageListItem {
 }
 
 export interface AgentListItem extends BasePackageListItem {
+  /** AFPS manifest `icon`, interpreted by the client icon catalogue. */
+  icon?: string;
+  /** Appstrate presentation token from `_meta["dev.appstrate/ui"].color`. */
+  color?: string;
   display_name?: string;
   schema_version?: string;
   author?: string;
@@ -533,6 +583,10 @@ export interface AgentListItem extends BasePackageListItem {
 
 export interface AgentDetail {
   id: string;
+  /** AFPS manifest `icon`, interpreted by the client icon catalogue. */
+  icon?: string;
+  /** Appstrate presentation token from `_meta["dev.appstrate/ui"].color`. */
+  color?: string;
   /** Manifest-derived; may be absent (the SPA falls back to the id). */
   display_name?: string;
   description?: string;
@@ -733,6 +787,18 @@ export interface OrgPackageItem extends BasePackageListItem {
    * package asks for no `share`. Always emitted.
    */
   home_shareable: boolean;
+}
+
+/**
+ * A row of the integration INDEX (`GET /api/packages/integrations`): the
+ * common row plus the two facts of the manifest's `source` the page splits and
+ * labels its list by, so it draws itself without the manifest.
+ */
+export interface IntegrationIndexItem extends OrgPackageItem {
+  /** The manifest's `source.kind`: a sandboxed server, a hosted MCP, or no MCP backing. */
+  source_kind: "local" | "remote" | "none";
+  /** `source.server` of a `local` integration — the package it runs and its range. `null` otherwise. */
+  server: { name: string; version: string } | null;
 }
 
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is
@@ -1053,6 +1119,12 @@ export interface ModelProviderCredentialInfo {
   allowed_actions: ModelProviderCredentialAction[];
   /** Whether an organization model may be bound to this credential: `true` for an organization one (API key or subscription), `false` for a personal or a built-in one. */
   bindable: boolean;
+  /**
+   * On a personal credential, the organization models left to members' own credentials that it
+   * pays for (`servesModel`: the same service, or a subscription offering the model on its
+   * API); `[]` on an organization or built-in one, whose models name it as their credential.
+   */
+  serves_model_ids: string[];
   created_by: string | null;
   createdAt: string;
   updatedAt: string;

@@ -72,6 +72,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "OrgPackageItem",
   },
   {
+    specSchemaName: "IntegrationIndexItem",
+    sharedTypeName: "IntegrationIndexItem",
+    description: "IntegrationIndexItem",
+  },
+  {
     specSchemaName: "OrgPackageItemDetail",
     sharedTypeName: "OrgPackageItemDetail",
     description: "OrgPackageItemDetail",
@@ -209,6 +214,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     specSchemaName: "OrgMember",
     sharedTypeName: "OrganizationMember",
     description: "OrgMember ↔ OrganizationMember",
+  },
+  {
+    specSchemaName: "OrgMemberSpace",
+    sharedTypeName: "OrganizationMemberSpace",
+    description: "OrgMemberSpace ↔ OrganizationMemberSpace (OrgMember.spaces entry)",
   },
   { specSchemaName: "OrgSettings", sharedTypeName: "OrgSettings", description: "OrgSettings" },
   // --- Module wire shapes (faithful shared-type twins; already aligned) ---

@@ -7,11 +7,13 @@
  * type, so without this block the type has no rendered view at all.
  */
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { ManifestFact, McpServerManifestDetails } from "../../lib/package-manifest";
-import { SectionCard } from "../section-card";
-import { FactGrid } from "./manifest-fact";
+import { DetailSectionCard } from "../detail-section-card";
+import { ManifestFacts } from "./manifest-fact";
+import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 
 export function McpServerDetails({ details }: { details: McpServerManifestDetails }) {
   const { t } = useTranslation("agents");
@@ -37,33 +39,32 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
   return (
     <>
       {facts.length > 0 && (
-        <SectionCard title={t("manifest.server")}>
-          <FactGrid facts={facts} />
-        </SectionCard>
+        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.server")}>
+          <ManifestFacts facts={facts} />
+        </DetailSectionCard>
       )}
 
       {tools.length > 0 && (
-        <SectionCard title={t("manifest.tools")}>
-          {tools.map((tool) => (
-            <div key={tool.name}>
-              <code className="text-sm">{tool.name}</code>
-              {tool.description && (
-                <p className="text-muted-foreground mt-0.5 text-xs">{tool.description}</p>
-              )}
-            </div>
-          ))}
-        </SectionCard>
+        <DetailSectionCard
+          bodyClassName="space-y-4 p-4"
+          title={t("manifest.tools")}
+          className="lg:col-span-2"
+        >
+          <PackageToolCatalog tools={tools} />
+        </DetailSectionCard>
       )}
 
       {userConfig.length > 0 && (
-        <SectionCard title={t("manifest.userConfig")}>
+        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.userConfig")}>
           {userConfig.map((entry) => (
             <div key={entry.key}>
               <div className="flex flex-wrap items-center gap-2">
                 <code className="text-sm">{entry.key}</code>
                 {entry.type && <Badge variant="secondary">{entry.type}</Badge>}
                 {entry.required && <Badge variant="outline">{t("manifest.required")}</Badge>}
-                {entry.sensitive && <Badge variant="warning">{t("manifest.sensitive")}</Badge>}
+                {entry.sensitive && (
+                  <ToneBadge variant="warning">{t("manifest.sensitive")}</ToneBadge>
+                )}
               </div>
               {(entry.title ?? entry.description) && (
                 <p className="text-muted-foreground mt-0.5 text-xs">
@@ -74,7 +75,7 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
               )}
             </div>
           ))}
-        </SectionCard>
+        </DetailSectionCard>
       )}
     </>
   );

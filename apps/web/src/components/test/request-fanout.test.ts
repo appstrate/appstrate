@@ -67,28 +67,39 @@ const code = (source: string) =>
 
 const DASHBOARD = read("../../pages/dashboard.tsx");
 const SCHEDULE_CARD = read("../schedule-card.tsx");
+const SCHEDULE_STATE = read("../schedule-status-badge.tsx");
 const RUN_LIST = read("../run-list.tsx");
+const DASHBOARD_CONTENT = read("../../pages/dashboard-content.tsx");
+const RUNS_TABLE = read("../runs-table.tsx");
 const NOTIFICATIONS = read("../../hooks/use-notifications.ts");
 const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
 const AGENT_ACTIONS = read("../package-detail/agent-actions.tsx");
 const MUTATIONS = read("../../hooks/use-mutations.ts");
 
 describe("dashboard reuses its own runs", () => {
-  it("renders the presentational rows, not a second fetching list", () => {
-    expect(DASHBOARD).toContain("<RunRows runs={runs.slice(0, RECENT_RUNS_COUNT)} />");
-    // `<RunList …>` here is what issues the duplicate query.
+  it("renders the rows it already holds, not a second fetching list", () => {
+    // The page hands its own rows down and the presentation layer trims them
+    // (rendered in `pages/test/dashboard.test.tsx`); what must never appear on
+    // either side is the FETCHING list, which would issue a second query for
+    // rows the page is already holding.
     expect(code(DASHBOARD)).not.toMatch(/<RunList[\s/>]/);
+    expect(code(DASHBOARD_CONTENT)).not.toMatch(/<RunList[\s/>]/);
+    expect(DASHBOARD_CONTENT).toContain("runs.slice(0, limit)");
   });
 
   it("keeps exactly one run query on the page", () => {
     expect([...DASHBOARD.matchAll(/usePaginatedRuns\(/g)]).toHaveLength(1);
   });
 
-  it("still exposes a fetching RunList for the pages that page through runs", () => {
+  it("keeps the table free of queries, and the fetching list exported", () => {
     // The split must not have turned the paginated list into a dead export:
-    // /runs, the agent tab and the schedule detail all rely on it.
+    // /runs, the agent tab and the schedule detail all rely on it. And the
+    // table must stay row-taking — the day it fetches for itself, mounting it
+    // under a page that already has the rows brings the duplicate query back.
     expect(RUN_LIST).toContain("export function RunList(");
-    expect(RUN_LIST).toContain("export function RunRows(");
+    expect(RUNS_TABLE).toContain("export function RunsTable(");
+    expect(code(RUNS_TABLE)).not.toContain("useQuery");
+    expect(code(RUNS_TABLE)).not.toContain("usePaginatedRuns");
   });
 });
 
@@ -98,10 +109,11 @@ describe("schedule cards read their counters from the schedule", () => {
     expect(code(SCHEDULE_CARD)).not.toContain("/runs");
   });
 
-  it("reads the three counters served with the list payload", () => {
-    expect(SCHEDULE_CARD).toContain("schedule.running_runs");
-    expect(SCHEDULE_CARD).toContain("schedule.unread_count");
-    expect(SCHEDULE_CARD).toContain("schedule.last_run_number");
+  it("reads the counters served with the list payload", () => {
+    // The card draws them through ScheduleStateBadges, off the row it is handed.
+    expect(SCHEDULE_CARD).toContain("<ScheduleStateBadges schedule={schedule} />");
+    expect(SCHEDULE_STATE).toContain("schedule.running_runs");
+    expect(SCHEDULE_STATE).toContain("schedule.unread_count");
   });
 });
 
@@ -124,12 +136,14 @@ describe("agent page", () => {
 });
 
 describe("package pages other than an agent's", () => {
-  // A skill page loaded the org's models and proxies, which only the
-  // agent configuration tab shows.
+  // The org's models and proxies are shown only by an agent's settings. The
+  // page itself reads neither: the agent settings view and the model alert
+  // (agents only) each read their own.
   it("do not read the model and proxy lists", () => {
     const detail = read("../../pages/unified-package-detail.tsx");
-    expect(detail).toContain('useProxies(type === "agent")');
-    expect(detail).toContain('useModels(type === "agent")');
+    expect(detail).not.toContain("useProxies(");
+    expect(detail).not.toContain("useModels(");
+    expect(detail).toContain('{type === "agent" && <ModelRequiredAlert');
   });
 });
 

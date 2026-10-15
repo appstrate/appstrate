@@ -12,13 +12,12 @@ import {
   toggleCapped,
   keepAvailable,
   canApplyConnectionSet,
+  checkedConnectionIds,
   placeCreatedConnection,
   shownConnectionPick,
   unavailableConnectionIds,
   withConnectionOverride,
   withDeclaredConnections,
-  withFallbackConnections,
-  type FallbackBindingEntry,
 } from "../connection-set";
 
 describe("toggleCapped", () => {
@@ -50,6 +49,8 @@ describe("keepAvailable", () => {
 describe("canApplyConnectionSet", () => {
   const a = { id: "conn_a" };
   const b = { id: "conn_b" };
+  const candidateIds = ["conn_a", "conn_b"];
+  const conns = (ids: string[]) => [a, b].filter((c) => ids.includes(c.id));
 
   it("refuses the empty set and the stored pick, in any order", () => {
     // Control: a touched set that differs from the stored pick is writable.
@@ -62,20 +63,28 @@ describe("canApplyConnectionSet", () => {
     expect(canApplyConnectionSet([], [], true)).toBe(false);
     expect(canApplyConnectionSet([a], [], true)).toBe(true);
     // Untouched over a stored "none", nothing is ticked: nothing to write.
-    expect(canApplyConnectionSet([], [], false)).toBe(false);
+    const untouched = checkedConnectionIds({ draft: null, explicitIds: [], candidateIds });
+    expect(untouched).toEqual([]);
+    expect(canApplyConnectionSet(conns(untouched), [], false)).toBe(false);
   });
 
-  it("refuses an untouched menu ticked from the default an unset pick shows", () => {
-    // Writing it would pin {a, b} and detach the member from later org-default
-    // changes. Control: the same ticks after an actual edit are writable.
-    expect(canApplyConnectionSet([a, b], null, false)).toBe(false);
-    expect(canApplyConnectionSet([a, b], null, true)).toBe(true);
+  it("ticks nothing while nothing is chosen: the cascade's default is not a choice", () => {
+    // "Hériter" is the ticked row; ticking its connection too would show two choices, and
+    // writing them would pin the default and detach the member from later changes.
+    const untouched = checkedConnectionIds({ explicitIds: null, candidateIds, draft: null });
+    expect(untouched).toEqual([]);
+    expect(canApplyConnectionSet(conns(untouched), null, false)).toBe(false);
+    // Control: ticks after an actual edit are writable.
+    expect(canApplyConnectionSet(conns(["conn_a"]), null, true)).toBe(true);
   });
 
-  it("lets the actor rewrite a stored pick naming an unavailable connection, while a member survives", () => {
+  it("lets the actor rewrite a stored pick that names an unavailable connection", () => {
     // Nothing was ticked or unticked, yet the stored set differs from what a
     // write would send: without this the ghost id could never be dropped.
-    expect(canApplyConnectionSet([a], ["conn_a", "conn_unshared"], false)).toBe(true);
+    const explicitIds = ["conn_a", "conn_unshared"];
+    const cleaned = checkedConnectionIds({ draft: null, explicitIds, candidateIds });
+    expect(cleaned).toEqual(["conn_a"]);
+    expect(canApplyConnectionSet(conns(cleaned), explicitIds, false)).toBe(true);
     // Control: an untouched pick with no ghost has nothing to rewrite.
     expect(canApplyConnectionSet([a], ["conn_a"], false)).toBe(false);
     // No member survives: the set left to write is empty, which "Valider" never writes.
@@ -113,6 +122,29 @@ describe("shownConnectionPick", () => {
 
   it("shows nothing when no layer chose and nothing binds", () => {
     expect(shownConnectionPick({ ...below, explicitIds: null })).toBeNull();
+  });
+});
+
+describe("checkedConnectionIds", () => {
+  const candidateIds = ["conn_a", "conn_b"];
+
+  it("keeps only the candidates among the stored pick", () => {
+    expect(
+      checkedConnectionIds({
+        draft: null,
+        explicitIds: ["conn_a", "conn_unshared"],
+        candidateIds,
+      }),
+    ).toEqual(["conn_a"]);
+  });
+
+  it("prefers the draft, then the explicit pick, and ticks nothing under the cascade", () => {
+    const base = { explicitIds: ["conn_a"], candidateIds };
+    expect(checkedConnectionIds({ ...base, draft: ["conn_b"] })).toEqual(["conn_b"]);
+    expect(checkedConnectionIds({ ...base, draft: null })).toEqual(["conn_a"]);
+    expect(checkedConnectionIds({ ...base, draft: null, explicitIds: null })).toEqual([]);
+    // A stored "no connection" ticks nothing too.
+    expect(checkedConnectionIds({ ...base, draft: null, explicitIds: [] })).toEqual([]);
   });
 });
 
@@ -187,6 +219,19 @@ describe("unavailableConnectionIds", () => {
     expect(unavailableConnectionIds(["a", "b"], ["a", "b", "c"])).toEqual([]);
     expect(unavailableConnectionIds([], ["a"])).toEqual([]);
   });
+
+  // The scenario the picker exists for: [a, gone] stored, `gone` deleted by its
+  // owner. Untouched, the ticks are the survivors and "Valider" is live: it
+  // writes [a], the change the unavailable row announces.
+  it("leaves 'Valider' live on the survivors, and dead once nothing survives", () => {
+    const explicitIds = ["a", "gone"];
+    const candidateIds = ["a", "b"];
+    const checked = checkedConnectionIds({ draft: null, explicitIds, candidateIds });
+    expect(checked).toEqual(["a"]);
+    expect(canApplyConnectionSet([{ id: "a" }], explicitIds, false)).toBe(true);
+    expect(checkedConnectionIds({ draft: null, explicitIds: ["gone"], candidateIds })).toEqual([]);
+    expect(canApplyConnectionSet([], ["gone"], false)).toBe(false);
+  });
 });
 
 describe("withConnectionOverride", () => {
@@ -241,68 +286,5 @@ describe("withDeclaredConnections", () => {
 
   it("keeps every key while the declared set is unknown", () => {
     expect(withDeclaredConnections(overrides, undefined)).toBe(overrides);
-  });
-});
-
-const GMAIL = "@acme/gmail";
-const entry = (
-  id: string,
-  resolution: Partial<FallbackBindingEntry["resolution"]> = {},
-): FallbackBindingEntry => ({
-  integration_package_id: id,
-  inert: false,
-  resolution: {
-    source: "fallback_auto",
-    resolved_connection_ids: ["c_own"],
-    ...resolution,
-  },
-});
-
-describe("withFallbackConnections", () => {
-  const picksOf = (picks: Record<string, string[]> | undefined, readiness = [entry(GMAIL)]) => {
-    const overrides = picks ? { connection_overrides: picks } : {};
-    return withFallbackConnections(overrides, readiness).connection_overrides;
-  };
-
-  it("names the set the fallback binds", () => {
-    expect(picksOf(undefined)).toEqual({ [GMAIL]: ["c_own"] });
-  });
-
-  it("names nothing a layer already names, nor an integration nothing binds", () => {
-    const readiness = [
-      entry(GMAIL, { source: "member_pin" }),
-      entry("@acme/slack", { source: "org_default" }),
-      entry("@acme/notion", { source: "org_default_enforced" }),
-      entry("@acme/ssh", { source: "admin_pin" }),
-      entry("@acme/crm", { source: null, resolved_connection_ids: [] }),
-    ];
-    expect(picksOf(undefined, readiness)).toBeUndefined();
-  });
-
-  it("names the fallback's set whatever its health", () => {
-    // Readiness keeps the bound ids beside a health `error_code`.
-    const { resolution, ...rest } = entry(GMAIL);
-    const dead = { ...rest, resolution: { ...resolution, error_code: "needs_reconnection" } };
-    expect(picksOf(undefined, [dead])).toEqual({ [GMAIL]: ["c_own"] });
-  });
-
-  it("names nothing for an inert integration: no run binds it", () => {
-    expect(picksOf(undefined, [{ ...entry(GMAIL), inert: true }])).toBeUndefined();
-  });
-
-  it("gives way to a pick, 'no connection' included", () => {
-    expect(picksOf({ [GMAIL]: ["c_other"] })).toEqual({ [GMAIL]: ["c_other"] });
-    expect(picksOf({ [GMAIL]: [] })).toEqual({ [GMAIL]: [] });
-    const slack = { "@acme/slack": ["c_slack"] };
-    expect(picksOf(slack)).toEqual({ ...slack, [GMAIL]: ["c_own"] });
-  });
-
-  it("keeps the other overrides, and the value itself without a verdict", () => {
-    const overrides = { model_id_override: "m1" };
-    expect(withFallbackConnections(overrides, [entry(GMAIL)])).toEqual({
-      model_id_override: "m1",
-      connection_overrides: { [GMAIL]: ["c_own"] },
-    });
-    expect(withFallbackConnections(overrides, undefined)).toBe(overrides);
   });
 });

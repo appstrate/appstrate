@@ -4,9 +4,17 @@ import {
   applyFileTreeOperations,
   decodePackageFileText,
 } from "@appstrate/core/package-file-operations";
-import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
+import {
+  PACKAGE_CONTENT_ENTRY,
+  PACKAGE_FILE_INLINE_MAX_BYTES,
+} from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
-import type { PackageFileEntry, PackageFileWriteOperation } from "./package-file-tree";
+import {
+  validateNewPath,
+  NEW_PATH_ERROR_KEYS,
+  type PackageFileEntry,
+  type PackageFileWriteOperation,
+} from "./package-file-tree";
 
 export interface DraftFile extends PackageFileEntry {
   /** Original server path, retained by renames until the whole draft is saved. */
@@ -130,4 +138,33 @@ export async function uploadedFileOperation(
   for (let i = 0; i < bytes.length; i += 8192)
     binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
   return { op: "write", path, bytes_base64: btoa(binary) };
+}
+
+/**
+ * Why an import is refused, as a `files` message key, checked over the whole
+ * selection before any file is read. Each imported name is planned into the
+ * tree, so one selection cannot overwrite itself. A replacement keeps its path.
+ */
+export function importRefusal(
+  entries: readonly PackageFileEntry[],
+  files: readonly { name: string; size: number }[],
+  replacing: boolean,
+): { key: string; path?: string } | null {
+  if (files.some((file) => file.size > PACKAGE_FILE_INLINE_MAX_BYTES))
+    return { key: "files.errorTooLarge" };
+  if (replacing) return null;
+  const planned = [...entries];
+  for (const file of files) {
+    const rejection = validateNewPath(planned, file.name);
+    if (rejection)
+      return {
+        key:
+          rejection === "exists" || rejection === "conflict"
+            ? "files.errorImportConflict"
+            : NEW_PATH_ERROR_KEYS[rejection],
+        path: file.name,
+      };
+    planned.push({ path: file.name, size: file.size, media_kind: "binary" });
+  }
+  return null;
 }

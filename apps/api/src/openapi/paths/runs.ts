@@ -5,7 +5,7 @@ import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { MAX_WAIT_SECONDS } from "../../lib/run-wait-limits.ts";
-import { runStatusValues, terminalRunStatusValues } from "@appstrate/core/run-status";
+import { terminalRunStatusValues } from "@appstrate/core/run-status";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
@@ -197,6 +197,7 @@ const canonicalRunsPaths = {
                 artifacts: null,
                 checkpoint: {},
                 error: null,
+                model_error: null,
                 metadata: null,
                 generation: { temperature: 0.2, reasoning_level: "high" },
                 generation_override: { temperature: 0.2, reasoning_level: "high" },
@@ -336,6 +337,8 @@ const canonicalRunsPaths = {
           schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
         },
         { $ref: "#/components/parameters/Offset" },
+        { $ref: "#/components/parameters/RunStatusFilter" },
+        { $ref: "#/components/parameters/RunSearch" },
       ],
       responses: {
         "200": {
@@ -568,6 +571,7 @@ const canonicalRunsPaths = {
                 artifacts: null,
                 checkpoint: {},
                 error: null,
+                model_error: null,
                 metadata: null,
                 generation: null,
                 generation_override: null,
@@ -818,16 +822,7 @@ const canonicalRunsPaths = {
           description:
             "Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
         },
-        {
-          name: "status",
-          in: "query",
-          schema: {
-            type: "string",
-            enum: [...runStatusValues],
-          },
-          description:
-            "Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
-        },
+        { $ref: "#/components/parameters/RunStatusFilter" },
         { name: "start_date", in: "query", schema: { type: "string", format: "date-time" } },
         { name: "end_date", in: "query", schema: { type: "string", format: "date-time" } },
         {
@@ -836,6 +831,7 @@ const canonicalRunsPaths = {
           schema: { type: "string" },
           description: "Return only runs launched from this chat session.",
         },
+        { $ref: "#/components/parameters/RunSearch" },
       ],
       responses: {
         "200": {
@@ -927,6 +923,7 @@ const canonicalRunsPaths = {
                 artifacts: { status: "complete", published: 2, failed: [] },
                 checkpoint: { lastProcessedId: "msg_99f2a" },
                 error: null,
+                model_error: null,
                 metadata: null,
                 generation: { reasoning_level: "medium" },
                 generation_override: null,
@@ -1104,6 +1101,7 @@ const canonicalRunsPaths = {
                 artifacts: null,
                 checkpoint: {},
                 error: "Cancelled by user",
+                model_error: null,
                 metadata: null,
                 generation: null,
                 generation_override: null,

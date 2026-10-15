@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import i18n from "../i18n";
 import { schemaHasFileFields } from "@appstrate/core/form";
-import { client, type paths } from "../api/client";
+import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
@@ -15,16 +15,9 @@ import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { scheduleKeys } from "../lib/query-keys";
+import type { ScheduleCreateBody, ScheduleUpdateBody } from "../lib/schedule-payload";
 import type { AgentDetail, EnrichedSchedule } from "@appstrate/shared-types";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
-
-// `useScheduleRuns` used to live here: the schedule CARD fetched a schedule's
-// runs purely to count active/unread/last-number, once per card. Those three
-// counters now ride on the schedule itself (`EnrichedSchedule.running_runs` /
-// `unread_count` / `last_run_number`), and the only remaining consumer of the
-// endpoint is `<RunList scheduleId>` on the schedule-detail page, which fetches
-// it through `usePaginatedRuns`. The `scheduleKeys.runs` cache key is still
-// invalidated by `use-global-run-sync` for that list.
 
 // Every schedules read requires `schedules:read`, which some space roles
 // (`runner`, and any custom role without it) do not hold. Gating here rather
@@ -55,10 +48,16 @@ export function useScheduleById(id: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadSchedules();
+  const qc = useQueryClient();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync invalidates
     // ["schedule", orgId, spaceId, scheduleId] on SSE events.
     queryKey: scheduleKeys.detail(orgId, spaceId, id),
+    // The list caches the same enriched rows: show the page from it while the detail loads.
+    placeholderData: () =>
+      qc
+        .getQueryData<EnrichedSchedule[]>(scheduleKeys.list(orgId, spaceId))
+        ?.find((s) => s.id === id),
     queryFn: async (): Promise<EnrichedSchedule> => {
       const { data } = await client.GET("/api/schedules/{id}", {
         params: { path: { id: id! } },
@@ -104,16 +103,11 @@ export function warnSchedulesDisabled(qc: ReturnType<typeof useQueryClient>, cou
   invalidateSchedules(qc);
 }
 
-type CreateScheduleBody =
-  paths["/api/agents/{scope}/{name}/schedules"]["post"]["requestBody"]["content"]["application/json"];
-type UpdateScheduleBody =
-  paths["/api/schedules/{id}"]["patch"]["requestBody"]["content"]["application/json"];
-
 export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async (body: CreateScheduleBody) => {
+    mutationFn: async (body: ScheduleCreateBody) => {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
         params: { path: { scope, name } },
@@ -134,7 +128,7 @@ export function useUpdateSchedule() {
   const qc = useQueryClient();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async ({ id, ...body }: UpdateScheduleBody & { id: string }) => {
+    mutationFn: async ({ id, ...body }: ScheduleUpdateBody & { id: string }) => {
       const { data: updated } = await client.PATCH("/api/schedules/{id}", {
         params: { path: { id } },
         body,
@@ -160,7 +154,11 @@ export function useDeleteSchedule() {
     mutationFn: async (id: string) => {
       await client.DELETE("/api/schedules/{id}", { params: { path: { id } } });
     },
-    onSuccess: () => invalidateSchedules(qc),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: scheduleKeys.listAll });
+      // The page still showing the deleted schedule would re-read it, a 404: stale only.
+      qc.invalidateQueries({ queryKey: scheduleKeys.detailAll, refetchType: "none" });
+    },
   });
 }
 
@@ -200,8 +198,9 @@ interface ScheduleFormDeps {
 }
 
 /**
- * Aggregates the agent-detail / model / proxy lookups that both
- * `ScheduleCreatePage` and `ScheduleEditPage` feed into `<ScheduleForm>`.
+ * Aggregates the agent-detail / model / proxy lookups the new-schedule form and
+ * the run options need; the schedule's Paramètres tab reads it for the sections
+ * that depend on the agent.
  *
  * `deps` is `null` until the agent detail has landed — or when no agent is
  * selected — so a consumer can never mount a form on settings it does not have
@@ -231,9 +230,10 @@ export function useScheduleFormDeps(
   const denied = !!packageId && ready && !packageSightPermissions("agent").some(can);
 
   // `deps` stays null until the AGENT DETAIL itself lands, not merely until an
-  // agent is picked: `ScheduleForm` seeds its input state once, in a `useState`
-  // initialiser, and a form mounted on empty settings would seed a field that
-  // has since been locked — unremovable through the UI and refused on save
+  // agent is picked: the schedule forms (`new-schedule-modal.tsx`, the inputs
+  // section of `schedule-settings.tsx`) seed their input state once, in a
+  // `useState` initialiser, and a form mounted on empty settings would seed a
+  // field that has since been locked — unremovable through the UI and refused on save
   // (400 `locked_input_field`). `key={schedule.id}` means no remount when the
   // detail arrives, so the only safe answer while it is in flight is "not yet".
   if (!packageId || !agentDetail) return { deps: null, error, denied };

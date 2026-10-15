@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import type { components } from "../api/schema";
 import type { IntegrationConnection } from "../hooks/use-integrations";
 import type { RunOverridesValue } from "./schedule-payload";
 import { sameSet } from "./strings";
@@ -46,36 +45,6 @@ export function withDeclaredConnections(
   return kept.length > 0 ? { ...rest, connection_overrides: Object.fromEntries(kept) } : rest;
 }
 
-/** What {@link withFallbackConnections} reads of one integration's readiness entry. */
-export interface FallbackBindingEntry {
-  integration_package_id: string;
-  inert: boolean;
-  resolution: Pick<
-    components["schemas"]["IntegrationAgentResolution"],
-    "source" | "resolved_connection_ids"
-  >;
-}
-
-/**
- * `overrides` naming, for each integration a run binds and no pick covers (`[]` is one), the set
- * the fallback binds in that actor's `readiness` (`fallback_auto`), whatever its health.
- */
-export function withFallbackConnections(
-  overrides: RunOverridesValue,
-  readiness: readonly FallbackBindingEntry[] | undefined,
-): RunOverridesValue {
-  let next = overrides;
-  for (const entry of readiness ?? []) {
-    const id = entry.integration_package_id;
-    const { source, resolved_connection_ids: bound } = entry.resolution;
-    const binds = !entry.inert && source === "fallback_auto" && bound.length > 0;
-    if (binds && next.connection_overrides?.[id] === undefined) {
-      next = withConnectionOverride(next, id, bound);
-    }
-  }
-  return next;
-}
-
 export function keepAvailable(ids: string[], availableIds: string[]): string[] {
   return ids.filter((id) => availableIds.includes(id));
 }
@@ -112,6 +81,19 @@ export function shownConnectionPick(input: {
   if (chosen !== null) return chosen;
   const bound = input.softDefaultIds.length > 0 ? input.softDefaultIds : input.resolvedIds;
   return bound.length > 0 ? bound : null;
+}
+
+/**
+ * The ticked set "Valider" writes: what is CHOSEN, never what the cascade would bind (while
+ * nothing is chosen "Hériter" is the ticked row, not the connection it resolves to).
+ */
+export function checkedConnectionIds(input: {
+  draft: string[] | null;
+  explicitIds: ConnectionSet;
+  candidateIds: string[];
+}): string[] {
+  const base = input.draft ?? input.explicitIds ?? [];
+  return keepAvailable(base, input.candidateIds);
 }
 
 /**

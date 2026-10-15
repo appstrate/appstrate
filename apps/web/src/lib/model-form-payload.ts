@@ -121,6 +121,15 @@ export interface ModelFormSubmitOutcome {
    * Named apart because it is not a failure to retry: the model is there.
    */
   duplicateModelIds: string[];
+  /** The server's code for the first refusal that is not a duplicate: the form names it when it can. */
+  refusalCode?: string;
+  /**
+   * The entries of `failedModelIds` the server named as refused for a reason of their own
+   * (an `errors[]` item on `add.<i>` other than a duplicate). The choice is atomic, so the other
+   * entries were not written either and stay to submit — but these are the ones to tell the user
+   * about. Empty when the refusal names no entry.
+   */
+  refusedModelIds?: string[];
   credentialId?: string;
 }
 
@@ -239,8 +248,16 @@ export function modelFormRefusals(input: {
   return { credentialId, modelId: outsideOffer ? "settings:models.form.modelNotOffered" : null };
 }
 
+/** The fields {@link capabilityOverrides} reads. */
+type CapabilityFields = Pick<
+  ModelFormFields,
+  "inputText" | "inputImage" | "contextWindow" | "maxTokens" | "reasoning"
+>;
+
 function capabilityOverrides(
-  input: Pick<ModelFormPayloadInput, "fields" | "capabilities" | "isEdit" | "catalogEntry">,
+  input: Pick<ModelFormPayloadInput, "capabilities" | "isEdit" | "catalogEntry"> & {
+    fields: CapabilityFields;
+  },
 ): Pick<ModelFormData, "input" | "contextWindow" | "maxTokens" | "reasoning"> {
   const { fields } = input;
   if (input.capabilities === "auto") {
@@ -303,12 +320,38 @@ function describedCapabilities(
   };
 }
 
+/** What the list asks of a model id typed by hand: its name and, if wanted, its own capabilities. */
+export type ManualRowFields = Pick<ModelFormFields, "label" | "modelId" | "capabilitiesExplicit"> &
+  CapabilityFields;
+
+/** An id typed by hand, as a row of the pick list; the capabilities are the operator's own answers. */
+export function manualRow(fields: ManualRowFields): ModelPickRow {
+  const answered = capabilityOverrides({
+    fields,
+    capabilities: fields.capabilitiesExplicit ? "explicit" : "auto",
+    isEdit: false,
+  });
+  return {
+    id: fields.modelId.trim(),
+    label: fields.label.trim() || null,
+    contextWindow: answered.contextWindow ?? null,
+    maxTokens: answered.maxTokens ?? null,
+    input: answered.input ?? null,
+    reasoning: answered.reasoning ?? null,
+    source: null,
+    endpointCapabilities: {},
+    cost: null,
+    origin: "manual",
+    featured: false,
+  };
+}
+
 /**
- * Search includes the billing rate; catalog rows resolve at read time.
+ * Search includes the billing rate, a typed id its own answers; catalog rows resolve at read time.
  * Discovery pins only endpoint capabilities, never catalog display hints.
  */
-function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
-  if (row.origin === "search") {
+export function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
+  if (row.origin === "search" || row.origin === "manual") {
     return {
       ...(row.label ? { label: row.label } : {}),
       modelId: row.id,

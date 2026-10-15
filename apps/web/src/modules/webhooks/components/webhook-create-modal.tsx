@@ -3,13 +3,13 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm } from "react-hook-form";
-import { Modal } from "@/components/modal";
-import { Button } from "@appstrate/ui/components/button";
+import { useModalParam } from "@/hooks/use-modal-param";
+import { FormModal } from "@/components/form-modal";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { Spinner } from "@/components/spinner";
+import { FormItem } from "@/components/app-ui/form-item";
 import { WebhookFormFields } from "./webhook-form-fields";
-import { toggleEvent } from "../hooks/use-webhooks";
+import { toggleValue } from "@/lib/toggle-value";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { useCreateWebhook } from "../hooks/use-webhooks";
 import { errorMessage } from "../../../lib/mutation-error";
@@ -18,9 +18,10 @@ import type { WebhookInfo } from "../hooks/use-webhooks";
 
 type Level = WebhookInfo["level"];
 
+/** The URL parameter that opens the modal. The secret step has no URL of its own. */
+export const NEW_WEBHOOK_PARAM = "newWebhook";
+
 interface Props {
-  open: boolean;
-  onClose: () => void;
   /** Levels the caller may create at — never empty (the page gates the button). */
   levels: readonly Level[];
 }
@@ -29,11 +30,44 @@ type FormData = {
   url: string;
 };
 
-export function WebhookCreateModal({ open, onClose, levels }: Props) {
+export function WebhookCreateModal({ levels }: Props) {
+  const { t } = useTranslation(["settings"]);
+  const param = useModalParam(NEW_WEBHOOK_PARAM);
+  const [createdSecret, setCreatedSecret] = useState<string | null>(null);
+
+  // Step 2: the secret, shown once. It has no address: the creation's one goes away as it appears.
+  if (createdSecret) {
+    return (
+      <SecretRevealModal
+        onClose={() => setCreatedSecret(null)}
+        title={t("settings:webhooks.created")}
+        secret={createdSecret}
+        warning={t("settings:webhooks.secretWarning")}
+      />
+    );
+  }
+  // The form exists only while the modal is open, so any way of closing it (Annuler, a click
+  // outside, Escape, Back) abandons what was typed.
+  if (param.value === null) return null;
+  return (
+    <WebhookCreateForm
+      levels={levels}
+      onClose={param.close}
+      onCreated={(secret) => {
+        setCreatedSecret(secret);
+        param.close();
+      }}
+    />
+  );
+}
+
+function WebhookCreateForm({
+  levels,
+  onClose,
+  onCreated,
+}: Props & { onClose: () => void; onCreated: (secret: string) => void }) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateWebhook();
-
-  const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
   const [payloadMode, setPayloadMode] = useState<"full" | "summary">("full");
   const [chosenLevel, setChosenLevel] = useState<Level>("space");
@@ -48,22 +82,11 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
   const {
     register,
     handleSubmit,
-    reset,
     setError,
     formState: { errors },
   } = useForm<FormData>({
     defaultValues: { url: "" },
   });
-
-  const handleClose = () => {
-    reset({ url: "" });
-    setCreatedSecret(null);
-    setSelectedEvents([]);
-    setPayloadMode("full");
-    setChosenLevel("space");
-    createMutation.reset();
-    onClose();
-  };
 
   function onFormSubmit(data: FormData) {
     if (selectedEvents.length === 0) {
@@ -79,9 +102,7 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
         payloadMode,
       },
       {
-        onSuccess: (result) => {
-          setCreatedSecret(result.secret);
-        },
+        onSuccess: (result) => onCreated(result.secret),
         onError: (err) => {
           setError("root", { message: errorMessage(err) });
         },
@@ -89,91 +110,63 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
     );
   }
 
-  const onSubmit = handleSubmit(onFormSubmit);
-
-  // Step 2: show the secret
-  if (createdSecret) {
-    return (
-      <SecretRevealModal
-        open={open}
-        onClose={handleClose}
-        title={t("settings:webhooks.created")}
-        secret={createdSecret}
-      />
-    );
-  }
-
-  // Step 1: creation form
   return (
-    <Modal
-      open={open}
-      onClose={handleClose}
+    <FormModal
+      onClose={onClose}
       title={t("settings:webhooks.createTitle")}
-      actions={
-        <>
-          <Button variant="outline" type="button" onClick={handleClose}>
-            {t("common:btn.cancel")}
-          </Button>
-          <Button type="submit" form="create-webhook-form" disabled={createMutation.isPending}>
-            {createMutation.isPending ? <Spinner /> : t("settings:webhooks.createBtn")}
-          </Button>
-        </>
-      }
+      onSubmit={handleSubmit(onFormSubmit)}
+      isPending={createMutation.isPending}
+      submitLabel={t("settings:webhooks.createBtn")}
+      error={errors.root?.message}
     >
-      <form id="create-webhook-form" onSubmit={onSubmit} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="webhook-url">{t("settings:webhooks.urlLabel")}</Label>
-          <Input
-            id="webhook-url"
-            type="url"
-            {...register("url", {
-              required: true,
-              pattern: /^https:\/\/.+/,
-            })}
-            placeholder={t("settings:webhooks.urlPlaceholder")}
-            autoFocus
-          />
-          {errors.url ? (
-            <p className="text-destructive text-xs">{t("settings:webhooks.urlHint")}</p>
-          ) : (
-            <p className="text-muted-foreground text-xs">{t("settings:webhooks.urlHint")}</p>
-          )}
-        </div>
-
-        {/* Never create an organization-wide webhook without saying so. */}
-        {levels.length === 1 && level === "org" && (
-          <div className="space-y-2">
-            <Label>{t("settings:webhooks.levelLabel")}</Label>
-            <p className="text-sm">{levelLabels.org}</p>
-          </div>
-        )}
-
-        {levels.length > 1 && (
-          <div className="space-y-2">
-            <Label>{t("settings:webhooks.levelLabel")}</Label>
-            <RadioGroup value={level} onValueChange={(v) => setChosenLevel(v as Level)}>
-              {levels.map((l) => (
-                <div key={l} className="flex items-center gap-2">
-                  <RadioGroupItem value={l} id={`create-level-${l}`} />
-                  <Label htmlFor={`create-level-${l}`} className="cursor-pointer font-normal">
-                    {levelLabels[l]}
-                  </Label>
-                </div>
-              ))}
-            </RadioGroup>
-          </div>
-        )}
-
-        <WebhookFormFields
-          selectedEvents={selectedEvents}
-          onToggleEvent={(e) => toggleEvent(e, setSelectedEvents)}
-          payloadMode={payloadMode}
-          onPayloadModeChange={setPayloadMode}
-          idPrefix="create-"
+      <FormItem
+        id="webhook-url"
+        label={t("settings:webhooks.urlLabel")}
+        hint={errors.url ? undefined : t("settings:webhooks.urlHint")}
+        error={errors.url ? t("settings:webhooks.urlHint") : undefined}
+      >
+        <Input
+          type="url"
+          {...register("url", {
+            required: true,
+            pattern: /^https:\/\/.+/,
+          })}
+          placeholder={t("settings:webhooks.urlPlaceholder")}
+          autoFocus
         />
+      </FormItem>
 
-        {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
-      </form>
-    </Modal>
+      {/* Never create an organization-wide webhook without saying so. */}
+      {levels.length === 1 && level === "org" && (
+        <div className="space-y-2">
+          <Label>{t("settings:webhooks.levelLabel")}</Label>
+          <p className="text-sm">{levelLabels.org}</p>
+        </div>
+      )}
+
+      {levels.length > 1 && (
+        <div className="space-y-2">
+          <Label>{t("settings:webhooks.levelLabel")}</Label>
+          <RadioGroup value={level} onValueChange={(v) => setChosenLevel(v as Level)}>
+            {levels.map((l) => (
+              <div key={l} className="flex items-center gap-2">
+                <RadioGroupItem value={l} id={`create-level-${l}`} />
+                <Label htmlFor={`create-level-${l}`} className="cursor-pointer font-normal">
+                  {levelLabels[l]}
+                </Label>
+              </div>
+            ))}
+          </RadioGroup>
+        </div>
+      )}
+
+      <WebhookFormFields
+        selectedEvents={selectedEvents}
+        onToggleEvent={(e) => setSelectedEvents((prev) => toggleValue(prev, e))}
+        payloadMode={payloadMode}
+        onPayloadModeChange={setPayloadMode}
+        idPrefix="create-"
+      />
+    </FormModal>
   );
 }

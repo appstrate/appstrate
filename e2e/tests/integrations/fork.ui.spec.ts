@@ -23,7 +23,7 @@ test("a system integration forks from its detail page into the org's scope", asy
   const name = `slack-copy-${Date.now().toString(36)}`;
 
   await page.goto(`/integrations/${SOURCE}`);
-  await page.getByRole("button", { name: "Actions du package" }).click();
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
   await page.getByRole("menuitem", { name: "Dupliquer" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Dupliquer le package" });

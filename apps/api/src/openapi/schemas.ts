@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MODEL_ERROR_CATEGORIES } from "@appstrate/core/model-error";
 import {
   orgRoleEnum,
   packageSourceValues,
@@ -112,6 +113,52 @@ const PACKAGE_HOME_PROPERTIES = {
   },
 } as const;
 
+/** An organization logo that is one emoji: the write form, and one of the read forms. */
+export const ORG_LOGO_EMOJI_SCHEMA = {
+  type: "object",
+  required: ["kind", "emoji"],
+  properties: {
+    kind: { type: "string", const: "emoji" },
+    emoji: { type: "string", description: "Exactly one emoji." },
+  },
+  additionalProperties: false,
+} as const;
+
+export const ORG_LOGO_PROPERTY = {
+  oneOf: [
+    ORG_LOGO_EMOJI_SCHEMA,
+    {
+      type: "object",
+      required: ["kind", "url"],
+      properties: {
+        kind: { type: "string", const: "image" },
+        url: {
+          type: "string",
+          description:
+            "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good.",
+        },
+      },
+      additionalProperties: false,
+    },
+    { type: "null" },
+  ],
+  description:
+    "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial.",
+} as const;
+
+/** The agent's identity tile, on the list item and on the detail. */
+const AGENT_IDENTITY_PROPERTIES = {
+  icon: {
+    type: "string",
+    description:
+      "The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none.",
+  },
+  color: {
+    type: "string",
+    description: 'Presentation token from `_meta["dev.appstrate/ui"].color`.',
+  },
+} as const;
+
 export const ORG_SETTINGS_PROPERTIES = {
   restrict_package_copy: {
     type: "boolean",
@@ -186,6 +233,67 @@ const RUN_AND_WAIT_COMMON_PROPERTIES = {
 };
 
 /**
+ * `OrgPackageItem`, a const so `IntegrationIndexItem` extends it in the SAME
+ * schema object: verify-openapi's shared-type check reads only the properties
+ * declared there, never through `allOf`.
+ */
+const ORG_PACKAGE_ITEM_SCHEMA = {
+  type: "object",
+  // Always emitted by the listOrgItems mapper. `created_by_name` stays
+  // optional (omitted when there's no creator); `scope` is not emitted by
+  // the org-package list (shared-type marks it optional).
+  required: [
+    "id",
+    "source",
+    "createdAt",
+    "updatedAt",
+    "name",
+    "description",
+    "icon",
+    "keywords",
+    "created_by",
+    "used_by_agents",
+    "version",
+    "auto_installed",
+    "forked_from",
+    "home_space_id",
+    "home_writable",
+    "home_deletable",
+    "home_shareable",
+  ],
+  properties: {
+    id: { type: "string" },
+    orgId: {
+      type: ["string", "null"],
+      description: "Owning organization ID (null for system packages)",
+    },
+    name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
+    description: { type: ["string", "null"] },
+    icon: {
+      type: ["string", "null"],
+      description:
+        "The manifest's `icon`: an Iconify id (`<prefix>:<name>`, e.g. `logos:slack-icon`, `lucide:bot`) or an image URL, `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone.",
+    },
+    keywords: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description.",
+    },
+    source: { type: "string", enum: [...packageSourceValues] },
+    created_by: { type: ["string", "null"] },
+    created_by_name: { type: "string" },
+    used_by_agents: { type: "integer" },
+    version: { type: ["string", "null"], description: "Manifest version (semver)" },
+    auto_installed: { type: "boolean" },
+    forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+    ...PACKAGE_HOME_PROPERTIES,
+    createdAt: { type: "string", format: "date-time" },
+    updatedAt: { type: "string", format: "date-time" },
+  },
+} as const;
+
+/**
  * All OpenAPI schema definitions (components/schemas).
  */
 export const schemas = {
@@ -210,6 +318,17 @@ export const schemas = {
       title: {
         type: "string",
         description: "Human-readable title; preserved from the underlying error factory.",
+      },
+      line: {
+        type: "integer",
+        minimum: 1,
+        description:
+          "On a file-level validation item, the 1-based line where the validator stopped, counted in the file itself (e.g. `skill_invalid_frontmatter` on a YAML syntax error: the opening `---` is line 1). Absent when unknown.",
+      },
+      column: {
+        type: "integer",
+        minimum: 1,
+        description: "The 1-based column beside `line`.",
       },
       // Channel-specific smuggles surfaced by services/integration-connection-resolver.ts:translateResolutionError.
       // Documented here so SDK consumers can rely on them without reading the resolver source.
@@ -700,11 +819,12 @@ export const schemas = {
   },
   Organization: {
     type: "object",
-    required: ["id", "name", "slug", "role", "permissions", "createdAt", "deleting_at"],
+    required: ["id", "name", "slug", "logo", "role", "permissions", "createdAt", "deleting_at"],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
+      logo: ORG_LOGO_PROPERTY,
       role: { type: "string", enum: ORG_ROLES },
       permissions: {
         type: "array",
@@ -725,13 +845,42 @@ export const schemas = {
     type: "object",
     // `email`/`displayName` are best-effort joins (getOrgMembers emits
     // `?? undefined` when the user/profile row is missing) — NOT required.
-    required: ["userId", "role", "joinedAt"],
+    required: ["userId", "role", "joinedAt", "spaces"],
     properties: {
       userId: { type: "string" },
       displayName: { type: "string" },
       email: { type: "string" },
       role: { type: "string", enum: ORG_ROLES },
       joinedAt: { type: "string", format: "date-time" },
+      spaces: {
+        type: "array",
+        description:
+          "The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them.",
+        items: { $ref: "#/components/schemas/OrgMemberSpace" },
+      },
+    },
+  },
+  OrgMemberSpace: {
+    type: "object",
+    required: ["id", "name", "source", "role"],
+    properties: {
+      id: { type: "string" },
+      name: { type: "string" },
+      source: {
+        type: "string",
+        enum: ["explicit", "org_role", "open_space"],
+        description:
+          "How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
+      },
+      role: {
+        type: ["object", "null"],
+        required: ["kind", "key", "name"],
+        properties: {
+          kind: { type: "string", enum: ["preset", "custom"] },
+          key: { type: "string" },
+          name: { type: "string" },
+        },
+      },
     },
   },
   SpaceAssignment: {
@@ -770,6 +919,7 @@ export const schemas = {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
+      logo: ORG_LOGO_PROPERTY,
       createdAt: { type: "string", format: "date-time" },
       deleting_at: {
         type: ["string", "null"],
@@ -844,6 +994,7 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string" },
+      ...AGENT_IDENTITY_PROPERTIES,
       display_name: { type: "string" },
       description: { type: "string" },
       schema_version: { type: "string" },
@@ -927,6 +1078,7 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string" },
+      ...AGENT_IDENTITY_PROPERTIES,
       display_name: { type: "string" },
       description: { type: "string" },
       source: { type: "string", enum: [...packageSourceValues] },
@@ -1287,6 +1439,7 @@ export const schemas = {
       "status",
       "input",
       "result",
+      "model_error",
       "artifacts",
       "checkpoint",
       "error",
@@ -1393,7 +1546,28 @@ export const schemas = {
       // `runs.checkpoint` is a nullable jsonb column — null on every run that
       // never emitted a checkpoint (pending/running/most terminal runs).
       checkpoint: { type: ["object", "null"], additionalProperties: true },
-      error: { type: ["string", "null"] },
+      error: {
+        type: ["string", "null"],
+        description:
+          "The failure as it happened, verbatim — a debugging surface. To say WHY a run failed, branch on `model_error` (and `status`), never on this text.",
+      },
+      model_error: {
+        description:
+          "What a run that failed on a model call failed on, classified once when it finalized: `category` (one of `credential_unavailable`, `rate_limited`, `upstream_unavailable`, `invalid_request`, `unknown`), `retryable` (derived from it), the provider's HTTP `status` and its own `message`, each `null` when the failure text carried none. `null` on every other run, and on a run finalized before the platform recorded it. A `cancelled` run is always a member's cancellation (`POST /api/runs/{id}/cancel`).",
+        oneOf: [
+          {
+            type: "object",
+            required: ["category", "retryable", "status", "message"],
+            properties: {
+              category: { type: "string", enum: [...MODEL_ERROR_CATEGORIES] },
+              retryable: { type: "boolean" },
+              status: { type: ["integer", "null"], minimum: 100, maximum: 599 },
+              message: { type: ["string", "null"] },
+            },
+          },
+          { type: "null" },
+        ],
+      },
       token_usage: {
         description:
           "Snapshot of token consumption for the run, as every runner (PiRunner / remote CLI / GitHub Action) reports it, parsed on ingestion before it is stored. `null` until the run reports usage.",
@@ -1773,59 +1947,28 @@ export const schemas = {
       createdAt: { type: "string", format: "date-time" },
     },
   },
-  OrgPackageItem: {
-    type: "object",
-    // Always emitted by the listOrgItems mapper. `created_by_name` stays
-    // optional (omitted when there's no creator); `scope` is not emitted by
-    // the org-package list (shared-type marks it optional).
-    required: [
-      "id",
-      "source",
-      "createdAt",
-      "updatedAt",
-      "name",
-      "description",
-      "icon",
-      "keywords",
-      "created_by",
-      "used_by_agents",
-      "version",
-      "auto_installed",
-      "forked_from",
-      "home_space_id",
-      "home_writable",
-      "home_deletable",
-      "home_shareable",
-    ],
+  OrgPackageItem: ORG_PACKAGE_ITEM_SCHEMA,
+  IntegrationIndexItem: {
+    ...ORG_PACKAGE_ITEM_SCHEMA,
+    required: [...ORG_PACKAGE_ITEM_SCHEMA.required, "source_kind", "server"],
     properties: {
-      id: { type: "string" },
-      orgId: {
-        type: ["string", "null"],
-        description: "Owning organization ID (null for system packages)",
-      },
-      name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
-      description: { type: ["string", "null"] },
-      icon: {
-        type: ["string", "null"],
+      ...ORG_PACKAGE_ITEM_SCHEMA.properties,
+      source_kind: {
+        type: "string",
+        enum: ["local", "remote", "none"],
         description:
-          "The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone.",
+          "The manifest's `source.kind`: `local` runs an MCP server package in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).",
       },
-      keywords: {
-        type: "array",
-        items: { type: "string" },
+      server: {
+        type: ["object", "null"],
+        required: ["name", "version"],
+        properties: {
+          name: { type: "string" },
+          version: { type: "string", description: "Semver range" },
+        },
         description:
-          "The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description.",
+          "`source.server` of a `local` integration — the MCP server package it runs and its version range. `null` for any other source.",
       },
-      source: { type: "string", enum: [...packageSourceValues] },
-      created_by: { type: ["string", "null"] },
-      created_by_name: { type: "string" },
-      used_by_agents: { type: "integer" },
-      version: { type: ["string", "null"], description: "Manifest version (semver)" },
-      auto_installed: { type: "boolean" },
-      forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
-      ...PACKAGE_HOME_PROPERTIES,
-      createdAt: { type: "string", format: "date-time" },
-      updatedAt: { type: "string", format: "date-time" },
     },
   },
   OrgPackageItemDetail: {
@@ -1876,7 +2019,7 @@ export const schemas = {
       created_by: { type: ["string", "null"] },
       auto_installed: { type: "boolean" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
-      manifest: { type: "object", description: "Full manifest object" },
+      manifest: { type: "object", additionalProperties: true, description: "Full manifest object" },
       manifest_name: {
         type: ["string", "null"],
         description: "Manifest name (@scope/name) — may differ from package ID",
@@ -1920,6 +2063,7 @@ export const schemas = {
       "owner_name",
       "allowed_actions",
       "bindable",
+      "serves_model_ids",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -1970,6 +2114,12 @@ export const schemas = {
         type: "boolean",
         description:
           "Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one.",
+      },
+      serves_model_ids: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "On a personal credential, the ids of the organization models left to members' own credentials (`binding: user`) that it pays for — the same service, or a subscription offering the model on its API. `[]` on an organization or built-in credential: its models name it in `credentialId`.",
       },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
@@ -2834,6 +2984,7 @@ export const schemas = {
         "home_shareable",
         "published",
         "placements",
+        "activation",
       ],
       properties: {
         id: { type: "string", description: "Package id (`@scope/name`)." },
@@ -2858,6 +3009,20 @@ export const schemas = {
           type: "boolean",
           description:
             "Whether the package has a published version (a `latest` dist-tag), or is a system package. A skill can be enforced in a space's chat only when it is published.",
+        },
+        activation: {
+          type: "array",
+          description:
+            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the offer; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
+          items: {
+            type: "object",
+            required: ["spaceId", "activate", "deactivate"],
+            properties: {
+              spaceId: { type: "string" },
+              activate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
+              deactivate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
+            },
+          },
         },
         placements: {
           type: "array",

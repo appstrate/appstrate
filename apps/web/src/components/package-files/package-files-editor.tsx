@@ -1,45 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  PACKAGE_FILE_INLINE_MAX_BYTES,
-  PACKAGE_MANIFEST_FILE,
-} from "@appstrate/core/package-files";
-import { formatBytes } from "../../lib/format-bytes";
+import { PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
-import { $api } from "../../api/client";
-import { useOrgScope } from "../../hooks/use-org-scope";
-import { splitPackageRef } from "../../lib/package-paths";
-import { primaryDisplayFile, packageFilesErrorKey } from "../../lib/package-files";
-import {
-  projectDraftFiles,
-  stageFileOperations,
-  fileTextOperation,
-  uploadedFileOperation,
-  type DraftFile,
-} from "../../lib/package-file-drafts";
+import { primaryDisplayFile } from "../../lib/package-files";
+import { projectDraftFiles, fileTextOperation } from "../../lib/package-file-drafts";
 import {
   isPinnedEntry,
-  languageForPath,
   pickActiveEntry,
   previewBlockReason,
-  validateNewPath,
-  NEW_PATH_ERROR_KEYS,
   type PackageFileEntry,
   type PackageFileWriteOperation,
 } from "../../lib/package-file-tree";
-import { ConfirmModal } from "../confirm-modal";
-import { ContentEditor } from "../package-editor/content-editor";
-import { LoadingState, ErrorState } from "../page-states";
+import { ErrorState } from "../page-states";
+import { TextSkeleton } from "../loading-skeletons";
 import { FileTree } from "./file-tree";
-import { FilePreview } from "./file-preview";
-import { FilePathDialog } from "./file-path-dialog";
-import { usePackageFile } from "./use-package-file";
-
-type Dialog = { kind: "create" } | { kind: "rename" | "delete"; path: string } | null;
+import { PackageFileSource } from "./package-file-source";
+import { PackageFileTextEditor } from "./package-file-text-editor";
+import { usePackageFileIndex } from "./use-package-file-index";
+import { useStagedPackageFiles } from "./use-staged-package-files";
 
 interface Props {
   packageId: string | undefined;
@@ -64,15 +45,7 @@ export function PackageFilesEditor({
   onBusyChange,
 }: Props) {
   const { t } = useTranslation(["agents", "common"]);
-  const scope = useOrgScope();
-  const query = $api.useQuery(
-    "get",
-    "/api/packages/{scope}/{name}/files",
-    {
-      params: { path: splitPackageRef(packageId ?? ""), header: scope.header },
-    },
-    { enabled: scope.enabled && !!packageId, staleTime: 0, gcTime: 0, refetchOnMount: "always" },
-  );
+  const query = usePackageFileIndex(packageId, undefined, true);
   // Keep the tree this draft started from. Refetches cannot silently rebase it;
   // the parent's original ETag (sent as If-Match) rejects any intervening write.
   const [base, setBase] = useState<readonly PackageFileEntry[] | null>(() =>
@@ -80,90 +53,45 @@ export function PackageFilesEditor({
   );
   if (base === null && query.isSuccess && query.isFetchedAfterMount) setBase(query.data.data);
   const [selected, setSelected] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<Dialog>(null);
-  const [generation, setGeneration] = useState(0);
-  const [uploading, setUploading] = useState(false);
-  const uploadRef = useRef<HTMLInputElement>(null);
-  const replacePath = useRef<string | null>(null);
   const id = useId();
-  const limit = formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES);
-  const busy = disabled || uploading;
+  const manifestText = JSON.stringify(manifest, null, 2);
+  const entries =
+    active && base
+      ? projectDraftFiles(base, operations, type).map((entry) =>
+          entry.path === PACKAGE_MANIFEST_FILE
+            ? {
+                ...entry,
+                inline: manifestText,
+                size: new TextEncoder().encode(manifestText).byteLength,
+              }
+            : entry,
+        )
+      : [];
+  const files = useStagedPackageFiles({
+    type,
+    base: base ?? undefined,
+    entries,
+    operations,
+    onChange,
+    onSelect: setSelected,
+    disabled,
+    onBusyChange,
+  });
   if (!active) return null;
   if (!base)
-    return query.isError ? <ErrorState message={t("files.errorLoad")} /> : <LoadingState />;
+    return query.isError ? (
+      <ErrorState message={t("files.errorLoad")} />
+    ) : (
+      <TextSkeleton lines={6} />
+    );
 
-  const manifestText = JSON.stringify(manifest, null, 2);
-  const entries = projectDraftFiles(base, operations, type).map((entry) =>
-    entry.path === PACKAGE_MANIFEST_FILE
-      ? { ...entry, inline: manifestText, size: new TextEncoder().encode(manifestText).byteLength }
-      : entry,
-  );
   const current = pickActiveEntry(entries, selected, primaryDisplayFile(type).name);
-  const stage = (added: PackageFileWriteOperation[], select?: string) => {
-    try {
-      const next = stageFileOperations(operations, added);
-      projectDraftFiles(base, next, type);
-      onChange(next);
-      if (select !== undefined) setSelected(select);
-      setDialog(null);
-    } catch (error) {
-      toast.error(t(packageFilesErrorKey(error) ?? "files.errorGeneric", { limit }));
-    }
-  };
-  const pick = (path: string | null) => {
-    replacePath.current = path;
-    if (uploadRef.current) {
-      uploadRef.current.multiple = path === null;
-      uploadRef.current.click();
-    }
-  };
-  const upload = async (files: File[]) => {
-    if (files.some((file) => file.size > PACKAGE_FILE_INLINE_MAX_BYTES)) {
-      toast.error(t("files.errorTooLarge", { limit }));
-      return;
-    }
-    const target = replacePath.current;
-    if (target === null) {
-      // Validate the complete selection before reading or staging anything.
-      // Include earlier selections so one import cannot overwrite itself.
-      const planned = [...entries];
-      for (const file of files) {
-        const rejection = validateNewPath(planned, file.name);
-        if (rejection) {
-          toast.error(
-            t(
-              rejection === "exists" || rejection === "conflict"
-                ? "files.errorImportConflict"
-                : NEW_PATH_ERROR_KEYS[rejection],
-              { path: file.name },
-            ),
-          );
-          return;
-        }
-        planned.push({ path: file.name, size: file.size, media_kind: "binary" });
-      }
-    }
-    setUploading(true);
-    onBusyChange(true);
-    try {
-      const added: PackageFileWriteOperation[] = await Promise.all(
-        files.map((file) => uploadedFileOperation(target ?? file.name, file)),
-      );
-      setGeneration((value) => value + 1);
-      stage(added, added[0]?.op === "write" ? added[0].path : undefined);
-    } catch {
-      toast.error(t("files.errorGeneric"));
-    } finally {
-      setUploading(false);
-      onBusyChange(false);
-    }
-  };
-  const pinned = (path: string) => isPinnedEntry(type, path);
+  const busy = files.busy;
   const editable =
     current && current.path !== PACKAGE_MANIFEST_FILE && previewBlockReason(current) === null;
   const replacementAction =
     current && current.path !== PACKAGE_MANIFEST_FILE ? (
-      <Button variant="outline" disabled={busy} onClick={() => pick(current.path)}>
+      <Button variant="outline" disabled={busy} onClick={() => files.pickUpload(current.path)}>
         {t("files.replace")}
       </Button>
     ) : null;
@@ -181,33 +109,38 @@ export function PackageFilesEditor({
           controlsId={id}
           className="border-border bg-card max-h-[560px] rounded-lg border"
           actions={{
-            onCreate: () => setDialog({ kind: "create" }),
-            onUpload: () => pick(null),
-            onRename: (path) => setDialog({ kind: "rename", path }),
-            onDelete: (path) => setDialog({ kind: "delete", path }),
-            isPinned: pinned,
+            onCreate: files.openNewFile,
+            onUpload: () => files.pickUpload(null),
+            onRename: files.openRename,
+            onDelete: files.openDelete,
+            isPinned: (path) => isPinnedEntry(type, path),
             isBusy: busy,
-            labels: {
-              newFile: t("files.newFile"),
-              upload: t("files.upload"),
-              rename: t("files.rename"),
-              delete: t("files.delete"),
-            },
           }}
         />
         {current &&
           (editable ? (
-            <DraftFilePane
-              key={`${current.path}:${generation}`}
+            <div
+              key={`${current.path}:${files.imports}`}
               id={id}
-              packageId={packageId}
-              entry={current}
-              disabled={busy}
-              actions={replacementAction}
-              onChange={(text) => stage([fileTextOperation(current.path, text)])}
-            />
+              role="region"
+              aria-label={current.path}
+              className="min-w-0"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate font-mono text-sm">{current.path}</p>
+                {replacementAction}
+              </div>
+              <PackageFileTextEditor
+                packageId={packageId}
+                entry={current.sourcePath ? { ...current, path: current.sourcePath } : current}
+                path={current.path}
+                commit="live"
+                disabled={busy}
+                onCommit={(text) => files.stage([fileTextOperation(current.path, text)])}
+              />
+            </div>
           ) : (
-            <FilePreview
+            <PackageFileSource
               id={id}
               packageId={packageId}
               version={undefined}
@@ -217,94 +150,7 @@ export function PackageFilesEditor({
             />
           ))}
       </div>
-      <input
-        ref={uploadRef}
-        type="file"
-        className="hidden"
-        onChange={(event) => {
-          const files = [...(event.target.files ?? [])];
-          event.target.value = "";
-          if (files.length) void upload(files);
-        }}
-      />
-      {dialog?.kind === "create" && (
-        <FilePathDialog
-          title={t("files.newFile")}
-          confirmLabel={t("btn.create", { ns: "common" })}
-          initialPath=""
-          entries={entries}
-          onClose={() => setDialog(null)}
-          onSubmit={(path) => stage([fileTextOperation(path, "")], path)}
-        />
-      )}
-      {dialog?.kind === "rename" && (
-        <FilePathDialog
-          title={t("files.newName")}
-          confirmLabel={t("files.rename")}
-          initialPath={dialog.path}
-          entries={entries.filter((entry) => entry.path !== dialog.path)}
-          onClose={() => setDialog(null)}
-          onSubmit={(to) => stage([{ op: "move", from: dialog.path, to }], to)}
-        />
-      )}
-      {dialog?.kind === "delete" && (
-        <ConfirmModal
-          open
-          onClose={() => setDialog(null)}
-          title={t("files.delete")}
-          description={t("files.deleteConfirm", { path: dialog.path })}
-          confirmLabel={t("files.delete")}
-          isPending={busy}
-          onConfirm={() => stage([{ op: "delete", path: dialog.path }])}
-        />
-      )}
-    </div>
-  );
-}
-
-function DraftFilePane({
-  id,
-  packageId,
-  entry,
-  disabled,
-  actions,
-  onChange,
-}: {
-  id: string;
-  packageId: string | undefined;
-  entry: DraftFile;
-  disabled: boolean;
-  actions: ReactNode;
-  onChange: (text: string) => void;
-}) {
-  const { t } = useTranslation("agents");
-  const { text, isLoading, isError } = usePackageFile(
-    packageId,
-    undefined,
-    entry.sourcePath ? { ...entry, path: entry.sourcePath } : entry,
-    true,
-  );
-  return (
-    <div id={id} role="region" aria-label={entry.path} className="min-w-0">
-      <div className="flex items-center justify-between gap-2">
-        <p className="truncate font-mono text-sm">{entry.path}</p>
-        {actions}
-      </div>
-      {isError ? (
-        <ErrorState message={t("files.errorLoad")} />
-      ) : isLoading || text === undefined ? (
-        <LoadingState />
-      ) : (
-        <ContentEditor
-          value={text}
-          onChange={onChange}
-          language={languageForPath(entry.path)}
-          readOnly={disabled}
-          // The region label above stops being announced the moment Monaco
-          // takes focus; inside the textarea the open file has to name itself.
-          ariaLabel={entry.path}
-        />
-      )}
+      {files.dialogs}
     </div>
   );
 }

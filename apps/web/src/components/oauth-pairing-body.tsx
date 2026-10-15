@@ -8,17 +8,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Copy, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { toastError } from "../lib/mutation-error";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import {
   useCreateModelProviderPairing,
   useModelProviderPairingStatus,
 } from "../hooks/use-model-provider-pairing";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { addPendingPairing, markPairingShown, resumablePairing } from "../stores/pairing-store";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { pairingRequestBody, type PairingTarget } from "../lib/oauth-pairing";
 
 interface OAuthPairingBodyProps {
@@ -53,7 +53,6 @@ function PairingBody({
   orgId,
 }: OAuthPairingBodyProps & { orgId: string }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { copied, copy } = useCopyToClipboard();
   const [pairing, setPairing] = useState(() => resumablePairing({ orgId, providerId, target }));
   const pairingId = pairing?.id ?? null;
 
@@ -117,8 +116,6 @@ function PairingBody({
     await generatePairing();
   }
 
-  const handleCopy = () => void copy(command);
-
   return (
     <div className="flex flex-col gap-4 text-sm">
       <p>{t("credentials.oauth.cliInstructions")}</p>
@@ -146,20 +143,19 @@ function PairingBody({
         <>
           <div className="bg-muted relative flex items-center gap-2 rounded-md p-3 font-mono text-xs">
             <code className="flex-1 break-all whitespace-pre-wrap">{command}</code>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleCopy}
+            <CopyButton
+              variant="text"
+              value={command}
+              label={t("credentials.oauth.copy")}
               aria-label={t("credentials.oauth.copyCommand")}
               className="shrink-0"
-            >
-              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              <span className="ml-1.5">
-                {copied ? t("credentials.oauth.copied") : t("credentials.oauth.copy")}
-              </span>
-            </Button>
+            />
           </div>
+          <ul className="text-muted-foreground list-disc space-y-1 pl-4 text-xs">
+            <li>{t("credentials.oauth.cliStepNode")}</li>
+            <li>{t("credentials.oauth.cliStepBrowser")}</li>
+            <li>{t("credentials.oauth.cliStepKeepOpen")}</li>
+          </ul>
           <div className="text-muted-foreground flex items-center gap-2 text-xs">
             <Spinner />
             <span>{t("credentials.oauth.cliWaiting")}</span>

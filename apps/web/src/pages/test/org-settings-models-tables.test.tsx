@@ -1,26 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The two tables of the models page as an administrator reads them: who owns
- * each credential, which of them the caller may change, and which credential a
- * model names — or that it names none, because each member brings their own.
+ * The providers tables as an administrator reads them: the organization's keys and the instance
+ * on one tab, the services open to personal keys on the other, each row with the models it
+ * makes usable and one State column. The personal kinds of key (Preferences) are the first
+ * table with its Type column.
+ *
+ * A row carries no marker of its own (the table is a `DataTable`), so a row is read from its
+ * label to the next row.
  */
 
 import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import settingsFr from "../../locales/fr/settings.json";
-import agentsFr from "../../locales/fr/agents.json";
-import commonFr from "../../locales/fr/common.json";
-import type { ModelProviderCredentialInfo } from "../../hooks/use-model-provider-credentials.ts";
+import type {
+  ModelProviderCredentialInfo,
+  ProviderRegistryEntry,
+} from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
+import { orgModelFixture as model } from "../../test/org-model-fixture.ts";
+import { personalServiceRows, providerRows } from "../../lib/model-providers.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
-const { ModelsList, ModelTestResult } = await import("../org-settings/models.tsx");
-const { CredentialsSection } = await import("../../components/model-credentials-section.tsx");
+const { ProvidersTable } = await import("../../components/providers-table.tsx");
+const { PersonalServicesTable } = await import("../../components/personal-services-table.tsx");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
 
@@ -41,6 +48,28 @@ function seededClient(): QueryClient {
 
 const CREATED = "2026-07-01T10:00:00.000Z";
 
+/** What `providerRows` reads of the registry: the services, and what a subscription offers. */
+const SERVICES = [
+  {
+    providerId: "anthropic",
+    displayName: "Anthropic",
+    authMode: "api_key",
+    apiShape: "anthropic-messages",
+    defaultBaseUrl: "https://api.anthropic.com",
+    baseUrlOverridable: false,
+    personal_allowed: true,
+    models: [{ id: "claude-sonnet-4-5" }],
+  },
+  {
+    providerId: "claude-code",
+    displayName: "Claude Code",
+    authMode: "oauth2",
+    apiShape: "anthropic-messages",
+    defaultBaseUrl: "https://api.anthropic.com",
+    models: [{ id: "claude-sonnet-4-5" }],
+  },
+] as unknown as ProviderRegistryEntry[];
+
 function credential(over: Partial<ModelProviderCredentialInfo>): ModelProviderCredentialInfo {
   return {
     id: "cred_org",
@@ -54,8 +83,9 @@ function credential(over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
     owner_id: null,
     owner_name: null,
     created_by: "usr_admin",
-    allowed_actions: ["edit", "delete"],
+    allowed_actions: ["edit", "delete", "test"],
     bindable: true,
+    serves_model_ids: [],
     needs_reconnection: false,
     createdAt: CREATED,
     updatedAt: CREATED,
@@ -64,208 +94,282 @@ function credential(over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
 }
 
 const ORG_KEY = credential({});
+const EMPTY_KEY = credential({ id: "cred_empty", label: "Clé sans modèle" });
+const MY_KEY = credential({
+  id: "cred_me",
+  label: "Ma clé",
+  owner_type: "user",
+  owner_id: "usr_me",
+  owner_name: "Moi",
+  bindable: false,
+  serves_model_ids: ["mdl_m"],
+});
 const BOB_SUBSCRIPTION = credential({
   id: "cred_bob",
-  label: "Abonnement principal",
+  label: "Abonnement de Bob",
   providerId: "claude-code",
   authMode: "oauth2",
   oauth_email: "bob@example.com",
   owner_type: "user",
   owner_id: "usr_bob",
   owner_name: "Bob",
-  created_by: "usr_bob",
-  allowed_actions: ["edit", "delete", "test"],
   bindable: false,
+  serves_model_ids: ["mdl_m"],
+  allowed_actions: ["test"],
 });
-const ALICE_SUBSCRIPTION = credential({
-  ...BOB_SUBSCRIPTION,
-  id: "cred_alice",
-  label: "Abonnement secondaire",
-  oauth_email: "alice@example.com",
-  owner_id: "usr_alice",
-  owner_name: "Alice",
-  created_by: "usr_alice",
-  allowed_actions: [],
+const DEAD_KEY = credential({
+  id: "cred_dead",
+  label: "Clé morte",
+  needs_reconnection: true,
 });
+const OFF_KEY = credential({ id: "cred_off", label: "Clé éteinte" });
 
-function credentialsPage(credentials: ModelProviderCredentialInfo[]): string {
+/** The table row holding `text`, up to the next row, so a cell is read off its own row. */
+function rowOf(html: string, text: string): string {
+  const at = html.indexOf(text);
+  if (at === -1) throw new Error(`no row holds "${text}"`);
+  const next = html.indexOf("<tr", at);
+  return html.slice(html.lastIndexOf("<tr", at), next === -1 ? undefined : next);
+}
+
+const noop = () => {};
+function providersTable(
+  models: OrgModelInfo[],
+  credentials: ModelProviderCredentialInfo[],
+  over: { canWrite?: boolean; showType?: boolean } = {},
+): string {
   return render(
-    <CredentialsSection
-      credentials={credentials}
+    <ProvidersTable
+      label={settingsFr["providers.tableLabel"]}
+      tableId="org-providers"
+      rows={providerRows(models, credentials, SERVICES, "usr_me")}
+      showType={over.showType}
       isLoading={false}
       error={null}
-      onCreate={() => {}}
-      onEdit={() => {}}
-      onDelete={() => {}}
-      onConnectOAuth={() => {}}
-      canAdd
-      showOwner
+      empty={{ message: settingsFr["providers.empty"] }}
+      canWriteModels={over.canWrite ?? false}
+      onRename={async () => {}}
+      onChooseModels={noop}
+      onChangeKey={noop}
+      onReconnect={noop}
+      onDelete={noop}
+      onSetDefault={noop}
     />,
     { queryClient: seededClient() },
   );
 }
 
-/** One table row, from its marker to the next row, so a cell is read off its own row. */
-function rowOf(html: string, marker: string): string {
-  const start = html.indexOf(marker);
-  const next = html.indexOf("<tr", start + 1);
-  return html.slice(start, next === -1 ? undefined : next);
-}
+describe("the providers table", () => {
+  const html = providersTable(
+    [
+      model({ id: "mdl_a", label: "Claude Sonnet", is_default: true }),
+      model({ id: "mdl_b", label: "Claude Opus" }),
+      model({ id: "mdl_m", label: "Claude pour tous", credentialId: null, binding: "user" }),
+      model({
+        id: "mdl_s",
+        label: "Modèle système",
+        source: "built-in",
+        credentialId: "cred_builtin",
+      }),
+      model({ id: "mdl_off", label: "Claude éteint", credentialId: "cred_off", enabled: false }),
+    ],
+    [
+      ORG_KEY,
+      EMPTY_KEY,
+      DEAD_KEY,
+      OFF_KEY,
+      MY_KEY,
+      BOB_SUBSCRIPTION,
+      credential({ id: "cred_builtin", source: "built-in", providerId: null }),
+    ],
+  );
+  const system = settingsFr["providers.type.system"];
 
-describe("the credentials table, as Bob sees it", () => {
-  const html = credentialsPage([ORG_KEY, BOB_SUBSCRIPTION, ALICE_SUBSCRIPTION]);
-  const row = (id: string) => rowOf(html, `data-testid="credential-row-${id}"`);
-
-  it("names the organization for an organization credential", () => {
-    expect(row(ORG_KEY.id)).toContain(`>${settingsFr["source.org"]}<`);
+  it("heads the columns Provider, Service, Models, State, and no Type nor owner", () => {
+    for (const key of [
+      "providers.col.name",
+      "providers.col.provider",
+      "providers.col.models",
+      "providers.col.state",
+    ] as const) {
+      expect(html).toContain(settingsFr[key]);
+    }
+    expect(html).not.toContain("Appartient à");
   });
 
-  it("names the owner for a personal credential", () => {
-    expect(row(BOB_SUBSCRIPTION.id)).toContain(">Bob<");
-    expect(row(ALICE_SUBSCRIPTION.id)).toContain(">Alice<");
+  it("names the instance's row Système, and says where its models come from", () => {
+    expect(rowOf(html, system)).toContain(settingsFr["providers.instanceName"]);
   });
 
-  it("lets Bob rename his own subscription, and not Alice's", () => {
-    const edit = `aria-label="${settingsFr["credentials.edit"]}"`;
-    expect(row(BOB_SUBSCRIPTION.id)).toContain(edit);
-    expect(row(ALICE_SUBSCRIPTION.id)).not.toContain(edit);
+  it("says under the name, when asked, whether a row is a personal key or a subscription", () => {
+    const typed = providersTable([], [MY_KEY, BOB_SUBSCRIPTION], { showType: true });
+    expect(rowOf(typed, MY_KEY.label)).toContain(settingsFr["providers.type.personalKey"]);
+    expect(rowOf(typed, BOB_SUBSCRIPTION.label)).toContain(
+      settingsFr["providers.type.subscription"],
+    );
   });
 
-  it("lets the organization credential be renamed where the server allows it", () => {
-    expect(row(ORG_KEY.id)).toContain(`aria-label="${settingsFr["credentials.edit"]}"`);
+  it("lists the models a provider makes usable, the default one marked by a star", () => {
+    const row = rowOf(html, ORG_KEY.label);
+    expect(row).toContain("Claude Sonnet");
+    expect(row).toContain("Claude Opus");
+    expect(row).toContain("lucide-star");
+    expect(rowOf(html, MY_KEY.label)).toContain("Claude pour tous");
+    expect(rowOf(html, system)).toContain("Modèle système");
+  });
+
+  it("says « Aucun » for a provider with no model", () => {
+    expect(rowOf(html, EMPTY_KEY.label)).toContain(settingsFr["providers.noModels"]);
+  });
+
+  it("gathers the states in one column: unavailable, default, disabled, and nothing otherwise", () => {
+    expect(rowOf(html, DEAD_KEY.label)).toContain(settingsFr["models.credentialUnavailable"]);
+    expect(rowOf(html, ORG_KEY.label)).toContain(`>${settingsFr["models.default"]}<`);
+    expect(rowOf(html, OFF_KEY.label)).toContain(settingsFr["providers.state.disabled"]);
+    const quiet = rowOf(html, EMPTY_KEY.label);
+    expect(quiet).not.toContain(settingsFr["models.credentialUnavailable"]);
+    expect(quiet).not.toContain(`>${settingsFr["models.default"]}<`);
+    expect(quiet).not.toContain(settingsFr["providers.state.disabled"]);
+    // The state is said once, never repeated as a badge beside the name.
+    expect(
+      rowOf(html, DEAD_KEY.label).split(settingsFr["models.credentialUnavailable"]),
+    ).toHaveLength(2);
+  });
+
+  it("gives the holder's rows a menu, and another person's subscription a test only", () => {
+    const menu = (label: string) =>
+      `aria-label="${settingsFr["providers.moreActions"].replace("{{name}}", label)}"`;
+    expect(rowOf(html, ORG_KEY.label)).toContain(menu(ORG_KEY.label));
+    expect(rowOf(html, BOB_SUBSCRIPTION.label)).toContain(menu(BOB_SUBSCRIPTION.label));
+  });
+
+  it("does not rename by a click on the name, nor draw a pencil", () => {
+    expect(rowOf(html, ORG_KEY.label)).not.toContain("cursor-pointer");
+    expect(rowOf(html, ORG_KEY.label)).not.toContain("lucide-pencil");
   });
 });
 
-describe("the credentials table, where a subscription needs reconnecting", () => {
-  const html = credentialsPage([
-    {
-      ...BOB_SUBSCRIPTION,
-      needs_reconnection: true,
-      allowed_actions: ["edit", "delete", "reconnect"],
-    },
-    { ...ALICE_SUBSCRIPTION, needs_reconnection: true, allowed_actions: [] },
-  ]);
-  const row = (id: string) => rowOf(html, `data-testid="credential-row-${id}"`);
+describe("a click on a row", () => {
+  it("chooses the models of an organization key, for a caller who may write models", () => {
+    const writer = providersTable([], [ORG_KEY], { canWrite: true });
+    expect(rowOf(writer, ORG_KEY.label)).toContain(`aria-label="${ORG_KEY.label}"`);
+    const reader = providersTable([], [ORG_KEY], { canWrite: false });
+    expect(rowOf(reader, ORG_KEY.label)).not.toContain(`aria-label="${ORG_KEY.label}"`);
+  });
 
-  it("offers the reconnect on the row whose allowed actions list it, and on no other", () => {
-    expect(row(BOB_SUBSCRIPTION.id)).toContain(settingsFr["credentials.oauth.reconnect"]);
-    expect(row(ALICE_SUBSCRIPTION.id)).not.toContain(settingsFr["credentials.oauth.reconnect"]);
+  it("leads nowhere from a personal key", () => {
+    const html = providersTable([], [MY_KEY], { canWrite: true });
+    expect(rowOf(html, MY_KEY.label)).not.toContain(`aria-label="${MY_KEY.label}"`);
   });
 });
 
-describe("the credentials table, where an organization subscription needs reconnecting", () => {
+describe("an organization subscription", () => {
   const ORG_SUBSCRIPTION = credential({
     id: "cred_org_sub",
-    label: "Abonnement de l'équipe",
+    label: "Abonnement équipe",
     providerId: "claude-code",
     authMode: "oauth2",
     oauth_email: "team@example.com",
     needs_reconnection: true,
-    allowed_actions: ["edit", "delete", "reconnect"],
+    allowed_actions: ["reconnect"],
   });
-  const reconnect = settingsFr["credentials.oauth.reconnect"];
-  const rowFor = (c: ModelProviderCredentialInfo) =>
-    rowOf(credentialsPage([c]), `data-testid="credential-row-${c.id}"`);
+  const menu = `aria-label="${settingsFr["providers.moreActions"].replace("{{name}}", ORG_SUBSCRIPTION.label)}"`;
 
-  it("names the organization as its owner", () => {
-    expect(rowFor(ORG_SUBSCRIPTION)).toContain(`>${settingsFr["source.org"]}<`);
-  });
-
-  it("offers the reconnect where the server lists it", () => {
-    expect(rowFor(ORG_SUBSCRIPTION)).toContain(reconnect);
-  });
-
-  it("withholds it from a reader the server does not allow, with the badge still shown", () => {
-    const row = rowFor({ ...ORG_SUBSCRIPTION, allowed_actions: ["test"] });
-    expect(row).not.toContain(reconnect);
-    expect(row).toContain(settingsFr["credentials.oauth.needsReconnection"]);
-  });
-});
-
-describe("the credentials table, where a subscription that lists the reconnect is healthy", () => {
-  const html = credentialsPage([
-    { ...BOB_SUBSCRIPTION, allowed_actions: ["edit", "delete", "test", "reconnect"] },
-  ]);
-
-  it("does not offer the reconnect", () => {
-    expect(rowOf(html, `data-testid="credential-row-${BOB_SUBSCRIPTION.id}"`)).not.toContain(
-      settingsFr["credentials.oauth.reconnect"],
+  it("is an organization key: it serves the models bound to it, not the ones left to members", () => {
+    const [row] = providerRows(
+      [
+        model({ id: "mdl_bound", label: "Claude lié", credentialId: ORG_SUBSCRIPTION.id }),
+        model({ id: "mdl_m", label: "Claude pour tous", credentialId: null, binding: "user" }),
+      ],
+      [ORG_SUBSCRIPTION],
+      SERVICES,
+      "usr_me",
     );
+    expect(row?.kind).toBe("org-key");
+    expect(row?.models.map((m) => m.id)).toEqual(["mdl_bound"]);
+  });
+
+  it("offers the reconnect where the server lists it, with the row unavailable", () => {
+    const row = rowOf(providersTable([], [ORG_SUBSCRIPTION]), ORG_SUBSCRIPTION.label);
+    expect(row).toContain(menu);
+    expect(row).toContain(settingsFr["models.credentialUnavailable"]);
+  });
+
+  it("withholds it from a reader the server does not allow, with the state still shown", () => {
+    const row = rowOf(
+      providersTable([], [{ ...ORG_SUBSCRIPTION, allowed_actions: [] }]),
+      ORG_SUBSCRIPTION.label,
+    );
+    expect(row).not.toContain(menu);
+    expect(row).toContain(settingsFr["models.credentialUnavailable"]);
+  });
+
+  it("offers no reconnect while it is healthy", () => {
+    const row = rowOf(
+      providersTable([], [{ ...ORG_SUBSCRIPTION, needs_reconnection: false }]),
+      ORG_SUBSCRIPTION.label,
+    );
+    expect(row).not.toContain(menu);
   });
 });
 
-describe("the models table, for the credential each model names", () => {
-  const model = (over: Partial<OrgModelInfo>): OrgModelInfo => ({
-    id: "mdl_1",
-    label: "Claude Sonnet",
-    apiShape: "anthropic-messages",
-    providerId: "anthropic",
-    provider_name: "Anthropic",
-    pi_provider: "anthropic",
-    pi_dialect: null,
-    base_url: "https://api.anthropic.com",
-    modelId: "claude-sonnet-4-5",
-    generation: null,
-    enabled: true,
-    is_default: false,
-    needs_reconnection: false,
-    aliased: false,
-    iconUrl: null,
-    source: "custom",
-    credentialId: "cred_org",
-    binding: "org",
-    billed_to: "org",
-    created_by: null,
-    createdAt: CREATED,
-    updatedAt: CREATED,
-    ...over,
-  });
-  const bound = model({ id: "mdl_bound" });
-  const unbound = model({
-    id: "mdl_each",
-    binding: "user",
+describe("the personal keys table", () => {
+  const personalHtml = (
+    models: OrgModelInfo[],
+    credentials: ModelProviderCredentialInfo[],
+    canWrite = false,
+  ) =>
+    render(
+      <PersonalServicesTable
+        rows={personalServiceRows(models, credentials, SERVICES, "usr_me")}
+        isLoading={false}
+        error={null}
+        canWriteModels={canWrite}
+        onChooseModels={noop}
+      />,
+      { queryClient: seededClient() },
+    );
+  const MEMBER_MODEL = model({
+    id: "mdl_m",
+    label: "Claude pour tous",
     credentialId: null,
-    billed_to: null,
+    binding: "user",
   });
-  const html = render(
-    <ModelsList
-      models={[bound, unbound]}
-      isLoading={false}
-      error={null}
-      onCreate={() => {}}
-      onEdit={() => {}}
-      onDelete={() => {}}
-      onSetDefault={() => {}}
-      canWrite={false}
-      canDelete={false}
-      credentialLabels={new Map([["cred_org", "Clé équipe"]])}
-    />,
-    { queryClient: seededClient() },
-  );
-  const row = (id: string) => rowOf(html, `data-testid="model-row-${id}"`);
+  const html = personalHtml([MEMBER_MODEL], [MY_KEY, BOB_SUBSCRIPTION]);
 
-  it("names the organization credential a model is bound to", () => {
-    expect(row(bound.id)).toContain("Clé équipe");
+  it("heads the columns Service, Models, Connected keys, State", () => {
+    for (const key of [
+      "providers.col.provider",
+      "providers.col.models",
+      "providers.col.keys",
+      "providers.col.state",
+    ] as const) {
+      expect(html).toContain(settingsFr[key]);
+    }
   });
 
-  it("says that each member brings their own credential, for an unbound model", () => {
-    expect(row(unbound.id)).toContain(settingsFr["models.credentialEachMember"]);
-  });
-});
-
-describe("a model's connection-test result", () => {
-  const line = (error: string) =>
-    render(<ModelTestResult result={{ ok: false, latency: 0, error, message: "server detail" }} />);
-
-  it("words a dead credential as a model's, not as an integration connection", () => {
-    const html = line("NEEDS_RECONNECTION");
-    expect(html).toContain(settingsFr["models.credentialUnavailableHint"]);
-    expect(html).not.toContain(agentsFr["error.needsReconnection"]);
+  it("makes a row of each service open to personal keys, with its models and who plugged in", () => {
+    const row = rowOf(html, "Anthropic");
+    expect(row).toContain("Claude pour tous");
+    expect(row).toContain("Moi (vous), Bob");
   });
 
-  it("leaves every other failure to the shared result line", () => {
-    const html = line("AUTH_FAILED");
-    expect(html).toContain(commonFr["apiError.auth_failed"]);
-    expect(html).not.toContain(settingsFr["models.credentialUnavailableHint"]);
+  it("says « Aucune clé connectée » where nobody plugged a key in", () => {
+    const row = rowOf(personalHtml([MEMBER_MODEL], []), "Anthropic");
+    expect(row).toContain(settingsFr["providers.noKeys"]);
+    expect(row).toContain(settingsFr["providers.state.noKey"]);
+    expect(rowOf(html, "Anthropic")).not.toContain(settingsFr["providers.state.noKey"]);
+  });
+
+  it("gives a caller who may write models the menu and the click, a reader neither", () => {
+    const writer = personalHtml([MEMBER_MODEL], [], true);
+    expect(rowOf(writer, "Anthropic")).toContain(
+      `aria-label="${settingsFr["providers.moreActions"].replace("{{name}}", "Anthropic")}"`,
+    );
+    expect(rowOf(writer, "Anthropic")).toContain(`aria-label="Anthropic"`);
+    expect(rowOf(html, "Anthropic")).not.toContain(`aria-label="Anthropic"`);
+    expect(rowOf(html, "Anthropic")).not.toContain(
+      settingsFr["providers.moreActions"].slice(0, 12),
+    );
   });
 });

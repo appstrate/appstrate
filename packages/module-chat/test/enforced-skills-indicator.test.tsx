@@ -9,6 +9,7 @@
 import { describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { EnforcedSkillsIndicator } from "../src/ui/enforced-skills.tsx";
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
@@ -21,6 +22,7 @@ const host: ChatHost = {
   t: (key, options) => (options ? `${key} ${JSON.stringify(options)}` : key),
   can: () => true,
   personalModelCredentials: true,
+  modelCredentials: [],
   formatBytes: String,
 };
 
@@ -33,7 +35,9 @@ function render(enforced: SkillHint[]): string {
   return renderToString(
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={host}>
-        <EnforcedSkillsIndicator getHeaders={getHeaders} />
+        <TooltipProvider>
+          <EnforcedSkillsIndicator getHeaders={getHeaders} />
+        </TooltipProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
   );

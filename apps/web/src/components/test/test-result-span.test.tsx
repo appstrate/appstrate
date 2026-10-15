@@ -22,8 +22,8 @@ function line(result: Parameters<typeof TestResultSpan>[0]["result"]): string {
   return render(
     <TestResultSpan
       result={result}
-      successKey="models.testSuccess"
-      failedKey="models.testFailed"
+      successKey="credentials.testSuccess"
+      failedKey="credentials.testFailed"
     />,
   );
 }

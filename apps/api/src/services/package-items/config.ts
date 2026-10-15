@@ -130,6 +130,7 @@ export function assertContentConforms(
       code: violation.reason.toLowerCase(),
       title: "Invalid Content",
       message: `${prefix}${violation.message}`,
+      ...(violation.position ? violation.position : {}),
     },
   ]);
 }

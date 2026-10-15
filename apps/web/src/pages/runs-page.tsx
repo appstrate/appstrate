@@ -1,71 +1,138 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { CheckCheck } from "lucide-react";
 import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
-import { usePermissions } from "../hooks/use-permissions";
 import { PageHeader } from "../components/page-header";
+import { NoMatchState } from "../components/page-states";
+import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
+import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { useListParams } from "../lib/list-params";
 import { RunList } from "../components/run-list";
+import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
+import { useListView } from "../stores/list-view-store";
+import { usePermissions } from "../hooks/use-permissions";
+import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 
-type UserTab = "all" | "me";
+/**
+ * The filters live in the URL, so a filtered list is a link. They also come
+ * back as one closed set rather than tab strips: three dimensions drawn as
+ * tabs is three rows of chrome above five rows of data.
+ *
+ * Each dimension takes SEVERAL values. It matters for one of them: "everything
+ * that broke" is `failed` or `timeout`, one question the endpoint answers
+ * in one request. The other two are narrower on the wire, and squaring that
+ * with the checkboxes is THIS file's job, not the toolbar's — a tick has to
+ * mean a tick on every menu.
+ */
+const KINDS = ["package", "inline"] as const;
+const SCOPES = ["me"] as const;
 
+/** The query parameters this screen filters on, and nothing else. */
+const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
+
+/** `?status=failed,timeout` — the wire shape the endpoint takes. */
 export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { data: unreadCount } = useUnreadCount();
   const markAllRead = useMarkAllRead();
+  const list = useListParams(FILTER_PARAMS);
+  const searchPlaceholder = useSearchPlaceholder(t("runs.entity"));
   const { can } = usePermissions();
-  // Without `runs:read-all` the list is already "mine" — the two tabs would
-  // answer the same set, so the choice is not offered.
+  // Without `runs:read-all` the list is already "mine": the scope filter would
+  // answer the same set, so it is not offered.
   const canSeeEveryRun = can("runs:read-all");
-  const [userTab, setUserTab] = useState<UserTab>("all");
-  const [kindTab, setKindTab] = useState<RunKindFilter>("all");
+
+  const scopes = list.values("user", SCOPES);
+  const kinds = list.values("kind", KINDS);
+  const { statuses, filter: statusFilter } = useRunStatusFilter(list);
+  const search = list.search;
+  const [view, setView] = useListView("runs");
+
+  const filters: FilterSpec[] = [
+    ...(canSeeEveryRun
+      ? [
+          {
+            id: "user",
+            label: t("runs.filterScope"),
+            values: scopes,
+            options: [{ value: "me", label: t("runs.filterMine") }],
+            onChange: list.setValues("user"),
+          },
+        ]
+      : []),
+    {
+      id: "kind",
+      label: t("runs.filterKind"),
+      values: kinds,
+      options: [
+        { value: "package", label: t("runs.filterKindPackage") },
+        { value: "inline", label: t("runs.filterKindInline") },
+      ],
+      onChange: list.setValues("kind"),
+    },
+    statusFilter,
+  ];
+
+  // The endpoint takes ONE kind, so "both ticked" is spelled "no kind
+  // parameter" — the same rows, asked for in the only way the wire has. Same
+  // for scope, whose single box is on or off. Neither collapses the ticks
+  // themselves: what you ticked stays ticked and stays chipped.
+  const kind: RunKindFilter | undefined = kinds.length === 1 ? kinds[0] : undefined;
+  const user = canSeeEveryRun && scopes.includes("me") ? "me" : undefined;
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title={t("runs.title")}
-        emoji="▶️"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("runs.title") },
-        ]}
+        variant="collection"
+        breadcrumbs={[{ label: t("runs.title") }]}
         actions={
-          <Button
-            variant="outline"
-            onClick={() => markAllRead.mutate({})}
-            disabled={markAllRead.isPending || !unreadCount}
-          >
-            {t("runs.markAllRead")}
-          </Button>
+          <PageActionsMenu
+            actions={[
+              {
+                id: "mark-all-read",
+                label: t("runs.markAllRead"),
+                icon: CheckCheck,
+                onSelect: () => markAllRead.mutate({}),
+                disabled: markAllRead.isPending || !unreadCount,
+              },
+            ]}
+          />
         }
-      >
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          {canSeeEveryRun && (
-            <Tabs value={userTab} onValueChange={(v) => setUserTab(v as UserTab)}>
-              <TabsList>
-                <TabsTrigger value="all">{t("runs.filterAll")}</TabsTrigger>
-                <TabsTrigger value="me">{t("runs.filterMine")}</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-          <Tabs value={kindTab} onValueChange={(v) => setKindTab(v as RunKindFilter)}>
-            <TabsList>
-              <TabsTrigger value="all">{t("runs.filterKindAll")}</TabsTrigger>
-              <TabsTrigger value="package">{t("runs.filterKindPackage")}</TabsTrigger>
-              <TabsTrigger value="inline">{t("runs.filterKindInline")}</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-      </PageHeader>
+      />
 
       <RunList
-        key={`${userTab}-${kindTab}`}
         pageSize={15}
-        user={userTab === "me" ? "me" : undefined}
-        kind={kindTab}
+        user={user}
+        kind={kind}
+        status={statuses}
+        search={search}
+        view={view}
+        tableColumnMode="scroll"
+        countLabel={(total) => t("runs.count", { count: total })}
+        toolbar={({ columns }) => (
+          <ListToolbar
+            search={{
+              value: search,
+              onChange: list.setSearch,
+              placeholder: searchPlaceholder,
+            }}
+            filters={filters}
+            onReset={list.reset}
+            columns={view === "table" ? columns : undefined}
+            view={view}
+            onViewChange={setView}
+          />
+        )}
+        // A filtered list that finds nothing has NOT run out of runs — it has
+        // run out of matches, and the way out is the filter, not the agent.
+        emptyState={
+          search || filters.some((f) => f.values.length > 0) ? (
+            <NoMatchState message={t("runs.emptyFiltered")} onReset={list.reset} />
+          ) : undefined
+        }
       />
     </div>
   );

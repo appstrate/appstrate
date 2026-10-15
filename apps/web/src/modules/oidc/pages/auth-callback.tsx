@@ -12,8 +12,9 @@ import { useNavigate } from "react-router-dom";
 import { handleOidcCallback } from "../lib/oidc";
 import { refreshAuth, AuthRefreshError } from "../../../hooks/use-auth";
 import { authStore } from "../../../stores/auth-store";
-import { Spinner } from "../../../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { errorMessage } from "../../../lib/mutation-error";
+import { FieldError } from "@appstrate/ui/components/field";
 
 /**
  * Server-rendered prefixes that live outside the SPA's router. Paths
@@ -77,7 +78,7 @@ export function AuthCallbackPage() {
   if (error) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
-        <p className="text-destructive text-sm">{error}</p>
+        <FieldError>{error}</FieldError>
         <a href="/login" className="text-primary text-sm underline">
           Retour à la connexion
         </a>

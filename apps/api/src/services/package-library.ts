@@ -13,13 +13,14 @@ import {
 } from "@appstrate/db/schema";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import { packagePermission } from "@appstrate/core/permissions";
+import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { isActiveHere } from "./package-activation.ts";
 import { isPublished, latestTagJoin } from "./space-packages.ts";
 import { sharerView } from "./package-shares.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
+import { callerPersonalOwnerId } from "../lib/view-as.ts";
 
 const PACKAGE_TYPES = ["agent", "skill", "mcp-server", "integration"] as const;
 
@@ -48,6 +49,22 @@ interface Placement {
   shared_by: { user_id: string; name: string } | null;
 }
 
+/**
+ * Whether the caller may switch a package on (or off) in one space, as
+ * `POST /api/spaces/{id}/packages` and `DELETE …/packages/{scope}/{name}` judge it:
+ * `allowed`; `not_shareable` — not placed there, and its home grants no `<type>:share`, which
+ * the activation needs to create the offer; `forbidden` — the type's
+ * `activate`/`deactivate` grant is missing there (the owner of a personal space needs none).
+ */
+type ActivationVerdict = "allowed" | "not_shareable" | "forbidden";
+
+/** The two verdicts of one (package, space) pair, for every space the library lists. */
+interface ActivationCell {
+  spaceId: string;
+  activate: ActivationVerdict;
+  deactivate: ActivationVerdict;
+}
+
 interface LibraryPackage {
   id: string;
   type: string;
@@ -61,6 +78,7 @@ interface LibraryPackage {
   /** A `latest` published version exists (or a system package) — what enforcing a skill needs. */
   published: boolean;
   placements: Placement[];
+  activation: ActivationCell[];
 }
 
 /**
@@ -81,11 +99,12 @@ interface LibraryPackage {
  * `state: "none"`, behind the same switch as every other space. A separate
  * section would put one activation behind two buttons.
  *
- * `GET /api/library` (owners and admins) returns every space the caller reads;
- * `GET /api/spaces/{id}/library` narrows to the requested space, which is what
- * makes it a space's own page rather than an organization map. A package with
- * NO placement there is still listed when the caller could PLACE it — a system
- * package, or one whose home grants them `<type>:share` — since
+ * `GET /api/library` returns every space whose library the caller reads, so it
+ * is the union of the space forms: an administrator's whole map, a member's
+ * spaces. `GET /api/spaces/{id}/library` narrows to the requested space, which
+ * is what makes it a space's own page rather than an organization map. A
+ * package with NO placement there is still listed when the caller could PLACE
+ * it — a system package, or one whose home grants them `<type>:share` — since
  * `POST /api/spaces/{id}/packages` would create the offer with the activation.
  * Never into a PERSONAL destination: an offer into somebody's own space is
  * somebody else's act.
@@ -94,8 +113,32 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   const orgId = c.get("orgId");
 
   const accessible = await packageAccessSpaces(c);
+  // The caller's own personal space takes no activation grant: ownership authorizes
+  // (`coarseSpacePackageGate`, `routes/spaces.ts`).
+  const personalOwnerId = callerPersonalOwnerId(c);
+  const activationVerdict = (
+    type: PackageType,
+    space: (typeof accessible)[number],
+    placed: boolean,
+    shareable: boolean,
+    next: boolean,
+  ): ActivationVerdict => {
+    if (!placed && !shareable) return "not_shareable";
+    const ownSpace = space.ownerUserId !== null && space.ownerUserId === personalOwnerId;
+    if (ownSpace) return "allowed";
+    return space.permissions.has(spacePackagePermission(type, next ? "activate" : "deactivate"))
+      ? "allowed"
+      : "forbidden";
+  };
   const target = spaceId ? accessible.find((space) => space.id === spaceId) : undefined;
-  const visibleSpaces = spaceId ? accessible.filter((space) => space.id === spaceId) : accessible;
+  // The spaces whose library this caller reads: those it reaches AND holds
+  // `spaces:read` in — the per-space route's own guard, so the organization
+  // form is exactly the union of the space forms (an owner or admin holds it
+  // everywhere). The space form's route has already checked it for its space.
+  const visibleSpaces = spaceId
+    ? accessible.filter((space) => space.id === spaceId)
+    : accessible.filter((space) => space.permissions.has("spaces:read"));
+  const visibleIds = new Set(visibleSpaces.map((space) => space.id));
   const accessibleIds = accessible.map((space) => space.id);
   const orgSpaces = visibleSpaces
     .sort((a, b) => Number(b.isDefault) - Number(a.isDefault))
@@ -121,7 +164,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
           .filter(
             (space) =>
               (!target?.ownerUserId || space.id === target.id) &&
-              (!spaceId || space.id === spaceId) &&
+              visibleIds.has(space.id) &&
               space.permissions.has(packagePermission(type, "read")),
           )
           .map((space) => space.id),
@@ -261,17 +304,30 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     }
     placements.sort((a, b) => a.space_id.localeCompare(b.space_id));
 
-    // A package with no placement the caller reads is listed in ONE case, and
-    // only in the SPACE form: it is a candidate the caller could put there in
-    // one click — a package whose home grants them `<type>:share`, since
+    // A package with no placement the caller reads is listed in ONE case: it is
+    // a candidate the caller could put in one of the spaces read here in one
+    // click — a package whose home grants them `<type>:share`, since
     // `POST /api/spaces/{id}/packages` creates the offer with the activation —
-    // and never for a PERSONAL destination, where an offer is somebody else's
-    // act. Nothing else earns a row: every package of the organization is
-    // homed in one of its spaces (`packages_org_package_has_home`), so a
+    // and never for a PERSONAL destination alone, where an offer is somebody
+    // else's act. Nothing else earns a row: every package of the organization
+    // is homed in one of its spaces (`packages_org_package_has_home`), so a
     // package with no placement here is one placed in spaces this caller does
-    // not read, and the ORGANIZATION map is the page that shows it.
-    if (placements.length === 0 && !(!!spaceId && !target?.ownerUserId && home.home_shareable))
-      continue;
+    // not read.
+    const proposable = [...readable].some((space) => !personalSpaceIds.has(space));
+    if (placements.length === 0 && !(proposable && home.home_shareable)) continue;
+
+    const placedIn = new Set(placements.map((placement) => placement.space_id));
+    const activation = visibleSpaces.map((space): ActivationCell => ({
+      spaceId: space.id,
+      activate: activationVerdict(type, space, placedIn.has(space.id), home.home_shareable, true),
+      deactivate: activationVerdict(
+        type,
+        space,
+        placedIn.has(space.id),
+        home.home_shareable,
+        false,
+      ),
+    }));
 
     const m = asRecord(row.draftManifest);
     grouped[row.type]?.push({
@@ -286,6 +342,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       description: typeof m.description === "string" ? m.description : "",
       published: isPublished(row),
       placements,
+      activation,
     });
   }
 

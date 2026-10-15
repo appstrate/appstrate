@@ -1,26 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
+import { usePermissions } from "../../hooks/use-permissions";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { EmptyState } from "../../components/page-states";
+import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { CliSessionCard } from "../../components/cli-session-card";
 import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
-import { usePermissions } from "../../hooks/use-permissions";
-import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
-
-interface AdminCliSession extends CliSessionDisplay {
-  userId: string;
-  userEmail: string | null;
-  userName: string | null;
-}
-
-function memberLabel(s: AdminCliSession): string {
-  return s.userName || s.userEmail || s.userId;
-}
+import { deriveLabel } from "../../lib/cli-sessions";
+import { invalidatePaths } from "../../lib/query-keys";
+import {
+  cliSessionUserLabel,
+  useCliSessionColumns,
+  type CliSessionRow,
+} from "../../components/cli-session-columns";
 
 export function OrgSettingsCliSessionsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -42,17 +38,15 @@ export function OrgSettingsCliSessionsPage() {
 
   const revoke = $api.useMutation("delete", "/api/orgs/{orgId}/cli-sessions/{familyId}", {
     onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ["get", "/api/orgs/{orgId}/cli-sessions"],
-      });
+      void invalidatePaths(queryClient, ["/api/orgs/{orgId}/cli-sessions"]);
     },
   });
 
-  const [pendingRevoke, setPendingRevoke] = useState<AdminCliSession | null>(null);
-
-  if (!orgId) return <LoadingState />;
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState error={error} />;
+  const [pendingRevoke, setPendingRevoke] = useState<CliSessionRow | null>(null);
+  const columns = useCliSessionColumns({
+    revokingFamilyId: revoke.isPending ? (revoke.variables?.params.path.familyId ?? null) : null,
+    onRevoke: can("cli-sessions:delete") ? setPendingRevoke : undefined,
+  });
 
   const sessions = data ?? [];
 
@@ -64,30 +58,23 @@ export function OrgSettingsCliSessionsPage() {
           {t("orgCliSessions.description")}
         </p>
       </div>
-
-      {sessions.length === 0 ? (
-        <EmptyState
-          icon={Laptop}
-          message={t("orgCliSessions.emptyTitle")}
-          hint={t("orgCliSessions.emptyDescription")}
-        />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {sessions.map((s) => (
-            <CliSessionCard
-              key={s.familyId}
-              session={s}
-              meta={<span className="text-muted-foreground text-xs">· {memberLabel(s)}</span>}
-              revokeDisabled={
-                !can("cli-sessions:delete") ||
-                (revoke.isPending && revoke.variables?.params.path.familyId === s.familyId)
-              }
-              onRevoke={() => setPendingRevoke(s)}
-            />
-          ))}
-        </div>
-      )}
-
+      <DataTable
+        tableId="cli-sessions"
+        columns={columns}
+        rows={sessions}
+        rowKey={(session) => session.familyId}
+        label={t("orgCliSessions.tableLabel")}
+        // Without an org id the query never runs: an empty list is not an answer yet.
+        isLoading={isLoading || !orgId}
+        failure={error}
+        empty={
+          <EmptyState
+            icon={Laptop}
+            message={t("orgCliSessions.emptyTitle")}
+            hint={t("orgCliSessions.emptyDescription")}
+          />
+        }
+      />
       <ConfirmModal
         open={pendingRevoke !== null}
         title={t("orgCliSessions.confirmRevokeTitle")}
@@ -95,7 +82,7 @@ export function OrgSettingsCliSessionsPage() {
           pendingRevoke
             ? t("orgCliSessions.confirmRevokeDescription", {
                 device: deriveLabel(pendingRevoke, t),
-                user: memberLabel(pendingRevoke),
+                user: cliSessionUserLabel(pendingRevoke),
               })
             : ""
         }

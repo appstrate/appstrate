@@ -1,29 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useForm } from "react-hook-form";
-import { Field, FieldGroup } from "@appstrate/ui/components/field";
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ShieldCheck } from "lucide-react";
+import { Eye, Grid3x3, Plus, Rows3, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@appstrate/ui/components/badge";
+import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { cn } from "@appstrate/ui/cn";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@appstrate/ui/components/collapsible";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
+import { FormItem } from "@/components/app-ui/form-item";
 import { ApiError } from "../../api/client";
 import {
+  dependentsLabel,
   lockedReads,
-  togglePermission,
-  type RoleVocabularyEntry,
+  withRequiredReads,
 } from "../../lib/role-permission-dependencies";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import {
   spaceRoleDescription,
   spaceRoleLabel,
@@ -35,35 +30,91 @@ import {
   type RoleObject,
 } from "../../hooks/use-roles";
 import { ConfirmModal } from "../../components/confirm-modal";
+import { DataTable } from "../../components/data-table";
 import { Modal } from "../../components/modal";
+import { FormModal } from "../../components/form-modal";
+import type { MenuAction } from "../../lib/menu-action";
+import { ScopeMultiSelect } from "../../components/scope-multi-select";
+import { SettingsGroup } from "../../components/settings/setting-row";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { ViewAsDialog } from "../../components/view-as-dialog";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
-import { Spinner } from "../../components/spinner";
+import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
+import { TextSkeleton } from "../../components/loading-skeletons";
+import { useRoleColumns } from "./role-columns";
+import { RoleMatrix } from "./role-matrix";
+import { CollectionTabs } from "../../components/collection-tabs";
+import { ViewToggle } from "../../components/view-toggle";
+import { OrgRolesList, OrgRolesMatrix } from "./org-roles";
+import {
+  groupPermissionsByResource,
+  permissionLabel,
+  permissionResourceLabel,
+} from "../../lib/permission-labels";
+import { rolesPageDeeds } from "./rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
+import { parseViewAsPreset, viewAsPresetParam } from "../../lib/view-as-preset";
+
+type RoleView = "list" | "matrix";
+type RoleTab = "org" | "space";
 
 export function OrgSettingsRolesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const { data: roles, isLoading, error } = useRoles();
   const deleteRole = useDeleteRole();
-
-  const [editing, setEditing] = useState<RoleObject | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
   const canPreview = useCanPreviewRole();
+  // Both modals have an address: `?role=<key>` (or `new`) and `?view-as`.
+  // `?role=<key>` is only ever an existing role: `new` is a valid role key.
+  const roleParam = useModalTarget("role", roles, (role) => role.key);
+  const newRole = useModalParam("newRole");
+  const viewAsParam = useModalParam("viewAs");
+  // Tab and view are places too: `?tab=space&view=matrix` opens exactly that,
+  // and Back undoes a switch. Each defaults to its first option, which is
+  // then left out of the URL.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: RoleTab = searchParams.get("tab") === "space" ? "space" : "org";
+  const view: RoleView = searchParams.get("view") === "matrix" ? "matrix" : "list";
+  const setParam = (name: "tab" | "view", value: string, fallback: string) =>
+    setSearchParams((prev) => {
+      const out = new URLSearchParams(prev);
+      if (value === fallback) out.delete(name);
+      else out.set(name, value);
+      return out;
+    });
   const [confirmDelete, setConfirmDelete] = useState<RoleObject | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState error={error} />;
-
-  // Authoring bundles is OSS platform code: the permission is the whole gate,
-  // with no deployment-level feature on top of it.
+  // Authoring bundles is OSS platform code: the permission is the whole
+  // gate, with no deployment-level feature on top of it.
   const canWrite = can("roles:write");
   const canDelete = can("roles:delete");
+  const deeds = rolesPageDeeds({ canWrite, canPreview });
 
   const presets = (roles ?? []).filter((r) => r.kind === "preset");
   const custom = (roles ?? []).filter((r) => r.kind === "custom");
+
+  // A row previews its own role: the dialog opens pre-filled, at an address.
+  const previewSpaceRole = deeds.includes("view-as")
+    ? (role: RoleObject) => viewAsParam.open(viewAsPresetParam({ kind: "space", key: role.key }))
+    : undefined;
+  const previewOrgRole = deeds.includes("view-as")
+    ? (role: ViewAsOrgRole) => viewAsParam.open(viewAsPresetParam({ kind: "org", role }))
+    : undefined;
+  const presetColumns = useRoleColumns({
+    onPreview: previewSpaceRole,
+    canDelete: () => false,
+    isDeleting: false,
+    onDelete: () => {},
+  });
+  const customColumns = useRoleColumns({
+    onPreview: previewSpaceRole,
+    canDelete: () => canDelete,
+    isDeleting: deleteRole.isPending,
+    onDelete: (role) => {
+      setDeleteError(null);
+      setConfirmDelete(role);
+    },
+  });
 
   const onDelete = (role: RoleObject) => {
     if (!role.id) return;
@@ -98,82 +149,127 @@ export function OrgSettingsRolesPage() {
     );
   };
 
+  // The row opens the role: to edit it when it is yours to edit, to read it
+  // otherwise. A preset's permissions are one click away, on the same gesture
+  // as every row.
+  const openRole = (role: RoleObject) => roleParam.open(role.key);
+  const target = roleParam.target;
+  const editable = !!target && target.kind === "custom" && canWrite;
+  const create: MenuAction = {
+    id: "create",
+    icon: Plus,
+    testId: "create-role-button",
+    label: t("roles.create"),
+    onSelect: () => newRole.open(),
+    hidden: !deeds.includes("create"),
+  };
+  const viewAs: MenuAction = {
+    id: "view-as",
+    icon: Eye,
+    testId: "view-as-button",
+    label: t("viewAs.trigger"),
+    onSelect: () => viewAsParam.open(),
+    hidden: !deeds.includes("view-as"),
+  };
+  const tableState = {
+    isLoading,
+    failure: error,
+  };
+
   return (
     <>
-      <div className="mb-4 flex items-center justify-between">
-        <span className="text-muted-foreground text-sm font-medium">
-          {t("roles.presetsSection")}
-        </span>
-        {canPreview && (
-          <Button
-            variant="outline"
-            data-testid="view-as-button"
-            onClick={() => setPreviewing(true)}
-          >
-            {t("viewAs.trigger")}
-          </Button>
-        )}
-      </div>
-      <div className="mb-8 flex flex-col gap-3">
-        {presets.map((role) => (
-          <RoleCard key={role.key} role={role} />
-        ))}
-      </div>
+      <SettingsPageActions actions={[create, viewAs]} />
 
-      <div className="mb-4 flex items-center justify-between">
-        <span className="text-muted-foreground text-sm font-medium">
-          {t("roles.customSection")}
-        </span>
-        {canWrite && (
-          <Button data-testid="create-role-button" onClick={() => setCreating(true)}>
-            {t("roles.create")}
-          </Button>
-        )}
-      </div>
-
-      {custom.length === 0 ? (
-        <EmptyState
-          message={t("roles.empty")}
-          hint={t("roles.emptyHint")}
-          icon={ShieldCheck}
-          compact
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <CollectionTabs
+          value={tab}
+          label={t("roles.tabTitle")}
+          onChange={(next) => setParam("tab", next, "org")}
+          options={[
+            { value: "org", label: t("roles.tabOrg") },
+            { value: "space", label: t("roles.tabSpace") },
+          ]}
         />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {custom.map((role) => (
-            <RoleCard
-              key={role.id ?? role.key}
-              role={role}
-              onEdit={canWrite ? () => setEditing(role) : undefined}
-              onDelete={
-                canDelete
-                  ? () => {
-                      setDeleteError(null);
-                      setConfirmDelete(role);
-                    }
-                  : undefined
-              }
-            />
-          ))}
-        </div>
+        <ViewToggle
+          value={view}
+          onChange={(next) => setParam("view", next, "list")}
+          options={[
+            { id: "list", icon: Rows3, label: t("roles.viewList") },
+            { id: "matrix", icon: Grid3x3, label: t("roles.viewMatrix") },
+          ]}
+        />
+      </div>
+      {tab === "org" &&
+        (view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList onPreview={previewOrgRole} />)}
+      {tab === "space" && (
+        <>
+          {view === "matrix" ? (
+            isLoading ? (
+              <TextSkeleton lines={6} />
+            ) : error ? (
+              <ErrorState error={error} />
+            ) : (
+              <RoleMatrix roles={roles ?? []} />
+            )
+          ) : (
+            <>
+              <SettingsGroup title={t("roles.presetsSection")}>
+                <DataTable
+                  tableId="preset-roles"
+                  label={t("roles.presetsSection")}
+                  columns={presetColumns}
+                  rows={presets}
+                  rowKey={(role) => role.key}
+                  rowAction={openRole}
+                  rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
+                  {...tableState}
+                />
+              </SettingsGroup>
+
+              <SettingsGroup title={t("roles.customSection")}>
+                <DataTable
+                  tableId="custom-roles"
+                  label={t("roles.customSection")}
+                  columns={customColumns}
+                  rows={custom}
+                  rowKey={(role) => role.id ?? role.key}
+                  rowAction={openRole}
+                  rowLabel={(role) => role.name}
+                  {...tableState}
+                  empty={
+                    <EmptyState
+                      message={t("roles.empty")}
+                      hint={t("roles.emptyHint")}
+                      icon={ShieldCheck}
+                      compact
+                    >
+                      <EmptyStateAction action={create} />
+                    </EmptyState>
+                  }
+                />
+              </SettingsGroup>
+            </>
+          )}
+        </>
       )}
 
-      {(creating || editing) && (
-        <RoleFormModal
-          role={editing}
-          onClose={() => {
-            setCreating(false);
-            setEditing(null);
-          }}
-        />
+      {newRole.value !== null && canWrite && (
+        <RoleFormModal key="new" role={null} onClose={newRole.close} />
       )}
+      {target && editable && (
+        <RoleFormModal key={target.key} role={target} onClose={roleParam.close} />
+      )}
+      {target && !editable && <RoleViewModal role={target} onClose={roleParam.close} />}
 
-      {previewing && <ViewAsDialog onClose={() => setPreviewing(false)} />}
+      {viewAsParam.value !== null && canPreview && (
+        <ViewAsDialog preset={parseViewAsPreset(viewAsParam.value)} onClose={viewAsParam.close} />
+      )}
 
       <ConfirmModal
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("roles.deleteTitle")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         description={
           deleteError ??
           (confirmDelete ? t("roles.deleteConfirm", { name: confirmDelete.name }) : "")
@@ -186,133 +282,49 @@ export function OrgSettingsRolesPage() {
   );
 }
 
-function RoleCard({
-  role,
-  onEdit,
-  onDelete,
-}: {
-  role: RoleObject;
-  onEdit?: () => void;
-  onDelete?: () => void;
-}) {
+/** A role you may not edit, read in place: what it is for, and what it grants. */
+function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
-  const [open, setOpen] = useState(false);
+  const description = spaceRoleDescription(role, t);
 
   return (
-    <div className="border-border bg-card rounded-lg border p-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-[0.95rem] font-semibold">{spaceRoleLabel(role, t)}</h3>
-          <span className="text-muted-foreground text-sm">
-            {spaceRoleDescription(role, t) ?? role.key}
-          </span>
+    <Modal
+      open
+      onClose={onClose}
+      title={spaceRoleLabel(role, t) ?? role.name}
+      className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-lg"
+    >
+      <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
+        {description && <p className="text-muted-foreground text-sm">{description}</p>}
+        <div>
+          <div className="mb-2 text-sm font-medium">
+            {t("roles.permissionCount", { count: role.permissions.length })}
+          </div>
+          <dl className="divide-border divide-y rounded-lg border">
+            {groupPermissionsByResource([...role.permissions].sort()).map(
+              ([resource, permissions]) => (
+                <div
+                  key={resource}
+                  className="grid gap-1 px-3 py-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4"
+                >
+                  <dt className="text-sm font-medium">{permissionResourceLabel(resource, t)}</dt>
+                  <dd>
+                    <ul className="text-muted-foreground space-y-0.5 text-sm">
+                      {permissions.map((permission) => (
+                        <li key={permission} title={permission}>
+                          {permissionLabel(permission, t)}
+                        </li>
+                      ))}
+                    </ul>
+                  </dd>
+                </div>
+              ),
+            )}
+          </dl>
         </div>
-        {role.kind === "preset" && <Badge variant="running">{t("roles.presetBadge")}</Badge>}
-        {onEdit && (
-          <Button variant="outline" size="sm" onClick={onEdit}>
-            {t("btn.edit")}
-          </Button>
-        )}
-        {onDelete && (
-          <Button variant="destructive" size="sm" onClick={onDelete}>
-            {t("btn.delete")}
-          </Button>
-        )}
       </div>
-
-      <Collapsible open={open} onOpenChange={setOpen} className="mt-3">
-        <CollapsibleTrigger className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm">
-          <ChevronDown
-            size={14}
-            className={open ? "rotate-180 transition-transform" : "transition-transform"}
-          />
-          {t("roles.permissionCount", { count: role.permissions.length })}
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <ul className="mt-2 flex flex-wrap gap-1.5">
-            {role.permissions.map((permission) => (
-              <li
-                key={permission}
-                className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-xs"
-              >
-                {permission}
-              </li>
-            ))}
-          </ul>
-        </CollapsibleContent>
-      </Collapsible>
-    </div>
+    </Modal>
   );
-}
-
-/** The picker's resource groups; a read a selected action still depends on is locked and names it. */
-export function PermissionGroups({
-  groups,
-  selected,
-  locked,
-  disabled,
-  onToggle,
-}: {
-  groups: { resource: string; permissions: RoleVocabularyEntry[] }[];
-  selected: ReadonlySet<string>;
-  locked: ReadonlyMap<string, RoleVocabularyEntry[]>;
-  disabled: boolean;
-  onToggle: (entry: RoleVocabularyEntry) => void;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  return groups.map((group) => (
-    <div key={group.resource} className="border-border rounded-lg border p-3">
-      <p className="mb-2 font-mono text-xs font-semibold">{group.resource}</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {group.permissions.map((entry) => {
-          const dependents = locked.get(entry.permission);
-          // A locked read stays focusable (aria-disabled, not disabled) so keyboard and
-          // screen-reader users reach the hint that explains it; `disabled` is the pending save.
-          const isLocked = !disabled && !!dependents;
-          const hintId = `perm-${entry.permission}-required-by`;
-          return (
-            <label
-              key={entry.permission}
-              className={cn("flex items-start gap-2 text-sm", isLocked && "cursor-not-allowed")}
-              htmlFor={`perm-${entry.permission}`}
-            >
-              <Checkbox
-                id={`perm-${entry.permission}`}
-                disabled={disabled}
-                aria-disabled={isLocked || undefined}
-                aria-describedby={dependents ? hintId : undefined}
-                checked={selected.has(entry.permission)}
-                onCheckedChange={() => {
-                  if (!isLocked) onToggle(entry);
-                }}
-                className="mt-0.5 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-              />
-              <span className="flex flex-col">
-                <span className="font-mono text-xs">{entry.action}</span>
-                {dependents && (
-                  <span id={hintId} className="text-muted-foreground text-xs">
-                    {t("roles.requiredBy", {
-                      // Another resource's dependent (`agents:run` on a runs read) is named in full.
-                      actions: dependents
-                        .map((dependent) =>
-                          dependent.permission.startsWith(`${group.resource}:`)
-                            ? dependent.action
-                            : dependent.permission,
-                        )
-                        .join(", "),
-                    })}
-                  </span>
-                )}
-                {!entry.api_key_grantable && (
-                  <span className="text-muted-foreground text-xs">{t("roles.sessionOnly")}</span>
-                )}
-              </span>
-            </label>
-          );
-        })}
-      </div>
-    </div>
-  ));
 }
 
 /** The unavailable half of the picker: what the row spells and this deployment cannot grant. */
@@ -351,14 +363,10 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       description: role?.description ?? "",
     },
   });
-  const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set(role?.permissions ?? []));
   const [formError, setFormError] = useState<string | null>(null);
 
   const isPending = createRole.isPending || updateRole.isPending;
-
-  const toggle = (entry: RoleVocabularyEntry) =>
-    setSelected((prev) => togglePermission(prev, entry));
 
   const submit = (data: { key: string; name: string; description: string }) => {
     setFormError(null);
@@ -385,155 +393,115 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
     createRole.mutate({ body: { ...body, key: trimmedKey } }, { onSuccess: onClose, onError });
   };
 
-  // Judged over the whole vocabulary: an action hidden by the search still holds its read.
-  const locked = lockedReads(
-    selected,
-    (vocabulary ?? []).flatMap((group) => group.permissions),
+  // The same picker API keys use for their scopes: a role's permissions are
+  // the same vocabulary, so they are chosen the same way.
+  const entries = (vocabulary ?? []).flatMap((group) => group.permissions);
+  const available = entries.map((entry) => entry.permission);
+  const availableSet = new Set(available);
+  const sessionOnly = new Set(
+    entries.filter((entry) => !entry.api_key_grantable).map((entry) => entry.permission),
   );
-  const query = search.trim().toLowerCase();
-  const groups = (vocabulary ?? [])
-    .map((group) => ({
-      ...group,
-      permissions: group.permissions.filter((entry) =>
-        entry.permission.toLowerCase().includes(query),
-      ),
-    }))
-    .filter((group) => group.permissions.length > 0);
-  // Named by the server against its own vocabulary — the client re-deriving it
-  // from the picker would be a second answer to the same question.
-  const unavailable = (role?.unavailable_permissions ?? []).filter((permission) =>
-    permission.toLowerCase().includes(query),
-  );
+  // A read a selected action depends on alone is held: ticking the action
+  // ticks it, unticking it is undone, and its note names what needs it. The
+  // server refuses a role missing one; the picker answers first.
+  const locked = lockedReads(selected, entries);
+  const requiredBy = (permission: string) => {
+    const dependents = locked.get(permission);
+    return dependents ? t("roles.requiredBy", { actions: dependentsLabel(dependents, t) }) : null;
+  };
+  // Named by the server against its own vocabulary, and listed as it sends
+  // them. NOT intersected with the selection: `selected` is seeded from the
+  // GRANTED half alone, so the two sets are disjoint by construction and an
+  // intersection would always be empty.
+  const unavailable = role?.unavailable_permissions ?? [];
 
   return (
-    <Modal
-      open
+    <FormModal
       onClose={onClose}
       title={role ? t("roles.editTitle") : t("roles.createTitle")}
-      className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-2xl"
-      actions={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-          <Button
-            type="submit"
-            form="space-role-form"
-            disabled={isPending || isLoading || !!vocabularyError}
-          >
-            {isPending ? <Spinner /> : t("btn.save")}
-          </Button>
-        </>
-      }
+      className="sm:max-w-lg"
+      onSubmit={handleSubmit(submit)}
+      isPending={isPending}
+      submitDisabled={isLoading || !!vocabularyError}
+      error={formError}
+      formProps={{ noValidate: true, onChange: () => setFormError(null) }}
     >
-      <form
-        id="space-role-form"
-        noValidate
-        onSubmit={handleSubmit(submit)}
-        onChange={() => setFormError(null)}
-        className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1"
+      <FormItem id="role-name" label={t("roles.nameLabel")} error={errors.name?.message}>
+        <Input
+          maxLength={100}
+          disabled={isPending}
+          autoFocus
+          {...register("name", {
+            required: t("common:validation.required"),
+            setValueAs: (value: string) => value.trim(),
+          })}
+        />
+      </FormItem>
+      <FormItem
+        id="role-key"
+        label={t("roles.keyLabel")}
+        hint={t("roles.keyHint")}
+        error={errors.key?.message}
       >
-        <FieldGroup>
-          <Field data-invalid={!!errors.name}>
-            <Label htmlFor="role-name">{t("roles.nameLabel")}</Label>
-            <Input
-              id="role-name"
-              maxLength={100}
-              disabled={isPending}
-              aria-invalid={!!errors.name}
-              aria-describedby={errors.name ? "role-name-error" : undefined}
-              {...register("name", {
-                required: t("common:validation.required"),
-                setValueAs: (value: string) => value.trim(),
-              })}
-            />
-            {errors.name && (
-              <p id="role-name-error" role="alert" className="text-destructive text-sm">
-                {errors.name.message}
-              </p>
-            )}
-          </Field>
-          <Field data-invalid={!!errors.key}>
-            <Label htmlFor="role-key">{t("roles.keyLabel")}</Label>
-            <Input
-              id="role-key"
-              maxLength={64}
-              disabled={isPending}
-              placeholder="support-lead"
-              aria-invalid={!!errors.key}
-              aria-describedby="role-key-hint role-key-error"
-              {...register("key", {
-                required: t("common:validation.required"),
-                setValueAs: (value: string) => value.trim(),
-              })}
-            />
-            <p id="role-key-hint" className="text-muted-foreground text-xs">
-              {t("roles.keyHint")}
-            </p>
-            {errors.key && (
-              <p id="role-key-error" role="alert" className="text-destructive text-sm">
-                {errors.key.message}
-              </p>
-            )}
-          </Field>
-          <Field>
-            <Label htmlFor="role-description">{t("roles.descriptionLabel")}</Label>
-            <Input
-              id="role-description"
-              maxLength={500}
-              disabled={isPending}
-              {...register("description")}
-            />
-          </Field>
-        </FieldGroup>
-
-        <fieldset className="space-y-3">
-          <legend className="text-sm font-medium">{t("roles.permissionsLabel")}</legend>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="role-permission-search">{t("roles.searchPermissions")}</Label>
-            <Input
-              id="role-permission-search"
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              disabled={isLoading || !!vocabularyError}
-            />
-            <p className="text-muted-foreground text-xs" aria-live="polite">
-              {t("roles.selectedPermissions", { count: selected.size })}
-            </p>
+        <Input
+          maxLength={64}
+          disabled={isPending}
+          placeholder="support-lead"
+          {...register("key", {
+            required: t("common:validation.required"),
+            setValueAs: (value: string) => value.trim(),
+          })}
+        />
+      </FormItem>
+      <FormItem id="role-description" label={t("roles.descriptionLabel")}>
+        <Input maxLength={500} disabled={isPending} {...register("description")} />
+      </FormItem>
+      <div className="space-y-2">
+        <Label>{t("roles.permissionsLabel")}</Label>
+        {isLoading ? (
+          <TextSkeleton lines={5} />
+        ) : vocabularyError ? (
+          <div role="alert" className="space-y-2">
+            <ErrorState error={vocabularyError} compact />
+            <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
+              {t("common:btn.retry")}
+            </Button>
           </div>
-          {isLoading ? (
-            <LoadingState />
-          ) : vocabularyError ? (
-            <div role="alert">
-              <ErrorState error={vocabularyError} />
-              <Button type="button" variant="outline" onClick={() => void refetch()}>
-                {t("common:btn.retry")}
-              </Button>
-            </div>
-          ) : (
-            <>
-              <UnavailablePermissions permissions={unavailable} />
-              <PermissionGroups
-                groups={groups}
-                selected={selected}
-                locked={locked}
-                disabled={isPending}
-                onToggle={toggle}
-              />
-            </>
-          )}
-        </fieldset>
-
-        {!isLoading && !vocabularyError && groups.length === 0 && unavailable.length === 0 && (
-          <p className="text-muted-foreground text-sm">{t("roles.noMatchingPermissions")}</p>
+        ) : (
+          <ScopeMultiSelect
+            available={available}
+            selected={[...selected]}
+            // The picker only knows the catalog; a permission it no longer
+            // lists stays selected until it is removed on purpose, below.
+            onChange={(next) => {
+              setSelected(
+                withRequiredReads(
+                  new Set([...next, ...[...selected].filter((p) => !availableSet.has(p))]),
+                  entries,
+                ),
+              );
+              setFormError(null);
+            }}
+            hint={requiredBy}
+            disabled={isPending}
+            // The exception, marked where it applies: most permissions an API
+            // key holding this role can use, these only a signed-in person.
+            tag={(permission) =>
+              sessionOnly.has(permission)
+                ? { label: t("roles.sessionOnly"), title: t("roles.sessionOnlyHelp") }
+                : null
+            }
+            labels={{
+              all: t("roles.allPermissions"),
+              none: t("roles.permissionsPlaceholder"),
+              count: (count) => t("roles.selectedPermissions", { count }),
+              search: t("roles.searchPermissions"),
+              empty: t("roles.noMatchingPermissions"),
+            }}
+          />
         )}
-        {formError && (
-          <p role="alert" className="text-destructive text-sm">
-            {formError}
-          </p>
-        )}
-      </form>
-    </Modal>
+        <UnavailablePermissions permissions={unavailable} />
+      </div>
+    </FormModal>
   );
 }

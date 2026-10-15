@@ -11,7 +11,8 @@ import type {
   DiscoveredModel,
   ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
-import type { OpenRouterModel } from "../hooks/use-models";
+import type { OpenRouterModel, OrgModelInfo } from "../hooks/use-models";
+import { matchesSearch } from "./strings";
 import { catalogValues, type CatalogModelValues } from "./row-overrides-catalog";
 
 export type ModelSource = "catalog" | "discover" | "search";
@@ -51,8 +52,8 @@ export interface ModelPickRow {
     Pick<ModelPickRow, "input" | "contextWindow" | "maxTokens" | "reasoning">
   >;
   cost: ModelCost | null;
-  /** The listing it came from: what the batch is allowed to send. */
-  origin: ModelSource;
+  /** The listing it came from (or `manual`, an id typed by hand): what the batch is allowed to send. */
+  origin: ModelSource | "manual";
   /** Catalog-only: the curated group. */
   featured: boolean;
 }
@@ -128,11 +129,23 @@ export function searchRows(models: readonly OpenRouterModel[]): ModelPickRow[] {
   );
 }
 
+/**
+ * A model the organization already has, as a row of the pick list: ticked, so that the list
+ * can untick it, even when the provider's listing no longer offers it. It is never sent again.
+ */
+export function existingRow(m: OrgModelInfo): ModelPickRow {
+  return pickRow({
+    id: m.modelId ?? m.id,
+    label: m.label,
+    contextWindow: m.contextWindow ?? null,
+    maxTokens: m.maxTokens ?? null,
+    input: m.input ?? null,
+    reasoning: m.reasoning ?? null,
+    origin: "catalog",
+  });
+}
+
 /** Client-side search over a list. A remote search filters itself. */
 export function filterRows(rows: readonly ModelPickRow[], search: string): ModelPickRow[] {
-  const needle = search.trim().toLowerCase();
-  if (!needle) return [...rows];
-  return rows.filter(
-    (r) => r.id.toLowerCase().includes(needle) || !!r.label?.toLowerCase().includes(needle),
-  );
+  return rows.filter((r) => matchesSearch(search, [r.id, r.label]));
 }

@@ -1,30 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link } from "react-router-dom";
-import { useTranslation } from "react-i18next";
-import { LayoutDashboard } from "lucide-react";
 import { useAuth } from "../hooks/use-auth";
 import { useAgents } from "../hooks/use-packages";
-import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
-import { dashboardSections } from "../lib/dashboard-sections";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
-import { PackageCard } from "../components/package-card";
-import { ScheduleCard } from "../components/schedule-card";
-import { RunRows } from "../components/run-list";
-
-/** Rows shown under "recent runs" — a prefix of the page's own run query. */
-const RECENT_RUNS_COUNT = 7;
+import { ErrorState } from "../components/page-states";
+import { DashboardBodySkeleton } from "../components/loading-skeletons";
+import { useRunAgentName } from "../hooks/use-run-agent-name";
+import { useUnreadCountsByAgent } from "../hooks/use-notifications";
+import { DashboardContent, DashboardHeader } from "./dashboard-content";
 
 export function DashboardPage() {
-  const { t } = useTranslation(["agents", "common"]);
   const { profile, user } = useAuth();
-  const { can, ready } = usePermissions();
-  // Every query below gates itself on its guard; a section it feeds is drawn
-  // only when that read is open to the caller.
-  const sections = dashboardSections(can);
+  // Every query below gates itself on its guard; `DashboardContent` draws a
+  // section only when the read that feeds it is open to the caller and holds
+  // something.
+  const { ready } = usePermissions();
   const {
     data: runsData,
     isLoading: runsLoading,
@@ -34,39 +26,34 @@ export function DashboardPage() {
     offset: 0,
   });
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents();
+  const agentName = useRunAgentName();
   const { data: unreadCounts } = useUnreadCountsByAgent();
-  const { data: schedules } = useAllSchedules();
+  // The schedules feed one section and one figure; their failure is not the
+  // dashboard's, but the body waits for them so neither is drawn as « none »
+  // first and then reflowed.
+  const { data: schedules, isLoading: schedulesLoading } = useAllSchedules();
+  const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0] ?? "";
 
   // A disabled query is not loading, so an unresolved permission set must be.
-  const isLoading = !ready || runsLoading || agentsLoading;
+  const isLoading = !ready || runsLoading || agentsLoading || schedulesLoading;
   const error = runsError || agentsError;
 
-  if (isLoading) return <LoadingState />;
+  // The greeting is known before any read: only the body waits.
+  if (isLoading)
+    return (
+      <div className="mx-auto w-full max-w-[1300px] space-y-8">
+        <DashboardHeader firstName={firstName} />
+        <DashboardBodySkeleton />
+      </div>
+    );
   if (error) return <ErrorState error={error} />;
 
   const runs = runsData?.data ?? [];
 
   // Build agent lookup map
-  const agentMap = new Map<
-    string,
-    {
-      displayName: string;
-      description?: string | null;
-      source?: string;
-      keywords?: string[];
-      running_runs?: number;
-    }
-  >();
+  const agentMap = new Map<string, NonNullable<typeof agents>[number]>();
   if (agents) {
-    for (const f of agents) {
-      agentMap.set(f.id, {
-        displayName: f.display_name ?? f.id,
-        description: f.description ?? null,
-        source: f.source,
-        keywords: f.keywords,
-        running_runs: f.running_runs,
-      });
-    }
+    for (const agent of agents) agentMap.set(agent.id, agent);
   }
 
   // Deduplicate runs by packageId (keep first = most recent), limit to 8
@@ -82,117 +69,26 @@ export function DashboardPage() {
     if (recentAgentIds.length >= 8) break;
   }
 
-  // Upcoming schedules: active, with nextRunAt, sorted by soonest first
-  const upcomingSchedules = (schedules ?? [])
-    .filter((s) => s.enabled !== false && s.next_run_at)
-    .sort((a, b) => new Date(a.next_run_at!).getTime() - new Date(b.next_run_at!).getTime())
-    .slice(0, 5);
-
-  const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0];
-  // What is DRAWN, not merely readable: a readable section with nothing in it
-  // still leaves the page bare.
-  const shown = {
-    schedules: sections.schedules && upcomingSchedules.length > 0,
-    recentAgents: sections.recentAgents && recentAgentIds.length > 0,
-    recentRuns: sections.recentRuns,
-  };
+  const orderedAgents = recentAgentIds
+    .map((id) => agentMap.get(id))
+    .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent));
+  for (const agent of agents ?? []) {
+    if (!seen.has(agent.id)) orderedAgents.push(agent);
+  }
 
   return (
-    <div className="space-y-6 p-6">
-      <h1 className="text-3xl font-bold">
-        {t("dashboard.welcome", { name: firstName, ns: "common" })}
-      </h1>
-      {!Object.values(shown).some(Boolean) && (
-        <EmptyState
-          message={t("dashboard.empty")}
-          hint={t("dashboard.emptyHint")}
-          icon={LayoutDashboard}
-        />
-      )}
-      {/* Upcoming schedules */}
-      {shown.schedules && (
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-muted-foreground text-sm font-medium">
-              {t("dashboard.upcomingSchedules")}
-            </h2>
-            <Link
-              to="/schedules"
-              className="text-muted-foreground hover:text-foreground text-xs transition-colors"
-            >
-              {t("dashboard.seeAll")}
-            </Link>
-          </div>
-          <div className="space-y-2">
-            {upcomingSchedules.map((sched) => (
-              <ScheduleCard
-                key={sched.id}
-                schedule={sched}
-                agentName={agentMap.get(sched.packageId)?.displayName}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Recent agents (horizontal scroll) */}
-      {shown.recentAgents && (
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-muted-foreground text-sm font-medium">
-              {t("dashboard.recentAgents")}
-            </h2>
-            <Link
-              to="/agents"
-              className="text-muted-foreground hover:text-foreground text-xs transition-colors"
-            >
-              {t("dashboard.seeAll")}
-            </Link>
-          </div>
-          <div className="flex items-stretch gap-3 overflow-x-auto pb-2">
-            {recentAgentIds.map((agentId) => {
-              const agent = agentMap.get(agentId);
-              return (
-                <div key={agentId} className="flex max-w-[300px] min-w-[260px] shrink-0">
-                  <PackageCard
-                    id={agentId}
-                    displayName={agent?.displayName ?? agentId}
-                    description={agent?.description}
-                    type="agent"
-                    source={agent?.source as "system" | "local" | undefined}
-                    runningRuns={agent?.running_runs}
-                    keywords={agent?.keywords}
-                    unreadCount={unreadCounts?.[agentId]}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* Recent runs */}
-      {shown.recentRuns && (
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-muted-foreground text-sm font-medium">
-              {t("dashboard.recentRuns")}
-            </h2>
-            <Link
-              to="/runs"
-              className="text-muted-foreground hover:text-foreground text-xs transition-colors"
-            >
-              {t("dashboard.seeAll")}
-            </Link>
-          </div>
-          {/* Rendered from the runs THIS page already loaded. Mounting
-            `<RunList pageSize={7}>` here instead issued a second
-            `GET /api/runs` (a different `limit` is a different query key), and
-            with it a second `COUNT` + enriched page read, for rows the 15 above
-            already contain. */}
-          <RunRows runs={runs.slice(0, RECENT_RUNS_COUNT)} />
-        </section>
-      )}
+    <div className="mx-auto w-full max-w-[1300px]">
+      <DashboardContent
+        {...{
+          firstName,
+          agents: orderedAgents,
+          runs,
+          runTotal: runsData?.total ?? runs.length,
+          schedules: schedules ?? [],
+          agentName,
+          unreadCounts,
+        }}
+      />
     </div>
   );
 }

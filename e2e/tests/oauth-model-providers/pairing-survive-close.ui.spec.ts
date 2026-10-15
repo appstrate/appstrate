@@ -16,11 +16,14 @@
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import {
+  CREDENTIAL_LABEL,
   SETTINGS_PATH,
   SUCCESS_TOAST,
   closePairingModal,
+  credentialDialog,
   deleteCredential,
   helperRedeem,
+  openModelToPersonalKeys,
   openPairingModal,
   readStore,
 } from "../../helpers/pairing.ts";
@@ -37,6 +40,7 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
       }
     });
 
+    await openModelToPersonalKeys(apiClient);
     await page.goto(SETTINGS_PATH);
     const { token } = await openPairingModal(page);
 
@@ -60,7 +64,9 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
 
     try {
       await expect(page.getByText(SUCCESS_TOAST)).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByText(/Connecté en tant que/).first()).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole("row").filter({ hasText: CREDENTIAL_LABEL })).toBeVisible({
+        timeout: 15_000,
+      });
 
       await expect.poll(() => readStore(page), { timeout: 15_000 }).toBeNull();
       expect(pairingDeletes).toEqual([]);
@@ -70,13 +76,16 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
   });
 
   test("pairing survives a full page reload", async ({ authedPage: page, apiClient }) => {
+    await openModelToPersonalKeys(apiClient);
     await page.goto(SETTINGS_PATH);
     const { token } = await openPairingModal(page);
     expect(await readStore(page)).not.toBeNull();
 
-    // Hard reload — the modal is gone; only the persisted pairing remains.
+    // Hard reload — the modal is addressed by the URL, so it comes back empty;
+    // only the persisted pairing remains. Dismiss it to reach the page.
     await page.reload();
-    await expect(page.getByRole("tab", { name: "Modèles", exact: true })).toBeVisible({
+    await credentialDialog(page).getByRole("button", { name: "Annuler", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Mes clés de modèles" })).toBeVisible({
       timeout: 15_000,
     });
 

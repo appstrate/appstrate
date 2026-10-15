@@ -28,6 +28,11 @@ export const organizations = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     name: text("name").notNull(),
     slug: text("slug").unique().notNull(),
+    // Small presentation asset for the shell and organization switcher:
+    // `emoji:<grapheme>`, or `image:<version>` for a WebP image kept in object
+    // storage (`services/org-logo.ts`, which also gives its wire form). Null
+    // renders the organization's initial.
+    logo: text("logo"),
     orgSettings: jsonb("org_settings").notNull().default({}),
     // The org's default model — a flat model id that may name a system model
     // (SYSTEM_PROVIDER_KEYS) OR an `org_models.id` (UUID). A pointer rather than

@@ -43,13 +43,24 @@ describe("isConnectionOwnedBy", () => {
 });
 
 describe("connectionLockHintKey", () => {
-  it("names the lock that refuses an unshare or delete", () => {
-    expect(connectionLockHintKey("admin_pin")).toBe("integration.connection.lock.adminPin");
-    expect(connectionLockHintKey("org_default")).toBe("integration.connection.lock.orgDefault");
+  it("names the lock that refuses an unshare or delete, and what unlocks it", () => {
+    expect(connectionLockHintKey("admin_pin", true)).toBe("integration.connection.lock.adminPin");
+    expect(connectionLockHintKey("org_default", true)).toBe(
+      "integration.connection.lock.orgDefault",
+    );
+  });
+
+  it("tells anyone who may not change the access rules whom to ask", () => {
+    expect(connectionLockHintKey("admin_pin", false)).toBe(
+      "integration.connection.lock.adminPinAsk",
+    );
+    expect(connectionLockHintKey("org_default", false)).toBe(
+      "integration.connection.lock.orgDefaultAsk",
+    );
   });
 
   it("is null for an unlocked connection", () => {
-    expect(connectionLockHintKey(null)).toBeNull();
-    expect(connectionLockHintKey(undefined)).toBeNull();
+    expect(connectionLockHintKey(null, true)).toBeNull();
+    expect(connectionLockHintKey(undefined, false)).toBeNull();
   });
 });

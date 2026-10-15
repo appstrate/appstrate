@@ -16,17 +16,18 @@ import {
   useUpsertMemberIntegrationPin,
   useDeleteMemberIntegrationPin,
 } from "../../hooks/use-member-integration-pins";
-import { useHostedConnectPopup } from "./use-integration-oauth-popup";
+import { useHostedConnectPopup } from "./use-hosted-connect-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
-import { describeResolution } from "./integration-run-readiness";
+import { describeResolution, unboundLabel } from "./integration-run-readiness";
 import { scopeLabels } from "./scope-labels";
 import {
+  MAX_CONNECTIONS_PER_INTEGRATION,
   requiredScopesForAgent,
   resolveScopeToolSelection,
-  MAX_CONNECTIONS_PER_INTEGRATION,
 } from "@appstrate/core/integration";
 import {
   canApplyConnectionSet,
+  checkedConnectionIds,
   type ConnectionSet,
   keepAvailable,
   placeCreatedConnection,
@@ -50,9 +51,9 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *                 the render that passed it: it must apply the pick to the value
  *                 the form holds then.
  *
- * In both, an explicit pick displays itself and an unset pick displays what the layer below
- * binds, marked as the default; `[]` at either layer is "no connection", offered only when the
- * agent does not require the integration.
+ * In both, an explicit pick displays itself and an unset pick is "Hériter", naming what the
+ * layer below binds; `[]` at either layer is "no connection", offered only when the agent does
+ * not require the integration.
  *
  * Locks (admin pin, enforced org default) render read-only in both modes: a
  * member pin loses to them, and an override naming a connection outside the
@@ -200,8 +201,7 @@ export function useConnectionPicker(
     resolvedIds: resolvedConnectionIds,
   });
   const shownIds = shownPick ?? [];
-  // An unset pick shows the layer below, marked as the default.
-  const shownAsDefault = explicitIds === null && shownPick !== null;
+  const pickedNone = explicitIds?.length === 0;
   const fromDefault = explicitIds === null && softDefaultIds.length > 0;
   // A shown member that is no candidate blocks the run: the set is named whole.
   const unavailableIds = unavailableConnectionIds(shownIds, candidateIds);
@@ -215,29 +215,46 @@ export function useConnectionPicker(
       dead: conns.filter((c) => c.needs_reconnection),
     };
   };
-  // The trigger shows, and is judged on, the shown pick — never the uncommitted draft.
+  // The trigger shows, and is judged on, the shown pick, never the uncommitted draft.
   const shown = judge(shownIds);
-  // Whether the pick gates a run — what turns the picker amber. The server's `run_blocking` (same
+  // Whether the pick gates a run: what turns the picker amber. The server's `run_blocking` (same
   // verdict as the launch badge and the kickoff 409) judges the cascade: a member pin, and what
-  // an unset override shows. It does not know a set override, judged here on the pick itself: an
-  // under-scoped, dead or unavailable member, or "no connection" for a required integration.
+  // an unset override inherits. It does not know a set override, judged here on the pick itself:
+  // an under-scoped, dead or unavailable member, or "no connection" for a required integration.
   const gatesRun =
     overrideMode && explicitIds !== null
       ? shown.underScoped.length > 0 ||
         shown.dead.length > 0 ||
         unavailableIds.length > 0 ||
-        (explicitIds.length === 0 && required)
+        (pickedNone && required)
       : runBlocking;
-  // The ticked rows and the warnings under the picker follow the set "Valider" would write: the
-  // same one until a tick moves it.
-  const checked = draft === null ? shown : judge(draft);
-  const checkedIds = checked.conns.map((c) => c.id);
-  const atCap = checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION;
+  // The ticks are what is CHOSEN, never what the cascade would bind.
+  const checkedIds = checkedConnectionIds({ draft, explicitIds, candidateIds });
+  const ticked = judge(checkedIds);
+  // The warnings under the picker judge the set "Valider" would write once a tick moved it,
+  // else the shown pick, an inherited connection included.
+  const warned = draft === null ? shown : ticked;
+  // What "Hériter" would bind: the verdict itself while nothing explicit is chosen (and, in
+  // override mode, always: the verdict ignores the override). Under a member pin the verdict
+  // is the pin, so only the soft space default can be named.
+  const orgDefaultIds = resolution.org_default_connection_ids ?? [];
+  const inheritedConns =
+    overrideMode || explicitIds === null
+      ? resolvedConnectionIds.map(byId).filter((c): c is IntegrationCandidate => !!c)
+      : orgDefaultIds.map(byId).filter((c): c is IntegrationCandidate => !!c);
+  const inheritedSource =
+    overrideMode || explicitIds === null
+      ? resolution.source
+      : orgDefaultIds.length > 0
+        ? ("org_default" as const)
+        : null;
+  // Why nothing is inherited, when the verdict says (not connected, several to choose from...).
+  const inheritedUnbound = unboundLabel(resolution.warning);
   const oneClick = candidates.length === 1;
   const hasCandidates = candidates.length > 0;
   // Every entry that writes waits for the write in flight.
   const busy = upsertPin.isPending || deletePin.isPending;
-  const canApply = canApplyConnectionSet(checked.conns, explicitIds, draft !== null) && !busy;
+  const canApply = canApplyConnectionSet(ticked.conns, explicitIds, draft !== null) && !busy;
 
   // `null` clears the pick, `[]` stores "no connection". False = refused; the mutation toasted why.
   const persist = async (connectionIds: ConnectionSet): Promise<boolean> => {
@@ -331,6 +348,9 @@ export function useConnectionPicker(
     lockedConnectionIds,
     lockedBy,
     emptyPickerPrompt,
+    inheritedConns,
+    inheritedSource,
+    inheritedUnbound,
     // Actor
     canConnect,
     integrationPath,
@@ -341,17 +361,15 @@ export function useConnectionPicker(
     hasCandidates,
     // Sets
     explicitIds,
-    shownPick,
+    pickedNone,
     shownIds,
-    shownAsDefault,
     fromDefault,
     unavailableIds,
     checkedIds,
-    atCap,
     oneClick,
     displayConns: shown.conns,
-    underScopedConns: checked.underScoped,
-    deadConns: checked.dead,
+    underScopedConns: warned.underScoped,
+    deadConns: warned.dead,
     busy,
     canApply,
     // Labels shared by several components

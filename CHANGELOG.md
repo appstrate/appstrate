@@ -6,6 +6,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The dashboard is redesigned** (#1937): settings and preferences open as
+  routed overlays, every real dialog has a URL, tables share one component, and
+  one connection menu and one model picker serve every screen. SPA routes moved
+  without redirects: `/library` is `/catalogue`, `/webhooks`, `/end-users` and
+  `/org-settings/space/*` live under `/workspace-settings/*`, and
+  `/schedules/new` and the `…/edit` routes are gone (editing happens in a
+  package's settings). The API changes behind it:
+  - **Run lists.** `GET /api/runs`, `GET /api/agents/{scope}/{name}/runs` and
+    `GET /api/schedules/{id}/runs` take several comma-separated `status` values
+    (an unknown one is a 400 for the whole list) and a `q` search over agent,
+    error and run number (400 above 200 characters), applied before pagination.
+    In the OpenAPI spec `status` becomes an array of the status enum, serialized
+    `style: form, explode: false` (`status=failed,timeout`), so clients generated
+    from the spec type it `string[]`.
+  - **Runs carry `model_error`** (migration `0098_run_model_error`, three
+    nullable columns, no backfill): a run that failed on a model call names its
+    `category`, the provider's HTTP `status` and its own sentence, classified
+    once at finalize. Also on the `run_update` realtime event (`modelError`) and
+    in the MCP `run_and_wait` result.
+  - **Organizations carry a `logo`** (migration `0097_org_logo`, a nullable
+    column), returned by `GET /api/orgs`, `GET /api/me/orgs` and invitation
+    accept as `{ kind: "emoji", emoji }`, `{ kind: "image", url }` or `null`. An
+    emoji (or `null`) is written by `PATCH /api/orgs/{id}`; an image is uploaded
+    as WebP bytes by `PUT /api/orgs/{id}/logo`, kept in object storage and served
+    by `GET /api/orgs/{id}/logo`, whose URL names the image's version. The audit
+    log records an image logo by its version, never its bytes.
+  - **`POST /api/models/apply`** (new) applies a model-provider choice in one
+    transaction: an optional new credential, models enabled or disabled, the
+    default. It honours `Idempotency-Key`, which widens the core set of
+    idempotent routes to five.
+  - **`GET /api/org-roles`** (new, read-only, any member): the four org roles
+    and the org-level permissions each grants, modules included, so the SPA no
+    longer mirrors the role matrix.
+  - **`GET /api/library` is open to every member** (still refused to a
+    delegate): it was 403 below admin, and now answers each caller the union of
+    the per-space library pages it could open. Each package carries
+    `activation[]`, the verdict of the activation routes served in advance:
+    `{ spaceId, activate, deactivate }`, each `allowed`, `not_shareable` or
+    `forbidden`.
+  - **`GET /api/integrations`** takes `q` and `id` (comma-separated), and each
+    item carries `source_kind` (`local` | `remote` | `none`) and `server`.
+  - **Org members carry `spaces`** (`OrgDetail.members[]`, and the response of
+    `PUT /api/orgs/{id}/members/{userId}`): the spaces the caller can see the
+    member in.
+  - **Model-provider credentials carry `serves_model_ids`**: on a personal
+    credential, the organization models left to members' own credentials that
+    it pays for; `[]` on an organization or built-in credential.
+  - **Agents** return optional `icon` and `color` on the list and the detail.
+    `GET /api/files` takes `q` (by name, inside the existing visibility filter).
+  - **Schedules**: `GET`, `POST` and `PATCH /api/schedules/{id}` return an
+    `ETag`, and a `PATCH` carrying `If-Match` answers `412` when the schedule
+    moved since it was read. When the caller writes a schedule for itself and
+    holds exactly one connection for an integration the set leaves unpicked, the
+    server now names it and stores it in `connection_overrides` — on every
+    `POST` or `PATCH` of an enabled schedule, a rename included — where it used
+    to answer `409 must_choose_connection`.
+  - **Manifest validation**: an agent manifest declaring an output schema
+    without the `output` runtime tool now answers the `errors[]` item
+    `output_tool_required` on `manifest.runtime_tools` instead of
+    `invalid_manifest`, and items carry `line`/`column` on a YAML syntax error.
+
 ## [1.0.0-beta.68] - 2026-10-15
 
 ### Operators

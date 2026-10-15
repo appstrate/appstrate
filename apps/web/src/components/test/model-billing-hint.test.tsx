@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The picker note that says who pays for a model. Only the caller's own
+ * The note that says who pays for a model. Only the caller's own
  * credential and the missing one are worth a word: an organization credential
  * is the default and renders nothing.
  */
@@ -18,13 +18,13 @@ await i18n.changeLanguage("fr");
 describe("ModelBillingHint", () => {
   it("names the caller's own credential when it pays for the model", () => {
     expect(render(<ModelBillingHint billedTo="user" />)).toContain(
-      settingsFr["models.billing.userCredential"],
+      settingsFr["modelPicker.kind.personalKey"],
     );
   });
 
   it("asks for a credential when none serves the caller", () => {
     expect(render(<ModelBillingHint billedTo={null} />)).toContain(
-      settingsFr["models.billing.credentialRequired"],
+      settingsFr["modelPicker.reason.personalRequired"],
     );
   });
 

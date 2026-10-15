@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import {
   Command,
@@ -15,12 +16,20 @@ import {
   CommandList,
 } from "@appstrate/ui/components/command";
 import { cn } from "@appstrate/ui/cn";
-import { $api } from "../api/client";
-import { useCurrentOrgId } from "../hooks/use-org";
-import { useEndUsers, useEndUser } from "../hooks/use-end-users";
+import { useOrgDetail } from "../hooks/use-org";
+import { useDebouncedValue } from "../hooks/use-debounced-value";
+import { useEndUsers } from "../hooks/use-end-users";
 import { useScheduleCaller } from "../hooks/use-can-write-schedule";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { usePermissions } from "../hooks/use-permissions";
+import { useRoles } from "../hooks/use-roles";
+import { useSpaceMembers } from "../hooks/use-space-members";
+import { endUserLabel, memberLabel } from "../lib/members";
+import { matchesSearch } from "../lib/strings";
 import { mayGovernScheduleActor } from "../lib/schedule-governance";
 import type { ActorValue } from "../lib/schedule-payload";
+import { useActorName } from "../hooks/use-actor-name";
+import { isQueryInFlight } from "../lib/query-state";
 
 interface ActorSelectProps {
   value?: ActorValue;
@@ -38,11 +47,6 @@ interface Option {
   email: string | null;
 }
 
-/** Primary line for an option — name, falling back to email then id. */
-function primaryLabel(name: string | null | undefined, email: string | null, id: string): string {
-  return name || email || id;
-}
-
 /**
  * Unified, searchable actor picker. Lists org members and end-users in one
  * combobox so a single field selects either kind. Reusable anywhere an
@@ -57,34 +61,52 @@ export function ActorSelect({
   disabled,
 }: ActorSelectProps) {
   const { t } = useTranslation(["agents", "common"]);
-  const orgId = useCurrentOrgId();
   const [open, setOpen] = useState(false);
 
   const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(query), 300);
-    return () => clearTimeout(timer);
-  }, [query]);
+  const debouncedQuery = useDebouncedValue(query);
 
-  const { data: orgData } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
+  const orgQuery = useOrgDetail();
+  const { data: orgData } = orgQuery;
   const members = useMemo(() => orgData?.members ?? [], [orgData]);
   // Naming ANOTHER identity takes authority over it (`mayGovernScheduleActor`); anyone else picks
   // themselves or the actor the field started on — kept listed after picking someone else, so it
   // can be put back. The server decides (403).
   const caller = useScheduleCaller();
+  const { can } = usePermissions();
+  // Only a member who reaches the space with a role holding `agents:run` can be an actor (the
+  // server's `schedule_actor_invalid`). Without the two reads the list is not narrowed and the
+  // server's refusal does the talking.
+  const spaceId = useCurrentSpaceId();
+  const spaceMembersQuery = useSpaceMembers(spaceId ?? "", can("space-members:read"));
+  const rolesQuery = useRoles(can("roles:read"));
+  const { data: spaceMembers } = spaceMembersQuery;
+  const { data: roles } = rolesQuery;
+  // Members are listed once both reads are known: filtering later would drop entries already shown.
+  const membersPending =
+    isQueryInFlight(orgQuery) || isQueryInFlight(spaceMembersQuery) || isQueryInFlight(rolesQuery);
+  const mayRunIds = useMemo(() => {
+    if (!spaceMembers || !roles) return null;
+    const runRoles = new Set(
+      roles.filter((r) => r.permissions.includes("agents:run")).map((r) => `${r.kind}:${r.key}`),
+    );
+    return new Set(
+      spaceMembers
+        .filter((m) => m.role && runRoles.has(`${m.role.kind}:${m.role.key}`))
+        .map((m) => m.userId),
+    );
+  }, [spaceMembers, roles]);
   const [initialUserId] = useState(value?.userId);
   const [initialEndUserId] = useState(value?.endUserId);
 
-  const { data: endUserPage } = useEndUsers({
+  const endUsersQuery = useEndUsers({
     limit: 50,
     search: debouncedQuery || undefined,
   });
+  const { data: endUserPage } = endUsersQuery;
+  // The search is debounced, then fetched: both are waiting, not "no result".
+  const endUsersPending = includeEndUsers && (endUsersQuery.isFetching || query !== debouncedQuery);
+  const pending = membersPending || endUsersPending;
   const endUsers = useMemo(
     () =>
       (includeEndUsers ? (endUserPage?.data ?? []) : []).filter(
@@ -94,61 +116,33 @@ export function ActorSelect({
   );
 
   const memberOptions = useMemo<Option[]>(() => {
-    const q = debouncedQuery.toLowerCase();
+    if (membersPending) return [];
     return members
       .filter(
-        (m) => m.userId === initialUserId || mayGovernScheduleActor({ userId: m.userId }, caller),
-      )
-      .filter(
         (m) =>
-          !q ||
-          (m.displayName ?? "").toLowerCase().includes(q) ||
-          (m.email ?? "").toLowerCase().includes(q),
+          m.userId === initialUserId ||
+          (mayGovernScheduleActor({ userId: m.userId }, caller) &&
+            (mayRunIds === null || mayRunIds.has(m.userId))),
       )
+      .filter((m) => matchesSearch(debouncedQuery, [m.displayName, m.email]))
       .map((m) => ({
         actor: { userId: m.userId },
-        name: primaryLabel(m.displayName, m.email ?? null, m.userId),
+        name: memberLabel(m),
         email: m.email ?? null,
       }));
-  }, [members, debouncedQuery, caller, initialUserId]);
+  }, [members, membersPending, debouncedQuery, caller, initialUserId, mayRunIds]);
 
   const endUserOptions = useMemo<Option[]>(
     () =>
       endUsers.map((eu) => ({
         actor: { endUserId: eu.id },
-        name: primaryLabel(eu.name, eu.email, eu.externalId || eu.id),
+        name: endUserLabel(eu, eu.id),
         email: eu.email,
       })),
     [endUsers],
   );
 
-  // Resolve the selected end-user's label even when it isn't in the current
-  // search page (the trigger must show it regardless of the active query).
-  const selectedEndUserInList = endUsers.some((eu) => eu.id === value?.endUserId);
-  const { data: selectedEndUser } = useEndUser(
-    !selectedEndUserInList && value?.endUserId ? value.endUserId : "",
-  );
-
-  const selectedLabel = useMemo(() => {
-    if (value?.userId) {
-      const m = members.find((mm) => mm.userId === value.userId);
-      if (m) return primaryLabel(m.displayName, m.email ?? null, m.userId);
-      return value.userId;
-    }
-    if (value?.endUserId) {
-      const inList = endUsers.find((eu) => eu.id === value.endUserId);
-      if (inList) return primaryLabel(inList.name, inList.email, inList.externalId || inList.id);
-      if (selectedEndUser) {
-        return primaryLabel(
-          selectedEndUser.name,
-          selectedEndUser.email,
-          selectedEndUser.externalId || selectedEndUser.id,
-        );
-      }
-      return value.endUserId;
-    }
-    return null;
-  }, [value, members, endUsers, selectedEndUser]);
+  const selectedLabel = useActorName(value, endUsers);
 
   const select = (actor: ActorValue) => {
     onChange(actor);
@@ -184,7 +178,7 @@ export function ActorSelect({
             placeholder={t("actorSelect.search")}
           />
           <CommandList>
-            <CommandEmpty>{t("actorSelect.empty")}</CommandEmpty>
+            {!pending && <CommandEmpty>{t("actorSelect.empty")}</CommandEmpty>}
             {memberOptions.length > 0 && (
               <CommandGroup heading={t("actorSelect.groupMembers")}>
                 {memberOptions.map((o) => (
@@ -238,6 +232,13 @@ export function ActorSelect({
                   </CommandItem>
                 ))}
               </CommandGroup>
+            )}
+            {pending && (
+              <div className="space-y-1 p-1" aria-hidden>
+                <Skeleton className="h-7 w-full" />
+                <Skeleton className="h-7 w-full" />
+                <Skeleton className="h-7 w-full" />
+              </div>
             )}
           </CommandList>
         </Command>

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Badge as UIBadge } from "@appstrate/ui/components/badge";
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { CheckCircle2, Pause } from "lucide-react";
-import type { ScheduleWireDto } from "@appstrate/shared-types";
+import type { EnrichedSchedule, ScheduleWireDto } from "@appstrate/shared-types";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
+import { CountBadge } from "./count-badge";
+import { Badge } from "./status-badge";
 
 interface ScheduleStatusBadgeProps {
   schedule: Pick<ScheduleWireDto, "enabled" | "disabled_reason">;
@@ -20,18 +22,40 @@ export function ScheduleStatusBadge({ schedule }: ScheduleStatusBadgeProps) {
           schedule.disabled_reason ? t(`schedule.disabledReason.${schedule.disabled_reason}`) : null
         }
       >
-        <UIBadge variant="secondary" className="gap-1">
+        <ToneBadge variant="secondary" className="gap-1">
           <Pause className="size-3" />
           {t("schedule.statusDisabled")}
-        </UIBadge>
+        </ToneBadge>
       </DisabledReasonTooltip>
     );
   }
 
   return (
-    <UIBadge variant="success" className="gap-1">
+    <ToneBadge variant="success" className="gap-1">
       <CheckCircle2 className="size-3" />
       {t("schedule.statusActive")}
-    </UIBadge>
+    </ToneBadge>
+  );
+}
+
+/**
+ * A schedule's state where it is listed: on or off, its unread runs, and a
+ * run in progress. The card and the dashboard row draw the same three facts.
+ */
+export function ScheduleStateBadges({
+  schedule,
+}: {
+  schedule: Pick<EnrichedSchedule, "enabled" | "disabled_reason" | "unread_count" | "running_runs">;
+}) {
+  const { t } = useTranslation(["agents"]);
+  return (
+    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+      <ScheduleStatusBadge schedule={schedule} />
+      <CountBadge
+        count={schedule.unread_count}
+        label={t("dashboard.unreadRuns", { count: schedule.unread_count })}
+      />
+      {schedule.running_runs > 0 && <Badge status="running" />}
+    </div>
   );
 }

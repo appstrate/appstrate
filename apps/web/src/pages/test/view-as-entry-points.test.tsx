@@ -30,7 +30,8 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { $api } = await import("../../api/client.ts");
 const { OrgSettingsRolesPage } = await import("../org-settings/roles.tsx");
-const { OrgSettingsSpaceMembersPage } = await import("../org-settings/space/members.tsx");
+const { WorkspaceSettingsMembersPage } = await import("../workspace-settings/members.tsx");
+const { rolesPageDeeds, spaceMembersPageDeeds } = await import("../org-settings/rbac-deeds.ts");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
 const { toViewAsPersona } = await import("../../stores/view-as-store.ts");
@@ -84,6 +85,8 @@ function preset(key: string): components["schemas"]["RoleObject"] {
 interface SeedOptions {
   /** Added to the four every case holds. */
   orgPermissions?: string[];
+  /** The address rendered, for a page whose tab lives in the URL. */
+  path?: string;
   customRoles?: components["schemas"]["RoleObject"][];
 }
 
@@ -94,6 +97,7 @@ function seed(orgRole: OrgRole, options: SeedOptions = {}): QueryClient {
     id: ORG_ID,
     name: "Acme",
     slug: "acme",
+    logo: null,
     role: orgRole,
     deleting_at: null,
     permissions: [
@@ -153,7 +157,10 @@ function renderAs(
     id: SPACE_ID,
   });
   try {
-    return render(node, { queryClient: seed(orgRole, options) });
+    return render(node, {
+      queryClient: seed(orgRole, options),
+      initialEntries: options.path ? [options.path] : undefined,
+    });
   } finally {
     orgSnapshot.mockRestore();
     spaceSnapshot.mockRestore();
@@ -164,28 +171,27 @@ describe("trigger visibility", () => {
   // Eligibility is the server's rule (`validateViewAs`): owner or admin, and a
   // role rather than a permission, because "a preview only removes" holds only
   // while the previewer outranks every persona.
+  // Without roles:write the preview is the roles page's only deed, so the
+  // Actions trigger is there exactly when the preview is.
   it.each(["owner", "admin"] as const)("offers the roles-page trigger to an %s", (orgRole) => {
-    const html = renderAs(orgRole, <OrgSettingsRolesPage />);
-    expect(html).toContain('data-testid="view-as-button"');
-    expect(html).toContain("Prévisualiser un rôle");
+    expect(renderAs(orgRole, <OrgSettingsRolesPage />)).toContain("data-page-actions-trigger");
   });
 
   it.each(["member", "guest"] as const)("hides the roles-page trigger from a %s", (orgRole) => {
-    expect(renderAs(orgRole, <OrgSettingsRolesPage />)).not.toContain(
-      'data-testid="view-as-button"',
-    );
+    expect(renderAs(orgRole, <OrgSettingsRolesPage />)).not.toContain("data-page-actions-trigger");
   });
 
-  it("offers the space-members trigger to an owner and hides it from a member", () => {
-    const asOwner = renderAs("owner", <OrgSettingsSpaceMembersPage />);
-    expect(asOwner).toContain('data-testid="view-as-space-button"');
-    expect(asOwner).toContain("Prévisualiser un rôle");
-    // The "Ajouter un membre" action is unaffected — the two live side by side.
-    expect(asOwner).toContain('data-testid="add-space-member-button"');
-
-    expect(renderAs("member", <OrgSettingsSpaceMembersPage />)).not.toContain(
-      'data-testid="view-as-space-button"',
+  it("lists the preview beside the add action, and only for a previewer", () => {
+    expect(renderAs("owner", <WorkspaceSettingsMembersPage />)).toContain(
+      "data-page-actions-trigger",
     );
+    // The two live side by side in one menu; adding is unaffected by preview.
+    expect(spaceMembersPageDeeds({ canInvite: true, canPreview: true })).toEqual([
+      "add",
+      "view-as",
+    ]);
+    expect(spaceMembersPageDeeds({ canInvite: true, canPreview: false })).toEqual(["add"]);
+    expect(spaceMembersPageDeeds({ canInvite: false, canPreview: false })).toEqual([]);
   });
 });
 
@@ -243,23 +249,36 @@ describe("permission gating on the roles page", () => {
     const html = renderAs("admin", <OrgSettingsRolesPage />, {
       orgPermissions: ["roles:write", "roles:delete"],
       customRoles: [custom],
+      path: "/org-settings/roles?tab=space",
     });
-    expect(html).toContain('data-testid="create-role-button"');
+    expect(html).toContain("data-page-actions-trigger");
+    expect(rolesPageDeeds({ canWrite: true, canPreview: true })).toEqual(["create", "view-as"]);
     expect(html).toContain("Responsable assistance");
-    expect(html).toContain("Modifier");
-    expect(html).toContain("Supprimer");
-    // The presets are listed beside the bundles, not instead of them.
-    expect(html).toContain("Rôles intégrés");
+    // The row opens the role (editable for this caller), and deleting is in its menu.
+    expect(html).toContain(`aria-label="Responsable assistance"`);
+    expect(html).toContain("Plus d’actions pour Responsable assistance");
   });
 
   it("hides create, edit and delete from a reader holding only `roles:read`", () => {
-    // The half that must stay closed now that no deployment flag sits on top:
-    // the `roles:*` grants are the whole gate, so a reader still authors
-    // nothing while reading the same catalogue.
-    const html = renderAs("admin", <OrgSettingsRolesPage />, { customRoles: [custom] });
+    // The half that must stay closed with no deployment flag on top: the
+    // `roles:*` grants are the whole gate, so a reader authors nothing while
+    // reading the same catalogue.
+    const html = renderAs("admin", <OrgSettingsRolesPage />, {
+      customRoles: [custom],
+      path: "/org-settings/roles?tab=space",
+    });
     expect(html).toContain("Responsable assistance");
-    expect(html).not.toContain('data-testid="create-role-button"');
-    expect(html).not.toContain("Modifier");
-    expect(html).not.toContain("Supprimer");
+    expect(rolesPageDeeds({ canWrite: false, canPreview: true })).toEqual(["view-as"]);
+    // The row's menu holds the one deed left to this caller: previewing the role.
+    expect(html).toContain("Plus d’actions pour Responsable assistance");
+  });
+
+  it("offers a row no menu to someone who may neither delete nor preview", () => {
+    const html = renderAs("member", <OrgSettingsRolesPage />, {
+      customRoles: [custom],
+      path: "/org-settings/roles?tab=space",
+    });
+    expect(html).toContain("Responsable assistance");
+    expect(html).not.toContain("Plus d’actions pour Responsable assistance");
   });
 });

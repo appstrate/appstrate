@@ -9,7 +9,7 @@
  * had to clear cookies by hand. These tests assert the two exits:
  *
  *   - sign out from any onboarding step → back to `/login`;
- *   - once an org exists, "Retour à l'application" → back to the dashboard.
+ *   - once an org exists, "Retour à l'espace de travail" → back to the dashboard.
  *
  * They also pin the reason the onboarding menu is `minimal`: `/preferences`
  * lives behind `OrgGate`, so offering it here would bounce an org-less user
@@ -76,7 +76,7 @@ test.describe("Onboarding — account menu", () => {
   test("a user who already has an org can leave onboarding for the app", async ({ authedPage }) => {
     await authedPage.goto("/onboarding/model");
 
-    const backToApp = authedPage.getByRole("link", { name: "Retour à l'application" });
+    const backToApp = authedPage.getByRole("link", { name: "Retour à l'espace de travail" });
     await expect(backToApp).toBeVisible({ timeout: 15_000 });
     await backToApp.click();
 

@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 // Type-only: erased at compile time, so it does not pull the store in before
 // the fake storage below is installed.
 import type { ViewAsPersona } from "../view-as-store.ts";
+import type { ReactElement } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/client.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -38,11 +39,12 @@ const { orgStore } = await import("../org-store.ts");
 const { spaceStore } = await import("../space-store.ts");
 const { queryClient } = await import("../../lib/query-client.ts");
 const { $api } = await import("../../api/client.ts");
-const { buildScopingHeaders, withViewAsParam } = await import("../../lib/scoping-headers.ts");
+const { buildScopingHeaders } = await import("../../lib/scoping-headers.ts");
 const { endPreviewIfRefused, noteViewAsRefusal, viewAsRefusalCode } =
   await import("../../lib/view-as-refusal.ts");
 const { ApiError } = await import("../../api/errors.ts");
 const { ViewAsBanner } = await import("../../components/view-as-banner.tsx");
+const { OverlayProvider } = await import("../../lib/modal-route.ts");
 const { render } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 
@@ -69,6 +71,7 @@ const ORGS_AS_PERSONA: Organization[] = [
     id: "org_a",
     name: "Acme",
     slug: "acme",
+    logo: null,
     role: "member",
     permissions: ["org:read"],
     createdAt: "2026-01-01T00:00:00Z",
@@ -115,6 +118,26 @@ describe("view-as store", () => {
     exitViewAs();
     expect(fakeStorage.getItem(STORAGE_KEY)).toBeNull();
     expect(getViewAsHeader()).toBeNull();
+  });
+});
+
+describe("way back", () => {
+  it("hands the space the preview moved the admin out of to the exit", () => {
+    enterViewAs(PERSONA, ORGS_AS_PERSONA, "spc_home");
+    expect(exitViewAs()).toBe("spc_home");
+    // Answered once: a second exit has nowhere to take anyone.
+    expect(exitViewAs()).toBeNull();
+  });
+
+  it("keeps the first preview's way back when another replaces it", () => {
+    enterViewAs(PERSONA, ORGS_AS_PERSONA, "spc_home");
+    enterViewAs({ orgId: "org_a", orgRole: "guest", space: null }, ORGS_AS_PERSONA, "spc_1");
+    expect(exitViewAs()).toBe("spc_home");
+  });
+
+  it("has none when the preview did not move the admin", () => {
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
+    expect(exitViewAs()).toBeNull();
   });
 });
 
@@ -232,26 +255,6 @@ describe("cache reset", () => {
     await Bun.sleep(0);
 
     expect(queryClient.getQueryData<Organization[]>(orgKeys.all)).toEqual(ORGS_AS_PERSONA);
-  });
-});
-
-describe("realtime carrier", () => {
-  it("appends `view_as` to the stream URL — those routes refuse the header", () => {
-    enterViewAs(PERSONA, ORGS_AS_PERSONA);
-    expect(withViewAsParam("/api/realtime/runs?orgId=org_a", getViewAsHeader())).toBe(
-      "/api/realtime/runs?orgId=org_a&view_as=org_role%3Dmember%3B%20space%3Dspc_1%3B%20role%3Dpreset%3Aviewer",
-    );
-  });
-
-  it("uses the value it is handed, so an effect can depend on it", () => {
-    // The reactive callers pass `useViewAsHeader()`; a stream reads its URL
-    // once, so the value cannot be read from the store inside the builder.
-    expect(withViewAsParam("/api/realtime/runs?orgId=org_a", "org_role=guest")).toBe(
-      "/api/realtime/runs?orgId=org_a&view_as=org_role%3Dguest",
-    );
-    expect(withViewAsParam("/api/realtime/runs?orgId=org_a", null)).toBe(
-      "/api/realtime/runs?orgId=org_a",
-    );
   });
 });
 
@@ -412,6 +415,7 @@ function renderBanner(
   persona: ViewAsPersona | null,
   orgId: string,
   here: { spaceId: string; spaces: SpaceObject[] } = { spaceId: "spc_1", spaces: [] },
+  node: ReactElement = <ViewAsBanner />,
 ): string {
   const viewAsSnapshot = spyOn(viewAsStore, "getInitialState").mockReturnValue({
     ...viewAsStore.getInitialState(),
@@ -431,7 +435,7 @@ function renderBanner(
     { object: "list", data: here.spaces, hasMore: false },
   );
   try {
-    return render(<ViewAsBanner />, { queryClient: client });
+    return render(node, { queryClient: client });
   } finally {
     viewAsSnapshot.mockRestore();
     orgSnapshot.mockRestore();
@@ -440,11 +444,35 @@ function renderBanner(
 }
 
 describe("banner", () => {
+  it("is carried by an open overlay alone, since the frame behind a modal is inert", () => {
+    const settings = {
+      path: "/org-settings/members",
+      background: { pathname: "/", search: "", hash: "", state: null, key: "default" },
+    };
+    const here = { spaceId: "spc_1", spaces: [] };
+    const underOverlay = (node: ReactElement) => (
+      <OverlayProvider value={settings}>{node}</OverlayProvider>
+    );
+    expect(renderBanner(PERSONA, "org_a", here, underOverlay(<ViewAsBanner />))).toBe("");
+    const inOverlay = renderBanner(
+      PERSONA,
+      "org_a",
+      here,
+      underOverlay(<ViewAsBanner inOverlay />),
+    );
+    expect(inOverlay).toContain("Quitter");
+    // The dialog's close button sits over the band's right end.
+    expect(inOverlay).toContain("pr-14");
+    // No overlay open: an overlay's banner has nothing to stand in for.
+    expect(renderBanner(PERSONA, "org_a", here, <ViewAsBanner inOverlay />)).toBe("");
+  });
+
   it("names the role, the space role and the space, with an exit", () => {
     const html = renderBanner(PERSONA, "org_a");
-    expect(html).toContain("Vous voyez l'organisation avec le rôle");
-    expect(html).toContain("Utilisateur standard");
+    expect(html).toContain("Aperçu avec le rôle");
+    expect(html).toContain("Membre");
     expect(html).toContain("Lecteur");
+    expect(html).toContain("dans l'espace <strong");
     expect(html).toContain("Marketing");
     expect(html).toContain("Quitter");
   });
@@ -465,23 +493,43 @@ describe("banner", () => {
       listedSpace({ id: "spc_2", name: "Ventes" }),
     ];
     const elsewhere = renderBanner(PERSONA, "org_a", { spaceId: "spc_2", spaces });
-    expect(elsewhere).toContain("Lecteur");
-    expect(elsewhere).toContain("Marketing");
     expect(elsewhere).toContain("Ventes");
     expect(elsewhere).toContain("Opérateur");
-    expect(elsewhere).toContain("espace ouvert");
+    expect(elsewhere).toContain("que cet espace donne à tout membre de l'organisation");
+    // Where the user is comes first: the persona's space role is not the news there.
+    expect(elsewhere).not.toContain("Lecteur");
 
     // In the persona's own space the assignment already says it all.
     const home = renderBanner(PERSONA, "org_a", { spaceId: "spc_1", spaces });
-    expect(home).not.toContain("espace ouvert");
+    expect(home).not.toContain("tout membre de l'organisation");
     expect(home).not.toContain("Opérateur");
   });
 
-  it("says nothing about a space the persona cannot enter", () => {
+  it("names the default role of the space an organization-only persona stands in", () => {
+    const spaces = [listedSpace({ id: "spc_2", name: "Ventes" })];
+    const html = renderBanner({ orgId: "org_a", orgRole: "member", space: null }, "org_a", {
+      spaceId: "spc_2",
+      spaces,
+    });
+    expect(html).toContain("Ventes");
+    expect(html).toContain("Opérateur");
+  });
+
+  it("says a persona with no space to enter has access to none", () => {
+    const guest = { orgId: "org_a", orgRole: "guest", space: null } as const;
+    expect(renderBanner(guest, "org_a", { spaceId: "spc_9", spaces: [] })).toContain(
+      "Ce rôle n'a accès à aucun espace.",
+    );
+    // A closed space is listed but cannot be entered: still no space to stand in.
     const closed = listedSpace({ id: "spc_3", name: "Direction", access: "none", role: null });
-    const html = renderBanner(PERSONA, "org_a", { spaceId: "spc_3", spaces: [closed] });
-    expect(html).toContain("Lecteur");
-    expect(html).not.toContain("Direction");
+    expect(renderBanner(guest, "org_a", { spaceId: "spc_9", spaces: [closed] })).toContain(
+      "aucun espace",
+    );
+    // Not said while a space is there to stand in.
+    const open = listedSpace({ id: "spc_2", name: "Ventes" });
+    expect(renderBanner(PERSONA, "org_a", { spaceId: "spc_2", spaces: [open] })).not.toContain(
+      "aucun espace",
+    );
   });
 
   // A persona restricts the caller without replacing them, so every capability
@@ -489,10 +537,10 @@ describe("banner", () => {
   // preview. The banner is the one place that boundary is stated.
   it("states that what the previewer created stays visible, whatever the persona", () => {
     const withSpace = renderBanner(PERSONA, "org_a");
-    expect(withSpace).toContain("Ce que vous avez créé reste visible");
+    expect(withSpace).toContain("montre encore ce que vous avez créé");
 
     const orgOnly = renderBanner({ orgId: "org_a", orgRole: "guest", space: null }, "org_a");
-    expect(orgOnly).toContain("Ce que vous avez créé reste visible");
+    expect(orgOnly).toContain("montre encore ce que vous avez créé");
   });
 
   it("renders nothing outside the previewed organization", () => {

@@ -17,6 +17,7 @@ import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts
 import { SELECTABLE_RUNTIME_TOOLS, canonicalizeRuntimeToolIds } from "./runtime-tools-catalog.ts";
 import { findRetiredDependencyKeys } from "./dependencies.ts";
 import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
+import { asRecord } from "./safe-json.ts";
 
 export { integrationManifestSchema, type IntegrationManifest };
 export { mcpServerManifestSchema, type McpServerManifest };
@@ -215,6 +216,31 @@ export type Manifest = z.infer<typeof manifestSchema>;
 /** Appstrate vendor-extension key for optional agent resource hints. */
 export const AGENT_RESOURCES_META_KEY = "dev.appstrate/resources";
 
+/** Appstrate vendor-extension key for an agent's presentation: `color`, read by Appstrate surfaces only. */
+export const AGENT_UI_META_KEY = "dev.appstrate/ui";
+
+/**
+ * An agent's identity tile: the AFPS manifest `icon` (its grammar is
+ * `@appstrate/core/manifest-icon`; a picked icon is `lucide:<name>`), and the
+ * `color` held under `_meta[AGENT_UI_META_KEY]`. A field that is not a string
+ * is left out.
+ */
+export function readAgentAppearance(manifest: Record<string, unknown>): {
+  icon?: string;
+  color?: string;
+} {
+  const icon = typeof manifest.icon === "string" ? manifest.icon : undefined;
+  const ui = asRecord(asRecord(manifest._meta)[AGENT_UI_META_KEY]);
+  const color = typeof ui.color === "string" ? ui.color : undefined;
+  return {
+    ...(icon ? { icon } : {}),
+    ...(color ? { color } : {}),
+  };
+}
+
+/** Largest organization logo image accepted, in bytes. */
+export const ORG_LOGO_MAX_BYTES = 36_000;
+
 /**
  * Agent-authored resource hints read from `_meta["dev.appstrate/resources"]`.
  *
@@ -313,6 +339,9 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   runtime_tools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
 });
 
+/** The issue code of the agent rule "an output schema needs the `output` runtime tool". */
+export const OUTPUT_TOOL_REQUIRED = "output_tool_required";
+
 /**
  * `output` is opt-in like every runtime tool (none is auto-injected). But an
  * agent that declares an `output.schema` promises a typed result, so it MUST
@@ -347,6 +376,8 @@ export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx
     ctx.addIssue({
       code: "custom",
       path: ["runtime_tools"],
+      // Its own code: the one rule on `runtime_tools` a reader is told in their language.
+      params: { code: OUTPUT_TOOL_REQUIRED },
       message:
         "The 'output' runtime tool must be enabled when an output schema is defined — " +
         "an agent that declares an output schema must be able to return its result.",
@@ -428,7 +459,25 @@ export type ValidateManifestResult =
        */
       droppedRuntimeTools: string[];
     }
-  | { valid: false; errors: string[]; manifest?: undefined; droppedRuntimeTools?: undefined };
+  | {
+      valid: false;
+      errors: string[];
+      /**
+       * The same failures, structured: `path` dotted, and `code` set on a rule that carries its
+       * own (e.g. {@link OUTPUT_TOOL_REQUIRED}). Absent on a dispatcher-level failure
+       * (unknown type, retired keys), which only `errors` states.
+       */
+      issues?: ManifestIssue[];
+      manifest?: undefined;
+      droppedRuntimeTools?: undefined;
+    };
+
+/** One structured manifest validation failure. */
+export interface ManifestIssue {
+  path: string;
+  message: string;
+  code?: string;
+}
 
 function parseWithSchema(
   schema:
@@ -447,8 +496,16 @@ function parseWithSchema(
   // reserved `_meta` key already surfaces as a `safeParse` failure below.
   const result = schema.safeParse(raw);
   if (!result.success) {
-    const errors = result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
-    return { valid: false, errors };
+    const issues = result.error.issues.map((issue): ManifestIssue => {
+      const code = (issue as { params?: { code?: unknown } }).params?.code;
+      return {
+        path: issue.path.join("."),
+        message: issue.message,
+        ...(typeof code === "string" ? { code } : {}),
+      };
+    });
+    const errors = issues.map((issue) => `${issue.path}: ${issue.message}`);
+    return { valid: false, errors, issues };
   }
 
   return { valid: true, errors: [], manifest: result.data, droppedRuntimeTools };

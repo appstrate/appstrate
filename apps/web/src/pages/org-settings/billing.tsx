@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneAlert } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
-import { CreditCard } from "lucide-react";
+import { AlertTriangle, CreditCard } from "lucide-react";
+import { AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
-import { formatBytes } from "../../lib/format-bytes";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
 import {
@@ -15,11 +16,12 @@ import {
   type CheckoutPlanId,
 } from "../../hooks/use-billing";
 import { useOrgStorage } from "../../hooks/use-org-storage";
-import { getUsageBarColor } from "../../lib/usage-severity";
+import { UsageMeter } from "../../components/usage-bar";
 import { PlanGrid } from "../../components/plan-card";
 import { BillingManagersSection } from "../../components/billing-managers-section";
 import { BillingContactSection } from "../../components/billing-contact-section";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState } from "../../components/page-states";
+import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { formatDateField } from "../../lib/format-date";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -40,8 +42,28 @@ const STATUS_I18N: Record<components["schemas"]["EeBillingAccount"]["status"], s
 };
 
 export function OrgSettingsBillingPage() {
-  const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
+  const { data: billing, isLoading } = useBilling();
+  // The two admin sections read their own data (managers, contact) independently of the billing
+  // account, so they mount alongside it and fetch in parallel instead of after it. They are MOUNTED
+  // on `billing:manage`, not merely hidden by it, so their queries never fire for a caller the
+  // routes would 403.
+  const showAdminSections = can("billing:manage") && (isLoading || !!billing);
+  return (
+    <>
+      <BillingOverview />
+      {showAdminSections && (
+        <>
+          <BillingManagersSection />
+          <BillingContactSection />
+        </>
+      )}
+    </>
+  );
+}
+
+function BillingOverview() {
+  const { t } = useTranslation(["settings", "common"]);
   // The route opens on `billing:read` under the `billing` feature
   // (`lib/route-access.ts`), both only `@appstrate/module-ee` contributes, so
   // `/api/billing` answers.
@@ -55,13 +77,15 @@ export function OrgSettingsBillingPage() {
   // Storage entitlement — core data (organizations.files_bytes_*), shown
   // next to the credit gauge because the plan drives the storage limit when
   // billing is on. Same source (useOrgStorage) as org-settings/general.
-  const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
+  const {
+    storage,
+    limitBytes: storageLimit,
+    percent: storagePercent,
+    usageLabel,
+    isLoading: storageLoading,
+  } = useOrgStorage();
 
-  // The two admin sections below are MOUNTED on `billing:manage`, not merely
-  // hidden by it, so their queries never fire for a caller the routes would 403.
-  const canManageBilling = can("billing:manage");
-
-  if (isLoading) return <LoadingState />;
+  if (isLoading) return <SettingsSkeleton />;
   if (error) return <ErrorState error={error} />;
   if (!billing) {
     return <EmptyState message={t("billing.noAccount")} icon={CreditCard} compact />;
@@ -151,10 +175,12 @@ export function OrgSettingsBillingPage() {
           ) : null}
         </div>
 
-        <div className="mb-2">
-          <div className="mb-1 flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">{t("billing.usage")}</span>
-            <span className="font-medium">
+        <UsageMeter
+          className="mb-2"
+          label={t("billing.usage")}
+          percent={billing.usage_percent}
+          summary={
+            <>
               {billing.usage_percent}%
               <span className="text-muted-foreground ml-2 text-xs font-normal">
                 (
@@ -164,77 +190,49 @@ export function OrgSettingsBillingPage() {
                 })}
                 )
               </span>
-            </span>
-          </div>
-          <div
-            className="bg-muted h-2 overflow-hidden rounded-full"
-            role="progressbar"
-            aria-valuenow={Math.min(billing.usage_percent, 100)}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label={t("billing.usage")}
-          >
-            <div
-              className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usage_percent)}`}
-              style={{ width: `${Math.min(billing.usage_percent, 100)}%` }}
-            />
-          </div>
-        </div>
+            </>
+          }
+        />
 
-        {storage && (
-          <div className="mt-4">
-            <div className="mb-1 flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">{t("billing.storageUsage")}</span>
-              <span className="font-medium">
-                {storageLimit === null
-                  ? t("orgStorage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
-                  : `${storagePercent}%`}
-                {storageLimit !== null && (
+        {(storageLoading || storage) && (
+          <UsageMeter
+            className="mt-4"
+            label={t("billing.storageUsage")}
+            loading={storageLoading}
+            percent={storageLimit === null ? null : (storagePercent ?? 0)}
+            summary={
+              storageLimit === null ? (
+                usageLabel
+              ) : (
+                <>
+                  {storagePercent}%
                   <span className="text-muted-foreground ml-2 text-xs font-normal">
-                    (
-                    {t("orgStorage.usedOfLimit", {
-                      used: formatBytes(storage.used_bytes),
-                      limit: formatBytes(storageLimit),
-                    })}
-                    )
+                    ({usageLabel})
                   </span>
-                )}
-              </span>
-            </div>
-            {storageLimit !== null && (
-              <div
-                className="bg-muted h-2 overflow-hidden rounded-full"
-                role="progressbar"
-                aria-valuenow={storagePercent ?? 0}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label={t("billing.storageUsage")}
-              >
-                <div
-                  className={`h-full rounded-full transition-all ${getUsageBarColor(storagePercent ?? 0)}`}
-                  style={{ width: `${storagePercent ?? 0}%` }}
-                />
-              </div>
-            )}
-          </div>
+                </>
+              )
+            }
+          />
         )}
       </div>
 
       {billing.status === "past_due" && (
-        <div className="mb-4 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm">
-          <p className="font-medium text-yellow-600 dark:text-yellow-400">
-            {t("billing.pastDueWarning")}
-          </p>
-          <p className="text-muted-foreground mt-1">{t("billing.pastDueDescription")}</p>
-        </div>
+        <ToneAlert variant="warning" className="mb-4">
+          <AlertTriangle />
+          <AlertTitle>{t("billing.pastDueWarning")}</AlertTitle>
+          <AlertDescription className="text-muted-foreground">
+            {t("billing.pastDueDescription")}
+          </AlertDescription>
+        </ToneAlert>
       )}
 
       {billing.status === "canceling" && billing.period_end && (
-        <div className="mb-4 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm">
-          <p className="font-medium text-yellow-600 dark:text-yellow-400">
+        <ToneAlert variant="warning" className="mb-4">
+          <AlertTriangle />
+          <AlertTitle>
             {t("billing.cancelingWarning", { date: formatDateField(billing.period_end, "date") })}
-          </p>
-        </div>
+          </AlertTitle>
+        </ToneAlert>
       )}
 
       {billing.plans.length > 0 && (
@@ -248,13 +246,6 @@ export function OrgSettingsBillingPage() {
             onSelect={handleSelectPlan}
           />
         </div>
-      )}
-
-      {canManageBilling && (
-        <>
-          <BillingManagersSection />
-          <BillingContactSection />
-        </>
       )}
     </>
   );

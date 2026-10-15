@@ -27,7 +27,6 @@
     "@appstrate/ui": "workspace:*",
     "@assistant-ui/react": "^0.15.27",
     "@assistant-ui/react-ai-sdk": "^1.4.17",
-    "@iconify/react": "^6.0.2",
     "@assistant-ui/react-markdown": "^0.14.20",
     "ai": "^7.0.137",
     "assistant-stream": "^0.3.26",

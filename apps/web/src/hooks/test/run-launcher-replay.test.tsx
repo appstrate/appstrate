@@ -67,13 +67,10 @@ describe("useRunLauncher — replaying a refused launch", () => {
       .mockRejectedValueOnce(refusal(CRM, "override_outranked"))
       .mockRejectedValueOnce(refusal(DRIVE, "override_connection_unavailable"))
       .mockResolvedValue({ data: { id: "run_1", warnings: [] } });
-    const done: string[] = [];
     const launch = launcher();
 
     const picks = { [CRM]: ["c_out"], [MAIL]: ["c_m"], [DRIVE]: ["c_d"] };
-    launch.launch({ input: { prompt: "bonjour" }, connectionOverrides: picks }, () =>
-      done.push("launched"),
-    );
+    launch.launch({ input: { prompt: "bonjour" }, connectionOverrides: picks });
     await settled();
     launch.retry();
     await settled();
@@ -90,8 +87,6 @@ describe("useRunLauncher — replaying a refused launch", () => {
     // The input typed in the run modal rides every replay.
     const input = { prompt: "bonjour" };
     expect(sentBodies().map((body) => body.input)).toEqual([input, input, input]);
-    // The launch's own success handler fires for the replay that lands.
-    expect(done).toEqual(["launched"]);
   });
 
   it("drops every pick a refusal names, sending no empty map", async () => {

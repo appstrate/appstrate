@@ -507,6 +507,56 @@ describe("Schedules API", () => {
       expect(body).toHaveProperty("actor_name");
     });
 
+    it("stamps an ETag and refuses a stale If-Match with 412, writing nothing", async () => {
+      const fid = agentId("etag-agent");
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
+      await publish(fid);
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        name: "Before",
+      });
+      const patch = (body: Record<string, unknown>, ifMatch?: string) =>
+        app.request(`/api/schedules/${schedule.id}`, {
+          method: "PATCH",
+          headers: {
+            ...authHeaders(ctx),
+            "Content-Type": "application/json",
+            ...(ifMatch ? { "If-Match": ifMatch } : {}),
+          },
+          body: JSON.stringify(body),
+        });
+
+      const read = await app.request(`/api/schedules/${schedule.id}`, {
+        headers: authHeaders(ctx),
+      });
+      const etag = read.headers.get("ETag")!;
+      expect(etag).toMatch(/^"\d+"$/);
+
+      const first = await patch({ name: "First" }, etag);
+      expect(first.status).toBe(200);
+      const next = first.headers.get("ETag")!;
+      expect(next).not.toBe(etag);
+
+      // The tag the first write consumed is stale now.
+      const stale = await patch({ name: "Second" }, etag);
+      expect(stale.status).toBe(412);
+      expect(stale.headers.get("ETag")).toBe(next);
+      expect(
+        (
+          (await (
+            await app.request(`/api/schedules/${schedule.id}`, { headers: authHeaders(ctx) })
+          ).json()) as { name: string }
+        ).name,
+      ).toBe("First");
+
+      expect((await patch({ name: "Second" }, next)).status).toBe(200);
+      // Without the header, last write wins as before.
+      expect((await patch({ name: "Third" })).status).toBe(200);
+    });
+
     it("merges (RFC 7396): an absent field is kept, `null` clears a nullable one", async () => {
       const { agent, integration, ids } = await agentWithConnections("merge-agent", 1);
       // Disabled: armed, clearing the set would leave the actor's one connection unnamed (409).
@@ -1303,6 +1353,57 @@ describe("Schedules API", () => {
   });
 
   describe("GET /api/schedules/:id/runs", () => {
+    it("filters the full schedule history before pagination and counting", async () => {
+      const agent = await seedAgent({ id: agentId("filtered-history"), orgId: ctx.orgId });
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        cronExpression: "0 * * * *",
+      });
+      const base = {
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        scheduleId: schedule.id,
+      };
+      await seedRun({ ...base, status: "failed", error: "invoice mismatch" });
+      await seedRun({ ...base, status: "timeout", error: "invoice timeout" });
+      await seedRun({ ...base, status: "success" });
+      await seedRun({
+        ...base,
+        scheduleId: null,
+        status: "failed",
+        error: "invoice other schedule",
+      });
+      const response = await app.request(
+        `/api/schedules/${schedule.id}/runs?status=failed,timeout&q=invoice&limit=1`,
+        { headers: authHeaders(ctx) },
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { scheduleId: string; status: string }[];
+        total: number;
+        hasMore: boolean;
+      };
+      expect(body.total).toBe(2);
+      expect(body.data).toHaveLength(1);
+      expect(body.hasMore).toBe(true);
+      expect(body.data[0]!.scheduleId).toBe(schedule.id);
+      expect(["failed", "timeout"]).toContain(body.data[0]!.status);
+    });
+
+    it("rejects malformed filters", async () => {
+      for (const query of ["status=made-up", `q=${"x".repeat(201)}`]) {
+        const response = await app.request(`/api/schedules/unused/runs?${query}`, {
+          headers: authHeaders(ctx),
+        });
+        expect(response.status).toBe(400);
+      }
+    });
+
     it("returns runs for a schedule", async () => {
       const fid = agentId("exec-sched");
       const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });

@@ -8,7 +8,7 @@
  * (`apps/api/src/lib/oauth-popup-html.ts`) or the hosted credential form
  * (`apps/web/src/pages/hosted-connect.tsx`) — while the surface that started it
  * waits elsewhere: the dashboard connect popup
- * (`components/integration-connect/use-integration-oauth-popup.ts`) or the
+ * (`components/integration-connect/use-hosted-connect-popup.ts`) or the
  * in-chat connect card (`packages/module-chat/src/ui/oauth-connect-card.tsx`).
  * The finishing page announces completion twice, because the two launch
  * contexts need different carriers: a `postMessage` to `window.opener` (the
@@ -253,11 +253,82 @@ export function completionMatches(
  * check, so those listeners call {@link completionMatches} directly. That is the
  * only difference between the two carriers — the correlation is identical.
  */
-export function acceptsCompletionMessage(
-  event: { origin: string; data: unknown },
+export function acceptsCompletionMessage<T extends { origin: string; data: unknown }>(
+  event: T,
   selfOrigin: string,
   target: { state?: string; packageId?: string },
-): boolean {
+): event is T & { data: IntegrationConnectCompletion } {
   if (!isIntegrationConnectMessage(event, selfOrigin)) return false;
   return completionMatches(event.data, target);
+}
+
+/** `window.open` features of the connect popup: one size on every surface. */
+export const CONNECT_POPUP_FEATURES = "width=600,height=700";
+
+/**
+ * Browsing-context name of a connect popup — one per integration. A fixed name
+ * is a single popup: starting a second connect while the first popup is open
+ * NAVIGATES it to the second URL, silently abandoning flow 1. Sanitized to
+ * `[A-Za-z0-9_]`, a window name being a target token.
+ */
+export function connectPopupName(packageId: string | undefined): string {
+  return packageId
+    ? `appstrate_oauth_${packageId.replace(/[^A-Za-z0-9_]+/g, "_")}`
+    : "appstrate_oauth";
+}
+
+/** What {@link listenConnectCompletion} needs of the browser: `window`, in practice. */
+interface ConnectCompletionHost {
+  location: { origin: string };
+  addEventListener(
+    type: "message",
+    listener: (event: { origin: string; data: unknown }) => void,
+  ): void;
+  removeEventListener(
+    type: "message",
+    listener: (event: { origin: string; data: unknown }) => void,
+  ): void;
+  BroadcastChannel?: new (name: string) => {
+    // Method syntax: bivariant, so the DOM `BroadcastChannel` (a `MessageEvent` handler) fits.
+    onmessage: { handle(event: { data: unknown }): void }["handle"] | null;
+    close(): void;
+  };
+}
+
+/**
+ * Listen for the completion of the connect flow `target` identifies, on both
+ * carriers a finishing page announces on: `postMessage` (origin-checked and
+ * correlated by {@link acceptsCompletionMessage}) and `BroadcastChannel`
+ * (same-origin by spec, correlated by {@link completionMatches}). Failures
+ * (`ok: false`) are delivered too; a caller that waits for success checks `ok`.
+ * Returns the cleanup that removes both listeners. A host without
+ * `BroadcastChannel` listens on `postMessage` alone. Browser callers pass
+ * `window`.
+ */
+export function listenConnectCompletion(
+  target: { state?: string; packageId?: string },
+  onCompletion: (completion: IntegrationConnectCompletion) => void,
+  host: ConnectCompletionHost,
+): () => void {
+  const onMessage = (event: { origin: string; data: unknown }) => {
+    if (acceptsCompletionMessage(event, host.location.origin, target)) onCompletion(event.data);
+  };
+  host.addEventListener("message", onMessage);
+
+  let channel: InstanceType<NonNullable<ConnectCompletionHost["BroadcastChannel"]>> | null = null;
+  try {
+    channel = host.BroadcastChannel ? new host.BroadcastChannel(INTEGRATION_CONNECT_CHANNEL) : null;
+    if (channel) {
+      channel.onmessage = (event) => {
+        if (completionMatches(event.data, target)) onCompletion(event.data);
+      };
+    }
+  } catch {
+    channel = null;
+  }
+
+  return () => {
+    host.removeEventListener("message", onMessage);
+    channel?.close();
+  };
 }

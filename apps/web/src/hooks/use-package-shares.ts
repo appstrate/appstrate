@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
+import { useInvalidatePaths } from "./use-invalidate-paths";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { useInvalidatePackageActivation } from "./use-library";
 
@@ -35,10 +35,10 @@ export function usePackageShares(packageId: string, enabled: boolean) {
  * that renders both halves — is invalidated alongside the share list.
  */
 function useInvalidateShares() {
-  const qc = useQueryClient();
+  const invalidateShares = useInvalidatePaths("/api/packages/{scope}/{name}/shares");
   const invalidateActivation = useInvalidatePackageActivation();
   return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/shares"] });
+    invalidateShares();
     invalidateActivation();
   };
 }

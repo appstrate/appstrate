@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Who reaches each route under the main layout — one declaration, read by
- * `RouteGate`, the shell's links and the settings tabs; `anyOf` is pinned to the
- * named operations' guards by `apps/api/test/unit/spa-route-access.test.ts`.
+ * Who reaches each route of the signed-in app — the main layout's pages, the
+ * chat's own shell and the overlay surfaces (catalogue, settings, preferences).
+ * One declaration, read by `RouteGate` and the shell's links; `anyOf` is pinned
+ * to the named operations' guards by `apps/api/test/unit/spa-route-access.test.ts`.
  * Pure data: that API test imports it, so nothing here may reach React.
  */
 
@@ -33,12 +34,13 @@ type RouteAccess = {
     }
 );
 
-const HOME_SPACE_EDITOR: RouteAccess = {
-  open:
-    "write authority is the package's HOME space (`home_writable`, RBAC spec §6.9), " +
-    "which the editor reads off the loaded detail — not the space being browsed",
-};
 const OWN_ACCOUNT: RouteAccess = { open: "the caller's own account; no org or space permission" };
+/**
+ * One screen graded inside by what the caller may do. It reads the
+ * organization-wide `/api/library`, which the server grades to the spaces where
+ * the caller holds `spaces:read` — the floor here.
+ */
+const CATALOGUE: RouteAccess = { anyOf: ["spaces:read"], operations: ["getLibrary"] };
 const WEBHOOKS_READ = ["webhooks:read", "org-webhooks:read"] as const;
 const AGENT_SIGHT = packageSightPermissions("agent");
 
@@ -47,7 +49,6 @@ export const ROUTE_ACCESS = {
 
   "/agents": { anyOf: AGENT_SIGHT, operations: ["listAgents"] },
   "/agents/new": { anyOf: ["agents:write"], operations: ["createAgent"] },
-  "/agents/:scope/:name/edit": HOME_SPACE_EDITOR,
   "/agents/:scope/:name": { anyOf: AGENT_SIGHT, operations: ["getAgentPackage"] },
   // A version is the full manifest; `agents:run` reads only the summary (RBAC spec §3.4).
   "/agents/:scope/:name/:version": {
@@ -59,13 +60,10 @@ export const ROUTE_ACCESS = {
   "/files": { anyOf: ["files:read"], operations: ["listFiles"] },
 
   "/schedules": { anyOf: ["schedules:read"], operations: ["listSchedules"] },
-  "/schedules/new": { anyOf: ["schedules:write"], operations: ["createSchedule"] },
   "/schedules/:id": { anyOf: ["schedules:read"], operations: ["getSchedule"] },
-  "/schedules/:id/edit": { anyOf: ["schedules:write"], operations: ["updateSchedule"] },
 
   "/skills": { anyOf: ["skills:read"], operations: ["listSkills"] },
   "/skills/new": { anyOf: ["skills:write"], operations: ["createSkill"] },
-  "/skills/:scope/:name/edit": HOME_SPACE_EDITOR,
   "/skills/:scope/:name": { anyOf: ["skills:read"], operations: ["getSkill"] },
   "/skills/:scope/:name/:version": {
     anyOf: ["skills:read"],
@@ -74,21 +72,17 @@ export const ROUTE_ACCESS = {
 
   "/integrations": { anyOf: ["integrations:read"], operations: ["listIntegrations"] },
   "/integrations/new": { anyOf: ["integrations:write"], operations: ["createIntegrationPackage"] },
-  "/integrations/:scope/:name/edit": HOME_SPACE_EDITOR,
   "/integrations/:scope/:name": { anyOf: ["integrations:read"], operations: ["getIntegration"] },
 
   "/mcp-servers": { anyOf: ["mcp-servers:read"], operations: ["listMcpServerPackages"] },
-  "/mcp-servers/:scope/:name/edit": HOME_SPACE_EDITOR,
   "/mcp-servers/:scope/:name": { anyOf: ["mcp-servers:read"], operations: ["getMcpServerPackage"] },
   "/mcp-servers/:scope/:name/:version": {
     anyOf: ["mcp-servers:read"],
     operations: ["getMcpServerPackageVersionDetail"],
   },
 
-  "/space/packages": { anyOf: ["spaces:read"], operations: ["listSpacePackages"] },
-  "/library": {
-    open: "an organization role rule (owner/admin, `RequireOrgCatalogAdmin`), not a permission",
-  },
+  "/catalogue": CATALOGUE,
+  "/catalogue/:reading/:type": CATALOGUE,
 
   "/preferences": OWN_ACCOUNT,
   "/preferences/general": OWN_ACCOUNT,
@@ -96,15 +90,12 @@ export const ROUTE_ACCESS = {
   "/preferences/security": OWN_ACCOUNT,
   "/preferences/devices": OWN_ACCOUNT,
   "/preferences/connections": OWN_ACCOUNT,
+  "/preferences/mcp-access": OWN_ACCOUNT,
   // Its one read is the list, guarded read|connect; a personal credential's actions need `connect`.
   "/preferences/models": {
     anyOf: ["model-provider-credentials:read", "model-provider-credentials:connect"],
     operations: ["listModelProviderCredentials"],
   },
-
-  // Both levels; the detail's guard is the row's level, resolved in its handler.
-  "/webhooks": { feature: "webhooks", anyOf: WEBHOOKS_READ, operations: ["listWebhooks"] },
-  "/webhooks/:id": { feature: "webhooks", anyOf: WEBHOOKS_READ, operations: ["getWebhook"] },
 
   "/chat": { feature: "chat", anyOf: ["chat:read"], operations: ["listChatSessions"] },
   "/chat/:conversationId": {
@@ -113,13 +104,9 @@ export const ROUTE_ACCESS = {
     operations: ["getChatSession"],
   },
 
-  "/end-users": {
-    teamSpaceOnly: true,
-    anyOf: ["end-users:read"],
-    operations: ["listEndUsers"],
+  "/org-settings": {
+    open: "layout only: the index opens the rail's first entry, every tab gates itself",
   },
-
-  "/org-settings": { open: "layout only: the index redirects to general, every tab gates itself" },
   // The org read asks membership only; its handler filters the member list on `members:read`.
   "/org-settings/general": { anyOf: ["org:read"], operations: ["getOrganization"] },
   "/org-settings/members": { anyOf: ["members:read"], operations: ["getOrganization"] },
@@ -142,34 +129,88 @@ export const ROUTE_ACCESS = {
     anyOf: ["billing:read"],
     operations: ["getEeBillingAccount"],
   },
-  "/org-settings/space/general": { anyOf: ["space-settings:write"], operations: ["updateSpace"] },
+
+  "/workspace-settings": {
+    open: "layout only: the index opens the rail's first entry, every tab gates itself",
+  },
+  "/workspace-settings/general": { anyOf: ["space-settings:write"], operations: ["updateSpace"] },
   // An inviter who may not list members still reaches the add-member form.
-  "/org-settings/space/members": {
+  "/workspace-settings/members": {
     teamSpaceOnly: true,
     anyOf: ["space-members:read", "space-members:invite"],
     operations: ["listSpaceMembers", "addSpaceMember"],
   },
-  "/org-settings/space/api-keys": {
-    teamSpaceOnly: true,
-    anyOf: ["api-keys:read"],
-    operations: ["listApiKeys"],
-  },
-  "/org-settings/space/auth": {
+  "/workspace-settings/auth": {
     feature: "oidc",
     anyOf: ["space-settings:write"],
     operations: ["getSpaceSmtpConfig"],
   },
-  "/org-settings/space/oauth": {
+  "/workspace-settings/api-keys": {
+    teamSpaceOnly: true,
+    anyOf: ["api-keys:read"],
+    operations: ["listApiKeys"],
+  },
+  "/workspace-settings/oauth": {
     feature: "oidc",
     teamSpaceOnly: true,
     anyOf: ["oauth-clients:read"],
     operations: ["listOAuthClients"],
   },
+  "/workspace-settings/end-users": {
+    teamSpaceOnly: true,
+    anyOf: ["end-users:read"],
+    operations: ["listEndUsers"],
+  },
+  // Both levels; the detail's guard is the row's level, resolved in its handler.
+  "/workspace-settings/webhooks": {
+    feature: "webhooks",
+    anyOf: WEBHOOKS_READ,
+    operations: ["listWebhooks"],
+  },
+  "/workspace-settings/webhooks/:id": {
+    feature: "webhooks",
+    anyOf: WEBHOOKS_READ,
+    operations: ["getWebhook"],
+  },
 } satisfies Record<string, RouteAccess>;
 
 export type RoutePath = keyof typeof ROUTE_ACCESS;
 
-/** The agent page's Connexions tab (`#connections`): its integration reads are not implied by the route. */
+/** `path` is `prefix` or lies below it, segment by segment (`/catalogueX` is not under `/catalogue`). */
+export const isUnder = (path: string, prefix: string) =>
+  path === prefix || path.startsWith(`${prefix}/`);
+
+/** What a settings page configures, and the API scope its requests carry. */
+export type SettingsScope = "organization" | "workspace" | "account";
+
+/** Each settings scope's index, the prefix of its pages. */
+export const SETTINGS_INDEX = {
+  organization: "/org-settings",
+  workspace: "/workspace-settings",
+  account: "/preferences",
+} as const satisfies Record<SettingsScope, RoutePath>;
+
+const SETTINGS_PREFIXES = Object.values(SETTINGS_INDEX);
+
+export const isSettingsPath = (path: string) =>
+  SETTINGS_PREFIXES.some((prefix) => isUnder(path, prefix));
+
+/** The routed modals: mounted over the screen they were opened from, never in the main tree. */
+export const OVERLAY_PREFIXES = [...SETTINGS_PREFIXES, "/catalogue"];
+
+export const isOverlayPath = (path: string) =>
+  OVERLAY_PREFIXES.some((prefix) => isUnder(path, prefix));
+
+/**
+ * The overlay tree's not-found routes, one per prefix: an address under an overlay that
+ * none of its pages matches is answered there, not by the dashboard standing in.
+ */
+export const OVERLAY_NOT_FOUND_PATHS = OVERLAY_PREFIXES.map((prefix) => `${prefix}/*`);
+
+/**
+ * The agent page's Connexions (the Paramètres section `?agentSettings=connections`, and the
+ * launch toast's « Connecter » link to it): its integration reads are not implied by the route.
+ */
 export function agentConnectionsTabVisible(can: (permission: Permission) => boolean): boolean {
   return can("integrations:read");
 }

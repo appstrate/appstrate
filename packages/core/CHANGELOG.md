@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`describeModelFailure`** and **`MODEL_ERROR_CATEGORIES`** (`@appstrate/core/model-error`):
+  one failed model call's text read once into `{ category, retryable, status?,
+providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusal unwrapped
+  server-side — and the category vocabulary as a runtime tuple.
+- **`ValidateManifestResult.issues`** (`@appstrate/core/validation`): on an invalid
+  manifest, the failures structured as **`ManifestIssue`** `{ path, message, code? }` beside the `errors`
+  strings; `code` is set on a rule that carries its own — today
+  **`OUTPUT_TOOL_REQUIRED`** (`"output_tool_required"`, an output schema without the
+  `output` runtime tool). **`ValidationFieldError.line` / `.column`**
+  (`@appstrate/core/api-errors`): the 1-based position of a file-level failure.
+- **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,
+  the `_meta` key holding an agent's presentation (`color`), next to
+  `AGENT_RESOURCES_META_KEY`.
+- **`readAgentAppearance(manifest)`** (`@appstrate/core/validation`): an
+  agent's identity tile, `{ icon?, color? }` — the manifest `icon` and the
+  `color` under `_meta[AGENT_UI_META_KEY]`, each only when it is a string.
+- **`@appstrate/core/manifest-icon`**: the grammar of a manifest `icon` —
+  **`parseManifestIcon(value)`** reads it as a `ManifestIcon` (`lucide` name,
+  other Iconify id, or image URL), `null` when no surface can draw it;
+  **`LUCIDE_ICON_PREFIX`** is `"lucide:"`, the prefix of an agent's icon.
+- **`ORG_LOGO_MAX_BYTES`** (`@appstrate/core/validation`): the largest
+  organization logo image `PUT /api/orgs/{orgId}/logo` accepts, 36 000 bytes.
+- **`unwrapMcpResult(value)`** (`@appstrate/core/mcp-result`): the payload inside
+  an MCP tool result — a `CallToolResult`, a bare content array or a JSON
+  string — recovered even when a prose text part (the turn-budget note) follows
+  it.
+- **`realtimeRunsUrl({ orgId, spaceId, runId?, channels?, verbose?, viewAs? })`**
+  (`@appstrate/core/realtime-url`): the URL of the realtime SSE stream, org-wide
+  or one run's, scope and role preview carried in the query.
+- **`isModelSelectable(model)`** (`@appstrate/core/model-selectable`): whether a
+  listed model can be picked — enabled, and its credential not flagged for
+  reconnection.
+- **`relativeAge(iso, now)`** and **`RelativeAgeUnit`** (`@appstrate/core/format`):
+  how long ago a timestamp was, as a rounded `{ unit, count }` the caller words
+  in its own language.
+- **`listenConnectCompletion(target, onCompletion, host)`**, **`connectPopupName(packageId)`**
+  and **`CONNECT_POPUP_FEATURES`** (`@appstrate/core/connect-handshake`): the
+  completion listener both connect surfaces share (origin-checked `postMessage`
+  plus `BroadcastChannel`), the per-integration popup window name, and the one
+  popup size.
+
+### Changed
+
+- **`acceptsCompletionMessage`** (`@appstrate/core/connect-handshake`) is now a
+  type guard: a `true` narrows `event.data` to `IntegrationConnectCompletion`.
+
 ## [16.0.0] — 2026-10-14
 
 ### Added

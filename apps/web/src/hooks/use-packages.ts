@@ -9,15 +9,25 @@ import { stripScope } from "@appstrate/core/naming";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { client, type components } from "../api/client";
-import { triggerBlobDownload } from "../lib/blob-download";
+import { downloadOrToast } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
+import { invalidateLibraries } from "./use-library";
+import { invalidateIntegrationQueries } from "./use-integrations";
 import { packagePermission, packageSightPermissions } from "@appstrate/core/permissions";
 import { ApiError } from "../api/errors";
-import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
+import {
+  packageKeys,
+  agentsKeys,
+  versionKeys,
+  invalidatePackageCaches,
+  invalidatePaths,
+  invalidateVersionCaches,
+} from "../lib/query-keys";
 import type {
+  IntegrationIndexItem,
   OrgPackageItem,
   OrgPackageItemDetail,
   AgentListItem,
@@ -119,11 +129,19 @@ function fetchPackageDetail<T extends PackageType>(
   type: T,
   packageId: string,
   version?: string,
+  spaceId?: string,
 ): Promise<PackageDetailMap[T]>;
 async function fetchPackageDetail(
   type: PackageType,
   packageId: string,
   version?: string,
+  /**
+   * The space to read it FROM, when not the current one. A package is readable
+   * only where it is placed, and the catalogue shows packages placed in spaces
+   * other than the one the reader stands in. The middleware leaves a header the
+   * caller set alone.
+   */
+  spaceId?: string,
 ): Promise<Versioned<AgentDetail | OrgPackageItemDetail>> {
   const path = splitPackageRef(packageId);
   // Omitted lets the server pick the definition this caller may see — their
@@ -131,9 +149,11 @@ async function fetchPackageDetail(
   // otherwise. An explicit `draft` is an author's read, and every type answers
   // it the same way (`403 draft_not_writable` for anybody else).
   const query = version ? { query: { version } } : {};
+  const headers = spaceId ? { headers: { "X-Space-Id": spaceId } } : {};
   if (type === "agent") {
     const { data, response } = await client.GET("/api/packages/agents/{scope}/{name}", {
       params: { path, ...query },
+      ...headers,
     });
     return { ...normalizeAgentDetail(data!), etag: response.headers.get("ETag") };
   }
@@ -141,10 +161,16 @@ async function fetchPackageDetail(
     `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}`,
     {
       params: { path, ...query },
+      ...headers,
     },
   );
   return { ...normalizePackageItemDetail(data!), etag: response.headers.get("ETag") };
 }
+
+/** The integration index adds the `source` facts its page splits by. */
+type PackageIndexItem<T extends PackageType> = T extends "integration"
+  ? IntegrationIndexItem
+  : OrgPackageItem;
 
 /**
  * One type's INDEX for the current space: what runs here, and nothing else.
@@ -152,22 +178,25 @@ async function fetchPackageDetail(
  * `GET /api/packages/{type}` answers the active set — placed in this space and
  * switched on — which is the same rule every launch route checks, so a row on
  * this list is a row that can be used. What is placed here but switched off, and
- * what has merely been offered, lives in the space library (`/space/packages`),
+ * what has merely been offered, lives in the catalogue's placed view (`/catalogue/placed/:type`),
  * the one management view. There is no selector: a narrower and a wider list
  * would be two answers to one question.
  */
-function usePackageList(type: PackageType) {
+function usePackageList<T extends PackageType>(type: T) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
-  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
+  // Widened to the union, which the typed client resolves to its four paths.
+  const segment: (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[PackageType] =
+    PACKAGE_TYPE_ROUTE_SEGMENT[type];
   const canRead = useCanReadPackages(type);
   return useQuery({
     queryKey: packageKeys.list(segment, orgId, spaceId),
-    queryFn: async (): Promise<OrgPackageItem[]> => {
+    queryFn: async (): Promise<PackageIndexItem<T>[]> => {
       const { data } = await client.GET(`/api/packages/${segment}`);
       // The spec marks most item fields optional — normalize to the
       // non-optional shape consumers have always used. `scope` is not
-      // returned by the list endpoints.
+      // returned by the list endpoints. The spread carries an integration
+      // row's own fields; `segment` is a union, so the cast ties them to `T`.
       return data!.data.map((item) => ({
         ...item,
         name: item.name,
@@ -183,7 +212,7 @@ function usePackageList(type: PackageType) {
         created_by_name: item.created_by_name ?? null,
         used_by_agents: item.used_by_agents,
         auto_installed: item.auto_installed,
-      }));
+      })) as PackageIndexItem<T>[];
     },
     enabled: canRead && !!orgId && !!spaceId,
   });
@@ -225,33 +254,6 @@ function usePackageDetail<T extends PackageType>(
   });
 }
 
-function useUploadPackage(type: PackageType) {
-  const qc = useQueryClient();
-  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
-  return useMutation({
-    mutationFn: async (file: File): Promise<{ id: string; version: string | null }> => {
-      const fd = new FormData();
-      fd.append("file", file);
-      // Single-package ZIP import goes through the canonical multipart import
-      // endpoint, which type-detects the package from the archive. The per-type
-      // create endpoints are JSON-only (except mcp-server), so POSTing a ZIP to
-      // `/api/packages/{type}` fails server-side — `/import` is the correct
-      // route for every type. Concrete path → the multipart `file` body is
-      // typed (Blob), so no cast is needed.
-      const { data } = await client.POST("/api/packages/import", {
-        body: { file },
-        bodySerializer: () => fd,
-      });
-      // 201 → { packageId, type, version? }. `version` is the manifest version
-      // of the imported draft (omitted when the manifest carries none).
-      return { id: data!.packageId, version: data!.version ?? null };
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
-    },
-  });
-}
-
 function useDeletePackage(type: PackageType) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -264,7 +266,10 @@ function useDeletePackage(type: PackageType) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
+      // Stale, not refetched: the deleted package's own detail is still mounted until the navigation below.
+      qc.invalidateQueries({ queryKey: packageKeys.family(segment), refetchType: "none" });
+      if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
+      if (type === "integration") void invalidateIntegrationQueries(qc);
       toast.success(t("packages.deleted"));
       navigate("/");
     },
@@ -281,7 +286,6 @@ function useDeletePackage(type: PackageType) {
  */
 function useMovePackageHome(type: PackageType) {
   const qc = useQueryClient();
-  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     mutationFn: async ({
       id,
@@ -299,22 +303,25 @@ function useMovePackageHome(type: PackageType) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+      invalidatePackageCaches(qc);
+      void invalidateLibraries(qc);
       // The space being left may have lost the package (`keepInPreviousHome:
       // false` drops its offer AND its placement row), so its own package
       // listing is stale too — not just this type's family.
-      void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/packages"] });
+      void invalidatePaths(qc, ["/api/spaces/{spaceId}/packages"]);
+      if (type === "integration") void invalidateIntegrationQueries(qc);
     },
   });
 }
 
 // Re-export factory hooks for direct use
 export {
+  // The imperative read, for a handler that has to KNOW before it writes: the
+  // catalogue asks an agent's manifest what it declares the moment a switch is
+  // flipped, rather than holding every row's detail open.
+  fetchPackageDetail,
   usePackageList,
   usePackageDetail,
-  useUploadPackage,
   useDeletePackage,
   useMovePackageHome,
   type PackageType,
@@ -361,47 +368,43 @@ export function useAgents() {
 // --- Package download ---
 
 export function usePackageDownload(scope: string | undefined, name: string | undefined) {
-  const { t } = useTranslation("common");
   return useCallback(
     async (version: string) => {
       if (!scope || !name) return;
-      try {
-        const { data } = await client.GET("/api/packages/{scope}/{name}/{version}/download", {
-          params: { path: { scope, name, version } },
-          parseAs: "blob",
-        });
-        triggerBlobDownload(data, `${stripScope(scope)}-${name}-${version}.afps`);
-      } catch {
-        toast.error(t("error.downloadFailed"));
-      }
+      await downloadOrToast(
+        () =>
+          client.GET("/api/packages/{scope}/{name}/{version}/download", {
+            params: { path: { scope, name, version } },
+            parseAs: "blob",
+          }),
+        `${stripScope(scope)}-${name}-${version}.afps`,
+      );
     },
-    [scope, name, t],
+    [scope, name],
   );
 }
 
 /**
  * Export an agent as a multi-package `.afps-bundle` (its transitive
  * dependency graph in one self-contained archive). Triggers a browser
- * download via the shared `triggerBlobDownload`. Optional `version` pins the
+ * download via the shared `downloadOrToast`. Optional `version` pins the
  * export to a specific release; defaults to the version resolved in the
  * current space.
  */
 export function useAgentBundleExport(scope: string | undefined, name: string | undefined) {
-  const { t } = useTranslation("common");
   return useCallback(
     async (version?: string) => {
       if (!scope || !name) return;
-      try {
-        const { data } = await client.GET("/api/agents/{scope}/{name}/bundle", {
-          params: { path: { scope, name }, query: { version } },
-          parseAs: "blob",
-        });
-        triggerBlobDownload(data, `${stripScope(scope)}-${name}.afps-bundle`);
-      } catch {
-        toast.error(t("error.downloadFailed"));
-      }
+      await downloadOrToast(
+        () =>
+          client.GET("/api/agents/{scope}/{name}/bundle", {
+            params: { path: { scope, name }, query: { version } },
+            parseAs: "blob",
+          }),
+        `${stripScope(scope)}-${name}.afps-bundle`,
+      );
     },
-    [scope, name, t],
+    [scope, name],
   );
 }
 
@@ -416,7 +419,7 @@ export function useVersionDetail(
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadPackages(type);
   return useQuery({
-    queryKey: ["version-detail", orgId, spaceId, type, packageId, version],
+    queryKey: versionKeys.detail(orgId, spaceId, type, packageId, version),
     queryFn: async (): Promise<VersionDetailResponse> => {
       const { data } = await client.GET(
         `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions/{version}`,
@@ -433,7 +436,7 @@ export function usePackageVersions(type: PackageType, packageId: string | undefi
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadPackages(type);
   return useQuery({
-    queryKey: ["package-versions", orgId, spaceId, type, packageId],
+    queryKey: versionKeys.list(orgId, spaceId, type, packageId),
     queryFn: async (): Promise<VersionListItem[]> => {
       const { data } = await client.GET(
         `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions`,
@@ -471,14 +474,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       return { id: data!.id, version: data!.version };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["package-versions"] });
-      qc.invalidateQueries({ queryKey: ["version-detail"] });
-      qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
-      // A published artifact appeared or vanished: a pinned Files tab and any
-      // dist-tag-resolved read of it are now wrong.
-      invalidatePackageFiles(qc);
+      invalidateVersionCaches(qc);
     },
     // A refusal that moved or settled the draft (`precondition_failed`: someone
     // wrote it; `no_changes`: the server cleared its dirty marker) leaves the page stale.
@@ -487,9 +483,8 @@ export function useCreateVersion(type: PackageType, packageId: string) {
         err instanceof ApiError &&
         (err.code === "precondition_failed" || err.code === "no_changes")
       ) {
-        qc.invalidateQueries({ queryKey: ["version-info"] });
-        qc.invalidateQueries({ queryKey: agentsKeys.all });
-        qc.invalidateQueries({ queryKey: packageKeys.all });
+        qc.invalidateQueries({ queryKey: versionKeys.infoAll });
+        invalidatePackageCaches(qc);
       }
     },
   });
@@ -505,14 +500,7 @@ export function useDeleteVersion(type: PackageType, packageId: string) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["package-versions"] });
-      qc.invalidateQueries({ queryKey: ["version-detail"] });
-      qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
-      // A published artifact appeared or vanished: a pinned Files tab and any
-      // dist-tag-resolved read of it are now wrong.
-      invalidatePackageFiles(qc);
+      invalidateVersionCaches(qc);
     },
   });
 }
@@ -537,10 +525,8 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
       };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
       // A restore overwrites the DRAFT artifact wholesale.
-      invalidatePackageFiles(qc);
+      invalidatePackageCaches(qc);
     },
   });
 }
@@ -550,7 +536,7 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadPackages(type);
   return useQuery({
-    queryKey: ["version-info", orgId, spaceId, type, packageId],
+    queryKey: versionKeys.info(orgId, spaceId, type, packageId),
     queryFn: async (): Promise<{
       latest_published_version: string | null;
       active_version: string | null;
@@ -584,8 +570,9 @@ export function useForkPackage() {
       return { id: data!.id, forked_from: data!.forked_from ?? null };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
+      invalidatePackageCaches(qc);
+      // The copy may be an integration, whose list is keyed apart from the package family.
+      void invalidateIntegrationQueries(qc);
     },
   });
 }

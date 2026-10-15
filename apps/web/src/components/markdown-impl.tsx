@@ -29,12 +29,46 @@ const inlineComponents: Components = {
 interface MarkdownProps {
   children: string;
   className?: string;
+  inert?: boolean;
 }
 
-export function Markdown({ children, className }: MarkdownProps) {
+const previewElements = [
+  "p",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "ul",
+  "ol",
+  "li",
+  "strong",
+  "em",
+  "del",
+  "code",
+  "pre",
+  "blockquote",
+  "hr",
+  "br",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
+];
+
+export function Markdown({ children, className, inert = false }: MarkdownProps) {
   return (
     <div className={`prose prose-sm max-w-none ${className ?? ""}`}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        components={components}
+        allowedElements={inert ? previewElements : undefined}
+        unwrapDisallowed={inert}
+        skipHtml={inert}
+      >
         {children}
       </ReactMarkdown>
     </div>

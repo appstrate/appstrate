@@ -173,6 +173,133 @@ export const modelsPaths = {
       },
     },
   },
+  "/api/models/apply": {
+    post: {
+      operationId: "applyModelChoice",
+      tags: ["Models"],
+      summary: "Apply a model-provider choice in one transaction",
+      description:
+        "One write for a provider choice: the credential its models run on (an existing organization credential `{ id }`, a new organization API key — the `POST /api/model-provider-credentials` body without `owner_type` —, or `null` for models each member serves with their own credential, `providerId` then naming the service), the models to create (`add`), the ones to switch on (`enable`) and off (`disable`), and the default (`default_model_id`, the `modelId` of a model of this choice). Applied in that order — the key, the models, the switches on, the default, the switches off — inside ONE transaction: either all of it is written or none. Every entry is checked as its own route would check it (`POST /api/models`, `PATCH /api/models/{id}`, `PUT /api/models/default`); refusals come back together as `400 validation_failed` with one `errors[]` item per entry (`field`: `add.<i>`, `enable.<i>`, `disable.<i>`, `default_model_id`; `code`: that route's own, or `model_not_in_choice` for a model that does not run on the choice's credential), and nothing is written. Requires `models:write`, and `model-provider-credentials:write` to mint an organization key (the rule of `POST /api/model-provider-credentials` with `owner_type: org`; `:connect` alone does not suffice), rate-limited like that route. Accepts `Idempotency-Key`: a retry with the same key and body replays the first response.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/IdempotencyKey" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["credential"],
+              properties: {
+                credential: {
+                  oneOf: [
+                    {
+                      type: "object",
+                      required: ["id"],
+                      properties: { id: { type: "string", format: "uuid" } },
+                      additionalProperties: false,
+                    },
+                    {
+                      type: "object",
+                      required: ["providerId", "api_key"],
+                      properties: {
+                        label: { type: "string", minLength: 1 },
+                        providerId: { type: "string", minLength: 1 },
+                        api_key: { type: "string", minLength: 1 },
+                        base_url_override: { type: ["string", "null"], format: "uri" },
+                      },
+                      additionalProperties: false,
+                    },
+                    { type: "null" },
+                  ],
+                },
+                providerId: {
+                  type: "string",
+                  minLength: 1,
+                  description: "The service of a choice without a credential (`credential: null`).",
+                },
+                add: {
+                  type: "array",
+                  maxItems: 100,
+                  items: {
+                    type: "object",
+                    required: ["modelId"],
+                    properties: {
+                      label: { type: "string", minLength: 1 },
+                      modelId: { type: "string", minLength: 1 },
+                      input: {
+                        type: "array",
+                        items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
+                      },
+                      contextWindow: { type: "integer" },
+                      maxTokens: { type: "integer" },
+                      reasoning: { type: "boolean" },
+                      cost: {
+                        type: "object",
+                        properties: {
+                          input: { type: "number" },
+                          output: { type: "number" },
+                          cacheRead: { type: "number" },
+                          cacheWrite: { type: "number" },
+                          tiers: {
+                            type: "array",
+                            maxItems: MAX_TOKEN_USAGE_TIERS,
+                            items: { $ref: "#/components/schemas/ModelCostTier" },
+                          },
+                        },
+                        additionalProperties: false,
+                      },
+                    },
+                    additionalProperties: false,
+                  },
+                },
+                enable: { type: "array", maxItems: 200, items: { type: "string", format: "uuid" } },
+                disable: {
+                  type: "array",
+                  maxItems: 200,
+                  items: { type: "string", format: "uuid" },
+                },
+                default_model_id: {
+                  type: "string",
+                  minLength: 1,
+                  description: "The `modelId` of a model of this choice, created or existing.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description:
+            "The choice was applied: the credential the models run on (`null` for each member's own), the models created or switched (same shape as `GET`/`list`), and the default set, if any.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "credential_id", "models", "default_model_id"],
+                properties: {
+                  object: { type: "string", enum: ["model_choice"] },
+                  credential_id: { type: ["string", "null"] },
+                  models: { type: "array", items: { $ref: "#/components/schemas/OrgModel" } },
+                  default_model_id: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "422": { $ref: "#/components/responses/IdempotencyConflict" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
+      },
+    },
+  },
   "/api/models/default": {
     put: {
       operationId: "setDefaultModel",

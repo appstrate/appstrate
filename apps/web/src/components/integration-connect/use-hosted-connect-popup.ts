@@ -1,0 +1,158 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  CONNECT_POPUP_FEATURES,
+  connectPopupName,
+  listenConnectCompletion,
+} from "@appstrate/core/connect-handshake";
+import { ApiError } from "../../api/errors";
+import { toastError } from "../../lib/mutation-error";
+import {
+  invalidateIntegrationQueries,
+  useInitiateIntegrationConnect,
+} from "../../hooks/use-integrations";
+
+const CONNECT_POPUP_TIMEOUT_MS = 5 * 60_000;
+const POPUP_POLL_INTERVAL_MS = 500;
+
+/**
+ * Drives the unified hosted-connect-portal flow via popup.
+ *
+ * Auth-type-agnostic: mints a connect session (`/connect/session`) and opens the
+ * returned `connect_url`, which dispatches server-side to the provider OAuth
+ * screen (oauth2) or the hosted credential form (api_key/basic/mtls/custom). The
+ * caller therefore never branches on the auth type — one entry point for every
+ * integration.
+ *
+ * On a reconnect/upgrade (a `connectionId` is supplied) the backend unions the
+ * caller scopes with that connection's already-granted set, so re-consent never
+ * shrinks the grant. A fresh connect carries no `connectionId` and gets the
+ * manifest defaults plus whatever scopes the caller forwards.
+ *
+ * Completion is event-driven: both the OAuth callback page and the hosted form
+ * broadcast `appstrate:integration_connection` on success (postMessage +
+ * BroadcastChannel). The promise resolves on that signal OR when the popup
+ * closes (cancel fallback) and rejects on timeout / kickoff failure. A success
+ * does not close the popup: completion pages close themselves, and one that
+ * shows an install block (SSH) stays open until the user dismisses it.
+ * `openPopup` resolves `true` once the popup settled AND the integration caches
+ * were invalidated (active queries refetched, inactive ones marked stale),
+ * `false` after a failure it already toasted.
+ */
+export function useHostedConnectPopup() {
+  const { t } = useTranslation("settings");
+  const qc = useQueryClient();
+  const initiateConnect = useInitiateIntegrationConnect();
+
+  const openPopup = useCallback(
+    async (input: {
+      packageId: string;
+      authKey: string;
+      scopes?: string[];
+      forceAccountSelect?: boolean;
+      connectionId?: string;
+    }): Promise<boolean> => {
+      try {
+        // Open the popup synchronously (some browsers block popups opened inside
+        // async callbacks), mint the session, point the popup at connect_url,
+        // then race a 5-min timeout against a success signal or the user closing
+        // the window.
+        const popup = window.open("", connectPopupName(input.packageId), CONNECT_POPUP_FEATURES);
+        if (!popup) {
+          throw new Error("popup_blocked");
+        }
+        let scopesDenied: string[];
+        try {
+          const session = await initiateConnect.mutateAsync({
+            params: { path: { packageId: input.packageId, authKey: input.authKey } },
+            body: {
+              scopes: input.scopes ?? [],
+              ...(input.forceAccountSelect ? { force_account_select: true } : {}),
+              ...(input.connectionId ? { connection_id: input.connectionId } : {}),
+            },
+          });
+          popup.location.href = session.connect_url;
+          scopesDenied = await new Promise<string[]>((resolve, reject) => {
+            const cleanup = () => {
+              clearInterval(poll);
+              clearTimeout(timer);
+              stopListening();
+            };
+            // Which completion this popup is waiting for: both carriers fan
+            // out to every listener, so a completion for ANOTHER package must
+            // not settle this promise. Success only: an `ok: false` completion
+            // is a failed connect, and the popup-close poll below settles it.
+            const stopListening = listenConnectCompletion(
+              { packageId: input.packageId },
+              (completion) => {
+                if (completion.ok !== true) return;
+                cleanup();
+                resolve(completion.scopesDenied ?? []);
+              },
+              window,
+            );
+            const timer = setTimeout(() => {
+              cleanup();
+              try {
+                popup.close();
+              } catch {
+                /* ignore */
+              }
+              reject(new Error("connect_timeout"));
+            }, CONNECT_POPUP_TIMEOUT_MS);
+            // Close-without-signal = user cancel; resolve so consumers re-read
+            // the truth (the cache invalidation below is a no-op if nothing
+            // changed).
+            const poll = setInterval(() => {
+              if (popup.closed) {
+                cleanup();
+                resolve([]);
+              }
+            }, POPUP_POLL_INTERVAL_MS);
+          });
+        } catch (err) {
+          try {
+            popup.close();
+          } catch {
+            /* ignore */
+          }
+          throw err;
+        }
+        // Invalidate the integration + user-connection caches so every consumer
+        // (status cards, pickers, the connections page) reflects the new
+        // connection without waiting for a window-focus refetch.
+        await invalidateIntegrationQueries(qc);
+        if (scopesDenied.length > 0) {
+          toast.warning(t("integration.popup.scopesDenied", { scopes: scopesDenied.join(", ") }));
+        }
+        return true;
+      } catch (err) {
+        if (err instanceof Error && err.message === "popup_blocked") {
+          toast.error(t("integration.popup.blocked"));
+          return false;
+        }
+        if (err instanceof Error && err.message === "connect_timeout") {
+          toast.error(t("integration.popup.timeout"));
+          return false;
+        }
+        // The space's admin gate: retrying cannot help, so the reason is the message.
+        if (err instanceof ApiError && err.code === "connection_blocked_by_admin") {
+          toastError(err);
+          return false;
+        }
+        // Mint failure (e.g. portal not configured / 5xx), network error, or any
+        // other unexpected throw: surface a generic toast here so callers never
+        // have to handle a rejected openPopup() — the cache stays untouched.
+        toast.error(t("integration.popup.failed"));
+        return false;
+      }
+    },
+    [initiateConnect, qc, t],
+  );
+
+  return { openPopup, isPending: initiateConnect.isPending };
+}

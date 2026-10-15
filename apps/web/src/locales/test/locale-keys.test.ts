@@ -170,6 +170,49 @@ describe("t() keys", () => {
     },
     SCAN_TIMEOUT_MS,
   );
+
+  /**
+   * Declared somewhere is not enough: `useTranslation(["settings", "agents"])`
+   * looks a bare key up in `settings`, then in the `common` fallback, and
+   * nowhere else. A key that lives in `agents` renders as its own string
+   * ("schedule.unnamed" in a schedule list). The namespace a call reads is the
+   * nearest `useTranslation` above it, unless the call names one (`{ ns }`,
+   * `ns:key`). The SPA's own tree only: the chat module's `t` is injected.
+   */
+  it(
+    "resolve in the namespace the call reads",
+    () => {
+      const HOOK = /\buseTranslation\(\s*(\[[^\]]*\]|["'][^"']+["'])?/g;
+      const CALL = /\bt\(\s*"([\w.-]+)"\s*(,\s*\{[^)]*\})?\)/g;
+      const has = (ns: string, key: string) => {
+        const keys = en.get(ns) ?? {};
+        return key in keys || `${key}_one` in keys || `${key}_other` in keys;
+      };
+      const wrong: string[] = [];
+
+      for (const file of SOURCES.filter((f) => f.startsWith(WEB_SRC))) {
+        const src = readFileSync(file, "utf8");
+        const hooks = [...src.matchAll(HOOK)].map((m) => ({
+          at: m.index,
+          ns: m[1] ? (/["']([^"']+)["']/.exec(m[1])?.[1] ?? "common") : "common",
+        }));
+        if (hooks.length === 0) continue;
+        for (const call of src.matchAll(CALL)) {
+          const key = call[1]!;
+          const named = /\bns:\s*["']([^"']+)["']/.exec(call[2] ?? "")?.[1];
+          const hook = [...hooks].reverse().find((h) => h.at < call.index) ?? hooks[0]!;
+          const ns = named ?? hook.ns;
+          if (has(ns, key) || has("common", key) || !isDeclared(key)) continue;
+          wrong.push(
+            `${relative(REPO_ROOT, file)}:${lineOf(src, call.index)} → "${key}" read in ${ns}`,
+          );
+        }
+      }
+
+      expect(wrong).toEqual([]);
+    },
+    SCAN_TIMEOUT_MS,
+  );
 });
 
 /**
@@ -177,32 +220,49 @@ describe("t() keys", () => {
  * site, so the reverse guard cannot see them. Each entry below is a prefix
  * under which a REAL interpolation site exists — the comment names it. This
  * is the one list that must be justified per line: widening it to silence a
- * failure is how a dead-key guard becomes decorative. Kept alphabetical.
+ * failure is how a dead-key guard becomes decorative. A generic head is
+ * qualified with its namespace (`files:type.`) so it shields that namespace
+ * alone. Kept alphabetical.
  */
 const DYNAMIC_KEY_PREFIXES = [
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
-  "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx
-  "filter.", // components/file-list-panel.tsx — t(`filter.${p}`)
+  "common:status.", // components/status-badge.tsx — t(`status.${status}`)
+  "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
+  "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx: one per runtime tool id
+  "files:type.", // components/document-columns.tsx, components/file-artifact.tsx — t(`type.${mimeKind(…)}`)
+  "integration.admin.creation.", // components/integration-detail/access-rules-section.tsx
+  "integration.admin.orgDefault.connection.", // components/integration-detail/org-default-section.tsx — forced / default
+  "integration.admin.usage.", // components/integration-detail/org-default-section.tsx — t(`integration.admin.usage.${mode}Help`)
   "integration.auth.type.", // components/integration-connect/connection-picker-menu.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
-  "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
+  "integration.structure.type.", // components/package-detail/integration-structure.tsx
+  "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
+  "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()
+  "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
+  "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
+  "orgRolesGuide.access.", // pages/org-settings/org-roles.tsx — space reach per org role
+  "orgRolesGuide.can.", // pages/org-settings/org-roles.tsx — one key per capability row
   "orgSettings.roleHint.", // components/org-invitation-form.tsx + OAuth signup form
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx
-  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/org-settings/space/general.tsx
+  "permissions.label.", // lib/permission-labels.ts — permissionLabel()
+  "permissions.resource.", // lib/permission-labels.ts — permissionResourceLabel()
+  "purpose.", // components/document-columns.tsx — t(`purpose.${doc.purpose}`)
+  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/workspace-settings/general.tsx
   "roles.presetDesc.", // hooks/use-roles.ts — spaceRoleDescription()
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
-  "run.connSource.", // components/run-configuration-tab.tsx — t(`run.connSource.${c.source}`)
+  "run.connSource.", // components/run-detail/run-snapshot-inspector.tsx
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
+  "run.triggerType.", // components/run-trigger.tsx, components/run-detail/run-header-summary.tsx + run-snapshot-inspector.tsx
   "schedule.disabledReason.", // components/schedule-status-badge.tsx, pages/schedule-detail.tsx
-  "spaceMembers.source.", // pages/org-settings/space/members.tsx — t(`spaceMembers.source.${member.source}`)
-  "spaces.visibility.", // pages/org-settings/space/general.tsx — t(`spaces.visibility.${value}`)
-  "spaces.visibilityDesc.", // pages/org-settings/space/general.tsx — t(`spaces.visibilityDesc.${value}`)
-  "status.", // components/status-badge.tsx — t(`status.${status}`)
+  "spaceMembers.source.", // components/space-seat-columns.tsx
+  "spaces.visibility.", // pages/workspace-settings/general.tsx — t(`spaces.visibility.${value}`)
+  "spaces.visibilityDesc.", // pages/workspace-settings/general.tsx — t(`spaces.visibilityDesc.${value}`)
+  "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
   "validation.schema.", // hooks/use-schema-form-labels.ts — one key per JSON Schema keyword
   "viewAs.stopped.", // components/view-as-banner.tsx — t(`viewAs.stopped.${code}`)
 ];
@@ -219,25 +279,40 @@ const SOURCE_BLOB = SOURCES.map((f) => readFileSync(f, "utf8")).join("\n");
 
 function isReferenced(key: string): boolean {
   for (const quote of ['"', "'", "`"]) {
-    if (SOURCE_BLOB.includes(quote + key)) return true;
-    for (const ns of en.keys()) if (SOURCE_BLOB.includes(`${quote}${ns}:${key}`)) return true;
+    // The whole literal, closing quote included: `"detail.open` is no
+    // reference to `detail.open` when it is the head of `"detail.openRuns"`.
+    if (SOURCE_BLOB.includes(quote + key + quote)) return true;
+    for (const ns of en.keys())
+      if (SOURCE_BLOB.includes(`${quote}${ns}:${key}${quote}`)) return true;
   }
   return false;
 }
 
-function isShielded(key: string): boolean {
-  return DYNAMIC_KEY_PREFIXES.some((prefix) => key.startsWith(prefix));
+/** An entry's optional `namespace:` qualifier, and the key head it shields. */
+function parsePrefix(entry: string): { ns: string | null; head: string } {
+  const qualified = /^([\w-]+):(.+)$/.exec(entry);
+  return qualified ? { ns: qualified[1]!, head: qualified[2]! } : { ns: null, head: entry };
+}
+
+function isShielded(ns: string, key: string): boolean {
+  return DYNAMIC_KEY_PREFIXES.map(parsePrefix).some(
+    (prefix) => (prefix.ns === null || prefix.ns === ns) && key.startsWith(prefix.head),
+  );
 }
 
 describe("declared keys", () => {
+  // Scans every key against the whole source blob, so it grows with the app;
+  // past ~1000 keys it no longer fits the 5s default on a cold run.
   it(
     "are all still referenced by the source",
     () => {
       // The guard the other direction lacks: deleting the last call site of a
       // key leaves the translation behind in both bundles, and nothing notices.
-      const orphans = [...allKeys]
-        .filter((key) => !isShielded(key))
-        .filter((key) => !isReferenced(key) && !isReferenced(key.replace(PLURAL_SUFFIX, "")))
+      const orphans = [...en]
+        .flatMap(([ns, keys]) => Object.keys(keys).map((key) => ({ ns, key })))
+        .filter(({ ns, key }) => !isShielded(ns, key))
+        .filter(({ key }) => !isReferenced(key) && !isReferenced(key.replace(PLURAL_SUFFIX, "")))
+        .map(({ ns, key }) => `${ns}:${key}`)
         .sort();
 
       expect(orphans).toEqual([]);
@@ -251,8 +326,8 @@ describe("declared keys", () => {
       // An exemption is only legitimate while the code it excuses exists. This
       // is what stops the allow-list from being widened to silence a failure:
       // an invented prefix has no `` `prefix.${…}` `` anywhere and fails here.
-      const unjustified = DYNAMIC_KEY_PREFIXES.filter((prefix) => {
-        const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const unjustified = DYNAMIC_KEY_PREFIXES.filter((entry) => {
+        const escaped = parsePrefix(entry).head.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         // Optional `namespace:` — some sites interpolate `settings:foo.${x}`.
         return !new RegExp("`(?:[\\w-]+:)?" + escaped + "\\$\\{").test(SOURCE_BLOB);
       });

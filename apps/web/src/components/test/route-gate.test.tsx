@@ -16,7 +16,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const layoutAt = (url: string) =>
   render(
-    <RouteGate path="/org-settings">
+    <RouteGate path="/org-settings" pending={null}>
       <p>layout</p>
     </RouteGate>,
     { initialEntries: [url] },
@@ -25,6 +25,17 @@ const layoutAt = (url: string) =>
 describe("RouteGate on a layout", () => {
   it("does not mount the layout for a page whose module is not loaded", () => {
     expect(layoutAt("/org-settings/billing")).not.toContain("layout");
+  });
+
+  it("says the page does not exist here instead of redirecting", () => {
+    const html = render(
+      <RouteGate path="/chat" pending={null}>
+        <p>chat</p>
+      </RouteGate>,
+      { initialEntries: ["/chat"] },
+    );
+    expect(html).not.toContain("chat</p>");
+    expect(html).toContain("Cette page n'existe pas ici.");
   });
 
   it("mounts it for a page that exists, whatever that page's own gate decides", () => {

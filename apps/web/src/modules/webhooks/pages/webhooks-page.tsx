@@ -1,100 +1,61 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import { Webhook } from "lucide-react";
-import { usePermissions } from "@/hooks/use-permissions";
-import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
+import { Plus, Webhook } from "lucide-react";
 import { useWebhooks } from "../hooks/use-webhooks";
-import { PageHeader } from "@/components/page-header";
-import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
-import { WebhookCreateModal } from "../components/webhook-create-modal";
+import { EmptyState, EmptyStateAction } from "@/components/page-states";
+import { DataTable } from "@/components/data-table";
+import { SettingsPageActions } from "@/components/settings/settings-page-actions";
+import type { MenuAction } from "@/lib/menu-action";
+import { useWebhookColumns } from "../components/webhook-columns";
+import { useModalParam } from "@/hooks/use-modal-param";
+import { NEW_WEBHOOK_PARAM, WebhookCreateModal } from "../components/webhook-create-modal";
+import { usePermissions } from "@/hooks/use-permissions";
 import { webhookResource } from "@/lib/webhook-permissions";
 
 export function WebhooksPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const newWebhook = useModalParam(NEW_WEBHOOK_PARAM);
   const { can } = usePermissions();
-  const [createOpen, setCreateOpen] = useState(false);
 
   const { data: webhooks, isLoading, error } = useWebhooks();
+  const columns = useWebhookColumns();
 
   // One grant per level (`webhooks` in the space, `org-webhooks` across the
   // org); the modal offers the levels the caller holds.
   const createLevels = (["space", "org"] as const).filter((level) =>
     can(`${webhookResource(level)}:write`),
   );
-  const canCreate = createLevels.length > 0;
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState error={error} />;
+  const create: MenuAction = {
+    id: "create",
+    icon: Plus,
+    label: t("settings:webhooks.createTitle"),
+    onSelect: () => newWebhook.open(),
+    hidden: createLevels.length === 0,
+  };
 
   return (
-    <div className="p-6">
-      <PageHeader
-        title={t("settings:webhooks.pageTitle")}
-        emoji="🪝"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("settings:webhooks.pageTitle") },
-        ]}
-        actions={
-          canCreate ? (
-            <Button onClick={() => setCreateOpen(true)}>
-              {t("settings:webhooks.createTitle")}
-            </Button>
-          ) : undefined
+    <div>
+      <SettingsPageActions actions={[create]} />
+
+      <DataTable
+        tableId="webhooks"
+        label={t("settings:webhooks.pageTitle")}
+        columns={columns}
+        rows={webhooks ?? []}
+        rowKey={(wh) => wh.id}
+        rowHref={(wh) => `/workspace-settings/webhooks/${wh.id}`}
+        rowLabel={(wh) => wh.url}
+        isLoading={isLoading}
+        failure={error}
+        empty={
+          <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>
+            <EmptyStateAction action={create} />
+          </EmptyState>
         }
       />
 
-      {!webhooks || webhooks.length === 0 ? (
-        <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>
-          {canCreate && (
-            <Button onClick={() => setCreateOpen(true)}>
-              {t("settings:webhooks.createTitle")}
-            </Button>
-          )}
-        </EmptyState>
-      ) : (
-        <div className="space-y-2">
-          {webhooks.map((wh) => (
-            <Link
-              key={wh.id}
-              to={`/webhooks/${wh.id}`}
-              className="border-border bg-card hover:bg-accent/50 block rounded-lg border p-4 transition-colors"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex items-center gap-2">
-                    <span className="truncate font-mono text-sm">{wh.url}</span>
-                    <Badge variant={wh.enabled ? "success" : "secondary"}>
-                      {wh.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
-                    </Badge>
-                    {wh.level === "org" && (
-                      <Badge variant="outline">{t("settings:webhooks.levelBadge.org")}</Badge>
-                    )}
-                  </div>
-                  <p className="text-muted-foreground font-mono text-xs">{wh.events.join(", ")}</p>
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    {wh.packageId || t("settings:webhooks.allAgents")}
-                    {" · "}
-                    {t("settings:webhooks.payloadMode")}:{" "}
-                    {wh.payloadMode === "full"
-                      ? t("settings:webhooks.payloadModeFull")
-                      : t("settings:webhooks.payloadModeSummary")}
-                  </p>
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
-
-      <WebhookCreateModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        levels={createLevels}
-      />
+      {!create.hidden && <WebhookCreateModal levels={createLevels} />}
     </div>
   );
 }

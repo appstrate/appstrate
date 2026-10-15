@@ -14,6 +14,8 @@ import type { UseFormRegisterReturn } from "react-hook-form";
 import { KeyRound, Users, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -182,22 +184,14 @@ function BaseUrlField({
   const { t } = useTranslation(["settings", "common"]);
 
   return (
-    <div className="space-y-2">
-      <Label htmlFor={id}>{t("models.form.baseUrl")}</Label>
-      <Input
-        id={id}
-        type="url"
-        {...baseUrlProps}
-        disabled={locked}
-        placeholder={placeholder}
-        aria-invalid={error ? true : undefined}
-        className={cn(error && "border-destructive")}
-      />
-      <div className="text-muted-foreground text-sm">
-        {locked ? t("models.form.baseUrlPinnedHint") : t("models.form.baseUrlHint")}
-      </div>
-      {error && <div className="text-destructive text-sm">{error}</div>}
-    </div>
+    <FormItem
+      id={id}
+      label={t("models.form.baseUrl")}
+      hint={locked ? t("models.form.baseUrlPinnedHint") : t("models.form.baseUrlHint")}
+      error={error}
+    >
+      <Input type="url" {...baseUrlProps} disabled={locked} placeholder={placeholder} />
+    </FormItem>
   );
 }
 
@@ -318,7 +312,7 @@ export function EndpointFields({
           <div className="text-muted-foreground text-sm">{t("models.form.eachMemberHint")}</div>
         )}
         {apiKeyHint && <div className="text-muted-foreground text-sm">{apiKeyHint}</div>}
-        {apiKeyError && <div className="text-destructive text-sm">{apiKeyError}</div>}
+        <FieldError>{apiKeyError}</FieldError>
       </div>
     </>
   );

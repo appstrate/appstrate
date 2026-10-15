@@ -230,7 +230,17 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   // Exact: every other route under `/api/orgs/…` IS guarded.
   { path: "/api/orgs", why: "the caller's own orgs, listed or created outside any org context" },
   { path: "/api/orgs/{orgId}", why: "membership (`orgRole`) is the gate, and every role reads" },
+  {
+    methods: ["GET"],
+    path: "/api/org-roles",
+    why: "membership is the gate: the four roles' grants, the same for every caller",
+  },
   { path: "/api/orgs/{orgId}/settings", why: "membership (`orgRole`) is the gate, every role" },
+  {
+    methods: ["GET"],
+    path: "/api/orgs/{orgId}/logo",
+    why: "membership (`orgRole`) is the gate, every role reads",
+  },
   {
     path: "/api/orgs/{orgId}/leave",
     why: "the person's own membership, dashboard session only (`orgRole`); last owner decided under lock",
@@ -238,7 +248,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
 
   // ── The row the handler loads decides, and refuses with the route's own error.
   // Method-precise: the other methods at these paths carry a mounted guard.
-  ...rowDecided("the caller's own org role (owner/admin), read in the handler", [
+  ...rowDecided("the caller's own credential, then each space's own guards, read in the handler", [
     [["GET"], "/api/library"],
   ]),
   ...rowDecided("`gateSpacePackageWrite`: the per-type permission in the path's space", [

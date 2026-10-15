@@ -6,10 +6,13 @@ import { useTranslation } from "react-i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Badge } from "./status-badge";
+import { CountBadge } from "./count-badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Sheet, SheetContent, SheetTrigger } from "@appstrate/ui/components/sheet";
 import { Separator } from "@appstrate/ui/components/separator";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { ErrorState } from "./page-states";
 import {
   useUnreadCount,
   useMarkRead,
@@ -21,6 +24,7 @@ import { useCanReach } from "../hooks/use-can-reach";
 import type { RoutePath } from "../lib/route-access";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { formatDateField } from "../lib/format-date";
+import { catalogueHref } from "../lib/catalogue-link";
 import type { paths } from "../api/client";
 
 /** One notification as returned by `GET /api/notifications`. */
@@ -40,7 +44,13 @@ function notificationTarget(
   canReach: (path: RoutePath) => boolean,
 ): string | null {
   if (notification.type === "package_shared") {
-    return canReach("/space/packages") ? "/space/packages" : null;
+    // One share, one decision: open THAT package's sheet, where the alert
+    // names the space it was shared with and activates it there — not a list
+    // the reader has to search.
+    const share = notification.payload;
+    return share && canReach("/catalogue/:reading/:type")
+      ? catalogueHref(share.package_type, { packageId: share.packageId })
+      : null;
   }
   if (packageId && notification.runId) {
     return canReach("/agents/:scope/:name/runs/:runId")
@@ -69,6 +79,9 @@ export function NotificationContent({
   onItemClick,
   onClose,
   markAllRead,
+  loading = false,
+  failed = false,
+  agentsPending = false,
 }: {
   unread: number;
   notifications: NotificationItem[];
@@ -77,6 +90,12 @@ export function NotificationContent({
   onItemClick: (notificationId: string) => void;
   onClose: () => void;
   markAllRead: () => void;
+  /** The list is still being read: the badge may already say N. */
+  loading?: boolean;
+  /** The list could not be read. */
+  failed?: boolean;
+  /** Agent names are still being read: a row shows a bar, not the raw package id. */
+  agentsPending?: boolean;
 }) {
   const { t } = useTranslation(["common", "agents"]);
 
@@ -87,7 +106,7 @@ export function NotificationContent({
         <div className="flex items-center gap-2">
           <h4 className="text-sm font-semibold">{t("notifications.title")}</h4>
           {unread > 0 && (
-            <span className="bg-destructive text-destructive-foreground flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium">
+            <span className="bg-spark text-spark-foreground flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium">
               {unread}
             </span>
           )}
@@ -107,7 +126,21 @@ export function NotificationContent({
       <Separator />
 
       {/* Notification list */}
-      {notifications.length === 0 ? (
+      {loading ? (
+        <div className="divide-y" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex gap-3 px-4 py-3">
+              <Skeleton className="mt-1.5 size-2 shrink-0 rounded-full" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : failed ? (
+        <ErrorState compact />
+      ) : notifications.length === 0 ? (
         <div className="flex flex-col items-center justify-center px-4 py-10">
           <Bell size={32} className="text-muted-foreground/30 mb-3" />
           <p className="text-muted-foreground text-sm">{t("notifications.empty")}</p>
@@ -136,7 +169,11 @@ export function NotificationContent({
                 <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="mb-0.5 flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium">{displayName}</span>
+                    {agentsPending && packageId && !shared ? (
+                      <Skeleton className="h-4 w-32" />
+                    ) : (
+                      <span className="truncate text-sm font-medium">{displayName}</span>
+                    )}
                     {status && <Badge status={status} />}
                   </div>
                   <p className="text-muted-foreground text-xs">
@@ -190,8 +227,12 @@ export function NotificationContent({
 export function NotificationBell() {
   const { t } = useTranslation(["common", "agents"]);
   const { data: count } = useUnreadCount();
-  const { data: agents } = useAgents();
-  const { data: notifications } = useNotifications({ unread: true, limit: 50 });
+  const { data: agents, isPending: agentsPending } = useAgents();
+  const {
+    data: notifications,
+    isPending: notificationsPending,
+    isError: notificationsFailed,
+  } = useNotifications({ unread: true, limit: 50 });
   const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
   const [open, setOpen] = useState(false);
@@ -222,11 +263,12 @@ export function NotificationBell() {
       aria-label={t("notifications.ariaLabel")}
     >
       <Bell size={18} />
-      {unread > 0 && (
-        <span className="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-          {unread > 99 ? "99+" : unread}
-        </span>
-      )}
+      <CountBadge
+        count={unread}
+        label={t("notifications.ariaLabel")}
+        tone="spark"
+        className="absolute -top-1 -right-1"
+      />
     </button>
   );
 
@@ -238,6 +280,9 @@ export function NotificationBell() {
     onItemClick: handleClick,
     onClose: () => setOpen(false),
     markAllRead: () => markAllRead.mutate({}),
+    loading: notificationsPending,
+    failed: notificationsFailed && notifications === undefined,
+    agentsPending,
   };
 
   if (isMobile) {

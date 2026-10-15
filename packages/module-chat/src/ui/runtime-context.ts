@@ -29,6 +29,7 @@
  */
 
 import { createContext, useContext } from "react";
+import type { PickerCredential } from "@appstrate/ui/components/model-picker-groups";
 
 export type GetHeaders = () => Record<string, string>;
 
@@ -78,14 +79,14 @@ export type DownloadFile = (id: string, name: string) => void;
 
 /**
  * The host's authenticated image-preview hook: a stored file id → an object
- * URL for an `<img src>`, or `null` while loading / on failure (callers fall
+ * URL for an `<img src>`, `undefined` while loading, `null` when there is none (callers fall
  * back to the chip). A HOOK is injected — not a fetcher — so the shell keeps
  * ownership of the request, its scoping headers and the object-URL lifecycle.
  *
  * Call it like any hook: unconditionally, at the top of a component (see
  * `FileImageThumbnail`, which exists precisely so the call site is stable).
  */
-export type UseFileImageSrc = (id: string) => string | null;
+export type UseFileImageSrc = (id: string) => string | null | undefined;
 
 /**
  * The host's staged upload (`POST /api/uploads` descriptor + PUT to the sink),
@@ -130,6 +131,12 @@ export interface ChatHost {
    * settings load: such a refusal then names neither the link nor the policy.
    */
   personalModelCredentials: boolean | undefined;
+  /**
+   * The credentials that name the model picker's groups: the organization's (when the caller
+   * may read them) and the caller's own, with the upstream models each serves. The shell
+   * builds them from its provider registry; empty until they load.
+   */
+  modelCredentials: readonly PickerCredential[];
   /** A byte count in the language the host renders (`2,0 Ko` in French). */
   formatBytes: (bytes: number) => string;
 }

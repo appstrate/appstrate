@@ -2,11 +2,9 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { KeyRound } from "lucide-react";
+import { ExternalLink, KeyRound, Plus } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
-import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import {
   useApiKeys,
@@ -14,142 +12,85 @@ import {
   useRevokeApiKey,
   type ApiKeyInfo,
 } from "../hooks/use-api-keys";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
-import { ApiKeyCreateModal } from "../components/api-key-create-modal";
-import { formatDateField } from "../lib/format-date";
-
-function isExpired(expiresAt: string | null | undefined): boolean {
-  return expiresAt ? new Date(expiresAt) < new Date() : false;
-}
+import { EmptyState, EmptyStateAction } from "../components/page-states";
+import { DataTable } from "../components/data-table";
+import { SettingsPageActions } from "../components/settings/settings-page-actions";
+import type { MenuAction } from "../lib/menu-action";
+import { useModalParam } from "../hooks/use-modal-param";
+import { ApiKeyCreateModal, NEW_API_KEY_PARAM } from "../components/api-key-create-modal";
+import { useApiKeyColumns } from "./api-key-columns";
 
 export function ApiKeysPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
+  const canCreate = can("api-keys:create");
   const spaceId = useCurrentSpaceId();
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const { data: availableScopes } = useAvailableScopes();
   const revokeApiKeyMutation = useRevokeApiKey();
-  const [createOpen, setCreateOpen] = useState(false);
+  const newApiKey = useModalParam(NEW_API_KEY_PARAM);
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
-  if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={KeyRound} />;
-
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState error={error} />;
-
-  const canCreate = can("api-keys:create");
-  const canRevoke = can("api-keys:revoke");
+  const create: MenuAction = {
+    id: "create",
+    icon: Plus,
+    label: t("settings:apiKeys.createBtn"),
+    onSelect: () => newApiKey.open(),
+    hidden: !canCreate,
+  };
 
   const handleRevoke = (key: ApiKeyInfo) => {
     setConfirmState({ id: key.id, label: key.name });
   };
+  const columns = useApiKeyColumns({
+    availableScopes,
+    revokingKeyId: revokeApiKeyMutation.isPending ? (confirmState?.id ?? null) : null,
+    onRevoke: can("api-keys:revoke") ? handleRevoke : undefined,
+  });
+
+  if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={KeyRound} />;
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-end gap-4">
-        <a
-          href="/api/docs"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-primary text-sm no-underline hover:underline"
-        >
-          {t("settings:apiKeys.swaggerLink")}
-        </a>
-        {canCreate && (
-          <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
-        )}
-      </div>
+      <SettingsPageActions
+        actions={[
+          create,
+          {
+            id: "api-docs",
+            icon: ExternalLink,
+            label: t("settings:apiKeys.swaggerLink"),
+            href: "/api/docs",
+          },
+        ]}
+      />
 
-      {apiKeys && apiKeys.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          {apiKeys.map((key) => {
-            const expired = isExpired(key.expiresAt);
-            return (
-              <div key={key.id} className="border-border bg-card rounded-lg border p-5">
-                <div className="mb-3 flex items-center gap-3">
-                  <div className="flex-1">
-                    <h3 className="text-[0.95rem] font-semibold">{key.name}</h3>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      <Badge variant="secondary" className="opacity-60">
-                        {key.keyPrefix}...
-                      </Badge>
-                      {expired ? (
-                        <Badge variant="failed">{t("settings:apiKeys.expired")}</Badge>
-                      ) : (
-                        <Badge variant="success">{t("settings:apiKeys.active")}</Badge>
-                      )}
-                    </div>
-                  </div>
-                  {/* Scope badges */}
-                  {availableScopes && key.scopes.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {key.scopes.length === availableScopes.length ? (
-                        <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
-                          {t("settings:apiKeys.fullAccess")}
-                        </Badge>
-                      ) : (
-                        [...new Set(key.scopes.map((s) => s.split(":")[0]!))].map((resource) => (
-                          <Badge
-                            key={resource}
-                            variant="outline"
-                            className="px-1.5 py-0 text-[0.65rem]"
-                          >
-                            {resource}
-                          </Badge>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="mt-3 flex flex-col gap-1">
-                  <span className="text-muted-foreground text-sm">
-                    {key.expiresAt
-                      ? t("settings:apiKeys.expiresOn", {
-                          date: formatDateField(key.expiresAt, "date"),
-                        })
-                      : t("settings:apiKeys.neverExpires")}
-                  </span>
-                  {key.lastUsedAt && (
-                    <span className="text-muted-foreground text-sm">
-                      {t("settings:apiKeys.lastUsed", { date: formatDateField(key.lastUsedAt) })}
-                    </span>
-                  )}
-                  {key.created_by_name && (
-                    <span className="text-muted-foreground text-sm">
-                      {t("settings:apiKeys.createdByLabel", { name: key.created_by_name })}
-                    </span>
-                  )}
-                </div>
-                <div className="border-border mt-3 flex justify-end gap-2 border-t pt-3">
-                  {canRevoke && (
-                    <Button variant="destructive" size="sm" onClick={() => handleRevoke(key)}>
-                      {t("settings:apiKeys.revoke")}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <EmptyState
-          message={t("settings:apiKeys.empty")}
-          hint={t("settings:apiKeys.emptyHint")}
-          icon={KeyRound}
-          compact
-        >
-          {canCreate && (
-            <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
-          )}
-        </EmptyState>
-      )}
+      <DataTable
+        tableId="api-keys"
+        label={t("settings:orgSettings.tabApiKeys")}
+        columns={columns}
+        rows={apiKeys ?? []}
+        rowKey={(key) => key.id}
+        isLoading={isLoading}
+        failure={error}
+        empty={
+          <EmptyState
+            message={t("settings:apiKeys.empty")}
+            hint={t("settings:apiKeys.emptyHint")}
+            icon={KeyRound}
+            compact
+          >
+            <EmptyStateAction action={create} />
+          </EmptyState>
+        }
+      />
 
-      <ApiKeyCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      {canCreate && <ApiKeyCreateModal />}
 
       <ConfirmModal
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("settings:apiKeys.revokeTitle")}
+        confirmLabel={t("settings:apiKeys.revoke")}
         description={t("settings:apiKeys.revokeConfirm", { name: confirmState?.label })}
         isPending={revokeApiKeyMutation.isPending}
         onConfirm={() => {

@@ -1,21 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Badge } from "@appstrate/ui/components/badge";
 import {
   OnboardingLayout,
   useOnboardingGuard,
   useOnboardingNav,
 } from "../../components/onboarding-layout";
 import { CopyLinkButton } from "../../components/copy-link-button";
-import { $api } from "../../api/client";
+import { useOrgDetail } from "../../hooks/use-org";
 import { roleI18nKey } from "../../hooks/use-permissions";
 import {
   OrgInvitationForm,
   type OrgInvitationFormHandle,
 } from "../../components/org-invitation-form";
+import { TextSkeleton } from "../../components/loading-skeletons";
 
 export function OnboardingMembersStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -24,12 +25,7 @@ export function OnboardingMembersStep() {
   const { nextRoute, prevRoute } = useOnboardingNav("members");
   const inviteFormRef = useRef<OrgInvitationFormHandle>(null);
 
-  const { data: orgData } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
+  const { data: orgData } = useOrgDetail();
 
   const invitations = orgData?.invitations ?? [];
 
@@ -43,7 +39,16 @@ export function OnboardingMembersStep() {
     if (sent && nextRoute) navigate(nextRoute);
   };
 
-  if (!orgId) return null;
+  if (!orgId)
+    return (
+      <OnboardingLayout
+        step="members"
+        title={t("onboarding.membersTitle")}
+        subtitle={t("onboarding.membersSubtitle")}
+      >
+        <TextSkeleton lines={3} className="py-4" />
+      </OnboardingLayout>
+    );
 
   return (
     <OnboardingLayout
@@ -70,7 +75,7 @@ export function OnboardingMembersStep() {
                     <span className="block truncate text-sm font-medium">{inv.email}</span>
                   </div>
                   <CopyLinkButton token={inv.token} />
-                  <Badge variant="pending">{t(roleI18nKey(inv.role))}</Badge>
+                  <ToneBadge variant="pending">{t(roleI18nKey(inv.role))}</ToneBadge>
                 </div>
               </div>
             ))}

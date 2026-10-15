@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ChevronDown,
@@ -41,9 +42,12 @@ import {
   flattenVisibleRows,
   nextTreeFocus,
   type PackageFileEntry,
+  type TreeNode,
 } from "../../lib/package-file-tree";
 
 const ROW_HEIGHT = 26;
+const NO_DIRECTORIES: readonly string[] = [];
+const NO_COLLAPSED_PATHS: readonly string[] = [];
 
 /** What an editable tree can do, supplied by the surface that owns the writes. */
 interface FileTreeActions {
@@ -55,43 +59,55 @@ interface FileTreeActions {
   isPinned: (path: string) => boolean;
   /** A write is in flight: every gesture is refused until the tree is current again. */
   isBusy: boolean;
-  labels: {
-    newFile: string;
-    upload: string;
-    rename: string;
-    delete: string;
-  };
 }
 
 interface FileTreeProps {
   entries: readonly PackageFileEntry[];
-  /** Path of the file whose preview is showing, or `null`. */
+  /** Directories that must remain visible even when they contain no file. */
+  directories?: readonly string[];
+  /** Directories collapsed on first mount without changing the shared default. */
+  initialCollapsedPaths?: readonly string[];
+  /** Displayed name of a directory, by path, when its path is a stable key rather than a word. */
+  directoryLabels?: Readonly<Record<string, string>>;
+  /** Path of the node (file or directory) whose preview is showing, or `null`. */
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  /** Optional richer selection for explorers that also preview directories. */
+  onSelectNode?: (node: TreeNode) => void;
   /** Accessible name of the tree (translated by the caller). */
   label: string;
   /** `id` of the panel this tree drives — announced as `aria-controls`. */
   controlsId?: string;
   /** Present on the authoring surface only; absent, the tree is read-only. */
   actions?: FileTreeActions;
+  /** Off when the surface draws the new-file and import buttons itself. */
+  showToolbar?: boolean;
   className?: string;
 }
 
 export function FileTree({
   entries,
+  directories = NO_DIRECTORIES,
+  initialCollapsedPaths = NO_COLLAPSED_PATHS,
+  directoryLabels,
   selectedPath,
   onSelect,
+  onSelectNode,
   label,
   controlsId,
   actions,
+  showToolbar = true,
   className,
 }: FileTreeProps) {
-  const tree = useMemo(() => buildFileTree(entries), [entries]);
+  const { t } = useTranslation("agents");
+  const tree = useMemo(() => buildFileTree(entries, directories), [directories, entries]);
   // The user's CLOSED directories, not their open ones. Package archives are
   // small (tens of files), so the whole artifact is visible at a glance by
   // default — and a directory that appears in a later refetch is open by
   // construction rather than the one closed row in an otherwise open tree.
-  const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(() => new Set());
+  const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(
+    () => new Set(initialCollapsedPaths),
+  );
   const [focusedId, setFocusedId] = useState<string | null>(null);
 
   const rows = useMemo(() => flattenVisibleRows(tree, collapsedDirs), [tree, collapsedDirs]);
@@ -171,6 +187,7 @@ export function FileTree({
       // never disagree with the file the preview then fetches.
       if (row.node.kind === "file") onSelect(row.node.entry.path);
       else setCollapsed(row.node.path, row.expanded);
+      onSelectNode?.(row.node);
       return;
     }
 
@@ -192,14 +209,14 @@ export function FileTree({
   // somewhere sensible inside the tree.
   const tabbableId =
     rows.find((row) => row.node.id === focusedId)?.node.id ??
-    rows.find((row) => row.node.kind === "file" && row.node.entry.path === selectedPath)?.node.id ??
+    rows.find((row) => row.node.path === selectedPath)?.node.id ??
     rows[0]?.node.id ??
     null;
 
   return (
     <div className={cn("flex flex-col", className)}>
-      {actions && (
-        <div className="border-border flex shrink-0 items-center gap-1 border-b p-1">
+      {actions && showToolbar && (
+        <div className="border-border flex shrink-0 flex-wrap items-center gap-1 border-b p-1">
           <Button
             variant="ghost"
             size="sm"
@@ -208,7 +225,7 @@ export function FileTree({
             disabled={actions.isBusy}
           >
             <FilePlus size={13} />
-            {actions.labels.newFile}
+            {t("files.newFile")}
           </Button>
           <Button
             variant="ghost"
@@ -218,7 +235,7 @@ export function FileTree({
             disabled={actions.isBusy}
           >
             <Upload size={13} />
-            {actions.labels.upload}
+            {t("files.upload")}
           </Button>
         </div>
       )}
@@ -233,7 +250,7 @@ export function FileTree({
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const row = rows[virtualRow.index]!;
             const node = row.node;
-            const isSelected = node.kind === "file" && node.entry.path === selectedPath;
+            const isSelected = node.path === selectedPath;
             const isFocused = node.id === focusedId;
             const Icon = node.kind === "file" ? FileIcon : row.expanded ? FolderOpen : Folder;
             const editable =
@@ -246,7 +263,7 @@ export function FileTree({
                 aria-setsize={row.setSize}
                 aria-posinset={row.posInSet}
                 aria-expanded={node.kind === "dir" ? row.expanded : undefined}
-                aria-selected={node.kind === "file" ? isSelected : undefined}
+                aria-selected={isSelected}
                 tabIndex={node.id === tabbableId ? 0 : -1}
                 data-tree-focused={isFocused ? "true" : undefined}
                 onFocus={() => setFocusedId(node.id)}
@@ -254,9 +271,10 @@ export function FileTree({
                   setFocusedId(node.id);
                   if (node.kind === "file") onSelect(node.entry.path);
                   else setCollapsed(node.path, row.expanded);
+                  onSelectNode?.(node);
                 }}
                 className={cn(
-                  "hover:bg-muted/60 focus-visible:ring-ring group flex cursor-pointer items-center gap-1.5 rounded-sm pr-1 text-sm outline-none focus-visible:ring-2",
+                  "hover:bg-muted/60 focus-visible:ring-ring group flex cursor-pointer items-center justify-start gap-1.5 rounded-sm pr-1 text-left text-sm outline-none focus-visible:ring-2",
                   isSelected ? "bg-muted text-foreground font-medium" : "text-muted-foreground",
                 )}
                 style={{
@@ -280,7 +298,9 @@ export function FileTree({
                   <span className="w-3 shrink-0" aria-hidden />
                 )}
                 <Icon size={13} className="shrink-0 opacity-70" aria-hidden />
-                <span className="min-w-0 flex-1 truncate">{node.name}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {(node.kind === "dir" && directoryLabels?.[node.path]) || node.name}
+                </span>
                 {editable && node.kind === "file" && (
                   // `tabIndex={-1}`: a `treeitem` owns exactly one tab stop, and
                   // the roving tabindex above IS that stop. The keyboard path to
@@ -291,13 +311,13 @@ export function FileTree({
                   <span className="flex shrink-0 items-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
                     <RowAction
                       icon={Pencil}
-                      label={actions.labels.rename}
+                      label={t("files.rename")}
                       disabled={actions.isBusy}
                       onClick={() => actions.onRename(node.entry.path)}
                     />
                     <RowAction
                       icon={Trash2}
-                      label={actions.labels.delete}
+                      label={t("files.delete")}
                       disabled={actions.isBusy}
                       onClick={() => actions.onDelete(node.entry.path)}
                     />

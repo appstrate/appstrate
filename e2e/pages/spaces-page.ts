@@ -13,15 +13,21 @@ export class SpacesPage {
   }
 
   async waitForLoaded() {
-    await expect(this.page.getByRole("heading", { name: "Default" })).toBeVisible({
+    await expect(this.page.getByRole("cell", { name: "Default", exact: true })).toBeVisible({
       timeout: 10_000,
     });
   }
 
-  /** Click the create space button and wait for the modal to open. */
+  /** The create-space modal, a second dialog over the settings overlay. */
+  get createDialog() {
+    return this.page.getByRole("dialog", { name: "Nouvel espace" });
+  }
+
+  /** Open the page's Actions menu, pick the create entry, and wait for the modal. */
   async openCreateModal() {
+    await this.page.getByRole("button", { name: "Actions", exact: true }).click();
     await this.page.getByTestId("create-space-button").click();
-    await expect(this.page.locator("[role='dialog']")).toBeVisible();
+    await expect(this.createDialog).toBeVisible();
   }
 
   /** Fill the name and submit the create space form. */
@@ -30,14 +36,16 @@ export class SpacesPage {
     await this.page.locator("#space-create-name").fill(name);
     await this.page.getByTestId("space-create-submit").click();
     // Wait for modal to close (creation complete)
-    await expect(this.page.locator("[role='dialog']")).not.toBeVisible();
+    await expect(this.createDialog).toHaveCount(0);
   }
 
   async expectSpaceVisible(name: string) {
-    await expect(this.page.getByText(name)).toBeVisible({ timeout: 5_000 });
+    await expect(this.page.getByRole("cell", { name, exact: true })).toBeVisible({
+      timeout: 5_000,
+    });
   }
 
   async expectDefaultBadgeVisible() {
-    await expect(this.page.getByText("Par défaut")).toBeVisible();
+    await expect(this.page.getByRole("cell", { name: "Par défaut" })).toBeVisible();
   }
 }

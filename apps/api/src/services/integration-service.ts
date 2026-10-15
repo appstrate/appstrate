@@ -8,7 +8,7 @@
  * and the runtime credential/spawn path live in their own services.
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageShares, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { integrationManifestSchema } from "@appstrate/core/integration";
@@ -25,6 +25,7 @@ import { pickVersion } from "./run-launcher/db-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { logger } from "../lib/logger.ts";
 import { formatZodIssues } from "../lib/zod-format.ts";
+import { likeContains } from "../lib/like-pattern.ts";
 
 // ---------------------------------------------------------------------------
 // Manifest loading
@@ -854,7 +855,22 @@ export async function fetchIntegrationPromptDocs(
  * never reaches the response, whatever the caller's organization role
  * (RBAC spec §3.6).
  */
-export async function listIntegrations(scope: SpaceScope): Promise<IntegrationSummary[]> {
+/**
+ * Narrowing of {@link listIntegrations}, combined with the placement rule.
+ * `ids`: only these package ids (an id not placed here is absent, never an
+ * error). `search`: case-insensitive substring of the id, the manifest's
+ * `display_name` or its `description`, taken as typed.
+ */
+export interface IntegrationListFilters {
+  ids?: readonly string[];
+  search?: string;
+}
+
+export async function listIntegrations(
+  scope: SpaceScope,
+  filters: IntegrationListFilters = {},
+): Promise<IntegrationSummary[]> {
+  const pattern = filters.search ? likeContains(filters.search) : undefined;
   const rows = await db
     .select({
       id: packages.id,
@@ -870,6 +886,15 @@ export async function listIntegrations(scope: SpaceScope): Promise<IntegrationSu
         notEphemeralFilter(),
         placementReadFilter(scope.spaceId),
         eq(packages.type, "integration"),
+        // An empty list would be `IN ()`, SQL for "nothing", where the caller meant no filter.
+        filters.ids?.length ? inArray(packages.id, [...filters.ids]) : undefined,
+        pattern
+          ? or(
+              ilike(packages.id, pattern),
+              ilike(sql`${packages.draftManifest}->>'display_name'`, pattern),
+              ilike(sql`${packages.draftManifest}->>'description'`, pattern),
+            )
+          : undefined,
       ),
     )
     // The route paginates this in memory: a stable order keeps pages disjoint.

@@ -20,3 +20,17 @@ export function toLiveSlug(value: string): string {
 export function sameSet(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v) => b.includes(v));
 }
+
+/**
+ * A list's search box: whether one of a row's texts holds `search`, ignoring
+ * case and surrounding blanks. An empty search matches every row; a missing
+ * text matches none.
+ */
+export function matchesSearch(
+  search: string,
+  texts: readonly (string | null | undefined | readonly string[])[],
+): boolean {
+  const needle = search.trim().toLocaleLowerCase();
+  if (!needle) return true;
+  return texts.flat().some((text) => text?.toLocaleLowerCase().includes(needle) ?? false);
+}

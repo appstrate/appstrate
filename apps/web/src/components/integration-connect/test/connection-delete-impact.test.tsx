@@ -64,14 +64,13 @@ describe("ConnectionDeleteImpact", () => {
       schedules: [],
       other_schedules_disabled_count: 0,
     });
-    expect(html).toContain(i18n.t("settings:connections.pinImpact.intro", { count: 2 }));
+    expect(html).toContain(i18n.t("settings:connections.impact.title"));
     expect(html).toContain("Ops multi");
-    expect(html).toContain(i18n.t("settings:connections.pinImpact.shrinks", { count: 2, from: 3 }));
+    expect(html).toContain(i18n.t("settings:connections.impact.shrinks", { count: 2, from: 3 }));
     expect(html).toContain("Audit");
-    expect(html).toContain(i18n.t("settings:connections.pinImpact.resets"));
-    expect(html).not.toContain(i18n.t("settings:connections.scheduleImpact.intro", { count: 1 }));
+    expect(html).toContain(i18n.t("settings:connections.impact.agentResets"));
     expect(html).not.toContain(
-      i18n.t("settings:connections.pinImpact.disablesSchedules", { count: 1 }),
+      i18n.t("settings:connections.impact.disablesSchedules", { count: 1 }),
     );
   });
 
@@ -88,10 +87,10 @@ describe("ConnectionDeleteImpact", () => {
       schedules: [],
       other_schedules_disabled_count: 0,
     });
-    const resets = i18n.t("settings:connections.pinImpact.resets");
+    const resets = i18n.t("settings:connections.impact.agentResets");
     for (const count of [1, 2]) {
       expect(html).toContain(
-        `${resets} — ${i18n.t("settings:connections.pinImpact.disablesSchedules", { count })}`,
+        `${resets}. ${i18n.t("settings:connections.impact.disablesSchedules", { count })}`,
       );
     }
   });
@@ -121,16 +120,13 @@ describe("ConnectionDeleteImpact", () => {
       ],
       other_schedules_disabled_count: 0,
     });
-    expect(html).toContain(i18n.t("settings:connections.scheduleImpact.intro", { count: 2 }));
+    expect(html).toContain(i18n.t("settings:connections.impact.title"));
     expect(html).toContain("Rapport du lundi");
-    expect(html).toContain(
-      i18n.t("settings:connections.scheduleImpact.shrinks", { count: 1, from: 2 }),
-    );
+    expect(html).toContain(i18n.t("settings:connections.impact.shrinks", { count: 1, from: 2 }));
     expect(html).toContain(i18n.t("settings:connections.scheduleImpact.unnamed"));
     expect(html).toContain("(Audit)");
-    expect(html).toContain(i18n.t("settings:connections.scheduleImpact.resets"));
-    expect(html).not.toContain(i18n.t("settings:connections.pinImpact.intro", { count: 1 }));
-    expect(html).not.toContain(i18n.t("settings:connections.scheduleImpact.disables"));
+    expect(html).toContain(i18n.t("settings:connections.impact.scheduleResets"));
+    expect(html).not.toContain(i18n.t("settings:connections.impact.scheduleDisables"));
   });
 
   it("says an enabled schedule the delete leaves with no connection is disabled", () => {
@@ -151,8 +147,8 @@ describe("ConnectionDeleteImpact", () => {
     });
     expect(html).toContain("Veille");
     expect(html).toContain("(Ops multi)");
-    expect(html).toContain(i18n.t("settings:connections.scheduleImpact.disables"));
-    expect(html).not.toContain(i18n.t("settings:connections.scheduleImpact.resets"));
+    expect(html).toContain(i18n.t("settings:connections.impact.scheduleDisables"));
+    expect(html).not.toContain(i18n.t("settings:connections.impact.scheduleResets"));
   });
 
   it("counts other people's schedules the delete disables, naming none of them", () => {
@@ -170,10 +166,46 @@ describe("ConnectionDeleteImpact", () => {
     ).not.toContain('data-testid="connection-delete-impact"');
   });
 
-  it("says it is checking until the impact arrives", () => {
+  it("holds its place until the impact arrives", () => {
     const html = render(<Harness />, { queryClient: new QueryClient() });
     expect(html).toContain('data-testid="connection-delete-impact-loading"');
-    expect(html).toContain(i18n.t("settings:connections.deleteImpact.loading"));
+    expect(html).toContain('role="status"');
+  });
+
+  it("punctuates each line as its language does", async () => {
+    const impact: Impact = {
+      pins: [
+        {
+          agent_package_id: "@acme/ops",
+          agent_display_name: "Ops multi",
+          integration_package_id: "@acme/ssh",
+          connection_count: 1,
+          schedules_disabled_count: 0,
+        },
+      ],
+      schedules: [
+        {
+          scheduleId: "sch_1",
+          schedule_name: "Veille",
+          agent_package_id: "@acme/ops",
+          agent_display_name: "Ops multi",
+          integration_package_id: "@acme/ssh",
+          connection_count: 1,
+          disables: false,
+        },
+      ],
+      other_schedules_disabled_count: 0,
+    };
+    expect(renderWith(impact)).toContain("Ops multi</span> : ");
+    await i18n.changeLanguage("en");
+    try {
+      const html = renderWith(impact);
+      expect(html).toContain("Ops multi</span>: ");
+      expect(html).toContain("Veille</span> (Ops multi): ");
+      expect(html).not.toContain(" : ");
+    } finally {
+      await i18n.changeLanguage("fr");
+    }
   });
 
   it("says the check failed when the impact cannot be read", () => {

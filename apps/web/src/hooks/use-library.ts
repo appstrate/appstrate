@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import i18n from "../i18n";
 import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type paths } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
-import { agentsKeys, packageKeys } from "../lib/query-keys";
+import { agentsKeys, invalidatePaths, packageKeys } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
+import { activationGate } from "../lib/catalogue-gates";
 
 /**
  * Wire shape from the OpenAPI spec (`GET /api/library`) — the organization
@@ -31,25 +32,33 @@ export type LibrarySpace = LibraryResponse["spaces"][number];
  */
 export type LibraryPlacement = LibraryPackageItem["placements"][number];
 
-export function useLibrary() {
+/**
+ * The library every screen but one space's own page reads: `GET /api/library`,
+ * graded by the server — an administrator's whole map, a member's or guest's
+ * own spaces (the union of their per-space libraries). One request, whatever
+ * the caller's role.
+ *
+ * `enabled: false` reads nothing, for a surface the caller cannot open.
+ */
+export function useCatalogueLibrary({ enabled = true }: { enabled?: boolean } = {}) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/library",
     { params: { header: scope.header } },
-    { enabled: scope.enabled },
+    { enabled: scope.enabled && enabled },
   );
 }
 
 /**
- * Space readers never need access to the organization administration view.
+ * One space's own library page.
  *
  * `enabled: false` is for the caller that already holds the answer from a
  * narrower response — a package's own detail — and must not spend a second
  * round trip restating it. A snapshot another component on the page fetched is
  * still read from the cache.
  */
-export function useSpaceLibrary(options: { enabled?: boolean } = {}) {
+function useSpaceLibrary(options: { enabled?: boolean } = {}) {
   const scope = useOrgOnlyScope();
   const spaceId = useCurrentSpaceId();
   return $api.useQuery(
@@ -65,7 +74,7 @@ export function useSpaceLibrary(options: { enabled?: boolean } = {}) {
 }
 
 /** The placement of `pkg` in `spaceId`, or `undefined` when it sits elsewhere. */
-export function placementIn(
+function placementIn(
   pkg: Pick<LibraryPackageItem, "placements">,
   spaceId: string | null | undefined,
 ): LibraryPlacement | undefined {
@@ -184,12 +193,20 @@ export function activationStateOf(
   };
 }
 
+/**
+ * Both forms of the library: the organization's (`useCatalogueLibrary`) and the
+ * current space's (`usePackageActivationState`). Invalidating one alone leaves
+ * the other's reader on a stale list.
+ */
+export function invalidateLibraries(qc: QueryClient) {
+  return invalidatePaths(qc, ["/api/library", "/api/spaces/{spaceId}/library"]);
+}
+
 /** Activation changes affect the library and every space's package/agent cache. */
 export function useInvalidatePackageActivation() {
   const qc = useQueryClient();
   return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/library"] });
+    void invalidateLibraries(qc);
     void qc.invalidateQueries({ queryKey: packageKeys.all });
     void qc.invalidateQueries({ queryKey: agentsKeys.all });
     void invalidateIntegrationQueries(qc);
@@ -224,11 +241,7 @@ export function useSetChatEnforced() {
       toast.success(
         i18n.t(enforced ? "settings:packages.chatEnforced" : "settings:packages.chatUnenforced"),
       ),
-    onSettled: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["get", "/api/library"] }),
-        qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/library"] }),
-      ]),
+    onSettled: () => invalidateLibraries(qc),
   });
 }
 
@@ -315,4 +328,39 @@ export function useSetPackageActive() {
       ),
     onSettled: invalidate,
   });
+}
+
+/**
+ * One package's switch in the current space: the server's two verdicts, served
+ * on the package's row of the space library (`activation`), and the two acts.
+ * Every control that flips it asks this instead of wiring the mutation, the
+ * space id and the grant by hand.
+ *
+ * A row the library does not carry (not read yet, or not readable by the
+ * caller) answers `false` both ways: the control stays dead and blames nobody.
+ */
+export function usePackageActivation(packageId: string) {
+  const setActive = useSetPackageActive();
+  const spaceId = useCurrentSpaceId();
+  const { data: library } = useSpaceLibrary();
+  const row = useMemo(
+    () =>
+      library
+        ? Object.values(library.packages)
+            .flat()
+            .find((pkg) => pkg.id === packageId)
+        : undefined,
+    [library, packageId],
+  );
+  const may = (next: boolean) => !!spaceId && !!row && activationGate(row, spaceId, next).allowed;
+  const set = (active: boolean, options?: { onSuccess?: () => void }) => {
+    if (spaceId) setActive.mutate({ spaceId, packageId, active }, options);
+  };
+  return {
+    mayActivate: may(true),
+    mayDeactivate: may(false),
+    activate: (options?: { onSuccess?: () => void }) => set(true, options),
+    deactivate: (options?: { onSuccess?: () => void }) => set(false, options),
+    pending: setActive.isPending,
+  };
 }

@@ -1,27 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ToneBadge } from "@/components/app-ui/status-variants";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Send } from "lucide-react";
-import { Badge } from "@appstrate/ui/components/badge";
-import { Button } from "@appstrate/ui/components/button";
-import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
+import { relativeAge } from "@appstrate/core/format";
+import { ErrorState, EmptyState } from "@/components/page-states";
+import { ItemList } from "@/components/item-list";
+import { ListFooter } from "@/components/list-toolbar";
 import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";
 import { errorMessage } from "../../../lib/mutation-error";
+
+const AGE_KEY = {
+  now: "webhooks.lessThanMinute",
+  minute: "webhooks.minutesAgo",
+  hour: "webhooks.hoursAgo",
+  day: "webhooks.daysAgo",
+  month: "webhooks.monthsAgo",
+  year: "webhooks.yearsAgo",
+} as const;
 
 function formatRelativeTime(
   dateStr: string,
   t: (key: string, opts?: Record<string, unknown>) => string,
 ): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return t("webhooks.lessThanMinute");
-  if (minutes < 60) return t("webhooks.minutesAgo", { count: minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t("webhooks.hoursAgo", { count: hours });
-  const days = Math.floor(hours / 24);
-  return t("webhooks.daysAgo", { count: days });
+  const age = relativeAge(dateStr, Date.now());
+  return age ? t(AGE_KEY[age.unit], { count: age.count }) : "";
 }
 
 function deliveryStatusVariant(d: WebhookDelivery): "success" | "failed" | "pending" {
@@ -49,49 +55,62 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
   } = useWebhookDeliveries(webhookId);
   const deliveries = useMemo(() => data?.pages.flatMap((p) => p.data) ?? [], [data]);
 
-  if (isLoading) return <LoadingState />;
-  // Once rows are on screen, a failed page (next or refetch) must not hide them.
-  if (error && !data) return <ErrorState error={error} />;
-
-  if (deliveries.length === 0) {
-    return <EmptyState message={t("settings:webhooks.noDeliveries")} icon={Send} compact />;
-  }
+  // Only a failed FIRST load answers as a failure. Once rows are on screen, a
+  // failed page (next or refetch) must not hide them: the footer says it.
+  const failed = Boolean(error) && !data;
 
   return (
-    <div className="space-y-2">
-      {deliveries.map((d) => {
-        const variant = deliveryStatusVariant(d);
-        return (
-          <div key={d.id} className="border-border bg-card rounded-lg border p-3">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="text-muted-foreground truncate font-mono text-xs">{d.eventId}</span>
-              <span className="font-mono text-sm">{d.eventType}</span>
+    <>
+      <ItemList
+        items={deliveries}
+        itemKey={(d) => d.id}
+        isLoading={isLoading}
+        isError={failed}
+        error={<ErrorState error={error} compact />}
+        empty={<EmptyState message={t("settings:webhooks.noDeliveries")} icon={Send} compact />}
+        renderItem={(d) => {
+          const variant = deliveryStatusVariant(d);
+          return (
+            <div className="border-border bg-card rounded-lg border p-3">
+              <div className="mb-1 flex items-center gap-2">
+                <span className="text-muted-foreground truncate font-mono text-xs">
+                  {d.eventId}
+                </span>
+                <span className="font-mono text-sm">{d.eventType}</span>
+              </div>
+              <div className="text-muted-foreground flex items-center gap-2 text-xs">
+                <ToneBadge variant={variant}>{deliveryStatusLabel(d)}</ToneBadge>
+                {d.latency != null && <span>{d.latency}ms</span>}
+                <span>{t("settings:webhooks.deliveryAttempt", { attempt: d.attempt })}</span>
+                <span>{formatRelativeTime(d.createdAt, t)}</span>
+              </div>
+              {d.error && <p className="text-destructive mt-1 text-xs">{d.error}</p>}
             </div>
-            <div className="text-muted-foreground flex items-center gap-2 text-xs">
-              <Badge variant={variant}>{deliveryStatusLabel(d)}</Badge>
-              {d.latency != null && <span>{d.latency}ms</span>}
-              <span>{t("settings:webhooks.deliveryAttempt", { attempt: d.attempt })}</span>
-              <span>{formatRelativeTime(d.createdAt, t)}</span>
-            </div>
-            {d.error && <p className="text-destructive mt-1 text-xs">{d.error}</p>}
-          </div>
-        );
-      })}
-      {error && (
-        <p className="text-destructive mt-2 text-sm">
-          {t("common:error.generic")} {errorMessage(error)}
-        </p>
-      )}
-      {hasNextPage && (
-        <Button
-          variant="outline"
-          className="mt-2"
-          disabled={isFetchingNextPage}
-          onClick={() => void fetchNextPage()}
-        >
-          {isFetchNextPageError ? t("common:btn.retry") : t("settings:webhooks.loadMoreDeliveries")}
-        </Button>
-      )}
-    </div>
+          );
+        }}
+      />
+      <ListFooter
+        count={
+          error && data ? (
+            <span className="text-destructive">
+              {t("common:error.generic")} {errorMessage(error)}
+            </span>
+          ) : undefined
+        }
+      >
+        {hasNextPage && !failed && (
+          <PendingButton
+            variant="outline"
+            size="sm"
+            pending={isFetchingNextPage}
+            onClick={() => void fetchNextPage()}
+          >
+            {isFetchNextPageError
+              ? t("common:btn.retry")
+              : t("settings:webhooks.loadMoreDeliveries")}
+          </PendingButton>
+        )}
+      </ListFooter>
+    </>
   );
 }

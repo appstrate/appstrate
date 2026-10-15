@@ -60,6 +60,7 @@ const LOCAL_KEY: ModelProviderCredentialInfo = {
   created_by: null,
   allowed_actions: [],
   bindable: true,
+  serves_model_ids: [],
   createdAt: "2026-07-01T10:00:00.000Z",
   updatedAt: "2026-07-01T10:00:00.000Z",
 };
@@ -141,8 +142,8 @@ describe("EndpointFields", () => {
         onClear: () => {},
       },
     });
-    const input = html.slice(html.indexOf('id="mdl-baseUrl"'));
-    expect(input.slice(0, input.indexOf(">"))).toContain("disabled");
+    const at = html.indexOf('id="mdl-baseUrl"');
+    expect(html.slice(html.lastIndexOf("<input", at), html.indexOf(">", at))).toContain("disabled");
     expect(html).toContain(settingsFr["models.form.baseUrlPinnedHint"]);
     expect(html).toContain(LOCAL_KEY.label);
     // The key is selected, so there is nothing to type into.

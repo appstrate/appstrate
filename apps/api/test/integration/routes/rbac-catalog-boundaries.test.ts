@@ -240,7 +240,7 @@ describe("organization detail privacy", () => {
 });
 
 describe("organization library administration", () => {
-  it("reserves the organization library to owners and admins", async () => {
+  it("opens the organization library to every member's own credential, never to an API key", async () => {
     expect((await app.request("/api/library", { headers: authHeaders(ctx) })).status).toBe(200);
     for (const role of ["admin", "member", "guest"] as const) {
       const user = await createTestUser();
@@ -248,7 +248,7 @@ describe("organization library administration", () => {
       const res = await app.request("/api/library", {
         headers: { ...authHeaders(ctx), Cookie: user.cookie },
       });
-      expect(res.status).toBe(role === "admin" ? 200 : 403);
+      expect(res.status).toBe(200);
     }
     expect(
       (
@@ -259,11 +259,16 @@ describe("organization library administration", () => {
     ).toBe(403);
   });
 
-  it("does not let an owner previewing a member regain organization administration", async () => {
-    const res = await app.request("/api/library", {
-      headers: { ...authHeaders(ctx), "X-View-As": "org_role=member" },
-    });
-    expect(res.status).toBe(403);
+  it("grades an owner previewing a member as that member", async () => {
+    // A closed space nobody but owners and admins reaches: the preview must not see it.
+    const closed = await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "closed" });
+    const spacesOf = async (extra: Record<string, string>) => {
+      const res = await app.request("/api/library", { headers: { ...authHeaders(ctx), ...extra } });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { spaces: { id: string }[] }).spaces.map((space) => space.id);
+    };
+    expect(await spacesOf({})).toContain(closed.id);
+    expect(await spacesOf({ "X-View-As": "org_role=member" })).not.toContain(closed.id);
   });
 
   it("discovers readable candidates without revealing other spaces' installation state", async () => {

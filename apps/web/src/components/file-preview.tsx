@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Modal wrapper around the reusable file viewer. */
+/** Modal wrapper around the file's Artifact frame. */
 
-import { useTranslation } from "react-i18next";
-import { DownloadIcon } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "./modal";
-import { useFile, useFileDownload } from "../hooks/use-files";
-import { FileViewer } from "./file-viewer";
+import { useFile } from "../hooks/use-files";
+import { FileArtifact } from "./file-artifact";
 
 export function FilePreview({
   file,
@@ -19,31 +16,30 @@ export function FilePreview({
   file: { id: string; name: string };
   onClose: () => void;
 }) {
-  const { t } = useTranslation("files");
-  const download = useFileDownload();
   // Callers mount this modal only while it is open, so mounting IS opening:
   // the DTO (and its short-lived preview token) is fetched fresh per open.
   const { data, isLoading, error } = useFile(file.id);
-  const fileName = file.name || data?.name || "";
   return (
     <Modal
       open
       onClose={onClose}
       // Deep links (e.g. `?preview=<id>`) may target a file outside the caller's
       // loaded page, so `file.name` can be empty — fall back to the fetched DTO's name.
-      title={fileName}
+      title={file.name || data?.name || ""}
       // DialogContent is a grid with auto rows — pin the body row to the
       // remaining height (minmax(0,1fr)) so the iframe previews stretch to the
       // full modal height instead of their intrinsic size.
-      className="h-[85vh] max-w-5xl grid-rows-[auto_minmax(0,1fr)_auto]"
-      actions={
-        <Button variant="outline" onClick={() => void download(file.id, fileName)}>
-          <DownloadIcon className="size-4" />
-          {t("row.download")}
-        </Button>
-      }
+      className="h-[85vh] max-w-5xl grid-rows-[auto_minmax(0,1fr)]"
     >
-      <FileViewer fileId={file.id} file={data} isLoading={isLoading} error={error} />
+      {/* The modal already titles the file; the frame carries the rest. */}
+      <FileArtifact
+        fileId={file.id}
+        file={data}
+        isLoading={isLoading}
+        error={error}
+        fallbackName={file.name}
+        showName={false}
+      />
     </Modal>
   );
 }

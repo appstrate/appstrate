@@ -4,11 +4,12 @@
  * Pure logic behind "how do I render a run's cost, given what the platform
  * actually knows about its pricing".
  *
- * Two surfaces show the number — the run header readout (`run-detail.tsx`) and
- * the Exécution pane's Usage card (`run-execution-tab.tsx`) — and they must
- * agree: a header saying `—` above a card saying
- * `$0.0000` is worse than either alone. This module is the single decision;
- * {@link RunCostReadout} (`run-cost-readout.tsx`) is its only renderer.
+ * Two surfaces show the number — the run header
+ * (`run-detail/run-header-summary.tsx`) and the Usage card
+ * (`run-detail/run-snapshot-inspector.tsx`) — and they must agree: a header
+ * saying `—` above a card saying `$0.0000` is worse than either alone. This
+ * module is the single decision; {@link RunCostReadout}
+ * (`run-cost-readout.tsx`) is its only renderer.
  *
  * Split from the component because the web test runner has no DOM: the mapping
  * is the part worth testing, and it is testable only if it does not import the
@@ -22,6 +23,7 @@
  */
 
 import type { RunWireDto } from "@appstrate/shared-types";
+import i18n from "../i18n";
 
 /**
  * Pricing provenance as carried by the run DTO / the `run_metric` SSE frame.
@@ -75,8 +77,15 @@ export function describeRunCost(
     return { text: COST_UNAVAILABLE, tooltipKey: "run.costUnpricedTooltip" };
   }
   // Four decimals: a single cheap call rounds to $0.00 at two, and the readout
-  // is the only place a per-run spend is visible.
-  const text = `$${amount.toFixed(4)}`;
+  // is the only place a per-run spend is visible. Written the interface's way:
+  // « 0,0017 $ » in French.
+  const text = new Intl.NumberFormat(i18n.language, {
+    style: "currency",
+    currency: "USD",
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(amount);
   if (pricingStatus === "unpriced") return { text, tooltipKey: "run.costUnpricedFloorTooltip" };
   if (pricingStatus === "partial") return { text, tooltipKey: "run.costPartialTooltip" };
   return { text, tooltipKey: null };

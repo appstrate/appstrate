@@ -5,10 +5,11 @@
  * implicit: detection spends a request against an unknown host.
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "../spinner";
-import { discoveryErrorKey, type DiscoveryState } from "@/lib/model-discovery";
+import type { DiscoveryState } from "@/lib/model-discovery";
+import { DiscoveryResult } from "./discovery-result";
 
 export function DiscoveryControls({
   mode,
@@ -29,14 +30,14 @@ export function DiscoveryControls({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
-        <Button
+        <PendingButton
           type="button"
           variant={mode === "list" ? "default" : "outline"}
           onClick={onDiscover}
-          disabled={isPending}
+          pending={isPending}
         >
-          {isPending ? <Spinner /> : t("models.form.discoverButton")}
-        </Button>
+          {t("models.form.discoverButton")}
+        </PendingButton>
         <Button
           type="button"
           variant={mode === "manual" ? "default" : "outline"}
@@ -45,23 +46,7 @@ export function DiscoveryControls({
           {t("models.form.manualButton")}
         </Button>
       </div>
-      {mode === "list" &&
-        discovery &&
-        (discovery.outcome === "ok" ? (
-          <div className="text-muted-foreground text-sm">
-            {discovery.models.length > 0
-              ? t("models.form.discoverCount", { count: discovery.models.length })
-              : t("models.form.discoverEmpty")}
-            {/* A capped listing is short of what the endpoint serves — saying so
-                is the difference between "these are the models" and "these are
-                the first models". */}
-            {discovery.truncated ? (
-              <span className="block">{t("models.form.discoverTruncated")}</span>
-            ) : null}
-          </div>
-        ) : (
-          <div className="text-destructive text-sm">{t(discoveryErrorKey(discovery.outcome))}</div>
-        ))}
+      {mode === "list" && discovery && <DiscoveryResult discovery={discovery} />}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -7,7 +8,8 @@ import { X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
-import { Field, FieldGroup } from "@appstrate/ui/components/field";
+import { Field, FieldDescription, FieldError, FieldGroup } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -24,9 +26,9 @@ import {
   toBillingContactDraft,
   type BillingContactDraft,
 } from "../lib/billing-contact";
-import { LoadingState, ErrorState } from "./page-states";
+import { ErrorState } from "./page-states";
+import { SettingsSkeleton } from "./loading-skeletons";
 import { SectionCard } from "./section-card";
-import { Spinner } from "./spinner";
 
 /**
  * Where invoices, receipts and dunning mail go instead of every owner's inbox.
@@ -52,7 +54,7 @@ export function BillingContactSection() {
   const [ccInput, setCcInput] = useState("");
   const [ccError, setCcError] = useState<string | null>(null);
 
-  if (contactQuery.isLoading) return <LoadingState />;
+  if (contactQuery.isLoading) return <SettingsSkeleton rows={2} />;
   if (contactQuery.error) return <ErrorState error={contactQuery.error} />;
 
   const contact = contactQuery.data ?? { billing_email: null, billing_cc: [] };
@@ -65,7 +67,6 @@ export function BillingContactSection() {
   const dirty = hasBillingContactChanges(patch);
   const emailInvalid =
     current.billing_email.trim() !== "" && !isBillingEmail(current.billing_email.trim());
-  const emailDescribed = emailInvalid || current.billing_email.trim() === "";
 
   const edit = (next: Partial<BillingContactDraft>) => setDraft({ ...current, ...next });
 
@@ -122,31 +123,25 @@ export function BillingContactSection() {
       <p className="text-muted-foreground text-sm">{t("billingContact.description")}</p>
 
       <FieldGroup>
-        <Field data-invalid={emailInvalid}>
-          <Label htmlFor="billing-contact-email">{t("billingContact.emailLabel")}</Label>
+        <FormItem
+          id="billing-contact-email"
+          label={t("billingContact.emailLabel")}
+          hint={
+            !emailInvalid && current.billing_email.trim() === ""
+              ? t("billingContact.emailFallback")
+              : undefined
+          }
+          error={emailInvalid ? t("validation.emailFormat", { ns: "common" }) : undefined}
+        >
           <Input
-            id="billing-contact-email"
             type="email"
             autoComplete="email"
             placeholder="billing@example.com"
             value={current.billing_email}
-            aria-invalid={emailInvalid}
-            aria-describedby={emailDescribed ? "billing-contact-email-hint" : undefined}
             disabled={update.isPending}
             onChange={(event) => edit({ billing_email: event.target.value })}
           />
-          {emailInvalid ? (
-            <p id="billing-contact-email-hint" role="alert" className="text-destructive text-sm">
-              {t("validation.emailFormat", { ns: "common" })}
-            </p>
-          ) : (
-            current.billing_email.trim() === "" && (
-              <p id="billing-contact-email-hint" className="text-muted-foreground text-sm">
-                {t("billingContact.emailFallback")}
-              </p>
-            )
-          )}
-        </Field>
+        </FormItem>
 
         <Field>
           <Label htmlFor="billing-contact-cc">{t("billingContact.ccLabel")}</Label>
@@ -197,13 +192,11 @@ export function BillingContactSection() {
             </Button>
           </div>
           {ccError ? (
-            <p id="billing-contact-cc-hint" role="alert" className="text-destructive text-sm">
-              {ccError}
-            </p>
+            <FieldError id="billing-contact-cc-hint">{ccError}</FieldError>
           ) : (
-            <p id="billing-contact-cc-hint" className="text-muted-foreground text-sm">
+            <FieldDescription id="billing-contact-cc-hint">
               {t("billingContact.ccHint", { max: MAX_BILLING_CC })}
-            </p>
+            </FieldDescription>
           )}
         </Field>
       </FieldGroup>
@@ -233,14 +226,14 @@ export function BillingContactSection() {
             {t("btn.cancel", { ns: "common" })}
           </Button>
         )}
-        <Button
+        <PendingButton
           size="sm"
-          disabled={!dirty || emailInvalid || update.isPending}
+          pending={update.isPending}
+          disabled={!dirty || emailInvalid}
           onClick={handleSave}
         >
-          {update.isPending && <Spinner />}
           {t("btn.save", { ns: "common" })}
-        </Button>
+        </PendingButton>
       </div>
     </SectionCard>
   );

@@ -1380,7 +1380,7 @@ export interface paths {
         };
         /**
          * List files
-         * @description List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `runId`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`. An unknown query parameter or an invalid `purpose` is rejected with 400.
+         * @description List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `runId`, `packageId`, `chat_session_id`, or a chat session's complete context; search names with `q`, and paginate with `startingAfter` + `limit`. An unknown query parameter or an invalid `purpose` is rejected with 400.
          */
         get: operations["listFiles"];
         put?: never;
@@ -1959,8 +1959,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Organization library — the placement map (owners and admins)
-         * @description Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Members, guests and delegated credentials cannot access this administrative endpoint. Ephemeral packages are excluded. The spaces list and the placements include only spaces the caller can enter, and each package type also requires that type's read permission in the space. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` activates a package in a space — creating the offer that places it when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.
+         * Organization library — the placement map, graded by caller
+         * @description Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Graded by the caller: the spaces list and the placements include only the spaces whose own library (`GET /api/spaces/{spaceId}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — and each package type also requires that type's read permission in the space. So the response is the union of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package with no placement the caller reads is listed, with empty `placements`, when its home grants the caller `<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one space) receive 403. Ephemeral packages are excluded. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` activates a package in a space — creating the offer that places it when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.
          */
         get: operations["getLibrary"];
         put?: never;
@@ -2541,6 +2541,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply a model-provider choice in one transaction
+         * @description One write for a provider choice: the credential its models run on (an existing organization credential `{ id }`, a new organization API key — the `POST /api/model-provider-credentials` body without `owner_type` —, or `null` for models each member serves with their own credential, `providerId` then naming the service), the models to create (`add`), the ones to switch on (`enable`) and off (`disable`), and the default (`default_model_id`, the `modelId` of a model of this choice). Applied in that order — the key, the models, the switches on, the default, the switches off — inside ONE transaction: either all of it is written or none. Every entry is checked as its own route would check it (`POST /api/models`, `PATCH /api/models/{id}`, `PUT /api/models/default`); refusals come back together as `400 validation_failed` with one `errors[]` item per entry (`field`: `add.<i>`, `enable.<i>`, `disable.<i>`, `default_model_id`; `code`: that route's own, or `model_not_in_choice` for a model that does not run on the choice's credential), and nothing is written. Requires `models:write`, and `model-provider-credentials:write` to mint an organization key (the rule of `POST /api/model-provider-credentials` with `owner_type: org`; `:connect` alone does not suffice), rate-limited like that route. Accepts `Idempotency-Key`: a retry with the same key and body replays the first response.
+         */
+        post: operations["applyModelChoice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models/default": {
         parameters: {
             query?: never;
@@ -2989,6 +3009,26 @@ export interface paths {
         patch: operations["updateOrgIntegrationOAuthClient"];
         trace?: never;
     };
+    "/api/org-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List organization roles
+         * @description The four organization roles (`owner`, `admin`, `member`, `guest`) and the org-level permissions each grants — the platform's own matrix with what the loaded modules contribute at `level: "org"`. The same in every organization and for every caller (no preview, no credential ceiling): it describes the roles, not the caller. Any member may read it.
+         */
+        get: operations["listOrgRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs": {
         parameters: {
             query?: never;
@@ -3036,7 +3076,7 @@ export interface paths {
         head?: never;
         /**
          * Update organization
-         * @description Update organization name and/or slug. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         * @description Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes `{ kind: "emoji", emoji }` or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.
          */
         patch: operations["updateOrganization"];
         trace?: never;
@@ -3121,6 +3161,30 @@ export interface paths {
          * @description The caller leaves the organization. Any member may leave, whatever their role; the last owner is refused with `409 last_owner` and must first promote another member to owner, or delete the organization. The decision reads the caller's real membership, so an active `X-View-As` preview changes nothing. Leaving has the effects of a removal: the caller's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window (a re-invitation inside it gives the space back; revoked keys and opaque tokens stay revoked). A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile. Leaving requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403, as is a caller who is not a member.
          */
         post: operations["leaveOrganization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get organization logo image
+         * @description The organization's logo image, for any member. Its `ETag` is the image's version, the `v` of `logo.url`; a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.
+         */
+        get: operations["getOrganizationLogo"];
+        /**
+         * Upload organization logo image
+         * @description Replace the organization logo with a WebP image sent as the raw request body (`Content-Type: image/webp`, at most 36000 bytes, a RIFF container of form type `WEBP`). Requires `org:update`. `logo` becomes `{ kind: "image", url }`.
+         */
+        put: operations["uploadOrganizationLogo"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5461,6 +5525,10 @@ export interface components {
         };
         AgentDetail: {
             id: string;
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none. */
+            icon?: string;
+            /** @description Presentation token from `_meta["dev.appstrate/ui"].color`. */
+            color?: string;
             display_name?: string;
             description?: string;
             /** @enum {string} */
@@ -5559,6 +5627,10 @@ export interface components {
         };
         AgentListItem: {
             id: string;
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none. */
+            icon?: string;
+            /** @description Presentation token from `_meta["dev.appstrate/ui"].color`. */
+            color?: string;
             display_name?: string;
             description?: string;
             schema_version?: string;
@@ -6041,6 +6113,50 @@ export interface components {
             /** @description Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and `/upstream-success`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload. */
             credential_revision?: string;
         };
+        IntegrationIndexItem: {
+            id: string;
+            /** @description Owning organization ID (null for system packages) */
+            orgId?: string | null;
+            name: string;
+            description: string | null;
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`, e.g. `logos:slack-icon`, `lucide:bot`) or an image URL, `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
+            icon: string | null;
+            /** @description The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description. */
+            keywords: string[];
+            /** @enum {string} */
+            source: "local" | "system";
+            created_by: string | null;
+            created_by_name?: string;
+            used_by_agents: number;
+            /** @description Manifest version (semver) */
+            version: string | null;
+            auto_installed: boolean;
+            /** @description Source package ID if forked */
+            forked_from: string | null;
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
+            home_space_id: string | null;
+            /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
+            home_writable: boolean;
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            home_deletable: boolean;
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            home_shareable: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /**
+             * @description The manifest's `source.kind`: `local` runs an MCP server package in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).
+             * @enum {string}
+             */
+            source_kind: "local" | "remote" | "none";
+            /** @description `source.server` of a `local` integration — the MCP server package it runs and its version range. `null` for any other source. */
+            server: {
+                name: string;
+                /** @description Semver range */
+                version: string;
+            } | null;
+        };
         IntegrationPin: {
             agent_package_id: string;
             integration_package_id: string;
@@ -6077,6 +6193,14 @@ export interface components {
             home_shareable: boolean;
             /** @description Whether the package has a published version (a `latest` dist-tag), or is a system package. A skill can be enforced in a space's chat only when it is published. */
             published: boolean;
+            /** @description What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the offer; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance. */
+            activation: {
+                spaceId: string;
+                /** @enum {string} */
+                activate: "allowed" | "not_shareable" | "forbidden";
+                /** @enum {string} */
+                deactivate: "allowed" | "not_shareable" | "forbidden";
+            }[];
             /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (a package whose home grants them `<type>:share`). */
             placements: components["schemas"]["PackagePlacement"][];
         }[];
@@ -6157,6 +6281,8 @@ export interface components {
             allowed_actions: ("edit" | "delete" | "test" | "reconnect")[];
             /** @description Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one. */
             bindable: boolean;
+            /** @description On a personal credential, the ids of the organization models left to members' own credentials (`binding: user`) that it pays for — the same service, or a subscription offering the model on its API. `[]` on an organization or built-in credential: its models name it in `credentialId`. */
+            serves_model_ids: string[];
             created_by: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -6216,6 +6342,18 @@ export interface components {
             id?: string;
             name?: string;
             slug?: string;
+            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+            logo?: {
+                /** @constant */
+                kind: "emoji";
+                /** @description Exactly one emoji. */
+                emoji: string;
+            } | {
+                /** @constant */
+                kind: "image";
+                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                url: string;
+            } | null;
             /** Format: date-time */
             createdAt?: string;
             /**
@@ -6258,6 +6396,23 @@ export interface components {
             role: "owner" | "admin" | "member" | "guest";
             /** Format: date-time */
             joinedAt: string;
+            /** @description The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them. */
+            spaces: components["schemas"]["OrgMemberSpace"][];
+        };
+        OrgMemberSpace: {
+            id: string;
+            name: string;
+            /**
+             * @description How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default.
+             * @enum {string}
+             */
+            source: "explicit" | "org_role" | "open_space";
+            role: {
+                /** @enum {string} */
+                kind: "preset" | "custom";
+                key: string;
+                name: string;
+            } | null;
         };
         OrgModel: {
             id: string;
@@ -6326,7 +6481,7 @@ export interface components {
             orgId?: string | null;
             name: string;
             description: string | null;
-            /** @description The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
+            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`, e.g. `logos:slack-icon`, `lucide:bot`) or an image URL, `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
             icon: string | null;
             /** @description The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description. */
             keywords: string[];
@@ -6373,7 +6528,9 @@ export interface components {
             /** @description Manifest version (semver) */
             version: string | null;
             /** @description Full manifest object */
-            manifest?: Record<string, never>;
+            manifest?: {
+                [key: string]: unknown;
+            };
             /** @description Manifest name (@scope/name) — may differ from package ID */
             manifest_name?: string | null;
             /** @description Number of published versions */
@@ -6429,6 +6586,18 @@ export interface components {
             id: string;
             name: string;
             slug: string;
+            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+            logo: {
+                /** @constant */
+                kind: "emoji";
+                /** @description Exactly one emoji. */
+                emoji: string;
+            } | {
+                /** @constant */
+                kind: "image";
+                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                url: string;
+            } | null;
             /** @enum {string} */
             role: "owner" | "admin" | "member" | "guest";
             /** @description The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces. */
@@ -6610,6 +6779,10 @@ export interface components {
             message: string;
             /** @description Human-readable title; preserved from the underlying error factory. */
             title?: string;
+            /** @description On a file-level validation item, the 1-based line where the validator stopped, counted in the file itself (e.g. `skill_invalid_frontmatter` on a YAML syntax error: the opening `---` is line 1). Absent when unknown. */
+            line?: number;
+            /** @description The 1-based column beside `line`. */
+            column?: number;
             /** @description Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, least privilege first (the order of readiness `candidates`), each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. The write of an enabled schedule raises it for its actor's one own connection too (see that write's 409). Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set, unranked (else every own and shared connection), and the retry names one in `X-Connection-Id`. */
             candidate_connections?: {
                 id: string;
@@ -6730,7 +6903,16 @@ export interface components {
             checkpoint: {
                 [key: string]: unknown;
             } | null;
+            /** @description The failure as it happened, verbatim — a debugging surface. To say WHY a run failed, branch on `model_error` (and `status`), never on this text. */
             error: string | null;
+            /** @description What a run that failed on a model call failed on, classified once when it finalized: `category` (one of `credential_unavailable`, `rate_limited`, `upstream_unavailable`, `invalid_request`, `unknown`), `retryable` (derived from it), the provider's HTTP `status` and its own `message`, each `null` when the failure text carried none. `null` on every other run, and on a run finalized before the platform recorded it. A `cancelled` run is always a member's cancellation (`POST /api/runs/{id}/cancel`). */
+            model_error: {
+                /** @enum {string} */
+                category: "credential_unavailable" | "rate_limited" | "upstream_unavailable" | "invalid_request" | "unknown";
+                retryable: boolean;
+                status: number | null;
+                message: string | null;
+            } | null;
             /** @description Snapshot of token consumption for the run, as every runner (PiRunner / remote CLI / GitHub Action) reports it, parsed on ingestion before it is stored. `null` until the run reports usage. */
             token_usage: components["schemas"]["TokenUsage"] | null;
             /** Format: date-time */
@@ -7577,6 +7759,10 @@ export interface components {
     parameters: {
         /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
         Offset: number;
+        /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+        RunStatusFilter: ("pending" | "running" | "success" | "failed" | "timeout" | "cancelled")[];
+        /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
+        RunSearch: string;
         /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
         IfMatch: string;
         /** @description The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current. */
@@ -8720,6 +8906,7 @@ export interface operations {
                      *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": null,
+                     *       "model_error": null,
                      *       "metadata": null,
                      *       "generation": {
                      *         "temperature": 0.2,
@@ -8849,6 +9036,10 @@ export interface operations {
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
+                /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+                status?: components["parameters"]["RunStatusFilter"];
+                /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
+                q?: components["parameters"]["RunSearch"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -9023,7 +9214,7 @@ export interface operations {
                     proxy_id_override?: string;
                     /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent at THIS write — `403 draft_not_writable` otherwise — and is not re-checked at fire time, the way `connection_overrides` are frozen here too. The selected definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is selected. */
                     version_override?: string;
-                    /** @description Per-integration connection sets frozen on the schedule row. Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 0..20 per integration, always an ARRAY; `[]` fires without the integration (see the set schema). Resolved through the cascade `IntegrationAgentResolution` describes: this field is the launch-override layer of every fire, and the one own connection its fallback binds for the schedule's actor is a default the write of an enabled schedule wants named (see 409). Under an admin pin or an enforced org default the set must name only connections of that governing set (`[]` included), which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Ids that are not uuids are refused here, and so are a key that names no integration the fired agent declares and `[]` on an integration it marks `required`: 400 `validation_failed`, an `errors[]` item on `connection_overrides.<id>` whose `code` is `undeclared_connection_override` or `required_integration_unbound`. */
+                    /** @description Per-integration connection sets frozen on the schedule row. Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 0..20 per integration, always an ARRAY; `[]` fires without the integration (see the set schema). Resolved through the cascade `IntegrationAgentResolution` describes: this field is the launch-override layer of every fire, and a fire takes no fallback: when the caller writes for itself, the server names the one own connection its fallback binds for each integration the set leaves unpicked, and stores it (a write for another member must name it, see 409). Under an admin pin or an enforced org default the set must name only connections of that governing set (`[]` included), which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Ids that are not uuids are refused here, and so are a key that names no integration the fired agent declares and `[]` on an integration it marks `required`: 400 `validation_failed`, an `errors[]` item on `connection_overrides.<id>` whose `code` is `undeclared_connection_override` or `required_integration_unbound`. */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -9045,6 +9236,8 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description The schedule's version (its `updatedAt` in milliseconds, quoted). Send it as `If-Match` on `PATCH /api/schedules/{id}` to refuse overwriting a write you have not seen. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -9103,7 +9296,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description `no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`). */
             404: components["responses"]["NoPublishedVersion"];
-            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write; a write for another member takes that one connection by default, since its writer can neither see nor name it. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run and leaves the schedule enabled. A fire refused over one of the items above records a failed run and disables the schedule (`disabled_reason: connection_choice_invalid`), which then stays disabled until it is re-enabled. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. */
+            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write — by the server itself when the caller writes for itself (that one connection is stored in `connection_overrides`, so this refusal then means several connections or only shared ones); a write for another member takes that one connection by default, since its writer can neither see nor name it. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run and leaves the schedule enabled. A fire refused over one of the items above records a failed run and disables the schedule (`disabled_reason: connection_choice_invalid`), which then stays disabled until it is re-enabled. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -12466,6 +12659,8 @@ export interface operations {
                 chat_session_id?: string;
                 /** @description Filter to the private conversation context: direct attachments plus files produced or consumed by runs launched from the session. */
                 context_chat_session_id?: string;
+                /** @description Case-insensitive substring search over document names. Longer than 200 characters is rejected with `400`. */
+                q?: string;
                 /** @description Keyset cursor — file id to page after (newest-first order). */
                 startingAfter?: string;
                 /** @description Page size (1–100, default 20). */
@@ -12851,6 +13046,10 @@ export interface operations {
                 offset?: components["parameters"]["Offset"];
                 /** @description Comma-separated allowlist of fields to return per item (`id` is always included). Allowed: id, manifest, orgId, source, active, block_user_connections. An unknown field is a 400. */
                 fields?: string;
+                /** @description Free-text filter, combined with every other filter: a case-insensitive substring of the package id, the manifest's `display_name` or its `description`, `%` and `_` taken as typed. Longer than 200 characters is rejected with `400`. */
+                q?: string;
+                /** @description Only these integrations, by package id, comma-separated on the wire (`id=@acme/gmail,@acme/slack`). An id not placed in this space is absent from the answer, never an error. At most 100 ids. Omit (or send an empty value) for every integration. */
+                id?: string[];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -14908,6 +15107,18 @@ export interface operations {
                      *                   "name": "Alex"
                      *                 }
                      *               }
+                     *             ],
+                     *             "activation": [
+                     *               {
+                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "allowed"
+                     *               },
+                     *               {
+                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "forbidden"
+                     *               }
                      *             ]
                      *           }
                      *         ],
@@ -14939,6 +15150,18 @@ export interface operations {
                      *                 "state": "inactive",
                      *                 "chat_enforced": false,
                      *                 "shared_by": null
+                     *               }
+                     *             ],
+                     *             "activation": [
+                     *               {
+                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "allowed"
+                     *               },
+                     *               {
+                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "activate": "forbidden",
+                     *                 "deactivate": "forbidden"
                      *               }
                      *             ]
                      *           }
@@ -16717,6 +16940,7 @@ export interface operations {
                      *           "id": "org_abc123",
                      *           "name": "Acme Corp",
                      *           "slug": "acme",
+                     *           "logo": null,
                      *           "role": "owner",
                      *           "permissions": [
                      *             "org:read",
@@ -16735,6 +16959,18 @@ export interface operations {
                             id: string;
                             name: string;
                             slug: string;
+                            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+                            logo: {
+                                /** @constant */
+                                kind: "emoji";
+                                /** @description Exactly one emoji. */
+                                emoji: string;
+                            } | {
+                                /** @constant */
+                                kind: "image";
+                                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                                url: string;
+                            } | null;
                             /**
                              * @description Org role for member callers; `end_user` for OIDC end-user JWTs.
                              * @enum {string}
@@ -16796,6 +17032,7 @@ export interface operations {
                      *             "test"
                      *           ],
                      *           "bindable": false,
+                     *           "serves_model_ids": [],
                      *           "created_by": "usr_cm3abc123",
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
@@ -17580,6 +17817,81 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["ModelAlreadyAdded"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
+        };
+    };
+    applyModelChoice: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization, the space and the authenticated caller — the member or end-user, the API key or OAuth client, the auth method — so the same key sent by another caller is a new request, never a replay. Only a request that executed — a 2xx — is stored, for 24 hours. A repeat by the same caller with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    credential: {
+                        /** Format: uuid */
+                        id: string;
+                    } | {
+                        label?: string;
+                        providerId: string;
+                        api_key: string;
+                        /** Format: uri */
+                        base_url_override?: string | null;
+                    } | null;
+                    /** @description The service of a choice without a credential (`credential: null`). */
+                    providerId?: string;
+                    add?: {
+                        label?: string;
+                        modelId: string;
+                        input?: ("text" | "image")[];
+                        contextWindow?: number;
+                        maxTokens?: number;
+                        reasoning?: boolean;
+                        cost?: {
+                            input?: number;
+                            output?: number;
+                            cacheRead?: number;
+                            cacheWrite?: number;
+                            tiers?: components["schemas"]["ModelCostTier"][];
+                        };
+                    }[];
+                    enable?: string[];
+                    disable?: string[];
+                    /** @description The `modelId` of a model of this choice, created or existing. */
+                    default_model_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The choice was applied: the credential the models run on (`null` for each member's own), the models created or switched (same shape as `GET`/`list`), and the default set, if any. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "model_choice";
+                        credential_id: string | null;
+                        models: components["schemas"]["OrgModel"][];
+                        default_model_id: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["IdempotencyConflict"];
+            429: components["responses"]["RateLimited"];
             503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
@@ -18947,6 +19259,45 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listOrgRoles: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Organization roles */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @enum {string} */
+                            object: "org_role";
+                            /** @enum {string} */
+                            role: "owner" | "admin" | "member" | "guest";
+                            /** @description Org-level permissions the role grants, sorted. */
+                            permissions: string[];
+                        }[];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listOrganizations: {
         parameters: {
             query?: never;
@@ -18994,6 +19345,7 @@ export interface operations {
                      *           "id": "550e8400-e29b-41d4-a716-446655440000",
                      *           "name": "Acme Corp",
                      *           "slug": "acme-corp",
+                     *           "logo": null,
                      *           "role": "owner",
                      *           "permissions": [
                      *             "org:read",
@@ -19049,6 +19401,7 @@ export interface operations {
                      *       "id": "550e8400-e29b-41d4-a716-446655440001",
                      *       "name": "New Organization",
                      *       "slug": "new-org",
+                     *       "logo": null,
                      *       "role": "owner",
                      *       "createdAt": "2026-01-15T10:30:00Z"
                      *     }
@@ -19058,6 +19411,18 @@ export interface operations {
                         id: string;
                         name: string;
                         slug: string;
+                        /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+                        logo: {
+                            /** @constant */
+                            kind: "emoji";
+                            /** @description Exactly one emoji. */
+                            emoji: string;
+                        } | {
+                            /** @constant */
+                            kind: "image";
+                            /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                            url: string;
+                        } | null;
                         /** @enum {string} */
                         role: "owner";
                         /** Format: date-time */
@@ -19095,20 +19460,45 @@ export interface operations {
                      *       "id": "550e8400-e29b-41d4-a716-446655440000",
                      *       "name": "Acme Corp",
                      *       "slug": "acme-corp",
+                     *       "logo": null,
                      *       "members": [
                      *         {
                      *           "userId": "usr_abc123",
                      *           "displayName": "Alice",
                      *           "email": "alice@acme.com",
                      *           "role": "owner",
-                     *           "joinedAt": "2026-01-10T08:00:00Z"
+                     *           "joinedAt": "2026-01-10T08:00:00Z",
+                     *           "spaces": [
+                     *             {
+                     *               "id": "spc_default",
+                     *               "name": "Default",
+                     *               "source": "org_role",
+                     *               "role": {
+                     *                 "kind": "preset",
+                     *                 "key": "admin",
+                     *                 "name": "admin"
+                     *               }
+                     *             }
+                     *           ]
                      *         },
                      *         {
                      *           "userId": "usr_def456",
                      *           "displayName": "Bob",
                      *           "email": "bob@acme.com",
                      *           "role": "member",
-                     *           "joinedAt": "2026-01-12T10:00:00Z"
+                     *           "joinedAt": "2026-01-12T10:00:00Z",
+                     *           "spaces": [
+                     *             {
+                     *               "id": "spc_default",
+                     *               "name": "Default",
+                     *               "source": "open_space",
+                     *               "role": {
+                     *                 "kind": "preset",
+                     *                 "key": "operator",
+                     *                 "name": "operator"
+                     *               }
+                     *             }
+                     *           ]
                      *         }
                      *       ],
                      *       "invitations": []
@@ -19161,6 +19551,13 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     slug?: string;
+                    /** @description `{ "kind": "emoji", "emoji": "<one emoji>" }`, or `null` to clear the logo. */
+                    logo?: {
+                        /** @constant */
+                        kind: "emoji";
+                        /** @description Exactly one emoji. */
+                        emoji: string;
+                    } | null;
                 };
             };
         };
@@ -19369,6 +19766,85 @@ export interface operations {
             409: components["responses"]["LastOwner"];
         };
     };
+    getOrganizationLogo: {
+        parameters: {
+            query?: {
+                /** @description The logo version the caller expects: the `v` of `logo.url`. */
+                v?: string;
+            };
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The logo image. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description The quoted logo version. */
+                    ETag?: string;
+                    /** @description `private, max-age=31536000, immutable` when `v` names the current version, `private, no-cache` otherwise. */
+                    "Cache-Control"?: string;
+                    "X-Content-Type-Options"?: "nosniff";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/webp": Blob;
+                };
+            };
+            /** @description Cached copy is still current (`If-None-Match` matched). No body. */
+            304: {
+                headers: {
+                    /** @description The quoted logo version. */
+                    ETag?: string;
+                    /** @description As on the `200`. */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The organization's logo is not an image. */
+            404: components["responses"]["NotFound"];
+        };
+    };
+    uploadOrganizationLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/webp": Blob;
+            };
+        };
+        responses: {
+            /** @description Updated organization — same OrgDetail shape as GET /api/orgs/{orgId} */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgDetail"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     inviteMember: {
         parameters: {
             query?: never;
@@ -19473,7 +19949,19 @@ export interface operations {
                      *       "displayName": "Bob",
                      *       "email": "bob@acme.com",
                      *       "role": "admin",
-                     *       "joinedAt": "2026-01-12T10:00:00Z"
+                     *       "joinedAt": "2026-01-12T10:00:00Z",
+                     *       "spaces": [
+                     *         {
+                     *           "id": "spc_default",
+                     *           "name": "Default",
+                     *           "source": "org_role",
+                     *           "role": {
+                     *             "kind": "preset",
+                     *             "key": "admin",
+                     *             "name": "admin"
+                     *           }
+                     *         }
+                     *       ]
                      *     }
                      */
                     "application/json": components["schemas"]["OrgMember"];
@@ -20338,7 +20826,7 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "list";
-                        data: components["schemas"]["OrgPackageItem"][];
+                        data: components["schemas"]["IntegrationIndexItem"][];
                         hasMore: boolean;
                     };
                 };
@@ -21380,7 +21868,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -21533,7 +22021,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -21630,7 +22118,7 @@ export interface operations {
                     "application/json": components["schemas"]["PackageVersionDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -21791,7 +22279,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -23146,12 +23634,14 @@ export interface operations {
                 offset?: components["parameters"]["Offset"];
                 /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 kind?: "all" | "package" | "inline";
-                /** @description Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
-                status?: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
+                /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+                status?: components["parameters"]["RunStatusFilter"];
                 start_date?: string;
                 end_date?: string;
                 /** @description Return only runs launched from this chat session. */
                 chat_session_id?: string;
+                /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
+                q?: components["parameters"]["RunSearch"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -23286,6 +23776,7 @@ export interface operations {
                      *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": null,
+                     *       "model_error": null,
                      *       "metadata": null,
                      *       "generation": null,
                      *       "generation_override": null,
@@ -23661,6 +24152,7 @@ export interface operations {
                      *         "lastProcessedId": "msg_99f2a"
                      *       },
                      *       "error": null,
+                     *       "model_error": null,
                      *       "metadata": null,
                      *       "generation": {
                      *         "reasoning_level": "medium"
@@ -23776,6 +24268,7 @@ export interface operations {
                      *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": "Cancelled by user",
+                     *       "model_error": null,
                      *       "metadata": null,
                      *       "generation": null,
                      *       "generation_override": null,
@@ -24529,6 +25022,8 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description The schedule's version (its `updatedAt` in milliseconds, quoted). Send it as `If-Match` on `PATCH /api/schedules/{id}` to refuse overwriting a write you have not seen. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24613,6 +25108,8 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -24658,6 +25155,8 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description The schedule's version (its `updatedAt` in milliseconds, quoted). Send it as `If-Match` on `PATCH /api/schedules/{id}` to refuse overwriting a write you have not seen. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24680,7 +25179,7 @@ export interface operations {
             /** @description Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) patches a schedule running as another member (any field), or (with `param: actor`) changes `actor` to another member; a schedule running as an end user, and `actor` naming one, take an API key or `api-keys:create` instead; and `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NoPublishedVersion"];
-            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write; a write for another member takes that one connection by default, since its writer can neither see nor name it. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run and leaves the schedule enabled. A fire refused over one of the items above records a failed run and disables the schedule (`disabled_reason: connection_choice_invalid`), which then stays disabled until it is re-enabled. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, the removal of the pin or org default that alone named one of its connection sets, a fire disabling it for an actor who lost access or for its own connection choice, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry. */
+            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write — by the server itself when the caller writes for itself (that one connection is stored in `connection_overrides`, so this refusal then means several connections or only shared ones); a write for another member takes that one connection by default, since its writer can neither see nor name it. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run and leaves the schedule enabled. A fire refused over one of the items above records a failed run and disables the schedule (`disabled_reason: connection_choice_invalid`), which then stays disabled until it is re-enabled. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, the removal of the pin or org default that alone named one of its connection sets, a fire disabling it for an actor who lost access or for its own connection choice, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry. */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -24690,6 +25189,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["MissingIntegrationConnectionProblem"];
                 };
             };
+            412: components["responses"]["PreconditionFailed"];
             422: components["responses"]["VersionArtifactUnavailable"];
             503: components["responses"]["EncryptionKeyUnavailable"];
         };
@@ -24700,6 +25200,10 @@ export interface operations {
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
+                /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+                status?: components["parameters"]["RunStatusFilter"];
+                /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
+                q?: components["parameters"]["RunSearch"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -25687,6 +26191,18 @@ export interface operations {
                      *                   "name": "Alex"
                      *                 }
                      *               }
+                     *             ],
+                     *             "activation": [
+                     *               {
+                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "allowed"
+                     *               },
+                     *               {
+                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "forbidden"
+                     *               }
                      *             ]
                      *           }
                      *         ],
@@ -25718,6 +26234,18 @@ export interface operations {
                      *                 "state": "inactive",
                      *                 "chat_enforced": false,
                      *                 "shared_by": null
+                     *               }
+                     *             ],
+                     *             "activation": [
+                     *               {
+                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "allowed"
+                     *               },
+                     *               {
+                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "activate": "forbidden",
+                     *                 "deactivate": "forbidden"
                      *               }
                      *             ]
                      *           }
@@ -27830,6 +28358,7 @@ export interface operations {
                      *       "id": "550e8400-e29b-41d4-a716-446655440000",
                      *       "name": "Acme Corp",
                      *       "slug": "acme-corp",
+                     *       "logo": null,
                      *       "role": "member",
                      *       "permissions": [
                      *         "org:read",

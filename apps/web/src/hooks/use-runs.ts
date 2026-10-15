@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { client, type components } from "../api/client";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
-import { runKeys } from "../lib/query-keys";
-import type { EnrichedRun } from "@appstrate/shared-types";
+import { paginatedRunsKeys, runKeys } from "../lib/query-keys";
+import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 
 /**
  * Wire shape of a persisted log row (spec `RunLog`): on the wire `createdAt`
@@ -25,6 +25,7 @@ export function useRun(runId: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadRuns();
+  const qc = useQueryClient();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync and run-detail patch
     // this cache in place (setQueryData) on SSE events.
@@ -35,6 +36,21 @@ export function useRun(runId: string | undefined) {
       });
       // Non-2xx throws via the client middleware, so `data` is defined here.
       return data!;
+    },
+    // The row is usually already cached by a run list (runs page, agent runs
+    // tab, dashboard): it names the run until the detail read replaces it.
+    // Inline runs are left out: their manifest and prompt ride only on the
+    // detail, and the list row would read as "details expired".
+    placeholderData: () => {
+      if (!runId) return undefined;
+      const pages = qc.getQueriesData<ListEnvelope<EnrichedRun>>({
+        queryKey: [...paginatedRunsKeys.all, orgId, spaceId],
+      });
+      for (const [, page] of pages) {
+        const row = page?.data?.find((candidate) => candidate.id === runId);
+        if (row && !row.package_ephemeral) return row;
+      }
+      return undefined;
     },
     enabled: canRead && !!runId && !!spaceId,
   });

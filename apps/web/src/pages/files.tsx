@@ -7,135 +7,157 @@
  * files, end-users see only their own.
  */
 
-import { useMemo, useState } from "react";
+import { ToneAlert } from "@/components/app-ui/status-variants";
+import { PendingButton } from "@/components/app-ui/pending-button";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { formatBytes } from "../lib/format-bytes";
+import { AlertDescription } from "@appstrate/ui/components/alert";
 import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { useFiles, type FileDto } from "../hooks/use-files";
+import { useFilesPaged } from "../hooks/use-files";
 import { PageHeader } from "../components/page-header";
+import { DocumentListPanel } from "../components/document-list-panel";
+import { ListFooter, ListToolbar } from "../components/list-toolbar";
+import { useListParams } from "../lib/list-params";
+import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { useListView } from "../stores/list-view-store";
 import { useCanReach } from "../hooks/use-can-reach";
-import { FileListPanel, type PurposeFilter } from "../components/file-list-panel";
+import { useDebouncedValue } from "../hooks/use-debounced-value";
 
-/**
- * A single storage-usage line ("X used / Y limit") with a conditional warning
- * when consumption has reached or passed the effective limit — at which point
- * new file writes are rejected (403) while existing files stay intact.
- * `effective_limit_bytes` null = unlimited: the line collapses to "X used".
- */
-function StorageUsageLine() {
-  const { t } = useTranslation(["files"]);
-  const { storage, limitBytes: limit } = useOrgStorage();
-  if (!storage) return null;
+const PURPOSES = ["agent_output", "user_upload"] as const;
 
-  const over = limit !== null && storage.used_bytes >= limit;
+export function FilesPage() {
+  // Remount on space switch so the loaded pages reset.
+  const spaceId = useCurrentSpaceId();
+  return <DocumentsPageContent key={spaceId ?? "none"} />;
+}
+
+function DocumentsPageContent() {
+  const list = useListParams(["purpose"]);
+  const purposes = list.values("purpose", PURPOSES);
+  const effectivePurpose = purposes.length === 1 ? purposes[0] : undefined;
+  const search = list.search;
 
   return (
-    <div className="mb-4">
-      <p className="text-muted-foreground text-sm tabular-nums">
-        {limit === null
-          ? t("storage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
-          : t("storage.usedOfLimit", {
-              used: formatBytes(storage.used_bytes),
-              limit: formatBytes(limit),
-            })}
-      </p>
-      {over && (
-        <Alert variant="warning" className="mt-2">
-          <AlertTriangle size={16} />
-          <AlertDescription>{t("storage.limitReached")}</AlertDescription>
-        </Alert>
-      )}
-    </div>
+    <DocumentsCollection
+      purposes={purposes}
+      effectivePurpose={effectivePurpose}
+      search={search}
+      onSearchChange={list.setSearch}
+      onPurposeChange={list.setValues("purpose")}
+      onReset={list.reset}
+    />
   );
 }
 
-export function FilesPage() {
-  // Remount on space switch so the cursor + accumulated pages reset.
-  const spaceId = useCurrentSpaceId();
-  return <FilesPageContent key={spaceId ?? "none"} />;
-}
-
-function FilesPageContent() {
+function DocumentsCollection({
+  purposes,
+  effectivePurpose,
+  search,
+  onSearchChange,
+  onPurposeChange,
+  onReset,
+}: {
+  purposes: Array<(typeof PURPOSES)[number]>;
+  effectivePurpose: (typeof PURPOSES)[number] | undefined;
+  search: string;
+  onSearchChange: (value: string) => void;
+  onPurposeChange: (values: string[]) => void;
+  onReset: () => void;
+}) {
   const { t } = useTranslation(["files", "common"]);
   const canReach = useCanReach();
+  const [view, setView] = useListView("documents");
+  const searchPlaceholder = useSearchPlaceholder(t("page.title"));
+  const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
+  const query = useDebouncedValue(search);
 
-  const [purpose, setPurpose] = useState<PurposeFilter>("all");
-  const [cursor, setCursor] = useState<string | undefined>(undefined);
-  const [loadedPages, setLoadedPages] = useState<FileDto[]>([]);
-
-  const { data, isLoading, error } = useFiles({
-    purpose: purpose === "all" ? undefined : purpose,
-    startingAfter: cursor,
-    limit: 25,
+  const { data, isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } = useFilesPaged({
+    search: query,
+    purpose: effectivePurpose,
   });
+  const files = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
 
-  const currentPage = useMemo(() => data?.data ?? [], [data?.data]);
-  const hasMore = data?.hasMore ?? false;
-
-  // Merge accumulated pages with the current one, deduping by id (the current
-  // page briefly overlaps the accumulator between "Load more" and the fetch).
-  const files = useMemo(() => {
-    const seen = new Set<string>();
-    const out: FileDto[] = [];
-    for (const file of [...loadedPages, ...currentPage]) {
-      if (!seen.has(file.id)) {
-        seen.add(file.id);
-        out.push(file);
-      }
-    }
-    return out;
-  }, [loadedPages, currentPage]);
-
-  const resetPaging = (next: PurposeFilter) => {
-    setPurpose(next);
-    setCursor(undefined);
-    setLoadedPages([]);
-  };
+  const filtering = purposes.length > 0 || query.trim() !== "";
+  const countLabel = hasNextPage
+    ? t("page.countLoaded", { count: files.length })
+    : t("page.count", { count: files.length });
+  const overLimit = storage !== undefined && limit !== null && storage.used_bytes >= limit;
+  const footerLabel = usageLabel ? (
+    <>
+      {countLabel} <span aria-hidden>·</span> {t("storage.usage", { usage: usageLabel })}
+    </>
+  ) : (
+    countLabel
+  );
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title={t("page.title")}
-        emoji="📄"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("page.title") },
-        ]}
+        variant="collection"
+        breadcrumbs={[{ label: t("page.title") }]}
       />
 
-      <StorageUsageLine />
+      {overLimit && (
+        <ToneAlert variant="warning" className="mb-4">
+          <AlertTriangle size={16} />
+          <AlertDescription>{t("storage.limitReached")}</AlertDescription>
+        </ToneAlert>
+      )}
 
-      <FileListPanel
-        files={files}
+      <DocumentListPanel
+        documents={files}
         isLoading={isLoading}
         error={error}
-        filter={{ axis: "purpose", value: purpose, onChange: resetPaging }}
-        empty={{ message: t("page.empty"), hint: t("page.emptyHint") }}
-        showRunLink={canReach("/agents/:scope/:name/runs/:runId")}
-        onDeleted={(id) => setLoadedPages((prev) => prev.filter((d) => d.id !== id))}
-        onKept={(id) =>
-          setLoadedPages((prev) => prev.map((d) => (d.id === id ? { ...d, expiresAt: null } : d)))
+        display={view}
+        tableLabel={t("tableLabel")}
+        tableColumnMode="scroll"
+        toolbar={({ columns }) => (
+          <ListToolbar
+            search={{
+              value: search,
+              onChange: onSearchChange,
+              placeholder: searchPlaceholder,
+            }}
+            filters={[
+              {
+                id: "purpose",
+                label: t("column.purpose"),
+                values: purposes,
+                onChange: onPurposeChange,
+                options: [
+                  { value: "agent_output", label: t("filter.agent_output") },
+                  { value: "user_upload", label: t("filter.user_upload") },
+                ],
+              },
+            ]}
+            onReset={onReset}
+            columns={view === "table" ? columns : undefined}
+            view={view}
+            onViewChange={setView}
+          />
+        )}
+        empty={
+          filtering
+            ? { message: t("page.noMatch"), compact: true }
+            : { message: t("page.empty"), hint: t("page.emptyHint") }
         }
+        showRunLink={canReach("/agents/:scope/:name/runs/:runId")}
         footer={
-          hasMore && (
-            <Button
-              variant="outline"
-              className="mt-2"
-              onClick={() => {
-                const last = currentPage[currentPage.length - 1];
-                if (last) {
-                  setLoadedPages((prev) => [...prev, ...currentPage]);
-                  setCursor(last.id);
-                }
-              }}
-            >
-              {t("page.loadMore")}
-            </Button>
-          )
+          <ListFooter count={isLoading || error ? undefined : footerLabel}>
+            {hasNextPage && (
+              <PendingButton
+                variant="outline"
+                size="sm"
+                pending={isFetchingNextPage}
+                onClick={() => void fetchNextPage()}
+              >
+                {t("page.loadMore")}
+              </PendingButton>
+            )}
+          </ListFooter>
         }
       />
     </div>

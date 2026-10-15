@@ -4,8 +4,8 @@
  * The run cost readout exists so a run the platform could NOT price stops
  * rendering a confident `$0.0000`. The web test runner has no DOM, so this
  * exercises the pure mapping both surfaces share (`run-cost.ts`), plus source
- * scans proving the header (`run-detail.tsx`) and the Exécution pane
- * (`run-execution-tab.tsx`) really route through it — a second
+ * scans proving the header (`run-detail/run-header-summary.tsx`) and the Usage
+ * card (`run-detail/run-snapshot-inspector.tsx`) really route through it — a second
  * hand-rolled `toFixed(4)` on either surface is exactly the drift this split
  * was made to prevent.
  */
@@ -13,7 +13,14 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import i18n, { i18nReady } from "../../i18n";
 import { describeRunCost, COST_UNAVAILABLE } from "../run-cost.ts";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
+
+/** A French amount as Intl writes it: comma decimals, no-break space before the sign. */
+const usd = (amount: string) => `${amount}\u00a0$`;
 
 describe("describeRunCost", () => {
   it("unpriced with nothing spent → the placeholder, never a number", () => {
@@ -32,32 +39,32 @@ describe("describeRunCost", () => {
     // genuinely knows, to avoid overstating the part it doesn't, trades a
     // small overstatement for a total loss of information.
     expect(describeRunCost(12.5, "unpriced")).toEqual({
-      text: "$12.5000",
+      text: usd("12,5000"),
       tooltipKey: "run.costUnpricedFloorTooltip",
     });
   });
 
   it("partial → the amount, flagged as a floor", () => {
     expect(describeRunCost(0.1234, "partial")).toEqual({
-      text: "$0.1234",
+      text: usd("0,1234"),
       tooltipKey: "run.costPartialTooltip",
     });
   });
 
   it("priced → today's rendering exactly: bare amount, no tooltip", () => {
-    expect(describeRunCost(1.5, "priced")).toEqual({ text: "$1.5000", tooltipKey: null });
+    expect(describeRunCost(1.5, "priced")).toEqual({ text: usd("1,5000"), tooltipKey: null });
   });
 
   it("no status → identical to priced (the whole back catalogue, not a warning)", () => {
-    expect(describeRunCost(0.02, null)).toEqual({ text: "$0.0200", tooltipKey: null });
-    expect(describeRunCost(0.02, undefined)).toEqual({ text: "$0.0200", tooltipKey: null });
+    expect(describeRunCost(0.02, null)).toEqual({ text: usd("0,0200"), tooltipKey: null });
+    expect(describeRunCost(0.02, undefined)).toEqual({ text: usd("0,0200"), tooltipKey: null });
   });
 
   it("a status-less null cost still reads $0.0000, unchanged from before", () => {
     // Regression guard: only an unpriced run that spent NOTHING withholds the
     // number. A run that simply spent nothing keeps the zero it always showed.
-    expect(describeRunCost(null, null).text).toBe("$0.0000");
-    expect(describeRunCost(0, "priced").text).toBe("$0.0000");
+    expect(describeRunCost(null, null).text).toBe(usd("0,0000"));
+    expect(describeRunCost(0, "priced").text).toBe(usd("0,0000"));
   });
 
   it("qualifies every figure it cannot vouch for", () => {
@@ -83,11 +90,15 @@ describe("cost readout wiring", () => {
   });
 
   it("both surfaces delegate to the shared readout instead of formatting a cost", () => {
-    for (const relative of ["../../pages/run-detail.tsx", "../run-execution-tab.tsx"]) {
+    for (const relative of [
+      "../run-detail/run-header-summary.tsx",
+      "../run-detail/run-snapshot-inspector.tsx",
+    ]) {
       const source = read(relative);
       expect(source).toContain("<RunCostReadout");
       expect(source).toContain("pricingStatus={run.cost_pricing_status}");
       expect(source).not.toContain("toFixed(4)");
+      expect(source).not.toContain("NumberFormat");
     }
   });
 
