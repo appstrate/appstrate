@@ -81,11 +81,12 @@ interface LibraryPackage {
  * `state: "none"`, behind the same switch as every other space. A separate
  * section would put one activation behind two buttons.
  *
- * `GET /api/library` (owners and admins) returns every space the caller reads;
- * `GET /api/spaces/{id}/library` narrows to the requested space, which is what
- * makes it a space's own page rather than an organization map. A package with
- * NO placement there is still listed when the caller could PLACE it — a system
- * package, or one whose home grants them `<type>:share` — since
+ * `GET /api/library` returns every space whose library the caller reads, so it
+ * is the union of the space forms: an administrator's whole map, a member's
+ * spaces. `GET /api/spaces/{id}/library` narrows to the requested space, which
+ * is what makes it a space's own page rather than an organization map. A
+ * package with NO placement there is still listed when the caller could PLACE
+ * it — a system package, or one whose home grants them `<type>:share` — since
  * `POST /api/spaces/{id}/packages` would create the offer with the activation.
  * Never into a PERSONAL destination: an offer into somebody's own space is
  * somebody else's act.
@@ -95,7 +96,14 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
 
   const accessible = await packageAccessSpaces(c);
   const target = spaceId ? accessible.find((space) => space.id === spaceId) : undefined;
-  const visibleSpaces = spaceId ? accessible.filter((space) => space.id === spaceId) : accessible;
+  // The spaces whose library this caller reads: those it reaches AND holds
+  // `spaces:read` in — the per-space route's own guard, so the organization
+  // form is exactly the union of the space forms (an owner or admin holds it
+  // everywhere). The space form's route has already checked it for its space.
+  const visibleSpaces = spaceId
+    ? accessible.filter((space) => space.id === spaceId)
+    : accessible.filter((space) => space.permissions.has("spaces:read"));
+  const visibleIds = new Set(visibleSpaces.map((space) => space.id));
   const accessibleIds = accessible.map((space) => space.id);
   const orgSpaces = visibleSpaces
     .sort((a, b) => Number(b.isDefault) - Number(a.isDefault))
@@ -121,7 +129,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
           .filter(
             (space) =>
               (!target?.ownerUserId || space.id === target.id) &&
-              (!spaceId || space.id === spaceId) &&
+              visibleIds.has(space.id) &&
               space.permissions.has(packagePermission(type, "read")),
           )
           .map((space) => space.id),
@@ -261,17 +269,17 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     }
     placements.sort((a, b) => a.space_id.localeCompare(b.space_id));
 
-    // A package with no placement the caller reads is listed in ONE case, and
-    // only in the SPACE form: it is a candidate the caller could put there in
-    // one click — a package whose home grants them `<type>:share`, since
+    // A package with no placement the caller reads is listed in ONE case: it is
+    // a candidate the caller could put in one of the spaces read here in one
+    // click — a package whose home grants them `<type>:share`, since
     // `POST /api/spaces/{id}/packages` creates the offer with the activation —
-    // and never for a PERSONAL destination, where an offer is somebody else's
-    // act. Nothing else earns a row: every package of the organization is
-    // homed in one of its spaces (`packages_org_package_has_home`), so a
+    // and never for a PERSONAL destination alone, where an offer is somebody
+    // else's act. Nothing else earns a row: every package of the organization
+    // is homed in one of its spaces (`packages_org_package_has_home`), so a
     // package with no placement here is one placed in spaces this caller does
-    // not read, and the ORGANIZATION map is the page that shows it.
-    if (placements.length === 0 && !(!!spaceId && !target?.ownerUserId && home.home_shareable))
-      continue;
+    // not read.
+    const proposable = [...readable].some((space) => !personalSpaceIds.has(space));
+    if (placements.length === 0 && !(proposable && home.home_shareable)) continue;
 
     const m = asRecord(row.draftManifest);
     grouped[row.type]?.push({

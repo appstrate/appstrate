@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react";
-import { useMutation, useQueries, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import i18n from "../i18n";
 import { parseScopedName } from "@appstrate/core/naming";
@@ -11,10 +11,7 @@ import { useCurrentSpaceId } from "./use-current-space";
 import { agentsKeys, invalidatePaths, packageKeys } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
-import { useCurrentSpaceGrant, usePermissions } from "./use-permissions";
-import { useSpaces } from "./use-spaces";
-import { mergeSpaceLibraries, readableLibrarySpaces } from "../lib/merge-space-libraries";
-import { hasFullOrgAccess } from "../lib/org-role";
+import { useCurrentSpaceGrant } from "./use-permissions";
 import { maySetPackageActive } from "../lib/package-permissions";
 
 /**
@@ -37,75 +34,26 @@ export type LibrarySpace = LibraryResponse["spaces"][number];
  */
 export type LibraryPlacement = LibraryPackageItem["placements"][number];
 
-function useLibrary(options: { enabled?: boolean } = {}) {
-  const scope = useOrgOnlyScope();
-  return $api.useQuery(
-    "get",
-    "/api/library",
-    { params: { header: scope.header } },
-    { enabled: scope.enabled && (options.enabled ?? true) },
-  );
-}
-
 /**
- * The library every screen but the organization's own administration reads.
- *
- * `GET /api/library` answers owners and admins only (`routes/library.ts`), so
- * reading it for anyone else is a 403 that left the catalogue — and the
- * navigation's offer count beside it — as an error for every member. An
- * administrator still reads it directly; everybody else gets the SAME shape,
- * merged from the library of each space they are a member of
- * (`lib/merge-space-libraries`). One screen, graded by the rule the server
- * already applies: nobody is shown a space they cannot enter.
+ * The library every screen but one space's own page reads: `GET /api/library`,
+ * graded by the server — an administrator's whole map, a member's or guest's
+ * own spaces (the union of their per-space libraries). One request, whatever
+ * the caller's role.
  *
  * `enabled: false` reads nothing, for a surface the caller cannot open.
  */
 export function useCatalogueLibrary({ enabled = true }: { enabled?: boolean } = {}) {
   const scope = useOrgOnlyScope();
-  const { orgRole } = usePermissions();
-  const isOrgAdmin = hasFullOrgAccess(orgRole);
-  const org = useLibrary({ enabled: enabled && isOrgAdmin });
-  const spaces = useSpaces(enabled && !isOrgAdmin);
-  const perSpace = useQueries({
-    queries: readableLibrarySpaces(isOrgAdmin ? [] : (spaces.data ?? [])).map((space) => ({
-      ...$api.queryOptions("get", "/api/spaces/{spaceId}/library", {
-        params: { path: { spaceId: space.id }, header: scope.header },
-      }),
-      enabled: enabled && scope.enabled,
-    })),
-  });
-  if (isOrgAdmin) return { data: org.data, isLoading: org.isLoading, error: org.error };
-  return combineSpaceLibraries(spaces, perSpace);
-}
-
-type QueryState<T> = { data: T | undefined; isLoading: boolean; error: unknown };
-
-/**
- * A member's catalogue from the space listing and each space's library. Nothing
- * is answered until the listing is: its failure is the catalogue's failure, and
- * a listing that is not being read (`enabled: false`) is not loading either.
- *
- * Merged on every call rather than memoised: a handful of spaces, a few hundred
- * rows, and no dependency list that could fall out of step.
- */
-export function combineSpaceLibraries(
-  spaces: QueryState<unknown>,
-  perSpace: readonly QueryState<Pick<LibraryResponse, "spaces" | "packages">>[],
-): QueryState<Pick<LibraryResponse, "spaces" | "packages">> {
-  if (spaces.data === undefined) {
-    return { data: undefined, isLoading: spaces.isLoading, error: spaces.error };
-  }
-  return {
-    data: perSpace.some((query) => !query.data)
-      ? undefined
-      : mergeSpaceLibraries(perSpace.map((query) => query.data!)),
-    isLoading: perSpace.some((query) => query.isLoading),
-    error: perSpace.find((query) => query.error)?.error ?? null,
-  };
+  return $api.useQuery(
+    "get",
+    "/api/library",
+    { params: { header: scope.header } },
+    { enabled: scope.enabled && enabled },
+  );
 }
 
 /**
- * Space readers never need access to the organization administration view.
+ * One space's own library page.
  *
  * `enabled: false` is for the caller that already holds the answer from a
  * narrower response — a package's own detail — and must not spend a second
@@ -248,9 +196,9 @@ export function activationStateOf(
 }
 
 /**
- * Both forms of the library `useCatalogueLibrary` reads: the organization's for
- * an administrator, each space's for everybody else. Invalidating one alone
- * leaves the other's reader on a stale list.
+ * Both forms of the library: the organization's (`useCatalogueLibrary`) and the
+ * current space's (`usePackageActivationState`). Invalidating one alone leaves
+ * the other's reader on a stale list.
  */
 export function invalidateLibraries(qc: QueryClient) {
   return invalidatePaths(qc, ["/api/library", "/api/spaces/{spaceId}/library"]);

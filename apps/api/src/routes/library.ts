@@ -2,38 +2,28 @@
 
 import { Hono } from "hono";
 import { forbidden } from "../lib/errors.ts";
-import { callerOrgRole } from "../lib/view-as.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import { getPackageLibrary } from "../services/package-library.ts";
 import type { AppEnv } from "../types/index.ts";
 
 /**
- * Who may open the ORGANIZATION-wide library page — the person's own
- * credential holding owner or admin, never a delegate (RBAC spec §6.10).
+ * Who may open the ORGANIZATION-wide library — the person's own credential,
+ * never a delegate (RBAC spec §6.10). A delegate is refused because it is
+ * pinned to a single space: an organization map is not a thing a space-pinned
+ * credential asks for.
  *
- * This is a PAGE gate and nothing more: the map it guards spans every space of
- * the organization, which is an administrator's view by definition. It confers
- * no authority over any package on it — each row is still placed, read, moved
- * and switched on under the home rule (`packages.home_space_id`), and the
- * per-space page `GET /api/spaces/{id}/library` serves the same projection to
- * whoever reads that one space.
- *
- * A delegate is refused because it is pinned to a single space: an
- * organization map is not a thing a space-pinned credential asks for.
+ * Every member may: the map is graded by the caller, each space listed only
+ * where its own library page (`GET /api/spaces/{id}/library`) would answer
+ * them, so it is the union of those pages. It confers no authority over any
+ * package on it — each row is still placed, read, moved and switched on under
+ * the home rule (`packages.home_space_id`).
  */
-function mayOpenOrganizationLibrary(c: Parameters<typeof callerOrgRole>[0]): boolean {
-  const orgRole = callerOrgRole(c);
-  return isUserPrincipal(c) && (orgRole === "owner" || orgRole === "admin");
-}
-
 export function createLibraryRouter() {
   const router = new Hono<AppEnv>();
-  // The caller's org role decides, not a grant: no permission names this page.
+  // The credential decides, not a grant: the graded map needs none of its own.
   router.get("/", async (c) => {
-    if (!mayOpenOrganizationLibrary(c))
-      throw forbidden(
-        "The organization library requires the user's own credential holding owner or admin",
-      );
+    if (!isUserPrincipal(c))
+      throw forbidden("The organization library requires the user's own credential");
     return c.json(await getPackageLibrary(c));
   });
   return router;

@@ -19,6 +19,7 @@ await registerTestPlatformApp();
 /** Guarded in the handler, invisible to the route table; a route guard added later re-pins them. */
 const HANDLER_GUARDED: Record<string, string> = {
   getOrganization: "membership only; `buildOrgDetail` returns the member list under `members:read`",
+  getLibrary: "graded in `getPackageLibrary`: the spaces where the caller holds `spaces:read`",
   getWebhook: "the row's level picks webhooks vs org-webhooks (`loadWebhookForAction`)",
 };
 
