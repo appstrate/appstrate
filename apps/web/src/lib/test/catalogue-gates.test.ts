@@ -45,8 +45,8 @@ const ALLOWED = { allowed: true, refusal: null };
 describe("activationGate", () => {
   const pkg = packageRow("agent", [placement("spc_a", "home", "active")], {
     activation: [
-      { space_id: "spc_a", activate: "allowed", deactivate: "forbidden" },
-      { space_id: "spc_b", activate: "not_shareable", deactivate: "not_shareable" },
+      { spaceId: "spc_a", activate: "allowed", deactivate: "forbidden" },
+      { spaceId: "spc_b", activate: "not_shareable", deactivate: "not_shareable" },
     ],
   });
 
@@ -61,7 +61,7 @@ describe("activationGate", () => {
 
   it("words a missing grant by direction", () => {
     const off = packageRow("agent", [], {
-      activation: [{ space_id: "spc_c", activate: "forbidden", deactivate: "allowed" }],
+      activation: [{ spaceId: "spc_c", activate: "forbidden", deactivate: "allowed" }],
     });
     expect(activationGate(off, "spc_c", true)).toEqual({ allowed: false, refusal: "activate" });
     expect(activationGate(off, "spc_c", false)).toEqual(ALLOWED);

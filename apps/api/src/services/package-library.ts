@@ -60,7 +60,7 @@ type ActivationVerdict = "allowed" | "not_shareable" | "forbidden";
 
 /** The two verdicts of one (package, space) pair, for every space the library lists. */
 interface ActivationCell {
-  space_id: string;
+  spaceId: string;
   activate: ActivationVerdict;
   deactivate: ActivationVerdict;
 }
@@ -318,7 +318,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
 
     const placedIn = new Set(placements.map((placement) => placement.space_id));
     const activation = visibleSpaces.map((space): ActivationCell => ({
-      space_id: space.id,
+      spaceId: space.id,
       activate: activationVerdict(type, space, placedIn.has(space.id), home.home_shareable, true),
       deactivate: activationVerdict(
         type,

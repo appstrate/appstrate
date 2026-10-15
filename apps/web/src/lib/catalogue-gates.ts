@@ -35,7 +35,7 @@ export function activationGate(
   spaceId: string,
   next: boolean,
 ): ActivationGate {
-  const cell = pkg.activation.find((entry) => entry.space_id === spaceId);
+  const cell = pkg.activation.find((entry) => entry.spaceId === spaceId);
   if (!cell) return { allowed: false, refusal: null };
   const verdict = next ? cell.activate : cell.deactivate;
   if (verdict === "allowed") return { allowed: true, refusal: null };

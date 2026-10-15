@@ -136,14 +136,14 @@ describe("library activation verdicts", () => {
       packages: {
         agent: {
           id: string;
-          activation: { space_id: string; activate: string; deactivate: string }[];
+          activation: { spaceId: string; activate: string; deactivate: string }[];
         }[];
       };
     };
     return body.packages.agent.find((row) => row.id === AGENT)!;
   }
   const cellOf = (row: Awaited<ReturnType<typeof libraryRow>>, spaceId: string) =>
-    row.activation.find((cell) => cell.space_id === spaceId);
+    row.activation.find((cell) => cell.spaceId === spaceId);
 
   beforeEach(async () => {
     await seedAgent({
@@ -159,7 +159,7 @@ describe("library activation verdicts", () => {
   it("allows an owner in the package's home", async () => {
     const row = await libraryRow(owner);
     expect(row.activation).toEqual([
-      { space_id: owner.defaultSpaceId, activate: "allowed", deactivate: "allowed" },
+      { spaceId: owner.defaultSpaceId, activate: "allowed", deactivate: "allowed" },
     ]);
   });
 
@@ -190,12 +190,12 @@ describe("library activation verdicts", () => {
       packages: {
         agent: {
           id: string;
-          activation: { space_id: string; activate: string; deactivate: string }[];
+          activation: { spaceId: string; activate: string; deactivate: string }[];
         }[];
       };
     };
     const row = body.packages.agent.find((entry) => entry.id === PRIVATE)!;
-    const cell = (spaceId: string) => row.activation.find((entry) => entry.space_id === spaceId);
+    const cell = (spaceId: string) => row.activation.find((entry) => entry.spaceId === spaceId);
     expect(cell(team.id)).toMatchObject({ activate: "not_shareable" });
     // CONTROL: where it is placed, the owner's grant decides, and it holds.
     expect(cell(owner.defaultSpaceId)).toMatchObject({

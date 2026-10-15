@@ -6195,7 +6195,7 @@ export interface components {
             published: boolean;
             /** @description What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the offer; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance. */
             activation: {
-                space_id: string;
+                spaceId: string;
                 /** @enum {string} */
                 activate: "allowed" | "not_shareable" | "forbidden";
                 /** @enum {string} */

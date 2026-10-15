@@ -3016,9 +3016,9 @@ export const schemas = {
             "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the offer; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
           items: {
             type: "object",
-            required: ["space_id", "activate", "deactivate"],
+            required: ["spaceId", "activate", "deactivate"],
             properties: {
-              space_id: { type: "string" },
+              spaceId: { type: "string" },
               activate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
               deactivate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
             },
