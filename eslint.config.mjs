@@ -891,8 +891,4 @@ export default tseslint.config(
     },
   },
   eslintConfigPrettier,
-  {
-    files: ["scripts/lint.ts"],
-    rules: { "no-warning-comments": ["warn", { terms: ["SPDX"], location: "anywhere" }] },
-  },
 );
