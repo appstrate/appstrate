@@ -1150,8 +1150,11 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       : resolveDraftContent(rcfg.cfg.type, existing.content, draftContentInput);
     // The tree handed to `mutate` carries the PREVIOUS column in INTEGRATION.md
     // (the draft overlay); without this write the stored copy, which publish
-    // freezes, would trail the column by one save, or never exist.
-    const contentEntryPath = optionalContentEntryPath(rcfg.cfg.type, draftContent);
+    // freezes, would trail the column by one save, or never exist. Alongside
+    // operations, the body's `content` is written first and they apply on top,
+    // as `storageFileName` is for a skill; the column then follows the tree.
+    const entryContent = body.operations ? body.content : draftContent;
+    const contentEntryPath = optionalContentEntryPath(rcfg.cfg.type, entryContent);
     let written: number;
     try {
       ({ lockVersion: written } = await mutatePackageDraftFiles(
@@ -1168,7 +1171,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
             if (body.content !== undefined || !body.operations)
               next[rcfg.storageFileName] = new TextEncoder().encode(storageContent);
             if (contentEntryPath) {
-              if (draftContent) next[contentEntryPath] = new TextEncoder().encode(draftContent);
+              if (entryContent) next[contentEntryPath] = new TextEncoder().encode(entryContent);
               else delete next[contentEntryPath];
             }
             return applyFileOperations(next, toDraftFileOperations(body.operations ?? []), {

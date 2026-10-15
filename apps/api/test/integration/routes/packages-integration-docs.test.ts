@@ -359,14 +359,22 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       });
     }
 
-    async function saveContent(content: string, version: string): Promise<Response> {
+    async function saveContent(
+      content: string,
+      version: string,
+      operations?: Array<Record<string, unknown>>,
+    ): Promise<Response> {
       return app.request(`/api/packages/integrations/${id}`, {
         method: "PATCH",
         headers: authHeaders(ctx, {
           "Content-Type": "application/json",
           ...ifMatch(await lockVersionOf(ctx, id)),
         }),
-        body: JSON.stringify({ manifest: integrationManifest(id, version), content }),
+        body: JSON.stringify({
+          manifest: integrationManifest(id, version),
+          content,
+          ...(operations ? { operations } : {}),
+        }),
       });
     }
 
@@ -417,6 +425,36 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       expect((await listFiles(ctx, id)).some((e) => e.path === "INTEGRATION.md")).toBe(false);
       await publish("1.1.0");
       expect(await frozenDoc("1.1.0")).toBeUndefined();
+    });
+
+    it("applies content before operations saved alongside it, as for a skill", async () => {
+      expect((await create()).status).toBe(201);
+      const next = "# Gmail\n\nRevised with a note.\n";
+      const notes = [{ op: "write", path: "notes.txt", text: "a note" }];
+      expect((await saveContent(next, "1.1.0", notes)).status).toBe(200);
+
+      expect(await draftContentOf(id)).toBe(next);
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(next);
+      expect(await storedFile(ctx.orgId, id, "notes.txt")).toBe("a note");
+      await publish("1.1.0");
+      expect(await frozenDoc("1.1.0")).toBe(next);
+
+      expect((await saveContent("", "1.2.0", notes)).status).toBe(200);
+      expect(await draftContentOf(id)).toBe("");
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBeUndefined();
+      await publish("1.2.0");
+      expect(await frozenDoc("1.2.0")).toBeUndefined();
+    });
+
+    it("an operation writing INTEGRATION.md wins over the content saved with it", async () => {
+      expect((await create()).status).toBe(201);
+      const byOperation = "# Gmail\n\nWritten by the operation.\n";
+      const res = await saveContent("# ignored\n", "1.1.0", [
+        { op: "write", path: "INTEGRATION.md", text: byOperation },
+      ]);
+      expect(res.status).toBe(200);
+      expect(await draftContentOf(id)).toBe(byOperation);
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(byOperation);
     });
 
     it("writes no INTEGRATION.md for the manifest-text value the dashboard sends", async () => {
