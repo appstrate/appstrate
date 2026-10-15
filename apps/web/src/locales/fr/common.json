@@ -324,8 +324,6 @@
   "table.resizeColumn": "Redimensionner la colonne {{column}}",
   "toolbar.clearAll": "Tout effacer",
   "toolbar.filters": "Filtres",
-  "toolbar.viewCards": "Vue cartes",
-  "toolbar.viewTable": "Vue tableau",
   "toolbar.searchEntity": "Rechercher des {{entity}}…",
   "toolbar.columns": "Colonnes",
   "toolbar.columnsLabel": "Afficher les colonnes",
