@@ -242,6 +242,12 @@ describe("describeModelFailure", () => {
     expect(describeModelFailure("400 {not json}")).not.toHaveProperty("providerMessage");
   });
 
+  it("reads no status outside the HTTP range, which runs.model_error_status refuses", () => {
+    for (const text of ['000 {"message":"x"}', '999 {"message":"x"}', '600 {"message":"x"}']) {
+      expect(describeModelFailure(text)).not.toHaveProperty("status");
+    }
+  });
+
   it("classifies a failure with no status by its text, as classifyModelError does", () => {
     const failure = describeModelFailure("fetch failed");
     expect(failure).toEqual(classifyModelError({ message: "fetch failed" }));

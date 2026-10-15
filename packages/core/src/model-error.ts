@@ -199,8 +199,11 @@ export interface ModelFailure extends ModelErrorClassification {
   providerMessage?: string;
 }
 
-/** The agent SDK's wording of a provider refusal: `<status> <JSON body>`. */
-const PROVIDER_REFUSAL = /^(\d{3}) (\{[\s\S]*\})$/;
+/**
+ * The agent SDK's wording of a provider refusal: `<status> <JSON body>`. The status is an HTTP
+ * one (100–599), the range `runs.model_error_status` accepts.
+ */
+const PROVIDER_REFUSAL = /^([1-5]\d\d) (\{[\s\S]*\})$/;
 
 /**
  * Read one failed model call's text ONCE, server-side, into what a reader branches on — so no
