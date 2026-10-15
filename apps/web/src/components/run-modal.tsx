@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { FormModal } from "./form-modal";
