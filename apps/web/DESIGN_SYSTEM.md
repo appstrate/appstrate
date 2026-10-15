@@ -352,7 +352,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   page, `useLocalListParams` in a panel that floats over a page): filters are
   pushed, the search is replaced, a reset is one update. Runs, schedules, files
   and integrations are tables; the package indexes (agents, skills, MCP) let the reader
-  choose cards or table (`ToggleGroup`, `stores/list-view-store.ts`, one preference per
+  choose cards or table (`Tabs`, `stores/list-view-store.ts`, one preference per
   index: a preference, not a location). Hidden columns
   are in `stores/column-visibility-store.ts`.
 - Toolbar buttons have two treatments (`lib/toolbar-button.ts`): `TOOLBAR_UTILITY`

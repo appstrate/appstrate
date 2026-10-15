@@ -16,7 +16,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { LayoutGrid, Rows3, type LucideIcon } from "lucide-react";
-import { ToggleGroup, ToggleGroupItem } from "@appstrate/ui/components/toggle-group";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { PackageType } from "@appstrate/core/validation";
 import type { DataColumn } from "./data-table";
 import { CardGrid } from "./card-grid";
@@ -222,26 +222,16 @@ export function PackageCollection({
         actions={
           <>
             {onViewChange && (
-              <ToggleGroup
-                type="single"
-                variant="outline"
-                size="sm"
-                value={view}
-                onValueChange={(next) => next && onViewChange(next as ListView)}
-              >
-                <ToggleGroupItem
-                  value="table"
-                  aria-label={t("toolbar.viewTable", { ns: "common" })}
-                >
-                  <Rows3 />
-                </ToggleGroupItem>
-                <ToggleGroupItem
-                  value="cards"
-                  aria-label={t("toolbar.viewCards", { ns: "common" })}
-                >
-                  <LayoutGrid />
-                </ToggleGroupItem>
-              </ToggleGroup>
+              <Tabs value={view} onValueChange={(next) => onViewChange(next as ListView)}>
+                <TabsList className="h-9">
+                  <TabsTrigger value="table" aria-label={t("toolbar.viewTable", { ns: "common" })}>
+                    <Rows3 className="size-4" />
+                  </TabsTrigger>
+                  <TabsTrigger value="cards" aria-label={t("toolbar.viewCards", { ns: "common" })}>
+                    <LayoutGrid className="size-4" />
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
             )}
             {actions}
           </>

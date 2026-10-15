@@ -43,7 +43,7 @@ import { TextSkeleton } from "../../components/loading-skeletons";
 import { useRoleColumns } from "./role-columns";
 import { RoleMatrix } from "./role-matrix";
 import { CollectionTabs } from "../../components/detail-tabs";
-import { ToggleGroup, ToggleGroupItem } from "@appstrate/ui/components/toggle-group";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { OrgRolesList, OrgRolesMatrix } from "./org-roles";
 import {
   groupPermissionsByResource,
@@ -190,20 +190,16 @@ export function OrgSettingsRolesPage() {
             { value: "space", label: t("roles.tabSpace") },
           ]}
         />
-        <ToggleGroup
-          type="single"
-          variant="outline"
-          size="sm"
-          value={view}
-          onValueChange={(next) => next && setParam("view", next, "list")}
-        >
-          <ToggleGroupItem value="list" aria-label={t("roles.viewList")}>
-            <Rows3 />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="matrix" aria-label={t("roles.viewMatrix")}>
-            <Grid3x3 />
-          </ToggleGroupItem>
-        </ToggleGroup>
+        <Tabs value={view} onValueChange={(next) => setParam("view", next, "list")}>
+          <TabsList className="h-9">
+            <TabsTrigger value="list" aria-label={t("roles.viewList")}>
+              <Rows3 className="size-4" />
+            </TabsTrigger>
+            <TabsTrigger value="matrix" aria-label={t("roles.viewMatrix")}>
+              <Grid3x3 className="size-4" />
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
       {tab === "org" &&
         (view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList onPreview={previewOrgRole} />)}
