@@ -803,6 +803,7 @@
   "integrations.count_other": "{{count}} integrations",
   "integrations.col.name": "Name",
   "integrations.col.version": "Version",
+  "integrations.col.connections": "Connections",
   "integrations.filter.origin": "Origin",
   "integrations.empty.space": "No active integration in this space.",
   "integrations.empty.filtered": "No integrations match these filters.",

@@ -29,6 +29,7 @@ import {
 } from "../lib/integration-collection";
 import { readList, useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { useConnectionCounts } from "../hooks/use-me-connections";
 import { usePackageList } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
@@ -42,6 +43,7 @@ export function IntegrationsPage() {
   // The server answers the active set of this space: the index route every
   // type page asks, not the management listing.
   const { data: active = [], isLoading, error } = usePackageList("integration");
+  const connectionCounts = useConnectionCounts();
   const list = useListParams(["origin", "protocol"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
   const canCreate = can("integrations:write");
@@ -84,7 +86,7 @@ export function IntegrationsPage() {
   const countOf = (value: IntegrationExecution) =>
     active.filter((row) => integrationExecution(row.source_kind) === value).length;
 
-  const allColumns = useIntegrationListColumns().filter((column) =>
+  const allColumns = useIntegrationListColumns(connectionCounts).filter((column) =>
     execution === "local" ? column.id !== "protocol" : column.id !== "server",
   );
   const { columns, menu } = useColumnVisibility("integrations", allColumns);

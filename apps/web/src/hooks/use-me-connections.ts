@@ -2,14 +2,32 @@
 
 /** User-scope connection reads and writes: owner-only `/api/me/connections/*` routes, which need no org/space context. */
 
+import { useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { $api, client } from "../api/client";
+import { connectionCountBySource } from "../lib/connection-count";
+import { useCurrentSpaceId } from "./use-current-space";
 import { invalidateIntegrationQueries } from "./use-integrations";
+import { useCurrentOrgId } from "./use-org";
 import { invalidateSchedules } from "./use-schedules";
 
 /** The caller's connections across every org/space, grouped by source package (no header context). */
 export function useMyConnections() {
   return $api.useQuery("get", "/api/me/connections", {}, { select: (e) => e.data });
+}
+
+/**
+ * The caller's own connections per integration package id, in the current org and space.
+ * `undefined` until the account list answers (or when it fails): a caller must not read that as 0.
+ */
+export function useConnectionCounts(): Map<string, number> | undefined {
+  const { data: groups } = useMyConnections();
+  const orgId = useCurrentOrgId();
+  const spaceId = useCurrentSpaceId();
+  return useMemo(
+    () => (groups ? connectionCountBySource(groups, { orgId, spaceId }) : undefined),
+    [groups, orgId, spaceId],
+  );
 }
 
 /** Fetches only while `connectionId` is set, i.e. while the confirmation is open. */

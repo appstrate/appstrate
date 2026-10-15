@@ -11,8 +11,13 @@ import {
 import { useOrg } from "../hooks/use-org";
 import { integrationProtocol } from "../lib/integration-collection";
 
-/** One comparable integration fact per column. */
-export function useIntegrationListColumns(): DataColumn<IntegrationIndexItem>[] {
+/**
+ * One comparable integration fact per column. `connectionCounts` is the caller's own connections
+ * per integration here (`useConnectionCounts`); `undefined` while unknown, drawn as « — ».
+ */
+export function useIntegrationListColumns(
+  connectionCounts?: ReadonlyMap<string, number>,
+): DataColumn<IntegrationIndexItem>[] {
   const { t } = useTranslation("settings");
   const origin = useCatalogueOriginColumn<IntegrationIndexItem>(useOrg().currentOrg?.name ?? "");
   // Remote tab only: API or MCP.
@@ -47,6 +52,21 @@ export function useIntegrationListColumns(): DataColumn<IntegrationIndexItem>[] 
           {server ? `${server.name} ${server.version}` : "—"}
         </span>
       ),
+    },
+    {
+      id: "connections",
+      header: t("integrations.col.connections"),
+      width: 112,
+      align: "end",
+      tier: 2,
+      cell: (integration) => {
+        const count = connectionCounts && (connectionCounts.get(integration.id) ?? 0);
+        return (
+          <span className={count ? "tabular-nums" : "text-muted-foreground tabular-nums"}>
+            {count ?? "—"}
+          </span>
+        );
+      },
     },
     {
       id: "version",
