@@ -5,7 +5,7 @@ import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
-import { Database, LayoutGrid, Play, Settings2, TriangleAlert } from "lucide-react";
+import { Database, Layers, LayoutGrid, Play, Settings2, TriangleAlert } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
@@ -28,7 +28,7 @@ import { isQueryInFlight } from "../lib/query-state";
 import { packageDetailPath } from "../lib/package-paths";
 
 // Shared components
-import { SharedHeader } from "../components/package-detail/shared-header";
+import { PackageDetailBar } from "../components/package-detail/package-detail-bar";
 import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
@@ -45,12 +45,7 @@ import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab"
 import { AgentIdentity } from "../components/agent-detail/agent-identity";
 import { AgentDetailBar } from "../components/agent-detail/agent-detail-bar";
 import { AgentSettingsView } from "../components/agent-detail/agent-settings-view";
-import {
-  DetailTabs,
-  DetailTabBar,
-  DetailTabPanel,
-  type DetailTab,
-} from "../components/detail-tabs";
+import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
 import { AgentRunButton } from "../components/package-detail/agent-run-button";
 import { PackageUsage } from "../components/package-detail/package-usage";
 import { PackageSettingsView } from "../components/package-detail/package-settings-view";
@@ -267,7 +262,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
 
-  // ── Unified detail for SharedHeader ──
+  // ── Unified detail for the header and the overview ──
   const historicalManifestName =
     typeof versionDetail?.manifest?.display_name === "string"
       ? versionDetail.manifest.display_name
@@ -308,6 +303,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const overviewTab: DetailTab<PackageTab> = {
     value: "overview",
     label: t("detail.overview.summary"),
+    icon: LayoutGrid,
   };
 
   const agentTabLabels: Record<(typeof AGENT_DETAIL_TABS)[number], string> = {
@@ -330,8 +326,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const pkgTabs: Array<DetailTab<PackageTab>> = [
     overviewTab,
-    { value: "settings", label: t("detail.tabSettings") },
-    { value: "usedBy", label: t("packages.usedBy") },
+    { value: "settings", label: t("detail.tabSettings"), icon: Settings2 },
+    { value: "usedBy", label: t("packages.usedBy"), icon: Layers },
   ];
 
   const tabDefs = type === "agent" ? agentTabs : pkgTabs;
@@ -395,29 +391,25 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             }
           />
         ) : (
-          <SharedHeader
+          <PackageDetailBar
             detail={unifiedForHeader}
             isHistoricalVersion={isHistoricalVersion}
             // For a package the server's flag is authoring state: only whoever can
             // publish the draft has a use for it.
             hasUnarchivedChanges={hasTimestampChanges && !!homeWritable}
-            activeSubpage={{
-              label: tabDefs.find((item) => item.value === tab)?.label ?? overviewTab.label,
-            }}
-            actionsRight={
-              <div className="flex items-center gap-2">
-                <PackageActionsDropdown
-                  packageId={packageId}
-                  type={type}
-                  detail={pkgDetail}
-                  isHistoricalVersion={isHistoricalVersion}
-                  downloadVersion={downloadVersion}
-                  onDownload={downloadPackage}
-                  onCreateVersion={() => newVersion.open()}
-                  createVersionBlockedReason={unsavedReason}
-                  isActiveHere={isActiveInCurrentSpace}
-                />
-              </div>
+            tabs={tabDefs}
+            actions={
+              <PackageActionsDropdown
+                packageId={packageId}
+                type={type}
+                detail={pkgDetail}
+                isHistoricalVersion={isHistoricalVersion}
+                downloadVersion={downloadVersion}
+                onDownload={downloadPackage}
+                onCreateVersion={() => newVersion.open()}
+                createVersionBlockedReason={unsavedReason}
+                isActiveHere={isActiveInCurrentSpace}
+              />
             }
           />
         )}
@@ -506,7 +498,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
         {type !== "agent" && (
           <>
-            <DetailTabBar tabs={tabDefs} />
             {/* Non-Agent tab content */}
             {/* Both follow the version being viewed: the explorer through
           `versionLabel`, the overview through the manifest picked above. */}

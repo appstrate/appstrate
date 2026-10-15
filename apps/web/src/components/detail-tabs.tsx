@@ -42,23 +42,6 @@ function useScrollEdges() {
   return { ref, edge };
 }
 
-/** Stock shadcn tabs, tighter on a phone; when they still do not fit they scroll, with a fade on the hidden edge. */
-function DetailTabsList(props: Omit<React.ComponentPropsWithoutRef<typeof TabsList>, "className">) {
-  const { ref, edge } = useScrollEdges();
-  return (
-    <div ref={ref} className={cn("max-w-full overflow-x-auto", FADE_EDGE[edge])}>
-      <TabsList className="mt-6 mb-3 w-max justify-start" {...props} />
-    </div>
-  );
-}
-
-function DetailTabsTrigger({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<typeof TabsTrigger>) {
-  return <TabsTrigger className={cn("max-sm:px-2", className)} {...props} />;
-}
-
 export interface DetailTab<T extends string> {
   value: T;
   label: string;
@@ -80,19 +63,6 @@ export function DetailTabs<T extends string>({
     <Tabs value={value} onValueChange={(next) => onChange(next as T)}>
       {children}
     </Tabs>
-  );
-}
-
-/** The tab bar of `tabs`. */
-export function DetailTabBar<T extends string>({ tabs }: { tabs: readonly DetailTab<T>[] }) {
-  return (
-    <DetailTabsList>
-      {tabs.map((tab) => (
-        <DetailTabsTrigger key={tab.value} value={tab.value}>
-          {tab.label}
-        </DetailTabsTrigger>
-      ))}
-    </DetailTabsList>
   );
 }
 

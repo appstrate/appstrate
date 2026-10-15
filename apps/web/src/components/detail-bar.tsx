@@ -15,6 +15,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useCanReach } from "@/hooks/use-can-reach";
 import type { BreadcrumbEntry } from "@/stores/breadcrumb-store";
@@ -23,14 +24,27 @@ import {
   ShellHeaderLead,
   ShellHeaderTabs,
 } from "@/components/shell-header-slots";
+import { HeaderTabBar, type DetailTab } from "@/components/detail-tabs";
 
-export function DetailBar({
+/** A package's id in the small line under the title, with its copy button. */
+export function DetailBarId({ id }: { id: string }) {
+  return (
+    <>
+      <span aria-hidden>·</span>
+      <code className="truncate font-mono">{id}</code>
+      <CopyButton value={id} className="size-5 shrink-0 [&_svg]:size-3" />
+    </>
+  );
+}
+
+export function DetailBar<T extends string = string>({
   icon,
   title,
   badge,
   parent,
   meta,
   actions,
+  tabs,
 }: {
   /** The identity tile, left of the title. */
   icon?: ReactNode;
@@ -44,6 +58,8 @@ export function DetailBar({
   meta?: ReactNode;
   /** The header's right end, left of the notification bell. */
   actions?: ReactNode;
+  /** The tab bar, on the band's rule. Needs the page's `DetailTabs` above. */
+  tabs?: readonly DetailTab<T>[];
 }) {
   const canReach = useCanReach();
 
@@ -76,6 +92,7 @@ export function DetailBar({
         </div>
       </ShellHeaderLead>
       {actions && <ShellHeaderActions>{actions}</ShellHeaderActions>}
+      {tabs && <HeaderTabBar tabs={tabs} />}
     </>
   );
 }

@@ -16,7 +16,7 @@ import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { useModalParam } from "../hooks/use-modal-param";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
-import { PageHeader } from "../components/page-header";
+import { DetailBar } from "../components/detail-bar";
 import { ResourceErrorState } from "../components/page-states";
 import { RunDetailSkeleton } from "../components/loading-skeletons";
 import { useMarkReadByRun } from "../hooks/use-notifications";
@@ -41,13 +41,8 @@ import { RunExecutionView } from "../components/run-detail/run-execution-view";
 import { RunResultsView } from "../components/run-detail/run-results-view";
 import { RunSnapshotInspector } from "../components/run-detail/run-snapshot-inspector";
 import { Button } from "@appstrate/ui/components/button";
-import { ArrowRight } from "lucide-react";
-import {
-  DetailTabs,
-  DetailTabBar,
-  DetailTabPanel,
-  type DetailTab,
-} from "../components/detail-tabs";
+import { ArrowRight, LayoutGrid, FileText, ScrollText } from "lucide-react";
+import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
 import { Badge } from "../components/status-badge";
 import { RunProvenanceBadges } from "../components/run-cells";
 import type { JournalOverviewFilter } from "../components/log-viewer";
@@ -249,22 +244,18 @@ export function RunDetailPage() {
   const canRerun = !isRunning && !isInline && !!agent && permissionsReady && can("agents:run");
   // `?rerun=1` opens the form only where the Re-run button itself would.
   const rerunOpen = rerun.value !== null && canRerun && !rerunRefusal;
-  const hasInlineName = !!enrichedRun.agent_name?.trim();
   const inlineName = inlineRunDisplayName(enrichedRun.agent_name, t("runs.inlineBadge"));
 
-  const agentCrumb = isInline
-    ? {
-        label: hasInlineName
-          ? `${inlineName} (${t("runs.inlineBadge").toLowerCase()})`
-          : inlineName,
-        href: location.pathname,
-      }
+  // The list this run belongs to, in the header's small line: its agent's runs,
+  // or the runs list for an inline run, which has no agent page.
+  const parent = isInline
+    ? { label: t("runs.title"), href: "/runs" }
     : {
         // The name the agents list already holds stands in while the detail
         // loads; the id is the fallback for an agent with no name, never a
         // placeholder for one whose name is still on its way.
         label: agent?.display_name || knownAgentName || packageId,
-        href: `/agents/${packageId}`,
+        href: `/agents/${packageId}#runs`,
       };
 
   const runCrumbLabel = runNumber
@@ -276,60 +267,47 @@ export function RunDetailPage() {
     numberedTitle: runCrumbLabel,
   });
   const tabs: DetailTab<RunDetailTab>[] = [
-    { value: "overview", label: t("run.tabOverview") },
-    { value: "journal", label: t("run.tabJournal") },
-    { value: "results", label: t("run.tabResults") },
-  ];
-
-  const breadcrumbs = [
-    { label: t("detail.breadcrumb"), href: "/agents" },
-    agentCrumb,
-    ...(isInline
-      ? []
-      : [
-          { label: t("detail.tabRuns"), href: `/agents/${packageId}#runs` },
-          { label: runCrumbLabel, href: location.pathname },
-        ]),
-    { label: tabs.find((item) => item.value === tab)?.label ?? tab },
+    { value: "overview", label: t("run.tabOverview"), icon: LayoutGrid },
+    { value: "journal", label: t("run.tabJournal"), icon: ScrollText },
+    { value: "results", label: t("run.tabResults"), icon: FileText },
   ];
 
   return (
-    <div>
-      <PageHeader
+    <DetailTabs value={tab} onChange={setTab}>
+      <DetailBar
         title={title}
-        titleClassName="text-xl"
-        breadcrumbs={breadcrumbs}
-        wrapActions
-        actions={
+        parent={parent}
+        tabs={tabs}
+        badge={
           <>
             {/* No unread dot here: this page is the reading. */}
             <Badge status={enrichedRun.status} />
             <RunProvenanceBadges run={enrichedRun} />
-            <RunHeaderActions
-              canRerun={canRerun}
-              rerunRefusal={rerunRefusal ? t(rerunRefusal) : null}
-              // Hidden for remote-origin runs: the process runs on the caller's
-              // host and the platform cannot signal it.
-              canCancel={isRunning && enrichedRun.runOrigin !== "remote" && can("runs:cancel")}
-              rerunPending={launcher.isPending}
-              cancelPending={cancelRun.isPending}
-              onRerun={() => {
-                if (canReadAgent) rerun.open();
-                // The API conceals resolved input from runners: replay that
-                // snapshot server-side, keeping its parameters.
-                else
-                  launcher.launch({
-                    rerun_from: run.id,
-                    version: replayVersion(run.version_ref, agent?.home_writable),
-                  });
-              }}
-              onCancel={() => cancelRun.mutate(runId!)}
-            />
           </>
         }
-      >
-        <RunHeaderSummary run={enrichedRun} />
-      </PageHeader>
+        actions={
+          <RunHeaderActions
+            canRerun={canRerun}
+            rerunRefusal={rerunRefusal ? t(rerunRefusal) : null}
+            // Hidden for remote-origin runs: the process runs on the caller's
+            // host and the platform cannot signal it.
+            canCancel={isRunning && enrichedRun.runOrigin !== "remote" && can("runs:cancel")}
+            rerunPending={launcher.isPending}
+            cancelPending={cancelRun.isPending}
+            onRerun={() => {
+              if (canReadAgent) rerun.open();
+              // The API conceals resolved input from runners: replay that
+              // snapshot server-side, keeping its parameters.
+              else
+                launcher.launch({
+                  rerun_from: run.id,
+                  version: replayVersion(run.version_ref, agent?.home_writable),
+                });
+            }}
+            onCancel={() => cancelRun.mutate(runId!)}
+          />
+        }
+      />
 
       {agent && canReadAgent && (
         <RunModal
@@ -356,55 +334,52 @@ export function RunDetailPage() {
         integrationEntries={agent?.dependencies.integrations}
       />
 
-      <DetailTabs value={tab} onChange={setTab}>
-        <div className="overflow-visible" data-run-detail-surface>
-          <DetailTabBar tabs={tabs} />
+      <div className="overflow-visible" data-run-detail-surface>
+        <DetailTabPanel value="overview">
+          <RunHeaderSummary run={enrichedRun} />
+          <RunSnapshotInspector
+            run={enrichedRun}
+            turns={turnRows}
+            logs={allLogs}
+            structuredOutput={finalOutput}
+            memoryChangeCount={runMemoryCount}
+            logsLoading={logsQuery.isLoading}
+            memoryLoading={memoryLoading}
+            modelFallback={modelFallback}
+            onOpenJournal={(filter) => openTab("#journal", filter)}
+            onOpenResults={() => openTab("#results")}
+          />
+        </DetailTabPanel>
 
-          <DetailTabPanel value="overview">
-            <RunSnapshotInspector
-              run={enrichedRun}
-              turns={turnRows}
-              logs={allLogs}
-              structuredOutput={finalOutput}
-              memoryChangeCount={runMemoryCount}
-              logsLoading={logsQuery.isLoading}
-              memoryLoading={memoryLoading}
-              modelFallback={modelFallback}
-              onOpenJournal={(filter) => openTab("#journal", filter)}
-              onOpenResults={() => openTab("#results")}
-            />
-          </DetailTabPanel>
+        <DetailTabPanel value="journal" flush>
+          <RunExecutionView
+            run={enrichedRun}
+            logs={allLogs}
+            logsLoading={logsQuery.isLoading}
+            initialFilter={journalFilter}
+            headerActions={
+              run.status === "success" && hasDurableResults ? (
+                <Button variant="outline" size="sm" onClick={() => setTab("results")}>
+                  {t("run.viewResults")}
+                  <ArrowRight className="size-3.5" />
+                </Button>
+              ) : undefined
+            }
+          />
+        </DetailTabPanel>
 
-          <DetailTabPanel value="journal" flush>
-            <RunExecutionView
-              run={enrichedRun}
-              logs={allLogs}
-              logsLoading={logsQuery.isLoading}
-              initialFilter={journalFilter}
-              headerActions={
-                run.status === "success" && hasDurableResults ? (
-                  <Button variant="outline" size="sm" onClick={() => setTab("results")}>
-                    {t("run.viewResults")}
-                    <ArrowRight className="size-3.5" />
-                  </Button>
-                ) : undefined
-              }
-            />
-          </DetailTabPanel>
-
-          <DetailTabPanel value="results" flush>
-            <RunResultsView
-              run={enrichedRun}
-              packageId={packageId}
-              output={finalOutput}
-              hasRunMemory={hasRunMemory}
-              isRunning={isRunning}
-              outputLoading={logsQuery.isLoading}
-              memoryLoading={memoryLoading}
-            />
-          </DetailTabPanel>
-        </div>
-      </DetailTabs>
-    </div>
+        <DetailTabPanel value="results" flush>
+          <RunResultsView
+            run={enrichedRun}
+            packageId={packageId}
+            output={finalOutput}
+            hasRunMemory={hasRunMemory}
+            isRunning={isRunning}
+            outputLoading={logsQuery.isLoading}
+            memoryLoading={memoryLoading}
+          />
+        </DetailTabPanel>
+      </div>
+    </DetailTabs>
   );
 }

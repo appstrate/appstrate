@@ -25,10 +25,7 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { agentsKeys, packageKeys } from "../lib/query-keys";
 import { usePackageListCrumb } from "../hooks/use-package-list-crumb";
-import { AgentDetailBarSkeleton } from "./agent-detail/agent-detail-bar";
-
-/** `AGENT_DETAIL_TABS` of `pages/unified-package-detail.tsx`. */
-const AGENT_TAB_COUNT = 4;
+import { DetailBarSkeleton } from "./detail-bar";
 
 /** One `status` for assistive technology; the blocks themselves are hidden from it. */
 function Waiting({ className, children }: { className?: string; children: ReactNode }) {
@@ -69,65 +66,31 @@ export function TextSkeleton({ lines = 3, className }: { lines?: number; classNa
 }
 
 /**
- * `PageHeader`'s box: the same height, so the real title replaces it in place.
- * Publishes the part of the trail the page already knows from its address, and
- * writes the title itself when a cached row already names it.
+ * `PageHeader`'s box on a collection page: the same height, so the real title
+ * replaces it in place. Publishes the part of the trail the page already knows
+ * from its address.
  */
 function HeaderBlocks({
   breadcrumbs,
-  title,
-  icon,
-  subtitle,
   actions = true,
-  collection,
 }: {
   breadcrumbs: BreadcrumbEntry[];
-  title?: string;
-  icon?: boolean;
-  subtitle?: "lines" | "line";
   actions?: boolean;
-  collection?: boolean;
 }) {
   usePageBreadcrumb(breadcrumbs);
   return (
     <div data-page-header className="mb-4">
       <div className="flex min-h-9 items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-2">
-          {icon && <Skeleton className="size-10 shrink-0 rounded-[10px]" />}
-          {title ? (
-            <span className="truncate text-xl font-semibold">{title}</span>
-          ) : (
-            <Skeleton className={collection ? "h-7 w-44" : "h-6 w-52"} />
-          )}
-        </div>
+        <Skeleton className="h-7 w-44" />
         {actions && <Skeleton className="h-8 w-24 shrink-0" />}
       </div>
-      {subtitle === "lines" && (
-        <div className="mt-2 space-y-2">
-          <Skeleton className="h-3 w-40" />
-          <Skeleton className="h-3.5 w-80 max-w-full" />
-        </div>
-      )}
-      {subtitle === "line" && <Skeleton className="mt-2 mb-2 h-3.5 w-72 max-w-full" />}
     </div>
   );
 }
 
-/** The tab strip: the real labels when the page knows them, a block otherwise. */
-function TabStrip({ tabs }: { tabs?: string[] }) {
-  if (!tabs) return <Skeleton className="mt-6 mb-3 h-9 w-72 max-w-full rounded-lg" />;
-  return (
-    <div className="bg-muted text-muted-foreground mt-6 mb-3 inline-flex h-9 max-w-full items-center rounded-lg p-1 text-sm font-medium">
-      {tabs.map((label, i) => (
-        <span
-          key={label}
-          className={cn("rounded-md px-3 py-1", i === 0 && "bg-background text-foreground shadow")}
-        >
-          {label}
-        </span>
-      ))}
-    </div>
-  );
+/** The tab strip of a page whose tabs are in the page: a block. */
+function TabStrip() {
+  return <Skeleton className="mt-6 mb-3 h-9 w-72 max-w-full rounded-lg" />;
 }
 
 function CardBlocks({ count }: { count: number }) {
@@ -144,29 +107,24 @@ function CardBlocks({ count }: { count: number }) {
 }
 
 /**
- * A resource's page: identity header, tab strip, the tab's framed panel. Each
- * detail route draws the same element as its fallback and as its page's
- * loading state, so the two waits share one shape. `subtitle` is what the
- * header carries under its title (a package's id and description: `lines`; a
- * run's summary: `line`); `title` and `tabs` are drawn as text when known.
+ * A resource's page: its identity, controls and tabs are in the shell header
+ * (`DetailBar`), so the page waits with its panel alone. Each detail route draws
+ * the same element as its fallback and as its page's loading state, so the two
+ * waits share one shape. `title` is drawn as text when known; `parent` is the
+ * part of the header's small line the address already tells.
  */
 export function DetailPageSkeleton({
-  breadcrumbs = NO_CRUMBS,
   title,
-  icon = true,
-  subtitle,
-  tabs,
+  parent,
+  tabCount,
 }: {
-  breadcrumbs?: BreadcrumbEntry[];
   title?: string;
-  icon?: boolean;
-  subtitle?: "lines" | "line";
-  tabs?: string[];
+  parent?: BreadcrumbEntry;
+  tabCount: number;
 }) {
   return (
     <Waiting>
-      <HeaderBlocks breadcrumbs={breadcrumbs} title={title} icon={icon} subtitle={subtitle} />
-      <TabStrip tabs={tabs} />
+      <DetailBarSkeleton title={title} parent={parent} tabCount={tabCount} />
       <div className="bg-card rounded-lg border p-6">
         <CardBlocks count={3} />
       </div>
@@ -194,49 +152,41 @@ function useCachedPackageName(type: PackageType, packageId: string | undefined) 
 
 /**
  * A package's page while its detail loads (and its route's fallback): its
- * family's crumb, and its name when the list was read on the way here.
+ * family's list as the parent, and its name when the list was read on the way here.
  */
 export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const { scope, name } = useParams();
   const packageId = scope && name ? `${scope}/${name}` : undefined;
   const listCrumb = usePackageListCrumb(type);
   const title = useCachedPackageName(type, packageId);
-  // An agent's identity and tabs are in the shell header (`AgentDetailBar`), so
-  // the page itself waits with its panel alone.
-  if (type === "agent") {
-    return (
-      <Waiting>
-        <AgentDetailBarSkeleton title={title} tabCount={AGENT_TAB_COUNT} />
-        <div className="bg-card rounded-lg border p-6">
-          <CardBlocks count={3} />
-        </div>
-      </Waiting>
-    );
-  }
   return (
     <DetailPageSkeleton
-      breadcrumbs={title ? [listCrumb, { label: title }] : [listCrumb]}
       title={title}
-      subtitle="lines"
+      parent={listCrumb}
+      // An agent offers four tabs, every other family three.
+      tabCount={type === "agent" ? 4 : 3}
     />
   );
 }
 
-/** A run's page: no identity tile, one summary line, under its agent's crumbs. */
+/** A run's page, under its agent. */
 export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
-  const { t } = useTranslation("agents");
   const { scope, name } = useParams();
-  const crumbs: BreadcrumbEntry[] = [{ label: t("detail.breadcrumb"), href: "/agents" }];
-  if (agentName) crumbs.push({ label: agentName, href: `/agents/${scope}/${name}` });
-  return <DetailPageSkeleton breadcrumbs={crumbs} icon={false} subtitle="line" />;
+  return (
+    <DetailPageSkeleton
+      parent={agentName ? { label: agentName, href: `/agents/${scope}/${name}#runs` } : undefined}
+      tabCount={3}
+    />
+  );
 }
 
-/** A schedule's page, under the schedules crumb. */
+/** A schedule's page, under the schedules list. */
 export function ScheduleDetailSkeleton() {
   const { t } = useTranslation("agents");
   return (
     <DetailPageSkeleton
-      breadcrumbs={[{ label: t("schedule.breadcrumbList"), href: "/schedules" }]}
+      parent={{ label: t("schedule.breadcrumbList"), href: "/schedules" }}
+      tabCount={3}
     />
   );
 }
@@ -245,7 +195,7 @@ export function ScheduleDetailSkeleton() {
 export function ListPageSkeleton() {
   return (
     <Waiting>
-      <HeaderBlocks breadcrumbs={NO_CRUMBS} collection />
+      <HeaderBlocks breadcrumbs={NO_CRUMBS} />
       <div className="mb-3 flex items-center justify-between gap-2">
         <Skeleton className="h-9 w-72 max-w-full" />
         <Skeleton className="h-9 w-24" />

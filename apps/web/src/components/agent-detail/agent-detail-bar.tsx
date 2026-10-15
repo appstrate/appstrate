@@ -3,11 +3,10 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
-import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import { DetailBar, DetailBarSkeleton } from "../detail-bar";
-import { HeaderTabBar, type DetailTab } from "../detail-tabs";
+import { DetailBar, DetailBarId } from "../detail-bar";
+import type { DetailTab } from "../detail-tabs";
 import { PackageIcon } from "../package-icon";
 import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 
@@ -52,38 +51,24 @@ export function AgentDetailBar<T extends string>({
   const listCrumb = usePackageListCrumb("agent");
 
   return (
-    <>
-      <DetailBar
-        icon={<PackageIcon type="agent" icon={detail.icon} color={detail.color} />}
-        title={detail.displayName}
-        badge={
-          <VersionPill
-            detail={detail}
-            isHistoricalVersion={isHistoricalVersion}
-            hasUnarchivedChanges={hasUnarchivedChanges}
-            draftVerdictPending={draftVerdictPending}
-            latestPublishedVersion={latestPublishedVersion}
-          />
-        }
-        parent={listCrumb}
-        meta={
-          <>
-            <span aria-hidden>·</span>
-            <code className="truncate font-mono">{detail.id}</code>
-            <CopyButton value={detail.id} className="size-5 shrink-0 [&_svg]:size-3" />
-          </>
-        }
-        actions={actions}
-      />
-      <HeaderTabBar tabs={tabs} />
-    </>
+    <DetailBar
+      icon={<PackageIcon type="agent" icon={detail.icon} color={detail.color} />}
+      title={detail.displayName}
+      badge={
+        <VersionPill
+          detail={detail}
+          isHistoricalVersion={isHistoricalVersion}
+          hasUnarchivedChanges={hasUnarchivedChanges}
+          draftVerdictPending={draftVerdictPending}
+          latestPublishedVersion={latestPublishedVersion}
+        />
+      }
+      parent={listCrumb}
+      meta={<DetailBarId id={detail.id} />}
+      actions={actions}
+      tabs={tabs}
+    />
   );
-}
-
-/** The agent page while its detail loads: the title when a cached row names it. */
-export function AgentDetailBarSkeleton({ title, tabCount }: { title?: string; tabCount: number }) {
-  const listCrumb = usePackageListCrumb("agent");
-  return <DetailBarSkeleton title={title} parent={listCrumb} tabCount={tabCount} />;
 }
 
 function VersionPill({
