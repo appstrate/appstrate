@@ -52,8 +52,8 @@ they start with `packages/` or `e2e/`.
 
 ## 2. The shell
 
-- **`ShellSidebar` and `ShellHeader`** (`components/shell-frame.tsx`) are the one
-  frame of both products (`components/app-sidebar.tsx` renders it for Studio and the chat). A product passes only its own navigation;
+- **`AppSidebar` and `ShellHeader`** (`components/app-shell.tsx`) are the one
+  frame of both products (`AppSidebar` picks Studio's or the chat's navigation). A product passes only its own navigation;
   never copy the frame.
 - The sidebar head is the organisation and workspace switcher
   (`components/org-switcher.tsx`: organisations left, the workspaces of the one
@@ -112,8 +112,8 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    (`-my-1.5`). What _happened_ (a run's failure, an integration that lost its
    connection mid-run, files not saved) is never a band: it opens the run's
    overview as a `HealthCard` (`components/run-detail/run-warnings.tsx`).
-4. **Tabs**: `DetailTabsList` / `DetailTabsTrigger`
-   (`components/agent-detail/agent-local-tabs.tsx`), the tab kept in the URL hash
+4. **Tabs**: `DetailTabBar` / `DetailTabPanel` (`components/detail-tabs.tsx`, which
+   also holds `CollectionTabs`), the tab kept in the URL hash
    (`useTabWithHash`, `hooks/use-tab-with-hash.ts`; it keeps the query string).
    When the list is wider than its container (a phone) it scrolls sideways and a
    fade marks each edge that hides tabs, nothing when they all fit. **The same
@@ -297,7 +297,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   `DataTable` (aligned columns, needs width), `CardGrid` (`components/card-grid.tsx`,
   `auto-fill`, no breakpoints) and `ItemList` (`components/item-list.tsx`, stacked
   self-contained blocks, asks nothing of its container: use it in a panel, a modal
-  or a narrow tab). A settings list is a table, not cards. A matrix (packages by
+  or a narrow tab). A settings list is a table, not cards (except a list that never exceeds a handful of
+  rows, such as an agent's connections: plain rows). A matrix (packages by
   workspace) is the one raw shadcn `Table`.
 - `DataTable` (`components/data-table.tsx`) under a `ListToolbar`
   (`components/list-toolbar.tsx`: search, filters behind one button, column menu,
@@ -702,7 +703,7 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
   `?field-input=` / `?field-output=`), in Paramètres › Schémas and on the creation
   page.
 - **Code and JSON editors** are Monaco, only through the lazy facade
-  `components/monaco/index.tsx` (`MonacoEditor`, `MonacoDiffEditor`; self-hosted,
+  `components/monaco/index.tsx` (`CodeEditor`, `CodeDiff`: the one theme and base options; self-hosted,
   never import `monaco-editor` elsewhere). `JsonEditor` for a JSON value,
   `package-editor/content-editor.tsx` for typed text (it owns its text from mount,
   push new text by remounting with a `key`), `DraftDiffView` for a diff.
@@ -764,7 +765,7 @@ wraps under the title as a whole), the sidebar becomes a sheet, a panel's rail
 becomes a select (`PanelDialog mobileNav`). A surface that covers the page on a
 phone (`PanelDialog mobileAsSurface`) sits at `z-30`, above the `z-10` / `z-20`
 stretched links and action clusters of the cards under it. Tabs tighten to `px-2`
-below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
+below `sm` so four of them fit 390 px.
 
 ## Checklist before handing UI work over
 
