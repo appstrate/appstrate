@@ -66,14 +66,14 @@ export function DetailBar<T extends string = string>({
   return (
     <>
       <ShellHeaderLead>
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3 md:gap-3.5">
           {icon}
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
-              <h1 className="truncate text-base leading-6 font-semibold">{title}</h1>
+              <h1 className="truncate text-base leading-6 font-semibold md:text-[17px]">{title}</h1>
               {badge}
             </div>
-            <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs leading-5">
+            <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs leading-5 md:mt-0.5">
               {parent &&
                 (parent.href && canReach(parent.href) ? (
                   <Link
@@ -114,15 +114,15 @@ export function DetailBarSkeleton({
   return (
     <>
       <ShellHeaderLead>
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3 md:gap-3.5">
           <Skeleton className="size-10 shrink-0 rounded-[10px]" />
           <div className="min-w-0">
             {title ? (
-              <h1 className="truncate text-base leading-6 font-semibold">{title}</h1>
+              <h1 className="truncate text-base leading-6 font-semibold md:text-[17px]">{title}</h1>
             ) : (
               <Skeleton className="my-1 h-4 w-44" />
             )}
-            <div className="text-muted-foreground flex items-center gap-1.5 text-xs leading-5">
+            <div className="text-muted-foreground flex items-center gap-1.5 text-xs leading-5 md:mt-0.5">
               {parent ? <span>{parent.label}</span> : <Skeleton className="h-3 w-16" />}
             </div>
           </div>
@@ -132,7 +132,7 @@ export function DetailBarSkeleton({
         <Skeleton className="h-8 w-20" />
       </ShellHeaderActions>
       <ShellHeaderTabs>
-        <div className="flex h-11 items-center gap-4">
+        <div className="flex h-11 items-center gap-4 md:h-12">
           {Array.from({ length: tabCount }, (_, i) => (
             <Skeleton key={i} className="h-4 w-20" />
           ))}

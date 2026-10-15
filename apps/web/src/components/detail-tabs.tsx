@@ -88,12 +88,12 @@ export function UnderlineTabList<T extends string>({
           FADE_EDGE[edge],
         )}
       >
-        <TabsList className="h-11 w-max justify-start gap-1 rounded-none bg-transparent p-0">
+        <TabsList className="h-11 w-max justify-start gap-1 rounded-none bg-transparent p-0 md:h-12 md:gap-2">
           {tabs.map(({ value, label, icon: Icon }) => (
             <TabsTrigger
               key={value}
               value={value}
-              className="text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground h-full gap-2 rounded-none border-b-2 border-transparent px-2.5 py-0 data-[state=active]:bg-transparent data-[state=active]:shadow-none max-sm:px-2"
+              className="text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground h-full gap-2 rounded-none border-b-2 border-transparent px-2.5 py-0 data-[state=active]:bg-transparent data-[state=active]:shadow-none max-sm:px-2 md:px-3"
             >
               {Icon && <Icon className="size-4 shrink-0" aria-hidden />}
               {label}

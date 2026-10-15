@@ -193,7 +193,7 @@ export function ShellHeader() {
           stood and its icon over the navigation's icons. */}
       <div
         className={cn(
-          "pl-gutter md:min-h-header col-start-1 row-start-1 max-md:contents md:flex md:min-w-0 md:items-center md:gap-2",
+          "pl-gutter md:min-h-header col-start-1 row-start-1 max-md:contents md:flex md:min-w-0 md:items-center md:gap-2 md:group-has-[[data-header-lead]:not(:empty)]/header:min-h-17",
           collapsed && "md:pl-2",
         )}
       >
@@ -237,7 +237,7 @@ export function ShellHeader() {
           because the sidebar answers "where am I" and this answers "what is
           new" — and because a header holding only a trail is a header holding
           nothing. */}
-      <div className="px-gutter h-header col-start-2 row-start-1 flex shrink-0 items-center gap-1 border-b border-b-black/5 md:border-b-0 md:pl-2">
+      <div className="px-gutter h-header md:min-h-header col-start-2 row-start-1 flex shrink-0 items-center gap-1 border-b border-b-black/5 md:h-auto md:border-b-0 md:pl-2">
         <HeaderSlotOutlet slot="actions" className="flex items-center gap-1 empty:hidden" />
         <NotificationBell />
       </div>
