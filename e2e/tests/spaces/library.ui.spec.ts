@@ -175,7 +175,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
   // home, and so does moving one.
   // Every space column's switch names its space too, so only the Provenance
   // cell itself tells a moved home from an unmoved one.
-  await expect(movedRow.locator('[data-data-table-column="origin"]')).toContainText(target.name);
+  await expect(movedRow.locator('[data-column="origin"]')).toContainText(target.name);
   expect(
     (await packagesIn(target.id)).find((p) => p.packageId === `${scope}/${name}`)?.enabled,
   ).toBe(true);

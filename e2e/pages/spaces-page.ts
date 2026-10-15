@@ -12,10 +12,16 @@ export class SpacesPage {
     await this.page.goto("/org-settings/spaces");
   }
 
+  /**
+   * The row of the space showing `name`. Found by its text, not by its cell's accessible name: a
+   * row's cover button, named after the row, sits in that cell and doubles it ("Default Default").
+   */
+  private row(name: string) {
+    return this.page.getByRole("row").filter({ has: this.page.getByText(name, { exact: true }) });
+  }
+
   async waitForLoaded() {
-    await expect(this.page.getByRole("cell", { name: "Default", exact: true })).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(this.row("Default")).toBeVisible({ timeout: 10_000 });
   }
 
   /** The create-space modal, a second dialog over the settings overlay. */
@@ -40,9 +46,7 @@ export class SpacesPage {
   }
 
   async expectSpaceVisible(name: string) {
-    await expect(this.page.getByRole("cell", { name, exact: true })).toBeVisible({
-      timeout: 5_000,
-    });
+    await expect(this.row(name)).toBeVisible({ timeout: 5_000 });
   }
 
   async expectDefaultBadgeVisible() {
