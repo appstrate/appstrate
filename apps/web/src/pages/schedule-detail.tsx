@@ -9,18 +9,13 @@ import { useCanReach } from "../hooks/use-can-reach";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { AlertDescription } from "@appstrate/ui/components/alert";
-import {
-  DetailTabs,
-  DetailTabBar,
-  DetailTabPanel,
-  type DetailTab,
-} from "../components/detail-tabs";
+import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
 import { DetailSectionCard } from "../components/detail-section-card";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { ManifestFacts } from "../components/package-manifest/manifest-fact";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { PageActionsMenu } from "../components/page-actions-menu";
-import { PageHeader } from "../components/page-header";
+import { DetailBar } from "../components/detail-bar";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { ResourceErrorState, EmptyState } from "../components/page-states";
 import { ScheduleDetailSkeleton, SettingsSkeleton } from "../components/loading-skeletons";
@@ -47,8 +42,16 @@ import {
 import { formatDateField } from "../lib/format-date";
 import { parseCron } from "../lib/cron-frequency";
 import { describeFrequency } from "../lib/frequency-summary";
-import { scheduleDetailPath } from "../lib/package-paths";
-import { Pause, Clock, CalendarClock, FileInput, CirclePlay } from "lucide-react";
+import {
+  Pause,
+  Clock,
+  CalendarClock,
+  FileInput,
+  CirclePlay,
+  LayoutGrid,
+  Play,
+  Settings2,
+} from "lucide-react";
 
 type ScheduleTab = "details" | "runs" | "settings";
 const SCHEDULE_TABS: readonly ScheduleTab[] = ["details", "runs", "settings"];
@@ -73,9 +76,9 @@ export function ScheduleDetailPage() {
   if (isQueryInFlight(scheduleQuery)) return <ScheduleDetailSkeleton />;
   if (error || !schedule) return <ResourceErrorState error={error} />;
   const tabs: DetailTab<ScheduleTab>[] = [
-    { value: "details", label: t("detail.overview.summary") },
-    { value: "runs", label: t("common:nav.runs") },
-    { value: "settings", label: t("common:nav.settings") },
+    { value: "details", label: t("detail.overview.summary"), icon: LayoutGrid },
+    { value: "runs", label: t("common:nav.runs"), icon: Play },
+    { value: "settings", label: t("common:nav.settings"), icon: Settings2 },
   ];
   const disabledReason = schedule.disabled_reason
     ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
@@ -84,26 +87,18 @@ export function ScheduleDetailPage() {
   return (
     <div>
       <DetailTabs value={activeTab} onChange={setActiveTab}>
-        <PageHeader
+        <DetailBar
           title={schedule.name || t("schedule.unnamed")}
-          titleClassName="text-xl"
-          wrapActions
           icon={
             <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-[10px]">
               <CalendarClock className="size-5" aria-hidden />
             </span>
           }
-          breadcrumbs={[
-            { label: t("common:nav.schedules"), href: "/schedules" },
-            {
-              label: schedule.name || t("schedule.unnamed"),
-              href: scheduleDetailPath(schedule.id),
-            },
-            { label: tabs.find((item) => item.value === activeTab)?.label ?? activeTab },
-          ]}
+          badge={<ScheduleStatusBadge schedule={schedule} />}
+          parent={{ label: t("common:nav.schedules"), href: "/schedules" }}
+          tabs={tabs}
           actions={
             <>
-              <ScheduleStatusBadge schedule={schedule} />
               {/* A schedule running as ANOTHER member is an org owner/admin
                   act: the page deed stays where it always is, disabled,
                   and says why. */}
@@ -144,8 +139,6 @@ export function ScheduleDetailPage() {
             </AlertDescription>
           </Alert>
         )}
-        <DetailTabBar tabs={tabs} />
-
         <DetailTabPanel value="runs">
           {readsRuns ? (
             <ScheduleHistory schedule={schedule} />
@@ -271,7 +264,7 @@ function ScheduleParams({
               value:
                 describeFrequency(parseCron(schedule.cron_expression)) ?? schedule.cron_expression,
             },
-            { labelKey: "schedule.timezone", value: schedule.timezone },
+            { labelKey: "schedule.paramTimezone", value: schedule.timezone },
             {
               labelKey: "schedule.paramNextRun",
               value: nextRunAt

@@ -53,8 +53,8 @@ they start with `packages/` or `e2e/`.
 ## 2. The shell
 
 - **`AppSidebar` and `ShellHeader`** (`components/app-shell.tsx`) are the one
-  frame of both products (`AppSidebar` picks Studio's or the chat's navigation). A product passes only its own navigation;
-  never copy the frame.
+  frame of both products (`AppSidebar` picks Studio's or the chat's navigation);
+  the header's slots are `components/shell-header-slots.tsx`. Never copy the frame.
 - The sidebar head is the organisation and workspace switcher
   (`components/org-switcher.tsx`: organisations left, the workspaces of the one
   being explored right; a pick always ends on a workspace). Products are tabs
@@ -88,13 +88,30 @@ they start with `packages/` or `e2e/`.
   whose rail lists three sections — Organisation, Espace de travail, Compte
   (`/preferences`) — built in `pages/settings/navigation.ts` from what each
   route lets the caller reach.
-- The header's right end stays personal (notification bell, profile); page
-  controls never move into it.
+- A detail page that draws its title in the header (the agent, run, schedule and
+  integration pages, and the skill and tool pages, through `DetailBar`,
+  `components/detail-bar.tsx`) fills three slots the header
+  exposes (`components/shell-header-slots.tsx`): the **lead** (identity tile,
+  title, version pill, then the parent list and the id), the **actions** (left of
+  the bell) and the **tabs** (`HeaderTabBar`, underlined, on the band's rule).
+  The slots are portals: the page keeps its context, so the tab bar still answers
+  the page's own `<DetailTabs>`, which therefore wraps the whole page, header
+  included. The lead takes the breadcrumb's place; a detail page needs only its
+  parent, the tab being already underlined. On a phone the lead is a row under
+  the navigation row, and the organisation switcher yields (the sidebar still
+  holds it).
+- Outside that, the header's right end stays personal (notification bell, profile).
+  A page's controls reach it only through a slot, never by drawing in it.
 
 ## 3. Page anatomy (detail pages)
 
 Top to bottom, every detail page (agent, run, schedule, integration, skill):
 
+0. **A detail page has no `PageHeader`**: its title, pills, actions and tabs are
+   in the shell header (section 2). What the old header said under the title
+   opens the overview tab: an agent's description, home space and origin
+   (`AgentIdentity`), a package's description, a run's trigger, start, cost and
+   duration (`RunHeaderSummary`). A settings overlay's sub-page (a webhook) has no shell header behind its panel: it keeps the section heading and draws its tabs with `UnderlineTabList`.
 1. **`PageHeader`** (`components/page-header.tsx`): title with its identity tile
    in `icon` (`PackageIcon`), a one-line summary and the object's id as `children`, and in
    `actions` the status and version badges (`components/status-badge.tsx`, see
@@ -118,8 +135,8 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    (`-my-1.5`). What _happened_ (a run's failure, an integration that lost its
    connection mid-run, files not saved) is never a band: it opens the run's
    overview as a `HealthCard` (`components/run-detail/run-warnings.tsx`).
-4. **Tabs**: `DetailTabBar` / `DetailTabPanel` (`components/detail-tabs.tsx`, which
-   also holds `CollectionTabs`), the tab kept in the URL hash
+4. **Tabs**: `HeaderTabBar` (`components/detail-tabs.tsx`, passed to `DetailBar`
+   as `tabs`), underlined, an icon each, the tab kept in the URL hash
    (`useTabWithHash`, `hooks/use-tab-with-hash.ts`; it keeps the query string).
    When the list is wider than its container (a phone) it scrolls sideways and a
    fade marks each edge that hides tabs, nothing when they all fit. **The same
@@ -771,7 +788,7 @@ header actions wrap (`PageHeader wrapActions`: the group of badges and buttons
 wraps under the title as a whole), the sidebar becomes a sheet, a panel's rail
 becomes a menu sheet (`PhoneNavigation`), and a panel overlay covers the page
 (`OverlayFrame` goes full screen below `sm`). Tabs tighten to `px-2`
-below `sm` so four of them fit 390 px.
+below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
 
 ## Checklist before handing UI work over
 

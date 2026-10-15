@@ -28,22 +28,25 @@ import {
   Wrench,
   History,
   IdCard,
+  LayoutGrid,
   Server,
+  Settings2,
 } from "lucide-react";
+import { InlineMarkdown } from "../components/markdown";
 import { authMethodLabel } from "../lib/integration-presentation";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { ErrorState, ResourceErrorState } from "../components/page-states";
 import { SettingsSkeleton } from "../components/loading-skeletons";
-import { DetailTabs, DetailTabBar, DetailTabPanel } from "../components/detail-tabs";
+import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
 import { SettingsHeading } from "../components/settings/settings-heading";
 import type { SectionRailItem } from "../components/settings/section-rail";
 import {
   SettingsRailView,
   type SettingsRailGroup,
 } from "../components/settings/settings-rail-view";
-import { SharedHeader } from "../components/package-detail/shared-header";
+import { PackageDetailBar } from "../components/package-detail/package-detail-bar";
 import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
@@ -387,13 +390,18 @@ export function IntegrationDetailPage() {
   const version = pkgLoading ? undefined : (pkg?.version ?? m.version);
   const isOwned = isOwnedSource(source);
 
+  const tabs: DetailTab<(typeof INTEGRATION_TABS)[number]>[] = [
+    { value: "overview", label: t("integration.tabs.overview"), icon: LayoutGrid },
+    { value: "connections", label: t("integration.tabs.connections"), icon: Plug },
+    { value: "configuration", label: t("integration.tabs.configuration"), icon: Settings2 },
+  ];
+
   return (
-    <div>
-      <SharedHeader
+    <DetailTabs value={tab} onChange={setTab}>
+      <PackageDetailBar
         detail={{
           id: packageId,
           displayName: m.display_name ?? packageId,
-          description: m.description ?? "",
           source: source ?? "",
           type: "integration",
           version,
@@ -401,10 +409,8 @@ export function IntegrationDetailPage() {
           homeSpaceName,
         }}
         isHistoricalVersion={false}
-        activeSubpage={{
-          label: t(`integration.tabs.${tab}`),
-        }}
-        actionsLeft={
+        tabs={tabs}
+        status={
           <>
             {pkgLoading && <Skeleton className="h-5 w-16" />}
             <Badge variant={active ? "success" : "warning"}>
@@ -412,8 +418,8 @@ export function IntegrationDetailPage() {
             </Badge>
           </>
         }
-        actionsRight={
-          <>
+        actions={
+          <div className="flex items-center gap-2">
             {!active && activation.mayActivate && (
               <Button
                 size="sm"
@@ -437,7 +443,7 @@ export function IntegrationDetailPage() {
                 isActiveHere={active}
               />
             )}
-          </>
+          </div>
         }
       />
 
@@ -448,65 +454,60 @@ export function IntegrationDetailPage() {
         draftReadOnly={pkg?.definition === "draft" && !homeWritable}
       />
 
-      <DetailTabs value={tab} onChange={setTab}>
-        <DetailTabBar
-          tabs={[
-            { value: "overview", label: t("integration.tabs.overview") },
-            { value: "connections", label: t("integration.tabs.connections") },
-            { value: "configuration", label: t("integration.tabs.configuration") },
-          ]}
-        />
-
-        {/* One connected-accounts table, with each row retaining its auth context. */}
-        <DetailTabPanel value="connections">
-          {!active ? (
-            <ActivationHint packageId={packageId} />
-          ) : detail.auths.length === 0 ? (
-            <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
-          ) : (
-            <ConnectionsTable
-              packageId={packageId}
-              detail={detail}
-              canConfigure={canConfigure}
-              onConfigure={openAuthentication}
-            />
-          )}
-        </DetailTabPanel>
-
-        {/* Configuration is admin-only; package files stay readable for every member. */}
-        <DetailTabPanel value="configuration" flush>
-          {/* Its rail (definition, versions) depends on the package's source. */}
-          {pkgLoading ? (
-            <SettingsSkeleton className="p-6" />
-          ) : (
-            <IntegrationSettings
-              packageId={packageId}
-              detail={detail}
-              blockUserConnections={detail.block_user_connections}
-              canConfigure={canConfigure}
-              // Write authority is the package's HOME space, never the space being browsed.
-              definition={homeWritable && pkg ? pkg : undefined}
-              isOwned={isOwned}
-              versionGrants={{
-                canRestore: isOwned && !!homeWritable,
-                canDelete: isOwned && !!homeDeletable,
-              }}
-            />
-          )}
-        </DetailTabPanel>
-
-        {/* ─── Outils (effective tool catalog — read-only) ─── */}
-
-        {/* Capabilities, connected accounts and package usage are distinct concepts. */}
-        <DetailTabPanel value="overview">
-          <IntegrationOverview
+      {/* One connected-accounts table, with each row retaining its auth context. */}
+      <DetailTabPanel value="connections">
+        {!active ? (
+          <ActivationHint packageId={packageId} />
+        ) : detail.auths.length === 0 ? (
+          <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
+        ) : (
+          <ConnectionsTable
+            packageId={packageId}
             detail={detail}
-            dependentIds={pkg?.agents.map((agent) => agent.id)}
-            onOpenConnections={openConnections}
-            onConfigureAuth={canConfigure ? openAuthentication : undefined}
+            canConfigure={canConfigure}
+            onConfigure={openAuthentication}
           />
-        </DetailTabPanel>
-      </DetailTabs>
-    </div>
+        )}
+      </DetailTabPanel>
+
+      {/* Configuration is admin-only; package files stay readable for every member. */}
+      <DetailTabPanel value="configuration" flush>
+        {/* Its rail (definition, versions) depends on the package's source. */}
+        {pkgLoading ? (
+          <SettingsSkeleton className="p-6" />
+        ) : (
+          <IntegrationSettings
+            packageId={packageId}
+            detail={detail}
+            blockUserConnections={detail.block_user_connections}
+            canConfigure={canConfigure}
+            // Write authority is the package's HOME space, never the space being browsed.
+            definition={homeWritable && pkg ? pkg : undefined}
+            isOwned={isOwned}
+            versionGrants={{
+              canRestore: isOwned && !!homeWritable,
+              canDelete: isOwned && !!homeDeletable,
+            }}
+          />
+        )}
+      </DetailTabPanel>
+
+      {/* ─── Outils (effective tool catalog — read-only) ─── */}
+
+      {/* Capabilities, connected accounts and package usage are distinct concepts. */}
+      <DetailTabPanel value="overview">
+        {m.description && (
+          <p className="mb-6 text-sm">
+            <InlineMarkdown>{m.description}</InlineMarkdown>
+          </p>
+        )}
+        <IntegrationOverview
+          detail={detail}
+          dependentIds={pkg?.agents.map((agent) => agent.id)}
+          onOpenConnections={openConnections}
+          onConfigureAuth={canConfigure ? openAuthentication : undefined}
+        />
+      </DetailTabPanel>
+    </DetailTabs>
   );
 }

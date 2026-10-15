@@ -4,8 +4,8 @@ import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { ResourceErrorState } from "@/components/page-states";
+import { DetailTabs, UnderlineTabList } from "@/components/detail-tabs";
 import { SettingsSkeleton } from "@/components/loading-skeletons";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
 import { useBreadcrumb } from "@/stores/breadcrumb-store";
@@ -43,12 +43,18 @@ export function WebhookDetailPage() {
       ) : (
         <Skeleton className="h-4 w-80 max-w-full" />
       )}
-      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="mt-4 mb-4">
-        <TabsList>
-          <TabsTrigger value="deliveries">{t("settings:webhooks.deliveries")}</TabsTrigger>
-          <TabsTrigger value="settings">{t("settings:webhooks.settings")}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      {/* The overlay has no shell header to carry the tabs: they sit under the
+          page, on a rule of their own (the band's, in a header). */}
+      <DetailTabs value={tab} onChange={setTab}>
+        <div className="mt-4 mb-6 shadow-[inset_0_-1px_0_0_var(--color-border)]">
+          <UnderlineTabList
+            tabs={[
+              { value: "deliveries", label: t("settings:webhooks.deliveries") },
+              { value: "settings", label: t("settings:webhooks.settings") },
+            ]}
+          />
+        </div>
+      </DetailTabs>
 
       {tab === "deliveries" && <WebhookDeliveriesTab webhookId={id!} />}
       {tab === "settings" &&

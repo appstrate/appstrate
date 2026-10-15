@@ -26,7 +26,8 @@ import {
 import { chunkComponent, lazyPage } from "./lib/lazy-chunk";
 import { OverlayFrame } from "./components/overlay-frame";
 import { OverlayUnavailable } from "./components/overlay-unavailable";
-import { AppSidebar, ShellFrameProvider, ShellHeader } from "./components/app-shell";
+import { AppSidebar, ShellHeader } from "./components/app-shell";
+import { ShellFrameProvider } from "./components/shell-header-slots";
 import {
   ChatPanelSkeleton,
   DashboardSkeleton,

@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
-import { TriangleAlert } from "lucide-react";
+import { Database, Layers, LayoutGrid, Play, Settings2, TriangleAlert } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
@@ -27,7 +28,7 @@ import { isQueryInFlight } from "../lib/query-state";
 import { packageDetailPath } from "../lib/package-paths";
 
 // Shared components
-import { SharedHeader } from "../components/package-detail/shared-header";
+import { PackageDetailBar } from "../components/package-detail/package-detail-bar";
 import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
@@ -40,15 +41,11 @@ import { CreateVersionModal } from "../components/create-version-modal";
 import { AgentActions } from "../components/package-detail/agent-actions";
 import { AgentRunsTab, AgentMemoryTab } from "../components/package-detail/agent-tabs";
 import { AgentInactiveAlert } from "../components/package-detail/agent-inactive-alert";
-import { ModelRequiredAlert } from "../components/package-detail/model-required-alert";
 import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
+import { AgentIdentity } from "../components/agent-detail/agent-identity";
+import { AgentDetailBar } from "../components/agent-detail/agent-detail-bar";
 import { AgentSettingsView } from "../components/agent-detail/agent-settings-view";
-import {
-  DetailTabs,
-  DetailTabBar,
-  DetailTabPanel,
-  type DetailTab,
-} from "../components/detail-tabs";
+import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
 import { AgentRunButton } from "../components/package-detail/agent-run-button";
 import { PackageUsage } from "../components/package-detail/package-usage";
 import { PackageSettingsView } from "../components/package-detail/package-settings-view";
@@ -60,22 +57,55 @@ type PackageTab = "overview" | "runs" | "settings" | "memory" | "usedBy";
 
 const AGENT_DETAIL_TABS = ["overview", "runs", "memory", "settings"] as const;
 
-const TAB_LABEL_KEYS: Record<PackageTab, string> = {
-  overview: "detail.overview.summary",
-  runs: "detail.tabRuns",
-  memory: "detail.tabMemory",
-  settings: "detail.tabSettings",
-  usedBy: "packages.usedBy",
-};
-
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
+
+/** No model a run could use: said where it can be acted on, graded by who may act. */
+function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentModelBlocker> }) {
+  const { t } = useTranslation(["settings"]);
+  const { can } = usePermissions();
+
+  const copy =
+    blocker === "detail.titleModel"
+      ? {
+          title: t("models.alert.noModel"),
+          // Only `models:write` can act on "configure a model" (POST /api/models).
+          description: t(
+            can("models:write")
+              ? "models.alert.noModelDescription"
+              : "models.alert.noModelAskAdmin",
+          ),
+        }
+      : blocker === "detail.titleNoDefaultModel"
+        ? {
+            title: t("models.alert.noDefaultModel"),
+            // Only `models:write` can set the default (PUT /api/models/default).
+            description: t(
+              can("models:write")
+                ? "models.alert.noDefaultModelDescription"
+                : "models.alert.noDefaultModelAskAdmin",
+            ),
+          }
+        : null;
+  if (!copy) return null;
+
+  return (
+    <Alert variant="destructive" className="mb-4">
+      <TriangleAlert className="h-4 w-4" />
+      <AlertTitle>{copy.title}</AlertTitle>
+      <AlertDescription className="flex items-center justify-between">
+        <span>{copy.description}</span>
+      </AlertDescription>
+    </Alert>
+  );
+}
 
 // ─── Main Page ──────────────────────────────────────────────────────
 
 export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
-  // Without `agents:read` a runner launches an agent and follows its runs but does not see what it is made of.
+  // Only an agent has a narrower read: without `agents:read` a runner launches
+  // it and follows its own runs, but does not see what it is made of.
   const fullRead = type !== "agent" || can("agents:read");
   const {
     scope,
@@ -95,16 +125,22 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const detailQuery = usePackageDetail(type, packageId);
   const { data: detail, error } = detailQuery;
   const { data: versionInfo } = useVersionInfo(type, type === "agent" ? packageId : undefined);
-  // Read beside the detail so the alert does not wait for the loading gate.
+  // The model verdict alone: it holds whatever else blocks the run first. Read
+  // here, beside the detail, so the alert does not wait for the loading gate.
   const modelBlocker = useAgentModelBlocker(type === "agent" ? packageId : undefined);
 
+  // Agents list for "Used by" tab enrichment
+
+  // Type-narrowed aliases for type-specific branches
   const agentDetail = type === "agent" ? (detail as Versioned<AgentDetail> | undefined) : undefined;
   const pkgDetail =
     type !== "agent" ? (detail as Versioned<OrgPackageItemDetail> | undefined) : undefined;
 
   const displayName = agentDetail?.display_name ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
   const source = agentDetail?.source ?? pkgDetail?.source;
-  // WHICH definition the server projected (draft or published), the same for every type.
+  // WHICH definition the server projected. Every type answers it now, from the
+  // one function that decides it, so the read-only banner below is a single
+  // condition rather than one per type.
   const definition = (agentDetail ?? pkgDetail)?.definition;
   const version = agentDetail?.version ?? pkgDetail?.version;
   const hasUnarchivedChanges =
@@ -116,8 +152,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { data: versionDetail, error: versionError } = versionQuery;
   const versionLoading = isQueryInFlight(versionQuery);
 
-  // The server's flag gates publishing (it sees annexes the comparison below cannot, and answers
-  // `409 no_changes`); the comparison only decides whether a diff tab has anything to show.
+  // The server's own flag gates publishing (the header badge and the publish
+  // dialog), as it does for `appstrate packages publish`: the server judges the
+  // content itself — annexes included, which the manifest/prompt comparison
+  // below cannot see — and answers `409 no_changes` when nothing moved. The
+  // comparison only decides whether a diff tab has anything to show.
   const hasTimestampChanges = source !== "system" && !!hasUnarchivedChanges;
   const latestDiffQuery = useVersionDetail(
     type,
@@ -138,19 +177,30 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const downloadPackage = usePackageDownload(scope, name);
   const downloadBundle = useAgentBundleExport(scope, name);
-  // Skills and MCP servers only: their detail carries no `active`. An agent's detail answers for itself (`AgentDetail.active`), so the query is not mounted there.
+  // Only a skill or an MCP server needs this: their detail response carries no
+  // `active`, so the library's projection of the placement is the only answer
+  // available. An agent's detail answers for itself (`AgentDetail.active`,
+  // read by `AgentRunButton`, `AgentActions` and the banner below), and
+  // asking the library too would be one page reading one fact twice — so the
+  // query is not even mounted there.
   const { isActiveInCurrentSpace } = usePackageActivationState(packageId, {
     enabled: type !== "agent",
   });
-  // The detail response is the authority on the home contract; `undefined` (not loaded) reads as "no".
+  // The package's own detail response is the authority on both halves of the
+  // home contract: the id (only when this caller reaches that space) and the
+  // write verdict. `undefined` means "not loaded yet", which every gate reads
+  // as "no".
   const homeSpaceId = (agentDetail ?? pkgDetail)?.home_space_id;
   const homeWritable = (agentDetail ?? pkgDetail)?.home_writable;
   const homeDeletable = (agentDetail ?? pkgDetail)?.home_deletable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
 
   // ── State ──
-  // The tabs this caller may MOUNT (`useTabWithHash` falls back for anything outside the list).
-  // An agent's tabs are the same for every role; a tab the caller cannot read says so (`RoleLimitNotice`).
+  // The tabs this caller may MOUNT — the single gate, since `useTabWithHash`
+  // falls back to the default tab for a hash naming anything outside the list.
+  // An agent's tabs are the same for every role: a tab whose read the caller
+  // lacks says so in its panel (`RoleLimitNotice`) instead of disappearing, so
+  // the page reads the same whatever the role and only its content changes.
   const allValidTabs: readonly PackageTab[] =
     type === "agent" ? AGENT_DETAIL_TABS : ["overview", "settings", "usedBy"];
   // Every detail opens on its summary; an agent the reader may only run opens on
@@ -164,7 +214,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     return <PackageDetailSkeleton type={type} />;
   if (error || !detail) return <ResourceErrorState error={error} />;
 
-  // A version with an unavailable archive EXISTS: redirecting (as other version failures do) would hide that it is broken.
+  // A published version whose stored archive is unavailable EXISTS — redirecting
+  // to the live page (what any other version failure does) would hide that it
+  // is broken. Say so, and leave the way back to the live page one click away.
   if (
     isVersionView &&
     versionError instanceof ApiError &&
@@ -198,7 +250,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   }
   const { isHistoricalVersion } = versionResult;
 
-  // The manifest on screen: the archived one when a version is pinned, else the live draft.
+  // The manifest the page is looking at — the archived one when a version is
+  // pinned, the live draft otherwise. Same rule the file explorer follows.
   const effectiveManifest = isHistoricalVersion ? versionDetail?.manifest : currentManifest;
 
   // A pinned version shows its OWN parameter schema; one it does not declare
@@ -209,7 +262,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
 
-  // ── Unified detail for SharedHeader ──
+  // ── Unified detail for the header and the overview ──
   const historicalManifestName =
     typeof versionDetail?.manifest?.display_name === "string"
       ? versionDetail.manifest.display_name
@@ -244,10 +297,40 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // ── Render ──
   const isBuiltIn = source === "system";
 
-  const tabDefs: Array<DetailTab<PackageTab>> = allValidTabs.map((value) => ({
+  // Determine available tabs based on type
+
+  // The rendered manifest, next to the raw artifact it comes from.
+  const overviewTab: DetailTab<PackageTab> = {
+    value: "overview",
+    label: t("detail.overview.summary"),
+    icon: LayoutGrid,
+  };
+
+  const agentTabLabels: Record<(typeof AGENT_DETAIL_TABS)[number], string> = {
+    overview: t("detail.overview.summary"),
+    runs: t("detail.tabRuns"),
+    memory: t("detail.tabMemory"),
+    settings: t("detail.tabSettings"),
+  };
+  const agentTabIcons: Record<(typeof AGENT_DETAIL_TABS)[number], DetailTab<PackageTab>["icon"]> = {
+    overview: LayoutGrid,
+    runs: Play,
+    memory: Database,
+    settings: Settings2,
+  };
+  const agentTabs: Array<DetailTab<PackageTab>> = AGENT_DETAIL_TABS.map((value) => ({
     value,
-    label: t(TAB_LABEL_KEYS[value]),
+    label: agentTabLabels[value],
+    icon: agentTabIcons[value],
   }));
+
+  const pkgTabs: Array<DetailTab<PackageTab>> = [
+    overviewTab,
+    { value: "settings", label: t("detail.tabSettings"), icon: Settings2 },
+    { value: "usedBy", label: t("packages.usedBy"), icon: Layers },
+  ];
+
+  const tabDefs = type === "agent" ? agentTabs : pkgTabs;
 
   // The trigger's own verdict, which also bounds its `?newVersion` URL.
   const canCreateVersion = !!homeWritable && !isBuiltIn && !isHistoricalVersion && isOwned;
@@ -256,7 +339,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // Versions live in Paramètres › Explorer for every type.
   const versionsProps = {
-    // Judged in the package's HOME space, never the space being browsed.
+    // Restoring writes the draft, deleting removes a version: both are judged
+    // in the package's HOME space, never in the space being browsed.
     canRestore: !isBuiltIn && !!homeWritable,
     canDelete: !isBuiltIn && !!homeDeletable,
     // The page's « Créer une version » (PackageActionsDropdown's `isMutable`).
@@ -266,62 +350,70 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const versionLabel = isHistoricalVersion ? versionDetail?.version : undefined;
 
+  const runButton = (
+    // The page's one launch verdict, shared with the empty runs list.
+    <AgentRunButton
+      packageId={packageId}
+      versionLabel={versionLabel}
+      variant="outline"
+      size="sm"
+      className="bg-card"
+      unsavedReason={unsavedReason}
+    />
+  );
+
   return (
     <EditorDirtyReportContext.Provider value={setEditorDirty}>
-      <div>
-        <SharedHeader
-          detail={unifiedForHeader}
-          isHistoricalVersion={isHistoricalVersion}
-          // A package's draft is authoring state (publishers only); an agent's header names it to any reader, when it differs from the last version.
-          draftVerdictPending={draftVerdictPending}
-          hasUnarchivedChanges={
-            type === "agent" ? hasArchivableChanges : hasTimestampChanges && !!homeWritable
-          }
-          latestPublishedVersion={versionInfo?.latest_published_version}
-          activeSubpage={{
-            label: tabDefs.find((item) => item.value === tab)?.label ?? t(TAB_LABEL_KEYS.overview),
-          }}
-          actionsLeft={
-            type === "agent" ? (
-              // The page's one launch verdict, shared with the empty runs list.
-              <AgentRunButton
-                packageId={packageId}
-                versionLabel={versionLabel}
-                variant="outline"
-                size="sm"
-                className="bg-card"
-                unsavedReason={unsavedReason}
-              />
-            ) : undefined
-          }
-          actionsRight={
-            type === "agent" ? (
-              <AgentActions
-                packageId={packageId}
-                isHistoricalVersion={isHistoricalVersion}
-                downloadVersion={downloadVersion}
-                downloadPackage={downloadPackage}
-                downloadBundle={downloadBundle}
-                onCreateVersion={() => newVersion.open()}
-                unsavedReason={unsavedReason}
-              />
-            ) : (
+      {/* The tabs root wraps the whole page, header included: an agent's tab bar
+          is portalled into the shell header and must still answer these tabs. */}
+      <DetailTabs value={tab} onChange={setTab}>
+        {type === "agent" ? (
+          <AgentDetailBar
+            title={unifiedForHeader.displayName}
+            detail={unifiedForHeader}
+            isHistoricalVersion={isHistoricalVersion}
+            draftVerdictPending={draftVerdictPending}
+            hasUnarchivedChanges={!!hasArchivableChanges}
+            latestPublishedVersion={versionInfo?.latest_published_version}
+            tabs={agentTabs}
+            actions={
               <div className="flex items-center gap-2">
-                <PackageActionsDropdown
+                {runButton}
+                <AgentActions
                   packageId={packageId}
-                  type={type}
-                  detail={pkgDetail}
                   isHistoricalVersion={isHistoricalVersion}
                   downloadVersion={downloadVersion}
-                  onDownload={downloadPackage}
+                  downloadPackage={downloadPackage}
+                  downloadBundle={downloadBundle}
                   onCreateVersion={() => newVersion.open()}
-                  createVersionBlockedReason={unsavedReason}
-                  isActiveHere={isActiveInCurrentSpace}
+                  unsavedReason={unsavedReason}
                 />
               </div>
-            )
-          }
-        />
+            }
+          />
+        ) : (
+          <PackageDetailBar
+            detail={unifiedForHeader}
+            isHistoricalVersion={isHistoricalVersion}
+            // For a package the server's flag is authoring state: only whoever can
+            // publish the draft has a use for it.
+            hasUnarchivedChanges={hasTimestampChanges && !!homeWritable}
+            tabs={tabDefs}
+            actions={
+              <PackageActionsDropdown
+                packageId={packageId}
+                type={type}
+                detail={pkgDetail}
+                isHistoricalVersion={isHistoricalVersion}
+                downloadVersion={downloadVersion}
+                onDownload={downloadPackage}
+                onCreateVersion={() => newVersion.open()}
+                createVersionBlockedReason={unsavedReason}
+                isActiveHere={isActiveInCurrentSpace}
+              />
+            }
+          />
+        )}
 
         <VersionBanners
           isHistorical={isHistoricalVersion}
@@ -331,9 +423,17 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
         {type === "agent" && <ModelRequiredAlert blocker={modelBlocker} />}
 
+        {/* Placed here, switched off. The page renders in full — reading and
+          configuring an agent is not running it — and says the one thing that
+          would otherwise turn a click into a 404. */}
         {agentDetail && !agentDetail.active && <AgentInactiveAlert packageId={packageId} />}
 
-        {/* Unpublished and not this reader's working copy: says why Run is greyed out. */}
+        {/* Nothing has ever been published and the working copy is not this
+          reader's: what the page renders below is the author's work in
+          progress. Saying it is what makes the greyed-out Run button legible
+          — and the page renders at all precisely because reading a definition
+          is not running it. True of every package type: the server answers
+          `definition` for all four from one function. */}
         <PackageOwnershipNotice
           type={type}
           isOwned={isOwned}
@@ -343,10 +443,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
         {type === "agent" && agentDetail && (
           <div className="overflow-visible" data-agent-detail-surface>
-            <DetailTabs value={tab} onChange={setTab}>
-              <DetailTabBar tabs={tabDefs} />
-
-              <DetailTabPanel value="overview">
+            <DetailTabPanel value="overview">
+              <div className="space-y-8">
+                <AgentIdentity
+                  description={unifiedForHeader.description}
+                  source={unifiedForHeader.source}
+                  homeSpaceName={homeSpaceName}
+                />
                 {fullRead ? (
                   <AgentOverviewTab
                     packageId={packageId}
@@ -365,38 +468,37 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                     )}
                   </div>
                 )}
-              </DetailTabPanel>
-              <DetailTabPanel value="runs">
-                {tabReads.runs ? (
-                  <AgentRunsTab packageId={packageId} versionLabel={versionLabel} />
-                ) : (
-                  <RoleLimitNotice>{t("detail.roleLimit.runs")}</RoleLimitNotice>
-                )}
-              </DetailTabPanel>
-              <DetailTabPanel value="settings" flush>
-                <AgentSettingsView
-                  versions={versionsProps}
-                  packageId={packageId}
-                  detail={agentDetail}
-                  version={versionLabel}
-                  isHistorical={isHistoricalVersion}
-                  inputWrapperOverride={historicalInputWrapper}
-                />
-              </DetailTabPanel>
-              <DetailTabPanel value="memory" flush>
-                {tabReads.memory ? (
-                  <AgentMemoryTab packageId={packageId} />
-                ) : (
-                  <RoleLimitNotice className="m-6">{t("detail.roleLimit.memory")}</RoleLimitNotice>
-                )}
-              </DetailTabPanel>
-            </DetailTabs>
+              </div>
+            </DetailTabPanel>
+            <DetailTabPanel value="runs">
+              {tabReads.runs ? (
+                <AgentRunsTab packageId={packageId} versionLabel={versionLabel} />
+              ) : (
+                <RoleLimitNotice>{t("detail.roleLimit.runs")}</RoleLimitNotice>
+              )}
+            </DetailTabPanel>
+            <DetailTabPanel value="settings" flush>
+              <AgentSettingsView
+                versions={versionsProps}
+                packageId={packageId}
+                detail={agentDetail}
+                version={versionLabel}
+                isHistorical={isHistoricalVersion}
+                inputWrapperOverride={historicalInputWrapper}
+              />
+            </DetailTabPanel>
+            <DetailTabPanel value="memory" flush>
+              {tabReads.memory ? (
+                <AgentMemoryTab packageId={packageId} />
+              ) : (
+                <RoleLimitNotice className="m-6">{t("detail.roleLimit.memory")}</RoleLimitNotice>
+              )}
+            </DetailTabPanel>
           </div>
         )}
 
         {type !== "agent" && (
-          <DetailTabs value={tab} onChange={setTab}>
-            <DetailTabBar tabs={tabDefs} />
+          <>
             {/* Non-Agent tab content */}
             {/* Both follow the version being viewed: the explorer through
           `versionLabel`, the overview through the manifest picked above. */}
@@ -435,7 +537,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 pkgDetail && <PackageUsage agentIds={pkgDetail.agents.map((agent) => agent.id)} />
               )}
             </DetailTabPanel>
-          </DetailTabs>
+          </>
         )}
 
         {/* Mounted only while open: any way of closing a form modal abandons its input. */}
@@ -448,7 +550,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             etag={(agentDetail ?? pkgDetail)?.etag}
           />
         )}
-      </div>
+      </DetailTabs>
     </EditorDirtyReportContext.Provider>
   );
 }

@@ -13,11 +13,11 @@ import {
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { JsonEditor } from "../json-editor";
 import { PackageFilesEditor } from "../package-files/package-files-editor";
 import { ManifestEditEntry } from "../package-files/package-files-section";
-import { PageHeader } from "../page-header";
+import { DetailBar } from "../detail-bar";
+import { DetailTabs } from "../detail-tabs";
 import { SettingsHeading } from "../settings/settings-heading";
 import { UnsavedChangesModal } from "../unsaved-changes-modal";
 import { packageListPath } from "../../lib/package-paths";
@@ -161,50 +161,41 @@ export function PackageEditorFrame({
   const listPath = packageListPath(type);
 
   return (
-    <div className="space-y-4">
-      <PageHeader
+    // The tabs root wraps the page, header included: the tab bar is portalled
+    // into the shell header and must still answer these tabs.
+    <DetailTabs
+      value={activeTab}
+      onChange={(next) => {
+        if (next === "json") editor.bumpJsonKey();
+        setActiveTab(next);
+      }}
+    >
+      <DetailBar
         title={t(page.title)}
-        breadcrumbs={[
-          { label: t(page.list.key, { ns: page.list.ns }), href: listPath },
-          { label: t(page.title) },
-        ]}
+        parent={{ label: t(page.list.key, { ns: page.list.ns }), href: listPath }}
+        tabs={tabs.map(({ id, label }) => ({ value: id, label }))}
       />
 
-      {editor.error && (
-        <Alert variant="destructive" className="mb-4">
-          <AlertDescription>{editor.error}</AlertDescription>
-        </Alert>
-      )}
+      <div className="space-y-4">
+        {editor.error && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertDescription>{editor.error}</AlertDescription>
+          </Alert>
+        )}
 
-      <Tabs
-        value={activeTab}
-        onValueChange={(v) => {
-          if (v === "json") editor.bumpJsonKey();
-          setActiveTab(v as PackageEditorTab);
-        }}
-        className="mb-4"
-      >
-        <TabsList className="overflow-x-auto">
-          {tabs.map((tab) => (
-            <TabsTrigger key={tab.id} value={tab.id}>
-              {tab.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+        {body}
 
-      {body}
-
-      {activeTab !== "json" && (
-        <div className="border-border mt-6 flex justify-end gap-2 border-t pt-4">
-          <Button variant="outline" type="button" onClick={() => navigate(listPath)}>
-            {t("btn.cancel")}
-          </Button>
-          <PendingButton type="button" onClick={editor.submit} pending={isPending}>
-            {t("btn.create")}
-          </PendingButton>
-        </div>
-      )}
-    </div>
+        {activeTab !== "json" && (
+          <div className="border-border mt-6 flex justify-end gap-2 border-t pt-4">
+            <Button variant="outline" type="button" onClick={() => navigate(listPath)}>
+              {t("btn.cancel")}
+            </Button>
+            <PendingButton type="button" onClick={editor.submit} pending={isPending}>
+              {t("btn.create")}
+            </PendingButton>
+          </div>
+        )}
+      </div>
+    </DetailTabs>
   );
 }

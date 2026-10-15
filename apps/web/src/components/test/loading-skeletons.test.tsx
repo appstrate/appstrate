@@ -20,7 +20,7 @@ describe("loading skeletons", () => {
     for (const node of [
       <TextSkeleton />,
       <SettingsSkeleton />,
-      <DetailPageSkeleton />,
+      <DetailPageSkeleton tabCount={3} />,
       <ListPageSkeleton />,
       <DashboardSkeleton />,
     ]) {
@@ -36,8 +36,7 @@ describe("loading skeletons", () => {
     expect(count(render(<TextSkeleton lines={5} />), "animate-pulse")).toBe(5);
   });
 
-  it("keeps the page header's box, so the real title lands in place", () => {
-    expect(render(<DetailPageSkeleton />)).toContain("data-page-header");
+  it("keeps a collection page header's box, so the real title lands in place", () => {
     expect(render(<ListPageSkeleton />)).toContain("data-page-header");
   });
 });

@@ -54,7 +54,11 @@ export function ShellBreadcrumb() {
   const canReach = useCanReach();
 
   return (
-    <Breadcrumb aria-label={t("nav.breadcrumb")} className="flex min-w-0 flex-1 overflow-hidden">
+    <Breadcrumb
+      aria-label={t("nav.breadcrumb")}
+      data-trail
+      className="flex min-w-0 flex-1 overflow-hidden"
+    >
       <BreadcrumbList className="min-w-0 flex-nowrap gap-1.5 sm:gap-1.5">
         {entries.map((crumb, i) => (
           <Fragment key={i}>
