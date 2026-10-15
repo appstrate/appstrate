@@ -180,6 +180,8 @@ export function ShellHeader() {
     // filled the lead slot (`has-[[data-header-lead]:not(:empty)]`). Its rule is
     // an inset shadow, not a border: a border would add a pixel to rows that
     // are exactly `--spacing-header`, the height the sidebar's brand cell shares.
+    // A phone with a title block draws navigation row, title block and tabs as one
+    // band: shorter navigation row, no divider under it.
     <header
       className={cn(
         "bg-canvas group/header sticky top-0 z-20 grid shrink-0 grid-cols-[minmax(0,1fr)_auto] shadow-[inset_0_-1px_0_0_var(--color-border)]",
@@ -197,7 +199,7 @@ export function ShellHeader() {
           collapsed && "md:pl-2",
         )}
       >
-        <div className="h-header pl-gutter col-start-1 row-start-1 flex min-w-0 items-center gap-2 border-b border-b-black/5 md:contents">
+        <div className="h-header pl-gutter col-start-1 row-start-1 flex min-w-0 items-center gap-2 border-b border-b-black/5 max-md:group-has-[[data-header-lead]:not(:empty)]/header:h-12 max-md:group-has-[[data-header-lead]:not(:empty)]/header:border-b-0 md:contents">
           {/* Mobile-only trigger: on desktop the collapse lives in the sidebar */}
           <SidebarTrigger className="-ml-5 size-11 shrink-0 rounded-l-none md:hidden">
             <Menu className="size-4" />
@@ -226,7 +228,7 @@ export function ShellHeader() {
         <HeaderSlotOutlet
           slot="lead"
           data-header-lead
-          className="px-gutter flex min-w-0 items-center py-1.5 empty:hidden max-md:col-span-2 max-md:row-start-2 max-md:min-h-14 md:flex-1 md:px-0 md:py-0"
+          className="px-gutter flex min-w-0 items-center py-1.5 empty:hidden max-md:col-span-2 max-md:row-start-2 max-md:py-1 md:flex-1 md:px-0 md:py-0"
         />
         <div className="px-gutter flex h-10 min-w-0 items-center group-has-[[data-header-lead]:not(:empty)]/header:hidden max-md:col-span-2 max-md:row-start-2 md:h-auto md:flex-1 md:px-0">
           <ShellBreadcrumb />
@@ -237,7 +239,7 @@ export function ShellHeader() {
           because the sidebar answers "where am I" and this answers "what is
           new" — and because a header holding only a trail is a header holding
           nothing. */}
-      <div className="px-gutter h-header md:min-h-header col-start-2 row-start-1 flex shrink-0 items-center gap-1 border-b border-b-black/5 md:h-auto md:border-b-0 md:pl-2 md:group-has-[[data-header-lead]:not(:empty)]/header:pt-5">
+      <div className="px-gutter h-header md:min-h-header col-start-2 row-start-1 flex shrink-0 items-center gap-1 border-b border-b-black/5 max-md:group-has-[[data-header-lead]:not(:empty)]/header:h-12 max-md:group-has-[[data-header-lead]:not(:empty)]/header:border-b-0 md:h-auto md:border-b-0 md:pl-2 md:group-has-[[data-header-lead]:not(:empty)]/header:pt-5">
         <HeaderSlotOutlet slot="actions" className="flex items-center gap-1 empty:hidden" />
         <NotificationBell />
       </div>
