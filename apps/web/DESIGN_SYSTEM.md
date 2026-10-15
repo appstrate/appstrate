@@ -80,13 +80,28 @@ they start with `packages/` or `e2e/`.
   whose rail lists three sections — Organisation, Espace de travail, Compte
   (`/preferences`) — built in `pages/settings/navigation.ts` from what each
   route lets the caller reach.
-- The header's right end stays personal (notification bell, profile); page
-  controls never move into it.
+- A detail page that draws its title in the header (today the agent's, through
+  `DetailBar`, `components/detail-bar.tsx`) fills three slots the header
+  exposes (`components/shell-header-slots.tsx`): the **lead** (identity tile,
+  title, version pill, then the parent list and the id), the **actions** (left of
+  the bell) and the **tabs** (`HeaderTabBar`, underlined, on the band's rule).
+  The slots are portals: the page keeps its context, so the tab bar still answers
+  the page's own `<DetailTabs>`, which therefore wraps the whole page, header
+  included. The lead takes the breadcrumb's place; a detail page needs only its
+  parent, the tab being already underlined. On a phone the lead is a row under
+  the navigation row, and the organisation switcher yields (the sidebar still
+  holds it).
+- Outside that, the header's right end stays personal (notification bell, profile).
+  A page's controls reach it only through a slot, never by drawing in it.
 
 ## 3. Page anatomy (detail pages)
 
 Top to bottom, every detail page (agent, run, schedule, integration, skill):
 
+0. **The agent page** has no `PageHeader`: its title, version pill, actions and
+   tabs are in the shell header (section 2), and what the old header said under
+   the title (description, home space, system origin) opens the overview tab
+   (`AgentIdentity`). The other detail pages below still use `PageHeader`.
 1. **`PageHeader`** (`components/page-header.tsx`): title with its identity tile
    in `icon` (`PackageIcon`), a one-line summary and the object's id as `children`, and in
    `actions` the status and version badges (`components/status-badge.tsx`, see

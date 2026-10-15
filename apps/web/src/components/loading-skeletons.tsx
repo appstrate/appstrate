@@ -25,6 +25,10 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { agentsKeys, packageKeys } from "../lib/query-keys";
 import { usePackageListCrumb } from "../hooks/use-package-list-crumb";
+import { AgentDetailBarSkeleton } from "./agent-detail/agent-detail-bar";
+
+/** `AGENT_DETAIL_TABS` of `pages/unified-package-detail.tsx`. */
+const AGENT_TAB_COUNT = 4;
 
 /** One `status` for assistive technology; the blocks themselves are hidden from it. */
 function Waiting({ className, children }: { className?: string; children: ReactNode }) {
@@ -197,6 +201,18 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const packageId = scope && name ? `${scope}/${name}` : undefined;
   const listCrumb = usePackageListCrumb(type);
   const title = useCachedPackageName(type, packageId);
+  // An agent's identity and tabs are in the shell header (`AgentDetailBar`), so
+  // the page itself waits with its panel alone.
+  if (type === "agent") {
+    return (
+      <Waiting>
+        <AgentDetailBarSkeleton title={title} tabCount={AGENT_TAB_COUNT} />
+        <div className="bg-card rounded-lg border p-6">
+          <CardBlocks count={3} />
+        </div>
+      </Waiting>
+    );
+  }
   return (
     <DetailPageSkeleton
       breadcrumbs={title ? [listCrumb, { label: title }] : [listCrumb]}

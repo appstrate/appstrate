@@ -11,8 +11,7 @@
  * both without anyone remembering to.
  */
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { LibraryBig, Menu, PanelLeft, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -22,6 +21,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { CountBadge } from "@/components/count-badge";
 import { useUnreadCount } from "@/hooks/use-notifications";
 import { ProductTabs } from "@/components/product-tabs";
+import { HeaderSlotOutlet } from "@/components/shell-header-slots";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { useOverlayPath } from "@/lib/modal-route";
 import { useCanReach } from "@/hooks/use-can-reach";
@@ -42,31 +42,6 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@appstrate/ui/components/sidebar";
-
-/**
- * Where a page's own header controls land. The header belongs to the shell, and
- * the shell stays mounted while pages come and go, so a page does not pass its
- * controls down to the header: it portals them into this slot
- * (`ShellHeaderActions`), and they leave with the page.
- */
-const HeaderActionsSlot = createContext<HTMLElement | null>(null);
-const SetHeaderActionsSlot = createContext<((node: HTMLElement | null) => void) | null>(null);
-
-/** Raised once by the layout, around both the header and the page it frames. */
-export function ShellFrameProvider({ children }: { children: ReactNode }) {
-  const [slot, setSlot] = useState<HTMLElement | null>(null);
-  return (
-    <SetHeaderActionsSlot.Provider value={setSlot}>
-      <HeaderActionsSlot.Provider value={slot}>{children}</HeaderActionsSlot.Provider>
-    </SetHeaderActionsSlot.Provider>
-  );
-}
-
-/** A page's controls for the header's right end, left of the notification bell. */
-export function ShellHeaderActions({ children }: { children: ReactNode }) {
-  const slot = useContext(HeaderActionsSlot);
-  return slot ? createPortal(children, slot) : null;
-}
 
 /** Where the sidebar's settings entry lands: the organization scope's index. */
 const SETTINGS_ENTRY = SETTINGS_INDEX.organization;
@@ -193,15 +168,21 @@ export function ShellSidebar({
 }
 
 export function ShellHeader() {
-  const setActionsSlot = useContext(SetHeaderActionsSlot);
   const { isMobile, openMobile, state } = useSidebar();
   const { data: unreadCount } = useUnreadCount();
   const collapsed = !isMobile && state === "collapsed";
 
   return (
+    // One band, up to three rows. A grid so the title block, which the phone
+    // draws under the navigation row and the desktop beside it, is ONE element:
+    // the left cell is `display: contents` on a phone, and its children
+    // place themselves. `group/header` lets the cells below ask whether a page has
+    // filled the lead slot (`has-[[data-header-lead]:not(:empty)]`). Its rule is
+    // an inset shadow, not a border: a border would add a pixel to rows that
+    // are exactly `--spacing-header`, the height the sidebar's brand cell shares.
     <header
       className={cn(
-        "bg-canvas md:h-header sticky top-0 z-20 flex shrink-0 flex-col border-b md:flex-row md:items-center",
+        "bg-canvas group/header sticky top-0 z-20 grid shrink-0 grid-cols-[minmax(0,1fr)_auto] shadow-[inset_0_-1px_0_0_var(--color-border)]",
         isMobile && openMobile && "invisible",
       )}
     >
@@ -212,44 +193,56 @@ export function ShellHeader() {
           stood and its icon over the navigation's icons. */}
       <div
         className={cn(
-          "px-gutter h-header flex w-full shrink-0 items-center gap-2 border-b border-b-black/5 md:border-b-0",
+          "pl-gutter md:min-h-header col-start-1 row-start-1 max-md:contents md:flex md:min-w-0 md:items-center md:gap-2",
           collapsed && "md:pl-2",
         )}
       >
-        {/* Mobile-only trigger: on desktop the collapse lives in the sidebar */}
-        <SidebarTrigger className="-ml-5 size-11 shrink-0 rounded-l-none md:hidden">
-          <Menu className="size-4" />
-        </SidebarTrigger>
-        {/* Desktop, collapsed: nothing of the sidebar is left on screen, so its
-            way back is here. A click pins it open again. It carries the unread
-            dot the hidden Runs entry cannot show. */}
-        {collapsed && (
-          <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
+        <div className="h-header pl-gutter col-start-1 row-start-1 flex min-w-0 items-center gap-2 border-b border-b-black/5 md:contents">
+          {/* Mobile-only trigger: on desktop the collapse lives in the sidebar */}
+          <SidebarTrigger className="-ml-5 size-11 shrink-0 rounded-l-none md:hidden">
             <Menu className="size-4" />
-            {(unreadCount ?? 0) > 0 && (
-              <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />
-            )}
           </SidebarTrigger>
-        )}
-        <div className="flex min-w-0 flex-1 md:hidden">
-          <OrgSwitcher variant="mobile" />
+          {/* Desktop, collapsed: nothing of the sidebar is left on screen, so its
+              way back is here. A click pins it open again. It carries the unread
+              dot the hidden Runs entry cannot show. */}
+          {collapsed && (
+            <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
+              <Menu className="size-4" />
+              {(unreadCount ?? 0) > 0 && (
+                <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />
+              )}
+            </SidebarTrigger>
+          )}
+          {/* Yields to a detail page's own controls: the phone's first row has
+              room for the burger, those controls and the bell, not for the
+              organization too (the sidebar still holds it). */}
+          <div className="flex min-w-0 flex-1 group-has-[[data-header-lead]:not(:empty)]/header:hidden md:hidden">
+            <OrgSwitcher variant="mobile" />
+          </div>
         </div>
-        <div className="hidden min-w-0 flex-1 md:flex">
+        {/* The title block of a page that draws one (a detail page), else the
+            trail. Both sit in the same cell and only one is ever shown: the
+            trail yields as soon as the slot holds something. */}
+        <HeaderSlotOutlet
+          slot="lead"
+          data-header-lead
+          className="px-gutter flex min-w-0 items-center py-1.5 empty:hidden max-md:col-span-2 max-md:row-start-2 max-md:min-h-14 md:flex-1 md:px-0 md:py-0"
+        />
+        <div className="px-gutter flex h-10 min-w-0 items-center group-has-[[data-header-lead]:not(:empty)]/header:hidden max-md:col-span-2 max-md:row-start-2 md:h-auto md:flex-1 md:px-0">
           <ShellBreadcrumb />
         </div>
-        {/* The page's own actions, then the one utility that is global but not
-            personal: notifications. It sits here rather than in the sidebar
-            because the sidebar answers "where am I" and this answers "what is
-            new" — and because a header holding only a trail is a header holding
-            nothing. */}
-        <div className="flex shrink-0 items-center gap-1">
-          <div ref={setActionsSlot} className="flex items-center gap-1 empty:hidden" />
-          <NotificationBell />
-        </div>
       </div>
-      <div className="px-gutter flex h-10 w-full shrink-0 items-center md:hidden">
-        <ShellBreadcrumb />
+      {/* The page's own actions, then the one utility that is global but not
+          personal: notifications. It sits here rather than in the sidebar
+          because the sidebar answers "where am I" and this answers "what is
+          new" — and because a header holding only a trail is a header holding
+          nothing. */}
+      <div className="px-gutter h-header col-start-2 row-start-1 flex shrink-0 items-center gap-1 border-b border-b-black/5 md:border-b-0 md:pl-2">
+        <HeaderSlotOutlet slot="actions" className="flex items-center gap-1 empty:hidden" />
+        <NotificationBell />
       </div>
+      {/* The page's tabs: the same band, closed by the header's own rule. */}
+      <HeaderSlotOutlet slot="tabs" className="px-gutter col-span-2 empty:hidden" />
     </header>
   );
 }

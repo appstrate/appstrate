@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as React from "react";
+import type { LucideIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
+import { ShellHeaderTabs } from "@/components/shell-header-slots";
 
 /** The fade is drawn on the edge that hides tabs, nothing when they all fit. */
 const FADE_EDGE = {
@@ -60,6 +62,8 @@ function DetailTabsTrigger({
 export interface DetailTab<T extends string> {
   value: T;
   label: string;
+  /** Drawn by the header's tab bar only (`HeaderTabBar`). */
+  icon?: LucideIcon;
 }
 
 /** The tabs root of a detail page; the header, the tab bar and the panels all live inside it. */
@@ -89,6 +93,49 @@ export function DetailTabBar<T extends string>({ tabs }: { tabs: readonly Detail
         </DetailTabsTrigger>
       ))}
     </DetailTabsList>
+  );
+}
+
+/**
+ * The tab bar of a page whose title block is in the shell header (`DetailBar`):
+ * underlined tabs on the band's own rule, `end` at the far right (a search, a
+ * filter). Must render inside the page's `DetailTabs`: it is portalled to the
+ * header, and the portal keeps the tabs' context.
+ */
+export function HeaderTabBar<T extends string>({
+  tabs,
+  end,
+}: {
+  tabs: readonly DetailTab<T>[];
+  end?: React.ReactNode;
+}) {
+  const { ref, edge } = useScrollEdges();
+  return (
+    <ShellHeaderTabs>
+      <div className="flex items-center justify-between gap-4">
+        <div
+          ref={ref}
+          className={cn(
+            "-mb-px min-w-0 [scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden",
+            FADE_EDGE[edge],
+          )}
+        >
+          <TabsList className="h-11 w-max justify-start gap-1 rounded-none bg-transparent p-0">
+            {tabs.map(({ value, label, icon: Icon }) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground h-full gap-2 rounded-none border-b-2 border-transparent px-2.5 py-0 data-[state=active]:bg-transparent data-[state=active]:shadow-none max-sm:px-2"
+              >
+                {Icon && <Icon className="size-4 shrink-0" aria-hidden />}
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+        {end && <div className="flex shrink-0 items-center gap-2">{end}</div>}
+      </div>
+    </ShellHeaderTabs>
   );
 }
 
