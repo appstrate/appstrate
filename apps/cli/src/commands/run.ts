@@ -35,6 +35,8 @@ import {
   readBundleFromFile,
   buildPlatformPromptInputs,
   renderPlatformPrompt,
+  type Bundle,
+  type PlatformPromptOptions,
 } from "@appstrate/afps-runtime/bundle";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfileOrNull } from "../lib/config.ts";
@@ -304,8 +306,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   validateLocalInput(bundle, input);
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
-  // Derive the full platform prompt (tools / skills / schemas / output)
-  // from the bundle. The runtime `output` tool receives the output schema as
+  // Derive the full platform prompt (skills / integrations / schemas /
+  // output) from the bundle. The runtime `output` tool receives the output schema as
   // a parameter (`buildRuntimeToolExtensions({ outputSchema })` below), not
   // via the environment.
   //
@@ -322,11 +324,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const context = mergeSnapshotIntoContext(baseContext, snapshot);
   // The integrations the platform bound this run to none of: told to the agent, tools withheld.
   const unavailable = unavailableIntegrations(reportSession?.warnings ?? []);
-  const promptInputs = buildPlatformPromptInputs(bundle, context, {
-    platformName: "Appstrate CLI",
-    ...(unavailable.length > 0 ? { unavailableIntegrations: unavailable } : {}),
-  });
-  const systemPrompt = renderPlatformPrompt(promptInputs);
 
   // System tools (`@appstrate/output`, `@appstrate/log`, …) read
   // `AGENT_RUN_ID` from the env when stamping their stdout-JSONL events.
@@ -351,22 +348,26 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // `{ns}__api_call` MCP tool, so prompts are identical regardless of
   // execution mode. Pure MCP-server integrations are skipped here (no
   // generic call surface in-process).
-  const apiCallFactories = await buildApiCallExtensionFactory({
-    bundle: withoutIntegrations(
-      bundle,
-      unavailable.map((entry) => entry.id),
-    ),
-    integrationResolver,
-    runId,
-    workspace: workspaceDir,
-    emitEvent: () => {
-      // Events are swallowed in the CLI — the run-result aggregate is
-      // assembled from stdout CloudEvents, not from these telemetry hooks.
-    },
-  });
+  const { factories: apiCallFactories, integrationIds: wiredIntegrationIds } =
+    await buildApiCallExtensionFactory({
+      bundle: withoutIntegrations(
+        bundle,
+        unavailable.map((entry) => entry.id),
+      ),
+      integrationResolver,
+      runId,
+      workspace: workspaceDir,
+      emitEvent: () => {
+        // Events are swallowed in the CLI — the run-result aggregate is
+        // assembled from stdout CloudEvents, not from these telemetry hooks.
+      },
+    });
   if (!opts.json && apiCallFactories.length > 0) {
     process.stderr.write(`→ wired ${apiCallFactories.length} integration api_call tool(s)\n`);
   }
+  // Built once the tools are wired: the catalog lists only integrations the agent can call.
+  const promptInputs = cliPromptInputs(bundle, context, unavailable, wiredIntegrationIds);
+  const systemPrompt = renderPlatformPrompt(promptInputs);
 
   // ─── 7b. Platform runtime tools (output/log/note/pin) ──────────
   // Selected via `manifest.runtime_tools`. With no sidecar (the CLI always
@@ -854,6 +855,24 @@ async function resolveProfileNameForPreset(opts: RunCommandOptions): Promise<str
     );
   }
   return resolved.profileName;
+}
+
+/**
+ * Prompt inputs of a local run. The integrations catalog lists only the ones
+ * the run wired tools for (none under `--integrations none`), so the agent is
+ * never pointed at the doc of an integration it cannot call.
+ */
+export function cliPromptInputs(
+  bundle: Bundle,
+  context: ExecutionContext,
+  unavailable: ReadonlyArray<{ id: string; reason: string }>,
+  wiredIntegrationIds: ReadonlySet<string>,
+): PlatformPromptOptions {
+  return buildPlatformPromptInputs(bundle, context, {
+    platformName: "Appstrate CLI",
+    ...(unavailable.length > 0 ? { unavailableIntegrations: unavailable } : {}),
+    availableIntegrationIds: wiredIntegrationIds,
+  });
 }
 
 async function buildResolverInputs(

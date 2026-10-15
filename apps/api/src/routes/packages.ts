@@ -120,6 +120,7 @@ import {
   readPackageSnapshot,
   snapshotFile,
   resolveDraftContent,
+  optionalContentEntryPath,
   mutatePackageDraftFiles,
   buildFileIndex,
   indexEtag,
@@ -750,6 +751,9 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
           rcfg.cfg.manifestIsStoredFile ? manifestText : content,
         ),
       };
+      const contentEntryPath = optionalContentEntryPath(rcfg.cfg.type, content);
+      if (contentEntryPath && content)
+        normalizedFiles[contentEntryPath] = new TextEncoder().encode(content);
       if (body.operations || rcfg.requireContent) {
         try {
           normalizedFiles = applyFileOperations(
@@ -1140,6 +1144,17 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // different files for the manifest-backed types — see `storageFileName`.
     // `resolveDraftContent` guards the column; the storage entry is resolved on
     // its own terms.
+    // File operations own the content column when they are supplied.
+    const draftContent = body.operations
+      ? undefined
+      : resolveDraftContent(rcfg.cfg.type, existing.content, draftContentInput);
+    // The tree handed to `mutate` carries the PREVIOUS column in INTEGRATION.md
+    // (the draft overlay); without this write the stored copy, which publish
+    // freezes, would trail the column by one save, or never exist. Alongside
+    // operations, the body's `content` is written first and they apply on top,
+    // as `storageFileName` is for a skill; the column then follows the tree.
+    const entryContent = body.operations ? body.content : draftContent;
+    const contentEntryPath = optionalContentEntryPath(rcfg.cfg.type, entryContent);
     let written: number;
     try {
       ({ lockVersion: written } = await mutatePackageDraftFiles(
@@ -1150,14 +1165,15 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
           },
           manifest: validatedManifest,
           validateBundle: body.operations !== undefined,
-          // File operations own the content column when they are supplied.
-          draftContent: body.operations
-            ? undefined
-            : resolveDraftContent(rcfg.cfg.type, existing.content, draftContentInput),
+          draftContent,
           mutate: (files) => {
             const next = { ...files };
             if (body.content !== undefined || !body.operations)
               next[rcfg.storageFileName] = new TextEncoder().encode(storageContent);
+            if (contentEntryPath) {
+              if (entryContent) next[contentEntryPath] = new TextEncoder().encode(entryContent);
+              else delete next[contentEntryPath];
+            }
             return applyFileOperations(next, toDraftFileOperations(body.operations ?? []), {
               type: rcfg.cfg.type,
             });

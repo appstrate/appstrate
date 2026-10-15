@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration test: end-to-end Bundle assembly via DbPackageCatalog.
+ * Integration test: end-to-end Bundle assembly via DbPackageCatalog, through
+ * the export-side assembly (`assembleAgentBundle`, no signature policy).
  *
  * Seeds an agent + skill + skill dep in the DB, uploads their AFPS
  * ZIPs to storage, and exercises:
@@ -20,12 +21,15 @@ import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { buildBundleFromDb } from "../../../src/services/bundle-assembly.ts";
+import { assembleAgentBundle } from "../../../src/services/package-storage.ts";
+import { buildBundleFromAgentDraft } from "../../../src/services/bundle-assembly.ts";
+import type { AgentManifest } from "../../../src/types/index.ts";
 import {
   BundleError,
   extractRootFromAfps,
   readBundleFromBuffer,
   writeBundleToBuffer,
+  type BundlePackage,
   type PackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
 import { toBundleApiError } from "../../../src/services/run-launcher/bundle-error-mapping.ts";
@@ -79,16 +83,19 @@ async function seedPackageWithZip(opts: {
   });
 }
 
+/** The export's assembly for a root that declares no integration. */
+function assembleForExport(root: BundlePackage, orgId: string) {
+  return assembleAgentBundle(root, { orgId, integrationVersions: {}, forExecution: false });
+}
+
 describe("bundle-assembly — end-to-end via DbPackageCatalog", () => {
   let ctx: TestContext;
   let ORG_ID: string;
-  let SPACE_ID: string;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "bundletest" });
     ORG_ID = ctx.org.id;
-    SPACE_ID = ctx.defaultSpaceId;
   });
 
   it("assembles a multi-package bundle for a classic run", async () => {
@@ -157,10 +164,7 @@ describe("bundle-assembly — end-to-end via DbPackageCatalog", () => {
     );
     const root = extractRootFromAfps(rootAfps);
 
-    const bundle = await buildBundleFromDb(root, {
-      orgId: ORG_ID,
-      spaceId: SPACE_ID,
-    });
+    const bundle = await assembleForExport(root, ORG_ID);
 
     expect(bundle.packages.size).toBe(3);
     expect(bundle.root).toBe("@test/agent-root@1.0.0");
@@ -192,13 +196,11 @@ describe("bundle-assembly — end-to-end via DbPackageCatalog", () => {
 describe("bundle-assembly — storage integrity gate (#878)", () => {
   let ctx: TestContext;
   let ORG_ID: string;
-  let SPACE_ID: string;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "bundletest" });
     ORG_ID = ctx.org.id;
-    SPACE_ID = ctx.defaultSpaceId;
   });
 
   it("tampered bytes at rest throw BundleError(INTEGRITY_MISMATCH), mapped to 500 bundle_integrity_mismatch", async () => {
@@ -239,7 +241,7 @@ describe("bundle-assembly — storage integrity gate (#878)", () => {
 
     let caught: unknown;
     try {
-      await buildBundleFromDb(root, { orgId: ORG_ID, spaceId: SPACE_ID });
+      await assembleForExport(root, ORG_ID);
     } catch (err) {
       caught = err;
     }
@@ -284,7 +286,7 @@ describe("bundle-assembly — storage integrity gate (#878)", () => {
     );
     const root = extractRootFromAfps(rootAfps);
 
-    const bundle = await buildBundleFromDb(root, { orgId: ORG_ID, spaceId: SPACE_ID });
+    const bundle = await assembleForExport(root, ORG_ID);
     expect(bundle.packages.has("@test/skill-a@1.0.0" as PackageIdentity)).toBe(true);
   });
 });
@@ -331,5 +333,138 @@ describe("bundle-assembly — signature policy placement", () => {
     await expect(
       new DbPackageCatalog({ orgId: ORG_ID, forExecution: true }).fetch(identity),
     ).rejects.toBeInstanceOf(BundleSignatureError);
+  });
+});
+
+/**
+ * The export freezes integration versions the way a run does, so a pin no
+ * published version satisfies fails the export like it fails a run.
+ */
+describe("bundle-assembly — export integration freeze", () => {
+  it("an unsatisfiable integration pin is DEPENDENCY_UNRESOLVED, mapped to 422", async () => {
+    await truncateAll();
+    const ctx = await createTestContext({ orgSlug: "bundletest" });
+    const integ = {
+      name: "@test/integ",
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "0.2",
+      display_name: "Integ",
+      source: { kind: "none" },
+    };
+    await seedPackage({ id: "@test/integ", type: "integration", orgId: ctx.org.id });
+    await seedPackageVersion({ packageId: "@test/integ", version: "1.0.0", manifest: integ });
+
+    const manifest = {
+      name: "@test/agent-root",
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Root",
+      dependencies: { integrations: { "@test/integ": "^3.0.0" } },
+    };
+    const caught = await buildBundleFromAgentDraft(
+      {
+        id: manifest.name,
+        manifest: manifest as unknown as AgentManifest,
+        prompt: "Do the thing.",
+        source: "local",
+      },
+      { orgId: ctx.org.id, spaceId: ctx.defaultSpaceId },
+    ).catch((err: unknown) => err);
+
+    expect(caught).toBeInstanceOf(BundleError);
+    expect((caught as BundleError).details).toEqual({
+      missing: [{ name: "@test/integ", versionSpec: "^3.0.0" }],
+    });
+    const mapped = toBundleApiError(caught);
+    expect(mapped?.status).toBe(422);
+    expect(mapped?.code).toBe("dependency_unresolved");
+  });
+});
+
+/**
+ * An integration member is optional in a run bundle: an unsigned org
+ * integration under `AFPS_SIGNATURE_POLICY=required` withholds its doc with a
+ * warning, it does not fail the run.
+ */
+describe("bundle-assembly — unsigned integration under a required signature policy", () => {
+  const INTEG = "@test/unsigned-integ";
+  const savedPolicy = process.env.AFPS_SIGNATURE_POLICY;
+  let ORG_ID: string;
+
+  const root: BundlePackage = {
+    identity: "@test/agent-root@1.0.0" as PackageIdentity,
+    manifest: {
+      name: "@test/agent-root",
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Root",
+      dependencies: { integrations: { [INTEG]: "^1.0.0" } },
+      integrations_configuration: { [INTEG]: {} },
+    },
+    files: new Map([["prompt.md", enc("Do the thing.")]]),
+    integrity: "",
+  };
+
+  beforeEach(async () => {
+    await truncateAll();
+    ORG_ID = (await createTestContext({ orgSlug: "bundletest" })).org.id;
+    const manifest = {
+      name: INTEG,
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "0.2",
+      display_name: "Integ",
+      source: { kind: "none" },
+    };
+    const afps = zipSync({
+      "manifest.json": enc(JSON.stringify(manifest, null, 2)),
+      "INTEGRATION.md": enc("# Integ\n"),
+    });
+    await seedPackage({ id: INTEG, type: "integration", orgId: ORG_ID });
+    await storage.uploadFile(BUCKET, `${INTEG}/1.0.0.afps`, Buffer.from(afps));
+    await seedPackageVersion({
+      packageId: INTEG,
+      version: "1.0.0",
+      integrity: computeIntegrity(afps),
+      artifactSize: afps.length,
+      manifest,
+    });
+    process.env.AFPS_SIGNATURE_POLICY = "required";
+    resetEnvCache();
+  });
+
+  afterEach(() => {
+    if (savedPolicy === undefined) delete process.env.AFPS_SIGNATURE_POLICY;
+    else process.env.AFPS_SIGNATURE_POLICY = savedPolicy;
+    resetEnvCache();
+  });
+
+  const integrationVersions = { [INTEG]: { version: "1.0.0", source: "version" as const } };
+
+  it("builds the run bundle without the member and warns", async () => {
+    const warnings: string[] = [];
+    const bundle = await assembleAgentBundle(root, {
+      orgId: ORG_ID,
+      integrationVersions,
+      forExecution: true,
+      onWarn: (message) => warnings.push(message),
+    });
+
+    expect(bundle.packages.has(`${INTEG}@1.0.0` as PackageIdentity)).toBe(false);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(`${INTEG}@1.0.0`);
+    expect(warnings[0]).toContain("skipped");
+  });
+
+  it("keeps the member in the export, which applies no signature policy", async () => {
+    const bundle = await assembleAgentBundle(root, {
+      orgId: ORG_ID,
+      integrationVersions,
+      forExecution: false,
+    });
+    expect(bundle.packages.has(`${INTEG}@1.0.0` as PackageIdentity)).toBe(true);
   });
 });

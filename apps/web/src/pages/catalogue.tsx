@@ -12,6 +12,8 @@ import { OrgCatalogueModal } from "../components/org-catalogue-modal";
 import {
   catalogueHref,
   CATALOGUE_KINDS,
+  CATALOGUE_PACKAGE_PARAM,
+  CATALOGUE_VERSION_PARAM,
   isCatalogueKind,
   isCatalogueReading,
   type CatalogueReading,
@@ -44,7 +46,8 @@ export function CataloguePage() {
       hrefOf={(nextReading: CatalogueReading, nextType: PackageType) => {
         // The state filter is reading-specific, so it is dropped on a reading change.
         const query = new URLSearchParams(location.search);
-        query.delete("package");
+        query.delete(CATALOGUE_PACKAGE_PARAM);
+        query.delete(CATALOGUE_VERSION_PARAM);
         if (nextReading !== reading) query.delete("state");
         return `/catalogue/${nextReading}/${nextType}${searchOf(query)}`;
       }}

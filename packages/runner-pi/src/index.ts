@@ -61,7 +61,7 @@ export {
 export type { Api, Model, Message, ExtensionAPI, ExtensionFactory } from "./pi-sdk.ts";
 export type { PiSdkAgentSessionEvent, PiSdkAssistantMessageEvent, PiSdkUsage } from "./pi-sdk.ts";
 
-export { piSkillsDir, prepareBundleForPi } from "./bundle-extensions.ts";
+export { bundleMemberDir, prepareBundleForPi } from "./bundle-extensions.ts";
 
 export { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
 

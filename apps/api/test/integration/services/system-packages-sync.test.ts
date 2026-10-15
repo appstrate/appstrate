@@ -40,11 +40,10 @@ import {
   syncSystemPackagesToDb,
   type SystemPackageEntry,
 } from "../../../src/services/system-packages.ts";
-import { fetchIntegrationPromptDocs } from "../../../src/services/integration-service.ts";
 import { loadSystemPackages } from "@appstrate/core/system-packages";
 import { zipArtifact } from "@appstrate/core/zip";
 import { packages, packageVersions } from "@appstrate/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 
 function enc(s: string): Uint8Array {
   return new TextEncoder().encode(s);
@@ -438,9 +437,9 @@ describe("syncSystemPackagesToDb", () => {
 
   // ─── Shipped INTEGRATION.md ────────────────────────────
 
-  it("seeds a shipped integration's INTEGRATION.md as the doc its runs are prompted with", async () => {
+  it("seeds a shipped integration's INTEGRATION.md as its draft_content", async () => {
     // The real archives, not fixtures: what is asserted is that the bytes
-    // built from `scripts/system-packages/` reach the prompt, and not the
+    // built from `scripts/system-packages/` reach the column, and not the
     // manifest text `parsePackageZip` falls back to without the companion.
     const { packages: shipped, warnings } = await loadSystemPackages(
       join(import.meta.dir, "../../../../../system-packages"),
@@ -454,8 +453,16 @@ describe("syncSystemPackagesToDb", () => {
     const { canonical, versions } = buildRegistry(withDoc);
     await syncSystemPackagesToDb(canonical, versions);
 
-    const docs = await fetchIntegrationPromptDocs(withDoc.map((entry) => entry.packageId));
-    expect(Object.fromEntries(docs.map((d) => [d.packageId, d.doc]))).toEqual(
+    const rows = await db
+      .select({ id: packages.id, draftContent: packages.draftContent })
+      .from(packages)
+      .where(
+        inArray(
+          packages.id,
+          withDoc.map((entry) => entry.packageId),
+        ),
+      );
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.draftContent]))).toEqual(
       Object.fromEntries(
         withDoc.map((entry) => [
           entry.packageId,

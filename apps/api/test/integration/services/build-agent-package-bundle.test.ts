@@ -17,9 +17,8 @@
  *   - the per-run `dependencyOverrides` escape hatch routes a single dep
  *     to its draft for the skill edit loop.
  *
- * NOTE: skills are the only bundle dependency the platform resolves.
- * Integrations / mcp-servers are spawned as separate MCP servers at runtime
- * (never embedded in the agent bundle).
+ * Integration members (at the run's frozen versions) are covered by
+ * `run-bundle-integration-versions.test.ts`; these agents declare none.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -37,6 +36,8 @@ import { eq } from "drizzle-orm";
 import * as storage from "@appstrate/db/storage";
 
 const VERSIONS_BUCKET = "agent-packages";
+/** These agents declare no integration, so the run froze none. */
+const NO_INTEGRATIONS = { integrationVersions: {} };
 
 function enc(s: string): Uint8Array {
   return new TextEncoder().encode(s);
@@ -168,7 +169,7 @@ describe("buildAgentPackage — pin resolution against published versions (#666)
       dependencies: { skills: { [SKILL]: "^1.0.0" } },
     };
 
-    const result = await buildAgentPackage(buildAgent(agentManifest), ORG_ID);
+    const result = await buildAgentPackage(buildAgent(agentManifest), ORG_ID, NO_INTEGRATIONS);
     const bundle = readBundleFromBuffer(new Uint8Array(result.zip));
 
     expect(bundle.root).toBe("@bundlehost/root-agent@3.0.0");
@@ -197,7 +198,7 @@ describe("buildAgentPackage — pin resolution against published versions (#666)
       dependencies: { skills: { [SKILL]: "^1.0.0" } },
     };
 
-    const result = await buildAgentPackage(buildAgent(agentManifest), ORG_ID);
+    const result = await buildAgentPackage(buildAgent(agentManifest), ORG_ID, NO_INTEGRATIONS);
     // `^1.0.0` re-resolves to the highest satisfying published version.
     expect(readBundleFromBuffer(new Uint8Array(result.zip)).packages.has(`${SKILL}@1.1.0`)).toBe(
       true,
@@ -218,7 +219,7 @@ describe("buildAgentPackage — pin resolution against published versions (#666)
 
     let caught: unknown;
     try {
-      await buildAgentPackage(buildAgent(agentManifest), ORG_ID);
+      await buildAgentPackage(buildAgent(agentManifest), ORG_ID, NO_INTEGRATIONS);
     } catch (err) {
       caught = err;
     }
@@ -244,9 +245,9 @@ describe("buildAgentPackage — pin resolution against published versions (#666)
       dependencies: { skills: { [SKILL]: "^1.0.0" } },
     };
 
-    await expect(buildAgentPackage(buildAgent(agentManifest), ORG_ID)).rejects.toThrow(
-      /unresolved/i,
-    );
+    await expect(
+      buildAgentPackage(buildAgent(agentManifest), ORG_ID, NO_INTEGRATIONS),
+    ).rejects.toThrow(/unresolved/i);
   });
 
   it("dependencyOverrides `draft` delivers the working-copy bytes for one dep", async () => {
@@ -268,12 +269,13 @@ describe("buildAgentPackage — pin resolution against published versions (#666)
     };
 
     // Without the override: published bytes.
-    const published = await buildAgentPackage(buildAgent(agentManifest), ORG_ID);
+    const published = await buildAgentPackage(buildAgent(agentManifest), ORG_ID, NO_INTEGRATIONS);
     expect(skillBody(published.zip)).toContain("version 1");
 
     // With the override: the dependency's mutable draft.
     const drafted = await buildAgentPackage(buildAgent(agentManifest), ORG_ID, {
-      [SKILL]: "draft",
+      integrationVersions: {},
+      dependencyOverrides: { [SKILL]: "draft" },
     });
     expect(skillBody(drafted.zip)).toContain("version 2 (draft)");
   });
@@ -309,7 +311,7 @@ describe("buildAgentPackage — bundle output invariants", () => {
       draftManifest: manifest,
     });
 
-    const result = await buildAgentPackage(buildAgent(manifest), ORG_ID);
+    const result = await buildAgentPackage(buildAgent(manifest), ORG_ID, NO_INTEGRATIONS);
 
     expect(result.zip.byteLength).toBeGreaterThan(0);
     const bundle = readBundleFromBuffer(new Uint8Array(result.zip));
@@ -333,8 +335,8 @@ describe("buildAgentPackage — bundle output invariants", () => {
       draftManifest: manifest,
     });
 
-    const a = await buildAgentPackage(buildAgent(manifest), ORG_ID);
-    const b = await buildAgentPackage(buildAgent(manifest), ORG_ID);
+    const a = await buildAgentPackage(buildAgent(manifest), ORG_ID, NO_INTEGRATIONS);
+    const b = await buildAgentPackage(buildAgent(manifest), ORG_ID, NO_INTEGRATIONS);
     expect(a.zip.equals(b.zip)).toBe(true);
   });
 });

@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedAgent, seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { eq } from "drizzle-orm";
@@ -227,9 +227,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     await seedAgentWith(buildAgentManifest([INTEGRATION], true));
     await seedIntegration(false);
     // Published so the launch clears the version freeze that follows the connection gate.
-    await seedPackageVersion({
-      packageId: INTEGRATION,
-      version: "1.0.0",
+    await seedPublishedVersion(INTEGRATION, "1.0.0", {
       manifest: buildIntegrationManifest(INTEGRATION, false) as unknown as Record<string, unknown>,
     });
 
@@ -520,11 +518,7 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
       draftManifest: manifest,
     });
     // Published so the run's version freeze judges the pinned manifest, as in prod.
-    await seedPackageVersion({
-      packageId: GMAIL,
-      version: manifest.version as string,
-      manifest,
-    });
+    await seedPublishedVersion(GMAIL, manifest.version as string, { manifest });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, GMAIL);
 
     await seedAgent({
@@ -694,7 +688,7 @@ describe("connection-readiness — scopes of an inherited tool selection", () =>
       draftManifest: manifest,
     });
     // Published so the run's version freeze judges the manifest readiness does.
-    await seedPackageVersion({ packageId: WILD, version: "1.0.0", manifest });
+    await seedPublishedVersion(WILD, "1.0.0", { manifest });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, WILD);
     await seedAgent({
       id: AGENT,

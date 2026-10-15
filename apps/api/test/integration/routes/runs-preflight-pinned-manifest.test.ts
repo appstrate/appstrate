@@ -26,7 +26,7 @@ import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedAgent, seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, packages } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
@@ -85,9 +85,7 @@ describe("POST /api/agents/:scope/:name/run — preflight reads the PINNED integ
       source: "local",
       draftManifest: integManifest("1.0.0", ["read"]),
     });
-    await seedPackageVersion({
-      packageId: INTEG,
-      version: "1.0.0",
+    await seedPublishedVersion(INTEG, "1.0.0", {
       manifest: integManifest("1.0.0", ["read"]) as unknown as Record<string, unknown>,
     });
     // …and NOW the integration author tightens their WORKING COPY to also

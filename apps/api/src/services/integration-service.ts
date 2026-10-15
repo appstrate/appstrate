@@ -15,12 +15,12 @@ import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { mcpServerManifestSchema, type McpServerManifest } from "@appstrate/core/mcp-server";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { BundleError } from "@appstrate/afps-runtime/bundle";
 import { getSystemPackages } from "./system-packages.ts";
 import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
-import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 import { pickVersion } from "./run-launcher/db-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { logger } from "../lib/logger.ts";
@@ -94,7 +94,7 @@ export async function fetchIntegrationManifest(
   return promise;
 }
 
-function parseIntegrationManifest(raw: unknown): IntegrationManifestLoadResult {
+export function parseIntegrationManifest(raw: unknown): IntegrationManifestLoadResult {
   const parsed = integrationManifestSchema.safeParse(raw);
   if (!parsed.success)
     return {
@@ -573,6 +573,22 @@ export async function resolveRunIntegrationVersions(params: {
   return { ok: true, versions };
 }
 
+/**
+ * The frozen map, or the `DEPENDENCY_UNRESOLVED` BundleError (`details.missing`)
+ * that `toBundleApiError` renders as `422 dependency_unresolved` — the one
+ * place an unresolved integration pin becomes a refusal, for runs and exports.
+ */
+export function assertIntegrationVersionsResolved(
+  result: RunIntegrationVersionsResult,
+): ResolvedIntegrationVersionMap {
+  if (result.ok) return result.versions;
+  throw new BundleError(
+    "DEPENDENCY_UNRESOLVED",
+    `${result.unresolved.length} integration pin(s) resolved to no published version`,
+    { missing: result.unresolved },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Read
 // ---------------------------------------------------------------------------
@@ -735,110 +751,6 @@ export async function getOrgWideIntegrationManifest(
     .limit(1);
   if (!row) return null;
   return asIntegrationManifest(row.draftManifest);
-}
-
-/**
- * Per-integration prompt companion returned by
- * {@link fetchIntegrationPromptDocs}. `description` comes from the
- * integration manifest; `doc` is the raw `INTEGRATION.md` content
- * (AFPS §3.5) parsed at import time and persisted on
- * `packages.draftContent`. Either may be absent.
- */
-interface IntegrationPromptDoc {
-  packageId: string;
-  description?: string;
-  doc?: string;
-}
-
-/** Soft cap on `INTEGRATION.md` content inlined in the platform prompt. */
-const INTEGRATION_DOC_INLINE_LIMIT_BYTES = 50 * 1024;
-
-/**
- * Decode `bytes` as UTF-8, capped at `limit` bytes. Backs up to the nearest
- * UTF-8 leading-byte boundary so the tail of the truncated output never
- * contains a U+FFFD replacement char from a partial multi-byte sequence.
- */
-function truncateUtf8(bytes: Uint8Array, limit: number): string {
-  if (bytes.length <= limit) return new TextDecoder().decode(bytes);
-  let cut = limit;
-  // Back up while the byte at `cut - 1` is a UTF-8 continuation byte (0b10xxxxxx).
-  // Max 3 step-backs needed (a 4-byte sequence has at most 3 continuation bytes).
-  while (cut > 0 && ((bytes[cut - 1] ?? 0) & 0xc0) === 0x80) {
-    cut--;
-  }
-  // If the byte at `cut - 1` is itself a leading byte of a multi-byte sequence
-  // (0b11xxxxxx), its continuation bytes were just cut off — back up one more
-  // to exclude the partial start byte.
-  if (cut > 0) {
-    const lead = bytes[cut - 1] ?? 0;
-    if ((lead & 0xc0) === 0xc0) {
-      cut--;
-    }
-  }
-  return new TextDecoder().decode(bytes.slice(0, cut));
-}
-
-/**
- * Truncate `raw` to the inline byte budget, respecting UTF-8 code-point
- * boundaries so the tail never holds a partial multi-byte sequence. Appends
- * a plain truncation marker with the original/cap byte counts.
- */
-function truncateIntegrationDoc(raw: string): string {
-  const bytes = new TextEncoder().encode(raw);
-  if (bytes.byteLength <= INTEGRATION_DOC_INLINE_LIMIT_BYTES) return raw;
-  const truncated = truncateUtf8(bytes, INTEGRATION_DOC_INLINE_LIMIT_BYTES);
-  return `${truncated}\n\n[…truncated — original ${bytes.length} bytes capped at ${INTEGRATION_DOC_INLINE_LIMIT_BYTES} bytes]`;
-}
-
-/**
- * Batch-load `(description, INTEGRATION.md)` for a set of integration
- * package ids. Reads from `packages.draftManifest` (description) +
- * `packages.draftContent` (the `INTEGRATION.md` content captured at
- * import time by `zip.ts`) — never re-fetches the bundle from object
- * storage. Returned entries are sized to the inline-budget; oversized
- * docs are truncated on a UTF-8 code-point boundary with a plain
- * truncation marker.
- *
- * Rows with no `INTEGRATION.md` (the optional companion is absent) yield
- * an entry with `doc` undefined. Rows that fail to load yield no entry.
- */
-export async function fetchIntegrationPromptDocs(
-  packageIds: readonly string[],
-): Promise<IntegrationPromptDoc[]> {
-  if (packageIds.length === 0) return [];
-  const rows = await db
-    .select({
-      id: packages.id,
-      type: packages.type,
-      draftManifest: packages.draftManifest,
-      draftContent: packages.draftContent,
-    })
-    .from(packages)
-    .where(and(inArray(packages.id, packageIds as string[]), eq(packages.type, "integration")));
-
-  const out: IntegrationPromptDoc[] = [];
-  for (const row of rows) {
-    const manifest = asIntegrationManifest(row.draftManifest);
-    const description = manifest?.description;
-    // `draftContent` for integrations is the raw INTEGRATION.md when
-    // present, or a fallback to the manifest JSON when the package was
-    // uploaded without an INTEGRATION.md (see `packages/core/src/zip.ts`).
-    // Only inline content that looks like markdown documentation, not
-    // the manifest JSON fallback — the SAME predicate the file explorer's
-    // overlay and the package write paths use, so the four of them cannot
-    // disagree about what the column holds.
-    const rawContent = row.draftContent ?? "";
-    const doc =
-      rawContent.trim().length > 0 && !isManifestTextFallback(rawContent)
-        ? truncateIntegrationDoc(rawContent)
-        : undefined;
-    out.push({
-      packageId: row.id,
-      ...(description ? { description } : {}),
-      ...(doc ? { doc } : {}),
-    });
-  }
-  return out;
 }
 
 /**

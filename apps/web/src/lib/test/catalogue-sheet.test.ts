@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  pinnedVersionState,
   sheetChatEnforce,
   sheetOffers,
   sheetSpaceMode,
@@ -162,5 +163,26 @@ describe("sheetChatEnforce", () => {
     for (const type of ["agent", "integration", "mcp-server"] as const) {
       expect(sheetChatEnforce(type, { state: "active" }, facts)).toBeNull();
     }
+  });
+});
+
+describe("pinnedVersionState", () => {
+  const read = { pinned: "1.0.0", missing: false, latestPublished: "2.0.0" };
+
+  it("has nothing to say about a sheet no version was pinned on", () => {
+    expect(pinnedVersionState({ ...read, pinned: undefined })).toBeNull();
+  });
+
+  it("names a version the server no longer has", () => {
+    expect(pinnedVersionState({ ...read, missing: true })).toBe("missing");
+  });
+
+  it("warns when the spaces run a newer version than the one read", () => {
+    expect(pinnedVersionState(read)).toBe("behind");
+  });
+
+  it("is current on the latest version, and while the latest is still unknown", () => {
+    expect(pinnedVersionState({ ...read, pinned: "2.0.0" })).toBe("current");
+    expect(pinnedVersionState({ ...read, latestPublished: undefined })).toBe("current");
   });
 });

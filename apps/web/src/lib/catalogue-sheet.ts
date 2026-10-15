@@ -85,3 +85,22 @@ export function sheetChatEnforce(
       : null;
   return { checked: facts.enforced, disabled: refusal !== null, refusal };
 }
+
+/**
+ * What the sheet says about a version the address pinned: `missing` when the
+ * server has no such version (deleted since the link was made), `behind` when
+ * the spaces run a newer one — a placement selects no version, outside its
+ * home a package runs its latest published one — and `current` otherwise.
+ * An unpinned sheet has no state.
+ */
+export type PinnedVersionState = "missing" | "behind" | "current";
+
+export function pinnedVersionState(facts: {
+  pinned: string | undefined;
+  missing: boolean;
+  latestPublished: string | null | undefined;
+}): PinnedVersionState | null {
+  if (!facts.pinned) return null;
+  if (facts.missing) return "missing";
+  return facts.latestPublished && facts.latestPublished !== facts.pinned ? "behind" : "current";
+}

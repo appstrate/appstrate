@@ -29,7 +29,13 @@ import { MOVE_HOME_PARAM, MoveHomeSpaceDialog } from "./package-detail/move-home
 import { SHARE_PARAM, SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ActivationClosureDialog } from "./catalogue-activation-dialog";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
-import { CATALOGUE_KINDS, catalogueHref, type CatalogueReading } from "../lib/catalogue-link";
+import {
+  CATALOGUE_KINDS,
+  CATALOGUE_VERSION_PARAM,
+  catalogueHref,
+  type CatalogueReading,
+} from "../lib/catalogue-link";
+import { searchOf } from "../lib/url-search";
 import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
 import { fetchPackageDetail, useAgents } from "../hooks/use-packages";
@@ -99,6 +105,9 @@ const KINDS = CATALOGUE_KINDS.map((type) => ({ type, ...KIND[type] }));
  * space under its provider, and `keywords` goes because the library carries none.
  */
 const CATALOGUE_DROPS = ["state", "actions", "origin", "keywords"];
+
+/** The parameter that qualifies the sheet's `?package=`, and leaves with it. */
+const SHEET_COMPANIONS = [CATALOGUE_VERSION_PARAM];
 
 /** One activation waiting on the integration question. */
 interface Closure {
@@ -175,9 +184,14 @@ export function OrgCatalogueModal({
 
   const [execution, setExecution] = useState<IntegrationExecution>("remote");
   const ofKind: LibraryPackageItem[] = library?.packages[active] ?? [];
-  // Looked up in the whole kind, not the filtered rows: a link to a package (a share
-  // notification) opens its sheet whatever the list shows. An unknown id drops from the address.
-  const preview = useModalTarget("package", library ? ofKind : undefined);
+  // The read has an address of its own: reload lands on it, Back leaves it.
+  // Looked up in the whole kind, not the rows the filters leave: a link to a
+  // package (a share notification) opens its sheet whatever the list shows,
+  // the other execution's integrations included. An id the kind does not hold
+  // drops from the address.
+  const preview = useModalTarget("package", library ? ofKind : undefined, {
+    companions: SHEET_COMPANIONS,
+  });
   const placementById = new Map(ofKind.map((item) => [item.id, placementOf(item)] as const));
   const spaceNameOf = (id: string) => spaces.find((space) => space.id === id)?.name ?? id;
   const all = ofKind.filter((item) => {
@@ -341,6 +355,19 @@ export function OrgCatalogueModal({
   const allSelected = activatable.length > 0 && activatable.every((id) => selected.has(id));
   const picked = offered.filter((item) => selected.has(item.id));
   const previewed = preview.target;
+  // A system package ships one definition and answers no version: the sheet reads it as is.
+  const pinnedVersion =
+    previewed && previewed.source !== "system"
+      ? new URLSearchParams(location.search).get(CATALOGUE_VERSION_PARAM) || undefined
+      : undefined;
+  const unpin = () => {
+    const params = new URLSearchParams(location.search);
+    params.delete(CATALOGUE_VERSION_PARAM);
+    navigate(
+      { pathname: location.pathname, search: searchOf(params), hash: location.hash },
+      { replace: true, state: location.state },
+    );
+  };
   const previewedItem: CardItem | undefined = previewed
     ? {
         id: previewed.id,
@@ -582,6 +609,8 @@ export function OrgCatalogueModal({
           }
           integrations={library?.packages.integration ?? []}
           agents={library?.packages.agent ?? []}
+          pinnedVersion={pinnedVersion}
+          onUnpin={unpin}
           protocol={
             active === "integration" && integrationById.get(previewed.id)
               ? integrationProtocol(integrationById.get(previewed.id)!.manifest.source.kind)

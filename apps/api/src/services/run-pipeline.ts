@@ -30,6 +30,7 @@ import {
   type LaunchOverrides,
 } from "./integration-connection-resolver.ts";
 import {
+  assertIntegrationVersionsResolved,
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
   type ResolvedIntegrationVersionMap,
@@ -336,16 +337,13 @@ export async function freezeRunSpawnDependencies(params: {
     dependencyOverrides: params.dependencyOverrides ?? null,
     manifestCache: params.manifestCache,
   });
-  if (!resolved.ok) {
-    const list = resolved.unresolved.map((m) => `'${m.name}@${m.versionSpec}'`).join(", ");
-    throw new ApiError({
-      status: 422,
-      code: "dependency_unresolved",
-      title: "Dependency Unresolved",
-      detail: `Could not resolve ${list} against published versions — publish the integration, fix the pin, or pass \`dependency_overrides\` to run a working copy.`,
-    });
+  // Mapped here rather than by each caller: both origins call this outside the
+  // try that maps bundle-layer errors, and an unmapped BundleError is a 500.
+  try {
+    return assertIntegrationVersionsResolved(resolved);
+  } catch (err) {
+    throw toBundleApiError(err) ?? err;
   }
-  return resolved.versions;
 }
 
 // ---------------------------------------------------------------------------
@@ -537,6 +535,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         proxyId,
         overrideVersionLabel,
         dependencyOverrides: params.dependencyOverrides ?? null,
+        resolvedIntegrationVersions,
         traceparent: params.traceparent,
         resolvedConnections,
         manifestCache,

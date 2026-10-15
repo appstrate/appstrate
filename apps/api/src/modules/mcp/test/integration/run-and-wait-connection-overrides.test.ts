@@ -50,7 +50,7 @@ import {
   type JsonRpcEnvelope,
   mcpAuthHeaders,
 } from "../../../../../test/helpers/mcp.ts";
-import { seedPackage, seedPackageVersion } from "../../../../../test/helpers/seed.ts";
+import { seedPackage, seedPublishedVersion } from "../../../../../test/helpers/seed.ts";
 import { localIntegrationManifest } from "../../../../../test/helpers/integration-manifests.ts";
 import { activatePackage } from "../../../../services/space-packages.ts";
 
@@ -323,7 +323,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
       source: "local",
       draftManifest: manifest,
     });
-    await seedPackageVersion({ packageId: OAUTH, version: "1.0.0", manifest });
+    await seedPublishedVersion(OAUTH, "1.0.0", { manifest });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH);
     await seedDefaultOrgModel(ctx);
 

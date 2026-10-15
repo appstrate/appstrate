@@ -35,6 +35,7 @@ import { and, eq, type InferInsertModel, type InferSelectModel } from "drizzle-o
 import { mcpServerManifest } from "./integration-manifests.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import * as storage from "@appstrate/db/storage";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "../../src/services/package-storage-keys.ts";
 import { extractKeyPrefix, generateApiKey, hashApiKey } from "../../src/services/api-keys.ts";
@@ -183,7 +184,10 @@ export async function loseVersionArchive(packageId: string, version: string): Pr
  *
  * The manifest and content default to the package's own draft, which is what
  * "the author published what they have" looks like and keeps a suite's
- * assertions about the draft true of the published version too.
+ * assertions about the draft true of the published version too. The content
+ * lands in the type's own content entry (`PACKAGE_CONTENT_ENTRY`); an OPTIONAL
+ * entry (an integration's `INTEGRATION.md`) is written only from an explicit
+ * `content`, since the draft column there may hold no documentation at all.
  */
 export async function seedPublishedVersion(
   packageId: string,
@@ -198,10 +202,13 @@ export async function seedPublishedVersion(
     version,
     type: pkg.type,
   };
-  const content = opts?.content ?? pkg.draftContent ?? "content";
+  const entry = PACKAGE_CONTENT_ENTRY[pkg.type];
+  const content = entry?.required
+    ? (opts?.content ?? pkg.draftContent ?? "content")
+    : opts?.content;
   const zip = zipArtifact({
     "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
-    [pkg.type === "skill" ? "SKILL.md" : "prompt.md"]: new TextEncoder().encode(content),
+    ...(entry && content !== undefined ? { [entry.path]: new TextEncoder().encode(content) } : {}),
   });
   await storage.uploadFile(AGENT_PACKAGES_BUCKET, versionZipKey(packageId, version), zip);
   const row = await seedPackageVersion({

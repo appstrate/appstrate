@@ -126,12 +126,13 @@ function scopeFromQueryParams(
 /**
  * Read guards for the package types a bundle can carry BEYOND its root.
  *
- * Both export paths walk `depTypes: ["skills"]`, so `skill` is the only type
- * that can appear today. Anything else fails CLOSED — an archive must never
- * ship bytes whose read scope this route does not name.
+ * Both export paths walk `depTypes: ["skills", "integrations"]`, so a skill or
+ * an integration is what can appear. Anything else fails CLOSED — an archive
+ * must never ship bytes whose read scope this route does not name.
  */
 const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requirePermission>>([
   ["skill", requirePermission("skills", "read")],
+  ["integration", requirePermission("integrations", "read")],
 ]);
 
 /**
@@ -142,11 +143,11 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  * catalog puts a dependency's ENTIRE stored file map into the archive
  * (`DbPackageCatalog.fetch` extracts the whole published artifact — the same
  * catalog for a `?source=draft` export as for a published one, since only the
- * ROOT of a draft export is a working copy). A bundle carrying a skill
- * therefore hands out exactly the bytes
+ * ROOT of a draft export is a working copy). A bundle carrying a skill or an
+ * integration therefore hands out exactly the bytes
  * `GET /api/packages/{scope}/{name}/files[/content]` serves — and
- * those need `skills:read`, resolved per package TYPE rather than
- * one blanket scope. Without this guard the export is a looser door to the same
+ * those need `skills:read` / `integrations:read`, resolved per package TYPE
+ * rather than one blanket scope. Without this guard the export is a looser door to the same
  * bytes: an `agents:read`-only credential is 403'd on the file explorer and
  * served the identical content here.
  *
@@ -155,11 +156,15 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  *
  * Every dependency also needs live catalog reachability. This allows a readable
  * source in another accessible space while hiding packages confined to private
- * spaces.
+ * spaces. And each one is a COPY leaving the platform, so it answers the org's
+ * copy restriction the way its own `download` would: an integration archive
+ * that route refuses must not leave inside a bundle (skills and system
+ * packages stay exempt inside the helper).
  */
 async function requireBundleDependencyReadPermissions(
   c: Context<AppEnv>,
   bundle: Bundle,
+  copySource: Parameters<typeof assertPackageCopyAllowed>[2],
 ): Promise<void> {
   const checked = new Set<string>();
   for (const [identity, pkg] of bundle.packages) {
@@ -185,7 +190,8 @@ async function requireBundleDependencyReadPermissions(
       // as every route-level RBAC call site.
       await guard(c, async () => {});
     }
-    await assertCatalogPackageAccess(c, parsed.packageId);
+    const dependency = await assertCatalogPackageAccess(c, parsed.packageId);
+    await assertPackageCopyAllowed(c, dependency, copySource);
   }
 }
 
@@ -684,8 +690,8 @@ export function createAgentsRouter() {
   // answer this agent the same way.
   // Past `agents:read` the handler refuses on the package
   // itself — the org's copy restriction (`assertPackageCopyAllowed`), draft
-  // ownership (`assertDraftSelectorAllowed`) and a per-type read scope for
-  // every dependency the assembled bundle carries.
+  // ownership (`assertDraftSelectorAllowed`), and a per-type read scope plus
+  // the same copy restriction for every dependency the assembled bundle carries.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/bundle`,
     rateLimit(30),
@@ -729,11 +735,12 @@ export function createAgentsRouter() {
       // which is what `org_settings.restrict_package_copy` governs (RBAC spec
       // §6.10). Read + active is not enough: without this gate a restricted
       // organization's `download` refusal is one `--local` run away from being
-      // pointless. Gated on the ROOT agent only (dependencies keep their own
-      // read-scope gate below), with skills and system packages exempt inside
-      // the helper. The consequence is deliberate: `appstrate run @scope/agent
-      // --local` answers 403 `package_copy_restricted` there. A SERVER-side run
-      // is unaffected; it assembles the same bundle without handing it over.
+      // pointless. Gated here on the ROOT agent and, once the bundle is
+      // assembled, on every dependency it carries (skills and system packages
+      // exempt inside the helper). The consequence is deliberate: `appstrate
+      // run @scope/agent --local` answers 403 `package_copy_restricted` there.
+      // A SERVER-side run is unaffected; it assembles the same bundle without
+      // handing it over.
       const accessible = await packageAccessSpaces(c);
       const root = await assertCatalogPackageAccess(c, packageId);
       await assertPackageCopyAllowed(c, root, { orgId, accessible });
@@ -794,9 +801,10 @@ export function createAgentsRouter() {
         }
         // The archive carries every dependency's full stored file map, which
         // `agents:read` does not authorize. Gate on the read scope of each
-        // dependency TYPE before any bytes are serialised, so this route is not
-        // a looser door to the same content the package file explorer guards.
-        await requireBundleDependencyReadPermissions(c, bundle);
+        // dependency TYPE and on its copy restriction before any bytes are
+        // serialised, so this route is not a looser door to the same content
+        // the package file explorer and `download` guard.
+        await requireBundleDependencyReadPermissions(c, bundle, { orgId, accessible });
         // Serialization stays inside the try: `writeBundleToBuffer` re-validates
         // the assembled map and raises the same `BundleError` family, so leaving
         // it outside would keep that throw on the untyped path.

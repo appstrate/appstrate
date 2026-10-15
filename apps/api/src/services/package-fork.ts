@@ -203,8 +203,8 @@ async function forkWithConfig(
   // four types: an integration forked to `""` even when its bundle shipped a
   // real `INTEGRATION.md`, and an mcp-server always did — a column NO import of
   // the same bytes would ever produce, which then read back as a 0-byte
-  // `INTEGRATION.md` in the file explorer and as "ships no doc" to
-  // `fetchIntegrationPromptDocs`, while `?version=…` still served the file.
+  // `INTEGRATION.md` in the file explorer, while `?version=…` still served
+  // the file.
   //
   // The absence branch reproduces `parsePackageZip`'s own manifest-text
   // fallback, so the fork's column is byte-identical to what importing the
