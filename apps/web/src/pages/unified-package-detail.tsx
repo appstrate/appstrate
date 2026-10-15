@@ -27,6 +27,7 @@ import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { isQueryInFlight } from "../lib/query-state";
 import { catalogueVersionFor } from "../lib/catalogue-link";
 import { packageDetailPath } from "../lib/package-paths";
+import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 
 // Shared components
 import { PackageDetailBar } from "../components/package-detail/package-detail-bar";
@@ -326,7 +327,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       versionLabel={versionLabel}
       variant="outline"
       size="sm"
-      className="bg-card"
+      className={TOOLBAR_ACTION}
       unsavedReason={unsavedReason}
     />
   );
@@ -346,7 +347,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             latestPublishedVersion={versionInfo?.latest_published_version}
             tabs={tabDefs}
             actions={
-              <div className="flex items-center gap-2">
+              <>
                 {catalogueLink}
                 {runButton}
                 <AgentActions
@@ -358,7 +359,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   onCreateVersion={() => newVersion.open()}
                   unsavedReason={unsavedReason}
                 />
-              </div>
+              </>
             }
           />
         ) : (
@@ -370,7 +371,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             hasUnarchivedChanges={hasTimestampChanges && !!homeWritable}
             tabs={tabDefs}
             actions={
-              <div className="flex items-center gap-2">
+              <>
                 {catalogueLink}
                 <PackageActionsDropdown
                   packageId={packageId}
@@ -383,7 +384,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   createVersionBlockedReason={unsavedReason}
                   isActiveHere={isActiveInCurrentSpace}
                 />
-              </div>
+              </>
             }
           />
         )}

@@ -2,12 +2,12 @@
 
 import { useTranslation } from "react-i18next";
 import { Play, Square } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { RunDuration } from "../run-duration";
 import { getRunTriggerActor, getRunTriggerType } from "../../lib/run-trigger";
 import { RunCostReadout } from "../run-cost-readout";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
+import { HeaderActionButton } from "../header-action-button";
 import { formatDateField } from "../../lib/format-date";
 
 export function RunHeaderSummary({ run }: { run: EnrichedRun }) {
@@ -80,34 +80,22 @@ export function RunHeaderActions({
   const { t } = useTranslation("agents");
 
   return (
-    <div className="flex items-center gap-2">
+    <>
       {canRerun && (
         <DisabledReasonTooltip reason={rerunRefusal}>
-          <Button
-            variant="outline"
-            size="sm"
-            className="bg-card"
-            onClick={onRerun}
-            disabled={rerunPending || !!rerunRefusal}
-          >
+          <HeaderActionButton onClick={onRerun} disabled={rerunPending || !!rerunRefusal}>
             <Play className="text-primary" />
             {t("run.rerun")}
-          </Button>
+          </HeaderActionButton>
         </DisabledReasonTooltip>
       )}
       {canCancel && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="bg-card"
-          onClick={onCancel}
-          disabled={cancelPending}
-        >
+        <HeaderActionButton onClick={onCancel} disabled={cancelPending}>
           <Square className="text-destructive" />
           {t("btn.cancel")}
-        </Button>
+        </HeaderActionButton>
       )}
-    </div>
+    </>
   );
 }
 
