@@ -46,7 +46,6 @@ import { useAuth } from "../hooks/use-auth";
 import { usePermissions } from "../hooks/use-permissions";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
-import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { useScheduleFormDeps, useUpdateSchedule } from "../hooks/use-schedules";
 import { useSaveAfterPause } from "../hooks/use-save-after-pause";
 import {
@@ -64,10 +63,8 @@ import {
   type ActorValue,
   type RunOverridesValue,
   type ScheduleOverridesState,
-  armedScheduleWrite,
   dueScheduleMove,
   sameActor,
-  savedScheduleOverrides,
   scheduleConnectionPickPayload,
   scheduleExecutionPayload,
   scheduleRefusalAnswerPayload,
@@ -85,8 +82,8 @@ type Schedule = ScheduleWireDto;
 type UpdateMutation = ReturnType<typeof useUpdateSchedule>;
 /**
  * The schedule's one write path; its `isError` leaves out a refusal over connections. `ready`
- * once the facts every write names its connections from have settled ({@link useFiredFacts}):
- * a write sent before would name none and be refused over them. `fired` is those facts.
+ * once the facts every write keeps its connections to have settled ({@link useFiredFacts}).
+ * `fired` is those facts.
  */
 type Save = Omit<UpdateMutation, "isError"> & {
   isError: boolean;
@@ -110,45 +107,27 @@ function useIsViewer(actor: ActorValue): boolean {
   return !!user && sameActor(actor, { userId: user.id });
 }
 
-/**
- * What the fires run at `version`: the integrations it declares, with their `required` flag,
- * and — asked only for fires running as the viewer — the viewer's verdict for it. `ready` once
- * both have settled.
- */
-function useFiredFacts(packageId: string, version: string, runsAsViewer: boolean) {
+/** What the fires run at `version`: the integrations it declares, with their `required` flag. */
+function useFiredFacts(packageId: string, version: string) {
   const detail = usePackageDetail("agent", packageId, { version });
-  const readiness = useAgentConnectionReadiness(runsAsViewer ? packageId : undefined, version);
-  return {
-    integrations: detail.data?.dependencies.integrations,
-    viewerReadiness: readiness.data?.integrations,
-    ready: !detail.isLoading && !readiness.isLoading,
-  };
+  return { integrations: detail.data?.dependencies.integrations, ready: !detail.isLoading };
 }
 
 /**
- * `useUpdateSchedule` for this schedule ({@link armedScheduleWrite}): the settings' fields and
- * moves, and the detail page's enable/disable. A write refused over connections is the refusal
- * panel's to say, not an « Erreur d'enregistrement » under the field.
+ * `useUpdateSchedule` for this schedule: the settings' fields and moves, and the detail page's
+ * enable/disable. A write refused over connections is the refusal panel's to say, not an
+ * « Erreur d'enregistrement » under the field. A write names no connection it does not mean to:
+ * the set a fallback binds is the server's to name (`withScheduleFallback`).
  */
 function useScheduleWrite(schedule: Schedule): Save {
   const update = useUpdateSchedule();
-  const runsAsViewer = useIsViewer(storedActor(schedule));
-  const { integrations, viewerReadiness, ready } = useFiredFacts(
+  const { integrations, ready } = useFiredFacts(
     schedule.packageId,
     firedVersion(schedule.version_override),
-    runsAsViewer,
   );
-  const fired = { runsAsViewer, viewerReadiness, declared: integrations?.map((i) => i.id) };
-  const { connection_overrides: named } = savedScheduleOverrides({
-    ...fired,
-    overrides: schedule.connection_overrides
-      ? { connection_overrides: schedule.connection_overrides }
-      : {},
-  });
-  const mutate: UpdateMutation["mutate"] = (variables, options) =>
-    update.mutate(armedScheduleWrite(variables, { enabled: schedule.enabled, named }), options);
+  const fired = { declared: integrations?.map((i) => i.id) };
   const refused = scheduleConnectionChoices(update.error).length > 0;
-  return { ...update, mutate, isError: update.isError && !refused, ready, fired };
+  return { ...update, isError: update.isError && !refused, ready, fired };
 }
 
 /**
@@ -210,11 +189,9 @@ type ScheduleMove = ReturnType<typeof useScheduleMove>;
 function useScheduleMove(schedule: Schedule, update: Save) {
   const [move, setMove] = useState<Move | null>(null);
   const sent = useRef<Move | null>(null);
-  const actor = move?.actor ?? storedActor(schedule);
   const version =
     move?.versionOverride !== undefined ? move.versionOverride : schedule.version_override;
-  const runsAsViewer = useIsViewer(actor);
-  const facts = useFiredFacts(schedule.packageId, firedVersion(version), runsAsViewer);
+  const facts = useFiredFacts(schedule.packageId, firedVersion(version));
   useEffect(() => {
     if (!move || sent.current === move) return;
     const body = dueScheduleMove({
@@ -225,8 +202,6 @@ function useScheduleMove(schedule: Schedule, update: Save) {
         picks: schedule.connection_overrides ?? null,
       },
       next: move,
-      runsAsViewer,
-      viewerReadiness: facts.viewerReadiness,
       declared: facts.integrations?.map((i) => i.id),
     });
     if (!body) return;

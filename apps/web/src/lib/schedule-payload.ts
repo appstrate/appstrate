@@ -4,10 +4,8 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { paths } from "../api/schema";
 import {
   type ConnectionSet,
-  type FallbackBindingEntry,
   withConnectionOverride,
   withDeclaredConnections,
-  withFallbackConnections,
 } from "./connection-set";
 
 /**
@@ -42,27 +40,17 @@ export function sameActor(a: ActorValue | undefined, b: ActorValue | undefined):
 /** The overrides a schedule is written with, and what a write derives the stored ones from. */
 export interface ScheduleOverridesState {
   overrides: RunOverridesValue;
-  runsAsViewer: boolean;
-  /** The viewer's readiness entries for the fired version. */
-  viewerReadiness: readonly FallbackBindingEntry[] | undefined;
   /** The integrations the fired version declares; `undefined` while it loads. */
   declared: readonly string[] | undefined;
 }
 
 /**
- * What a schedule write stores. For a schedule running as the viewer, the connection the
- * fallback binds is named from `viewerReadiness` (the server takes no fallback for a schedule);
- * for any other actor that verdict speaks for nobody and names nothing. Then only the keys of
- * `declared` are kept; `undefined` keeps every pick.
+ * What a schedule write stores: the picks, kept to the keys of `declared` (`undefined` keeps
+ * every pick). The connection a fallback binds is not named here: the server names it for a
+ * schedule armed by its own actor (`withScheduleFallback`), from that actor's real reach.
  */
 export function savedScheduleOverrides(state: ScheduleOverridesState): RunOverridesValue {
-  return withDeclaredConnections(
-    withFallbackConnections(
-      state.overrides,
-      state.runsAsViewer ? state.viewerReadiness : undefined,
-    ),
-    state.declared,
-  );
+  return withDeclaredConnections(state.overrides, state.declared);
 }
 
 export type ScheduleCreateBody =
@@ -107,9 +95,9 @@ export function scheduleCreatePayload(
 
 /**
  * A PATCH that moves who the fires run as or which version they run. Its connections are those
- * of the NEXT state, so the caller passes that state's `declared` and verdict: the stored picks
- * (dropped by an actor change: they named the previous identity's connections) kept to what the
- * next version declares, plus, when the next actor is the viewer, the set their fallback binds.
+ * of the NEXT state, so the caller passes that state's `declared`: the stored picks (dropped by
+ * an actor change: they named the previous identity's connections) kept to what the next version
+ * declares.
  * `connection_overrides` is always sent, `null` when empty: an absent key on an actor change
  * would let the server reset the picks and refuse the write anyway. `version_override` is sent
  * only when it moves, `null` back to inherit.
@@ -142,8 +130,7 @@ export function scheduleMovePayload(
 
 /**
  * A move held until the NEXT state's facts have settled ({@link scheduleMovePayload}): `null`
- * before, since a write sent with no `declared` yet would keep every pick, and one sent before
- * the viewer's verdict would name no fallback.
+ * before, since a write sent with no `declared` yet would keep every pick.
  */
 export function dueScheduleMove(
   args: Parameters<typeof scheduleMovePayload>[0] & { ready: boolean },
@@ -153,9 +140,7 @@ export function dueScheduleMove(
 
 /**
  * The PATCH of one connection pick: the stored picks with `integrationId`'s set replaced (`null`
- * removes it), written like every other save ({@link savedScheduleOverrides}) — for a schedule
- * running as the viewer, each integration no pick covers is named with the set their fallback
- * binds, since the server re-checks the written set and takes no fallback.
+ * removes it), written like every other save ({@link savedScheduleOverrides}).
  */
 export function scheduleConnectionPickPayload(
   args: Omit<ScheduleOverridesState, "overrides"> & {
@@ -173,24 +158,6 @@ export function scheduleConnectionPickPayload(
     ),
   });
   return { connection_overrides: connection_overrides ?? null };
-}
-
-/**
- * Any other PATCH of a schedule. The server takes no fallback for a schedule armed after the
- * write (enabling it included): a write that names no connections and moves no actor is
- * re-checked against the stored set, so it re-sends `named` — the stored picks plus the set the
- * viewer's fallback binds, for a schedule running as them ({@link savedScheduleOverrides}).
- */
-export function armedScheduleWrite<T extends ScheduleUpdateBody>(
-  variables: T,
-  schedule: { enabled: boolean; named: Record<string, string[]> | undefined },
-): T & Pick<ScheduleUpdateBody, "connection_overrides"> {
-  return (variables.enabled ?? schedule.enabled) &&
-    schedule.named &&
-    !("connection_overrides" in variables) &&
-    !("actor" in variables)
-    ? { ...variables, connection_overrides: schedule.named }
-    : variables;
 }
 
 /** The PATCH of the execution overrides: each one sent, `null` when cleared. */

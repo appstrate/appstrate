@@ -13,6 +13,7 @@ import { collectAgentReadiness } from "./agent-readiness.ts";
 import {
   launchOverrideLayer,
   missingIntegrationConnection,
+  resolveConnectionsForRun,
   toLaunchOverrides,
   translateResolutionError,
   unavailableMemberError,
@@ -118,6 +119,54 @@ export function sameRecord<T>(
     ids.length === Object.keys(b ?? {}).length &&
     ids.every((id) => b !== null && id in b && eq(a![id]!, b[id]!))
   );
+}
+
+/**
+ * The set an armed schedule stores once its fallback is named: for each integration no pick of
+ * the set covers, the connection the actor's fallback binds (their one own connection serving
+ * the selection, `fallback_auto`), whatever its health. A fire takes no fallback
+ * ({@link assertScheduleConnectionsChosen}), so the write names it — on the server, from the
+ * actor's real reach, rather than every client re-deriving it from its cache.
+ *
+ * Only for a caller writing for itself: for another member the fallback is the actor's private
+ * choice, and that write keeps its own rule. Returns `connectionOverrides` itself when nothing is
+ * added, so the caller can tell a write that names nothing new.
+ */
+export async function withScheduleFallback(params: {
+  /** The agent at the version the schedule fires (`version_override` resolved). */
+  agent: LoadedPackage;
+  orgId: string;
+  spaceId: string;
+  actor: Actor;
+  caller: Actor;
+  connectionOverrides: ConnectionOverrides | null;
+  dependencyOverrides: Record<string, string> | null;
+}): Promise<ConnectionOverrides | null> {
+  if (scheduleWriteFor(params.caller, params.actor) !== "self") return params.connectionOverrides;
+  const manifestCache = await seedPinnedIntegrationManifests(params);
+  const launchOverrides = toLaunchOverrides(params.connectionOverrides, "schedule_override");
+  const { resolved } = await resolveConnectionsForRun({
+    agentManifest: params.agent.manifest as unknown as Record<string, unknown>,
+    packageId: params.agent.id,
+    actor: params.actor,
+    scope: { orgId: params.orgId, spaceId: params.spaceId },
+    ...(launchOverrides ? { launchOverrides } : {}),
+    noFallback: false,
+    manifestCache,
+  });
+  const named = Object.entries(resolved).filter(
+    ([integrationId, bound]) =>
+      params.connectionOverrides?.[integrationId] === undefined &&
+      bound.length > 0 &&
+      bound.every((entry) => entry.source === "fallback_auto"),
+  );
+  if (named.length === 0) return params.connectionOverrides;
+  return {
+    ...params.connectionOverrides,
+    ...Object.fromEntries(
+      named.map(([integrationId, bound]) => [integrationId, bound.map((e) => e.connectionId)]),
+    ),
+  };
 }
 
 /**

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
 import type { Context } from "hono";
 import { z } from "zod";
 import {
@@ -55,6 +56,7 @@ import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import {
   assertScheduleConnectionsChosen,
+  withScheduleFallback,
   assertScheduleOverridesReachable,
   sameRecord,
   sameSet,
@@ -434,6 +436,15 @@ export const updateScheduleSchema = z
   })
   .strict();
 
+/**
+ * A schedule's version for `ETag` / `If-Match`: its `updated_at`, which every write of its
+ * governed state bumps (a fire's bookkeeping does not), in milliseconds — the precision the
+ * write's compare-and-set compares at.
+ */
+function scheduleVersion(schedule: { updatedAt: string }): number {
+  return Date.parse(schedule.updatedAt);
+}
+
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
 
@@ -544,13 +555,22 @@ export function createSchedulesRouter() {
         connectionOverrides: data.connection_overrides ?? null,
         storedOverrides: null,
       });
-      const warnings = await assertScheduleConnectionsChosen({
+      const connectionOverrides = await withScheduleFallback({
         agent: effectiveAgent,
         orgId: scope.orgId,
         spaceId: scope.spaceId,
         actor,
         caller: getActor(c),
         connectionOverrides: data.connection_overrides ?? null,
+        dependencyOverrides: data.dependency_overrides ?? null,
+      });
+      const warnings = await assertScheduleConnectionsChosen({
+        agent: effectiveAgent,
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        actor,
+        caller: getActor(c),
+        connectionOverrides,
         dependencyOverrides: data.dependency_overrides ?? null,
       });
 
@@ -563,7 +583,7 @@ export function createSchedulesRouter() {
         generationConfigOverride: generationConfigOverride ?? null,
         proxyIdOverride: data.proxy_id_override ?? null,
         versionOverride: data.version_override ?? null,
-        connectionOverrides: data.connection_overrides ?? null,
+        connectionOverrides,
         dependencyOverrides: data.dependency_overrides ?? null,
       });
       await recordAuditFromContext(c, {
@@ -586,6 +606,7 @@ export function createSchedulesRouter() {
           actorId: actor.id,
         },
       });
+      setEtag(c, scheduleVersion(schedule));
       return c.json({ ...schedule, warnings }, 201);
     },
   );
@@ -594,6 +615,7 @@ export function createSchedulesRouter() {
   router.get("/schedules/:id", requirePermission("schedules", "read"), async (c) => {
     const id = c.req.param("id")!;
     const schedule = await loadScheduleOr404(c, id, getSpaceScope(c));
+    setEtag(c, scheduleVersion(schedule));
     return c.json(schedule);
   });
 
@@ -605,6 +627,9 @@ export function createSchedulesRouter() {
     const scope = getSpaceScope(c);
     const existing = await loadScheduleOr404(c, id, scope);
     assertMayGovern(c, actorFromIds(existing.userId, existing.endUserId), "write");
+    // Optional: a client holding the row's ETag refuses to overwrite a write it has not seen.
+    // The compare-and-set in `updateSchedule` still guards the window inside this request.
+    assertIfMatch(c, scheduleVersion(existing));
 
     const data = await readJsonBody(c, updateScheduleSchema);
 
@@ -782,11 +807,11 @@ export function createSchedulesRouter() {
     // On a real change, frozen `connection_overrides` reference the previous
     // identity's connections — reset them unless this patch supplies fresh
     // picks, forcing a re-pick under the new identity.
-    const connectionOverrides =
+    let connectionOverrides =
       actorChanged && data.connection_overrides === undefined ? null : data.connection_overrides;
 
     const nextActor = actor ?? existingActor;
-    const nextOverrides =
+    let nextOverrides =
       connectionOverrides !== undefined ? connectionOverrides : existing.connection_overrides;
     // FORM, on the same trigger as the dependency map above: either half of the
     // (map, fired manifest) pair moving re-judges the whole map the row replays.
@@ -826,6 +851,18 @@ export function createSchedulesRouter() {
         throw err;
       });
       if (definition) {
+        // The fallback named here, not by the client: a write that adds nothing stores
+        // what it was sent, so a patch of another field leaves the set as it is.
+        const named = await withScheduleFallback({
+          agent: definition,
+          orgId: scope.orgId,
+          spaceId: scope.spaceId,
+          actor: nextActor,
+          caller: getActor(c),
+          connectionOverrides: nextOverrides,
+          dependencyOverrides: effectiveDependencyOverrides ?? null,
+        });
+        if (named !== nextOverrides) connectionOverrides = nextOverrides = named;
         const judged = await assertScheduleConnectionsChosen({
           agent: definition,
           orgId: scope.orgId,
@@ -887,6 +924,7 @@ export function createSchedulesRouter() {
         ...diff,
       });
     }
+    setEtag(c, scheduleVersion(schedule));
     return c.json({ ...schedule, warnings });
   });
 

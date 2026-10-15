@@ -95,20 +95,13 @@ describe("ScheduleFieldsReady", () => {
     expect(html).toContain(t("schedule.optionsTitle"));
   });
 
-  it("asks the creator's verdict for the published version the fires run", () => {
+  it("asks no readiness verdict to write: the server names the creator's fallback", () => {
     const qc = new QueryClient();
     renderForm(qc);
     const asked = qc
       .getQueryCache()
       .getAll()
-      .some(({ queryKey: [, path, init] }) => {
-        const params = (init as { params?: { path?: { name?: string }; query?: unknown } })?.params;
-        return (
-          path === "/api/agents/{scope}/{name}/connection-readiness" &&
-          params?.path?.name === "mailer" &&
-          Bun.deepEquals(params.query, { version: "published" })
-        );
-      });
-    expect(asked).toBe(true);
+      .some(({ queryKey: [, path] }) => path === "/api/agents/{scope}/{name}/connection-readiness");
+    expect(asked).toBe(false);
   });
 });

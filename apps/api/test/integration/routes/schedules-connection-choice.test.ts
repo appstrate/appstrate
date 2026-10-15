@@ -200,14 +200,19 @@ describe("schedule writes — the connection choice is made up front", () => {
     expect(res.status).toBe(201);
   });
 
-  it("refuses a create whose actor holds one connection that nothing names, listing it", async () => {
+  it("names the actor's one connection itself on a create that names none", async () => {
     await seedAgentWithIntegration();
     const only = await seedIntegrationConnection(ctx, INTEGRATION);
 
-    const body = await expectRefusal(await create({}), ["must_choose_connection"]);
-    expect(body.errors[0]!.field).toBe(`integrations.${INTEGRATION}`);
-    expect(body.errors[0]!.candidate_connections!.map((c) => c.id)).toEqual([only]);
-    expect(await db.select().from(schedules)).toHaveLength(0);
+    const res = await create({});
+    expect(res.status, await res.clone().text()).toBe(201);
+    const body = (await res.json()) as WriteBody & {
+      connection_overrides: Record<string, string[]> | null;
+    };
+    expect(body.connection_overrides).toEqual({ [INTEGRATION]: [only] });
+    expect(body.warnings).toEqual([]);
+    const [row] = await db.select().from(schedules);
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [only] });
   });
 
   for (const layer of ["member pin", "soft org default"] as const) {
@@ -218,8 +223,20 @@ describe("schedule writes — the connection choice is made up front", () => {
       const res = await create({});
       expect(res.status).toBe(201);
       expect(((await res.json()) as WriteBody).warnings).toEqual([]);
+      // A layer already names the set: the server freezes nothing onto the row.
+      const [row] = await db.select().from(schedules);
+      expect(row!.connectionOverrides).toBeNull();
     });
   }
+
+  it("names nothing when the actor holds several connections: the choice stays theirs", async () => {
+    await seedAgentWithIntegration();
+    await seedIntegrationConnection(ctx, INTEGRATION);
+    await seedIntegrationConnection(ctx, INTEGRATION);
+
+    await expectRefusal(await create({}), ["must_choose_connection"]);
+    expect(await db.select().from(schedules)).toHaveLength(0);
+  });
 
   it("accepts a create whose integration is not connected at all, warning that fires start without it", async () => {
     // Connecting later fixes it without editing the schedule.
@@ -290,25 +307,26 @@ describe("schedule writes — the connection choice is made up front", () => {
     await expectRefusal(await patch(schedule.id, { enabled: true }), ["must_choose_connection"]);
   });
 
-  it("refuses any patch of an armed schedule stored without the set its fire binds by default", async () => {
+  it("names the default set on a patch of an armed schedule stored without it, and leaves a paused one alone", async () => {
     await seedAgentWithIntegration();
     const only = await seedIntegrationConnection(ctx, INTEGRATION);
     const [armed, paused] = [await seedArmedSchedule(), await seedArmedSchedule()];
+    const stored = async (id: string) =>
+      (await db.select().from(schedules).where(eq(schedules.id, id)))[0]!.connectionOverrides;
 
-    const body = await expectRefusal(await patch(armed.id, { name: "renamed" }), [
-      "must_choose_connection",
-    ]);
-    expect(body.errors[0]!.candidate_connections!.map((c) => c.id)).toEqual([only]);
-    const repaired = await patch(armed.id, {
-      name: "renamed",
-      connection_overrides: { [INTEGRATION]: [only] },
-    });
-    expect(repaired.status).toBe(200);
+    const renamed = await patch(armed.id, { name: "renamed" });
+    expect(renamed.status, await renamed.clone().text()).toBe(200);
+    expect(await stored(armed.id)).toEqual({ [INTEGRATION]: [only] });
+    // Once named, a patch of another field stores the set as it is.
+    expect((await patch(armed.id, { name: "again" })).status).toBe(200);
+    expect(await stored(armed.id)).toEqual({ [INTEGRATION]: [only] });
 
-    // Disabling is not judged, and neither is a disabled schedule.
+    // Disabling is not judged and names nothing; re-enabling names the set.
     expect((await patch(paused.id, { enabled: false })).status).toBe(200);
     expect((await patch(paused.id, { name: "renamed" })).status).toBe(200);
-    await expectRefusal(await patch(paused.id, { enabled: true }), ["must_choose_connection"]);
+    expect(await stored(paused.id)).toBeNull();
+    expect((await patch(paused.id, { enabled: true })).status).toBe(200);
+    expect(await stored(paused.id)).toEqual({ [INTEGRATION]: [only] });
   });
 
   it("refuses a create whose connection_overrides names a connection the actor cannot reach", async () => {
@@ -917,34 +935,21 @@ describe("schedule writes — one rule whatever the door", () => {
     only = await seedIntegrationConnection(ctx, INTEGRATION);
   });
 
-  it("asks an API key of the member to name the actor's one connection, and stores the schedule once named", async () => {
+  it("names the member's one connection for their API key too", async () => {
     const key = await seedApiKey({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: ["schedules:read", "schedules:write"],
     });
-    const create = (body: Record<string, unknown>) =>
-      app.request(`/api/agents/${AGENT}/schedules`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-    const refused = await create({ cron_expression: "0 9 * * *" });
-    expect(refused.status).toBe(409);
-    expect(await refused.json()).toMatchObject({
-      code: "missing_integration_connection",
-      errors: [{ code: "must_choose_connection", candidate_connections: [{ id: only }] }],
+    const created = await app.request(`/api/agents/${AGENT}/schedules`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ cron_expression: "0 9 * * *" }),
     });
-    expect(await db.select().from(schedules)).toHaveLength(0);
-
-    const named = await create({
-      cron_expression: "0 9 * * *",
-      connection_overrides: { [INTEGRATION]: [only] },
-    });
-    expect(named.status).toBe(201);
-    expect(await db.select().from(schedules)).toHaveLength(1);
+    expect(created.status, await created.clone().text()).toBe(201);
+    const [row] = await db.select().from(schedules);
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [only] });
   });
 });
 
