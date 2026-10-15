@@ -22,11 +22,7 @@ export function useCanReach(): (target: string) => boolean {
   );
 }
 
-/**
- * Whether the reach verdicts above are answers yet: until the permission set
- * loads every one reads as refused, so a surface that hides what it cannot
- * reach shows its placeholder instead of an incomplete list.
- */
+/** Whether the reach verdicts are answers yet: until the permission set loads every one reads as refused. */
 export function useReachReady(): boolean {
   return usePermissions().ready;
 }

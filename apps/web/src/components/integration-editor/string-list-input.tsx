@@ -12,14 +12,7 @@ interface StringListInputProps {
   description?: string;
 }
 
-/**
- * Enter/comma-to-add chip list (authorized URIs, scopes, URL patterns, …).
- *
- * Pending typed text that the user hasn't yet confirmed with Enter/comma is
- * auto-committed on blur (focus loss) — leaving the section, switching tabs,
- * or clicking outside the field saves the in-progress chip rather than
- * silently discarding it.
- */
+/** Enter/comma-to-add chip list. Pending text is committed on blur rather than silently discarded. */
 export function StringListInput({
   label,
   values,

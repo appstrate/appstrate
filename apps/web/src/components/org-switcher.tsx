@@ -1,19 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Organization and workspace switcher, at the head of the header trail.
- *
- * Two columns rather than a menu with a submenu: the left one lists the
- * organizations, the right one the workspaces OF THE ONE BEING EXPLORED —
- * clicking an organization opens its workspaces, it does not switch to it.
- *
- * That is what the context is: you are always in a workspace, never in an
- * organization alone, so the pick ends on a workspace and org + workspace are
- * applied together. Switching org alone would have to choose a workspace for you.
- *
- * The current context and the explored one are two different things and read
- * differently: the current organization keeps the coral fill and the only gear,
- * the explored one is the highlighted row with the chevron into column two.
+ * Organization and workspace switcher, at the head of the header trail: two columns, the
+ * organizations and the workspaces OF THE ONE BEING EXPLORED (clicking an organization
+ * opens its workspaces, it does not switch to it). You are always in a workspace, never
+ * in an organization alone, so org + workspace are applied together. The current context
+ * keeps the coral fill and the only gear; the explored one is the highlighted row.
  */
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -81,9 +73,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const canCreateOrg = useCanCreateOrg();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  // The organization whose workspaces column two is showing. Null means "the
-  // one you are in": the panel always opens on your own context, and reopening
-  // it after a look around never leaves you exploring somewhere else.
+  // The organization whose workspaces column two shows; null = the one you are in (the panel always reopens there).
   const [exploredOrgId, setExploredOrgId] = useState<string | null>(null);
 
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
@@ -124,13 +114,9 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     .sort((a, b) => Number(Boolean(b.personal)) - Number(Boolean(a.personal)));
 
   /**
-   * The one place the context is applied — and it is applied whole. In a new
-   * organization the pick is remembered there first, so the space resolver
-   * enters it as soon as that organization's listing proves it enterable,
-   * instead of landing on its default.
-   *
-   * A new organization also means the current page may not exist there (an
-   * agent id, a run number): `useLandAfterOrgSwitch` moves it.
+   * The one place the context is applied, whole. In a new organization the pick is
+   * remembered there first so the space resolver enters it rather than the default; the
+   * current page may not exist there, so `useLandAfterOrgSwitch` moves it.
    */
   const applyContext = (orgId: string, spaceId: string) => {
     if (orgId !== currentOrg.id) {

@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The Paramètres sections every package has, whatever its type: Explorer's
- * file tree (`files`) and versions, and Package AFPS › Contenu (`bundle`), the
- * table of every file, which links each one into the tree.
- */
+/** The Paramètres sections every package has: files tree, versions, and the `bundle` file table. */
 import type { ComponentProps } from "react";
 import type { PackageType } from "@appstrate/core/validation";
 import { PackageFilesSection } from "../package-files/package-files-section";
@@ -38,11 +34,7 @@ export function PackageCommonSection<S extends string>({
   href: SettingsHref<S | "files">;
   /** A pinned version being read. */
   version?: string;
-  /**
-   * The section whose editor holds the raw manifest, when the reader may write
-   * the package: the draft's files are then changed in the tree, and
-   * `manifest.json` is edited there, modal open.
-   */
+  /** Section whose editor holds the raw manifest, when the reader may write the package. */
   manifestSection?: S;
   versions: PackageVersionsProps;
 }) {

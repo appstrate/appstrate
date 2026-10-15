@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Pure logic behind the package file explorer.
- *
- * Everything the explorer does that is worth testing lives here rather than in
- * the components: the tree is rendered through a virtualizer, and the web test
- * runner has no DOM, so a rendered tree emits zero rows. Keeping the shape, the
- * ARIA bookkeeping and the keyboard model as pure functions is what makes them
- * coverable at all — and it keeps the React layer to "draw these rows".
- */
+/** Pure logic of the package file explorer: the web test runner has no DOM and the tree is virtualized, so shape, ARIA and keyboard model live here to be testable. */
 
 import {
   PACKAGE_FILE_INLINE_MAX_BYTES,
@@ -29,15 +21,7 @@ export type PackageFileEntry = components["schemas"]["PackageFileEntry"];
 /** One staged file edit carried by the package PATCH's `operations` field. */
 export type PackageFileWriteOperation = components["schemas"]["PackageFileWriteOperation"];
 
-/**
- * Stable, unique row identity.
- *
- * NOT the path: `path` is not unique across a tree. An archive holding both a
- * file `docs` and a file `docs/a.md` yields a directory node and a file node
- * that both sit at `docs`, and duplicate entries for one path are possible in a
- * hand-crafted ZIP. Focus, selection, the roving tabindex and the React key all
- * key off `id`, so none of them can address two rows at once.
- */
+/** Stable row identity. NOT the path: a file `docs` and `docs/a.md` put a dir and a file node at `docs`, and a crafted ZIP can repeat a path. */
 interface NodeIdentity {
   id: string;
   /** Full path from the artifact root, no trailing slash. */
@@ -58,13 +42,7 @@ interface FileNode extends NodeIdentity {
 
 export type TreeNode = DirNode | FileNode;
 
-/**
- * A row of the flattened, windowed-render-ready tree.
- *
- * Carries ONLY what flattening computes. Identity, name and kind are read
- * through `node`, never copied onto the row — a copy is a second source of
- * truth that can silently disagree with the node it came from.
- */
+/** A flattened row; carries ONLY what flattening computes (identity, name, kind are read via `node`, never copied). */
 interface TreeRow {
   node: TreeNode;
   /** 0-based nesting depth. `aria-level` is `depth + 1`. */
@@ -77,28 +55,17 @@ interface TreeRow {
   posInSet: number;
 }
 
-/**
- * Build a nested tree from the flat path index. Directories exist only as path
- * segments in the API response — they are synthesized here, and a directory
- * node therefore never carries an entry of its own.
- *
- * Children are sorted directories-first then by name, independently of the
- * input order: the server sorts by path today, but the rendered order must not
- * silently depend on that.
- */
+/** Builds the nested tree from the flat index; directories are synthesized (no entry of their own), sorted dirs-first then by name regardless of input order. */
 export function buildFileTree(
   entries: readonly PackageFileEntry[],
   explicitDirectories: readonly string[] = [],
 ): TreeNode[] {
   const roots: TreeNode[] = [];
-  // Directory path → its children array, so a segment seen again is reused
-  // instead of duplicated. Directory paths are therefore unique by
-  // construction, which is what makes a path a valid key for the collapsed set.
+  // Directory path → children, reused on a repeated segment: dir paths are unique, so valid keys for the collapsed set.
   const dirs = new Map<string, TreeNode[]>();
   const usedIds = new Set<string>();
 
-  // Ids stay deterministic for a given entry order, so a refetch that returns
-  // the same index keeps focus and selection pointing at the same rows.
+  // Deterministic ids: a refetch of the same index keeps focus and selection on the same rows.
   const nextId = (kind: TreeNode["kind"], path: string): string => {
     const base = `${kind}:${path}`;
     if (!usedIds.has(base)) {
@@ -165,26 +132,17 @@ function sortChildren(nodes: TreeNode[]): void {
 }
 
 /**
- * Flatten the tree to the rows a virtualizer can window over, carrying the ARIA
- * bookkeeping with them. `aria-setsize` / `aria-posinset` MUST be computed here:
- * only a fraction of the rows is in the DOM at any time, so the browser cannot
- * infer either from the rendered siblings.
- *
- * Takes the COLLAPSED directories, not the expanded ones: everything is open by
- * default, so a directory that appears in a later refetch is expanded by
- * construction instead of being the one closed row in an otherwise open tree.
- *
- * Iterative, not recursive: a path's segment count is attacker-controlled (a
- * crafted ZIP entry name), and one deep enough would overflow the stack and
- * blank the tab for everyone in the org.
+ * Flattens the tree for a virtualizer; `aria-setsize` / `aria-posinset` MUST be computed here (the
+ * browser cannot infer them from a window of rows). Takes the COLLAPSED directories so a new
+ * directory is open by default. Iterative, not recursive: path depth is attacker-controlled (crafted
+ * ZIP entry name) and would overflow the stack.
  */
 export function flattenVisibleRows(
   nodes: readonly TreeNode[],
   collapsedDirs: ReadonlySet<string>,
 ): TreeRow[] {
   const rows: TreeRow[] = [];
-  // Pre-order traversal: siblings are pushed in reverse so the stack pops them
-  // back in document order.
+  // Pre-order: siblings pushed in reverse so the stack pops them in document order.
   const stack: TreeRow[] = [];
   const pushLevel = (siblings: readonly TreeNode[], depth: number) => {
     for (let i = siblings.length - 1; i >= 0; i--) {
@@ -212,15 +170,9 @@ export function flattenVisibleRows(
 type TreeFocusAction = { type: "focus" | "expand" | "collapse"; id: string };
 
 /**
- * The keyboard model, as a reducer over the visible rows (WAI-ARIA tree
- * pattern). Expansion is returned as an intent rather than applied, so the
- * component stays a thin dispatcher and every branch is testable without a DOM.
- *
- * Addresses rows by `node.id`, never by path — two rows can share a path, and
- * keying off it makes ArrowDown/ArrowLeft/Enter act on the wrong one.
- *
- * `null` is returned at the list boundaries and for unhandled keys — the caller
- * uses that to decide whether to `preventDefault()`.
+ * The WAI-ARIA tree keyboard model as a reducer over visible rows; expansion is returned as an
+ * intent. Addresses rows by `node.id` (two rows can share a path). `null` at list boundaries and
+ * for unhandled keys tells the caller not to `preventDefault()`.
  */
 export function nextTreeFocus(
   rows: readonly TreeRow[],
@@ -238,8 +190,7 @@ export function nextTreeFocus(
     case "End":
       return { type: "focus", id: last.node.id };
     case "ArrowDown":
-      // No focus yet (fresh tree, or the focused row disappeared): enter at the
-      // top rather than doing nothing.
+      // No focus yet (fresh tree, or the focused row vanished): enter at the top.
       if (index < 0) return { type: "focus", id: first.node.id };
       return index < rows.length - 1 ? { type: "focus", id: rows[index + 1]!.node.id } : null;
     case "ArrowUp":
@@ -274,10 +225,7 @@ function parentRow(rows: readonly TreeRow[], index: number): TreeFocusAction | n
   return null;
 }
 
-/**
- * Single-character type-ahead: jump to the next row whose name starts with the
- * character, wrapping past the end. Space is excluded — it selects.
- */
+/** Single-character type-ahead to the next row starting with it, wrapping; space is excluded (it selects). */
 function typeAhead(rows: readonly TreeRow[], index: number, key: string): TreeFocusAction | null {
   if (key.length !== 1 || key === " ") return null;
   const needle = key.toLowerCase();
@@ -288,14 +236,7 @@ function typeAhead(rows: readonly TreeRow[], index: number, key: string): TreeFo
   return null;
 }
 
-/**
- * The file whose preview is showing: the user's pick while it still exists,
- * else the type's primary file, else the first entry.
- *
- * Derived on every render rather than repaired by an effect — a version switch
- * that drops the selected file falls back silently, and no re-render can
- * clobber a selection the user made.
- */
+/** The previewed file: the user's pick while it exists, else the type's primary file, else the first. Derived per render, not repaired by an effect. */
 export function pickActiveEntry<T extends PackageFileEntry>(
   entries: readonly T[],
   selectedPath: string | null,
@@ -313,37 +254,22 @@ export function pickActiveEntry<T extends PackageFileEntry>(
 type PreviewBlockReason = "binary" | "too_large";
 
 /**
- * The preview verdict AND its reason, in one place — the panel has to tell the
- * user WHICH limit was hit, and deriving that from `media_kind` again at the
- * render site would put the rule in two places.
+ * The preview verdict AND its reason (the panel must say WHICH limit was hit). Independent of
+ * `inline`: bytes dropped from the inline budget are fetched on demand.
  *
- * Deliberately independent of `inline`: an entry can be perfectly previewable
- * and still have been dropped from the response's inline budget, in which case
- * the bytes are fetched on demand.
- *
- * SIZE WINS over the binary verdict, and only above the ceiling. The server
- * never decodes a file larger than `PACKAGE_FILE_INLINE_MAX_BYTES` — above it,
- * `media_kind` is decided by extension alone (`services/package-files.ts`), so
- * a 1.5 MB `CHANGELOG` or `LICENSE` arrives as `"binary"` while being ordinary
- * text. Telling the user it is binary would be a claim the server never
- * checked; "too large" is true either way and is the constraint that actually
- * blocks the preview. Below the ceiling the classification IS content-based,
- * so a real binary is still reported as one at any size under it.
+ * SIZE WINS over the binary verdict, above the ceiling only: the server never decodes a file larger
+ * than `PACKAGE_FILE_INLINE_MAX_BYTES` and sets `media_kind` by extension alone
+ * (`services/package-files.ts`), so a 1.5 MB `CHANGELOG` arrives as `"binary"`; "too large" is the
+ * claim that is true either way. Below the ceiling classification is content-based.
  */
 export function previewBlockReason(entry: PackageFileEntry): PreviewBlockReason | null {
-  // Inclusive, mirroring the server's `size <= PACKAGE_FILE_INLINE_MAX_BYTES`:
-  // a file of exactly the ceiling is still inlined, so it must still be
-  // previewable.
+  // Inclusive, mirroring the server's `size <= PACKAGE_FILE_INLINE_MAX_BYTES`.
   if (entry.size > PACKAGE_FILE_INLINE_MAX_BYTES) return "too_large";
   if (entry.media_kind === "binary") return "binary";
   return null;
 }
 
-/**
- * Extension → Monaco language id. Deliberately a short map of what package
- * artifacts actually contain rather than a mime database; anything unlisted
- * renders as plain text, which is a correct (if plain) preview.
- */
+/** Extension → Monaco language id; a short map on purpose, unlisted renders as plain text. */
 const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   md: "markdown",
   json: "json",
@@ -372,36 +298,22 @@ export function languageForPath(path: string): string {
 }
 
 /**
- * Whether an entry is one the draft write route refuses to move or delete —
- * the tree therefore offers it no rename and no delete affordance.
- *
- * Two entries qualify, for two different reasons, and both come from the
- * server's own rules (`applyFileOperations`): `manifest.json` is a projection
- * of the package's draft manifest, authored on the JSON tab and answered
- * `reserved_entry` here; the type's content entry (`SKILL.md`, `prompt.md`) is
- * what makes the package a package of that type, and is answered
- * `content_entry_immovable`. The content entry is still WRITABLE — it is the
- * file the editor opens on — while `manifest.json` is not.
+ * Whether the draft write route refuses to move or delete the entry (`applyFileOperations`):
+ * `manifest.json` (a projection of the draft manifest; `reserved_entry`) and the type's content
+ * entry (`SKILL.md`, `prompt.md`; `content_entry_immovable`, still WRITABLE).
  */
 export function isPinnedEntry(type: PackageType, path: string): boolean {
   return isProtectedPackageFile(type, path);
 }
 
 /**
- * Why a path the author typed cannot be created in this tree, or `null` when it
- * can.
- *
- * Restates the write route's refusals so a mistyped path is answered while the
- * dialog is still open instead of by a `400` after a round trip. The server
- * stays the authority: it runs the same rules under the lock, against the tree
- * as it is at that instant rather than against the index this client read.
+ * Why a typed path cannot be created, or `null`. Restates the write route's refusals so the dialog
+ * answers before a round trip; the server stays the authority (same rules under the lock).
  *
  * - `invalid` — {@link isSafeArchivePath} refuses the shape (`invalid_path`).
  * - `reserved` — it names the manifest (`reserved_entry`).
- * - `exists` — the tree already holds it. A `write` would silently overwrite,
- *   which is not what "new file" or "rename" mean; both dialogs refuse it.
- * - `conflict` — it would make one path both a file and a directory
- *   (`path_conflict`), in either direction.
+ * - `exists` — a `write` would silently overwrite, which "new file" and "rename" must not do.
+ * - `conflict` — one path both file and directory, either direction (`path_conflict`).
  */
 export type NewPathRejection = "invalid" | "reserved" | "exists" | "conflict";
 
@@ -438,13 +350,7 @@ export function validateNewPath(
   return null;
 }
 
-/**
- * The structural action a key press asks of the focused file row, or `null`.
- *
- * Pure, and here rather than inline in the tree, for the same reason
- * {@link nextTreeFocus} is: the rows are virtualized, so no DOM-less render
- * ever produces one to press a key on.
- */
+/** The structural action a key press asks of the focused file row, or `null`. */
 export function fileActionForKey(key: string): "rename" | "delete" | null {
   if (key === "F2") return "rename";
   if (key === "Delete") return "delete";

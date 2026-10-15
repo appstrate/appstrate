@@ -1,23 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * WAI-ARIA `tree` over a package artifact's file index.
- *
- * This component owns the tree's interaction only — its shape, its ARIA
- * bookkeeping and its keyboard model are pure functions in
- * `lib/package-file-tree.ts`, which is where they are tested. What is left here
- * is state, DOM focus and markup.
- *
- * Rows are virtualized, which is why `aria-level` / `aria-setsize` /
- * `aria-posinset` are computed by hand: only a window of rows is in the DOM, so
- * the browser can infer none of them from the markup.
- *
- * `actions` is what separates the two surfaces that mount it. Without it the
- * tree is a reader (the package detail page's explorer); with it every row that
- * is not pinned carries a rename and a delete, and the header carries the two
- * whole-tree gestures. One component, because the difference is four buttons —
- * a fork would duplicate the virtualizer, the roving tabindex and the focus
- * effect for them.
+ * WAI-ARIA `tree` over a package artifact's file index. Shape, ARIA bookkeeping and keyboard model
+ * are pure functions in `lib/package-file-tree.ts`; this owns state, DOM focus and markup.
+ * Rows are virtualized, so `aria-level` / `aria-setsize` / `aria-posinset` are computed by hand.
+ * `actions` turns the reader into the authoring surface (rename/delete on unpinned rows, plus
+ * whole-tree gestures) without forking the virtualizer and focus logic.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -101,10 +89,7 @@ export function FileTree({
 }: FileTreeProps) {
   const { t } = useTranslation("agents");
   const tree = useMemo(() => buildFileTree(entries, directories), [directories, entries]);
-  // The user's CLOSED directories, not their open ones. Package archives are
-  // small (tens of files), so the whole artifact is visible at a glance by
-  // default — and a directory that appears in a later refetch is open by
-  // construction rather than the one closed row in an otherwise open tree.
+  // The user's CLOSED directories, so a directory appearing in a later refetch is open by default.
   const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(
     () => new Set(initialCollapsedPaths),
   );
@@ -124,11 +109,8 @@ export function FileTree({
     overscan: 12,
   });
 
-  // Move real DOM focus onto the row the keyboard model picked. Runs after every
-  // render on purpose: `scrollToIndex` reaches the virtualizer through a scroll
-  // event, so a row scrolled in from far away is not mounted yet on the render
-  // that changed `focusedId` — the flag survives until it is. `moveFocus` only
-  // ever arms the flag alongside a state change that guarantees this runs.
+  // Runs after every render on purpose: `scrollToIndex` acts through a scroll event, so a far row
+  // is not mounted on the render that changed `focusedId`; the flag survives until it is.
   useEffect(() => {
     if (!pendingFocusRef.current) return;
     const el = scrollRef.current?.querySelector<HTMLElement>('[data-tree-focused="true"]');
@@ -149,11 +131,8 @@ export function FileTree({
   const moveFocus = (id: string) => {
     const index = rows.findIndex((row) => row.node.id === id);
     if (index >= 0) virtualizer.scrollToIndex(index);
-    // Already focused: React bails out of an identical state update, so no
-    // render and no effect would follow. Arming the flag here would leave it
-    // armed until some unrelated re-render, which would then yank focus out of
-    // whatever the user had moved on to (the editor, most likely). Reachable
-    // via Home on the first row, End on the last, and a type-ahead that wraps.
+    // Already focused: React bails out of an identical update, so arming the flag would leave it
+    // set until an unrelated re-render yanked focus away from the editor.
     if (id === focusedId) return;
     pendingFocusRef.current = true;
     setFocusedId(id);
@@ -167,8 +146,7 @@ export function FileTree({
     const row = rows.find((r) => r.node.id === focusedId);
     if (!row || row.node.kind !== "file") return false;
     const path = row.node.entry.path;
-    // A pinned row still SWALLOWS the key: letting `Delete` bubble on a row the
-    // route would refuse invites the browser's own handling of it.
+    // A pinned row still SWALLOWS the key, so `Delete` never falls to the browser.
     event.preventDefault();
     if (actions.isPinned(path)) return true;
     if (action === "rename") actions.onRename(path);
@@ -183,8 +161,7 @@ export function FileTree({
       const row = rows.find((r) => r.node.id === focusedId);
       if (!row) return;
       event.preventDefault();
-      // Selection carries the entry's OWN path, so a reconstructed path can
-      // never disagree with the file the preview then fetches.
+      // The entry's OWN path, so the preview fetches exactly this file.
       if (row.node.kind === "file") onSelect(row.node.entry.path);
       else setCollapsed(row.node.path, row.expanded);
       onSelectNode?.(row.node);
@@ -204,9 +181,7 @@ export function FileTree({
     if (row) setCollapsed(row.node.path, action.type === "collapse");
   };
 
-  // Exactly one row is tabbable — ids are unique, so this cannot match twice:
-  // the focused row, else the selected one, else the first, so Tab always lands
-  // somewhere sensible inside the tree.
+  // Exactly one tabbable row: the focused one, else the selected one, else the first.
   const tabbableId =
     rows.find((row) => row.node.id === focusedId)?.node.id ??
     rows.find((row) => row.node.path === selectedPath)?.node.id ??
@@ -302,12 +277,8 @@ export function FileTree({
                   {(node.kind === "dir" && directoryLabels?.[node.path]) || node.name}
                 </span>
                 {editable && node.kind === "file" && (
-                  // `tabIndex={-1}`: a `treeitem` owns exactly one tab stop, and
-                  // the roving tabindex above IS that stop. The keyboard path to
-                  // these two gestures is F2 and Delete on the focused row, which
-                  // is why `fileActionForKey` exists; the buttons are the pointer
-                  // path, and stay named for a screen reader that reaches them
-                  // through the row.
+                  // `tabIndex={-1}`: the roving tabindex is the treeitem's one tab stop; the keyboard
+                  // path is F2/Delete (`fileActionForKey`), these buttons are the pointer path.
                   <span className="flex shrink-0 items-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
                     <RowAction
                       icon={Pencil}
@@ -352,8 +323,7 @@ function RowAction({
       disabled={disabled}
       className="hover:bg-background text-muted-foreground hover:text-foreground rounded-sm p-1 disabled:opacity-40"
       onClick={(event) => {
-        // The row selects on click; a gesture aimed at the button is not a
-        // request to open the file underneath it.
+        // The row selects on click; this must not open the file underneath.
         event.stopPropagation();
         onClick();
       }}

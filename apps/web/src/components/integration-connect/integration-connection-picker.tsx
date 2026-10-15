@@ -19,28 +19,13 @@ import {
   UnderScopedWarning,
 } from "./connection-picker-states";
 
-// Module-level constant so the default prop is a stable reference across
-// renders (a `{ mode: "pin" }` literal default would be a new object each
-// render — react/no-object-type-as-default-prop).
 const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
 
 /**
- * Per-integration connection picker, rendered as a rich dropdown. Lists every
- * accessible connection (own + shared-with-org) with its name, auth type
- * (OAuth / API key …), and who created it, plus a "no connection" entry, a reset entry and "add a
- * connection" entries (one per declared auth) that launch the connect flow
- * inline.
- *
- * Rows are checkboxes composing a draft set (up to
- * `MAX_CONNECTIONS_PER_INTEGRATION`) that "Valider" writes in one go;
- * with a single candidate, clicking its row binds it directly.
- *
- * Single source of truth for "which connections?" UX. The agent page and the
- * launch-recovery modal write the member's pin; the run-with-options modal and
- * the schedule editor hold an override in their form (`persistence`). The
- * candidate list, scope/lock verdicts and the connect orchestration (hosted
- * connect portal popup) are identical across them; only where the pick lands
- * differs.
+ * Per-integration connection picker (dropdown). Rows are checkboxes composing a draft set
+ * (up to `MAX_CONNECTIONS_PER_INTEGRATION`) that "Valider" writes in one go; a single
+ * candidate binds directly. Only `persistence` differs between surfaces: where the pick lands
+ * (member pin vs. an override held in a form).
  */
 export function IntegrationConnectionPicker({
   integration,
@@ -49,7 +34,6 @@ export function IntegrationConnectionPicker({
   LoadedPickerProps,
   "integrationId" | "manifest" | "authStatuses" | "agentTools" | "agentScopes"
 > & {
-  /** The agent's dependency: its manifest and auths are read here (one deduped query). */
   integration: { id: string; tools?: string[] | "*"; scopes?: string[] };
 }) {
   const { data: detail, isError } = useIntegrationDetail(integration.id);
@@ -85,13 +69,9 @@ function LoadedPicker({
   const { t } = useTranslation(["agents", "settings"]);
   const { integrationId, agentPackageId, version } = options;
   const picker = useConnectionPicker({ ...options, persistence });
-  // Same query the hook reads, deduped: it only answers whether that read failed.
   const { isError } = useIntegrationReadinessEntry(integrationId, agentPackageId, version);
 
-  // Failure first, then loading — the order `collection.ts` owns, applied to a
-  // CONTROL rather than to a body. `isPending` is false once a query has
-  // failed, so a missing verdict alone would spin forever on a resolution that
-  // was never coming.
+  // Failure first: `isPending` is false once a query failed, so a missing verdict alone would spin forever.
   if (isError) return <FailedPicker integrationId={integrationId} />;
   if (!picker) return <LoadingPicker integrationId={integrationId} />;
 
@@ -121,17 +101,12 @@ function LoadedPicker({
     return <LockedPicker integrationId={integrationId} picker={picker} />;
   }
 
-  // Blocked for this member AND nothing to pick → dead end. Show a
-  // disabled, explanatory button instead of an empty dropdown.
-  // Unless a stored set is left to clear: the menu's reset item is the way out.
+  // Dead end (blocked, nothing to pick): explanatory button, unless a stored set is left to clear.
   if (!canAddConnection && !hasCandidates && explicitIds === null) {
     return <BlockedPicker integrationId={integrationId} canConnect={canConnect} />;
   }
 
-  // No existing connection AND no auth the actor can connect on (every
-  // oauth2 auth lacks an admin-registered OAuth client) → point at the
-  // admin setup instead of an empty dropdown that would only 403 — unless a
-  // stored set is left to clear, as above.
+  // No connection and no connectable auth (no OAuth client): point at admin setup, not a 403 dropdown.
   if (!hasCandidates && authKeys.length === 0 && explicitIds === null) {
     return (
       <NoClientPicker
@@ -145,9 +120,6 @@ function LoadedPicker({
   return (
     <div data-testid={`member-picker-${integrationId}`}>
       <PickerMenu integrationId={integrationId} picker={picker} onLeave={onLeave} />
-      {/* A stored member is unusable: the run is refused until the set is re-picked
-          — or, for the space default, until the member picks their own or an
-          admin fixes the default. */}
       {unavailableIds.length > 0 && (
         <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
           {t(
@@ -158,7 +130,6 @@ function LoadedPicker({
           )}
         </PickerWarning>
       )}
-      {/* A dead member fails every run that binds it until its owner reconnects it. */}
       {deadConns.length > 0 && (
         <PickerWarning testId={`member-pick-dead-warning-${integrationId}`}>
           {t("detail.integrationMemberPicker.needsReconnectionWarning", {
@@ -166,8 +137,6 @@ function LoadedPicker({
           })}
         </PickerWarning>
       )}
-      {/* Under-scoped → blocked server-side: a new connection with the agent's
-          scopes first, an in-place upgrade (owner only) second. */}
       {underScopedConns.map((conn) => (
         <UnderScopedWarning key={conn.id} conn={conn} picker={picker} />
       ))}

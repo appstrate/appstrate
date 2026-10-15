@@ -1,17 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The trail the shell header renders.
- *
- * Pages DECLARE their breadcrumbs (through `PageHeader`'s `breadcrumbs` prop,
- * or `useOverlayBreadcrumb` for a routed overlay) and the header draws them
- * once, next to the org chip that opens the trail.
- *
- * Each surface owns its own layer, so no writer can wipe another's trail: the
- * page beneath an overlay keeps its trail while the overlay is up, and a page
- * inside an overlay (a webhook under settings) extends the overlay's trail
- * instead of replacing it. A layer remembers its writer, and a writer clears it
- * on unmount only while it still owns it.
+ * The trail the shell header renders. Pages DECLARE breadcrumbs, the header
+ * draws them once. Each surface owns its own layer so no writer wipes another's
+ * trail; a layer remembers its writer and a writer clears it on unmount only
+ * while it still owns it.
  */
 import { useEffect, useId } from "react";
 import { createStore } from "zustand/vanilla";
@@ -19,11 +12,7 @@ import { createStore } from "zustand/vanilla";
 export interface BreadcrumbEntry {
   label: string;
   href?: string;
-  /**
-   * The header draws an empty slot here instead of the label, and the page fills
-   * it through `ShellTrailContent` — a portal, so what it renders keeps the
-   * page's own context (the store holds data, never an element).
-   */
+  /** The header draws an empty slot; the page fills it via `ShellTrailContent` (a portal keeps the page's context). */
   slot?: true;
 }
 
@@ -75,11 +64,7 @@ export function visibleTrail(layers: Layers, overlayOpen: boolean): BreadcrumbEn
     : layers.page.entries;
 }
 
-/**
- * Publishes `entries` to `layer` on every render, so a changed label or link
- * shows at once; unchanged entries leave the store as it is. Callers
- * rebuild the array each render, which is why there is no dependency list.
- */
+/** Publishes `entries` on every render (callers rebuild the array, hence no dependency list); unchanged entries are a no-op. */
 export function useBreadcrumb(layer: BreadcrumbLayer, entries: BreadcrumbEntry[]) {
   const owner = useId();
   const { publish, clear } = breadcrumbStore.getState();

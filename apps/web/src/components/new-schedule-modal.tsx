@@ -1,16 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Creating a schedule: a small object, so a modal (like a model or a webhook),
- * not a page (like a package). It asks what a schedule needs to exist — the
- * agent, a name, when it fires, the inputs the agent asks for — and, folded,
- * what may decide whether it can be created at all: who it runs as, the
- * version (an agent never published fires only its draft), the model (one
- * no organization credential serves is refused) and the connections.
- *
- * Opened from anywhere by the `newSchedule` URL parameter (`useModalParam`),
- * carrying the agent to preselect or `1` for none: the schedules list, an
- * agent's page and its settings all open the same modal.
+ * Creating a schedule, as a modal: the agent, a name, when it fires and the agent's
+ * inputs, with what may decide whether it can be created folded away (who it runs as,
+ * the version, the model, the connections). Opened from anywhere by the `newSchedule`
+ * URL parameter (`useModalParam`): the agent to preselect, or `1` for none.
  */
 
 import { PendingButton } from "@/components/app-ui/pending-button";

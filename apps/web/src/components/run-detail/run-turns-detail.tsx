@@ -16,49 +16,23 @@ import type { RunTurnRow } from "../log-utils";
 import { formatNumber } from "../../lib/format-number";
 
 /**
- * Per-turn breakdown. Totals alone hide WHERE a run started re-reading its
- * whole context, which is what makes a long run expensive — this shows the
- * trend, turn by turn.
- *
- * A table, not a chart: the shape is small, the numbers are the point, and no
- * charting dependency is worth it. The proportional bar behind the context
- * column is pure CSS.
- *
- * The bar is normalized on the run's context WINDOW, not on the run's own peak:
- * peak-relative bars make every run look equally full — the widest bar is
- * always 100 % whether the run used 5 % or 95 % of what it was given, which is
- * the one thing the column exists to tell apart.
- *
- * FALLBACK, deliberately explicit: when no turn states a window there is no
- * denominator, so the bar reverts to peak-relative AND the `%` column is not
- * rendered at all. No 200k default is invented here — the runner already
- * applies its own default when it has one, so an absent window means genuinely
- * unknown, and a fabricated percentage is worse than none.
- *
- * That switch is ANNOUNCED, in words and in colour: a full-width bar on the
- * peak turn under an unchanged header would read as "this turn filled the
- * window". The missing `%` column is not a cue: absence never is.
+ * Per-turn breakdown (a table; the context bar is pure CSS). The bar is normalized on the
+ * context WINDOW: peak-relative bars would make every run look equally full.
+ * FALLBACK: with no stated window the bar reverts to peak-relative and the `%` column is
+ * dropped (no invented 200k default: absent means unknown). The switch is announced in words
+ * and colour, since a full-width peak bar would read as "filled the window".
  */
 function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
   const { t, i18n } = useTranslation("agents");
   const peak = turns.reduce((max, turn) => Math.max(max, turn.contextTokens), 0);
-  // The window comes from the turns through `readRunContext`, which decides
-  // which turn's window applies. The table falls back whenever it returns
-  // nothing, including on a run whose turns all measured zero: that fallback is
-  // announced below, so the reader is never left guessing which denominator
-  // they are looking at.
+  // Falls back whenever `readRunContext` returns nothing (incl. all-zero turns).
   const contextWindow = readRunContext(turns)?.window ?? null;
-  // The denominator the bar is drawn against — the window when known, the run's
-  // own peak otherwise. `hasWindow` is what gates the `%` column: a share of a
-  // peak is not a share of anything the reader can act on.
+  // `hasWindow` gates the `%` column: a share of a peak is not actionable.
   const hasWindow = contextWindow != null && contextWindow > 0;
   const denominator = hasWindow ? contextWindow : peak;
 
   return (
     <>
-      {/* Dense metrics grid, so every cell trims the design system's default
-          padding — the components are still what defines the table's structure,
-          borders and hover behaviour. */}
       <Table className="border-collapse">
         <TableHeader>
           <TableRow className="text-muted-foreground text-xs hover:bg-transparent">
@@ -93,10 +67,7 @@ function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
                   {turn.index}
                 </TableHead>
                 <TableCell className="relative px-0 py-1 pr-3 text-right tabular-nums">
-                  {/* Tinted by what the bar is measured against, so the two
-                    denominators are not the same picture: the accent fill
-                    means "share of the model window", the neutral fill means
-                    "share of this run's own peak". */}
+                  {/* Accent = share of the model window; neutral = share of the run's own peak. */}
                   <span
                     aria-hidden
                     className={cn(
@@ -116,8 +87,7 @@ function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
                   {formatNumber(turn.outputTokens)}
                 </TableCell>
                 <TableCell className="text-muted-foreground px-0 py-1 text-right tabular-nums">
-                  {/* Omitted by the runner when it could not observe the turn's
-                    start — an em dash is honest, a 0 would read as instant. */}
+                  {/* Omitted when the turn's start was not observed: a 0 would read as instant. */}
                   {turn.latencyMs !== undefined ? formatDuration(turn.latencyMs) : "—"}
                 </TableCell>
               </TableRow>

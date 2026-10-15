@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A detail page's Paramètres: its sections in a rail, the open one beside it.
- * One query parameter names the section, `?file=` the file it opens on, and
- * the tab lives in the hash (`lib/settings-section-href.ts`). `resolve` turns
- * what the URL asks for into the section shown, so a section the reader may
- * not open falls back the same way for the panel and for the unsaved-changes
- * guard (`EditorPlaceContext`).
+ * A detail page's Paramètres: sections in a rail (`lib/settings-section-href.ts` owns the URL).
+ * `resolve` maps the URL to the shown section, so a forbidden one falls back identically for
+ * the panel and the unsaved-changes guard (`EditorPlaceContext`).
  */
 import { useCallback, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";

@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pending OAuth model-provider pairings, persisted to localStorage so an
- * in-flight `npx @appstrate/connect-helper` connection survives the modal
- * being closed (tab switch, accidental dismiss) or even a full page reload.
- *
- * `<PendingPairingsWatcher>` reads this store to poll each pairing to
- * completion regardless of which modal (if any) is currently open. The
- * store is also synced across tabs via the `storage` event so a pairing
- * minted (or completed) in one tab is reflected in the others.
+ * Pending OAuth model-provider pairings, persisted so an in-flight
+ * `connect-helper` connection survives a closed modal or reload.
+ * `<PendingPairingsWatcher>` polls each one to completion; tabs sync via `storage`.
  */
 
 import { createStore } from "zustand/vanilla";
@@ -39,7 +34,6 @@ interface PairingState {
   remove: (id: string) => void;
   prune: () => void;
   clear: () => void;
-  /** Re-read the persisted list (used by the cross-tab `storage` sync). */
   hydrate: () => void;
 }
 
@@ -113,16 +107,13 @@ export const pairingStore = createStore<PairingState>()((set) => ({
   hydrate: () => set({ pairings: readPersistedPairings() }),
 }));
 
-// Cross-tab sync: when another tab mutates the persisted list, mirror it
-// here so this tab's watcher picks up newly-minted pairings and drops ones
-// another tab already completed (reducing duplicate success toasts).
+// Cross-tab sync: mirrors another tab's writes (fewer duplicate success toasts).
 if (typeof globalThis.addEventListener === "function") {
   globalThis.addEventListener("storage", (e: StorageEvent) => {
     if (e.key === STORAGE_KEY) pairingStore.getState().hydrate();
   });
 }
 
-/** Reactive list for React components. */
 export function usePendingPairings(): PendingPairing[] {
   return useStore(pairingStore, (s) => s.pairings);
 }
@@ -139,7 +130,6 @@ pairingStore.subscribe(({ pairings }) => {
 
 const shown = new Set<string>();
 
-/** Non-hook accessors for use from event handlers / effects. */
 export function addPendingPairing(p: PendingPairing, command: string): void {
   commands.set(p.id, command);
   pairingStore.getState().add(p);

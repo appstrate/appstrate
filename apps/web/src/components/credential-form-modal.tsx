@@ -1,26 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unified credential modal — single entry point for both API-key and
- * OAuth model provider connections.
+ * Unified credential modal for both API-key and OAuth model provider connections. The
+ * picker is sourced entirely from `useProvidersRegistry()` (module entries appear with
+ * `MODULES`); an OAuth provider swaps the body to the pairing-token UI.
  *
- * The provider picker is fully sourced from `useProvidersRegistry()` —
- * api-key and OAuth providers alike. Selecting an OAuth provider swaps
- * the body to the pairing-token UI (`<OAuthPairingBody>`); api-key
- * providers keep the form. Modules can be added/removed via the
- * `MODULES` env var with zero client churn — their entries appear or
- * disappear in the picker automatically.
- *
- * The form posts the canonical `{ label, providerId, apiKey, baseUrlOverride? }`
- * shape. Providers that declare `baseUrlOverridable: true` collapse into the
- * picker's single "custom endpoint" row and are configured through the shared
- * endpoint fields, which own the API type, the base URL and the key.
- *
- * Renaming is never done here: the name is edited in place in the table
- * (`InlineEditableLabel`), the one rename. Editing a key-based row changes its
- * key; an OAuth row's connection changes only through the reconnect
- * affordance, which re-enters the modal with the exact credential targeted.
- * No key is ever sent for an OAuth row.
+ * `baseUrlOverridable` providers collapse into the picker's single "custom endpoint" row,
+ * configured through the shared endpoint fields. Renaming is never done here
+ * (`InlineEditableLabel`); editing a key row changes its key; an OAuth row changes only
+ * through the reconnect affordance, and no key is ever sent for it.
  */
 
 import { PendingButton } from "@/components/app-ui/pending-button";
@@ -62,10 +50,7 @@ import { ProviderPickerGroups } from "./provider-picker-groups";
 import { PairingModal } from "./pairing-modal";
 import { PreferencesModelsLink } from "./preferences-models-link";
 
-/**
- * Canonical payload shape submitted to `POST /api/model-provider-credentials`.
- * `baseUrlOverride` is only meaningful for a base-URL-overridable entry.
- */
+/** Payload of `POST /api/model-provider-credentials`; `baseUrlOverride` only for a base-URL-overridable entry. */
 export interface CredentialFormData {
   label: string;
   providerId: string;
@@ -95,11 +80,7 @@ interface CredentialFormFields {
   baseUrlOverride: string;
 }
 
-/**
- * Unified pick-list option model. Built entirely from the registry —
- * api-key entries surface as plain `providerId` options, OAuth entries
- * are prefixed `oauth:` to keep the dispatch unambiguous.
- */
+/** Pick-list option built from the registry; OAuth entries are prefixed `oauth:` to keep dispatch unambiguous. */
 interface PickerOption {
   id: string;
   label: string;
@@ -234,9 +215,7 @@ export function CredentialFormModal({
     }
     const provider = getProviderById(option.providerId, registry);
     if (provider) {
-      // Pre-seed the override field with the default base URL so users
-      // see the value they're customising. Non-overridable providers
-      // never read this field.
+      // Pre-seed the default base URL so users see the value they are customising.
       setValue("baseUrlOverride", provider.baseUrlOverridable ? provider.defaultBaseUrl : "");
       applyProviderName(provider);
     }
@@ -314,10 +293,8 @@ export function CredentialFormModal({
     </FormItem>
   );
 
-  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds back). A new
-  // subscription is owned as the form says (the caller's own, or the organization's); an existing
-  // row is re-paired only when it is flagged and the server allows the caller to reconnect it. Its
-  // name is changed in the table.
+  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds back). An
+  // existing row is re-paired only when flagged and the server allows the caller to reconnect it.
   if (isOAuthSelected && selectedOption?.providerId) {
     const showPairing = credential
       ? !!credential.needs_reconnection && credential.allowed_actions.includes("reconnect")
@@ -432,9 +409,7 @@ function PickerOptionItem({
   option: PickerOption;
   t: (key: string) => string;
 }): React.ReactNode {
-  // Inline lookup to satisfy `react-hooks/static-components` — the rule
-  // flags PascalCase consts assigned from helper calls at the top of a
-  // component body. Equivalent to `getProviderIcon(option)`.
+  // Inline lookup: `react-hooks/static-components` flags PascalCase consts assigned from helper calls.
   const Icon = PROVIDER_ICONS[option.iconUrl];
   return (
     <SelectItem key={option.id} value={option.id}>

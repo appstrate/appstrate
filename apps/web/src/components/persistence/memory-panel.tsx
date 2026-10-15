@@ -34,11 +34,7 @@ interface MemoryPanelProps {
   initialTypes?: Array<"pinned" | "archive">;
 }
 
-/**
- * Unified memory view: pinned slots (always-in-prompt blocks
- * including `checkpoint`) and archive memories in one filterable list.
- * Mirrors the Letta ADE pattern of one inspector over both tiers.
- */
+/** Pinned slots (always-in-prompt, incl. `checkpoint`) and archive memories in one filterable list. */
 export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps) {
   const { t } = useTranslation(["agents", "common"]);
   const isRunView = !!runId;
@@ -67,10 +63,7 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
   const isLoading = pinnedQ.isLoading || memoriesQ.isLoading;
   const isError = pinnedQ.isError || memoriesQ.isError;
 
-  // Nothing in EITHER tier, and only once both requests have answered. The
-  // counts alone are not enough: two queries that failed both count zero, and a
-  // 500 on the endpoint must not draw "no memory yet". Failure and loading are
-  // answered by the table; this return says only that both tiers are empty.
+  // Empty in BOTH tiers, once both answered: two failed queries also count zero, and a 500 must not draw "no memory yet".
   if (!isLoading && !isError && pinnedCount + memoriesCount === 0) {
     return (
       <EmptyState

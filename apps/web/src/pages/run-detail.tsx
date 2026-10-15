@@ -64,8 +64,7 @@ export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { scope, name, runId } = useParams<{ scope: string; name: string; runId: string }>();
   const packageId = `${scope}/${name}`;
-  // Skip the agent detail fetch for inline shadow packages — the shadow is
-  // filtered from catalog endpoints so the query would 404 on every view.
+  // Inline shadow packages are filtered from catalog endpoints: fetching would 404.
   const isInlinePath = packageId.startsWith("@inline/");
   const location = useLocation();
   const navigate = useNavigate();
@@ -74,12 +73,9 @@ export function RunDetailPage() {
   const spaceId = useCurrentSpaceId();
   const { can, ready: permissionsReady } = usePermissions();
   const canReadAgent = can("agents:read");
-  // A run PROVES the agent was active here once; it does not prove it still is.
-  // Deactivating is an ordinary, reversible gesture now, so "Relancer" answers
-  // to the same gate as the detail page's Run button and the card's launcher —
-  // said before the click rather than collected as a 404 after it. The verdict
-  // rides this very response (`AgentDetail.active`), resolved for the space the
-  // page is read from; the Re-run control renders only once it has landed.
+  // A run does not prove the agent is still active: "Relancer" answers to the
+  // same gate as the Run button (`AgentDetail.active`), so Re-run renders only
+  // once this has landed.
   const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const runQuery = useRun(runId);
   const [tab, setTab] = useTabWithHash(RUN_DETAIL_TABS, "overview");
@@ -100,9 +96,7 @@ export function RunDetailPage() {
     navigate({ pathname: location.pathname, search: searchOf(search), hash });
   };
 
-  // `useGlobalRunSync` (mounted in MainLayout) patches `run.status` directly
-  // into the React Query cache from the LISTEN/NOTIFY stream, so reading
-  // `run?.status` is sufficient — no local mirror needed.
+  // `useGlobalRunSync` patches `run.status` into the cache, so no local mirror.
   const status = run?.status;
   const isRunning = !!status && (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
   const isTerminal = !!status && !isRunning;
@@ -114,16 +108,9 @@ export function RunDetailPage() {
 
   const markRead = useMarkReadByRun();
 
-  // Auto-mark notification as read when viewing a terminal run, and refetch the
-  // run's logs. Keyed on `status`: the SSE run patch carries `status` (see
-  // `runUpdateToRunPatch`), so a run that finalizes while the page is open acts
-  // the moment status flips terminal. Idempotent server-side (no-op for a
-  // non-recipient / already-read), and `status` is stable once terminal so the
-  // effect does not re-fire on subsequent renders.
-  //
-  // Why the log refetch is a separate call rather than a consequence of the
-  // global invalidation: see `invalidateRunLogs`. It cannot loop — the effect
-  // depends on `status`/`runId`, never on the logs it refetches.
+  // On a terminal status (also when it flips while open): mark the notification
+  // read (idempotent server-side) and refetch the logs (separate from the global
+  // invalidation, see `invalidateRunLogs`). Cannot loop: deps never include the logs.
   useEffect(() => {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
     if (run && runId && terminal) {
@@ -140,23 +127,18 @@ export function RunDetailPage() {
       return { historicalLogs: [], structuredOutput: null, turnRows: [] };
     }
     const { entries, output } = buildLogEntries(logs, { isRunTerminal: isTerminal });
-    // Turn breadcrumbs are filtered OUT of the log stream by `buildLogEntries`
-    // and projected here into the per-turn table instead (`TurnsTable` in
-    // `run-detail/run-turns-detail.tsx`, opened from the overview's Usage card).
+    // Turn breadcrumbs are filtered out of the log stream and projected into the per-turn table.
     return { historicalLogs: entries, structuredOutput: output, turnRows: buildTurnRows(logs) };
   }, [logs, isTerminal]);
 
-  // `EnrichedRun.result` mirrors the jsonb column as `unknown`; the generated
-  // OpenAPI schema is the authority on its shape, so narrow to that rather
-  // than re-declaring the fields here. `output` is deliberately `unknown` in
-  // the spec (agent-declared), so it still needs a local narrowing.
+  // `EnrichedRun.result` is `unknown`; narrow to the OpenAPI shape. `output` is
+  // agent-declared (`unknown` in the spec) and needs its own narrowing.
   const execResult = run?.result as components["schemas"]["Run"]["result"];
   const finalOutput =
     structuredOutput || (execResult?.output as Record<string, unknown> | undefined) || null;
   const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
   const modelFallback = useMemo(() => findModelFallback(logs), [logs]);
-  // Run-level memory rows (only those touched during this run).
   const { data: runMemories, isLoading: memoriesLoading } = useRunMemories(packageId, runId);
   const { data: runPinned, isLoading: pinnedLoading } = useRunPinned(packageId, runId);
   const memoryLoading = memoriesLoading || pinnedLoading;
@@ -164,25 +146,14 @@ export function RunDetailPage() {
   const hasRunMemory = runMemoryCount > 0;
   const hasDurableResults = hasOutput || (run?.file_counts.output ?? 0) > 0 || hasRunMemory;
 
-  // Per-run SSE for log inserts + live metric updates. Status patches
-  // come from `useGlobalRunSync` (mounted in MainLayout), which writes
-  // directly into the same `["run", orgId, spaceId, runId]`
-  // cache key. Terminal-status refetch is also already triggered
-  // globally via `invalidateRunAndNotificationQueries`.
+  // Per-run SSE for log inserts and live metrics; status patches come from `useGlobalRunSync`.
   useRunRealtime(isRunning ? runId : null, {
     onNewLog: useCallback(
       (newLog: RunLogEvent) => {
-        // `newLog` is runtime-validated by `runLogEventSchema`. Type the patch
-        // against the wire `RunLog` (spec) so this writer and `useRunLogs` agree
-        // on the element type of the shared `runKeys.logs` cache. Spread carries
-        // the matching fields (id/createdAt are ISO strings on both).
-        //
-        // `data` needs a localized narrow, but NOT because the frame is empty:
-        // `use-realtime.ts` opens this stream with `verbose=true`, the flag that
-        // makes `routes/realtime.ts` send `evt.data` rather than
-        // `stripPayload(evt)`, so payloads arrive populated. The cast bridges a
-        // generated-type mismatch: the spec declares `data` as a bare object, so
-        // `schema.d.ts` emits `Record<string, never> | null`.
+        // Typed as the wire `RunLog` so this writer and `useRunLogs` agree on the
+        // shared cache. The `data` cast bridges a generated-type mismatch (the spec
+        // declares a bare object, emitted as `Record<string, never> | null`);
+        // payloads are populated because the stream opens with `verbose=true`.
         const entry: RunLogEntry = {
           ...newLog,
           data: (newLog.data ?? null) as RunLogEntry["data"],
@@ -192,12 +163,8 @@ export function RunDetailPage() {
           if (prev.some((l) => l.id === entry.id)) return prev;
           return [...prev, entry];
         });
-        // A published file arrives as a `type='result' event='file'`
-        // log frame — invalidate the run's files list (the tab body), the
-        // run itself (its `file_counts` drives the tab badge) and the org
-        // storage total those new bytes just moved, without a dedicated SSE
-        // channel. `isPublishedFileLogEvent` tests membership of the set the
-        // sink's own tag is built from — it carries no legacy spelling.
+        // A published file arrives as a result log frame (no dedicated SSE
+        // channel): refresh the files list, the run (`file_counts` badge) and the org storage total.
         if (entry.type === "result" && isPublishedFileLogEvent(entry.event)) {
           void invalidatePaths(qc, ["/api/files"]);
           void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, spaceId, runId) });
@@ -208,19 +175,10 @@ export function RunDetailPage() {
     ),
     onMetric: useCallback(
       (metric: RunMetricEvent) => {
-        // Patch the cached run row with the running token usage + cost
-        // so the overview's Usage card (`run-snapshot-inspector.tsx`)
-        // reflects live progress without polling.
-        // `runs.cost` is the cached aggregate written at finalize on
-        // the server; mid-run we render the broadcaster's
-        // `cost_so_far` instead. The next terminal-status invalidation
-        // refetches the canonical row so this in-cache shadow is
-        // bounded by the run's lifetime.
-        //
-        // The provenance is patched WITH the number, never separately: a
-        // live `cost` paired with the stale (or absent) status of the
-        // previous read is how a run nothing could price ends up showing a
-        // confident $0.0000 for its whole duration.
+        // Live usage for the Usage card; mid-run `cost` is the broadcaster's
+        // `cost_so_far`, replaced by the canonical row at the terminal refetch.
+        // The provenance is patched WITH the number: a live `cost` beside a stale
+        // status shows a confident $0.0000 for a run nothing could price.
         qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, spaceId, runId), (prev) => {
           if (!prev) return prev;
           return {
@@ -260,9 +218,7 @@ export function RunDetailPage() {
         href: location.pathname,
       }
     : {
-        // The name the agents list already holds stands in while the detail
-        // loads; the id is the fallback for an agent with no name, never a
-        // placeholder for one whose name is still on its way.
+        // The list's name stands in while the detail loads; the id only for a nameless agent.
         label: agent?.display_name || knownAgentName || packageId,
         href: `/agents/${packageId}`,
       };
@@ -337,9 +293,7 @@ export function RunDetailPage() {
           onClose={rerun.close}
           agent={agent}
           onSubmit={(input) => {
-            // Re-run the SAME definition the original run executed, as far as
-            // this caller may: `version_ref` is "draft" or a concrete semver,
-            // and only an author replays a draft (see `replayVersion`).
+            // Re-run the SAME definition as far as this caller may (only an author replays a draft).
             launcher.launch(
               { input, version: replayVersion(run.version_ref, agent.home_writable) },
               { leave: rerun.leave },

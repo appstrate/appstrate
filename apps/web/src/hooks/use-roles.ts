@@ -33,12 +33,7 @@ export function useRoleVocabulary() {
   );
 }
 
-/**
- * Role and space-membership writes refresh the catalogs, the
- * spaces' `permissions` (which also carry the caller's own effective set, so a
- * member editing their own row sees it change), and the member lists' role
- * names.
- */
+/** Role and membership writes refresh the catalogs, the spaces' `permissions` (which carry the caller's own effective set) and the member lists' role names. */
 export const useInvalidateRoles = () =>
   useInvalidatePaths(
     "/api/roles",
@@ -87,13 +82,7 @@ export function spaceRoleValue(role: {
   return role.preset_role ? `preset:${role.preset_role}` : `custom:${role.custom_role_id}`;
 }
 
-/**
- * A preset is a platform constant with no org-authored name, so its slug is
- * translated; a custom bundle renders the name its author typed.
- *
- * `t` is a parameter, not a hook call, so render paths that already hold a `t`
- * on another namespace reuse this — hence the namespace-qualified key.
- */
+/** A preset's slug is translated; a custom bundle renders its author's name. `t` is a parameter (hence the namespace-qualified key) so paths holding another namespace's `t` reuse it. */
 export function spaceRoleLabel(
   role: { kind: "preset" | "custom"; key: string; name: string } | null | undefined,
   t: (key: string) => string,
@@ -132,17 +121,9 @@ export function memberRoleValue(
 }
 
 /**
- * Space pickers use the caller's grantable catalog; org invitations use the org
- * catalog.
- *
- * `enabled: false` fetches NEITHER — for a picker that is mounted but currently
- * asking about no space at all, where the org catalog is not the fallback the
- * caller wants but a request for nothing.
- *
- * The space arm is gated on THAT space's own grant, not on `can`: `can` answers
- * over the space the caller is standing in, and a picker may ask about another
- * one (the share dialog asks about a package's home). Reading the row loses
- * nothing — the server unions the org half into every space's `permissions`.
+ * Space pickers use the caller's grantable catalog; org invitations use the org catalog.
+ * `enabled: false` fetches NEITHER. The space arm is gated on THAT space's grant, not on `can`
+ * (which answers for the current space; the share dialog asks about a package's home).
  */
 export function useSpaceRoleOptions(spaceId?: string, enabled = true) {
   const { t } = useTranslation("settings");

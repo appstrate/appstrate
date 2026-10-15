@@ -25,11 +25,7 @@ export interface NewProviderCredential {
 export type ModelChoiceBody =
   paths["/api/models/apply"]["post"]["requestBody"]["content"]["application/json"];
 
-/**
- * The body of a choice: the key (an existing one, one to mint, or none), the models added, those
- * switched back on, the default, those switched off. The server applies it in that order, in one
- * transaction ({@link useApplyModelChoice}).
- */
+/** The body of a choice (key, models added, switched back on, default, switched off); the server applies it in that order, in one transaction. */
 export function modelChoiceBody(input: {
   plan: ModelChoicePlan;
   target: ModelChoiceTarget;
@@ -66,11 +62,7 @@ export interface ModelChoiceRefusal {
   refusal: string | null;
 }
 
-/**
- * The upstream ids a `400 validation_failed` names, read off its items' `field` (`add.<i>`,
- * `enable.<i>`, `disable.<i>`, `default_model_id`), and the first sentence among them. `null` for
- * any other failure, which is the choice's as a whole (the key refused, a permission).
- */
+/** The upstream ids a `400 validation_failed` names (read off its items' `field`) and the first sentence among them; `null` for any failure of the choice as a whole. */
 export function choiceRefusal(err: unknown, plan: ModelChoicePlan): ModelChoiceRefusal | null {
   if (!(err instanceof ApiError) || err.code !== "validation_failed") return null;
   const failedModelIds: string[] = [];

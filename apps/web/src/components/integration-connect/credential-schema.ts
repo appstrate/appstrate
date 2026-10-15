@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Reading an integration auth's `credentials.schema` — which fields the connect
- * form asks for, and how each one presents itself.
- *
- * Separate from the component because these are pure functions over manifest
- * data, testable without rendering, and because a component file that also
- * exports helpers breaks fast refresh.
- */
+/** Pure readers of an auth's `credentials.schema` (kept out of components: helper exports break fast refresh). */
 
 import type { JSONSchema7 } from "@appstrate/core/form";
 import type { IntegrationManifestAuth } from "../../hooks/use-integrations";
@@ -36,11 +29,7 @@ export function fieldSchemas(auth: IntegrationManifestAuth): Record<string, JSON
   ) as Record<string, JSONSchema7>;
 }
 
-/**
- * The declared fields, required ones first in `required` order; the auth type's canonical set
- * only when none are declared. The server returns `properties` in jsonb key order (shortest key
- * first), not the manifest's, so the `required` array is the only author order that survives.
- */
+/** Required fields first: the server returns `properties` in jsonb key order, so `required` is the only author order that survives. */
 export function deriveFieldNames(auth: IntegrationManifestAuth): string[] {
   const props = declared(auth);
   if (props) {
@@ -57,11 +46,7 @@ export function deriveFieldNames(auth: IntegrationManifestAuth): string[] {
   return Object.keys(CANONICAL_FIELDS[auth.type] ?? {});
 }
 
-/**
- * Seed values for a connect form: every field the auth gives a `default`.
- * Seeding is the only way a default reaches the screen, which is what keeps
- * what the user sees and what the form submits the same value.
- */
+/** Seeding is the only way a default reaches the screen, so what is shown is what is submitted. */
 export function initialCredentialValues(auth: IntegrationManifestAuth): Record<string, string> {
   const schemas = fieldSchemas(auth);
   const out: Record<string, string> = {};

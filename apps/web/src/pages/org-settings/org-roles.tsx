@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The organization roles, in the roles page's first tab.
- *
- * Four fixed roles, the same in every organization: code, not rows, so there
- * is nothing to edit and the rows open nothing. The list says what each one is
- * and how far it reaches into spaces; the matrix crosses them with the
- * capabilities they hold.
- *
- * Which role holds which capability is the server's matrix (`GET /api/org-roles`); the rows
- * only group its permissions (`lib/org-role-capabilities.ts`).
+ * The four fixed organization roles (code, not rows: nothing to edit). Which
+ * role holds which capability is the server's matrix (`GET /api/org-roles`);
+ * the rows only group its permissions (`lib/org-role-capabilities.ts`).
  */
 import { useTranslation } from "react-i18next";
 import { ORG_ROLES, type OrgRole, type ViewAsOrgRole } from "@appstrate/core/permissions";

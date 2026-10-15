@@ -7,10 +7,8 @@ import type { JSONSchema7 } from "@appstrate/core/form";
 import { setKeyword, toKeywordNumber, type NumericKeyword, type TextValue } from "./utils";
 
 /**
- * Text input for a value that is parsed into a typed keyword. The raw text lives
- * in `draft` only while the user is typing (`null` = show the prop's text), so
- * "a, " or "-" are never collapsed mid-keystroke and external changes show up
- * without an effect. The parsed value is committed on blur and on Enter.
+ * Text input parsed into a typed keyword, committed on blur/Enter. Raw text lives in `draft` only
+ * while typing (`null` = show the prop's text), so "a, " or "-" survive mid-keystroke.
  */
 export function DraftInput({
   text,

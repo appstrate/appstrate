@@ -49,13 +49,8 @@ interface AgentInputFormProps {
  * | pre-filled | author `default` or a stored value | folded into "Avancé", collapsed |
  * | prompted | nothing decides it yet | asked at the top level |
  *
- * A locked field is DISPLAYED, never hidden: the run will use that value, and
- * a launcher that silently omits it hides half of what is about to execute.
- * It renders as a value with a lock, not as a greyed-out input — "imposed" and
- * "temporarily disabled" must not look the same.
- *
- * Shared by the run modal, the run-with-options modal and the schedule editor,
- * which all feed the same `input` field of the same API.
+ * A locked field is DISPLAYED, never hidden (the run will use that value), as a value
+ * with a lock rather than a greyed-out input: "imposed" and "disabled" must not look alike.
  */
 export function AgentInputForm({
   wrapper,

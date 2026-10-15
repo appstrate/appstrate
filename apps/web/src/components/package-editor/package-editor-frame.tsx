@@ -49,13 +49,7 @@ const createPages: Record<
   },
 };
 
-/**
- * What every package editor draws around its own sections: the page (header,
- * tabs, Create bar) to create or, embedded in a package's Définition, only the
- * open section and the save bar (the settings rail already lists the sections);
- * the raw manifest (opened from `manifest.json` embedded, a tab on the page),
- * the files tab of the page, and the unsaved-changes guard.
- */
+/** What every package editor draws around its sections: page chrome to create, or embedded only the open section and save bar; plus the raw manifest, files tab and unsaved-changes guard. */
 export function PackageEditorFrame({
   editor,
   tabs,
@@ -116,8 +110,7 @@ export function PackageEditorFrame({
   );
 
   if (embedded) {
-    // Only when there is something to save, as the files explorer's bar is: a
-    // permanent bar saying "nothing to save", with two dead buttons, is furniture.
+    // Only when there is something to save, as the files explorer's bar is.
     const footer = (editor.isDirty || isPending) && (
       <div className="bg-background border-border sticky bottom-0 z-10 flex min-h-16 items-center gap-3 border-t px-6 py-3 max-lg:flex-col max-lg:items-stretch">
         <span className="text-muted-foreground text-sm">

@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * What asking an operator's endpoint for its models answered. A request that
- * never reached the endpoint is one more outcome, so the form reads one value.
- */
-
 import type {
   DiscoveredModel,
   DiscoveredModelsResponse,
@@ -12,12 +7,13 @@ import type {
 } from "../hooks/use-model-provider-credentials";
 import { normalizeHttpUrl } from "@appstrate/core/url";
 
+/** What asking an endpoint for its models answered; a request that never reached it is one more outcome. */
 export interface DiscoveryState {
   /** Identifies the endpoint+key the listing came from — see `discoveryKey`. */
   key: string;
   outcome: DiscoveredModelsResponse["outcome"] | "request_failed" | "throttled";
   models: DiscoveredModel[];
-  /** The endpoint serves more than `models` lists — a cap stopped the read. */
+  /** A cap stopped the read: the endpoint serves more than `models` lists. */
   truncated: boolean;
 }
 

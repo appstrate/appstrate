@@ -23,29 +23,18 @@ import {
 } from "../lib/hosted-connect-submit";
 
 /**
- * Standalone hosted connect form — the form half of the unified
- * connect portal. Reached when the dispatch endpoint
- * (`GET /api/integrations/connect/start`) redirects here: a non-OAuth session,
- * or an OAuth one that must first collect connection variables (AFPS §7.12).
+ * Standalone hosted connect form (the form half of the connect portal), reached
+ * when `GET /api/integrations/connect/start` redirects here: a non-OAuth
+ * session, or an OAuth one that must first collect connection variables.
  *
- * Authentication is the httpOnly page cookie pinned during dispatch — NOT the
- * platform session — so this page renders standalone (members AND embedded
- * end-users), outside the authenticated app shell. Context comes from
- * `GET /connect/context`; the secret is entered here and POSTed directly to
- * `/connect/submit` (never through the model or the chat bundle).
- *
- * Both calls go through the typed client. That is safe despite the page's
- * non-session auth: `/api/integrations/connect/*` short-circuits the whole
- * auth pipeline server-side (`skipAuth` in `lib/auth-pipeline.ts`) and both
- * handlers derive scope + actor from the page-cookie claims alone, so the
- * `X-Org-Id` / `X-Space-Id` the client middleware may inject from a
- * leftover localStorage selection is never read.
+ * Auth is the httpOnly page cookie pinned at dispatch, NOT the platform session,
+ * so it renders outside the app shell. The secret is POSTed directly to
+ * `/connect/submit` (never through the model or chat bundle). The typed client
+ * is safe here: `/api/integrations/connect/*` skips the auth pipeline and takes
+ * scope + actor from the cookie claims, so a leftover `X-Org-Id` is never read.
  */
 
-/**
- * The spec leaves the manifest `auth` block open (`additionalProperties`), so
- * the generated type is a bare record — narrow it for `<CredentialFields>`.
- */
+/** The spec leaves the manifest `auth` block open: narrow it for `<CredentialFields>`. */
 type ConnectContext = Omit<
   paths["/api/integrations/connect/context"]["get"]["responses"][200]["content"]["application/json"],
   "auth"
@@ -68,13 +57,10 @@ export function HostedConnectPage() {
   const [values, setValues] = useState<Record<string, string>>({});
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [variableErrors, setVariableErrors] = useState<Record<string, string>>({});
-  // What the user must still do on the target host for a minted credential.
-  // Nothing here is secret — the private half never leaves the server.
+  // Steps left to do on the target host for a minted credential (nothing secret).
   const [handoffSteps, setHandoffSteps] = useState<HandoffStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Technical reason behind a context-load failure (HTTP status or network
-  // error). Shown under the generic body so an invalid/expired link, a removed
-  // integration, and a network outage don't all look identical.
+  // Reason behind a context-load failure, so expired links and outages look different.
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
   useEffect(() => {
@@ -86,8 +72,7 @@ export function HostedConnectPage() {
         if (cancelled) return;
         const ctx = data as ConnectContext;
         setContext(ctx);
-        // Seed the defaults the manifest declares, so a value the user can see
-        // in the form is a value the form will actually submit.
+        // Seed manifest defaults: a visible value must be a submitted value.
         setValues(initialCredentialValues(ctx.auth));
         setVariableValues(initialVariableValues(ctx.variables));
         setPhase("form");
@@ -128,8 +113,7 @@ export function HostedConnectPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // A missing CSRF nonce means the page session is broken (cookie cleared or
-    // context never carried one) — surface it instead of a dead-button no-op.
+    // A missing CSRF nonce means a broken page session: surface it, not a dead button.
     if (!context?.csrf) {
       setError(t("integration.connect.hosted.errorBody"));
       return;
@@ -169,8 +153,7 @@ export function HostedConnectPage() {
       );
       // The OAuth callback announces the result; the form stays disabled until the window leaves.
       if (outcome.kind === "redirected") return;
-      // The connection exists: announce it now. The popup opener does not close
-      // this window, so an install block below stays up until the user is done.
+      // Announce now: the opener does not close this window, so the install block stays up.
       publishConnectCompletion(
         { ok: true, packageId: context.packageId },
         window.opener as Window | null,

@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * React Query hooks for the front-end-initiated OAuth model-provider
- * pairing flow. The dashboard mints a pairing token, surfaces the
- * matching `npx @appstrate/connect-helper <token>` command to the user,
- * and polls the pairing until the server states the outcome of the helper's
- * redeem: `connected` (the OAuth dance completed and the credential is stored),
- * `failed` (the redeem was refused), or `expired`.
+ * Hooks for the OAuth model-provider pairing flow: the dashboard mints a token, shows the
+ * `npx @appstrate/connect-helper <token>` command, and polls until the server states the
+ * redeem's outcome (`connected`, `failed` or `expired`).
  */
 
 import { $api } from "../api/client";
@@ -19,15 +16,11 @@ export function useCreateModelProviderPairing() {
   });
 }
 
-/**
- * Poll a pairing's status. `id: null` polls nothing.
- */
 export function useModelProviderPairingStatus(id: string | null): {
   state: PairingPollState;
   credentialId: string | null;
 } {
-  // Guarded like the route: either permission that mints a pairing reads it. A
-  // role preview can drop both mid-poll.
+  // Guarded like the route; a role preview can drop both permissions mid-poll.
   const { can } = usePermissions();
   const mayRead =
     can("model-provider-credentials:write") || can("model-provider-credentials:connect");

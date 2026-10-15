@@ -12,12 +12,7 @@ import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { activationGate } from "../lib/catalogue-gates";
 
-/**
- * Wire shape from the OpenAPI spec (`GET /api/library`) — the organization
- * catalog: every package, and where each one is PLACED. The space form
- * (`GET /api/spaces/{id}/library`) is the same shape with the placements
- * narrowed to the one space, so both views read the same row.
- */
+/** `GET /api/library`: every package and where it is PLACED. The space form (`/api/spaces/{id}/library`) is the same shape narrowed to one space. */
 export type LibraryResponse =
   paths["/api/library"]["get"]["responses"][200]["content"]["application/json"];
 
@@ -25,21 +20,10 @@ export type LibraryPackageItem = LibraryResponse["packages"]["agent"][number];
 
 export type LibrarySpace = LibraryResponse["spaces"][number];
 
-/**
- * Where one package sits in one space, on the only two axes that exist: how it
- * got there (`via`) and whether it runs there (`state`). `state: "none"` is a
- * placement with no local instance yet — a pending offer is exactly that.
- */
+/** Where one package sits in one space: how it got there (`via`) and whether it runs (`state`); `"none"` is a placement with no local instance, e.g. a pending offer. */
 export type LibraryPlacement = LibraryPackageItem["placements"][number];
 
-/**
- * The library every screen but one space's own page reads: `GET /api/library`,
- * graded by the server — an administrator's whole map, a member's or guest's
- * own spaces (the union of their per-space libraries). One request, whatever
- * the caller's role.
- *
- * `enabled: false` reads nothing, for a surface the caller cannot open.
- */
+/** `GET /api/library`, graded by the server (an admin's whole map, else the union of the caller's spaces); `enabled: false` reads nothing. */
 export function useCatalogueLibrary({ enabled = true }: { enabled?: boolean } = {}) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
@@ -50,14 +34,7 @@ export function useCatalogueLibrary({ enabled = true }: { enabled?: boolean } = 
   );
 }
 
-/**
- * One space's own library page.
- *
- * `enabled: false` is for the caller that already holds the answer from a
- * narrower response — a package's own detail — and must not spend a second
- * round trip restating it. A snapshot another component on the page fetched is
- * still read from the cache.
- */
+/** One space's own library page; `enabled: false` is for a caller already holding the answer (e.g. a package detail), and still reads a cached snapshot. */
 function useSpaceLibrary(options: { enabled?: boolean } = {}) {
   const scope = useOrgOnlyScope();
   const spaceId = useCurrentSpaceId();
@@ -83,13 +60,9 @@ function placementIn(
 }
 
 /**
- * Fold one activation into a cached library snapshot.
- *
- * Deactivating never removes the placement — the row and its settings survive
- * (`DELETE` flips `enabled`), so the state walks `active ⇄ inactive` and never
- * back to `none`. Activating a space the package is not placed in at all is the
- * admin's one click: the server shares it there and activates in one
- * transaction, so the optimistic row appears as `via: "shared"`.
+ * Folds one activation into a cached snapshot. Deactivating keeps the placement (`DELETE` flips
+ * `enabled`), so state walks `active ⇄ inactive`, never back to `none`. Activating where the
+ * package is not placed shares and activates in one transaction, hence `via: "shared"`.
  */
 function applyActivation(
   prev: LibraryResponse | undefined,
@@ -134,29 +107,13 @@ function applyActivation(
 }
 
 /**
- * Whether a package RUNS in the current space — `true`, `false`, or "the
- * library has nothing to say about it".
- *
- * The third answer is not pedantry. `GET /api/spaces/{id}/library` lists, per
- * family, only what the caller may READ of that family, and the permission sets
- * do not line up with the run gate: a `runner` holds `agents:run` and no
- * `agents:read`, so the library answers with no agents at all for the very
- * caller most likely to be looking at a launch button. Reading that silence as
- * "not active here" greys out a control the server would have accepted, which
- * is the exact failure the tri-state exists to prevent — so a package ABSENT
- * from the payload is `undefined`, and only a package the payload carries can
- * be called inactive. Every reader tests `=== false` / `=== true`.
- *
- * The package's HOME is deliberately NOT derived here: it comes from the
- * package's own detail response (`home_space_id`), because a cache built for
- * activation state is not the authority on who may write the package.
- *
- * The same reasoning applies to activation wherever a detail response carries
- * it — an agent's own read answers `AgentDetail.active`, and the indexes list
- * the ACTIVE set, so no agent surface reads this projection and the `runner`
- * blind spot above never reaches a launch control. What is left is the families
- * whose detail carries no such field: a skill or an MCP server. Pass
- * `enabled: false` from a page that already holds the answer.
+ * Whether a package RUNS in the current space: `true`, `false`, or `undefined` ("the library says
+ * nothing"). The library lists only what the caller may READ, and a `runner` holds `agents:run`
+ * without `agents:read`, so a package ABSENT from the payload is `undefined` (never "inactive",
+ * which would grey out a launch the server accepts). Readers test `=== false` / `=== true`.
+ * The package's HOME is not derived here; it comes from the package's own detail
+ * (`home_space_id`). Agent surfaces use `AgentDetail.active` instead; pass `enabled: false` from a
+ * page that already holds the answer.
  */
 export function usePackageActivationState(packageId: string, options: { enabled?: boolean } = {}) {
   const { data: libraryData } = useSpaceLibrary(options);
@@ -181,8 +138,6 @@ export function activationStateOf(
         .flat()
         .find((p) => p.id === packageId)
     : undefined;
-  // Not answered yet, or answered without this package in it — the two read the
-  // same way here, and neither is a refusal.
   if (!libraryPkg) return { isActiveInCurrentSpace: undefined, placement: undefined };
   const placement = placementIn(libraryPkg, spaceId);
   return {
@@ -193,11 +148,7 @@ export function activationStateOf(
   };
 }
 
-/**
- * Both forms of the library: the organization's (`useCatalogueLibrary`) and the
- * current space's (`usePackageActivationState`). Invalidating one alone leaves
- * the other's reader on a stale list.
- */
+/** Invalidates both library forms (organization's and current space's); one alone leaves the other stale. */
 export function invalidateLibraries(qc: QueryClient) {
   return invalidatePaths(qc, ["/api/library", "/api/spaces/{spaceId}/library"]);
 }
@@ -246,23 +197,16 @@ export function useSetChatEnforced() {
 }
 
 /**
- * Activate or deactivate a package in one space — the single pair of doors,
- * for all four package families (`POST /api/spaces/{id}/packages`,
- * `DELETE /api/spaces/{id}/packages/{scope}/{name}`).
- *
- * `active: true` is an upsert: it places the package (sharing it from its home
- * when the caller may) and switches it on. `active: false` switches it off and
- * leaves the row — the model, proxy and generation settings chosen here are
- * still there when it comes back on.
+ * Activate / deactivate a package in one space, for all four families (`POST /api/spaces/{id}/packages`,
+ * `DELETE .../{scope}/{name}`). `active: true` upserts (places, sharing from home when allowed) and
+ * switches on; `false` switches off and keeps the row and its settings.
  */
 export function useSetPackageActive() {
   const qc = useQueryClient();
   const invalidate = useInvalidatePackageActivation();
   const scope = useOrgOnlyScope();
   const currentSpaceId = useCurrentSpaceId();
-  // Exact keys of the two library queries (same init) for the optimistic
-  // update. Both render the same row, so patching only one of them leaves the
-  // switch the user just clicked snapping back until the refetch lands.
+  // Both library queries render the same row: patching only one snaps the clicked switch back until the refetch.
   const libraryKey = $api.queryOptions("get", "/api/library", {
     params: { header: scope.header },
   }).queryKey;
@@ -281,9 +225,7 @@ export function useSetPackageActive() {
       active: boolean;
     }) => {
       if (!active) {
-        // The deactivate route splits the `@scope/name` package id into two
-        // path params — required so the typed client never percent-encodes
-        // the `/` separating scope from name.
+        // Two path params, so the typed client never percent-encodes the scope/name `/`.
         const parsed = parseScopedName(packageId);
         if (!parsed) throw new Error(`Invalid packageId: ${packageId}`);
         await client.DELETE("/api/spaces/{spaceId}/packages/{scope}/{name}", {
@@ -299,9 +241,7 @@ export function useSetPackageActive() {
       });
     },
     onMutate: async ({ spaceId, packageId, active }) => {
-      // The space form only ever answers about the space it was read from, so
-      // it is patched for a write aimed at that same space and left alone
-      // otherwise.
+      // The space form answers only for its own space: patched only for a write aimed at it.
       const keys: ReadonlyArray<readonly unknown[]> = [
         libraryKey,
         ...(spaceId === currentSpaceId ? [spaceLibraryKey] : []),
@@ -330,15 +270,7 @@ export function useSetPackageActive() {
   });
 }
 
-/**
- * One package's switch in the current space: the server's two verdicts, served
- * on the package's row of the space library (`activation`), and the two acts.
- * Every control that flips it asks this instead of wiring the mutation, the
- * space id and the grant by hand.
- *
- * A row the library does not carry (not read yet, or not readable by the
- * caller) answers `false` both ways: the control stays dead and blames nobody.
- */
+/** One package's switch in the current space: the server's two verdicts (`activation` on its library row) and the two acts. A row the library does not carry answers `false` both ways. */
 export function usePackageActivation(packageId: string) {
   const setActive = useSetPackageActive();
   const spaceId = useCurrentSpaceId();

@@ -1,35 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * A list's filters, held in the URL rather than in the component.
- *
- * A filtered list is what people paste to each other, and the rule that gives
- * modals real URLs brings the same obligation here: Back has to undo a filter.
- * Every filtering screen shares this one copy.
- *
- * Two behaviours are the whole reason this is not four lines at each call site:
- *
- * - **Pushed, not replaced** — a filter is a place you went.
- * - **Except the search, which is replaced**: typing eight characters would
- *   otherwise put eight entries in the history and make Back useless.
- *
- * And `reset` is ONE update, not one per dimension. Three `setParams` in the
- * same tick each read the same committed location, so the last would win and
- * the other two filters would survive a "Réinitialiser" that looks like it
- * worked. That is why this function exists at all rather than a loop at the
- * call site.
- */
+// A list's filters live in the URL so Back undoes a filter. Filters are pushed (a place you
+// went); the search is replaced, or typing would flood the history. `reset` is ONE update:
+// several `setParams` in the same tick read the same committed location and the last wins.
 
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-/**
- * What a list's bar reads and writes, wherever that state happens to live.
- *
- * A page keeps it in the URL ({@link useListParams}); a list inside a page (a
- * tab, a section) keeps it in itself ({@link useLocalListParams}), because both
- * would otherwise write the page's `?q=`.
- */
+/** A page keeps it in the URL ({@link useListParams}); a list inside a page keeps it locally ({@link useLocalListParams}) or both would write the page's `?q=`. */
 export interface ListState {
   search: string;
   setSearch: (value: string) => void;
@@ -51,7 +29,7 @@ export function useListParams(filterKeys: readonly string[]) {
 
 type SetParams = ReturnType<typeof useSearchParams>[1];
 
-/** {@link useListParams} over the router's search params, apart for its test. */
+/** {@link useListParams} apart from the router hook, for its test. */
 export function urlListParams(
   params: URLSearchParams,
   setParams: SetParams,
@@ -59,7 +37,6 @@ export function urlListParams(
 ) {
   return {
     params,
-    /** The chosen values of one dimension, narrowed to what the screen allows. */
     values<T extends string>(key: string, allowed: readonly T[]): T[] {
       return readList(params.get(key), allowed);
     },
@@ -95,11 +72,7 @@ export function urlListParams(
   };
 }
 
-/**
- * The same state, held in the component — for a panel, which has no URL of its
- * own. `initial` is the filter the panel opens on (a link into it); `reset`
- * clears every dimension, that one included.
- */
+/** For a panel with no URL of its own. `initial` is the filter it opens on; `reset` clears it too. */
 export function useLocalListParams(initial: Record<string, string[]> = {}): ListState {
   const [search, setSearch] = useState("");
   const [values, setValues] = useState<Record<string, string[]>>(initial);

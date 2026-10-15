@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * What the model form submits: one typed-in model, or the rows a pick list had
- * checked, plus the inline credential to create first when the user typed a
- * key instead of picking one. Pure and DOM-free; the credential it names is
- * always a registry `providerId`.
- */
+/** What the model form submits (a typed model or checked rows, plus any inline credential to create first). Pure; the credential always names a registry `providerId`. */
 
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { paths } from "../api/client";
@@ -67,11 +62,7 @@ interface ModelFormCredentialBinding {
   providerId?: string;
 }
 
-/**
- * One model, ready to submit. The four overrides widen to `null`: `PATCH` reads
- * `null` as "drop the stored override", `POST` refuses it and goes through
- * {@link toCreateModelBody}.
- */
+/** One model, ready to submit; overrides widen to `null` ("drop the stored override" on `PATCH`; `POST` refuses it, see {@link toCreateModelBody}). */
 export type ModelFormData = ModelFormCredentialBinding &
   Omit<ModelFormModelEntry, keyof ModelCapabilityOverrides> & {
     input?: ModelInputModality[] | null;
@@ -115,20 +106,11 @@ export type ModelFormSubmission = ModelFormData | ModelFormMultiData;
 /** The ids a batch could not create, and the credential it created for a retry to bind to. */
 export interface ModelFormSubmitOutcome {
   failedModelIds: string[];
-  /**
-   * The subset of `failedModelIds` the server refused as `model_already_added`
-   * — this organization already has a row for that (credential, model) pair.
-   * Named apart because it is not a failure to retry: the model is there.
-   */
+  /** The subset of `failedModelIds` refused as `model_already_added`: not a failure to retry, the model is there. */
   duplicateModelIds: string[];
   /** The server's code for the first refusal that is not a duplicate: the form names it when it can. */
   refusalCode?: string;
-  /**
-   * The entries of `failedModelIds` the server named as refused for a reason of their own
-   * (an `errors[]` item on `add.<i>` other than a duplicate). The choice is atomic, so the other
-   * entries were not written either and stay to submit — but these are the ones to tell the user
-   * about. Empty when the refusal names no entry.
-   */
+  /** Entries refused for a reason of their own (an `errors[]` item on `add.<i>`, not a duplicate); the others were not written either (atomic) but only these are reported. */
   refusedModelIds?: string[];
   credentialId?: string;
 }
@@ -144,24 +126,13 @@ export interface ModelFormPayloadInput {
   fields: ModelFormFields;
   /** RHF `dirtyFields` — the row's name ships only when the operator typed one. */
   dirtyFields: { [K in keyof ModelFormFields]?: boolean };
-  /**
-   * `explicit`: every value that is the operator's own ships, an unticked box
-   * included; a blank field, or one still equal to `catalogEntry`, is not.
-   * `auto`: nothing on a create; every field as `null` on an edit.
-   */
+  /** `explicit`: the operator's own values ship (an unticked box included; blank or still-catalog fields do not). `auto`: nothing on create, every field `null` on edit. */
   capabilities: "explicit" | "auto";
   isEdit: boolean;
-  /**
-   * The catalog's own values for the submitted id. An edit form opens on them,
-   * so a field still equal to them is not an answer: shipping it would freeze it
-   * as an override and cut the row off from catalog updates.
-   */
+  /** The catalog's values for the id; a field still equal to them is not an answer (shipping it would freeze it as an override, cutting off catalog updates). */
   catalogEntry?: CatalogModelValues;
   provider: ModelFormProvider | undefined;
-  /**
-   * The credential the form could match against the picked provider, or
-   * `null`. `fields.credentialId` alone survives a provider switch.
-   */
+  /** The credential matching the picked provider, or `null`; `fields.credentialId` alone survives a provider switch. */
   selectedCredentialId: string | null;
   /** Each member serves the model with their own credential: `credentialId` goes `null`. */
   unbound: boolean;
@@ -169,11 +140,7 @@ export interface ModelFormPayloadInput {
 
 type CredentialFailure = { ok: false; field: "credentialId"; messageKey: string };
 
-/**
- * The credential half of any create: an existing selection, the inline key to
- * create first, or none when each member brings their own (`unbound`). A
- * subscription (`oauth2`) is paired, never typed: it binds a selection or nothing.
- */
+/** The credential half of any create: a selection, the inline key to create first, or none (`unbound`). A subscription (`oauth2`) is paired, never typed. */
 function resolveCredentialBinding(input: {
   provider: ModelFormProvider | undefined;
   selectedCredentialId: string | null;

@@ -107,8 +107,7 @@ function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentMo
 export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
-  // Only an agent has a narrower read: without `agents:read` a runner launches
-  // it and follows its own runs, but does not see what it is made of.
+  // Without `agents:read` a runner launches an agent and follows its runs but does not see what it is made of.
   const fullRead = type !== "agent" || can("agents:read");
   const {
     scope,
@@ -128,22 +127,16 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const detailQuery = usePackageDetail(type, packageId);
   const { data: detail, error } = detailQuery;
   const { data: versionInfo } = useVersionInfo(type, type === "agent" ? packageId : undefined);
-  // The model verdict alone: it holds whatever else blocks the run first. Read
-  // here, beside the detail, so the alert does not wait for the loading gate.
+  // Read beside the detail so the alert does not wait for the loading gate.
   const modelBlocker = useAgentModelBlocker(type === "agent" ? packageId : undefined);
 
-  // Agents list for "Used by" tab enrichment
-
-  // Type-narrowed aliases for type-specific branches
   const agentDetail = type === "agent" ? (detail as Versioned<AgentDetail> | undefined) : undefined;
   const pkgDetail =
     type !== "agent" ? (detail as Versioned<OrgPackageItemDetail> | undefined) : undefined;
 
   const displayName = agentDetail?.display_name ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
   const source = agentDetail?.source ?? pkgDetail?.source;
-  // WHICH definition the server projected. Every type answers it now, from the
-  // one function that decides it, so the read-only banner below is a single
-  // condition rather than one per type.
+  // WHICH definition the server projected (draft or published), the same for every type.
   const definition = (agentDetail ?? pkgDetail)?.definition;
   const version = agentDetail?.version ?? pkgDetail?.version;
   const hasUnarchivedChanges =
@@ -155,11 +148,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { data: versionDetail, error: versionError } = versionQuery;
   const versionLoading = isQueryInFlight(versionQuery);
 
-  // The server's own flag gates publishing (the header badge and the publish
-  // dialog), as it does for `appstrate packages publish`: the server judges the
-  // content itself — annexes included, which the manifest/prompt comparison
-  // below cannot see — and answers `409 no_changes` when nothing moved. The
-  // comparison only decides whether a diff tab has anything to show.
+  // The server's flag gates publishing (it sees annexes the comparison below cannot, and answers
+  // `409 no_changes`); the comparison only decides whether a diff tab has anything to show.
   const hasTimestampChanges = source !== "system" && !!hasUnarchivedChanges;
   const latestDiffQuery = useVersionDetail(
     type,
@@ -180,30 +170,19 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const downloadPackage = usePackageDownload(scope, name);
   const downloadBundle = useAgentBundleExport(scope, name);
-  // Only a skill or an MCP server needs this: their detail response carries no
-  // `active`, so the library's projection of the placement is the only answer
-  // available. An agent's detail answers for itself (`AgentDetail.active`,
-  // read by `AgentRunButton`, `AgentActions` and the banner below), and
-  // asking the library too would be one page reading one fact twice — so the
-  // query is not even mounted there.
+  // Skills and MCP servers only: their detail carries no `active`. An agent's detail answers for itself (`AgentDetail.active`), so the query is not mounted there.
   const { isActiveInCurrentSpace } = usePackageActivationState(packageId, {
     enabled: type !== "agent",
   });
-  // The package's own detail response is the authority on both halves of the
-  // home contract: the id (only when this caller reaches that space) and the
-  // write verdict. `undefined` means "not loaded yet", which every gate reads
-  // as "no".
+  // The detail response is the authority on the home contract; `undefined` (not loaded) reads as "no".
   const homeSpaceId = (agentDetail ?? pkgDetail)?.home_space_id;
   const homeWritable = (agentDetail ?? pkgDetail)?.home_writable;
   const homeDeletable = (agentDetail ?? pkgDetail)?.home_deletable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
 
   // ── State ──
-  // The tabs this caller may MOUNT — the single gate, since `useTabWithHash`
-  // falls back to the default tab for a hash naming anything outside the list.
-  // An agent's tabs are the same for every role: a tab whose read the caller
-  // lacks says so in its panel (`RoleLimitNotice`) instead of disappearing, so
-  // the page reads the same whatever the role and only its content changes.
+  // The tabs this caller may MOUNT (`useTabWithHash` falls back for anything outside the list).
+  // An agent's tabs are the same for every role; a tab the caller cannot read says so (`RoleLimitNotice`).
   const allValidTabs: readonly PackageTab[] =
     type === "agent" ? AGENT_DETAIL_TABS : ["overview", "settings", "usedBy"];
   // Every detail opens on its summary; an agent the reader may only run opens on
@@ -217,9 +196,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     return <PackageDetailSkeleton type={type} />;
   if (error || !detail) return <ResourceErrorState error={error} />;
 
-  // A published version whose stored archive is unavailable EXISTS — redirecting
-  // to the live page (what any other version failure does) would hide that it
-  // is broken. Say so, and leave the way back to the live page one click away.
+  // A version with an unavailable archive EXISTS: redirecting (as other version failures do) would hide that it is broken.
   if (
     isVersionView &&
     versionError instanceof ApiError &&
@@ -253,8 +230,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   }
   const { isHistoricalVersion } = versionResult;
 
-  // The manifest the page is looking at — the archived one when a version is
-  // pinned, the live draft otherwise. Same rule the file explorer follows.
+  // The manifest on screen: the archived one when a version is pinned, else the live draft.
   const effectiveManifest = isHistoricalVersion ? versionDetail?.manifest : currentManifest;
 
   // A pinned version shows its OWN parameter schema; one it does not declare
@@ -334,8 +310,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // Versions live in Paramètres › Explorer for every type.
   const versionsProps = {
-    // Restoring writes the draft, deleting removes a version: both are judged
-    // in the package's HOME space, never in the space being browsed.
+    // Judged in the package's HOME space, never the space being browsed.
     canRestore: !isBuiltIn && !!homeWritable,
     canDelete: !isBuiltIn && !!homeDeletable,
     // The page's « Créer une version » (PackageActionsDropdown's `isMutable`).
@@ -351,10 +326,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         <SharedHeader
           detail={unifiedForHeader}
           isHistoricalVersion={isHistoricalVersion}
-          // The server's own flag, as for the publish dialog below. For a
-          // package it is authoring state, only whoever can publish the draft has
-          // a use for it; an agent's header names its draft to whoever reads it,
-          // and only when it differs from the last published version.
+          // A package's draft is authoring state (publishers only); an agent's header names it to any reader, when it differs from the last version.
           draftVerdictPending={draftVerdictPending}
           hasUnarchivedChanges={
             type === "agent" ? hasArchivableChanges : hasTimestampChanges && !!homeWritable
@@ -413,17 +385,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
         {type === "agent" && <ModelRequiredAlert blocker={modelBlocker} />}
 
-        {/* Placed here, switched off. The page renders in full — reading and
-          configuring an agent is not running it — and says the one thing that
-          would otherwise turn a click into a 404. */}
         {agentDetail && !agentDetail.active && <AgentInactiveAlert packageId={packageId} />}
 
-        {/* Nothing has ever been published and the working copy is not this
-          reader's: what the page renders below is the author's work in
-          progress. Saying it is what makes the greyed-out Run button legible
-          — and the page renders at all precisely because reading a definition
-          is not running it. True of every package type: the server answers
-          `definition` for all four from one function. */}
+        {/* Unpublished and not this reader's working copy: says why Run is greyed out. */}
         <PackageOwnershipNotice
           type={type}
           isOwned={isOwned}

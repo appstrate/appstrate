@@ -3,13 +3,7 @@
 import { toggleValue } from "../lib/toggle-value";
 import { createKeyedLocalStore } from "./local-storage";
 
-/**
- * Which columns a user has hidden, per table, remembered across reloads.
- *
- * A preference and not a location, so it stays out of the URL: a link to a
- * filtered list should open on the reader's own columns rather than impose the
- * sender's — the same call as the cards/table view.
- */
+/** Hidden columns per table, persisted; a preference, so kept out of the URL (like the cards/table view). */
 
 const NONE: string[] = [];
 

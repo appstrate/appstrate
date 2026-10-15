@@ -1,21 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * OIDC PKCE helpers for the platform SPA.
- *
- * The SPA uses the OIDC authorize flow to route login through the shared
- * server-rendered login page. After login, the Better Auth session cookie
- * is the primary auth mechanism — OIDC tokens are only used to confirm
- * the user's identity at callback time.
- */
+/** OIDC PKCE helpers for the SPA: the Better Auth session cookie is the real auth, the OIDC tokens are discarded. */
 
 interface OidcConfig {
   clientId: string;
   issuer: string;
-  // Canonical callback URL registered server-side on the instance client.
-  // Use this verbatim — deriving it from `window.location.origin` breaks
-  // when `APP_URL` differs from the browser origin (reverse proxy, TLS
-  // termination, subdomain mismatch) and triggers `redirect_uri_mismatch`.
+  // Use verbatim: deriving it from `window.location.origin` breaks behind a
+  // reverse proxy (`redirect_uri_mismatch`).
   callbackUrl: string;
 }
 
@@ -39,18 +30,7 @@ async function calculateCodeChallenge(verifier: string): Promise<string> {
   return base64url(new Uint8Array(digest));
 }
 
-/**
- * OAuth `state` — CSRF nonce + post-login redirect carrier.
- *
- * The state is a base64url-encoded JSON payload `{ n, r? }`: `n` is a random
- * nonce (the CSRF property), `r` the optional post-login redirect path. The
- * authorize endpoint echoes `state` verbatim, so `r` survives server-side
- * detours that a new browsing context cannot: the email-verification flow
- * (`POST /api/oauth/register` with SMTP → "check your email" → link opens in
- * a NEW tab/device where `sessionStorage` is empty) resumes the OAuth flow
- * via the pinned `callbackURL` and still lands on `/auth/callback` with this
- * state — the only surviving carrier of where the user was headed.
- */
+/** OAuth `state`: base64url JSON `{ n, r? }` (CSRF nonce, post-login redirect); the only carrier surviving the email-verification new tab. */
 export function generateState(redirectTo?: string): string {
   const payload: { n: string; r?: string } = {
     n: base64url(crypto.getRandomValues(new Uint8Array(16))),
@@ -59,14 +39,7 @@ export function generateState(redirectTo?: string): string {
   return base64url(new TextEncoder().encode(JSON.stringify(payload)));
 }
 
-/**
- * Extract the post-login redirect from an echoed `state` parameter.
- *
- * Returns `undefined` for anything that is not a same-origin relative path —
- * malformed base64/JSON (including legacy opaque random states), absolute
- * URLs, and protocol-relative `//host` forms — so a crafted callback URL can
- * never turn this into an open redirect.
- */
+/** Post-login redirect from an echoed `state`; `undefined` unless a same-origin relative path (no open redirect). */
 export function decodeStateRedirect(state: string): string | undefined {
   try {
     const b64 = state.replace(/-/g, "+").replace(/_/g, "/");
@@ -86,17 +59,7 @@ const OIDC_STATE_KEY = "appstrate_oidc_state";
 const OIDC_VERIFIER_KEY = "appstrate_oidc_verifier";
 const OIDC_REDIRECT_KEY = "appstrate_oidc_redirect";
 
-/**
- * Build the `URLSearchParams` shared by both the login (`/oauth2/authorize`)
- * and signup (`/api/oauth/register`) entry points and persist the PKCE
- * state for the eventual `/auth/callback` return.
- *
- * Both entry points feed the same underlying PKCE + authorize flow — the
- * server-rendered register page POSTs back to itself then redirects to
- * `/api/auth/oauth2/authorize${url.search}`, so the query string must
- * already carry every authorize parameter (including `resource` for the
- * RFC 8707 enforcement in `oidcGuardsPlugin`).
- */
+/** Authorize params for login and signup (the register page forwards `url.search`), plus PKCE state persistence. */
 async function initPkceFlow(
   config: OidcConfig,
   redirectTo: string | undefined,
@@ -110,18 +73,13 @@ async function initPkceFlow(
   sessionStorage.setItem(OIDC_VERIFIER_KEY, codeVerifier);
   if (redirectTo) sessionStorage.setItem(OIDC_REDIRECT_KEY, redirectTo);
 
-  // `resource` is required by `oidcGuardsPlugin` (RFC 8707) on both the
-  // authorize and token endpoints. `config.issuer` is one of the server's
-  // configured protected resources (`${APP_URL}/api/auth`). The SPA never
-  // consumes the minted tokens — the BA session cookie is the real auth — but
-  // the grant still has to succeed, so `resource` is non-negotiable.
+  // `resource` (RFC 8707) is required by `oidcGuardsPlugin` on authorize and
+  // token; `config.issuer` is one of the server's protected resources.
   const params = new URLSearchParams({
     response_type: "code",
     client_id: config.clientId,
     redirect_uri: config.callbackUrl,
-    // `offline_access` deliberately omitted: the SPA discards the tokens
-    // immediately after exchange (see `handleOidcCallback`), so a refresh
-    // token would be dead weight persisted server-side with no consumer.
+    // No `offline_access`: the tokens are discarded, a refresh token would have no consumer.
     scope: "openid profile email",
     state,
     code_challenge: codeChallenge,
@@ -129,24 +87,13 @@ async function initPkceFlow(
     resource: config.issuer,
   });
 
-  // OIDC `login_hint` (standard param) — the oauth-provider carries it
-  // through (signed) to the server-rendered login/register pages, which
-  // pre-fill and lock the email field. Used by the invitation flow to pin
-  // the invited address. Purely UX: the accept endpoint re-checks that the
-  // session email matches the invitation server-side, so a tampered field
-  // cannot escape it.
+  // Pre-fills and locks the email on the hosted pages (invitation flow). Purely
+  // UX: the accept endpoint re-checks the session email server-side.
   if (loginHint) params.set("login_hint", loginHint);
 
   return params;
 }
 
-/**
- * Initiate the OIDC Authorization Code + PKCE flow for login.
- *
- * Redirects to the authorization endpoint; the server-rendered login page
- * handles authentication. On success the browser lands on `/auth/callback`
- * with an authorization code.
- */
 export async function startOidcLogin(redirectTo?: string, loginHint?: string): Promise<void> {
   const config = getOidcConfig();
   if (!config) {
@@ -156,13 +103,7 @@ export async function startOidcLogin(redirectTo?: string, loginHint?: string): P
   window.location.assign(`/api/auth/oauth2/authorize?${params.toString()}`);
 }
 
-/**
- * Initiate the OIDC PKCE flow for signup — same as login, but targets the
- * server-rendered registration page at `/api/oauth/register`. On successful
- * sign-up the server forwards to `/api/auth/oauth2/authorize${url.search}`,
- * reusing the same `state`/`code_challenge`/`resource` that were generated
- * here, so the callback handler cannot tell login and signup apart.
- */
+/** Same as login, but targets the registration page; the callback cannot tell the two apart. */
 export async function startOidcSignup(redirectTo?: string, loginHint?: string): Promise<void> {
   const config = getOidcConfig();
   if (!config) {
@@ -173,29 +114,15 @@ export async function startOidcSignup(redirectTo?: string, loginHint?: string): 
 }
 
 /**
- * Handle the callback from the OIDC authorize endpoint.
+ * Handle the authorize callback: validate `state`, exchange the code (tokens
+ * are discarded), return the post-login redirect.
  *
- * Same-context flow (the common case): validates the state against the
- * `sessionStorage` copy, exchanges the code for tokens (to properly complete
- * the OIDC flow and prevent the code from being replayed), and returns the
- * post-login redirect path. The tokens themselves are discarded — the real
- * auth is the Better Auth session cookie set during login.
- *
- * Cross-context resume: the email-verification flow pauses the OAuth dance
- * ("check your email") and resumes it via the link in the email — which
- * opens in a NEW tab or device where `sessionStorage` is empty (it is
- * per-tab). There is then no stored state to compare and no PKCE verifier to
- * exchange with, but neither is needed: Better Auth's
- * `autoSignInAfterVerification` already set the session cookie, and the SPA
- * discards the tokens anyway. So when NO state was ever stored in this
- * context we skip the exchange and recover the redirect from the echoed
- * `state` payload. The caller MUST validate the session afterwards
- * (`refreshAuth()` in `auth-callback.tsx` throws when no session exists) —
- * that session check is what authenticates this path. A crafted callback URL
- * gains nothing here: the attacker-supplied code is never exchanged, and the
- * decoded redirect is constrained to a same-origin relative path.
- *
- * A PRESENT-but-different stored state remains a hard failure (CSRF guard).
+ * Cross-context resume (email-verification link opened in a new tab, so no
+ * stored state or verifier): skip the exchange and recover the redirect from
+ * `state`. The caller MUST validate the session afterwards (`refreshAuth()`) —
+ * that check is what authenticates this path; the code is never exchanged and
+ * the redirect is same-origin only. A PRESENT-but-different stored state stays
+ * a hard failure (CSRF guard).
  */
 export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
   const config = getOidcConfig();
@@ -222,10 +149,7 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
   sessionStorage.removeItem(OIDC_REDIRECT_KEY);
 
   if (storedState === null) {
-    // Cross-context resume (see the function doc): nothing was ever stored
-    // in this tab, so there is no verifier to exchange with. Skip the token
-    // exchange — the BA session cookie is the real auth, and the caller
-    // validates it right after. The unexchanged code simply expires.
+    // Cross-context resume (see the function doc); the unexchanged code just expires.
     return { redirectTo: decodeStateRedirect(state) ?? "/" };
   }
 
@@ -236,9 +160,7 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
     throw new Error("Missing code verifier — session may have expired");
   }
 
-  // `resource` MUST name one of the server's configured protected resources —
-  // the `oidcGuardsPlugin` rejects any `authorization_code`/`refresh_token`
-  // grant without it (RFC 8707). `config.issuer` is that resource.
+  // `oidcGuardsPlugin` rejects a grant without `resource` (RFC 8707).
   const tokenBody = new URLSearchParams({
     grant_type: "authorization_code",
     code,
@@ -248,9 +170,8 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
     resource: config.issuer,
   });
 
-  // Untyped on purpose: end-user-realm OAuth token exchange — the typed
-  // client's middleware would inject platform X-Org-Id/X-Space-Id
-  // headers into the grant, which is wrong in this realm.
+  // Untyped on purpose: the typed client's middleware would inject platform
+  // X-Org-Id/X-Space-Id headers, wrong in this end-user realm.
   const res = await fetch("/api/auth/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -266,19 +187,8 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
 }
 
 /**
- * OIDC logout — redirect through the server-side logout endpoint.
- * Clears the BA session cookie + the OIDC session on the IdP side.
- *
- * The post-logout redirect always lands on `/login` (the only URI the
- * server validates against the client's registered `postLogoutRedirectUris`
- * — an exact-match check, so a dynamic path like `/invite/:token` can't be
- * passed there). To still return the user somewhere specific after they
- * re-authenticate, `postLoginRedirect` is stashed in the same
- * `OIDC_REDIRECT_KEY` that `handleOidcCallback` consumes: logout → `/login`
- * → the gate re-runs `startOidcLogin(undefined)` (which does NOT overwrite
- * the key) → the callback reads the stash and returns there. Used by the
- * invite "log out and retry" path so a wrong-account user lands back on the
- * invitation after signing in with the correct account.
+ * Post-logout always lands on `/login` (exact-match `postLogoutRedirectUris`), so
+ * `postLoginRedirect` is stashed under `OIDC_REDIRECT_KEY`; `startOidcLogin(undefined)` keeps it.
  */
 export function startOidcLogout(postLoginRedirect?: string): void {
   const config = getOidcConfig();

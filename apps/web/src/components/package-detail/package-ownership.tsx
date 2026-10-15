@@ -8,12 +8,7 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import type { PackageType } from "@appstrate/core/validation";
 import { packageDetailPath } from "../../lib/package-paths";
 
-/**
- * What the reader needs to know about whose package this is: a system package is
- * read-only (duplicate it to customise), a fork names its origin, and a draft
- * the reader cannot write is somebody's work in progress. An agent says nothing
- * about being read-only — its header marks a system agent, and it can be run.
- */
+/** Whose package this is: system (read-only), a fork's origin, or someone else's draft. An agent never says read-only; its header marks system agents. */
 export function PackageOwnershipNotice({
   type,
   isOwned,

@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Where the model form's pick list comes from, and the one row shape all three
- * sources produce. Descriptions serve the picker; endpoint capabilities alone
- * may become overrides when adding a discovered model.
- */
+// Where the model form's pick list comes from, and the one row shape all three sources
+// produce. Only endpoint capabilities may become overrides when adding a discovered model.
 
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type {
@@ -18,12 +15,10 @@ import { catalogValues, type CatalogModelValues } from "./row-overrides-catalog"
 export type ModelSource = "catalog" | "discover" | "search";
 
 /**
- * Which listing answers for a provider. `search` is a provider declaring
- * `live_model_search`: its live search returns the billing rate, which
- * `POST /discover` never does. `catalog` covers every entry Pi's registry
- * describes and every oauth2 one (a subscription's listing is what the plan
- * serves, and discovery refuses to spend a subscription token). `discover` is
- * the rest.
+ * Which listing answers for a provider. `search`: `live_model_search` (returns the
+ * billing rate, which `POST /discover` never does). `catalog`: entries Pi's registry
+ * describes and every oauth2 one (discovery refuses to spend a subscription token).
+ * `discover`: the rest.
  */
 export function modelSource(
   provider:
@@ -129,10 +124,7 @@ export function searchRows(models: readonly OpenRouterModel[]): ModelPickRow[] {
   );
 }
 
-/**
- * A model the organization already has, as a row of the pick list: ticked, so that the list
- * can untick it, even when the provider's listing no longer offers it. It is never sent again.
- */
+/** A model the organization already has, as a ticked row (so it can be unticked) even when the listing no longer offers it; never sent again. */
 export function existingRow(m: OrgModelInfo): ModelPickRow {
   return pickRow({
     id: m.modelId ?? m.id,

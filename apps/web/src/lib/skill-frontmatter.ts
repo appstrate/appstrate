@@ -6,9 +6,8 @@ import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { SKILL_FRONTMATTER_ERROR_KEYS, filePosition, sentenceKey } from "./mutation-error";
 
 /**
- * The i18n key naming the fault, with the `position` its sentence may hold. The checker's own
- * sentence is English (and a YAML parser's text with it), so the screen says the rule in the
- * reader's language and never quotes it; only the YAML error's position is carried over.
+ * The i18n key naming the fault. The checker's sentence is English, so the screen
+ * says the rule in the reader's language; only the YAML error's position is carried over.
  */
 export function skillFrontmatterError(
   content: string,
@@ -24,12 +23,7 @@ export function skillFrontmatterError(
   };
 }
 
-/**
- * The instructions of a SKILL.md, without the frontmatter that names it. Read
- * as markdown, the block's closing `---` turns `name:`/`description:` into a
- * heading. Delimited the way `parseSkillFrontmatter` reads it; an unclosed
- * block is left as written.
- */
+/** A SKILL.md without its frontmatter (as markdown its closing `---` makes a heading); delimited as `parseSkillFrontmatter` reads it. */
 export function skillBody(content: string): string {
   const normalized = content.replace(/\r\n?/g, "\n");
   if (!normalized.startsWith("---")) return content;

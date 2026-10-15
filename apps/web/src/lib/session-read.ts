@@ -7,10 +7,7 @@ export function sessionExpected(storage: Storage): boolean {
   return storage.getItem(SIGNED_IN_KEY) !== null;
 }
 
-/**
- * Set on a session and just before any sign-in attempt, so the next boot drops
- * a cookie that yields none. A hint: a stale value corrects itself in one boot.
- */
+/** Set on a session and before any sign-in attempt. A hint: a stale value corrects itself in one boot. */
 export function rememberSignedIn(storage: Storage, signedIn: boolean): void {
   if (signedIn) storage.setItem(SIGNED_IN_KEY, "1");
   else storage.removeItem(SIGNED_IN_KEY);

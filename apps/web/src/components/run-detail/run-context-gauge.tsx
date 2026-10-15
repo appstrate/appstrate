@@ -7,20 +7,10 @@ import type { RunTurnRow } from "../log-utils";
 import { formatCompactTokens, formatWindowPercent, readRunContext } from "../run-context";
 
 /**
- * The run's context occupancy, a fact of the overview's Usage card.
- *
- * Two readings, because the useful question changes when the run stops: active
- * shows the CURRENT context (`128k / 200k · 64 %` — headroom left before
- * auto-compaction), terminal shows the PEAK (`187k / 200k` — did this run come
- * close). The two diverge exactly when the runner compacted, so which reading
- * is on screen is stated: `aria-valuetext` names it in both states, and the
- * terminal one, the misreadable number, carries a tooltip.
- *
- * `contextTokens` exists only at turn boundaries, so the gauge is still for a
- * whole turn, then jumps. No interpolation: a creeping bar would be an invented
- * number, and would hide the compaction drop.
- *
- * Renders nothing when there is no truthful reading (`readRunContext`).
+ * Context occupancy: active shows the CURRENT context, terminal the PEAK; they diverge when the
+ * runner compacted, so `aria-valuetext` names the reading and the terminal one has a tooltip.
+ * `contextTokens` exists only at turn boundaries: no interpolation (it would hide the compaction
+ * drop). Renders nothing without a truthful reading (`readRunContext`).
  */
 export function ContextGaugeReadout({
   turns,
@@ -40,8 +30,7 @@ export function ContextGaugeReadout({
 
   return (
     <span className="inline-flex items-center gap-1.5 tabular-nums">
-      {/* `aria-valuenow` is clamped into its range: "210000 out of 200000"
-          announces a broken widget. The raw count stays in the text. */}
+      {/* `aria-valuenow` is clamped: "210000 out of 200000" announces a broken widget. */}
       <span
         role="progressbar"
         aria-label={isActive ? t("run.contextGaugeAria") : t("run.contextGaugePeakAria")}
@@ -83,10 +72,7 @@ export function ContextGaugeReadout({
   );
 }
 
-/**
- * What the terminal gauge's tooltip says. Exported for the tests: Radix keeps
- * tooltip content unmounted until opened and the web test runner has no DOM.
- */
+/** Exported for tests: Radix keeps tooltip content unmounted until opened. */
 export function ContextGaugePeakHint() {
   const { t } = useTranslation("agents");
   return <span className="block text-xs">{t("run.contextGaugePeakHint")}</span>;

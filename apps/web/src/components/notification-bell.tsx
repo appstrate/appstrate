@@ -44,9 +44,7 @@ function notificationTarget(
   canReach: (path: RoutePath) => boolean,
 ): string | null {
   if (notification.type === "package_shared") {
-    // One share, one decision: open THAT package's sheet, where the alert
-    // names the space it was shared with and activates it there — not a list
-    // the reader has to search.
+    // One share, one decision: open THAT package's sheet, not a list to search.
     const share = notification.payload;
     return share && canReach("/catalogue/:reading/:type")
       ? catalogueHref(share.package_type, { packageId: share.packageId })
@@ -149,10 +147,7 @@ export function NotificationContent({
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
             const packageId = payloadString(notification.payload, "packageId");
-            // A SHARE names the sharer and the package and has no run behind
-            // it, so it carries no status to badge — reading every row as a
-            // finished run titled it "Agent supprimé", the fallback for a run
-            // whose agent is gone.
+            // A SHARE has no run behind it, so no status: read as a run it was titled "Agent supprimé".
             const shared = notification.type === "package_shared";
             const status = shared ? null : payloadString(notification.payload, "status");
             const displayName = shared

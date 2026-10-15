@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The two pieces every product's shell is built from: the sidebar frame and the
- * header.
- *
- * Studio and the chat are different products with different navigations, and
- * they still have to read as one app — so what surrounds the navigation is
- * written ONCE, here, and each product passes only what is its own. When the
- * brand cell, the meta block or the header's right end changes, it changes in
- * both without anyone remembering to.
+ * The sidebar frame and header every product's shell is built from: what surrounds the
+ * navigation is written ONCE here, and each product passes only its own navigation.
  */
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
@@ -43,12 +37,7 @@ import {
   useSidebar,
 } from "@appstrate/ui/components/sidebar";
 
-/**
- * Where a page's own header controls land. The header belongs to the shell, and
- * the shell stays mounted while pages come and go, so a page does not pass its
- * controls down to the header: it portals them into this slot
- * (`ShellHeaderActions`), and they leave with the page.
- */
+/** Where a page's header controls land: the shell stays mounted, so pages portal into this slot (`ShellHeaderActions`) and the controls leave with the page. */
 const HeaderActionsSlot = createContext<HTMLElement | null>(null);
 const SetHeaderActionsSlot = createContext<((node: HTMLElement | null) => void) | null>(null);
 
@@ -80,9 +69,7 @@ export function ShellSidebar({
   contentClassName?: string;
 }) {
   const { t } = useTranslation();
-  // Two organization-wide destinations: settings, which always hold the
-  // caller's own account, and the catalogue, drawn when its route admits the
-  // caller (`ROUTE_ACCESS`).
+  // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`).
   const canReach = useCanReach();
   const pendingShares = usePendingShares();
   const overlayPath = useOverlayPath() ?? "";
@@ -90,8 +77,7 @@ export function ShellSidebar({
   const catalogueActive = isUnder(overlayPath, "/catalogue");
   const catalogueReachable = canReach("/catalogue");
   const catalogueTo = pendingShares.href ?? catalogueHref("agent");
-  // The two entries below are always on screen, so their overlays' code is
-  // fetched ahead of any click (`lib/overlay-chunks.ts`).
+  // Always on screen, so their overlays' code is fetched ahead of any click (`lib/overlay-chunks.ts`).
   useEffect(
     () =>
       preloadOverlaysWhenIdle(
@@ -102,13 +88,8 @@ export function ShellSidebar({
 
   return (
     <Sidebar>
-      {/* Head: the brand cell, at the header's height and closed by the
-          header's own rule — the two lines meet across the shell instead of
-          nearly meeting. Beside it, the collapse: where the header's burger
-          brings the sidebar back, so both gestures happen in one corner. It
-          shows while the pointer is anywhere on the sidebar, or on focus
-          (Notion's way; `group` is the sidebar's own root), so at rest the
-          head is the workspace's name alone. */}
+      {/* The brand cell sits at the header's height so the two rules meet across the shell. The
+          collapse shows while the pointer is on the sidebar or on focus (`group` is its root). */}
       <SidebarHeader className="border-sidebar-border h-header flex-row items-center gap-1 border-b px-2 py-0">
         <div className="min-w-0 flex-1">
           <OrgSwitcher variant="brand" />
@@ -117,23 +98,14 @@ export function ShellSidebar({
           <PanelLeft className="size-4" />
         </SidebarTrigger>
       </SidebarHeader>
-      {/* Below the header's rule, the products. No second rule: the tabs are
-          their own enclosure, and a line under them would cut the column into
-          more pieces than it has ideas. More air above than below, so the tabs
-          read as the head of the navigation rather than as a tail of the rule
-          they sit under. */}
       <div className="px-2 pt-4 pb-1">
         <ProductTabs />
       </div>
       <SidebarContent className={cn("gap-0", contentClassName)}>{children}</SidebarContent>
-      {/* Settings is a permanent global destination, not only an action hidden
-          inside the context switcher. It sits above the user boundary and
-          represents the settings overlay as the active destination. */}
       <SidebarFooter className="gap-0 p-0">
         <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
           <SidebarMenuItem>
             <SidebarMenuButton asChild isActive={catalogueActive}>
-              {/* Where you are is not a control: nothing to click. */}
               {catalogueActive ? (
                 <span aria-current="page">
                   <LibraryBig />
@@ -141,8 +113,7 @@ export function ShellSidebar({
                 </span>
               ) : (
                 <Link
-                  // With shares waiting, the entry opens ON them: the count is a
-                  // promise, and the first click keeps it.
+                  // With shares waiting, the entry opens ON them.
                   to={catalogueTo}
                   {...overlayIntent(catalogueTo)}
                 >
@@ -151,10 +122,7 @@ export function ShellSidebar({
                 </Link>
               )}
             </SidebarMenuButton>
-            {/* Packages offered to a space this caller reaches and switched on
-                by nobody. The share route notifies a PERSON and says nothing
-                when the target is a team space, so without this an offer to the
-                team is visible only to whoever thinks to go and look. */}
+            {/* The share route notifies a PERSON, not a team space: without this badge an offer to a team goes unseen. */}
             {pendingShares.count > 0 && (
               <SidebarMenuBadge>
                 <CountBadge
@@ -183,7 +151,6 @@ export function ShellSidebar({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        {/* Who you are, and nothing else: the collapse control is in the head. */}
         <div className="border-sidebar-border border-t p-2">
           <NavUser variant="row" />
         </div>
@@ -205,11 +172,7 @@ export function ShellHeader() {
         isMobile && openMobile && "invisible",
       )}
     >
-      {/* Edge to edge, never centred on the page width: the header belongs to
-          the shell, not to the page column, so its two ends sit at the shell's
-          two edges whatever the screen's width. Collapsed, the left inset is
-          the sidebar's own (`px-2`), so the burger stands where the brand cell
-          stood and its icon over the navigation's icons. */}
+      {/* Edge to edge, not centred on the page column. Collapsed, the left inset is the sidebar's own (`px-2`). */}
       <div
         className={cn(
           "px-gutter h-header flex w-full shrink-0 items-center gap-2 border-b border-b-black/5 md:border-b-0",
@@ -220,9 +183,7 @@ export function ShellHeader() {
         <SidebarTrigger className="-ml-5 size-11 shrink-0 rounded-l-none md:hidden">
           <Menu className="size-4" />
         </SidebarTrigger>
-        {/* Desktop, collapsed: nothing of the sidebar is left on screen, so its
-            way back is here. A click pins it open again. It carries the unread
-            dot the hidden Runs entry cannot show. */}
+        {/* Desktop, collapsed: the sidebar's way back, carrying the unread dot the hidden Runs entry cannot show. */}
         {collapsed && (
           <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
             <Menu className="size-4" />
@@ -237,11 +198,6 @@ export function ShellHeader() {
         <div className="hidden min-w-0 flex-1 md:flex">
           <ShellBreadcrumb />
         </div>
-        {/* The page's own actions, then the one utility that is global but not
-            personal: notifications. It sits here rather than in the sidebar
-            because the sidebar answers "where am I" and this answers "what is
-            new" — and because a header holding only a trail is a header holding
-            nothing. */}
         <div className="flex shrink-0 items-center gap-1">
           <div ref={setActionsSlot} className="flex items-center gap-1 empty:hidden" />
           <NotificationBell />

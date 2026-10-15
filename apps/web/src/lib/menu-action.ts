@@ -4,10 +4,8 @@ import type { To } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 
 /**
- * One deed of a menu, declared once whichever menu draws it: a row's « … »
- * (`TableRowActions`), a page's Actions menu (`PageActionsMenu`), or the button
- * of an empty collection (`EmptyStateAction`). `onSelect` acts in place, `to`
- * goes to a route of the app, `href` opens an external page in a new tab.
+ * One deed of a menu, declared once whichever menu draws it. `onSelect` acts in
+ * place, `to` goes to an app route, `href` opens an external page in a new tab.
  */
 export interface MenuAction {
   id: string;
@@ -19,7 +17,6 @@ export interface MenuAction {
   disabled?: boolean;
   /** Destroys or revokes: drawn last, behind a separator, in the destructive tone. */
   destructive?: boolean;
-  /** Left out of the menu (the caller's permission or state says no). */
   hidden?: boolean;
   testId?: string;
 }

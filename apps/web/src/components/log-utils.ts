@@ -33,17 +33,10 @@ export interface ToolExecutionEntry extends ExecutionEntryBase {
   /** True when a result arrived without a matching start row. */
   orphaned?: boolean;
   /**
-   * Wall time of a tool call, in milliseconds, when the runner could pair the
-   * call's start and end (`data.durationMs`). Omitted otherwise — the runner
-   * deliberately emits nothing rather than a misleading zero.
-   *
-   * NOTE: whether this survives a live SSE frame depends on the stream, not on
-   * the field. `stripPayload` (`apps/api/src/routes/realtime.ts`) drops
-   * `run_log.data` only for NON-verbose subscribers — the org-wide
-   * `use-global-run-sync` stream, which deliberately omits `verbose` because it
-   * discards log payloads anyway. The per-run stream that feeds this projection
-   * opens with `verbose=true` (`use-realtime.ts`), so its frames arrive with
-   * `data` intact and this materializes live, not only on the REST logs query.
+   * Wall time of a tool call in ms (`data.durationMs`); omitted when the runner could
+   * not pair start and end, never a misleading zero. Live frames carry it only on
+   * `verbose=true` streams: `stripPayload` (`apps/api/src/routes/realtime.ts`) drops
+   * `run_log.data` for the non-verbose org-wide stream.
    */
   durationMs?: number;
   completedAt?: Date | string | null;
@@ -73,12 +66,9 @@ export function journalLevel(entry: ExecutionEntry): "info" | "warn" | "error" {
 }
 
 /**
- * One settled assistant turn, projected from a `data.event === "turn"` run-log
- * row (emitted by `buildTurnProgress` in `@appstrate/afps-runtime`).
- *
- * `contextTokens` is the prompt the provider actually saw that turn
- * (`inputTokens + cacheReadTokens + cacheWriteTokens`, output excluded) — the
- * number that reveals where a run started re-reading its whole context.
+ * One settled assistant turn, projected from a `data.event === "turn"` run-log row.
+ * `contextTokens` is the prompt the provider saw (input + cache read + cache write,
+ * output excluded).
  */
 export interface RunTurnRow {
   index: number;
@@ -90,14 +80,8 @@ export interface RunTurnRow {
   /** Omitted when the runner could not observe the turn's start. */
   latencyMs?: number;
   /**
-   * The window `contextTokens` is a share of, as stated by the runner for THIS
-   * turn — the denominator of the whole context reading.
-   *
-   * It rides the breadcrumb rather than the run row because the runner is the
-   * only authority on it: it applies the container-side default the platform
-   * cannot see, and it is where the number exists at emission time. Omitted
-   * when the runner cannot state it, and absent on every run predating the
-   * field — never zero, never a fabricated default.
+   * The window `contextTokens` is a share of, as stated by the runner for THIS turn
+   * (it alone knows the container-side default). Absent when unknown, never zero.
    */
   contextWindow?: number;
 }
@@ -114,15 +98,7 @@ function readNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-/**
- * Project the raw run logs into the per-turn breakdown rendered by
- * `TurnsTable` (`run-detail/run-turns-detail.tsx`). Pure and total: rows that are not
- * turn breadcrumbs, or whose payload is malformed/absent, are skipped rather
- * than throwing.
- *
- * Runs that predate the breadcrumb emit no such rows at all — an empty array
- * is the normal case, and the caller renders nothing for it.
- */
+/** Per-turn breakdown for `TurnsTable`. Total: non-turn or malformed rows are skipped. */
 export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
   const rows: RunTurnRow[] = [];
   for (const log of rawLogs) {
@@ -136,23 +112,14 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
     const cacheReadTokens = readNumber(d["cacheReadTokens"], 0);
     const cacheWriteTokens = readNumber(d["cacheWriteTokens"], 0);
     const latencyMs = d["latencyMs"];
-    // Same rule as `latencyMs`, and deliberately NOT `readNumber`: neither has
-    // an honest fallback. A missing window is "unknown", which the reading must
-    // be able to tell apart from any number at all — so the key is left ABSENT
-    // rather than defaulted, and a malformed payload drops it the same way
-    // instead of throwing.
+    // Deliberately NOT `readNumber` (as for `latencyMs`): a missing window is "unknown",
+    // so the key stays ABSENT rather than defaulted.
     const contextWindow = d["contextWindow"];
 
     rows.push({
       index: d["index"],
-      // The emitter sets `contextTokens` unconditionally (`buildTurnProgress`
-      // in `@appstrate/afps-runtime`), unlike `latencyMs`/`contextWindow`
-      // above, which are conditional spreads. So an absent value means a
-      // malformed payload, not an older emitter — the field and its only
-      // producer landed in the same commit and no release ever wrote a turn
-      // row without it. Read it like the other token counts and let a
-      // malformed row fall to 0; do NOT recompute a plausible-looking total
-      // from the parts, which plots a bar that was never measured.
+      // Always emitted, so absent means malformed: fall to 0, do NOT recompute a total
+      // from the parts (that plots a bar never measured).
       contextTokens: readNumber(d["contextTokens"], 0),
       inputTokens,
       outputTokens,
@@ -210,10 +177,8 @@ function toolName(data: Record<string, unknown>, message: string): string {
 }
 
 /**
- * Tool starts and results deliberately share the generic `appstrate.progress`
- * envelope. Their payload is the stable discriminator: results always carry
- * `isError`, even when the underlying tool returned `undefined`; starts carry
- * `args` when the SDK supplied them and use the `Tool:` message otherwise.
+ * Starts and results share the `appstrate.progress` envelope; the payload discriminates:
+ * results always carry `isError`, starts carry `args` or a `Tool:` message.
  */
 function toolRowPhase(
   data: Record<string, unknown>,
@@ -235,12 +200,7 @@ function rawEntryId(log: RawLog, index: number, suffix = ""): string {
   return `log:${log.id ?? index}${suffix}`;
 }
 
-/**
- * `assistant_message` is the only marker of model-authored prose. An untagged
- * `appstrate.progress` row is a runner LIFECYCLE breadcrumb by definition
- * (`AppstrateProgressEvent`, `@appstrate/afps-runtime`), so it belongs to the
- * `runtime` kind — attributing it to the model would put words in its mouth.
- */
+/** `assistant_message` is the only marker of model prose; untagged progress rows are runner lifecycle (`runtime` kind). */
 function isAgentText(log: RawLog): boolean {
   return log.type === "progress" && log.data?.["event"] === ASSISTANT_MESSAGE_EVENT;
 }
@@ -251,12 +211,9 @@ interface BuildLogEntriesOptions {
 }
 
 /**
- * Project raw run logs into a compact execution trace and structured output.
- *
- * Tool starts/results remain separate in persistence but collapse here by
- * exact `toolCallId`. Tool-name matching is intentionally forbidden: parallel
- * calls of the same tool may settle out of order. Legacy rows without an id
- * remain separate and explicitly `unknown` once a run is terminal.
+ * Project raw run logs into an execution trace and structured output. Tool starts and
+ * results collapse by exact `toolCallId` only (never by name: parallel calls of the
+ * same tool settle out of order); id-less legacy rows stay separate, `unknown` once terminal.
  */
 export function buildLogEntries(
   rawLogs: RawLog[],
@@ -276,18 +233,13 @@ export function buildLogEntries(
     } else if (log.event === "run_completed") {
       continue;
     } else if (isTurnRow(log)) {
-      // Per-turn breadcrumbs are a structured series, not narration: a heavy
-      // run emits ~108 of them and they would drown the agent's own log lines.
-      // They are rendered as a table instead (`buildTurnRows` → `TurnsTable`
-      // in `run-detail/run-turns-detail.tsx`).
+      // Turn breadcrumbs would drown the log lines; rendered by `buildTurnRows` → `TurnsTable`.
     } else {
       const logData = log.data ?? {};
       const message = (logData.message as string) || log.message || "";
       if (!message) continue;
 
-      // Explicit semantic channels win over message-shape fallbacks. In
-      // particular, agent prose or a log-tool message is allowed to begin
-      // with "Tool:" without becoming a synthetic tool invocation.
+      // Explicit channels win over message-shape fallbacks: a log message may begin with "Tool:".
       if (log.event === "log") {
         entries.push({
           id: rawEntryId(log, rawIndex, ":explicit-log"),
@@ -319,8 +271,7 @@ export function buildLogEntries(
         if (phase === "start") {
           const existingIndex = callId ? toolEntryByCallId.get(callId) : undefined;
           if (existingIndex !== undefined) {
-            // Defensive out-of-order path: a result row was projected first.
-            // Merge the late start into it without guessing by tool name.
+            // Out-of-order: a result row was projected first; merge the late start into it.
             const existing = entries[existingIndex];
             if (existing?.kind === "tool") {
               const args = logData["args"];

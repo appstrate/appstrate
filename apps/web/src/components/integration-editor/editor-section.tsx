@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * An integration editor section, in the surface it is drawn on.
- *
- * On the editor PAGE a section is a titled card. In the edit PANEL the rail
- * already names the section and the panel heads it, so a card title under that
- * heading said the same word twice: there the section is its fields, with its
- * own action (add an auth, add a policy) at the top right — the agent bundle
- * editor's `surface="settings"`, applied the same way.
- */
+/** Page: titled card. Panel (`settings`): the rail/panel already names it, so no card title. */
 import type { ReactNode } from "react";
 import { SectionCard } from "../section-card";
 

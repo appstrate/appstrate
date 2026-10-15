@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * React Query hooks for the AFPS integration marketplace.
- *
- * Hooks backed by `/api/integrations/*` through the typed OpenAPI client.
- * Query keys are the openapi-react-query `[method, path, init]` triples; the
- * spec-declared `X-Org-Id`/`X-Space-Id` headers ride in `init` so the
- * keys stay org/space-scoped — switching org or space refetches instead
- * of serving another scope's cached page.
+ * React Query hooks backed by `/api/integrations/*`. The `X-Org-Id`/`X-Space-Id` headers ride in
+ * the query key's `init`, so switching org or space refetches instead of serving another scope's page.
  */
 
 import {
@@ -30,21 +25,14 @@ import { $api, client, type paths } from "../api/client";
 import { invalidatePaths } from "../lib/query-keys";
 import { splitPackageRef } from "../lib/package-paths";
 
-// Spec-pinned narrowing for the integration list and detail endpoints. It takes
-// the generated OpenAPI response shape verbatim (so a rename/removal of any
-// non-`manifest` field breaks compilation) and narrows only the freeform AFPS
-// `manifest` JSON to IntegrationManifestView — the one trust boundary of these reads.
+// Spec-pinned: the generated response shape verbatim (a rename/removal of any non-`manifest`
+// field breaks compilation), narrowing only the freeform AFPS `manifest` to IntegrationManifestView.
 type RawIntegrationSummary = NonNullable<
   paths["/api/integrations"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
 export type IntegrationSummaryWire = Omit<RawIntegrationSummary, "manifest"> &
-  // `/api/integrations` supports `?fields=` projection, so the spec marks these
-  // optional; this hook never projects, so re-require what consumers read.
-  // `active` is in that list because both management readers sort the space's
-  // placements on it — the agent editor's connection block tells an active
-  // dependency from a placed-but-off one, and the detail page drives the
-  // switch. Were the field to leave the response, an optional type would make
-  // both read `undefined` in silence instead of failing to compile.
+  // `?fields=` projection makes the spec mark these optional; this hook never projects, so
+  // re-require what consumers read (`active` too: a missing one would read `undefined` silently).
   Required<Pick<RawIntegrationSummary, "id" | "orgId" | "source" | "active">> & {
     manifest: IntegrationManifestView;
   };
@@ -53,11 +41,7 @@ type RawIntegrationDetail =
 export type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
   manifest: IntegrationManifestView;
 };
-/**
- * One OAuth client offered for connecting an integration auth — a space or org
- * custom (BYO-app) client or a platform-provided system client. Spec-derived so
- * a rename/removal of any wire field breaks compilation. Secrets never present.
- */
+/** One OAuth client offered for an integration auth: a space/org custom (BYO-app) or system client. Secrets never present. */
 export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
@@ -67,12 +51,7 @@ import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { invalidateSchedules, warnSchedulesDisabled } from "./use-schedules";
 
-// Re-export wire types for component consumers — canonical definitions
-// live in `@appstrate/shared-types/integrations.ts`.
-// NB: the integration detail READ shape is NOT re-exported from shared-types —
-// consumers must use the spec-derived IntegrationDetailWire (above), the exact
-// shape the hook returns, so a spec rename/removal of any non-`manifest` field
-// breaks compilation.
+// The detail READ shape is NOT re-exported from shared-types: consumers use IntegrationDetailWire.
 export type {
   AgentIntegrationEntry,
   IntegrationAuthStatus,
@@ -86,30 +65,23 @@ export type {
 // ─────────────────────────────────────────────
 // Typed-client plumbing
 // ─────────────────────────────────────────────
-// Scoped package ids (`@scope/name`) in path params keep their raw `@` and
-// `/` on the wire — handled globally by the client's pathSerializer.
 
 /**
- * Invalidate every cached integrations read (list, detail, connections,
- * pins, org default, agent resolutions, OAuth clients) and the caller's
- * cross-org connection list, whose `locked_by` moves with pins and defaults.
- * Typed keys are `[method, "/api/integrations…", init]` — a key-prefix
- * invalidation can't span sibling path strings, so match on the path element.
+ * Invalidate every cached integrations read plus the caller's cross-org connection list
+ * (`locked_by` moves with pins and defaults). Typed keys are `[method, path, init]`, so a
+ * key-prefix invalidation can't span sibling paths: match on the path element.
  */
 export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
   return qc.invalidateQueries({
     predicate: (query) => {
       const path = query.queryKey[1];
       if (typeof path !== "string") return false;
-      // The integration index is keyed `["packages","integrations",…]` and lists
-      // the ACTIVE set, which is exactly what activation changes — so a row that
-      // just got switched on (or off) has to stop being served from cache.
+      // The index lists the ACTIVE set, which activation changes.
       if (query.queryKey[0] === "packages" && path === "integrations") return true;
       return (
         path.startsWith("/api/integrations") ||
         path === "/api/me/connections" ||
-        // The per-agent connection-readiness query lives under /api/agents but
-        // is driven entirely by connection state, so refresh it here too.
+        // Lives under /api/agents but is driven entirely by connection state.
         path === "/api/agents/{scope}/{name}/connection-readiness"
       );
     },
@@ -129,11 +101,7 @@ function useIntegrationsReadScope() {
 
 type IntegrationNameOf = (integrationId: string) => string;
 
-/**
- * Display names of `integrationIds`, each from its own detail query — the one
- * {@link useIntegrationDetail} caches — fetched when uncached and readable. The
- * id stands in for any name that cannot be read.
- */
+/** Display names of `integrationIds` from the detail query cache (fetched when uncached and readable); the id stands in for an unreadable name. */
 export async function loadIntegrationNames(
   qc: QueryClient,
   scope: { header: ReturnType<typeof useOrgScope>["header"]; enabled: boolean },
@@ -167,12 +135,7 @@ export function useIntegrationNames(): (
 /** `GET /api/integrations` answers at most this many ids per request (its `id` filter's bound). */
 const IDS_PER_REQUEST = 100;
 
-/**
- * The list rows of `ids` — `active`, `block_user_connections` and the manifest,
- * for the current space — in as many requests as {@link IDS_PER_REQUEST}
- * allows, instead of the whole corpus. An id not placed here has no row.
- * `undefined` until every request answered.
- */
+/** The list rows of `ids` for the current space, chunked by {@link IDS_PER_REQUEST}. An id not placed here has no row; `undefined` until every request answered. */
 export function useIntegrationsById(
   ids: readonly string[],
   options?: { enabled?: boolean },
@@ -217,11 +180,7 @@ export function useIntegrationDetail(packageId: string | undefined) {
   );
 }
 
-/**
- * The detail of each of `packageIds`, in order, each from the query {@link useIntegrationDetail}
- * caches. The detail is where an integration's `active` and `block_user_connections` are read: the
- * list is paginated, so a space with more than 100 integrations would misreport them.
- */
+/** The detail of each of `packageIds`, in order. `active` and `block_user_connections` are read here: the list is paginated and would misreport them past 100 integrations. */
 export function useIntegrationDetails(packageIds: readonly string[]) {
   const scope = useIntegrationsReadScope();
   return useQueries({
@@ -251,10 +210,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
   );
 }
 
-/**
- * Query options of an agent's connection readiness, shared by every reader of it: two readers
- * of the same version share one key, so they cannot disagree.
- */
+/** Query options of an agent's connection readiness: readers of the same version share one key, so they cannot disagree. */
 function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -262,9 +218,7 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
   const { scope, name } = agentPackageId
     ? splitPackageRef(agentPackageId)
     : { scope: "", name: "" };
-  // The `version` selector rides in the key: an explicit `draft` and the
-  // published version resolve different manifests, so their verdicts must not
-  // share one cache entry.
+  // `version` rides in the key: `draft` and the published version resolve different manifests.
   return $api.queryOptions(
     "get",
     "/api/agents/{scope}/{name}/connection-readiness",
@@ -283,11 +237,9 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
 }
 
 /**
- * Bulk connection readiness for an agent — ONE call that drives the launch
- * badge and the connection pickers. `blocks_run` /
- * `errors` mirror the run-kickoff 409 (run semantics); `integrations[]` carries
- * every declared integration's management verdict (includeInert) + a
- * `run_blocking` flag, so no surface reads one integration at a time.
+ * Bulk connection readiness for an agent: ONE call driving the launch badge and the pickers.
+ * `blocks_run`/`errors` mirror the run-kickoff 409; `integrations[]` carries every declared
+ * integration's management verdict plus a `run_blocking` flag.
  */
 export function useAgentConnectionReadiness(agentPackageId: string | undefined, version?: string) {
   return useQuery(useAgentConnectionReadinessOptions(agentPackageId, version));
@@ -309,10 +261,8 @@ export function blockingIntegrationIds(data: AgentConnectionReadiness): string[]
 }
 
 /**
- * Reader of the {@link useIntegrationReadinessEntry} verdict as the cache holds
- * it NOW, for a handler running after something already awaited the readiness
- * refetch (the connect popup does): the fresh value, without a second request.
- * Throws when that refetch failed — the cache then still holds the old verdict.
+ * Reader of the readiness verdict as the cache holds it NOW, for a handler running after the
+ * readiness refetch was awaited (the connect popup). Throws when that refetch failed.
  */
 export function useReadIntegrationResolution(
   integrationId: string,
@@ -328,10 +278,7 @@ export function useReadIntegrationResolution(
   };
 }
 
-/**
- * One declared integration's readiness entry (`resolution`, `run_blocking`, `required`), selected
- * out of the bulk readiness query of `version`: its readers share that version's cache entry.
- */
+/** One declared integration's readiness entry (`resolution`, `run_blocking`, `required`), selected out of the bulk query. */
 export function useIntegrationReadinessEntry(
   integrationId: string | undefined,
   agentPackageId: string | undefined,
@@ -346,13 +293,7 @@ export function useIntegrationReadinessEntry(
   });
 }
 
-/**
- * Mint a hosted-connect-portal session. Auth-type-agnostic: the
- * returned `connect_url` dispatches server-side to the provider OAuth screen or
- * the hosted credential form, so the caller never branches on the auth type.
- * Same body as the OAuth initiate (scopes / force_account_select / connection_id)
- * — scope-union + reconnect semantics are identical.
- */
+/** Mint a hosted-connect-portal session. Auth-type-agnostic: `connect_url` dispatches server-side to the OAuth screen or credential form. */
 export function useInitiateIntegrationConnect() {
   return useMutation({
     meta: { errorHandledByCaller: true },
@@ -400,10 +341,7 @@ type UpdateOAuthClientBody =
 type SetDefaultClientBody =
   paths["/api/integrations/{packageId}/auths/{authKey}/default-client"]["put"]["requestBody"]["content"]["application/json"];
 
-/**
- * Refreshes both lists: an org change re-badges the space list and can move its default.
- * No message when the table already shows the effect (a default moved, a row gone).
- */
+/** Refreshes both lists (an org change re-badges the space list). No toast when the table already shows the effect. */
 function useClientMutationSuccess(messageKey?: string) {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
@@ -413,10 +351,7 @@ function useClientMutationSuccess(messageKey?: string) {
   };
 }
 
-/**
- * A tier's own clients plus the one default it inherits (org or system). New
- * connections always use the default — there is no per-connect picker.
- */
+/** A tier's own clients plus the default it inherits (org or system). New connections always use the default. */
 export function useIntegrationClients(
   tier: IntegrationClientTier,
   packageId: string | undefined,
@@ -488,10 +423,7 @@ export function useUpdateIntegrationOAuthClient(tier: IntegrationClientTier) {
   });
 }
 
-/**
- * Choose the tier's default OAuth client for new connections. Existing
- * connections keep the client that minted them.
- */
+/** Choose the tier's default OAuth client for new connections; existing ones keep the client that minted them. */
 export function useSetDefaultIntegrationClient(tier: IntegrationClientTier) {
   const onSuccess = useClientMutationSuccess();
   return useMutation({
@@ -512,10 +444,7 @@ export function useSetDefaultIntegrationClient(tier: IntegrationClientTier) {
   });
 }
 
-/**
- * Move one of the space's own clients to the org tier, inherited by every
- * space. Its id is unchanged, so existing connections keep working.
- */
+/** Move a space client to the org tier. Its id is unchanged, so existing connections keep working. */
 export function usePromoteIntegrationOAuthClient() {
   const onSuccess = useClientMutationSuccess("integration.clients.promote.success");
   return useMutation({
@@ -571,11 +500,7 @@ export function useIntegrationPins(packageId: string | undefined) {
   );
 }
 
-/**
- * The space's agents that declare this integration as a dependency. Used
- * by the centralised pin management table to populate the "pin a new agent"
- * picker.
- */
+/** The space's agents that declare this integration as a dependency (feeds the "pin a new agent" picker). */
 export function useAgentsConsumingIntegration(packageId: string | undefined) {
   const scope = useIntegrationsReadScope();
   return $api.useQuery(
@@ -595,8 +520,6 @@ export function useUpdateIntegrationSettings() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return useMutation({
-    // 200 + the bare integration detail resource — the toggled
-    // gate is the resource's `block_user_connections` field.
     mutationFn: async (vars: {
       params: { path: { packageId: string } };
       body: { block_user_connections: boolean };
@@ -667,8 +590,7 @@ export function useIntegrationOrgDefault(packageId: string | undefined) {
     },
     {
       enabled: scope.enabled && !!packageId,
-      // Bare resource, or a 204 when no default is set — openapi-react-query
-      // maps the empty body to null for the existing null-means-unset consumers.
+      // A 204 (no default set) maps to null.
       select: (data): IntegrationOrgDefault | null => data ?? null,
     },
   );
@@ -690,8 +612,7 @@ export function useUpsertIntegrationOrgDefault() {
     },
     onSuccess: () => {
       toast.success(t("integration.admin.orgDefault.updated"));
-      // Picker verdicts on agent pages depend on the org default —
-      // invalidate every integrations read, not just the default itself.
+      // Agent-page picker verdicts depend on the org default.
       void invalidateIntegrationQueries(qc);
     },
   });
@@ -718,8 +639,6 @@ export function useDeleteIntegrationOrgDefault() {
 export function useRenameIntegrationConnection() {
   const qc = useQueryClient();
   return useMutation({
-    // 200 + the bare connection resource — same serializer as the
-    // connections list.
     mutationFn: async (vars: {
       params: { path: { packageId: string; connectionId: string } };
       body: { label: string };
@@ -738,10 +657,10 @@ export function useRenameIntegrationConnection() {
 }
 
 /**
- * Share a connection into a space (`share`, idempotent) or withdraw it (`unshare`), through the
- * space's door (`packageId` set) or the account's. The returned promise keeps the mutation pending
- * until the refetched sharing lands, so the share editor never re-enables on a stale state.
- * Withdrawing disables other actors' schedules there naming the connection.
+ * Share a connection into a space (idempotent) or withdraw it, through the space's door
+ * (`packageId` set) or the account's. The mutation stays pending until the refetched sharing
+ * lands, so the share editor never re-enables on stale state. Withdrawing disables other
+ * actors' schedules naming the connection.
  */
 export function useConnectionShare(op: "share" | "unshare", packageId?: string) {
   const qc = useQueryClient();

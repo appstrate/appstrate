@@ -5,15 +5,10 @@ import type { OrgLevelPermission } from "@appstrate/core/permissions";
 interface OrgRoleCapability {
   /** `orgRolesGuide.can.<key>` names the row. */
   key: string;
-  /** The org-level permissions the capability stands for. */
   permissions: readonly OrgLevelPermission[];
 }
 
-/**
- * The rows of the roles page: each a capability, the org-level permissions it stands for. Which
- * role holds it is the server's answer (`GET /api/org-roles`, {@link holdsCapability}), never a
- * copy of its matrix: a role holds a row when it is granted every permission of it.
- */
+/** The rows of the roles page. Which role holds one is the server's answer (`GET /api/org-roles`), never a copy of its matrix. */
 export const ORG_ROLE_CAPABILITIES: readonly OrgRoleCapability[] = [
   {
     key: "view",

@@ -7,22 +7,11 @@ import { Spinner } from "@appstrate/ui/components/spinner";
 import { commitRename } from "../lib/inline-rename";
 
 /**
- * A table row's name, renamed in place. **It opens only when something drives it**: the row's
- * « Renommer » entry sets `editing`, and a click on the name does not edit it, nor does a pencil
- * appear on hover (both made noise in a table whose « … » menu already holds the rename). Out of
- * edit it is the row's text: raised above the row's cover so its `title` reads, and a click on
- * it opens the row like a click anywhere else (`DataTable` hands it over). In edit it is raised
- * too, or the cover would take the field's clicks. Saves
- * on blur or Enter, cancels on Escape, and only fires `onSave` when the trimmed value actually
- * changed.
- *
- * **This is the app's ONE rename affordance**, and the reason it is one is a
- * product decision: "Direct manipulation in forms. No Edit button revealing a
- * field." The rename is the menu's, and the field appears in the name's place.
- *
- * **It truncates.** It sits in a table cell whose column has a floor, and a
- * long account name that refuses to shrink eats the column, and with it the
- * name the row is known by.
+ * A table row's name, renamed in place — the app's ONE rename affordance. It opens only
+ * when the row's « Renommer » entry sets `editing` (no click-to-edit, no hover pencil).
+ * Raised above the row's cover in both states, so its `title` reads and the field takes
+ * clicks. Saves on blur or Enter, cancels on Escape, and fires `onSave` only when the
+ * trimmed value changed. It truncates: a long name must not eat the column's floor.
  */
 export function InlineEditableLabel({
   value,
@@ -43,8 +32,7 @@ export function InlineEditableLabel({
   onEditingChange: (editing: boolean) => void;
 }) {
   const { t } = useTranslation("common");
-  // What was typed since the edit began; `null` reads the stored value, so an edit started from
-  // outside never opens on a stale draft.
+  // `null` reads the stored value, so an edit started from outside never opens on a stale draft.
   const [typed, setTyped] = useState<string | null>(null);
   const draft = typed ?? value;
   const setEditing = (next: boolean) => {

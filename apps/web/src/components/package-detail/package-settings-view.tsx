@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Paramètres for the packages with nothing set per space — skills and local
- * MCP servers — in the shape an agent's and an integration's have.
- *
- * Two groups, not three: Explorer (the tree, where files are changed, and the
- * versions) and Package AFPS (what the archive holds): Identité, the
- * manifest's form, for whoever may write it, and Contenu, the table of every
- * file, for whoever reads the package. The raw manifest is not a section (every
- * form writes into it) but a modal reached from under Identité.
+ * Paramètres for packages with nothing set per space (skills, local MCP servers): Explorer (tree,
+ * versions) and Package AFPS (Identité for writers, Contenu for readers). The raw manifest is a
+ * modal reached from Identité, not a section.
  */
 import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";

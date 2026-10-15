@@ -2,20 +2,12 @@
 
 /**
  * The email + password fields shared by the sign-in and sign-up forms, and the
- * new-password pair (`NewPasswordFields`) of the reset, set and change forms.
+ * new-password pair (`NewPasswordFields`) of the reset, set and change forms. The
+ * password minimum is imported from the server's rule (`minPasswordLength`,
+ * `packages/db/src/auth.ts`), never restated.
  *
- * The two forms carried ~55 lines of identical field markup each, and that
- * copy is what let the password minimum drift: both restated it, both said 6,
- * while the server (`minPasswordLength` in `packages/db/src/auth.ts`) enforced
- * 8 — so the form told the user 6 was enough, accepted it, and Better Auth
- * refused the signup. The rule now lives in one place on the server and is
- * imported here; the markup lives in one place too, so the next edit lands on
- * both surfaces at once.
- *
- * `register` / `invalid` / `error` are passed in rather than pulled from a form
- * context: the two forms are typed on different shapes (`LoginFormData` /
- * `RegisterFormData`) and `useAppForm` exposes `showError`, which no RHF
- * context carries.
+ * `register` / `invalid` / `error` are passed in rather than read from a form context:
+ * the forms have different shapes and `useAppForm`'s `showError` is in no RHF context.
  */
 
 import type { ReactNode } from "react";
@@ -84,12 +76,9 @@ export function EmailField<T extends FieldValues>({
 
 interface PasswordFieldProps<T extends FieldValues> extends SharedFieldProps<T> {
   /**
-   * `"current-password"` on sign-in, `"new-password"` on sign-up. It also
-   * decides whether the browser's own `minlength` constraint is attached: on a
-   * NEW password that matches the server-rendered OIDC signup page, which has
-   * always refused a short password in the browser. On sign-in it must not be
-   * attached — the minimum describes what may be created, and a client-side
-   * constraint there would lock out an account whose password predates it.
+   * `"current-password"` on sign-in, `"new-password"` on sign-up. It also decides whether
+   * the `minlength` constraint is attached: never on sign-in, where it would lock out an
+   * account whose password predates the minimum.
    */
   autoComplete: "current-password" | "new-password";
   /** Rendered on the label row, e.g. the "forgot password?" link. */
@@ -126,11 +115,7 @@ export function PasswordField<T extends FieldValues>({
         aria-invalid={invalid ? true : undefined}
         {...register(name, {
           required: t("validation.required"),
-          // Only on sign-UP. The minimum describes what may be CREATED, not
-          // what may be presented: an account whose password predates the
-          // rule must still be able to sign in, and the server is the only
-          // thing entitled to reject its credential. Enforcing it here would
-          // lock such a user out of the SPA with a message the API never sent.
+          // Only on sign-UP: the minimum describes what may be CREATED, and only the server may reject a credential.
           ...(isNewPassword
             ? {
                 minLength: {

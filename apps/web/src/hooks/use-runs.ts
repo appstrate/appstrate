@@ -9,10 +9,7 @@ import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys, runKeys } from "../lib/query-keys";
 import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 
-/**
- * Wire shape of a persisted log row (spec `RunLog`): on the wire `createdAt`
- * is an ISO string, unlike the Drizzle-derived shared-types `RunLog` (Date).
- */
+/** Wire shape of a persisted log row: `createdAt` is an ISO string, unlike shared-types `RunLog` (Date). */
 type RunLogEntry = components["schemas"]["RunLog"];
 
 /** Every run read below guards on `requireRunsRead`. */
@@ -27,8 +24,7 @@ export function useRun(runId: string | undefined) {
   const canRead = useCanReadRuns();
   const qc = useQueryClient();
   return useQuery({
-    // Key pinned to the legacy shape: use-global-run-sync and run-detail patch
-    // this cache in place (setQueryData) on SSE events.
+    // Key pinned: use-global-run-sync and run-detail patch this cache in place on SSE events.
     queryKey: runKeys.detail(orgId, spaceId, runId),
     queryFn: async (): Promise<EnrichedRun> => {
       const { data } = await client.GET("/api/runs/{id}", {
@@ -37,10 +33,8 @@ export function useRun(runId: string | undefined) {
       // Non-2xx throws via the client middleware, so `data` is defined here.
       return data!;
     },
-    // The row is usually already cached by a run list (runs page, agent runs
-    // tab, dashboard): it names the run until the detail read replaces it.
-    // Inline runs are left out: their manifest and prompt ride only on the
-    // detail, and the list row would read as "details expired".
+    // A run list usually holds the row already: it names the run until the detail lands. Inline
+    // runs are left out: their manifest and prompt ride only on the detail ("details expired").
     placeholderData: () => {
       if (!runId) return undefined;
       const pages = qc.getQueriesData<ListEnvelope<EnrichedRun>>({
@@ -61,14 +55,10 @@ export function useRunLogs(runId: string | undefined) {
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadRuns();
   return useQuery({
-    // Key pinned to the legacy shape: run-detail appends live SSE log frames
-    // into this cache (setQueryData).
+    // Key pinned: run-detail appends live SSE log frames into this cache.
     queryKey: runKeys.logs(orgId, spaceId, runId),
-    // The endpoint pages at 1000 rows (ASC by id) and signals continuation
-    // via the envelope's `hasMore` + a `since=<lastId>` cursor. Page through
-    // until exhausted so runs longer than one page keep their tail (final
-    // output) visible. Hard cap at 20 pages (~20k rows) as a safety valve
-    // against pathological runs.
+    // Pages at 1000 rows via `hasMore` + `since=<lastId>`; walked to the end so the tail (final
+    // output) stays visible. Capped at 20 pages (~20k rows) against pathological runs.
     queryFn: async () => {
       const logs: RunLogEntry[] = [];
       let since: number | undefined;

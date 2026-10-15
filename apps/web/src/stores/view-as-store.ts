@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "View as role" — the persona an owner/admin is previewing as. The server
- * enforces it on every call (`apps/api/src/lib/view-as.ts`); this is the SPA's
- * copy, persisted under one key carrying its own `orgId`, read once at init.
- *
+ * "View as role" persona (SPA copy; the server enforces it, `apps/api/src/lib/view-as.ts`).
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §6.7, §8
  */
 
@@ -38,23 +35,16 @@ const personaSchema = z.object({
 
 export type ViewAsPersona = z.infer<typeof personaSchema>;
 
-/** A row of `GET /api/orgs` — where `permissions` lives. */
 type Organization = components["schemas"]["Organization"];
 
 interface ViewAsState {
   persona: ViewAsPersona | null;
-  /**
-   * Set only when the SERVER refused the persona. State, not an immediate toast:
-   * the refusal usually lands before `<Toaster/>` subscribes and Sonner drops it.
-   */
+  /** Set when the SERVER refused the persona. State, not a toast: it lands before `<Toaster/>` subscribes. */
   stoppedReason: string | null;
   commit: (persona: ViewAsPersona | null, stoppedReason: string | null) => void;
 }
 
-/**
- * A stored value that no longer parses is dropped, never sent as a malformed
- * header. Blocked storage keeps the preview for this tab only.
- */
+/** A stored value that no longer parses is dropped, never sent as a malformed header. */
 const persistedPersona = persistedJson<ViewAsPersona | null>(STORAGE_KEY, (value) => {
   const parsed = personaSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
@@ -62,11 +52,7 @@ const persistedPersona = persistedJson<ViewAsPersona | null>(STORAGE_KEY, (value
 
 export const readPersistedPersona = persistedPersona.read;
 
-/**
- * The space the previewer stood in before the preview moved them into the
- * persona's: "Quitter" brings them back there rather than leaving the admin in
- * a space they only visited as someone else.
- */
+/** The space the previewer stood in before the preview; "Quitter" returns there. */
 const returnSpace = persistedValue<string | null>("appstrate_view_as_return", (raw) => raw || null);
 
 export const viewAsStore = createStore<ViewAsState>()((set) => ({
@@ -82,10 +68,7 @@ export function useViewAs(): ViewAsPersona | null {
   return useStore(viewAsStore, (s) => s.persona);
 }
 
-/**
- * Reactive {@link getViewAsHeader}: an `EventSource` reads its URL once, so
- * effects that OPEN a connection must depend on this to reconnect.
- */
+/** Reactive {@link getViewAsHeader}: an `EventSource` reads its URL once, so connection-opening effects depend on this. */
 export function useViewAsHeader(): string | null {
   const persona = useStore(viewAsStore, (s) => s.persona);
   const orgId = useStore(orgStore, (s) => s.id);
@@ -126,15 +109,10 @@ export function toViewAsPersona(
 }
 
 /**
- * Start — or replace — a preview.
- *
- * `orgs` is the org listing ALREADY answered for this persona (`fetchOrgsAs`),
- * passed in rather than fetched here because the two must land in the same tick:
- * `["orgs"]` is the one query the cache reset spares, every `can()` gate reads
- * `permissions` off that row, and React Query keeps serving the previous value
- * through a background refetch — and forever if it fails. Committing the persona
- * alone would present the previewer's own authority as the persona's; loading
- * first also means a load that fails starts no preview at all.
+ * Start (or replace) a preview. `orgs` is the listing ALREADY fetched as this
+ * persona (`fetchOrgsAs`): `["orgs"]` is spared by the cache reset and every
+ * `can()` reads it, so persona and listing must land in the same tick, and a
+ * failed load must start no preview.
  */
 export function enterViewAs(
   persona: ViewAsPersona,
@@ -144,20 +122,14 @@ export function enterViewAs(
   viewAsStore.getState().commit(persona, null);
   // A preview replacing another keeps the first one's way home.
   if (returnSpace.read() === null) returnSpace.write(returnSpaceId);
-  // Seeding cancels nothing, and `["orgs"]` is the one query the reset below
-  // spares: an `/api/orgs` still in flight under the PREVIOUS authority would
-  // land afterwards and write the previewer's permissions over the persona's.
-  // `exitViewAs` gets this free from `invalidateQueries`, which cancels first.
+  // Cancel first: an `/api/orgs` in flight under the PREVIOUS authority would
+  // overwrite the seeded persona permissions (`exitViewAs` gets this from `invalidateQueries`).
   void queryClient.cancelQueries({ queryKey: orgKeys.all });
   queryClient.setQueryData(orgKeys.all, orgs);
   removeOrgScopedQueries(queryClient);
 }
 
-/**
- * The ONE exit path — "Quitter", org switch, sign-out and a refused persona.
- * Answers the space the preview moved the previewer out of, for the caller
- * that takes them back ("Quitter"); the others have somewhere else to be.
- */
+/** The ONE exit path ("Quitter", org switch, sign-out, refused persona); returns the space to go back to. */
 export function exitViewAs(reason?: string): string | null {
   const back = returnSpace.read();
   returnSpace.write(null);

@@ -35,17 +35,10 @@ import {
 } from "../lib/run-launch";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
 
-// NOTE on query keys: run-cache keys (["paginated-runs"], ["run"])
-// are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
-// events, and the runs hooks are migrated with the same pinned keys. The
-// package/agent keys stay legacy too (see the note in use-packages.ts).
+// Run-cache keys (["paginated-runs"], ["run"]) are PINNED legacy keys: use-global-run-sync.ts
+// patches them from SSE. Package/agent keys stay legacy too (see use-packages.ts).
 
-/**
- * Persist the editor layer of input resolution for this space.
- *
- * Both members are FULL replacements — an omitted key is cleared, never left
- * unchanged — so the caller always sends the complete pair.
- */
+/** Persists the editor layer of input resolution; both members are FULL replacements (an omitted key is cleared), so always send the pair. */
 export function useSaveInputSettings(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -80,17 +73,12 @@ function useRunAgent(packageId: string) {
       const { data } = await client.POST("/api/agents/{scope}/{name}/run", {
         params: {
           path: splitPackageRef(packageId),
-          // Pure pass-through — NO default here. Omitting `version` means the
-          // server's unified default (`published`), exactly as for any
-          // API caller. The editor's "run the working copy" intent is encoded
-          // explicitly at the call site (`version: "draft"`), never inferred
-          // by this transport hook — so API and front agree on every selector.
+          // Pass-through, NO default: omitted `version` means the server's default (`published`);
+          // "run the working copy" is `version: "draft"` at the call site, never inferred here.
           query: { version },
         },
         body: {
-          // The spec types the free-form input object as `Record<string,
-          // never>` — narrow the editor-built input; the server validates it
-          // against the agent's input schema.
+          // The spec types free-form input as `Record<string, never>`; the server validates it.
           ...(input !== undefined ? { input: input as Record<string, never> } : {}),
           ...(rerun_from !== undefined ? { rerun_from } : {}),
           ...(connectionOverrides !== undefined
@@ -104,7 +92,6 @@ function useRunAgent(packageId: string) {
             : {}),
         },
       });
-      // 201 + the bare created Run resource (same shape as GET /runs/:id).
       return data!;
     },
     onSuccess: (data) => {
@@ -116,27 +103,19 @@ function useRunAgent(packageId: string) {
 }
 
 interface LaunchOptions {
-  /**
-   * The launch comes from a modal addressed in the URL (`?run=`, `?rerun=`):
-   * the modal's `leave` goes to the run page, so Back does not reopen it, and
-   * a refused launch leaves the form open with what was typed.
-   */
+  /** For a launch from a URL-addressed modal (`?run=`, `?rerun=`): `leave` goes to the run page so Back does not reopen it. */
   leave?: (to: string) => void;
 }
 
 /**
- * The one way the SPA launches a run. A `409 missing_integration_connection`
- * is a question, not a failure: the launcher keeps the refused launch and the
- * server's errors, `RunLaunchRecovery` renders them as the recovery modal, and
- * `retry` replays that launch without its own connection pick for the refused
- * integrations (`retryLaunch`), so each one binds what its row of the modal
- * shows. A replay refused in turn is replayed the same way, from what it sent.
+ * The one way the SPA launches a run. A `409 missing_integration_connection` is a question: the
+ * launcher keeps the refused launch and errors for `RunLaunchRecovery`, and `retry` replays it
+ * without its own connection pick for the refused integrations (`retryLaunch`).
  */
 export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
   const navigate = useNavigate();
   const [refusal, setRefusal] = useState<LaunchRefusal | null>(null);
-  // What `retry` sends: the refused launch, as `retryLaunch` replays it.
   const replay = useRef<{ launch: RunLaunch; options: LaunchOptions }>({
     launch: {},
     options: {},
@@ -182,14 +161,11 @@ export type RunLauncher = ReturnType<typeof useRunLauncher>;
 
 /** After an import: refresh every package cache and surface the non-blocking import-time warnings. */
 function afterImport(qc: QueryClient, data: { type: string; warnings?: string[] }) {
-  // An import REPLACES the draft artifact, and the import modal opens the
-  // detail page straight away — without the file caches the explorer renders
-  // the pre-import index until the query goes stale.
+  // An import REPLACES the draft artifact: without the file caches the explorer shows the pre-import index.
   invalidatePackageCaches(qc);
   if (data.type === "integration") void invalidateIntegrationQueries(qc);
   for (const message of data.warnings ?? []) toast.warning(message);
-  // The library feeds the integration editor's picker, which imports in place
-  // and must see the new package.
+  // The library feeds the integration editor's picker, which imports in place.
   void invalidateLibraries(qc);
 }
 
@@ -212,9 +188,7 @@ export function useImportPackage(meta?: MutationMeta) {
       // extension so users can drag both kinds into the same modal.
       if (file.name.toLowerCase().endsWith(".afps-bundle")) {
         const { data } = await client.POST("/api/packages/import-bundle", {
-          // Multipart gap: the generated body types the binary part as
-          // `string`. The FormData passes through the serializer untouched;
-          // the browser sets the multipart boundary.
+          // Multipart gap: the generated body types the binary part as `string`; FormData passes through the serializer.
           body: { file },
           bodySerializer: () => fd,
         });
@@ -319,27 +293,18 @@ export function useCreatePackage(type: PackageType) {
   const qc = useQueryClient();
   return useMutation({
     meta: { errorHandledByCaller: true },
-    // Exactly the keys the editor sends: the skill/integration branches forward
-    // this object whole and the create schemas are `.strict()`, so a key
-    // declared here that the server does not model is a 400 rather than a
-    // silent drop.
+    // Exactly the keys the editor sends: the branches forward `body` whole and the create schemas are `.strict()`, so an unmodelled key is a 400.
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
       operations?: components["schemas"]["PackageFileWriteOperation"][];
     }): Promise<{ id: string; version_count?: number }> => {
-      // 201 → the created package resource, bare.
       switch (type) {
         case "mcp-server":
           throw new Error("MCP servers are created by importing their bundle");
         case "agent": {
           const { data } = await client.POST("/api/packages/agents", {
-            // The editor builds the manifest as a plain `Record<string,
-            // unknown>`; createAgent's body keeps the strict AFPS
-            // `AgentManifest` (the documented SDK contract). Assert only the
-            // manifest field across that dynamic-object → typed boundary —
-            // `content` stays checked, and the server validates the manifest
-            // against the AFPS schema.
+            // Assert only the manifest across the dynamic-object → strict `AgentManifest` boundary; the server validates it.
             body: {
               ...body,
               manifest: body.manifest as components["schemas"]["AgentManifest"],
@@ -371,9 +336,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    // Every caller builds `body` through `packageUpdateBody`, and none of them
-    // sends the API's `content` field: a package's primary file is
-    // one of its files, written as a file operation like the others.
+    // Callers build `body` via `packageUpdateBody` and never send `content`: the primary file is written as a file operation.
     meta: { errorHandledByCaller: true },
     mutationFn: async ({
       etag,
@@ -390,7 +353,6 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
         params: { path: splitPackageRef(packageId), header: { "If-Match": etag } },
         body,
       });
-      // 200 → the updated package resource, bare; its `ETag` bases the next save.
       return { id: data!.id, etag: response.headers.get("ETag") };
     },
     onSuccess: () => {
@@ -398,11 +360,8 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       // The saved bytes ARE what the Files tab shows.
       invalidatePackageFiles(qc);
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
-      // An agent's tools drive the required OAuth scopes, so editing them
-      // changes the per-integration agent-resolution verdict (e.g. a connection
-      // flips to insufficient_scopes / needs reconnection). Invalidate the
-      // integrations subtree on agent edits too, not only integration edits, so
-      // the Connections tab verdict + badges refresh without a page reload.
+      // An agent's tools drive the required OAuth scopes, so agent edits change the connection
+      // verdicts too (e.g. insufficient_scopes): invalidate the integrations subtree for them as well.
       if (type === "agent" || type === "integration") {
         void invalidateIntegrationQueries(qc);
       }

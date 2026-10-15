@@ -9,17 +9,9 @@ import type { OrgRole } from "@appstrate/shared-types";
 import type { CorePermission } from "@appstrate/core/permissions";
 import { hasFullOrgAccess } from "../lib/org-role.ts";
 
-/**
- * A permission string `can()` accepts.
- *
- * Core's catalog is spelled out so editors autocomplete the vocabulary; the
- * open `string` arm keeps the module-contributed strings (`webhooks:read`,
- * `oauth-clients:write`, `chat:write`, `billing:read`, …) callable — they are
- * declared in each module's own package, which the SPA does not import.
- */
+/** A permission string `can()` accepts. The open `string` arm keeps module-contributed strings callable (the SPA does not import module packages). */
 export type GateablePermission = CorePermission | (string & {});
 
-/** i18n key for a role label: `orgSettings.roleOwner`, etc. */
 const ROLE_I18N_KEY: Record<OrgRole, string> = {
   owner: "orgSettings.roleOwner",
   admin: "orgSettings.roleAdmin",
@@ -27,49 +19,31 @@ const ROLE_I18N_KEY: Record<OrgRole, string> = {
   guest: "orgSettings.roleGuest",
 };
 
-/** Get the i18n key for a role label. */
 export function roleI18nKey(role: OrgRole): string {
   return ROLE_I18N_KEY[role];
 }
 
 /**
- * Who may preview a role — the server's own eligibility rule (`validateViewAs`).
- *
- * A role rather than a permission because that is what the server checks: the
- * preview is a downgrade of the caller's own authority, and "a preview only
- * removes" holds only while the previewer outranks every persona. The triggers
- * hide for anyone else; the server refuses them (`view_as_forbidden`) anyway.
+ * Who may preview a role — the server's eligibility rule (`validateViewAs`). A role, not a
+ * permission: "a preview only removes" holds only while the previewer outranks every persona.
  */
 export function useCanPreviewRole(): boolean {
   return hasFullOrgAccess(usePermissions().orgRole);
 }
 
 /**
- * Display name of a package's home space, or `null` when there is none to show.
- *
- * `home_space_id` is already `null` whenever the caller does not reach the home
- * (the server withholds the id — RBAC spec §6.9), so this covers both a package
- * with no home at all and a home that belongs to somebody else. There is no
- * companion "can I write it" hook: that answer is `home_writable` on the
- * package's own read, computed server-side.
+ * Display name of a package's home space, or `null`. `home_space_id` is already `null` when the
+ * caller does not reach the home (RBAC spec §6.9); write access is `home_writable` on the package read.
  */
 export function useHomeSpaceName(homeSpaceId: string | null | undefined): string | null {
   return useSpaceLabelOf()(homeSpaceId) ?? null;
 }
 
 /**
- * Permission gating for the UI.
- *
- * `can` answers over the caller's ORG-level effective set (`GET /api/orgs`)
- * union their SPACE-level set in the current space (`GET /api/spaces`). Both
- * arrays are computed and ceiling-applied server-side, so the SPA never
- * derives a permission from a role name — it asks for the exact string the
- * guard checks. Actual enforcement stays server-side; this only controls what
- * is rendered.
- *
- * `orgRole` serves labels and the few rules the server keys on the role itself
- * ({@link hasFullOrgAccess}); a space role is read off the space itself
- * (`GET /api/spaces` → `role`), where the renderer already is.
+ * Permission gating for the UI (enforcement stays server-side). `can` answers over the org-level
+ * effective set (`GET /api/orgs`) union the current space's (`GET /api/spaces`), both computed
+ * server-side: never derive a permission from a role name. `orgRole` serves labels and the few
+ * rules the server keys on the role ({@link hasFullOrgAccess}).
  */
 export function usePermissions() {
   const { currentOrg } = useOrg();
@@ -87,13 +61,9 @@ export function usePermissions() {
 
   const can = useCallback((permission: GateablePermission) => granted.has(permission), [granted]);
 
-  // `can` answers `false` for a set that has not loaded yet, which reads the
-  // same as a denial. A gate that REFUSES on that answer (rather than merely
-  // hiding a button) has to wait, or a hard reload flashes "no access" before
-  // the two lists land. Ready = the org is known AND either a space is resolved
-  // or there is none this caller can enter. Only `useSpaceResolver` resolves
-  // one, so `ready` never settles outside MainLayout; an org-level answer there
-  // needs no wait, the org's set arriving with `currentOrg` itself.
+  // `can` is `false` before the sets load, same as a denial: a gate that REFUSES on it must wait
+  // for `ready` (org known AND a space resolved or none enterable), or a reload flashes "no
+  // access". Only `useSpaceResolver` resolves a space, so `ready` never settles outside MainLayout.
   const enterableSpaceExists = spaces?.some(isSpaceEnterable) ?? false;
   const ready = !!currentOrg && !spacesLoading && (!!space || !enterableSpaceExists);
 
@@ -107,22 +77,11 @@ export function usePermissions() {
 }
 
 /**
- * The caller's standing in ONE named space, in the shape the chat access rows
- * read (`maySetPackageActive`). Activating a package is judged in the TARGET
- * space and nowhere else, and owning that space is its own authorization —
- * neither fact survives the org∪space union `can` computes, so the row itself
- * travels.
- *
- * Any space, not only the current one: a surface may ask about a space the
- * caller is not standing in (the share dialog asks about a package's HOME), and
- * `can` would answer for the wrong one. The array is safe to read that way
- * because the server already unions the org half into every row
- * (`effectiveInSpace`, `apps/api/src/lib/view-as.ts`) — so for the current
- * space this agrees with `can` by construction.
- *
- * `undefined` while `GET /api/spaces` is in flight, for no space at all, or for
- * a space this caller does not reach: all three read as "not yet", never as a
- * refusal.
+ * The caller's standing in ONE named space (`maySetPackageActive`). Activation is judged in the
+ * TARGET space and owning it is its own authorization — neither survives the org∪space union
+ * `can` computes. Works for a space the caller is not standing in; the server already unions the
+ * org half into every row (`effectiveInSpace`). `undefined` (loading, no space, unreached) reads
+ * as "not yet", never as a refusal.
  */
 export function useSpaceGrant(spaceId: string | null | undefined): SpaceGrant | undefined {
   const { data: spaces } = useSpaces();
@@ -135,7 +94,6 @@ export function useSpaceGrant(spaceId: string | null | undefined): SpaceGrant | 
   };
 }
 
-/** {@link useSpaceGrant} for the space the caller is currently in. */
 export function useCurrentSpaceGrant(): SpaceGrant | undefined {
   return useSpaceGrant(useCurrentSpaceId());
 }

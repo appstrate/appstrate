@@ -3,11 +3,8 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Preferences kept per browser: a convenience, never a location, and the
- * screen works without them. `localStorage` can be absent (the test runner),
- * blocked (sandboxed frame, disabled site data) or full, so every access is
- * guarded and a failure only costs the preference — never a click handler or
- * the module load that reads it.
+ * Per-browser preferences. `localStorage` can be absent (tests), blocked or full,
+ * so every access is guarded: a failure only costs the preference.
  */
 function readItem(key: string): string | null {
   try {
@@ -37,10 +34,7 @@ function parseStored<T>(raw: string | null, parse: (value: unknown) => T, fallba
   }
 }
 
-/**
- * One stored scalar under `key`; `parse` turns whatever is there (or nothing)
- * into a value. Writing `null` removes it.
- */
+/** One stored scalar under `key`; writing `null` removes it. */
 export function persistedValue<T extends string | boolean | null>(
   key: string,
   parse: (raw: string | null) => T,
@@ -51,10 +45,7 @@ export function persistedValue<T extends string | boolean | null>(
   };
 }
 
-/**
- * One stored JSON value under `key`. `parse` narrows what is there; absent or
- * unparseable JSON reaches it as `null`. Writing `null` removes the key.
- */
+/** One stored JSON value under `key`; absent or unparseable JSON reaches `parse` as `null`. Writing `null` removes it. */
 export function persistedJson<T>(key: string, parse: (value: unknown) => T) {
   return {
     read: (): T => parseStored(readItem(key), parse, () => parse(null)),
@@ -63,13 +54,9 @@ export function persistedJson<T>(key: string, parse: (value: unknown) => T) {
 }
 
 /**
- * One JSON value per key under `prefix` — a table's hidden columns, its column
- * widths — shared by every component naming the same key and kept in step
- * across them.
- *
- * Not zustand: keys arrive on demand from the component, and a store per key
- * would be created during render. A value that does not parse (hand-edited,
- * half-written) reads as `empty`.
+ * One JSON value per key under `prefix`, shared across components naming the
+ * same key. Not zustand: keys arrive on demand, a store per key would be created
+ * during render. An unparseable value reads as `empty`.
  */
 export function createKeyedLocalStore<T>(prefix: string, parse: (value: unknown) => T, empty: T) {
   const listeners = new Set<() => void>();
@@ -97,8 +84,6 @@ export function createKeyedLocalStore<T>(prefix: string, parse: (value: unknown)
   };
 
   const useValue = (key: string): [T, (value: T) => void] => {
-    // The SPA is never server-rendered: the static render the tests use reads
-    // the same storage as the browser.
     const snapshot = () => read(key);
     const value = useSyncExternalStore(subscribe, snapshot, snapshot);
     return [value, (next) => write(key, next)];

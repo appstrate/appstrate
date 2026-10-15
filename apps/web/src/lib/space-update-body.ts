@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The `PATCH /api/spaces/{id}` body for one setting of a space's General page.
- *
- * Each control commits on its own, so the body carries that control's field
- * and nothing else. Sending the others would not be neutral: the route refuses
- * `visibility` and `default_role` on a personal space whatever their value
- * (409 `personal_space_immutable`), so a rename that carried them would fail.
+ * The `PATCH /api/spaces/{id}` body for one setting. Each control commits alone:
+ * the route refuses `visibility`/`default_role` on a personal space whatever their
+ * value (409 `personal_space_immutable`), so a rename carrying them would fail.
  */
 
 import type { components, paths } from "../api/client";
@@ -22,12 +19,10 @@ export type SpaceSettingChange =
   | { field: "visibility"; value: SpaceObject["visibility"] }
   | { field: "defaultRole"; value: SpaceObject["default_role"] };
 
-/** A domain list as stored: an empty row is the residue of editing, not a domain. */
 function cleanDomains(domains: readonly string[]): string[] {
   return domains.map((domain) => domain.trim()).filter(Boolean);
 }
 
-/** Whether `next` would store anything other than `stored`: leaving an untouched field writes nothing. */
 export function domainsChanged(stored: readonly string[], next: readonly string[]): boolean {
   const before = cleanDomains(stored);
   const after = cleanDomains(next);

@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * A package's versions, as a section of Paramètres › Explorer — for every type.
- *
- * Browsing the history is exploring the package, the way its map and its files
- * are, so it sits beside them rather than in a top-level tab of its own.
- *
- * The section is the history. A draft holding changes that are in no version
- * yet says so in one line above the list, with the comparison one click away,
- * and any row can be compared to the draft from its own menu: the diff is a
- * gesture on the list, not a block that pushes it off the screen.
- */
+/** A package's version history (Paramètres › Explorer, every type); a draft ahead of the latest version adds a compare line. */
 import { useTranslation } from "react-i18next";
 import { GitCompareArrows } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";

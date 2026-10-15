@@ -1,21 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Publisher-authored setup instructions from an integration manifest.
- *
- * This stays separate from the page because each URL crosses a navigation
- * trust boundary and the pure component can be covered without mounting the
- * integration page's data layer.
- */
-
 import { useTranslation } from "react-i18next";
 import { normalizeHttpUrl } from "@appstrate/core/url";
 
-/**
- * AFPS §7.10 setup steps shown next to the OAuth client form. Unsafe URLs
- * degrade to plain text so the instruction remains visible without creating a
- * publisher-controlled navigation sink.
- */
+/** AFPS §7.10 setup steps; unsafe URLs degrade to plain text (no publisher-controlled navigation sink). */
 export function SetupGuideSteps({
   steps,
 }: {

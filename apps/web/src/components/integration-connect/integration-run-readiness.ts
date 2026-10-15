@@ -7,18 +7,14 @@ import { noneChosenBy } from "../../lib/launch-warnings";
 
 type IntegrationAgentResolution = components["schemas"]["IntegrationAgentResolution"];
 
-/**
- * What the picker's trigger asks for when nothing is bound. `reconfigure`: the agent's own
- * `auth_key` serves none of its selected tools — no pick or connection clears it.
- */
+/** `reconfigure`: the agent's `auth_key` serves none of its selected tools; no pick clears it. */
 type EmptyPickerPrompt = "choose" | "connect" | "reconfigure";
 
 interface ResolutionView {
-  /** The locking set — the admin pin's (`[]` pins none), else an enforced org default's. */
+  /** The admin pin's set (`[]` pins none), else an enforced org default's. */
   lockedConnectionIds: string[];
-  /** Which of the two locks it — they are lifted in different places, so the badge names it. */
   lockedBy: "admin_pin" | "org_default" | null;
-  /** The soft org default's whole stored set while in play, incl. members candidates hide. */
+  /** The soft org default's whole stored set, incl. members candidates hide. */
   softDefaultIds: string[];
   /** Connection health, not run relevance (the server's `run_blocking`): bound, with no error. */
   resolved: boolean;

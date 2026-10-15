@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Space-assignment form rules as plain functions. The validity rule feeds a
- * react-hook-form `Controller` `validate`, so RHF owns the error lifecycle.
- */
-
 import { spaceRoleAssignment } from "../hooks/use-roles";
 import type { components } from "../api/client";
 import type { AssignableOrgRole } from "@appstrate/shared-types";

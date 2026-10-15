@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The one row shape every package collection draws (cards and table alike),
- * and the builders that make it from what each list endpoint returns. A
- * surface that shows an agent, a skill or an MCP server builds its row here,
- * so the dashboard, the index pages and « Utilisé par » never map it by hand.
- */
+// The one row shape every package collection draws (cards and table), and its builders.
 
 import type { ReactNode } from "react";
 import type { PackageType } from "@appstrate/core/validation";
@@ -27,17 +22,16 @@ export interface CardItem {
   autoInstalled?: boolean;
   /** A tile drawn left of the title, instead of the one the type and identity give. */
   icon?: ReactNode;
-  /** An agent's chosen icon and colour: its identity tile, in the cards and the table alike. */
+  /** An agent's chosen icon and colour. */
   identity?: { icon?: string | null; color?: string | null };
-  /** An integration's logo (its manifest `icon`), next to its name. */
+  /** An integration's logo (its manifest `icon`). */
   logo?: string;
-  /** The card's state, top right: what a browsing reader looks for first. */
+  /** The card's state, top right. */
   status?: ReactNode;
-  /** One muted line under the description: who provides it, what it carries. */
+  /** One muted line under the description. */
   meta?: ReactNode;
 }
 
-/** An agent of the index (`useAgents`), with its unread runs when the surface counts them. */
 export function agentCardItem(agent: AgentListItem, unreadCount?: number): CardItem {
   return {
     id: agent.id,

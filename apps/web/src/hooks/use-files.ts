@@ -25,11 +25,7 @@ export interface FileListFilters {
   enabled?: boolean;
 }
 
-/**
- * List files (gallery + run tab). Org/app headers are passed explicitly so
- * they are part of the React Query key — an org/app switch refetches instead of
- * serving another scope's cached page (per the typed-client convention).
- */
+/** List files (gallery + run tab); scope headers ride in the query key. */
 export function useFiles(filters: FileListFilters = {}) {
   const scope = useOrgScope();
   // A run or a conversation shows its files incidentally; neither implies `files:read`.
@@ -53,11 +49,7 @@ export function useFiles(filters: FileListFilters = {}) {
   );
 }
 
-/**
- * The gallery's files, keyset-paged (`startingAfter` = last id seen). The key keeps the
- * `[method, path]` prefix so the write invalidations reach it, and the extra segment keeps it
- * apart from `useFiles`'s plain pages; a refetch re-reads every loaded page.
- */
+/** The gallery's files, keyset-paged. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
 export function useFilesPaged(filters: Pick<FileListFilters, "search" | "purpose"> = {}) {
   const scope = useOrgScope();
   const { can } = usePermissions();
@@ -79,12 +71,7 @@ export function useFilesPaged(filters: Pick<FileListFilters, "search" | "purpose
   });
 }
 
-/**
- * Fetch a single file's metadata — including a freshly-minted `preview_url`
- * (its signed token is short-lived, so the preview modal refetches on each open
- * rather than reusing a token carried in a list page). The caller mounts the
- * preview only when it is open, so the fetch is scoped to that lifetime.
- */
+/** A single file's metadata with a freshly-minted `preview_url` (short-lived signed token): never cached, refetched on each open. */
 export function useFile(id: string) {
   const scope = useOrgScope();
   const { can } = usePermissions();
@@ -96,12 +83,7 @@ export function useFile(id: string) {
   );
 }
 
-/**
- * openapi-react-query keys are `[method, path, init]` with the literal spec
- * path — invalidate the list and the single-file paths separately after a
- * write (they live under different path strings), plus the org detail that
- * carries the storage total.
- */
+/** Invalidate the list and single-file paths (different path strings) plus the org detail carrying the storage total. */
 function invalidateFiles(qc: ReturnType<typeof useQueryClient>) {
   void invalidatePaths(qc, ["/api/files", "/api/files/{id}"]);
   void invalidateOrgDetail(qc);
@@ -117,12 +99,7 @@ export function useDeleteFile() {
   });
 }
 
-/**
- * Keep ("pin") a file — clear its retention deadline so the expiry GC never
- * sweeps it. Same authorization as delete (creator or `files:delete`).
- * Invalidates the file queries on success so the pinned row reloads without
- * its expiry badge.
- */
+/** Keep ("pin") a file: clears its retention deadline so the expiry GC never sweeps it. Same authorization as delete. */
 export function useKeepFile() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/files/{id}/keep", {
@@ -131,14 +108,9 @@ export function useKeepFile() {
 }
 
 /**
- * Download a file's bytes. Uses the typed client with `parseAs: "blob"` so
- * the org/app scoping headers are injected by the client middleware (a bare
- * anchor navigation cannot send them) and the `307` to a presigned URL is
- * followed transparently by fetch — the same pattern as the package download.
- *
- * Handing the bytes to `downloadOrToast` (and so `triggerBlobDownload`) is what
- * keeps the inert type on this path in particular: the content route echoes the stored `row.mime`,
- * which is uploader-controlled and can be `text/html`.
+ * Download a file's bytes through the typed client (a bare anchor cannot send the scoping
+ * headers; fetch follows the `307` to a presigned URL). `downloadOrToast` keeps the inert type:
+ * the content route echoes the uploader-controlled `row.mime`, which can be `text/html`.
  */
 export function useFileDownload() {
   return useCallback(
@@ -151,12 +123,7 @@ export function useFileDownload() {
   );
 }
 
-/**
- * Copy a text file's content to the clipboard (the Artifact frame's "copy"):
- * the download's authenticated read, parsed as text, then `useCopyToClipboard`,
- * whose `copied` the caller shows. A failed read is said here; a refused
- * clipboard, there.
- */
+/** Copy a text file's content to the clipboard (the Artifact frame's "copy"). A failed read is toasted here; a refused clipboard, by `useCopyToClipboard`. */
 export function useFileTextCopy() {
   const { t } = useTranslation("files");
   const { copied, copy } = useCopyToClipboard();
@@ -181,17 +148,9 @@ export function useFileTextCopy() {
 }
 
 /**
- * Authenticated image preview: a stored file's bytes → an object URL for an
- * `<img src>`, revoked on unmount / id change. `undefined` while the bytes are
- * on their way, `null` when there is no preview (no grant, failed read), so a
- * caller draws a placeholder in the image's place first and its own fallback
- * only once the answer is no. Cookie auth alone is not enough — the content
- * route resolves the org/app context from the scoping headers, which the typed
- * client's middleware injects.
- *
- * THE single implementation for every image thumbnail in the app; the chat
- * module receives it through `ChatPage`'s injection seam instead of shipping
- * its own copy.
+ * Authenticated image preview: a stored file's bytes → an object URL for an `<img src>`, revoked
+ * on unmount / id change. `undefined` while loading, `null` when there is no preview (no grant,
+ * failed read). THE single implementation for image thumbnails; chat gets it via `ChatPage`'s injection seam.
  */
 export function useFileImageSrc(id: string): string | null | undefined {
   const [loaded, setLoaded] = useState<{ id: string; src: string | null } | null>(null);
@@ -206,8 +165,7 @@ export function useFileImageSrc(id: string): string | null | undefined {
           params: { path: { id } },
           parseAs: "blob",
         });
-        // No await between this check and `createObjectURL`, so a cleanup that
-        // has already run can never miss the URL it would have to revoke.
+        // No await between this check and `createObjectURL`: cleanup can never miss the URL to revoke.
         if (cancelled) return;
         if (!data) {
           setLoaded({ id, src: null });
@@ -216,8 +174,7 @@ export function useFileImageSrc(id: string): string | null | undefined {
         objectUrl = URL.createObjectURL(data);
         setLoaded({ id, src: objectUrl });
       } catch {
-        // Fetch failure (403 on another member's upload, network) → no preview;
-        // it is decorative.
+        // Decorative: a failed fetch (403, network) means no preview.
         if (!cancelled) setLoaded({ id, src: null });
       }
     })();

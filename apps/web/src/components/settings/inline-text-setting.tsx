@@ -1,19 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A text setting you edit in place: no Edit button, no mode.
- *
- * Commits on blur or Enter, reverts on Escape, and stays quiet when the value
- * did not actually change — so a stray focus never fires a write.
- *
- * Uncontrolled, keyed on the incoming value rather than mirrored into state.
- * The mirror would need an effect to follow the server, and syncing state from
- * an effect is exactly what the Rules-of-React gate rejects
- * (`react-hooks/set-state-in-effect`, see apps/web/CLAUDE.md). Remounting on a
- * value change costs nothing here and needs no state at all.
- *
- * Marked `data-inline-editing` so Escape reverts the field without closing the
- * dialog the settings page sits in (`keepOpenWhileRenaming`).
+ * Edit-in-place text: commits on blur/Enter (only if changed), reverts on Escape.
+ * Uncontrolled and keyed on `value`: mirroring into state would need a set-state-in-effect.
+ * `data-inline-editing` keeps Escape from closing the surrounding dialog (`keepOpenWhileRenaming`).
  */
 import { Input } from "@appstrate/ui/components/input";
 

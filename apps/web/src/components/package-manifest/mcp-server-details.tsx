@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * MCP-server-specific tail of the manifest overview: how the server is started
- * (`server`), what it exposes (`tools`) and what it asks the installer for
- * (`user_config`). `manifest.json` IS the only required file of this package
- * type, so without this block the type has no rendered view at all.
- */
+/** MCP-server tail of the manifest overview (`server`, `tools`, `user_config`); `manifest.json` is this type's only required file, so it has no other view. */
 
 import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
@@ -28,8 +23,7 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
     facts.push({ labelKey: "manifest.serverEntryPoint", value: server.entryPoint });
   }
   if (server?.command) {
-    // The args belong with the command — split across two rows they read as
-    // two unrelated facts instead of the one line the runner executes.
+    // Args stay with the command: split, they read as two unrelated facts.
     facts.push({
       labelKey: "manifest.serverCommand",
       value: [server.command, ...server.args].join(" "),

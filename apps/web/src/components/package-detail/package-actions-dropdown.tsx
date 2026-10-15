@@ -34,13 +34,7 @@ import { MoveHomeSpaceDialog, MOVE_HOME_PARAM } from "./move-home-space-dialog";
 import { SharePackageDialog, SHARE_PARAM } from "./share-package-dialog";
 import { useModalParam } from "../../hooks/use-modal-param";
 
-/**
- * What the menu reads off the package's own detail response (`AgentDetail` or
- * `OrgPackageItemDetail`): the home contract, whose verdicts gate every act on
- * the live object, and the facts the confirmations name. `agents` (the agents
- * using it) is on the non-agent shape only; deleting a package that is used is
- * refused.
- */
+/** What the menu reads off the detail response: the home verdicts gating each act, and the facts confirmations name. `agents` exists on the non-agent shape only. */
 type PackageActionsDetail = Pick<
   AgentDetail,
   | "source"
@@ -62,16 +56,11 @@ interface PackageActionsDropdownProps {
   onDownload?: (version: string) => void;
   /** Agent-only: export the full transitive bundle (.afps-bundle). */
   onDownloadBundle?: (version?: string) => void;
-  /** Agent-only: true when the package has at least one published version.
-   *  The bundle export endpoint resolves versions from the registry; a
-   *  draft-only agent (versionCount === 0) would 404, so we disable the
-   *  menu item and surface a tooltip pointing to "Créer une version". */
+  /** Agent-only: bundle export 404s on a draft-only agent, so the item is disabled with a hint. */
   hasPublishedVersion?: boolean;
   /**
-   * Whether the package is ACTIVE in the current space; `undefined` when not
-   * known yet, which offers neither switch. The bundle export route runs the
-   * execution gate (`isPackageActiveHere`), not the read gate, so a package
-   * merely placed here — or placed and switched off — answers 404 on click.
+   * ACTIVE in the current space; `undefined` (unknown) offers neither switch. Bundle export runs the
+   * execution gate (`isPackageActiveHere`), so a package placed but switched off answers 404.
    */
   isActiveHere?: boolean;
   onCreateVersion?: () => void;
@@ -89,12 +78,7 @@ interface PackageActionsDropdownProps {
   onDeleteMemories?: () => void;
   /** Agent-only: open the advanced run launcher (per-run overrides). */
   onRunWithOptions?: () => void;
-  /**
-   * Agent-only: why this caller cannot launch at all, already translated.
-   * Set when the package has never been published and its working copy is not
-   * theirs to run — the launcher would open on a version that does not exist.
-   * `undefined` means launchable.
-   */
+  /** Agent-only: why this caller cannot launch at all (never published, working copy not theirs), translated; `undefined` = launchable. */
   runBlockedReason?: string;
 }
 
@@ -153,36 +137,23 @@ export function PackageActionsDropdown({
   const isAgent = type === "agent";
   // The server's own verdict, not a re-derivation of it.
   const canWrite = detail?.home_writable === true;
-  // The exports carry the manifest and every authored file, so the two download
-  // routes ask for `<type>:read` — the permission a summary-only caller (an
-  // `agents:run` runner) does not hold. Without this the items 403 on click.
+  // The exports need `<type>:read`, which a summary-only caller (an `agents:run` runner) lacks.
   const canRead = can(packagePermission(type, "read"));
   const isMutable = canWrite && !isHistoricalVersion && isOwned;
-  // Its own verdict, not `canWrite`'s: `DELETE` enforces `<type>:delete`, an
-  // INDEPENDENT permission string, and a custom space role is an arbitrary
-  // bundle — one granting `write` without `delete` must not render a Supprimer
-  // item that 403s on click. The two travel together in every preset, so this
-  // narrows nothing for a preset-only organization.
+  // Its own verdict: `delete` is an independent permission, and a custom role may grant `write` without it.
   const canDelete = detail?.home_deletable === true;
-  // Its own verdict, not `canWrite`'s: sharing is a third verb on the home
-  // space, and a system package answers `false` (it is already readable
-  // everywhere, and the route refuses it).
+  // Sharing is a third verb on the home space; a system package answers `false`.
   const canShare = detail?.home_shareable === true && !isHistoricalVersion && isOwned;
-  // Activating is a space placement switch, one pair of doors for every family;
-  // deactivating keeps the placement and its settings. Whether the act EXISTS
-  // follows the package's state here; `usePackageActivation` says whether this
-  // caller may perform it — the target space's verdict, not the org∪space union
-  // `can` computes (owning a personal space authorizes it, §3.6).
+  // Whether activation EXISTS follows the package's state here; `usePackageActivation` says whether
+  // this caller may perform it (the target space's verdict, not the org∪space union `can` computes, §3.6).
   const showDeactivate = isActiveHere === true && activation.mayDeactivate;
   const showActivate = isActiveHere === false && activation.mayActivate;
   const showDelete = isOwned && canDelete;
   // Deleting a skill, MCP server or integration an agent still uses is refused.
   const canDeletePackage = !!detail?.agents && detail.agents.length === 0;
-  // Forking writes a NEW package in the current space, so it asks the current
-  // space's write, not the home's verdict on a package it never writes.
+  // Forking writes a NEW package in the current space, so it asks the current space's write.
   const showFork = can(packagePermission(type, "write")) && !isOwned;
-  // Clearing runs deletes every member's runs of this agent, so the route asks
-  // `runs:read-all` on top of `runs:delete`; clearing memories is its own verb.
+  // Clearing runs deletes every member's runs, so the route asks `runs:read-all` on top of `runs:delete`.
   const showDeleteRuns =
     can("runs:delete") && can("runs:read-all") && !!hasRuns && Boolean(onDeleteRuns);
   const showDeleteMemories =
@@ -215,10 +186,7 @@ export function PackageActionsDropdown({
     </DropdownMenuItem>
   );
 
-  // Where the package runs and where it lives, the same group in both menus:
-  // moving the home is the same authority as editing, since it is the home
-  // that grants that authority; sharing is a verb of its own on that same space
-  // (RBAC spec §6.10).
+  // Placement group shared by both menus; moving the home is the edit authority, sharing a verb of its own (RBAC §6.10).
   const placementItems = (
     <>
       {showActivate && (
@@ -248,13 +216,6 @@ export function PackageActionsDropdown({
     </>
   );
 
-  // The manifest is not reachable from here, and does not need to be:
-  // every page that mounts this dropdown carries both tabs — À propos renders
-  // the manifest, the Contenu tab serves its raw `manifest.json`. That holds for
-  // integrations too, which route to `pages/integration-detail.tsx` and have
-  // their own tab set, and that page mounts the file explorer as well, so an
-  // integration's `manifest.json` and `INTEGRATION.md` are reachable without
-  // downloading the `.afps`.
   return (
     <>
       <PageActionsMenu contentClassName={isAgent ? "min-w-64" : undefined}>

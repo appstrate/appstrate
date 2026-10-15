@@ -1,16 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `/claim` — bootstrap-token redemption page.
- *
- * Renders only when `AppConfig.features.bootstrapTokenPending` is true,
- * which the API flips off the moment an organization is created (see
- * `apps/api/src/lib/bootstrap-token.ts`). The form posts directly to
- * `POST /api/auth/bootstrap/redeem` — no Better Auth client involvement
- * because the redeem route owns its own gate. On success, the response
- * sets the BA session cookie and we hard-reload to `/` so the SPA picks
- * up the now-authenticated session AND the freshly-stale AppConfig
- * (which the next request rebuilds with `bootstrapTokenPending: false`).
+ * `/claim`: bootstrap-token redemption, shown only while
+ * `AppConfig.features.bootstrapTokenPending` (flipped off once an organization
+ * exists, `apps/api/src/lib/bootstrap-token.ts`). Posts directly to
+ * `/api/auth/bootstrap/redeem` (no Better Auth client: the route owns its gate).
  */
 
 import { PendingButton } from "@/components/app-ui/pending-button";
@@ -38,7 +32,6 @@ export function ClaimPage() {
     setErrorMsg(null);
     setSubmitting(true);
     try {
-      // Non-2xx throws ApiError (RFC 9457 detail) via the client middleware.
       await client.POST("/api/auth/bootstrap/redeem", {
         body: {
           token: token.trim(),
@@ -47,9 +40,7 @@ export function ClaimPage() {
           password,
         },
       });
-      // Success: the redeem route already set the session cookie. Hard-reload
-      // so the next request sees `bootstrapTokenPending: false` in AppConfig
-      // and the SPA flows into the normal authenticated path.
+      // The session cookie is set: hard-reload so AppConfig is rebuilt with `bootstrapTokenPending: false`.
       window.location.href = "/";
     } catch (err) {
       setErrorMsg(errorMessage(err));

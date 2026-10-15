@@ -24,27 +24,15 @@ export type PackageEditorTab =
   | "json";
 
 /**
- * Two presentations of one editor.
- *
- * `page` creates a package: every tab, the files included, on the creation
- * route. `embedded` edits an existing one inside its Paramètres › Package AFPS,
- * one rail section at a time — and there it edits the MANIFEST only. The
- * package's files are changed in Explorer › Fichiers, where the tree is; the
- * Package AFPS › Contenu table only reads them.
- *
- * So the presentation IS the create/edit distinction: `embedded` is what the
- * shared editor pieces call `isEdit`, and only `page` draws a Cancel.
+ * `page` creates a package (every tab, files included). `embedded` edits an existing one inside
+ * Paramètres › Package AFPS, the MANIFEST only (files are changed in Explorer › Fichiers).
+ * `embedded` is what shared pieces call `isEdit`; only `page` draws a Cancel.
  */
 export type Presentation = "page" | "embedded";
 
 type ValidationError = { error: string; tab?: string } | null;
 
-/**
- * Save from a package's Package AFPS. It saves the draft IN PLACE (no redirect:
- * the reader is already on the package) and reads back the draft's new ETag;
- * the parent refetches the package and remounts the editor on it, which is
- * what clears the unsaved state.
- */
+/** Saves the draft in place; the parent then refetches and remounts the editor, which clears the unsaved state. */
 async function saveEmbedded(saveDraft: () => Promise<void>, savedMessage: string) {
   try {
     await saveDraft();
@@ -65,11 +53,7 @@ function useEditorTab(
   return [tab ?? localTab, setActiveTab] as const;
 }
 
-/**
- * The editor state every package type shares: the draft, the open section,
- * the identity form, save and discard. A type adds its own rules to the one
- * they all have (an id), and its own sections.
- */
+/** The editor state every package type shares: draft, open section, identity form, save and discard. */
 export function usePackageEditor({
   type,
   initialState,

@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Addresses of a package's Paramètres sections: the section named in the query
- * (the default one included), the tab in the hash. A link to a section carries
- * nothing else from the page it leaves, so a modal open there does not follow.
- */
+// Paramètres section URLs: the section in the query, the tab in the hash. A link carries
+// nothing else from the page it leaves, so a modal open there does not follow.
 export type ConfigurationSection = "model" | "proxy" | "inputs" | "connections" | "schedules";
 
-/** One editor, its sections switched without leaving it. */
 export const AGENT_DEFINITION_SECTIONS = [
   "general",
   "schema",
@@ -68,11 +64,7 @@ export function integrationSettingsHref(
   return sectionHref(pathname, "configuration", "integrationSettings", section, extra);
 }
 
-/**
- * The editor a Paramètres URL mounts, for `EditorPlaceContext`: its section as
- * the view resolves it (the package's definition sections are one editor) and
- * the file its view is keyed on, which remounts it as surely as a section does.
- */
+/** The editor a Paramètres URL mounts, for `EditorPlaceContext`: the definition sections are one editor, and the `file` remounts it like a section. */
 export function settingsEditorPlace(
   section: string,
   search: URLSearchParams,

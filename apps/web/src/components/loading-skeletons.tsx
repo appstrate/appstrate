@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Data on its way, drawn where it will be and in its shape. The page's frame
- * (header, toolbar, tabs) never waits on a read it does not show; whatever does
- * wait is grey blocks laid out as the content will be. A spinner is a control
- * at work, never content on its way.
- *
- * A route's fallback (`skeletonOf` in `app.tsx`) is the same skeleton its page
- * draws while loading, so the chunk and the data wait under one shape.
+ * Data on its way, drawn as grey blocks laid out as the content will be (a spinner is a
+ * control at work, never content on its way). A route's fallback (`skeletonOf` in
+ * `app.tsx`) is the same skeleton its page draws, so chunk and data wait under one shape.
  */
 
 import type { ReactNode } from "react";

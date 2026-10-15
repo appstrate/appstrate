@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The ModelFormModal submission, minus React. A creation is ONE `POST /api/models/apply`: the
- * typed key, the models and their binding are written together or not at all, so a refusal leaves
- * nothing behind and a retry starts from a clean slate. Only an edit of a saved model is still a
- * `PATCH`, with the typed key (if any) minted first and reported back on failure so the retry
- * rebinds to it.
- *
- * The writes are injected rather than closed over, so the contract is assertable without a DOM.
+ * The ModelFormModal submission, minus React. A creation is ONE `POST /api/models/apply`
+ * (key, models and binding atomic: a refusal leaves nothing behind). An edit is a
+ * `PATCH`, the typed key (if any) minted first and reported back on failure so the
+ * retry rebinds to it. Writes are injected so the contract is assertable without a DOM.
  */
 
 import type {
@@ -53,10 +50,7 @@ function toChoiceCredential(data: ModelFormSubmission): ModelChoiceBody["credent
   return data.credentialId ? { id: data.credentialId } : null;
 }
 
-/**
- * What a refused choice reports back. The choice is atomic — nothing was written — so every entry
- * is still to submit, except the ones the server says the organization already holds.
- */
+/** What a refused choice reports back: nothing was written, so every entry is still to submit except those the organization already holds. */
 function refusalOutcome(err: unknown, modelIds: string[]): ModelFormSubmitOutcome {
   const duplicateModelIds: string[] = [];
   const refusedModelIds: string[] = [];

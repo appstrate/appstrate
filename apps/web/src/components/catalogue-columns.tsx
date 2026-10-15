@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The three columns the catalogue adds to the package table: the tick, where a
- * package is already active, and the deed.
- *
- * "Where it is already active" is the column this screen cannot do without.
- * There is no organization-level install in this product — a package is in the
- * org's catalogue, and then it is switched on space by space — so "activate"
- * with nothing beside it would never say WHERE. The row says where it already
- * runs, and the button names the space it would add.
+ * The columns the catalogue adds to the package table: the tick, the origin, one
+ * switch per space (where a package is active) and the row deeds. There is no
+ * organization-level install, so every activation has to say WHERE.
  */
 import { useTranslation } from "react-i18next";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -31,11 +26,10 @@ import type { IntegrationProtocol } from "../lib/integration-collection";
 export interface CatalogueRowState {
   /** Names of the spaces this caller can see where the package is active. */
   activeIn: string[];
-  /** Active in the space on screen: there is nothing left to do here. */
   activeHere: boolean;
   /** Placed here and switched off: its per-space settings are kept. */
   placedHere?: boolean;
-  /** Offered here and switched on by nobody — a placement whose state is `none`. */
+  /** Offered here and switched on by nobody (a placement whose state is `none`). */
   offeredHere?: boolean;
 }
 
@@ -66,8 +60,6 @@ export function useCatalogueSelectColumn({
       />
     ),
     width: "36px",
-    // This table SCROLLS rather than dropping columns (`columnMode="scroll"`),
-    // and the tick is held at its start with the name beside it.
     control: true,
     cell: (item) =>
       selectable(item) ? (
@@ -84,18 +76,9 @@ export function useCatalogueSelectColumn({
 }
 
 /**
- * Where the package comes FROM, in two words on one line: who provides it, and
- * which space governs its draft. The one origin column of every package table:
- * the lists, the integrations, the catalogue.
- *
- * They are different facts — Acme provides it, the space "Default" decides
- * who may edit it — and a column each would cost the tier-3 budget a whole
- * track (`column-tiers.test.tsx` measures it). So the home rides under the
- * provider, the way Claude's connector list puts "Personnalisé" beside "Web"
- * rather than in a column of its own.
- *
- * A system package has no home space: it is shipped into every space rather
- * than living in one, so there is nothing to name under it.
+ * The one origin column of every package table: the provider, with the home space
+ * (which governs the draft) under it. A column each would cost the tier-3 budget a
+ * whole track (`column-tiers.test.tsx`). A system package has no home space.
  */
 export function useCatalogueOriginColumn<
   T extends { source?: string | null; autoInstalled?: boolean } = CardItem,
@@ -130,11 +113,7 @@ export function useCatalogueOriginColumn<
 
 const NO_DEEDS: CatalogueDeeds = { moveHome: false, share: false, revokeFrom: [] };
 
-/**
- * The row's deeds, behind the table's standard "…" menu rather than a button
- * in every row: installing is one deed among the preview's, the bulk action is
- * the tick, and a column of identical buttons read as the table's content.
- */
+/** The row's deeds, behind the table's standard "…" menu. */
 export function useCatalogueActionsColumn({
   isPending,
   deedsOf,
@@ -156,8 +135,7 @@ export function useCatalogueActionsColumn({
   return rowActionsColumn((item) => (
     <CatalogueRowMenu
       item={item}
-      // A system package has no home to move and no audience to offer: the
-      // server answers `false` for both, so the menu offers neither.
+      // A system package has no home to move and no audience to offer.
       deeds={deedsOf(item) ?? NO_DEEDS}
       spaceNameOf={spaceNameOf}
       isPending={isPending}
@@ -191,27 +169,11 @@ export function useCatalogueProtocolColumn<T = CardItem>(
 }
 
 /**
- * One column per space the caller reaches, each cell saying — and changing —
- * this package's state THERE.
- *
- * Not a pair such as "Statut" and "Actif dans", which between them cannot name
- * the space they speak about: the first reasons on the current space without
- * writing its name, the second lists the others. With three states and
- * several spaces, a row needs the same word in the same place for every space,
- * which is a column each.
- *
- * The switch IS the deed, not a report of it: activating a package in a space
- * it is not placed in shares it there and switches it on in one transaction,
- * which is the door the API already opens. The verdict is the TARGET space's
- * (`activationGate`), never the one on screen, and a refused switch says which
- * half is missing.
- *
- * "Offered" is written beside the switch rather than in place of it: it is the
- * one state that asks the reader for a decision, and hiding the control that
- * takes it behind a word would make the row a dead end; its switch says what
- * switching it on consents to. "Switched off" is
- * written too: an off switch alone reads the same placed or not, and only the
- * placed one keeps its settings.
+ * One column per space the caller reaches; each cell says, and changes, this package's
+ * state THERE. The switch IS the deed: activating in a space where it is not placed shares
+ * and switches it on in one transaction. The verdict is the TARGET space's (`activationGate`).
+ * "Offered" and "switched off" are written beside the switch, which alone reads the same
+ * placed or not (only a placed one keeps its settings).
  */
 export function useCatalogueSpaceColumns({
   spaces,
@@ -222,10 +184,8 @@ export function useCatalogueSpaceColumns({
   onSetActive,
 }: {
   spaces: readonly { id: string; name: string }[];
-  /** The space the app is standing in — named, because the catalogue spans them all. */
   currentSpaceId: string | null;
   placementOf: (item: CardItem) => CataloguePlacement | undefined;
-  /** The reader's verdict for this switch, in the direction it would go. */
   gateOf: (item: CardItem, spaceId: string, next: boolean) => ActivationGate;
   busy: boolean;
   onSetActive: (item: CardItem, spaceId: string, next: boolean) => void;
@@ -235,9 +195,7 @@ export function useCatalogueSpaceColumns({
   return spaces.map((space, index) => ({
     id: `space:${space.id}`,
     header: space.name,
-    // The catalogue reads every space at once, so which one the rest of the
-    // app is acting in has to be SAID: it is where a launch, a run and a
-    // connection land, and nothing else on this screen says it.
+    // The catalogue spans every space, so the one the app acts in (launches, runs) has to be SAID.
     headerNode:
       space.id === currentSpaceId ? (
         <span className="flex min-w-0 items-center gap-1.5">
@@ -247,11 +205,8 @@ export function useCatalogueSpaceColumns({
           </span>
         </span>
       ) : undefined,
-    // Controls, not content: the row's link is placed elsewhere, and the
-    // switches below are raised over the overlay it stretches across the row.
     control: true,
-    // The pinned first column carries the space name AND the "ici" pill, so it
-    // asks for more room than the ones that carry a name alone.
+    // The pinned first column also carries the "ici" pill.
     width: index === 0 ? "minmax(140px,1fr)" : "minmax(104px,1fr)",
     cell: (item) => {
       const placement = placementOf(item);
@@ -259,9 +214,7 @@ export function useCatalogueSpaceColumns({
       const state = placementIn(placement, space.id);
       const gate = gateOf(item, space.id, state !== "active");
       return (
-        // `relative z-10`: the row link paints an overlay over every cell, and
-        // anything that answers to the pointer has to sit above it or the row
-        // swallows the click (see `data-table.tsx`).
+        // `relative z-10`: sit above the row link's overlay or the row swallows the click (see `data-table.tsx`).
         <span className="relative z-10 flex min-w-0 items-center gap-1.5 overflow-hidden">
           <Switch
             checked={state === "active"}
@@ -280,9 +233,7 @@ export function useCatalogueSpaceColumns({
             onCheckedChange={(next) => onSetActive(item, space.id, next === true)}
           />
           {state === "offered" && (
-            // One word, not "Partagé par Alice" on two lines: who shared it is
-            // on the sheet and in "Partages en attente", where the decision is
-            // taken; here the cell only has to tell shared-and-off from off.
+            // One word: who shared it is on the sheet and in "Partages en attente".
             <span className="text-primary text-[0.7rem] font-medium">
               {t("catalogue.offeredHere")}
             </span>

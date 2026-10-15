@@ -15,7 +15,6 @@ import {
 } from "./schedule-payload";
 import { sameSet } from "./strings";
 
-/** The integration package id an `integrations.{packageId}` error field names. */
 export function integrationIdOfField(field: string): string {
   return field.slice("integrations.".length);
 }
@@ -35,22 +34,17 @@ const SCHEDULE_CHOICE_CODES = [
   "required_integration_unbound",
 ] as const satisfies readonly MissingIntegrationConnectionCode[];
 
-/**
- * An integration a schedule write was refused over. `candidates` are those the caller may
- * name — none when only the actor can choose. Only an edit of the schedule clears any of them.
- */
+/** `candidates`: those the caller may name; none when only the actor can choose. */
 export interface ConnectionChoice {
   integrationId: string;
   code: (typeof SCHEDULE_CHOICE_CODES)[number];
   candidates: ConnectionChoiceCandidate[];
 }
 
-/** An integration refused for a reason no pick fixes alone (see `isChoiceRequest`). */
 export type ConnectionRefusal = ConnectionChoice & {
   code: Exclude<ConnectionChoice["code"], "must_choose_connection">;
 };
 
-/** A connection the schedule cannot settle by itself: it asks for a choice rather than fails. */
 export function isChoiceRequest(choice: ConnectionChoice): boolean {
   return choice.code === "must_choose_connection";
 }
@@ -81,10 +75,7 @@ export function scheduleConnectionChoices(err: unknown): ConnectionChoice[] {
   );
 }
 
-/**
- * The refused integrations whose current set is still the one the refused save sent (no pick and
- * `[]` differ). Derived, so a mark clears as soon as the user picks — and comes back on undo.
- */
+/** Refused integrations whose current set is still the one the refused save sent (no pick and `[]` differ). */
 export function pendingConnectionChoices(
   choices: readonly ConnectionChoice[],
   submitted: Readonly<Record<string, string[]>> | null | undefined,
@@ -97,7 +88,6 @@ export function pendingConnectionChoices(
   });
 }
 
-/** What a schedule save was sent with — what its refusal, if any, speaks for. */
 export interface SubmittedPicks {
   runsAs: ActorValue | undefined;
   picks: Readonly<Record<string, string[]>>;
@@ -112,11 +102,7 @@ export function refusalForActor(
   return submitted && sameActor(submitted.runsAs, runsAs) ? (choices ?? []) : [];
 }
 
-/**
- * A schedule PATCH refused over connections: what it was refused over, and whom and with which
- * picks the server judged it — the sent map, else the stored one (an absent key keeps it).
- * `null` for any other outcome.
- */
+/** Picks judged = the sent map, else the stored one (an absent key keeps it). `null` for any other outcome. */
 export function refusedScheduleWrite(
   error: unknown,
   sent: ScheduleUpdateBody | undefined,
@@ -163,7 +149,6 @@ export function withConnectionPickAs(
     : overrides;
 }
 
-/** Why an integration was refused, as an `agents` key. */
 export function refusalReasonKey(choice: ConnectionRefusal): string {
   switch (choice.code) {
     case "override_connection_unavailable":
@@ -188,11 +173,7 @@ export function isStructuralCode(code: MissingIntegrationConnectionCode): boolea
   return STRUCTURAL_CODES.has(code);
 }
 
-/**
- * Re-run state of a refused launch: offered when a row can be answered, held while the launch is
- * in flight or `stillBlocking` names a refused integration (undefined = verdict not loaded,
- * nothing gated: the server stays the authority).
- */
+/** Held while in flight or `stillBlocking` names a refused integration (undefined = not loaded, nothing gated). */
 export function retryDecision(
   errors: MissingIntegrationFieldError[],
   retrying: boolean,

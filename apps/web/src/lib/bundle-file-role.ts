@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * What a file IS in an AFPS bundle, read off its path.
- *
- * The file index only knows a file's nature (text, binary, image). Its role in
- * the package comes from the spec and the conventions the bundle follows: the
- * manifest, the type's main file, an integration's optional document, a local
- * server's entry point, and the Agent Skills folders (references/, scripts/,
- * assets/). Anything else is the author's own.
- */
+// A file's role in an AFPS bundle, read off its path: the file index only knows its nature
+// (text, binary, image).
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
 

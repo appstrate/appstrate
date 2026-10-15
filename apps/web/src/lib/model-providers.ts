@@ -1,18 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The rows of the providers table (Settings › Models, Preferences › My providers).
- *
- * One rule reads the whole page: a connected provider makes its models available. A row is
- * a provider, and its models are the ones it makes usable:
- *
- * - an **organization key** serves the models bound to it (`credentialId`);
- * - a **personal key** or **personal subscription** serves the models left unbound
- *   (`binding: "user"`) that its holder can use with it;
- * - the **instance** serves the models it ships (built-in, or managed aliases).
- *
- * A key the caller cannot read (a role with `models:read` alone gets no credential row) still
- * shows, named by the service its models run on, with nothing to act on.
+ * The rows of the providers table: a connected provider makes its models available.
+ * An **organization key** serves the models bound to it (`credentialId`); a **personal
+ * key/subscription** serves the models left unbound (`binding: "user"`) its holder can
+ * use; the **instance** serves the models it ships. A key the caller cannot read
+ * (`models:read` alone) still shows, named by its service, with nothing to act on.
  */
 
 import type {
@@ -32,32 +25,26 @@ export interface ProviderRow {
   /** `null` for the instance, and for an organization key the caller cannot read. */
   credential: ModelProviderCredentialInfo | null;
   label: string;
-  /** The services the row's models run on (the filter reads these). */
   serviceIds: string[];
-  /** The service a key belongs to; `null` for the instance, which spans several. */
+  /** `null` for the instance, which spans several services. */
   serviceName: string | null;
   /** `org`, `instance` or `user:<id>`. */
   owner: string;
   ownerName: string | null;
-  /**
-   * The models this provider makes usable, switched-on ones only; the instance's row keeps its
-   * switched-off ones, which the server still resolves as the default.
-   */
+  /** Switched-on models only; the instance's row keeps switched-off ones, which the server still resolves as the default. */
   models: OrgModelInfo[];
-  /** The key can no longer serve (a dead subscription, a secret that no longer decrypts). */
+  /** The key can no longer serve (dead subscription, undecryptable secret). */
   unavailable: boolean;
-  /** It carries models, and every one of them is switched off. */
+  /** It carries models, all switched off. */
   disabled: boolean;
 }
 
 const INSTANCE_ROW_ID = "instance";
 
-/** A model the instance ships: a built-in one, or a managed alias whose binding is hidden. */
 export function isSystemModel(m: OrgModelInfo): boolean {
   return m.source === "built-in" || m.binding === "managed";
 }
 
-/** The models an organization leaves to each person's own key or subscription. */
 export function memberModels(models: readonly OrgModelInfo[]): OrgModelInfo[] {
   return models.filter((m) => m.binding === "user" && !isSystemModel(m));
 }
@@ -167,10 +154,9 @@ export function providerRows(
 }
 
 /**
- * Whether the organization may leave a service's models to each person's own key or subscription
- * (`binding: "user"`): the service is open to personal keys, and its listing needs no key to ask
- * with, which a model left to everyone has none of. The model form's « Clé perso » and the
- * personal keys' « Choose the models » both read it.
+ * Whether the organization may leave a service's models to each person's own key
+ * (`binding: "user"`): the service is open to personal keys, and its listing needs no
+ * key to ask with (a model left to everyone has none).
  */
 export function allowsMemberModels(p: ProviderRegistryEntry): boolean {
   return p.personal_allowed && modelSource(p) !== "discover";
@@ -195,20 +181,19 @@ export interface PersonalServiceRow {
   /** The service's provider id. */
   id: string;
   service: ProviderRegistryEntry;
-  /** The models usable with a personal key of this service, switched-on ones only. */
   models: OrgModelInfo[];
   /** Everyone the server shows the caller, the caller first. */
   holders: ServiceHolder[];
-  /** Keys are connected and none of them can serve. */
+  /** Keys are connected and none can serve. */
   unavailable: boolean;
-  /** Models are left to personal keys, and every one of them is switched off. */
+  /** Models are left to personal keys, all switched off. */
   disabled: boolean;
 }
 
 /**
- * One row per service open to personal keys: the ones with a model left to them, and the ones
- * somebody already connected a key for (a key with no model to serve still shows, with none).
- * A subscription belongs to the service whose models its plan offers (Claude Code to Anthropic).
+ * One row per service open to personal keys: those with a model left to them or a key
+ * already connected. A subscription belongs to the service whose models its plan offers
+ * (Claude Code to Anthropic).
  */
 export function personalServiceRows(
   models: readonly OrgModelInfo[],

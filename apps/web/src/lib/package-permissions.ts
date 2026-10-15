@@ -3,7 +3,6 @@
 import type { PackageType } from "@appstrate/core/validation";
 import { spacePackagePermission } from "@appstrate/core/permissions";
 
-/** One row of `GET /api/spaces`, narrowed to what the verdict below reads. */
 export interface SpaceGrant {
   permissions: string[];
   personal: boolean;
@@ -11,26 +10,11 @@ export interface SpaceGrant {
 }
 
 /**
- * May this caller flip an activation of this TYPE in THIS space — with no
- * package in hand?
- *
- * Only the chat access chip asks it ("could the assistant activate an
- * integration here?"): that is a question about a capability, so there is no
- * library row whose served `activation` verdict could answer it. Everything that
- * holds a package row reads the verdict the server serves on it instead
- * (`activationGate`, `usePackageActivation`). The rule mirrors the server's: the type's activation
- * grant in the TARGET space, or owning that space. The second half is the
- * personal-space exemption of RBAC spec §3.6 — `gateSpacePackageWrite` skips
- * the activate/deactivate grants when the space belongs to the caller, because
- * a guest holds `operator` there and `operator` carries no `agents:configure`.
- * Without it the SPA hid a control the route would have accepted.
- *
- * A personal space is reached by its owner alone (`resolveSpaceRole`), so
- * `personal && access === "member"` IS "this one is mine": the owner's id is
- * deliberately absent from the wire, and this is the fact that stands in for it.
- *
- * `undefined` — the space list has not resolved — answers `false`: the control
- * is dead while the caller's standing is unknown, and blames nobody for it.
+ * May this caller flip an activation of this TYPE in THIS space, with no package in
+ * hand (anything holding a package row reads the served `activation` verdict instead)?
+ * Mirrors the server: the activation grant, or owning the space (RBAC spec §3.6,
+ * `gateSpacePackageWrite`). A personal space is reached by its owner alone, so
+ * `personal && access === "member"` IS "mine" (the owner's id is absent from the wire).
  */
 export function maySetPackageActive(
   space: SpaceGrant | undefined,
@@ -43,38 +27,20 @@ export function maySetPackageActive(
 }
 
 /**
- * May this caller change how THIS space runs a placed package — the PATCH's
- * `configure` gate (for a skill, `skills:write` in the space)?
- *
- * Unlike activation there is no personal-space exemption: the server's coarse
- * gate waives the grant for the owner on `activate`/`deactivate` only, so the
- * owner of a personal space answers by their grants like anyone else.
+ * May this caller change how THIS space runs a placed package (the PATCH's
+ * `configure` gate)? No personal-space exemption: the server waives the grant for
+ * the owner on `activate`/`deactivate` only.
  */
 export function mayConfigurePackage(space: SpaceGrant | undefined, type: PackageType): boolean {
   return !!space && space.permissions.includes(spacePackagePermission(type, "configure"));
 }
 
 /**
- * What co-authoring a package means for the caller, given their standing in its
- * HOME space.
- *
- * Sharing a package is DISTRIBUTION — the recipient gets it placed in their own
- * space and runs it with their own credentials. Working on the live object is a
- * different act entirely: a role in the space the package lives in. This is the
- * verdict that says which of the three answers that act has here, and the tab
- * renders all three rather than hiding itself, because the missing gesture was
- * the bug.
- *
- * `"personal"` comes FIRST and is not a permission question: a personal space
- * belongs to one member and takes no others (`personal_space_has_no_members`),
- * and it is never converted while it lives (`personal_space_not_orphaned`). The
- * way out is to move the PACKAGE (`PUT …/home`, which allows exactly this
- * direction) — never to open the space. So no grant, however wide, turns this
- * answer into `"invite"`, org owners and admins included: `resolveSpaceRole`
- * gives them no role there at all.
- *
- * `undefined` — the space list has not resolved, or there is no home the caller
- * reaches — answers `"unknown"`: "not yet", never a refusal.
+ * What co-authoring a package means for the caller in its HOME space. `"personal"`
+ * comes FIRST and is not a permission question: a personal space takes no other
+ * members (`personal_space_has_no_members`); the way out is moving the PACKAGE
+ * (`PUT …/home`). No grant, org owners included, turns it into `"invite"`.
+ * `undefined` answers `"unknown"`.
  */
 export type CoeditVerdict = "unknown" | "personal" | "no_authority" | "invite";
 

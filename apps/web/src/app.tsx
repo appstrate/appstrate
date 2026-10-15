@@ -64,10 +64,8 @@ import {
 } from "./lib/route-access";
 import type { PackageType } from "@appstrate/core/validation";
 
-// Module-owned pages live under `apps/web/src/modules/<name>/` and are
-// lazy-loaded so their bundle is never fetched when the corresponding module
-// is disabled (zero-footprint invariant): `RouteGate` renders its unavailable
-// state, never the page, for a route whose declared `feature` is off.
+// Module pages are lazy-loaded so a disabled module's bundle is never fetched
+// (zero-footprint): `RouteGate` renders its unavailable state when the `feature` is off.
 const WebhooksPage = lazy(() =>
   import("./modules/webhooks/pages/webhooks-page").then((m) => ({ default: m.WebhooksPage })),
 );
@@ -83,9 +81,7 @@ const ChatModulePage = lazy(() =>
   import("./modules/chat/chat-page").then((m) => ({ default: m.ChatModulePage })),
 );
 
-// Route-level code splitting — heavy authenticated pages are lazy-loaded so
-// the entry chunk only carries the login/dashboard shell. Each route waits on
-// its chunk under its page's skeleton (`skeletonOf`).
+// Heavy authenticated pages are lazy-loaded; each waits on its chunk under `skeletonOf`.
 const UnifiedPackageDetailPage = lazy(() =>
   import("./pages/unified-package-detail").then((m) => ({ default: m.UnifiedPackageDetailPage })),
 );
@@ -228,9 +224,7 @@ function PreShellRoute({ children }: { children: React.ReactNode }) {
 
 /**
  * The page of every signed-in route, keyed like its access declaration
- * (`lib/route-access.ts`): a route without one, or one without a page, fails to
- * compile. Mounted by `pageRoute`, always behind `RouteGate`; `mountOf` decides
- * which tree mounts it.
+ * (`lib/route-access.ts`): a route without one, or one without a page, fails to compile.
  */
 const PAGES: Record<RoutePath, ReactNode> = {
   "/": <DashboardPage />,
@@ -253,8 +247,6 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/mcp-servers": <McpServersPage />,
   "/mcp-servers/:scope/:name": <UnifiedPackageDetailPage type="mcp-server" />,
   "/mcp-servers/:scope/:name/:version": <UnifiedPackageDetailPage type="mcp-server" />,
-  // The catalogue is a destination like settings, not a per-list modal: one
-  // address, reachable from the navigation. Bare, it redirects to its first view.
   "/catalogue": <CatalogueIndexRedirect />,
   "/catalogue/:reading/:type": <CataloguePage />,
   "/preferences": <Outlet />,
@@ -267,9 +259,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/preferences/models": <PreferencesModelsPage />,
   "/chat": <ChatModulePage />,
   "/chat/:conversationId": <ChatModulePage />,
-  // The settings scopes (these two and `/preferences`) share
-  // `UnifiedSettingsLayout`, mounted one level up so switching scope keeps the
-  // dialog; each scope's own element is its outlet.
+  // The settings scopes share `UnifiedSettingsLayout` (mounted one level up, so switching scope keeps the dialog).
   "/org-settings": <Outlet />,
   "/org-settings/general": <OrgSettingsGeneralPage />,
   "/org-settings/members": <OrgSettingsMembersPage />,
@@ -280,14 +270,9 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/org-settings/oauth": <OrgSettingsOAuthPage />,
   "/org-settings/cli-sessions": <OrgSettingsCliSessionsPage />,
   "/org-settings/billing": <OrgSettingsBillingPage />,
-  // Workspace settings are their own surface, scoped by `X-Space-Id` — a
-  // different scope from the org, not a subsection of it. The one exception is
-  // webhooks: that page also manages the organization's own (`org-webhooks:read`).
+  // Workspace settings are scoped by `X-Space-Id`, except webhooks, which also manages the org's own (`org-webhooks:read`).
   "/workspace-settings": <Outlet />,
   "/workspace-settings/general": <WorkspaceSettingsGeneralPage />,
-  // Space membership and its custom roles: who is in THIS space, and as what.
-  // Org members are the other surface — a person can hold an org role and no
-  // seat here.
   "/workspace-settings/members": <WorkspaceSettingsMembersPage />,
   "/workspace-settings/auth": <WorkspaceSettingsAuthPage />,
   "/workspace-settings/api-keys": <ApiKeysPage />,
@@ -324,10 +309,7 @@ const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
   ["/integrations/", "integration"],
 ];
 
-/**
- * What a route draws while its chunk or its permissions load: the skeleton its
- * page draws while its data loads, so both waits share one shape.
- */
+/** What a route draws while its chunk or permissions load: the same skeleton its page draws for data. */
 function skeletonOf(path: RoutePath): ReactNode {
   if (inLayout(path)) return <SettingsSkeleton />;
   if (isOverlayPath(path)) return <OverlayPanelSkeleton list />;
@@ -373,15 +355,7 @@ function layoutRoute(layout: LayoutPath) {
   );
 }
 
-/**
- * The one boot placeholder. Every gate below renders it, so a visitor sees a
- * single uninterrupted spinner while the boot reads settle, never a sequence
- * of visually identical ones handed off between gates.
- *
- * The boot reads themselves are started in `main.tsx`, in parallel: by the
- * time `useAuth()` reports a user the org list is usually already cached, so
- * `OrgGate` normally resolves without ever painting this.
- */
+/** The one boot placeholder every gate renders, so a visitor sees a single uninterrupted spinner. */
 function BootScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center">
@@ -391,25 +365,16 @@ function BootScreen() {
 }
 
 /**
- * The ONE layout of both products. Studio and the chat are different products
- * with different navigations, but they share a frame — sidebar, header,
- * realtime stream, resolved space — and switching product must not tear that
- * frame down: only the sidebar's navigation, the inset's sizing and the page
- * change. A layout per product would remount all of it on every switch (the
- * realtime stream reconnecting, the sidebar's queries re-reading, a lazy chat
- * chunk blanking the whole screen while it loads).
- *
- * The space is resolved HERE, above the route gate: `RouteGate` waits on a
- * resolved space before it refuses, and every request a page makes is scoped by
- * it. The realtime sync covers the chat too: a chat turn runs agents, and their
- * progress is pushed on the same stream.
+ * The ONE layout of both products (Studio and the chat): switching product must not
+ * remount the shared frame (realtime stream, sidebar queries). The space is resolved
+ * HERE, above the route gate, which waits on it before it refuses. The realtime sync
+ * covers the chat too: a chat turn runs agents.
  */
 function MainLayout() {
   const studioSidebar = useSidebarStore();
   const chatSidebar = useChatSidebarStore();
   const { pathname } = useLocation();
   const product = isUnder(pathname, "/chat") ? "chat" : "studio";
-  // Each product remembers its own fold (`stores/sidebar-store.ts`).
   const sidebar = product === "chat" ? chatSidebar : studioSidebar;
   useSpaceResolver();
   useGlobalRunSync();
@@ -418,14 +383,8 @@ function MainLayout() {
     <ShellFrameProvider>
       <SidebarProvider open={sidebar.open} onOpenChange={sidebar.setOpen}>
         <AppSidebar product={product} />
-        {/* `bg-canvas` overrides SidebarInset's own `bg-background`: the content
-            column is page canvas (grey), not a component surface (white). */}
-        {/* Studio: the scroll lives HERE, not on an inner div: a scroll container
-            inside the inset would narrow the content by the scrollbar width
-            while the header above it kept the full width, and the profile would
-            sit 15px further right than the content it is supposed to line up
-            with. Chat: no page scroll — it owns its height, the thread scrolls
-            inside itself and the composer stays pinned. */}
+        {/* Studio: the scroll lives HERE, not on an inner div (which would narrow the content
+            by the scrollbar width and misalign it with the header). Chat owns its height. */}
         <SidebarInset
           className={
             product === "chat"
@@ -434,15 +393,11 @@ function MainLayout() {
           }
         >
           <ShellHeader />
-          {/* Must stay visible on every route, including the settings layouts and
-              the permission-denied pages a persona is precisely there to provoke. */}
+          {/* Must stay visible on every route, permission-denied pages included. */}
           <ViewAsBanner />
-          {/* Opened by `?newSchedule=` from any page: the schedules list, an agent. */}
+          {/* Opened by `?newSchedule=` from any page. */}
           <NewScheduleModalHost />
-          {/* Full-bleed surfaces (anything that owns its own height) opt out
-              with `data-full-bleed` on their root. The chat's row fills its
-              child (`*:flex-1`), so a loading, refused or crashed state is
-              centred in the panel instead of hugging its left edge. */}
+          {/* Full-bleed surfaces opt out with `data-full-bleed` on their root. */}
           <div
             className={
               product === "chat"
@@ -450,8 +405,6 @@ function MainLayout() {
                 : "max-w-page px-gutter mx-auto w-full pt-8 pb-18 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0"
             }
           >
-            {/* A page that crashes on render takes only itself down: the sidebar
-                and the header stay, and navigating away clears the error. */}
             <ErrorBoundary resetKey={pathname}>
               <Outlet />
             </ErrorBoundary>
@@ -466,21 +419,10 @@ function MainLayout() {
 const ORG_GATE_BYPASS = ["/welcome", "/onboarding", "/invite", "/auth/callback"];
 
 /**
- * Bridge for server-side redirects that land at `/auth/login?returnTo=...`.
- *
- * Only same-origin absolute paths are accepted — no schemes, no host,
- * no path-traversal tricks — so this cannot be abused as an open
- * redirect even if the `returnTo` query lands in an attacker-controlled
- * email. Anything malformed silently falls through to the default
- * post-login destination (`/`).
- */
-/**
- * Accept only same-origin relative paths. Rejects protocol-relative and
- * absolute-scheme values — including the backslash bypass (`/\evil.com`,
- * `/\/evil.com`), which browsers normalize to `//evil.com`. Backslashes are
- * folded to forward slashes before the protocol-relative test, mirroring the
- * OIDC redirect sanitizer, so a crafted `returnTo` in an attacker-controlled
- * email cannot become an open redirect.
+ * SECURITY: accept only same-origin relative paths (open-redirect guard for a `returnTo`
+ * that may come from an attacker-controlled email). Rejects protocol-relative and
+ * absolute-scheme values, including the backslash bypass (`/\evil.com`) that browsers
+ * normalize to `//evil.com`; mirrors the OIDC redirect sanitizer. Malformed falls through to `/`.
  */
 function sanitizeReturnTo(raw: string | null): string | undefined {
   if (!raw || !raw.startsWith("/")) return undefined;
@@ -558,9 +500,7 @@ export function App() {
   const { user, loading } = useAuth();
   const { features } = useAppConfig();
   const location = useLocation();
-  // While an overlay is up the page tree renders the page it opened over, so
-  // that page stays exactly as the user left it — scroll, filters and all —
-  // instead of unmounting.
+  // While an overlay is up the page tree renders the page it opened over (scroll and filters kept).
   const { page, overlay, exit } = useOverlayState();
   useExternalRedirect(!!user);
 
@@ -568,10 +508,8 @@ export function App() {
     return <BootScreen />;
   }
 
-  // Hosted connect portal — standalone, auth-agnostic. Rendered
-  // before every auth/bootstrap gate because it authenticates via its own
-  // httpOnly page cookie (pinned by the dispatch redirect), not the platform
-  // session: it must work for embedded end-users with no Better Auth user.
+  // Hosted connect portal: rendered before every gate because it authenticates via its own
+  // httpOnly page cookie, so it must work for embedded end-users with no Better Auth user.
   if (location.pathname === "/connect") {
     return (
       <ErrorBoundary>
@@ -589,12 +527,8 @@ export function App() {
     );
   }
 
-  // Bootstrap-token redemption — when the platform has a
-  // pending unattended-install token AND the visitor isn't authenticated,
-  // every route funnels into `/claim`. The redeem route owns its own gate
-  // (timing-safe compare + DB-org-count); the SPA's job is just to render
-  // the form and prevent users from wandering into login/register on a
-  // closed-by-default fresh instance.
+  // A pending unattended-install token funnels every unauthenticated route into `/claim`;
+  // the redeem route owns its own gate server-side.
   if (!user && features.bootstrapTokenPending) {
     return (
       <ErrorBoundary>
@@ -610,14 +544,8 @@ export function App() {
     return (
       <ErrorBoundary>
         <Routes>
-          {/*
-           * The auth-entry routes are wrapped in `HostedAuthGate`: in OIDC
-           * mode it redirects to the hosted login/register page before the
-           * native form mounts (one mechanism, no per-page `useEffect`
-           * check to forget); in OSS mode it renders the form below. The
-           * ESLint `auth-client` ban (eslint.config.mjs) backs this up by
-           * stopping any of these pages from calling Better Auth directly.
-           */}
+          {/* Auth-entry routes go through `HostedAuthGate`: in OIDC mode it redirects to the
+              hosted page before the native form mounts. */}
           <Route
             path="/login"
             element={
@@ -626,15 +554,8 @@ export function App() {
               </HostedAuthGate>
             }
           />
-          {/*
-           * `/register` stays mounted even when `signupDisabled` is true so
-           * an invited address can sign up via email/password without
-           * Google/GitHub/SMTP. The real
-           * barrier is server-side in `databaseHooks.user.create.before` —
-           * unauthorized signups receive a `signup_disabled` error that
-           * `RegisterPage` surfaces. The signup link is still hidden from
-           * `/login` to avoid public discoverability.
-           */}
+          {/* `/register` stays mounted when `signupDisabled` so an invited address can sign up;
+              the real barrier is server-side (`databaseHooks.user.create.before`). */}
           <Route
             path="/register"
             element={
@@ -643,15 +564,8 @@ export function App() {
               </HostedAuthGate>
             }
           />
-          {/*
-           * Server-rendered flows outside the SPA (e.g. the device-flow
-           * `/activate` page) redirect unauthenticated visitors here with
-           * a `?returnTo=<path>` query. Capture it into `state.from`
-           * before forwarding to `/login` so `LoginPage`'s existing
-           * `location.state?.from` hookup feeds it into
-           * `startOidcLogin(redirectTo)` and the callback returns to the
-           * original page. The `replace` keeps the back button sane.
-           */}
+          {/* Server-rendered flows (device-flow `/activate`) land here with `?returnTo=`;
+              the bridge moves it into `state.from` for `LoginPage`. */}
           <Route path="/auth/login" element={<AuthLoginReturnToBridge />} />
           {features.oidc && (
             <Route
@@ -663,14 +577,8 @@ export function App() {
               }
             />
           )}
-          {/*
-           * `/verify-email` is deliberately NOT gated: it is a post-signup
-           * interstitial (and verification-error display), not a login entry
-           * point. In OIDC + SMTP mode the server-rendered register flow can
-           * route an unauthenticated visitor here with `?email=` / `?error=`
-           * (see verify-email.tsx) — redirecting it to the hosted login would
-           * break that flow. It renders natively in both modes.
-           */}
+          {/* `/verify-email` is deliberately NOT gated: in OIDC + SMTP mode the server-rendered
+              register flow routes unauthenticated visitors here (see verify-email.tsx). */}
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route
             path="/forgot-password"
@@ -696,12 +604,7 @@ export function App() {
               </HostedAuthGate>
             }
           />
-          {/*
-           * `/invite/:token` is NOT wrapped: it loads invite data first, then
-           * drives `useHostedAuthRedirect` directly with a starter (login vs
-           * signup) and login-hint derived from that data. Same seam, dynamic
-           * inputs — see invite-accept.tsx.
-           */}
+          {/* `/invite/:token` is NOT wrapped: it drives `useHostedAuthRedirect` itself (invite-accept.tsx). */}
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="*" element={<SignedOutFallback />} />
         </Routes>
@@ -722,11 +625,7 @@ export function App() {
   return (
     <ErrorBoundary>
       <AppToaster />
-      {/*
-       * Mounted outside OrgGate/MainLayout so an in-flight OAuth pairing
-       * completes (toast + credential invalidation) even when the user is
-       * on an onboarding route or closed the modal that started it.
-       */}
+      {/* Outside OrgGate/MainLayout so an in-flight OAuth pairing completes on any route. */}
       <PendingPairingsWatcher />
       <OrgGate>
         <OverlayProvider value={overlay}>
@@ -734,14 +633,8 @@ export function App() {
             <Routes location={page}>
               <Route path="/login" element={<Navigate to="/" replace />} />
               <Route path="/register" element={<Navigate to="/" replace />} />
-              {/*
-               * `/auth/callback` must be reachable while authenticated too: by
-               * the time the browser lands here, the BA session cookie is
-               * already set by the server, so `useAuth()` flips us into this
-               * block before `AuthCallbackPage` runs. Without the route here
-               * the URL falls through to the catch-all and the `sessionStorage`
-               * returnTo we stashed pre-login is never consumed.
-               */}
+              {/* `/auth/callback` must also exist here: the session cookie is already set when the
+                  browser lands, so without it the stashed `returnTo` is never consumed. */}
               {features.oidc && (
                 <Route
                   path="/auth/callback"
@@ -814,11 +707,7 @@ export function App() {
                 <Route path="*" element={<NotFoundPage />} />
               </Route>
             </Routes>
-            {/* Overlay tree — the ONLY home of the routed modals. The tree above
-                renders the page under the overlay, so a second copy there could
-                never match; that is why there is no page-shaped variant to keep
-                in sync. Outside MainLayout's boundary, so it has its own: the
-                root one is cleared by no navigation. */}
+            {/* Overlay tree: the ONLY home of the routed modals. Outside MainLayout's boundary, so it has its own. */}
             {overlay && (
               <ErrorBoundary resetKey={location.pathname}>
                 <Routes>

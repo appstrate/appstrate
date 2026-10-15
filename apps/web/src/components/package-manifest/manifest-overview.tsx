@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The manifest metadata a package overview shows below its own summary cards.
- *
- * Everything rendered here is AUTHOR-CONTROLLED text. It reaches the screen as
- * JSX children and nothing else; the only string that becomes an `href` is one
- * `normalizeHttpUrl` accepted.
- */
+/** Author-controlled text: reaches the screen only as JSX children; the only `href` is one `normalizeHttpUrl` accepted. */
 
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";

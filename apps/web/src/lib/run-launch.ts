@@ -10,52 +10,29 @@ import {
   type MissingIntegrationFieldError,
 } from "./connection-choice";
 
-/** One run launch, as the launch surfaces build it — `useRunAgent` maps it onto the wire. */
 export interface RunLaunch {
   input?: Record<string, unknown>;
   /** Replay a prior run's persisted input instead of supplying `input`. */
   rerun_from?: string;
-  /**
-   * Version selector forwarded as `?version=`: `"draft"`, `"published"`, or
-   * a version spec. Omitted selectors use the API's published-when-exists
-   * default; callers testing a working copy explicitly pass `"draft"`, which
-   * the API grants only to a caller who can write the package in its home
-   * space (`403 draft_not_writable`). Launch surfaces derive it from
-   * `home_writable` via `defaultRunVersion`.
-   */
+  /** Forwarded as `?version=`; omitted = the API's published-when-exists default. `"draft"` needs `home_writable` (`defaultRunVersion`). */
   version?: string;
-  /**
-   * Per-integration connection sets for THIS run (cascade layer 3), validated in
-   * `apps/api/src/lib/launch-schemas.ts`. Set by the run-with-options modal.
-   */
+  /** Per-integration connection sets for THIS run (cascade layer 3). */
   connectionOverrides?: Record<string, string[]>;
-  /** Per-run model id override (wire `modelId`). From the run-with-options modal. */
   modelId?: string;
-  /** Per-run proxy id override (wire `proxyId`). From the run-with-options modal. */
   proxyId?: string;
-  /** Per-run temperature/reasoning override (wire `generation`). */
   generation?: ModelGenerationSettings;
-  /**
-   * Per-run dependency version overrides — `{ "@scope/skill": "draft"
-   * | "<semver|dist-tag>" }`. From the run-with-options modal. "draft" runs a
-   * dependency's working copy; any other value replaces the manifest pin.
-   */
+  /** `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`; "draft" runs the working copy, else replaces the manifest pin. */
   dependencyOverrides?: Record<string, string>;
 }
 
-/**
- * Lets one launch through at a time. A mutation's `isPending` cannot: it is
- * render state, so two clicks in one frame both read it `false`. The slot
- * follows the request's promise, so it is freed whatever became of its
- * listeners, and `onBusyChange` is the launcher's pending flag.
- */
+/** Lets one launch through at a time: a mutation's `isPending` is render state, so two clicks in one frame both read it `false`. */
 export function launchFlight(onBusyChange: (busy: boolean) => void): {
-  /** Starts the launch; a call while one is in flight is dropped. */
+  /** A call while one is in flight is dropped. */
   run: (
     start: () => Promise<unknown>,
     handlers: { onSuccess?: () => void; onError?: (error: Error) => void },
   ) => void;
-  /** Stops reporting the launch in flight. It keeps the slot until it settles. */
+  /** Stops reporting the launch in flight; it keeps the slot until it settles. */
   forget: () => void;
 } {
   let busy = false;
@@ -87,14 +64,7 @@ export function launchFlight(onBusyChange: (busy: boolean) => void): {
   };
 }
 
-/**
- * The replay of a launch a `409 missing_integration_connection` refused.
- * Everything the user chose rides along — the input typed in the run modal
- * above all — except the launch's own connection pick for each integration the
- * 409 refused: that integration then resolves as the recovery modal's row shows
- * it, so what the user answers there is what runs. A pick for an integration
- * the 409 does not name is kept.
- */
+/** Replay of a launch a `409 missing_integration_connection` refused, minus the refused integrations' picks (the recovery modal's answer wins). */
 export function retryLaunch(
   launch: RunLaunch,
   errors: readonly MissingIntegrationFieldError[],
@@ -106,7 +76,6 @@ export function retryLaunch(
   return kept.length > 0 ? { ...rest, connectionOverrides: Object.fromEntries(kept) } : rest;
 }
 
-/** A launch's 409 and the version it judged: the recovery modal reads that version's readiness. */
 export interface LaunchRefusal {
   errors: MissingIntegrationFieldError[];
   /** The 409's `version_ref` — an omitted `?version=` launches what readiness would not read. */
@@ -122,14 +91,9 @@ export function launchRefusal(err: unknown): LaunchRefusal | null {
 }
 
 /**
- * The launch "Lancer avec options…" sends. An option rides only when set — an
- * empty input or dependency map and an unset override are left out, so the
- * server applies what plain "Lancer" gets. `version` is always an explicit pick
- * (the modal seeds it with that same default). Overrides are already wire
- * values (a proxy pick of "none" means no proxy) and pass through as-is, the
- * connection picks narrowed to `declaredIntegrations`. While those are unknown
- * every pick rides: dropped, the run could bind another account, whereas the
- * server refuses an undeclared key out loud (400).
+ * The launch "Lancer avec options…" sends: an option rides only when set. Connection
+ * picks are narrowed to `declaredIntegrations`; while unknown every pick rides (dropped,
+ * the run could bind another account, whereas the server refuses an undeclared key, 400).
  */
 export function launchFromOptions({
   input,
@@ -155,10 +119,7 @@ export function launchFromOptions({
   };
 }
 
-/**
- * What a launch with no override resolves to: the agent's own setting, else the
- * org default — also past a setting that is gone or not `usable`, as the server does.
- */
+/** What a launch with no override resolves to: the agent's setting, else the org default (also past a gone or unusable setting, as the server does). */
 export function inheritedEntry<T extends { id: string }>(
   entries: readonly T[] | undefined,
   agentSettingId: string | null,

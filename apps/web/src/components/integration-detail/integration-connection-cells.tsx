@@ -1,21 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The controls a connected-account row is made of.
+ * Row controls as components: each owns state or a mutation, and `cell` runs during the table's
+ * render (a hook there would be a hook in a loop).
  *
- * They are components rather than closures inside the column set because each
- * one owns state or a mutation, and `cell` is called during the table's render
- * — a hook in there would be a hook inside a loop. Keeping them apart also
- * keeps `integration-columns.tsx` what its siblings are: column DATA,
- * exporting nothing but its two hooks.
- *
- * What the caller may do to a row is the server's verdict, read from the row's `allowed_actions`
- * (rename, share, unshare here) rather than re-derived: the list returns org-shared rows owned by
- * OTHER members, and a control drawn on a row the caller may not touch is a button that answers
- * 403. Delete and reconnect stay on ownership alone (`DELETE /api/me/connections/:id` has no admin
- * escape hatch by design). Every write also guards on `integrations:connect`, whoever owns the
- * row, and a row an admin pin or the space default names refuses an unshare or a delete (409
- * `connection_pinned`): those controls stay, disabled, with the reason on them.
+ * What the caller may do is the server's verdict (`allowed_actions`), not re-derived: the list
+ * includes org-shared rows owned by OTHER members. Delete and reconnect stay on ownership alone
+ * (no admin escape hatch by design). Writes also need `integrations:connect`; a row an admin pin
+ * or the space default names refuses unshare/delete (409 `connection_pinned`): controls stay,
+ * disabled, with the reason.
  */
 
 import { useMemo, useState } from "react";
@@ -48,11 +41,7 @@ import { packageDetailPath } from "../../lib/package-paths";
 import { integrationSettingsHref } from "../../lib/settings-section-href";
 import { TableRowActions } from "../table-row-actions";
 
-/**
- * The agents an admin pin binds this connection to, named so a locked row says WHICH
- * agents hold it. The pins list is readable with `integrations:read`, like this page;
- * the query only runs for a row an admin pin locks.
- */
+/** The agents an admin pin binds this connection to; the queries only run for an admin-pin-locked row. */
 function usePinningAgents(connection: IntegrationConnection, packageId: string) {
   const pinned = connection.locked_by === "admin_pin";
   const { data: pins } = useIntegrationPins(pinned ? packageId : undefined);
@@ -68,10 +57,7 @@ function usePinningAgents(connection: IntegrationConnection, packageId: string) 
     }));
 }
 
-/**
- * Why a locked row refuses an unshare or delete, in words: for an admin pin, the agents
- * that hold it when they are known, else the generic sentence.
- */
+/** Why a locked row refuses unshare/delete: names the pinning agents when known, else the generic sentence. */
 function useLockText(
   connection: IntegrationConnection,
   packageId: string,
@@ -112,19 +98,9 @@ function useRowGrants(connection: IntegrationConnection, isAdmin: boolean) {
 }
 
 /**
- * The account, renamed in place.
- *
- * Renaming is the owner's, or a governor's on a row of this space (`allowed_actions`
- * says which), while sharing and deleting are strictly the owner's. A
- * connection's variables (its instance URL) sit under the label: they are what
- * tells two accounts of one integration apart.
- *
- * No pencil swapping the label for an input: that is the Edit button the
- * product owner ruled out ("Direct manipulation in forms. No Edit button
- * revealing a field"). The app has one rename affordance, the shared
- * `InlineEditableLabel`, started by « Rename » in the row's menu (a click
- * on the name opens the row, like the rest of it). The label cannot be cleared: a run addresses
- * each bound connection by it, so an emptied field just cancels the edit.
+ * The account, renamed in place via `InlineEditableLabel` (started from the row menu; no Edit
+ * button). Variables (instance URL) sit under the label: they tell two accounts apart.
+ * The label cannot be cleared: a run addresses each bound connection by it.
  */
 export function AccountCell({
   connection,
@@ -146,8 +122,6 @@ export function AccountCell({
 
   return (
     <div className="min-w-0">
-      {/* `label` is the single source of truth (set at creation to the identity
-          or "Connexion N"); render it verbatim. */}
       <InlineEditableLabel
         value={connection.label}
         editable={canRename}
@@ -180,13 +154,8 @@ export function StatusCell({ connection }: { connection: IntegrationConnection }
 }
 
 /**
- * Where the connection is usable, and the spaces it is shared into.
- *
- * Its scope is the scope of the OAuth client that minted it, so it is a fact
- * (the badge), not a setting. Sharing is the owner's consent: an org-wide row is
- * shared into any space the owner reaches, a space-confined one into its own
- * space alone; a governor of this space can only withdraw a colleague's share
- * here, and a row an admin pin or the space default names refuses that (409).
+ * Scope is that of the OAuth client that minted it: a fact (badge), not a setting. Sharing is
+ * the owner's consent; a governor can only withdraw a colleague's share here.
  */
 export function ScopeCell({
   connection,
@@ -202,8 +171,7 @@ export function ScopeCell({
   const orgId = useCurrentOrgId();
   const { spaceId, canShare, canUnshareHere, lockKey } = useRowGrants(connection, isAdmin);
   const { text: lockText } = useLockText(connection, packageId, isAdmin, lockKey);
-  // Share targets: the spaces the owner may share into, plus those it is already shared into
-  // (named by the org's spaces). Only the owner carries either list.
+  // Only the owner carries either list.
   const { data: orgSpaces } = useOrgSpaces(canShare ? orgId : null);
   const shareTargets = useMemo(() => {
     const names = new Map((orgSpaces ?? []).map((s) => [s.id, s.name]));
@@ -273,11 +241,8 @@ export function ConnectionActionsCell({
   );
   const canReach = useCanReach();
   const location = useLocation();
-  // Deleting and reconnecting are the owner's; renaming is also a governor's.
   const canReconnect =
     isOwn && connection.needs_reconnection && canConnect && canRenew && authType === "oauth2";
-  // An admin pin or the space default names the row: deleting it is refused
-  // until it is removed from there.
   return (
     <>
       <TableRowActions
@@ -313,13 +278,12 @@ export function ConnectionActionsCell({
           },
         ]}
       >
-        {/* Said in the menu, where the dead item is: a disabled item takes no hover. */}
+        {/* In the menu: a disabled item takes no hover. */}
         {isOwn && lockHint && (
           <DropdownMenuLabel className="text-muted-foreground max-w-64 text-xs font-normal">
             {lockHint}
           </DropdownMenuLabel>
         )}
-        {/* Each agent holding it, one click away for whoever may open it. */}
         {(isOwn ? pinningAgents : [])
           .filter((agent) => canReach(packageDetailPath("agent", agent.id)))
           .map((agent) => (
@@ -330,7 +294,6 @@ export function ConnectionActionsCell({
               </Link>
             </DropdownMenuItem>
           ))}
-        {/* And the way to unlock it, one click away, for whoever may. */}
         {isOwn && lockHint && isAdmin && (
           <DropdownMenuItem asChild>
             <Link to={integrationSettingsHref(location.pathname, "access")}>

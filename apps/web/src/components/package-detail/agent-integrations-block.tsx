@@ -36,13 +36,7 @@ interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
   /** The agent whose resolution each row reads and whose member pin its picker writes. */
   agentPackageId: string;
-  /**
-   * The table for a schedule rather than the agent: "Compte utilisé" picks the
-   * connections frozen on the schedule (`connection_overrides`, the launch
-   * layer of every fire) instead of the member's pin, against the version the
-   * schedule fires. The agent's readiness column says nothing of a schedule,
-   * so it goes.
-   */
+  /** The table for a schedule: "Compte utilisé" picks the connections frozen on it (`connection_overrides`) instead of the member's pin, and the readiness column goes. */
   scheduleOverrides?: ScheduleOverrides;
 }
 
@@ -64,23 +58,11 @@ interface DetailState {
 const isNotPlaced = (error: unknown) => error instanceof ApiError && error.status === 404;
 
 /**
- * Connection-status table for every integration declared in the agent
- * manifest. An active integration's row renders the per-integration
- * connection picker — list, pick, disambiguate, connect, reconnect,
- * add-another — driven by the server-authoritative
- * `IntegrationAgentResolution`, selected from the bulk
- * `GET /api/agents/:scope/:name/connection-readiness` query — the same verdict
- * the launch-button readiness badge and the run-kickoff 409 consume, so the
- * three can never disagree.
- *
- * The picker renders for EVERY declared integration, independent of whether the
- * agent selected tools/scopes: connection management applies even to an inert
- * integration. Whether an integration BLOCKS the run (run semantics) is the
- * server's `run_blocking` flag on the same bulk query, not a client predicate.
- *
- * Whether an integration is active comes from its own detail, never from the
- * paginated list. A dependency binds 0..N connections and only a `required`
- * one refuses the run: an unbound optional one says why the run starts without it.
+ * Connection-status table for every declared integration, driven by the server's
+ * `IntegrationAgentResolution` from the bulk `connection-readiness` query (the same verdict as the
+ * launch badge and the run-kickoff 409). The picker shows for every integration, even inert ones;
+ * whether one BLOCKS the run is the server's `run_blocking` flag. Activity comes from the
+ * integration's own detail, never the paginated list.
  */
 export function AgentIntegrationsBlock({
   entries,
@@ -234,9 +216,7 @@ function IntegrationConnectionCell({
     );
   }
 
-  // Not active in this space (the integration's own detail says so) → no
-  // connection is possible. Show a disabled, explanatory control rather than a
-  // picker the run-time gate would reject with `integration_not_active`.
+  // Not active here: a disabled, explanatory control rather than a picker the run gate would reject.
   if (!detail.active) return <InactiveIntegration packageId={packageId} required={required} />;
 
   if (scheduleOverrides) {
@@ -257,11 +237,7 @@ function IntegrationConnectionCell({
   return <ManagedIntegration entry={entry} agentPackageId={agentPackageId} />;
 }
 
-/**
- * Connection-management surface for an active integration on the agent. Split
- * from the parent so its reads (resolution + consuming agents) run only once
- * the parent's loading / not-active guards have passed — when the picker renders.
- */
+/** Split from the parent so its reads run only once the loading / not-active guards have passed. */
 function ManagedIntegration({
   entry: integration,
   agentPackageId,
@@ -281,9 +257,7 @@ function ManagedIntegration({
     return <InactiveIntegration packageId={packageId} required={false} />;
   }
 
-  // Reuse hint: the resolved connections serve every agent of the space that
-  // consumes this integration — one connection, not one per agent. Only when
-  // resolved: a blocking state is the picker's warning, not a reassuring line.
+  // Reuse hint, only when resolved: a blocking state is the picker's warning, not a reassuring line.
   const resolvedConnections =
     resolution?.resolved_connection_ids
       .map((id) => resolution.candidates.find((c) => c.id === id))
@@ -327,10 +301,6 @@ function InactiveIntegration({ packageId, required }: { packageId: string; requi
       >
         {t(required ? "detail.integrationInactive" : UNBOUND_LABEL_KEYS.integration_not_active)}
       </span>
-      {/* The sentence asks for an activation, so the button performing it
-          sits beside it. Somebody the route
-          would refuse gets the button DEAD with the reason on it, rather
-          than a click that ends in a toast. */}
       <ActivateIntegrationButton packageId={packageId} />
     </span>
   );
@@ -341,8 +311,6 @@ function buildReuseInfo(
   agentCount: number,
   t: (k: string, opts?: Record<string, unknown>) => string,
 ): string {
-  // `label` is the connection's display name (identity or "Connexion N"),
-  // always set at creation.
   const account = connections.map((c) => c.label).join(" · ");
   if (agentCount <= 1) {
     return t("detail.integrationReuseSingle", { account, count: connections.length });

@@ -12,12 +12,7 @@ import { agentSettingsHref } from "../../lib/settings-section-href";
 import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
 import { artifactFailureCodeKey, partialArtifactFailures } from "../run-artifacts";
 
-/**
- * Safe-narrow `runs.metadata.degraded_integrations` (a `string[]` of
- * integration package ids stamped platform-side by `recordRunDegradedIntegration`
- * when the `/internal/.../refresh` call flags a connection on a terminal 401)
- * out of the untyped `run.metadata` blob.
- */
+/** Safe-narrows `runs.metadata.degraded_integrations` (integration ids, stamped on a terminal 401 at refresh). */
 function parseDegradedIntegrations(metadata: unknown): string[] {
   if (metadata == null || typeof metadata !== "object") return [];
   const raw = (metadata as Record<string, unknown>).degraded_integrations;
@@ -42,12 +37,7 @@ function DegradedIntegrationItem({ integrationId }: { integrationId: string }) {
   );
 }
 
-/**
- * The model chosen for the run did not load, the organization default served
- * instead. Presentational: `chosen` is already a name (or the raw id when the
- * model is gone or unreadable), `settingsTo` is where the agent's model is set,
- * null when the reader cannot reach it.
- */
+/** The chosen model did not load; the org default served. `chosen` is a name (raw id if gone); `settingsTo` null when unreachable. */
 export function ModelFallbackCard({
   chosen,
   used,
@@ -99,18 +89,9 @@ function ResolvedModelFallback({
 }
 
 /**
- * What the run left behind without failing, told in its overview with the
- * problem that ended it (never a banner: a finished run is history, not a
- * present state to act on). Three cases, each a warning card:
- *
- * - the model chosen for the run no longer loaded, so the organization default
- *   served (`model_fallback`, read off the run's journal by the page);
- * - an integration hit a terminal auth failure (a 401 that survived the
- *   proxy's refresh and retry): the agent lost a tool mid-run, and each row
- *   leads to the integration's page where the reconnect lives;
- * - the outputs sweep ended `partial`: deliverables were LOST (upload
- *   abandoned after retries, a file over the per-file cap) while the run itself
- *   may well have SUCCEEDED, so this is the only place a green run says it.
+ * What the run left behind without failing, as warning cards (never a banner: a finished run is
+ * history): model fallback; an integration's terminal auth failure (401 surviving refresh);
+ * a `partial` outputs sweep, where deliverables were LOST though the run may have SUCCEEDED.
  */
 export function RunWarnings({
   run,

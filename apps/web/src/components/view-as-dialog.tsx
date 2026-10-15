@@ -40,26 +40,19 @@ interface ViewAsDialogProps {
 }
 
 /**
- * Entry point for "view as role" — the only place a preview is started.
+ * Entry point for "view as role" — the only place a preview is started. Mounted
+ * conditionally by its triggers, so every open starts from its props.
  *
- * Mounted conditionally by its triggers (like `RoleFormModal`), so every open
- * starts from the props it was given rather than from the last visit's state.
- *
- * The role catalog comes from `useSpaceRoleOptions(spaceId)`, the same
- * grantability rule the server applies in `validateViewAs`, read HERE with the
- * caller's real permissions: once the preview is on, that catalog is answered
- * AS the persona and no longer says what the admin may preview.
- *
- * Eligibility is not decided here — the triggers show only for an owner or an
- * administrator, and the server refuses anyone else (`view_as_forbidden`).
+ * The role catalog (`useSpaceRoleOptions`, the server's `validateViewAs` rule) is read
+ * HERE with the caller's real permissions: once the preview is on, it is answered AS the
+ * persona. Eligibility is the server's call (`view_as_forbidden`).
  */
 export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   const { t } = useTranslation(["settings", "common"]);
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
-  // A personal space has one member and no roles to preview: nobody else can
-  // ever stand in it.
+  // A personal space has one member and no roles to preview.
   const { data: allSpaces } = useSpaces();
   const spaces = allSpaces?.filter((s) => !s.personal);
   const navigate = useNavigate();
@@ -106,49 +99,35 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   } = useSpaceRoleOptions(inSpace ? selectedSpaceId : undefined, inSpace);
   const space = spaces?.find((s) => s.id === selectedSpaceId);
   const roleValue = viewAsRoleValue(presetRoleKey, pickedRole, roles);
-  // Grantability is per space, so the catalog is what says whether this pair is
-  // previewable. Unknown is not empty: until the catalog lands there is nothing
-  // to judge the choice against.
+  // Grantability is per space; unknown is not empty (nothing to judge against until the catalog lands).
   const roleOption = rolesKnown ? options.find((o) => o.value === roleValue) : undefined;
   const catalogUsable = rolesKnown && !rolesError && options.length > 0;
   const ready = !!orgId && (!inSpace || (!!roleOption && !!space));
 
   const submit = async () => {
     if (!orgId || !ready || entering) return;
-    // Replaces any preview already running: the store commits one persona and
-    // resets the cache either way.
     const persona = toViewAsPersona(orgId, orgRole, space, roleOption);
     setEntering(true);
     try {
-      // Load the persona's own org row BEFORE committing it: the permissions
-      // and the banner must appear together, and a load that fails must leave
-      // the admin exactly where they were rather than under a persona wearing
-      // their own authority.
+      // Load the persona's org row BEFORE committing: permissions and banner appear together,
+      // and a failed load must leave the admin where they were.
       const orgs = await fetchOrgsAs(persona);
-      // Committing a preview the user already left would persist it, and a
-      // persona the server accepts is never stopped later: nothing would undo it.
+      // Committing a preview the user already left would persist it, with nothing to undo it.
       if (abandoned.current) return;
-      // Only a preview that moves the admin has a space to bring them back to.
       const moves = !!space && !!roleOption && space.id !== currentSpaceId;
       enterViewAs(persona, orgs, moves ? currentSpaceId : null);
     } catch (err) {
       if (abandoned.current) return;
       setEntering(false);
-      // Three of the four refusals are permanent; "try again" is only ever true
-      // of a failure the server named nothing for.
+      // Three of the four refusals are permanent; "try again" fits only an unnamed failure.
       const code = viewAsRefusalCode(err);
       toast.error(code ? t(`viewAs.stopped.${code}`, { ns: "common" }) : t("viewAs.enterFailed"));
       return;
     }
-    // Land where the persona's role applies. Elsewhere the persona is only its
-    // org role — an implicit member of open spaces — and a banner naming
-    // "Lecteur dans Default" over a page answered for another space reads as
-    // a preview that does not work.
+    // Land where the persona's role applies (elsewhere it is only its org role).
     const movesSpace = !!space && !!roleOption && space.id !== currentSpaceId;
     if (space && roleOption) switchSpace(space.id);
-    // The settings overlay this was opened in goes with it: the preview is for
-    // looking at the app. Back to the screen the overlay covered, unless the
-    // space changed under it (that screen belongs to the other space): home.
+    // The settings overlay goes with it: back to the screen it covered, or home if the space changed.
     close();
     if (movesSpace) navigate("/", { replace: true });
     else closeOverlay();

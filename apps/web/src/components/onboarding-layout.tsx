@@ -26,11 +26,7 @@ const ALL_STEPS: (StepDef & { showWhen?: "billing" })[] = [
   { key: "complete", route: "/onboarding/complete" },
 ];
 
-/**
- * Returns the active onboarding steps filtered by feature flags.
- * Without billing: create → model → members → complete
- * With billing (`@appstrate/module-ee`): create → plan → members → complete
- */
+/** The onboarding steps, filtered by feature flags (`plan` only with billing, `@appstrate/module-ee`). */
 function useOnboardingSteps(): StepDef[] {
   const { features } = useAppConfig();
   return useMemo(
@@ -43,9 +39,6 @@ function useOnboardingSteps(): StepDef[] {
   );
 }
 
-/**
- * Navigation helpers for a given step within the active onboarding flow.
- */
 // eslint-disable-next-line react-refresh/only-export-components
 export function useOnboardingNav(current: StepKey) {
   const steps = useOnboardingSteps();
@@ -64,9 +57,7 @@ export function useOnboardingNav(current: StepKey) {
 
 /**
  * Guard hook: redirects to /onboarding/create if the user has no real org (steps 2-5).
- * Uses the resolved currentOrg from the API, not the raw localStorage orgId,
- * to avoid stale IDs from deleted orgs.
- * Returns the currentOrg id or null.
+ * Uses the resolved currentOrg, not the raw localStorage orgId (stale after a deletion).
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function useOnboardingGuard() {
@@ -116,15 +107,8 @@ export function OnboardingLayout({
   return (
     <div className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
       <div className="w-full max-w-lg">
-        {/*
-         * Header: logo left, account cluster right. The cluster is what lets
-         * a user escape a half-finished onboarding — sign out (wrong account,
-         * account switch) or, once an org exists, go straight to the app. It
-         * sits outside the scrollable content area below so the dropdown is
-         * never clipped. The two share a row rather than overlapping: the
-         * « back to the workspace » button is wider than the room a centred
-         * logo leaves it.
-         */}
+        {/* The account cluster lets a user escape a half-finished onboarding; it sits outside
+            the scrollable content so its dropdown is never clipped. */}
         <div className="mb-6 flex items-center justify-between gap-2">
           <img
             src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
@@ -145,7 +129,6 @@ export function OnboardingLayout({
           </div>
         </div>
 
-        {/* Progress bar */}
         <div className="mb-8 flex items-center gap-2">
           {steps.map((s, i) => (
             <div key={s.key} className="flex flex-1 items-center gap-2">
@@ -159,21 +142,17 @@ export function OnboardingLayout({
           ))}
         </div>
 
-        {/* Step label */}
         <div className="text-muted-foreground mb-1 text-sm">
           {t("onboarding.stepLabel", { current: currentIndex + 1, total: totalSteps })}
         </div>
 
-        {/* Header */}
         <div className="mb-6">
           <h1 className="text-xl font-bold">{title}</h1>
           {subtitle && <p className="text-muted-foreground mt-1 text-sm">{subtitle}</p>}
         </div>
 
-        {/* Content */}
         <div className="mb-6 max-h-[40vh] overflow-y-auto">{children}</div>
 
-        {/* Footer navigation */}
         <div className="border-border flex items-center gap-2 border-t pt-4">
           {onBack ? (
             <Button variant="ghost" size="sm" onClick={onBack}>

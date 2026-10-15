@@ -7,28 +7,9 @@ import { Button } from "@appstrate/ui/components/button";
 import { usePackageActivation } from "../../hooks/use-library";
 
 /**
- * The agent is placed in this space and switched OFF.
- *
- * The page renders in full around this line, because reading and configuring an
- * agent is not running it: every read and configure route answers 200 for a
- * switched-off agent and only the execution doors refuse it. The server says
- * the same thing on the readiness read — `GET …/connection-readiness` answers
- * 200 with a blocking `agent_not_active` error rather than a 404 — precisely so
- * a client can show the cause instead of a panel that fails to load.
- *
- * It is ONE line and a switch, deliberately: this page is reached from the
- * space library or from a link somebody kept, both of which already say the
- * package is off here, so the reader needs the state and the remedy, not a
- * justification of either. The index never leads here — it lists the active set
- * only (RBAC spec §6.9).
- *
- * The verdict itself is NOT read here: the page passes it from its own detail
- * response (`AgentDetail.active`), so one page asks one source.
- *
- * The button is live on the verdict the server serves on the agent's library
- * row (`activation` — the type's activation grant in this space, or owning the
- * space, RBAC spec §3.6). Without it the banner would name a cure the
- * reader cannot apply, so it states the blockage alone.
+ * The agent is placed in this space and switched OFF. The page renders in full around this line:
+ * only the execution doors refuse a switched-off agent. The button shows only with the `activation`
+ * grant from the library row (RBAC spec §3.6); otherwise the banner states the blockage alone.
  */
 export function AgentInactiveAlert({ packageId }: { packageId: string }) {
   const { t } = useTranslation("agents");
@@ -37,8 +18,6 @@ export function AgentInactiveAlert({ packageId }: { packageId: string }) {
   return (
     <Alert variant="destructive" className="mb-4">
       <AlertTriangle className="h-4 w-4" />
-      {/* The button centres on the title's line (-my-1.5: 32px on a 20px line),
-          which is where the alert's icon sits too. */}
       <div className="flex items-start justify-between gap-3">
         <AlertTitle>{t("detail.deactivatedHere")}</AlertTitle>
         {mayActivate && (

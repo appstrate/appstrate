@@ -7,11 +7,7 @@ import type { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import type { useUploadClient } from "../../hooks/use-upload";
 import { subsetWrapper } from "../../lib/agent-input";
 
-/**
- * One input as a settings row: its field, then under it what the value is
- * (left) and what can be done to it (right): a note is text, a control acts. The agent's Entrées (with
- * "Verrouiller") and a schedule's Entrées share it.
- */
+/** One input as a settings row: its field, then a `hint` (left, text) and a `control` (right, acts). */
 export function InputFieldRow({
   fieldKey,
   wrapper,

@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * What the two RBAC pages offer, decided from permissions alone.
- *
- * The deeds live in a closed menu and a row's removal lives in a closed menu,
- * so a static render never shows them. The decisions are kept here, as plain
- * functions, where they can be read and tested without opening anything.
- */
+/** What the two RBAC pages offer, from permissions alone; plain functions because the menus are closed in a static render. */
 import type { components } from "../../api/schema";
 
 type SpaceMember = components["schemas"]["SpaceMemberObject"];
@@ -37,11 +31,7 @@ export function spaceMembersPageDeeds({
   return [...(canInvite ? (["add"] as const) : []), ...(canPreview ? (["view-as"] as const) : [])];
 }
 
-/**
- * What removing a member's seat does. Only an explicit seat can go. For a
- * standard member of an OPEN space it restores the space's default role
- * rather than cutting access, which is why the deed is named for that.
- */
+/** Only an explicit seat can go; for a standard member of an OPEN space it resets to the default role instead of cutting access. */
 export function spaceMemberRemoval(
   member: Pick<SpaceMember, "source" | "org_role">,
   { canRemove, visibility }: { canRemove: boolean; visibility: SpaceVisibility | undefined },

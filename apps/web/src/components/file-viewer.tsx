@@ -1,50 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Reusable in-browser viewer for a file, branching on the server-supplied
- * `preview_kind`: `html` (sandboxed iframe), `image` (`<img>`), `pdf`
- * (native-viewer iframe), `text` (plaintext `<pre>`).
+ * In-browser file viewer branching on the server-supplied `preview_kind`: `html` (sandboxed
+ * iframe), `image`, `pdf` (native-viewer iframe), `text` (`<pre>`).
  *
- * SECURITY — the `html` iframe renders UNTRUSTED agent-generated HTML. Its
- * isolation is load-bearing and MUST NOT be loosened:
+ * SECURITY — the `html` iframe renders UNTRUSTED agent-generated HTML; its isolation is
+ * load-bearing and MUST NOT be loosened:
  *
- *  - `sandbox="allow-scripts"` EXACTLY — scripts run (the page needs them) but
- *    the frame keeps an OPAQUE origin. Adding `allow-same-origin` would let the
- *    page reach the app's cookies/DOM and is the classic sandbox-defeat; adding
- *    `allow-popups`/`allow-forms`/`allow-top-navigation`/`allow-modals` re-opens
- *    exfiltration and navigation vectors. Combining `allow-scripts` with
- *    `allow-same-origin` is the single most dangerous mistake here — never do it.
- *  - `referrerPolicy="no-referrer"` — the preview URL (which carries a signed
- *    token) never leaks via the Referer header.
- *  - `src` is the server-minted `preview_url` on a cookie-less route hardened
- *    with a strict CSP + injected meta CSP (see `file-preview.ts` on the API).
- *  - Where this frame may NAVIGATE is bounded by the SPA document's own CSP,
- *    which the API sends on the `index.html` response: `frame-src <preview
- *    origin>` and nothing else (`buildSpaCsp()` in `apps/api/src/routes/spa.ts`).
- *    Neither the `sandbox` attribute nor the preview response's CSP can close
- *    that channel — a sandboxed navigable may always navigate ITSELF, and
- *    navigation is covered by no `connect-src`/`form-action`. Verified in Chrome:
- *    a cross-origin self-navigation out of this frame is blocked with no network
- *    request to the target, while the initial load still succeeds. What it bounds
- *    is cross-origin NAVIGATION and nothing more — it is not a general
- *    exfiltration control (WebRTC/STUN is a named, pre-existing residual: see
- *    `buildPreviewCsp` on the API). Navigation WITHIN the allowed origin stays
- *    possible: in `USERCONTENT_URL` mode that origin is nothing but token-bound
- *    preview bytes, and in the default mode (`frame-src 'self'`) it is the whole
- *    app origin — still harmless, because the frame is opaque-origin so SameSite
- *    cookies are not sent, and `frame-src` is re-enforced across a 302 so an open
- *    redirect cannot launder the navigation back out. **Framing any NEW origin
- *    from the SPA therefore requires widening `frame-src` first**, or the frame
- *    will not load.
+ *  - `sandbox="allow-scripts"` EXACTLY: scripts run but the frame keeps an OPAQUE origin.
+ *    `allow-same-origin` (the classic sandbox-defeat, fatal combined with `allow-scripts`) would
+ *    expose the app's cookies/DOM; `allow-popups`/`allow-forms`/`allow-top-navigation`/`allow-modals`
+ *    re-open exfiltration and navigation vectors.
+ *  - `referrerPolicy="no-referrer"`: the preview URL carries a signed token.
+ *  - `src` is the server-minted `preview_url` on a cookie-less route with a strict CSP + meta CSP
+ *    (`file-preview.ts` on the API).
+ *  - Where the frame may NAVIGATE is bounded only by the SPA document's CSP `frame-src <preview
+ *    origin>` (`buildSpaCsp()` in `apps/api/src/routes/spa.ts`): neither `sandbox` nor the preview
+ *    CSP can stop a sandboxed navigable navigating ITSELF. It bounds cross-origin navigation only,
+ *    not exfiltration generally (WebRTC/STUN is a known residual, `buildPreviewCsp`). Navigation
+ *    within the allowed origin is harmless: the frame is opaque-origin (no SameSite cookies) and
+ *    `frame-src` is re-enforced across a 302. **Framing any NEW origin requires widening
+ *    `frame-src` first**, or the frame will not load.
  *
- * The `pdf` iframe is DELIBERATELY sandboxless — Chrome refuses to render its
- * native PDF viewer inside a sandboxed iframe without `allow-same-origin`, and
- * loosening the html sandbox is not an option. This is safe: a PDF is not active
- * content in the embedding origin (browser-native viewer, no script access to
- * the parent), and the response carries `nosniff` + `inline` disposition + a
- * `default-src 'none'` CSP, so a body mislabelled `application/pdf` renders as a
- * broken PDF, never as HTML. So `image`/`pdf`/`text` are all inert and need no
- * sandbox.
+ * The `pdf` iframe is DELIBERATELY sandboxless: Chrome will not render its native PDF viewer in a
+ * sandbox without `allow-same-origin`. Safe because a PDF is inert in the embedding origin and the
+ * response carries `nosniff` + `inline` + `default-src 'none'`, so a mislabelled body renders as a
+ * broken PDF, never HTML. `image`/`pdf`/`text` are inert and need no sandbox.
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -56,10 +37,7 @@ import { TextSkeleton } from "./loading-skeletons";
 import { isMarkdownFile } from "../lib/files";
 import { client } from "../api/client";
 
-/**
- * The EXACT iframe sandbox token set for the HTML preview. The server ships the
- * same set in its CSP `sandbox` directive; move both or neither.
- */
+/** The EXACT iframe sandbox token set; the server ships the same in its CSP `sandbox` directive — move both or neither. */
 export const PREVIEW_IFRAME_SANDBOX = "allow-scripts";
 
 /** Inline-render cap for sanitized markdown. */
@@ -74,18 +52,7 @@ export interface ViewableFile {
   preview_kind: "html" | "image" | "pdf" | "text" | null;
 }
 
-/**
- * Load remote text for a preview pane, with the cancel guard both panes need.
- *
- * The two callers differ only in HOW they fetch — the typed client for a file
- * the platform serves, a bare `fetch` for a signed preview URL — and in what
- * they render. Everything else (the `{ text?, failed? }` state, the
- * `let cancelled` guard, treating any error as `failed`, and the
- * loading/error/content branch order) was written out twice, identically.
- *
- * `load` must be stable or memoised by the caller: it is the effect's only
- * dependency, so a fresh closure per render re-fetches on every render.
- */
+/** Loads remote text with a cancel guard; any error is `failed`. `load` must be memoised: it is the effect's only dependency. */
 function useRemoteText(load: (signal: { cancelled: boolean }) => Promise<string | undefined>): {
   text?: string;
   failed?: boolean;

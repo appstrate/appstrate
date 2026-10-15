@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The time zones a schedule can fire in: every IANA zone the browser knows,
- * UTC first. A hand-kept short list left a schedule stored in another zone
- * (America/Toronto) with an empty select.
- */
-
+// Every IANA zone the browser knows, UTC first (a short list left a schedule in
+// another zone, e.g. America/Toronto, with an empty select).
 // `Intl.supportedValuesOf` is ES2022; the app's TS lib stops at ES2020.
 const browserZones: readonly string[] =
   (Intl as { supportedValuesOf?: (key: "timeZone") => string[] }).supportedValuesOf?.("timeZone") ??

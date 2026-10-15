@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The app's single React Query client, a module value rather than a local in
- * `main.tsx` because the role preview resets the cache from OUTSIDE React — the
- * store's actions and the API response middleware, which have no hooks.
- */
+// A module value, not a local in `main.tsx`: the role preview resets the cache from OUTSIDE React.
 
 import { MutationCache, QueryClient } from "@tanstack/react-query";
 import { ApiError, isTransientError } from "../api/errors";

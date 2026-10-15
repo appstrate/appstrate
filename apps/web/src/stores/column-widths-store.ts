@@ -2,13 +2,7 @@
 
 import { createKeyedLocalStore } from "./local-storage";
 
-/**
- * The widths a person gave a table's columns, remembered across reloads.
- *
- * Same call as `column-visibility-store.ts`: a convenience per browser and per
- * table, never a location, and the table works without it. Keyed like that
- * store, by table only: no account identifier is written to storage.
- */
+/** Column widths per table, persisted like `column-visibility-store.ts`; keyed by table only (no account identifier in storage). */
 
 export type ColumnWidths = Readonly<Record<string, number>>;
 

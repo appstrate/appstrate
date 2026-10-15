@@ -33,50 +33,17 @@ import {
 } from "@appstrate/shared-types";
 
 /**
- * Patch caches when an `integration_connections` row changes (INSERT /
- * UPDATE / DELETE) — drives the live "Reconnection required" badge on
- * the connections page, the agent picker verdict, the integration detail
- * connection list, and the agent status cards. `refetchOnWindowFocus` is
- * globally false (`main.tsx`), so these caches move on exactly two things:
- * a live frame here, and the reconnect reconciliation (`trackStreamGaps`).
- *
- * Server-side actor filter in `services/realtime.ts:connection_update`
- * means we only see our own rows; a cross-actor change (e.g. someone else
- * sharing a connection) reaches this tab at the next reconnect or mutation,
- * which is acceptable because the run-time resolver gate enforces the
- * server-side truth anyway.
+ * Refresh every cache an `integration_connections` change moves. `refetchOnWindowFocus` is off,
+ * so these move only on a live frame or the reconnect reconciliation; the server filters by actor.
  */
 function handleConnectionUpdate(qc: QueryClient) {
-  // Connections page (`/preferences/connections`, whose orange "Reconnection
-  // required" badge reads off `/api/me/connections`), integration list
-  // (sidebar status, integrations page count) + detail subtree (auth
-  // statuses, connection lists, agent-resolution verdicts, the resolution
-  // verdict that powers the agent picker dropdown) — all refreshed by the
-  // shared helper, which matches on the typed key's path element.
   void invalidateIntegrationQueries(qc);
 }
 
 /**
- * Which cached queries a `chat_session_update` for `sessionId` must refetch.
- * Pure — exported for its test.
- *
- * Three families, matched on their React Query keys:
- *  - the module's session list (`["chat","sessions"]`) — ALWAYS: it is the
- *    signal-only protocol's single source of the session DTO.
- *  - the typed session detail, `["get","/api/chat/sessions/{id}",init]` with
- *    `init.params.path.id` (openapi-react-query key shape) — only the one
- *    whose path id is this session.
- *  - the typed file list, `["get","/api/files",init]` with
- *    `init.params.query.context_chat_session_id` — only the page filtered on
- *    this session. The gallery's paged key (`["get","/api/files","paged",…]`)
- *    carries no such id, so it never matches. A run's file tab (`runId` filter), the gallery (no
- *    filter) or another conversation's sidebar must not refetch on every
- *    frame of a turn that is not theirs (≥5 frames per turn).
- *
- * `sessionId` undefined (frame did not parse, or the reconnect reconciliation
- * where the missed frames' ids are unknowable) → every member of the three
- * families: a missed signal must degrade to "too many refetches", never to a
- * stale sidebar.
+ * Which queries a `chat_session_update` for `sessionId` must refetch: the session list always;
+ * the session detail and file list only when keyed on this session. `sessionId` undefined
+ * (unparsable frame, reconnect) → all: a missed signal must never leave a stale sidebar.
  */
 export function matchesChatSessionQuery(
   queryKey: readonly unknown[],
@@ -106,24 +73,7 @@ function readContextChatSessionId(init: unknown): unknown {
   return params?.query?.context_chat_session_id;
 }
 
-/**
- * Refetch the chat conversation list when the chat module signals a session
- * change (message persisted, read marker advanced on another device, rename,
- * delete, `generating` flip). Signal-only frame → invalidate, the list GET is
- * the single source of the session DTO. Deliberately NOT routed through the
- * throttled broad invalidator: chat emits a handful of frames per turn (not a
- * per-log firehose like runs) and the unread badge / spinner should react
- * instantly. The key is the module's `SESSIONS_QUERY_KEY` (re-exported from
- * `@appstrate/module-chat/unread`, already imported by the nav badge);
- * importing the constant is harmless when the chat feature is disabled — no
- * chat query is mounted, the invalidation matches nothing.
- *
- * The context sidebar's typed session detail and file list are scoped to the
- * frame's session (`matchesChatSessionQuery`): the wire frame is the
- * `chat_session_update` NOTIFY payload after the fan-out's camelCase +
- * schema pass (`{ sessionId, orgId, userId }`, `services/realtime.ts`).
- * `raw` undefined = reconnect reconciliation → unscoped.
- */
+/** Deliberately NOT throttled: the unread badge / spinner should react instantly. `raw` undefined = reconnect → unscoped. */
 function handleChatSessionUpdate(qc: QueryClient, raw?: string, options?: InvalidateOptions) {
   const sessionId = raw === undefined ? undefined : parseChatSessionId(raw);
   void qc.invalidateQueries(
@@ -143,21 +93,13 @@ function parseChatSessionId(raw: string): string | undefined {
   return parsed.success ? parsed.data.sessionId : undefined;
 }
 
-/**
- * Throttle (~2s) for the BROAD invalidations a `run_update` triggers: the run
- * caches are patched in place (cheap), a refetch fan-out per SSE message is
- * not. The trigger's `WHEN` clause (`packages/db/src/notify.ts`) only fires on
- * a status/timestamp transition, so this collapses bursts, not a firehose.
- */
+/** Throttle (~2s) for the BROAD invalidations a `run_update` triggers: run caches are patched in place, a refetch fan-out per SSE message is not. */
 interface BroadInvalidator {
   schedule: (key: readonly unknown[]) => void;
   dispose: () => void;
 }
 
-/**
- * Exported for its test. The budget this buys: under sustained traffic at most
- * one invalidation per `broadRunKeys` entry per `delayMs` per open tab.
- */
+/** Exported for its test. At most one invalidation per `broadRunKeys` entry per `delayMs` per tab. */
 export function createBroadInvalidator(
   getQueryClient: () => QueryClient,
   delayMs = 2000,
@@ -189,9 +131,8 @@ export function createBroadInvalidator(
 }
 
 /**
- * Single writer of the run-detail cache from a `run_update` frame; returns the
- * verdict, `false` when the frame is dropped:
- * a per-connection snapshot can predate a live frame, and status only moves on.
+ * Single writer of the run-detail cache from a `run_update` frame; `false` when the frame is
+ * dropped as stale (a snapshot can predate a live frame, and status only moves on).
  */
 export function patchRunDetail(
   qc: QueryClient,
@@ -214,41 +155,31 @@ export function patchRunDetail(
 }
 
 /**
- * The list/agent caches a `run_update` moves but cannot patch in place. ONE
- * list, fed to the per-event throttle AND to the reconnect reconciliation, so
- * the latter cannot drift into a silent subset of the former. Exported for its
- * test.
+ * The list/agent caches a `run_update` moves but cannot patch in place. ONE list, fed to the
+ * per-event throttle AND the reconnect reconciliation so they cannot drift. Exported for its test.
  */
 export function broadRunKeys(orgId: string): readonly (readonly unknown[])[] {
   return [
     paginatedRunsKeys.all,
     agentsKeys.inOrg(orgId),
-    // Agent detail caches are keyed ["packages","agents",orgId,spaceId,id], so
-    // the org-scoped prefix is what refreshes an agent's config/model tabs.
+    // Agent detail keys are ["packages","agents",orgId,spaceId,id]: the org prefix refreshes them.
     packageKeys.familyInOrg("agents", orgId),
     // The chat context sidebar reads this typed collection, not paginated-runs.
     ["get", "/api/runs"],
   ];
 }
 
-/**
- * Refetch the run families after a stream gap. Run LOGS are deliberately absent:
- * the run-detail page appends live frames into that cache and a refetch would
- * drop the per-turn breadcrumbs it holds (see `invalidateRunLogs`).
- */
+/** Refetch the run families after a gap. Run LOGS are absent on purpose: a refetch drops the breadcrumbs run-detail appends. */
 function reconcileRunQueries(qc: QueryClient, orgId: string) {
-  // Run detail/list caches are patched in place by live frames, so only a gap
-  // needs them refetched — they are not part of the per-event throttle.
   for (const queryKey of [runKeys.all, ...broadRunKeys(orgId)]) {
     qc.invalidateQueries({ queryKey }, KEEP_IN_FLIGHT);
   }
 }
 
 /**
- * A connection after a gap refetches what the lost frames would have moved.
- * Only the first attempt of a scope's first stream owes nothing: its caches are
- * created beside it. Coverage lives in the query cache, so a wipe forgets it.
- * A frame between a read and the subscription is left to the polls.
+ * A connection after a gap refetches what the lost frames would have moved; only a scope's first
+ * attempt owes nothing. Coverage lives in the query cache, so a wipe forgets it. A frame between
+ * a read and the subscription is left to the polls.
  */
 export function trackStreamGaps(
   getQueryClient: () => QueryClient,
@@ -312,11 +243,8 @@ function handleSSEMessage(
   // Frame dropped as stale — nothing below may move on it either.
   if (!patchRunDetail(qc, orgId, spaceId, evt)) return;
 
-  // Broad invalidations are throttled (~2s) — the in-place cache patches above
-  // keep the visible run data live in the meantime.
   for (const key of broadRunKeys(orgId)) broad.schedule(key);
 
-  // Invalidate schedule-specific caches
   if (scheduleId) {
     qc.invalidateQueries({ queryKey: scheduleKeys.runs(orgId, spaceId, scheduleId) });
     qc.invalidateQueries({ queryKey: scheduleKeys.detail(orgId, spaceId, scheduleId) });
@@ -326,21 +254,14 @@ function handleSSEMessage(
   if (TERMINAL_RUN_STATUSES.has(status)) {
     invalidateNotificationQueries(qc);
     qc.invalidateQueries({ queryKey: runKeys.all });
-    // A terminal run has completed its output sweep; refresh every scoped
-    // file collection, including conversation-context filters.
+    // A terminal run has finished writing its output files and memory (pinned slots, notes).
     void invalidatePaths(qc, ["/api/files"]);
-    // So has its memory: the pinned slots and notes it wrote count on the run
-    // page and list in the agent's Mémoire tab.
     qc.invalidateQueries({ queryKey: persistenceKeys.all });
     void invalidatePaths(qc, ["/api/billing"]);
   }
 }
 
-/**
- * The channels the hook dispatches on that the caller can receive — never the
- * `run_log` firehose. An effect dep: a new set reopens the stream under the new
- * grants. Exported for its test.
- */
+/** The channels the caller can receive, never the `run_log` firehose. An effect dep: a new set reopens the stream. Exported for its test. */
 export function globalStreamChannels(caller: { readsRuns: boolean; readsChat: boolean }): string {
   return [
     ...(caller.readsRuns ? ["run_update"] : []),
@@ -349,10 +270,7 @@ export function globalStreamChannels(caller: { readsRuns: boolean; readsChat: bo
   ].join(",");
 }
 
-/**
- * A 4xx other than 429 answers the request itself (session, grants, space,
- * persona): the effect reopens when one changes, not on a timer. Exported for its test.
- */
+/** A 4xx other than 429 answers the request itself: the effect reopens when its inputs change, not on a timer. Exported for its test. */
 export function isRetryableStreamStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
@@ -371,21 +289,18 @@ export async function reconnectUntilRefused(
 }
 
 /**
- * Global SSE subscription on run changes.
- * Uses fetch + ReadableStream instead of EventSource to avoid
- * Safari's aggressive auto-reconnect behavior on connection failure.
+ * Global SSE subscription on run changes. Uses fetch + ReadableStream, NOT EventSource, to avoid
+ * Safari's uncontrolled auto-reconnect — do not convert.
  */
 export function useGlobalRunSync() {
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
-  // Same reason as the org/space ids beside it: this stream is opened once and
-  // would otherwise keep filling the cache with the other authority's rows.
+  // Like the org/space ids: else the stream keeps filling the cache with the other authority's rows.
   const viewAs = useViewAsHeader();
   const { can, ready } = usePermissions();
   const canReach = useCanReach();
-  // Null until the grants load, or the stream would open without `run_update`
-  // and reopen a moment later.
+  // Null until the grants load, or the stream opens without `run_update` and reopens.
   const channels = ready
     ? globalStreamChannels({ readsRuns: canReadRuns(can), readsChat: canReach("/chat") })
     : null;
@@ -398,11 +313,7 @@ export function useGlobalRunSync() {
     const controller = new AbortController();
     const broad = createBroadInvalidator(() => qcRef.current);
 
-    // Bounded exponential backoff. A non-OK response (e.g. the endpoint is
-    // briefly unavailable during a redeploy) or a stream that simply ends
-    // used to leave the cache stale forever; we now reconnect so live run
-    // updates resume once the endpoint is back. Still fetch + ReadableStream
-    // (NOT EventSource) so Safari can't run its own uncontrolled reconnect.
+    // Bounded exponential backoff.
     const BASE_DELAY_MS = 1000;
     const MAX_DELAY_MS = 30_000;
     let attempt = 0;
@@ -419,20 +330,17 @@ export function useGlobalRunSync() {
           resolve();
         };
         const timer = setTimeout(() => {
-          // Timer fired normally — drop the abort listener so it doesn't leak
-          // for the lifetime of the controller (one per reconnect delay).
+          // Drop the abort listener so it doesn't leak for the controller's lifetime.
           controller.signal.removeEventListener("abort", onAbort);
           resolve();
         }, ms);
         controller.signal.addEventListener("abort", onAbort, { once: true });
       });
 
-    // One connection attempt: "refused" for an answer the server would give
-    // again, "ended" when the stream closes; throws on a transient failure.
+    // One attempt: "refused" for an answer the server would repeat, "ended" on close; throws if transient.
     const connectOnce = async () => {
       const res = await fetch(
-        // `verbose` is deliberately absent: it only affects `run_log`, which
-        // we no longer subscribe to.
+        // `verbose` is absent: it only affects `run_log`, which we do not subscribe to.
         realtimeRunsUrl({ orgId, spaceId, channels: channels.split(","), viewAs }),
         {
           credentials: "include",
@@ -451,10 +359,8 @@ export function useGlobalRunSync() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
-      // A 200 followed by an immediate close would otherwise reset the backoff
-      // on `res.ok` and re-hammer the endpoint at 1 req/s forever. Only reset
-      // the backoff once the stream actually delivers a frame — a healthy
-      // connection — so the next real drop starts from BASE again.
+      // Reset the backoff only once a frame arrives: a 200 followed by an immediate close
+      // would otherwise re-hammer the endpoint at 1 req/s forever.
       let firstFrameSeen = false;
 
       for (;;) {
@@ -484,8 +390,7 @@ export function useGlobalRunSync() {
 
     void reconnectUntilRefused(connectOnce, controller.signal, () => {
       reconciler.missed();
-      // Jitter — de-synchronize reconnect stampedes (every tab reconnects
-      // at once after a redeploy).
+      // Jitter de-synchronizes reconnect stampedes after a redeploy.
       const delay =
         Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS) * (0.5 + Math.random() * 0.5);
       attempt++;
