@@ -12,6 +12,7 @@ import { integrationSettingsHref } from "../../lib/settings-section-href";
 import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-keys";
 import { DetailSectionCard } from "../detail-section-card";
 import { OperationalStat } from "../operational-stat";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 export function IntegrationOverview({
   detail,
@@ -29,7 +30,7 @@ export function IntegrationOverview({
   const { t } = useTranslation("settings");
   const location = useLocation();
   // Only the agents of this space open from here: the others' pages answer 404.
-  const { data: spaceAgents } = useAgents();
+  const { data: spaceAgents, isLoading: agentsLoading } = useAgents();
   const agents = dependentIds && spaceAgents?.filter((agent) => dependentIds.includes(agent.id));
   const previewAgent = agents?.[0];
   const connections = [
@@ -110,12 +111,12 @@ export function IntegrationOverview({
             <OperationalStat
               label={t("integration.summary.connections")}
               value={connections.length}
-              to={connections.length ? connectionsTo : undefined}
+              target={connections.length ? { to: connectionsTo } : undefined}
             />
             <OperationalStat
               label={t("integration.summary.reauthorize")}
               value={reconnect}
-              to={reconnect ? connectionsTo : undefined}
+              target={reconnect ? { to: connectionsTo } : undefined}
             />
           </dl>
         </DetailSectionCard>
@@ -127,19 +128,25 @@ export function IntegrationOverview({
           <dl className="divide-y">
             <OperationalStat
               label={t("integration.summary.agentsCount")}
-              value={agents?.length ?? "—"}
+              value={agentsLoading ? <Skeleton className="h-6 w-10" /> : (agents?.length ?? "—")}
             />
             <OperationalStat
               label={t("integration.summary.agentPreview")}
               value={
-                <span
-                  className="block truncate text-sm font-medium"
-                  title={previewAgent?.display_name || previewAgent?.id}
-                >
-                  {previewAgent ? previewAgent.display_name || previewAgent.id : "—"}
-                </span>
+                agentsLoading ? (
+                  <Skeleton className="h-4 w-28" />
+                ) : (
+                  <span
+                    className="block truncate text-sm font-medium"
+                    title={previewAgent?.display_name || previewAgent?.id}
+                  >
+                    {previewAgent ? previewAgent.display_name || previewAgent.id : "—"}
+                  </span>
+                )
               }
-              to={previewAgent ? packageDetailPath("agent", previewAgent.id) : undefined}
+              target={
+                previewAgent ? { to: packageDetailPath("agent", previewAgent.id) } : undefined
+              }
             />
           </dl>
         </DetailSectionCard>
@@ -148,12 +155,12 @@ export function IntegrationOverview({
             <OperationalStat
               label={t("integration.summary.availableTools")}
               value={available}
-              to={available ? toolsTo : undefined}
+              target={available ? { to: toolsTo } : undefined}
             />
             <OperationalStat
               label={t("integration.summary.hiddenTools")}
               value={hidden}
-              to={hidden ? toolsTo : undefined}
+              target={hidden ? { to: toolsTo } : undefined}
             />
           </dl>
         </DetailSectionCard>

@@ -15,9 +15,7 @@
 
 import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
 
-import type { components } from "../api/client";
-
-export type OrgMember = components["schemas"]["OrgMember"];
+import { memberLabel, type OrgMember } from "./members";
 
 /**
  * The org roles the server refuses in `user_ids`: they already hold
@@ -31,11 +29,6 @@ const ROLES_WITH_BILLING_MANAGE: ReadonlySet<OrgMember["role"]> = new Set(
 /** The members the picker may offer, in the order the org listing returns them. */
 export function billingManagerCandidates(members: readonly OrgMember[]): OrgMember[] {
   return members.filter((member) => !ROLES_WITH_BILLING_MANAGE.has(member.role));
-}
-
-/** Display name for a member, falling back the way the members page does. */
-export function memberLabel(member: OrgMember): string {
-  return member.displayName || member.email || member.userId;
 }
 
 /**

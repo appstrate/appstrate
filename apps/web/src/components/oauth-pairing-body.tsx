@@ -11,8 +11,8 @@ import { useTranslation } from "react-i18next";
 import { RefreshCw } from "lucide-react";
 import { toastError } from "../lib/mutation-error";
 import { Button } from "@appstrate/ui/components/button";
-import { CopyButton } from "./copy-button";
-import { Spinner } from "./spinner";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import {
   useCreateModelProviderPairing,
   useModelProviderPairingStatus,

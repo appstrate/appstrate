@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Alert } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { VIEW_AS_REFUSAL_CODES } from "@appstrate/core/permissions";
 import {
@@ -49,7 +50,7 @@ export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}
   const stopped = useViewAsStopped();
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
-  const { data: spaces } = useSpaces();
+  const { data: spaces, isPending: spacesPending } = useSpaces();
   const overlayOpen = useOverlayPath() !== null;
   const { switchSpace } = useSpaceSwitcher();
   const navigate = useNavigate();
@@ -109,6 +110,13 @@ export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}
           }}
           components={{ b: <strong className="font-semibold" /> }}
         />
+        {/* The "in X: role Y" clause needs the listing; hold its place. */}
+        {!inPersonaSpace && spacesPending && (
+          <>
+            {" "}
+            <Skeleton className="inline-block h-3.5 w-40 align-middle" />
+          </>
+        )}
         {hereRole && here && (
           <>
             {" "}

@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
 import { initialCredentialValues } from "../components/integration-connect/credential-schema";
 import {
@@ -11,7 +11,7 @@ import {
 } from "../components/integration-connect/connection-variables-schema";
 import { VariableFields } from "../components/integration-connect/variable-fields";
 import { HandoffSteps, type HandoffStep } from "../components/integration-connect/handoff-steps";
-import { IntegrationIcon } from "../components/integration-icon";
+import { PackageIcon } from "../components/package-icon";
 import { client, type paths } from "../api/client";
 import { publishConnectCompletion } from "../lib/connect-completion";
 import type { IntegrationManifestAuth } from "../hooks/use-integrations";
@@ -252,7 +252,7 @@ export function HostedConnectPage() {
         {(phase === "form" || phase === "submitting") && context && (
           <>
             <div className="flex items-center gap-3">
-              <IntegrationIcon src={context.icon ?? undefined} />
+              <PackageIcon type="integration" icon={context.icon} />
               <h1 className="text-lg font-semibold">
                 {t("integration.connect.hosted.title", { display: context.display_name })}
               </h1>

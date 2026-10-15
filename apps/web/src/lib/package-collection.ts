@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PackageType } from "@appstrate/core/validation";
-import type { CardItem } from "../pages/package-list";
+import type { CardItem } from "./package-card-item";
 import { matchesSearch } from "./strings";
 
 export const PACKAGE_ORIGINS = ["local", "system"] as const;

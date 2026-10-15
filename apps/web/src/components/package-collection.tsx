@@ -32,7 +32,7 @@ import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import type { ListState } from "../lib/list-params";
 import { PACKAGE_ACTIVITIES, PACKAGE_ORIGINS, narrowPackages } from "../lib/package-collection";
-import type { CardItem } from "../pages/package-list";
+import type { CardItem } from "../lib/package-card-item";
 
 const NO_COLUMNS: DataColumn<CardItem>[] = [];
 const NO_IDS: string[] = [];

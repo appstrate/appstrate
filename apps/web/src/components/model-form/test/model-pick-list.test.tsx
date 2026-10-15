@@ -54,7 +54,6 @@ function list(options: Partial<Parameters<typeof ModelPickList>[0]> = {}): strin
       search=""
       onSearchChange={() => {}}
       isLoading={false}
-      loadingText="…"
       emptyText={settingsFr["models.form.modelSearchEmpty"]}
       {...options}
     />,
@@ -151,7 +150,6 @@ describe("ModelPickList — a catalog, in two groups", () => {
       search=""
       onSearchChange={() => {}}
       isLoading={false}
-      loadingText="…"
       emptyText="—"
       grouped
     />,
@@ -176,8 +174,10 @@ describe("ModelPickList — a catalog, in two groups", () => {
 });
 
 describe("ModelPickList — nothing to show", () => {
-  it("states what it is waiting for rather than showing an empty frame", () => {
-    expect(list({ rows: [], isLoading: true, loadingText: "Détection…" })).toContain("Détection…");
+  it("draws placeholder rows while it waits rather than an empty frame", () => {
+    const html = list({ rows: [], isLoading: true });
+    expect(html).toContain('role="status"');
+    expect(html).toContain("animate-pulse");
   });
 
   it("states why the list is empty once the answer is in", () => {

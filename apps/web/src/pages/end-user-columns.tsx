@@ -8,11 +8,8 @@ import { rowActionsColumn } from "../components/row-actions-column";
 import { TableRowActions } from "../components/table-row-actions";
 import { CellDate, CellText } from "../components/table-cells";
 import { EndUserAvatar } from "../components/end-user-avatar";
+import { endUserLabel } from "../lib/members";
 import type { EndUserInfo } from "../hooks/use-end-users";
-
-export function endUserDisplayName(user: EndUserInfo, anonymousLabel: string): string {
-  return user.name || user.email || user.externalId || anonymousLabel;
-}
 
 /** One comparable end-user fact per desktop column; identity and actions survive on phones. */
 export function useEndUserColumns({
@@ -40,7 +37,7 @@ export function useEndUserColumns({
         <div className="flex min-w-0 items-center gap-2">
           <EndUserAvatar user={user} />
           <span className="truncate font-medium">
-            {endUserDisplayName(user, t("spaces.anonymousUser"))}
+            {endUserLabel(user, t("spaces.anonymousUser"))}
           </span>
         </div>
       ),
@@ -74,7 +71,7 @@ export function useEndUserColumns({
     rowActionsColumn((user) => (
       <TableRowActions
         menuLabel={t("spaces.moreEndUserActions", {
-          name: endUserDisplayName(user, t("spaces.anonymousUser")),
+          name: endUserLabel(user, t("spaces.anonymousUser")),
         })}
         isPending={deletingUserId === user.id}
         actions={[

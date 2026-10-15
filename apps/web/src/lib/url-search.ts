@@ -5,11 +5,3 @@ export function searchOf(params: URLSearchParams): string {
   const query = params.toString();
   return query ? `?${query}` : "";
 }
-
-/** The address of `location` with its query replaced by `params`; the hash stays. */
-export function hrefWithSearch(
-  location: { pathname: string; hash: string },
-  params: URLSearchParams,
-): string {
-  return `${location.pathname}${searchOf(params)}${location.hash}`;
-}

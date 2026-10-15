@@ -21,3 +21,12 @@ export function useCanReach(): (target: string) => boolean {
     [can, features, inPersonalSpace],
   );
 }
+
+/**
+ * Whether the reach verdicts above are answers yet: until the permission set
+ * loads every one reads as refused, so a surface that hides what it cannot
+ * reach shows its placeholder instead of an incomplete list.
+ */
+export function useReachReady(): boolean {
+  return usePermissions().ready;
+}

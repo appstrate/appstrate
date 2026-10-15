@@ -9,7 +9,7 @@
  * ownership gates. The sections live in `components/integration-detail/`.
  */
 
-import { lazy, Suspense, useCallback, useState } from "react";
+import { lazy, Suspense } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
 import {
@@ -17,7 +17,6 @@ import {
   IntegrationMap,
 } from "../components/package-detail/integration-structure";
 import { PackageFilesView } from "../components/package-files/package-files-view";
-import { PackageFilesSection } from "../components/package-files/package-files-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 
 const INTEGRATION_TABS = ["overview", "connections", "configuration"] as const;
@@ -29,53 +28,46 @@ import {
   ShieldCheck,
   KeyRound,
   Plug,
+  Workflow,
   FolderTree,
   Wrench,
-  Workflow,
   History,
   FileArchive,
   IdCard,
   Server,
-  Info,
 } from "lucide-react";
 import { authMethodLabel } from "../lib/integration-presentation";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
-import { LoadingState, ErrorState, ResourceErrorState } from "../components/page-states";
-import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
-import { AgentDetailSplit } from "../components/agent-detail/agent-detail-split";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { ErrorState, ResourceErrorState } from "../components/page-states";
+import { SettingsSkeleton } from "../components/loading-skeletons";
+import { DetailTabs, DetailTabBar, DetailTabPanel } from "../components/detail-tabs";
 import { SettingsHeading } from "../components/settings/settings-heading";
-import { SectionRail, type SectionRailItem } from "../components/settings/section-rail";
+import type { SectionRailItem } from "../components/settings/section-rail";
+import {
+  SettingsRailView,
+  type SettingsRailGroup,
+} from "../components/settings/settings-rail-view";
 import { SharedHeader } from "../components/package-detail/shared-header";
+import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
-import { PackageVersionsSection } from "../components/package-detail/package-versions-section";
-import { useModalParam } from "../hooks/use-modal-param";
-import { ForkPackageModal } from "../components/fork-package-modal";
-import { ConfirmModal } from "../components/confirm-modal";
+import { PackageCommonSection } from "../components/package-detail/package-common-section";
+import { isOwnedSource } from "../components/package-detail/owned-source";
+import { PackageOwnershipNotice } from "../components/package-detail/package-ownership";
 import { ConfigAuthBlock } from "../components/integration-detail/config-auth-block";
 import { AccessRulesSection } from "../components/integration-detail/access-rules-section";
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
-import { usePermissions, useHomeSpaceName, useCurrentSpaceGrant } from "../hooks/use-permissions";
-import { maySetPackageActive } from "../lib/package-permissions";
-import {
-  usePackageDetail,
-  useDeletePackage,
-  usePackageDownload,
-  type Versioned,
-} from "../hooks/use-packages";
+import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
+import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCanReach } from "../hooks/use-can-reach";
-import { useSetPackageActive } from "../hooks/use-library";
-import { EditorPlaceContext } from "../hooks/use-unsaved-changes";
+import { usePackageActivation } from "../hooks/use-library";
 import { structurePanelState } from "../lib/integration-structure-panel";
-import type { EditorPlace } from "../lib/editor-place";
 import {
   integrationSettingsHref,
-  settingsEditorPlace,
+  isPackageCommonSection,
   type IntegrationSettingsSection,
 } from "../lib/settings-section-href";
 
@@ -104,9 +96,6 @@ function IntegrationSettings({
   detail,
   blockUserConnections,
   canConfigure,
-  onActivate,
-  activationPending,
-  canActivate,
   definition,
   isOwned,
   versionGrants,
@@ -115,10 +104,6 @@ function IntegrationSettings({
   detail: NonNullable<ReturnType<typeof useIntegrationDetail>["data"]>;
   blockUserConnections: boolean;
   canConfigure: boolean;
-  onActivate: () => void;
-  activationPending: boolean;
-  /** `maySetPackageActive` for this space — the hint names no button the route would refuse. */
-  canActivate: boolean;
   /**
    * The package draft, present when the reader may change the definition: its
    * sections are then edited here, in place. Absent, Définition stays a read.
@@ -130,36 +115,20 @@ function IntegrationSettings({
   versionGrants: { canRestore: boolean; canDelete: boolean };
 }) {
   const { t } = useTranslation(["settings", "agents"]);
-  const location = useLocation();
   const navigate = useNavigate();
-  const hasDefinition = !!definition;
-  const sectionOf = useCallback(
-    (search: URLSearchParams): IntegrationSettingsSection => {
-      const requested = search.get("integrationSettings");
-      return requested === "tools" ||
-        requested === "functioning" ||
-        requested === "map" ||
-        (requested === "versions" && isOwned) ||
-        requested === "bundle" ||
-        (hasDefinition && requested && DEFINITION_SECTIONS.includes(requested))
-        ? (requested as IntegrationSettingsSection)
-        : requested === "files" || !canConfigure
-          ? "files"
-          : requested === "access"
-            ? "access"
-            : "authentication";
-    },
-    [isOwned, hasDefinition, canConfigure],
-  );
-  const params = new URLSearchParams(location.search);
-  const active = sectionOf(params);
-  const requestedFile = params.get("file") ?? undefined;
-  const editorPlace = useCallback<EditorPlace>(
-    (search) => settingsEditorPlace(sectionOf(search), search, DEFINITION_SECTIONS),
-    [sectionOf],
-  );
-  const sectionHref = (section: IntegrationSettingsSection, extra?: Record<string, string>) =>
-    integrationSettingsHref(location.pathname, section, extra);
+  const resolve = (requested: string | null): IntegrationSettingsSection =>
+    requested === "tools" ||
+    requested === "functioning" ||
+    requested === "map" ||
+    (requested === "versions" && isOwned) ||
+    requested === "bundle" ||
+    (definition && requested && DEFINITION_SECTIONS.includes(requested))
+      ? (requested as IntegrationSettingsSection)
+      : requested === "files" || !canConfigure
+        ? "files"
+        : requested === "access"
+          ? "access"
+          : "authentication";
   const steps = detail.manifest.setup_guide?.steps ?? [];
   // Same order as an agent's: Explorer (see it: map, files, versions), then
   // what is set here, then the AFPS package, what the integration IS for every
@@ -169,7 +138,7 @@ function IntegrationSettings({
     id: IntegrationSettingsSection,
     icon: SectionRailItem["icon"],
     label: string,
-  ): SectionRailItem => ({ id, to: sectionHref(id), icon, label });
+  ): SettingsRailGroup<IntegrationSettingsSection>["items"][number] => ({ id, icon, label });
   const groups = [
     {
       title: t("detail.settings.exploreGroup", { ns: "agents" }),
@@ -211,137 +180,105 @@ function IntegrationSettings({
       ],
     },
   ];
-  const definitionSection = definition
-    ? DEFINITION_RAIL.find(([id]) => id === active)?.[1]
-    : undefined;
   return (
-    <EditorPlaceContext.Provider value={editorPlace}>
-      <AgentDetailSplit
-        className="max-lg:grid-cols-1"
-        railClassName="max-lg:border-r-0 max-lg:border-b"
-        phoneMenu={t("integration.tabs.configuration")}
-        rail={
-          <SectionRail
-            label={t("integration.tabs.configuration")}
-            groups={groups}
-            active={active}
-          />
-        }
-      >
-        {definition && definitionSection ? (
-          <Suspense fallback={<LoadingState />}>
+    <SettingsRailView
+      param="integrationSettings"
+      tab="configuration"
+      label={t("integration.tabs.configuration")}
+      groups={groups}
+      resolve={resolve}
+      definitionSections={DEFINITION_SECTIONS}
+    >
+      {({ active, file, href }) => {
+        const definitionSection = definition
+          ? DEFINITION_RAIL.find(([id]) => id === active)?.[1]
+          : undefined;
+        return definition && definitionSection ? (
+          <Suspense fallback={<SettingsSkeleton />}>
             <IntegrationDefinitionEditor
               detail={definition}
               section={definitionSection}
               onSection={(next) => {
                 const railId = DEFINITION_RAIL.find(([, section]) => section === next)?.[0];
-                if (railId) void navigate(sectionHref(railId));
+                if (railId) void navigate(href(railId));
               }}
               toolInspection={detail.tool_catalog_inspection}
             />
           </Suspense>
-        ) : active === "bundle" ? (
-          <PackageFilesSection
+        ) : isPackageCommonSection(active) ? (
+          <PackageCommonSection
+            section={active}
             type="integration"
             packageId={packageId}
             manifest={detail.manifest}
-            filesHref={(path) => sectionHref("files", { file: path })}
+            file={file}
+            href={href}
+            manifestSection={definition ? "identity" : undefined}
+            versions={versionGrants}
           />
-        ) : active === "versions" ? (
-          <PackageVersionsSection type="integration" packageId={packageId} {...versionGrants} />
-        ) : active === "files" ? (
-          <PackageFilesView
-            key={requestedFile}
-            type="integration"
-            packageId={packageId}
-            initialPath={requestedFile}
-            editable={Boolean(definition)}
-            editHref={
-              definition
-                ? (path) =>
-                    path === "manifest.json"
-                      ? sectionHref("identity", { editManifest: "1" })
-                      : undefined
-                : undefined
-            }
-          />
-        ) : active === "functioning" || active === "map" ? (
+        ) : active === "functioning" ? (
           <div className="p-6">
-            <SettingsHeading
-              title={t(
-                active === "map"
-                  ? "integration.structure.map"
-                  : "integration.structure.functioning",
-              )}
-              description={null}
-            />
-            {active === "map" ? (
-              <IntegrationMap
-                detail={detail}
-                packageId={packageId}
-                renderPanel={(section, openPanel) => {
-                  const state = structurePanelState(section, detail.active, canConfigure);
-                  if (state === "inactive")
-                    return (
-                      <ActivationHint
-                        onActivate={onActivate}
-                        pending={activationPending}
-                        canActivate={canActivate}
-                      />
-                    );
-                  if (state === "admin-only")
-                    return (
-                      <p className="text-muted-foreground text-sm">
-                        {t("integration.health.adminRequired")}
-                      </p>
-                    );
-                  if (section === "files")
-                    return <PackageFilesView type="integration" packageId={packageId} />;
-                  if (section === "tools")
-                    return (
-                      <IntegrationToolsSection
-                        integrationId={packageId}
-                        inspection={detail.tool_catalog_inspection}
-                        allowUndeclaredTools={detail.allow_undeclared_tools}
-                      />
-                    );
-                  if (section === "functioning") return <IntegrationGeneral detail={detail} />;
-                  if (section.startsWith("connections:"))
-                    return (
-                      <ConnectionsTable
-                        key={section}
-                        packageId={packageId}
-                        detail={detail}
-                        canConfigure={canConfigure}
-                        initialMethod={section.slice("connections:".length)}
-                        onConfigure={(authKey) =>
-                          openPanel(`auth:${authKey ?? detail.auths[0]?.auth_key ?? ""}`)
-                        }
-                      />
-                    );
-                  if (section === "access")
-                    return (
-                      <AccessRulesSection
-                        packageId={packageId}
-                        blockUserConnections={blockUserConnections}
-                      />
-                    );
-                  const authKey = section.slice("auth:".length);
-                  const status = detail.auths.find((auth) => auth.auth_key === authKey);
-                  const authDecl = detail.manifest.auths?.[authKey];
-                  return status && authDecl ? (
-                    <ConfigAuthBlock
-                      key={authKey}
-                      packageId={packageId}
-                      status={status}
-                      authDecl={authDecl}
+            <SettingsHeading title={t("integration.structure.functioning")} description={null} />
+            <IntegrationGeneral detail={detail} />
+          </div>
+        ) : active === "map" ? (
+          <div className="p-6">
+            <SettingsHeading title={t("integration.structure.map")} description={null} />
+            <IntegrationMap
+              detail={detail}
+              packageId={packageId}
+              renderPanel={(section, openPanel) => {
+                const state = structurePanelState(section, detail.active, canConfigure);
+                if (state === "inactive") return <ActivationHint packageId={packageId} />;
+                if (state === "admin-only")
+                  return (
+                    <p className="text-muted-foreground text-sm">
+                      {t("integration.health.adminRequired")}
+                    </p>
+                  );
+                if (section === "files")
+                  return <PackageFilesView type="integration" packageId={packageId} />;
+                if (section === "tools")
+                  return (
+                    <IntegrationToolsSection
+                      integrationId={packageId}
+                      inspection={detail.tool_catalog_inspection}
+                      allowUndeclaredTools={detail.allow_undeclared_tools}
                     />
-                  ) : null;
-                }}
-              />
-            ) : (
-              <IntegrationGeneral detail={detail} />
-            )}
+                  );
+                if (section === "functioning") return <IntegrationGeneral detail={detail} />;
+                if (section.startsWith("connections:"))
+                  return (
+                    <ConnectionsTable
+                      key={section}
+                      packageId={packageId}
+                      detail={detail}
+                      canConfigure={canConfigure}
+                      onConfigure={(authKey) =>
+                        openPanel(`auth:${authKey ?? detail.auths[0]?.auth_key ?? ""}`)
+                      }
+                    />
+                  );
+                if (section === "access")
+                  return (
+                    <AccessRulesSection
+                      packageId={packageId}
+                      blockUserConnections={blockUserConnections}
+                    />
+                  );
+                const authKey = section.slice("auth:".length);
+                const status = detail.auths.find((auth) => auth.auth_key === authKey);
+                const authDecl = detail.manifest.auths?.[authKey];
+                return status && authDecl ? (
+                  <ConfigAuthBlock
+                    key={authKey}
+                    packageId={packageId}
+                    status={status}
+                    authDecl={authDecl}
+                  />
+                ) : null;
+              }}
+            />
           </div>
         ) : active === "tools" ? (
           <div className="p-6">
@@ -358,11 +295,7 @@ function IntegrationSettings({
           </div>
         ) : !detail.active ? (
           <div className="p-6">
-            <ActivationHint
-              onActivate={onActivate}
-              pending={activationPending}
-              canActivate={canActivate}
-            />
+            <ActivationHint packageId={packageId} />
           </div>
         ) : (
           <div className="p-6">
@@ -428,9 +361,9 @@ function IntegrationSettings({
               />
             )}
           </div>
-        )}
-      </AgentDetailSplit>
-    </EditorPlaceContext.Provider>
+        );
+      }}
+    </SettingsRailView>
   );
 }
 
@@ -443,25 +376,23 @@ function IntegrationSettings({
  * yet active — connecting and governance are meaningless until the
  * integration is activated for this space.
  */
-function ActivationHint({
-  onActivate,
-  pending,
-  canActivate,
-}: {
-  onActivate: () => void;
-  pending: boolean;
-  /** The page's one activation verdict — the hint must not offer what the header hides. */
-  canActivate: boolean;
-}) {
+function ActivationHint({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings", "common"]);
+  // The hint names no button the route would refuse.
+  const { mayActivate, activate, pending } = usePackageActivation("integration", packageId);
   return (
     <div
       className="border-border bg-muted/30 rounded-md border p-6 text-center"
       data-testid="activation-hint"
     >
       <p className="text-muted-foreground mb-3 text-sm">{t("integrations.activate.hint")}</p>
-      {canActivate && (
-        <Button size="sm" onClick={onActivate} disabled={pending} data-testid="detail-activate-btn">
+      {mayActivate && (
+        <Button
+          size="sm"
+          onClick={() => activate()}
+          disabled={pending}
+          data-testid="detail-activate-btn"
+        >
           {t("integrations.btn.activate")}
         </Button>
       )}
@@ -478,13 +409,7 @@ export function IntegrationDetailPage() {
     "integration",
     packageId || undefined,
   );
-  // ONE pair of doors for every package family: an integration is activated in
-  // a space by `POST /api/spaces/{id}/packages` and switched off by its
-  // `DELETE`, exactly like an agent or a skill. The row and its settings
-  // survive the deactivation — connections were never held there anyway.
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
-  const deletePkg = useDeletePackage("integration");
+  const activation = usePackageActivation("integration", packageId);
   const downloadPackage = usePackageDownload(scope, name);
   const { can } = usePermissions();
   // The package's own detail response is the authority on its home — both the
@@ -492,18 +417,8 @@ export function IntegrationDetailPage() {
   const homeSpaceId = pkg?.home_space_id;
   const homeWritable = pkg?.home_writable;
   const homeDeletable = pkg?.home_deletable;
-  const homeShareable = pkg?.home_shareable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
   const canConfigure = can("integrations:configure");
-  // The tree's ONE activation verdict, and deliberately not
-  // `can("integrations:install")`: `can()` unions the org and space permission
-  // sets, and that union does not carry RBAC §3.6 — owning the space IS the
-  // authorization, so a guest in their own personal space holds `operator`,
-  // no `integrations:install`, and the route accepts all the same. A second
-  // spelling here hides a control the server takes, right beside the dropdown
-  // below, which asks `maySetPackageActive` and would offer its mirror image.
-  const spaceGrant = useCurrentSpaceGrant();
-  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if
   // it can point at the screen where that happens.
@@ -518,13 +433,11 @@ export function IntegrationDetailPage() {
     else params.delete("connectionMethod");
     void navigate({ search: params.toString(), hash: "connections" });
   };
-  const fork = useModalParam("fork");
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const canBrowseIntegrations = useCanReach()("/integrations");
 
-  // `source` (system or local) comes from the package detail only: wait for it.
-  if (isLoading || pkgLoading) return <LoadingState />;
+  // Only the integration detail gates the page; the package detail brings `source` and
+  // follows in place (badges, read-only alert, actions menu).
+  if (isLoading) return <PackageDetailSkeleton type="integration" />;
   if (error) {
     // Not placed in this space, or gone: one answer for both, and what the
     // member can do about either.
@@ -542,19 +455,10 @@ export function IntegrationDetailPage() {
 
   const active = detail.active;
   const m = detail.manifest;
-  // Only the package detail knows the source. Unknown (read refused or failed) is not owned.
+  // Only the package detail knows the source.
   const source = pkg?.source;
-  const version = pkg?.version ?? m.version;
-  const isBuiltIn = source === "system";
-  // Org-owned packages are editable regardless of scope name; only system packages are read-only.
-  const isOwned = source === "local";
-  // The fork action's own verdict (`PackageActionsDropdown`), which also bounds `?fork`.
-  const canFork = can("integrations:write") && !isOwned;
-  const setActivation = (next: boolean, onSuccess?: () => void) => {
-    if (!currentSpaceId) return;
-    setActive.mutate({ spaceId: currentSpaceId, packageId, active: next }, { onSuccess });
-  };
-  const onActivate = () => setActivation(true);
+  const version = pkgLoading ? undefined : (pkg?.version ?? m.version);
+  const isOwned = isOwnedSource(source);
 
   return (
     <div>
@@ -574,80 +478,62 @@ export function IntegrationDetailPage() {
           label: t(`integration.tabs.${tab}`),
         }}
         actionsLeft={
-          <Badge variant={active ? "success" : "warning"}>
-            {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
-          </Badge>
+          <>
+            {pkgLoading && <Skeleton className="h-5 w-16" />}
+            <Badge variant={active ? "success" : "warning"}>
+              {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
+            </Badge>
+          </>
         }
         actionsRight={
           <>
-            {!active && canActivate && (
+            {!active && activation.mayActivate && (
               <Button
                 size="sm"
-                onClick={onActivate}
-                disabled={setActive.isPending}
+                onClick={() => activation.activate()}
+                disabled={activation.pending}
                 data-testid="detail-activate-btn"
               >
                 {t("integrations.btn.activate")}
               </Button>
             )}
-            <PackageActionsDropdown
-              packageId={packageId}
-              type="integration"
-              isOwned={isOwned}
-              isBuiltIn={isBuiltIn}
-              isHistoricalVersion={false}
-              homeSpaceId={homeSpaceId}
-              homeWritable={homeWritable}
-              homeDeletable={homeDeletable}
-              homeShareable={homeShareable}
-              downloadVersion={version}
-              onDownload={downloadPackage}
-              onFork={() => fork.open()}
-              canDeactivate={active}
-              onDeactivate={() => setConfirmDeactivate(true)}
-              activationPending={setActive.isPending}
-              canDeletePackage={!!pkg && pkg.agents.length === 0}
-              onDeletePackage={() => setConfirmDelete(true)}
-            />
+            {pkgLoading ? (
+              <Skeleton className="size-8 rounded-md" />
+            ) : (
+              <PackageActionsDropdown
+                packageId={packageId}
+                type="integration"
+                detail={pkg}
+                isHistoricalVersion={false}
+                downloadVersion={version}
+                onDownload={downloadPackage}
+                isActiveHere={active}
+              />
+            )}
           </>
         }
       />
 
-      {isBuiltIn && (
-        <Alert variant="info" className="mb-4">
-          <Info />
-          <AlertDescription>{t("ownership.readOnly", { ns: "agents" })}</AlertDescription>
-        </Alert>
-      )}
+      <PackageOwnershipNotice
+        type="integration"
+        isOwned={isOwned}
+        forkedFrom={pkg?.forked_from ?? null}
+        draftReadOnly={pkg?.definition === "draft" && !homeWritable}
+      />
 
-      <Tabs
-        value={tab}
-        onValueChange={(v) => setTab(v as (typeof INTEGRATION_TABS)[number])}
-        className="mt-2"
-      >
-        <DetailTabsList>
-          <DetailTabsTrigger value="overview" data-testid="tab-overview">
-            {t("integration.tabs.overview")}
-          </DetailTabsTrigger>
-          <DetailTabsTrigger value="connections" data-testid="tab-connections">
-            {t("integration.tabs.connections")}
-          </DetailTabsTrigger>
-          <DetailTabsTrigger value="configuration" data-testid="tab-configuration">
-            {t("integration.tabs.configuration")}
-          </DetailTabsTrigger>
-        </DetailTabsList>
+      <DetailTabs value={tab} onChange={setTab}>
+        <DetailTabBar
+          tabs={[
+            { value: "overview", label: t("integration.tabs.overview") },
+            { value: "connections", label: t("integration.tabs.connections") },
+            { value: "configuration", label: t("integration.tabs.configuration") },
+          ]}
+        />
 
         {/* One connected-accounts table, with each row retaining its auth context. */}
-        <TabsContent
-          value="connections"
-          className="bg-card mt-0 space-y-8 rounded-lg border p-6 shadow-sm"
-        >
+        <DetailTabPanel value="connections">
           {!active ? (
-            <ActivationHint
-              onActivate={onActivate}
-              pending={setActive.isPending}
-              canActivate={canActivate}
-            />
+            <ActivationHint packageId={packageId} />
           ) : detail.auths.length === 0 ? (
             <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
           ) : (
@@ -658,82 +544,42 @@ export function IntegrationDetailPage() {
               onConfigure={openAuthentication}
             />
           )}
-        </TabsContent>
+        </DetailTabPanel>
 
         {/* Configuration is admin-only; package files stay readable for every member. */}
-        <TabsContent
-          value="configuration"
-          className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
-        >
-          <IntegrationSettings
-            packageId={packageId}
-            detail={detail}
-            blockUserConnections={detail.block_user_connections}
-            canConfigure={canConfigure}
-            onActivate={onActivate}
-            activationPending={setActive.isPending}
-            canActivate={canActivate}
-            // Write authority is the package's HOME space, never the space being browsed.
-            definition={homeWritable && pkg ? pkg : undefined}
-            isOwned={isOwned}
-            versionGrants={{
-              canRestore: isOwned && !!homeWritable,
-              canDelete: isOwned && !!homeDeletable,
-            }}
-          />
-        </TabsContent>
+        <DetailTabPanel value="configuration" flush>
+          {/* Its rail (definition, versions) depends on the package's source. */}
+          {pkgLoading ? (
+            <SettingsSkeleton className="p-6" />
+          ) : (
+            <IntegrationSettings
+              packageId={packageId}
+              detail={detail}
+              blockUserConnections={detail.block_user_connections}
+              canConfigure={canConfigure}
+              // Write authority is the package's HOME space, never the space being browsed.
+              definition={homeWritable && pkg ? pkg : undefined}
+              isOwned={isOwned}
+              versionGrants={{
+                canRestore: isOwned && !!homeWritable,
+                canDelete: isOwned && !!homeDeletable,
+              }}
+            />
+          )}
+        </DetailTabPanel>
 
         {/* ─── Outils (effective tool catalog — read-only) ─── */}
 
         {/* Capabilities, connected accounts and package usage are distinct concepts. */}
-        <TabsContent value="overview" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+        <DetailTabPanel value="overview">
           <IntegrationOverview
             detail={detail}
             dependentIds={pkg?.agents.map((agent) => agent.id)}
             onOpenConnections={openConnections}
             onConfigureAuth={canConfigure ? openAuthentication : undefined}
           />
-        </TabsContent>
-      </Tabs>
-
-      {fork.value !== null && canFork && (
-        <ForkPackageModal
-          open
-          onClose={fork.close}
-          onLeave={fork.leave}
-          packageId={packageId}
-          defaultName={name ?? ""}
-          type="integration"
-        />
-      )}
-
-      <ConfirmModal
-        open={confirmDeactivate}
-        onClose={() => setConfirmDeactivate(false)}
-        title={t("integrations.deactivate.title")}
-        confirmLabel={t("packages.deactivate")}
-        description={t("integrations.deactivate.confirm")}
-        variant="default"
-        isPending={setActive.isPending}
-        onConfirm={() => setActivation(false, () => setConfirmDeactivate(false))}
-      />
-
-      <ConfirmModal
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        title={t("integrations.delete.title")}
-        confirmLabel={t("btn.delete", { ns: "common" })}
-        description={t("packages.deleteConfirm", {
-          type: t("packages.type.integration"),
-          name: m.display_name ?? packageId,
-        })}
-        isPending={deletePkg.isPending}
-        onConfirm={() =>
-          deletePkg.mutate(packageId, {
-            onSuccess: () => setConfirmDelete(false),
-          })
-        }
-      />
+        </DetailTabPanel>
+      </DetailTabs>
     </div>
   );
 }

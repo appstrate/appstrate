@@ -10,8 +10,8 @@ import {
 } from "../../components/onboarding-layout";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useBilling, useCheckout, type CheckoutPlanId } from "../../hooks/use-billing";
-import { Spinner } from "../../components/spinner";
 import { PlanGrid } from "../../components/plan-card";
+import { TextSkeleton } from "../../components/loading-skeletons";
 
 export function OnboardingPlanStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -44,7 +44,16 @@ export function OnboardingPlanStep() {
     );
   };
 
-  if (!orgId) return null;
+  if (!orgId)
+    return (
+      <OnboardingLayout
+        step="plan"
+        title={t("onboarding.planTitle")}
+        subtitle={t("onboarding.planSubtitle")}
+      >
+        <TextSkeleton lines={5} className="py-4" />
+      </OnboardingLayout>
+    );
 
   return (
     <OnboardingLayout
@@ -54,9 +63,7 @@ export function OnboardingPlanStep() {
       onNext={goNext}
     >
       {isLoading ? (
-        <div className="flex justify-center py-8">
-          <Spinner />
-        </div>
+        <TextSkeleton lines={5} className="py-4" />
       ) : (
         <PlanGrid
           plans={billing?.plans ?? []}

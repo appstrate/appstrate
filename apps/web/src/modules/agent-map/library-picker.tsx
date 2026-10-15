@@ -23,7 +23,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { ShieldCheck } from "lucide-react";
 import type { OrgPackageItem } from "@appstrate/shared-types";
 import { usePackageList } from "../../hooks/use-packages";
-import { Spinner } from "../../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 
 export interface LibraryCandidate {
   id: string;

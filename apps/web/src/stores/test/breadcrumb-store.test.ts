@@ -70,11 +70,11 @@ describe("breadcrumb layers", () => {
     expect(labels(false)).toEqual(["#13"]);
   });
 
-  it("republishes a changed node under the same label", () => {
-    publish("page", "chat", [{ label: "Thread", node: "Thread (renaming)" }]);
-    publish("page", "chat", [{ label: "Thread", node: "Thread" }]);
+  it("republishes an entry that becomes a slot under the same label", () => {
+    publish("page", "chat", [{ label: "Thread" }]);
+    publish("page", "chat", [{ label: "Thread", slot: true }]);
 
-    expect(breadcrumbStore.getState().page.entries[0]!.node).toBe("Thread");
+    expect(breadcrumbStore.getState().page.entries[0]!.slot).toBe(true);
   });
 
   it("leaves the store untouched when nothing changed", () => {

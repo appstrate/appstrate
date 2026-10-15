@@ -20,14 +20,13 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { DataColumn } from "./data-table";
 import { Badge } from "./status-badge";
 import { RunAgentButton } from "./run-agent-button";
-import { AgentIdentityTile } from "./agent-identity";
-import { IntegrationIcon } from "./integration-icon";
+import { PackageIcon } from "./package-icon";
 import { useCatalogueOriginColumn } from "./catalogue-columns";
 import { CountBadge } from "./count-badge";
 import { rowActionsColumn } from "./row-actions-column";
 import { CellEmpty, CellText } from "./table-cells";
 import { useOrg } from "../hooks/use-org";
-import type { CardItem } from "../pages/package-list";
+import type { CardItem } from "../lib/package-card-item";
 
 /**
  * The column set, as a value the caller holds — see `useRunColumns` on why.
@@ -50,15 +49,17 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
       cell: (item) => (
         <div className="flex min-w-0 items-center gap-3">
           {item.identity && (
-            <AgentIdentityTile
-              agentId={item.id}
+            <PackageIcon
+              type="agent"
               icon={item.identity.icon}
               color={item.identity.color}
               className="size-8 rounded-md"
               iconClassName="size-4"
             />
           )}
-          {item.type === "integration" && <IntegrationIcon src={item.logo} size="sm" />}
+          {item.type === "integration" && (
+            <PackageIcon type="integration" icon={item.logo} size="sm" />
+          )}
           <div className="flex min-w-0 flex-col">
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate font-medium">{item.displayName}</span>

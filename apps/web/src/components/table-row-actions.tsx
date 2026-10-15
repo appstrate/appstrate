@@ -1,42 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Children, useRef, type ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { MoreHorizontal } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
-import { orderRowActions, type RowAction } from "../lib/row-action-order";
-import { Spinner } from "./spinner";
-
-export type { RowAction };
-
-function RowActionItem({ action }: { action: RowAction }) {
-  const Icon = action.icon;
-  const body = (
-    <>
-      <Icon />
-      {action.label}
-    </>
-  );
-  return (
-    <DropdownMenuItem
-      variant={action.destructive ? "destructive" : "default"}
-      disabled={action.disabled}
-      onSelect={action.onSelect}
-      asChild={action.href !== undefined}
-      {...(action.testId ? { "data-testid": action.testId } : {})}
-    >
-      {action.href !== undefined ? <Link to={action.href}>{body}</Link> : body}
-    </DropdownMenuItem>
-  );
-}
+import { Spinner } from "@appstrate/ui/components/spinner";
+import { MenuActionItem } from "./menu-action";
+import { splitMenuActions, type MenuAction } from "../lib/menu-action";
 
 /**
  * The shared end of an actionable table row, and its ONLY way to act: one « … »
@@ -59,20 +35,21 @@ export function TableRowActions({
   children,
 }: {
   menuLabel?: string;
-  actions?: RowAction[];
+  actions?: MenuAction[];
   isPending?: boolean;
   /**
    * True while the row's name is in inline edit, started from this menu's
    * « Rename ». The menu holds focus until it has finished closing, so a field
    * that focuses itself at once loses it again: when the menu is gone, focus goes
-   * to the row's text field (selected) instead of back to the « … ».
+   * to the row's text field (selected) instead of back to the « … ». The row is
+   * the menu's `<tr>`, or the element marked `data-row` in a list of cards.
    */
   renaming?: boolean;
   children?: ReactNode;
 }) {
   const { t } = useTranslation("common");
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const { plain, destructive } = orderRowActions(actions ?? []);
+  const { plain, destructive } = splitMenuActions(actions ?? []);
   const hasChildren = Children.toArray(children).length > 0;
   const hasItems = plain.length > 0 || destructive.length > 0 || hasChildren;
   return (
@@ -99,20 +76,20 @@ export function TableRowActions({
             onCloseAutoFocus={(event) => {
               if (!renaming) return;
               event.preventDefault();
-              const field = triggerRef.current?.closest("tr")?.querySelector("input");
+              const field = triggerRef.current?.closest("tr, [data-row]")?.querySelector("input");
               field?.focus();
               field?.select();
             }}
           >
             {plain.map((action) => (
-              <RowActionItem key={action.id} action={action} />
+              <MenuActionItem key={action.id} action={action} />
             ))}
             {children}
             {(plain.length > 0 || hasChildren) && destructive.length > 0 && (
               <DropdownMenuSeparator />
             )}
             {destructive.map((action) => (
-              <RowActionItem key={action.id} action={action} />
+              <MenuActionItem key={action.id} action={action} />
             ))}
           </DropdownMenuContent>
         </DropdownMenu>

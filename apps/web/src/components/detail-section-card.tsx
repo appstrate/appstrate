@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useId, type ReactNode } from "react";
-import { Link } from "react-router-dom";
-import { ArrowRight, type LucideIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
-import type { ActionTarget } from "./action-target";
+import { TargetArrow, TargetLink, type ActionTarget } from "./action-target";
 
 const HEADER_CLASS = "bg-muted/35 flex min-h-5 w-full items-center gap-2 px-4 py-3";
 const TARGET_CLASS =
@@ -38,9 +37,7 @@ export function DetailSectionCard({
       <h2 id={titleId} className="min-w-0 flex-1 truncate text-sm font-semibold">
         {title}
       </h2>
-      {headerAction && (
-        <ArrowRight className="text-muted-foreground group-hover:text-primary group-focus-visible:text-primary size-4 shrink-0 transition-all group-hover:translate-x-0.5 group-focus-visible:translate-x-0.5" />
-      )}
+      {headerAction && <TargetArrow className="text-muted-foreground size-4" />}
     </>
   );
 
@@ -52,25 +49,14 @@ export function DetailSectionCard({
         className,
       )}
     >
-      {headerAction?.to !== undefined ? (
-        <Link
-          to={headerAction.to}
-          aria-label={headerAction.label}
-          title={headerAction.label}
+      {headerAction ? (
+        <TargetLink
+          target={headerAction}
+          label={headerAction.label}
           className={cn(HEADER_CLASS, TARGET_CLASS)}
         >
           {heading}
-        </Link>
-      ) : headerAction ? (
-        <button
-          type="button"
-          aria-label={headerAction.label}
-          title={headerAction.label}
-          onClick={headerAction.onClick}
-          className={cn(HEADER_CLASS, TARGET_CLASS)}
-        >
-          {heading}
-        </button>
+        </TargetLink>
       ) : (
         <div className={HEADER_CLASS}>{heading}</div>
       )}

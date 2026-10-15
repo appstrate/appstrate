@@ -3,33 +3,28 @@
 /**
  * Dual-mode OAuth client modal (create + edit).
  *
- * - Create: form → SecretRevealModal (plaintext secret shown once)
+ * - Create: form → `onCreated` hands the plaintext secret to the host, which shows it once
  * - Edit: form → toast success → close
  *
- * Follows the ProxyFormModal pattern: outer shell with key-based remount,
- * inner body holding all form state.
+ * Mounted by the host while open, one per client (`key`).
  */
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Plus, X } from "lucide-react";
-import { Modal } from "@/components/modal";
-import { Button } from "@appstrate/ui/components/button";
+import { FormModal } from "@/components/form-modal";
+import { RowsEditor } from "@/components/rows-editor";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { CheckboxField } from "@appstrate/ui/components/checkbox";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@appstrate/ui/components/field";
 import { OptionSelect } from "@appstrate/ui/components/select";
-import { Spinner } from "@/components/spinner";
-import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { useAppForm } from "@/hooks/use-app-form";
 import { SpaceAssignmentsField } from "@/components/space-assignments-field";
-import { useSpaces } from "@/hooks/use-spaces";
-import { spaceRoleValue, useSpaceRoleOptions, type SpaceRoleOption } from "@/hooks/use-roles";
+import { useAssignmentCatalog } from "@/hooks/use-assignment-catalog";
+import { spaceRoleValue, type SpaceRoleOption } from "@/hooks/use-roles";
 import {
   hasUnavailableAssignments,
-  assignableSpaces,
   assignmentsFor,
   toSpaceAssignments,
   type AssignmentDraft,
@@ -49,60 +44,19 @@ import { errorMessage } from "../../../lib/mutation-error";
 const REQUIRED_SCOPES = new Set(["openid", "profile", "email"]);
 
 interface Props {
-  open: boolean;
   onClose: () => void;
   client: OAuthClient | null;
   level?: "org" | "space";
+  onCreated: (secret: CreatedSecret) => void;
 }
 
 interface FormData {
   name: string;
 }
 
-type CreatedSecret = { clientId: string; clientSecret: string };
+export type CreatedSecret = { clientId: string; clientSecret: string };
 
-export function OAuthClientFormModal({ open, onClose, client, level }: Props) {
-  const { t } = useTranslation(["settings", "common"]);
-  // The secret is shown once and has no address: the creation's one (`?newOAuthClient`)
-  // goes away as it appears, so the secret lives here, not in the form.
-  const [createdSecret, setCreatedSecret] = useState<CreatedSecret | null>(null);
-  if (createdSecret) {
-    return (
-      <SecretRevealModal
-        open
-        onClose={() => setCreatedSecret(null)}
-        title={t("settings:oauthClients.createdTitle")}
-        secret={`Client ID: ${createdSecret.clientId}\nClient Secret: ${createdSecret.clientSecret}`}
-      />
-    );
-  }
-  if (!open) return null;
-  const key = client?.clientId ?? "__create__";
-  return (
-    <OAuthClientFormBody
-      key={key}
-      client={client}
-      level={level}
-      onClose={onClose}
-      onCreated={(secret) => {
-        setCreatedSecret(secret);
-        onClose();
-      }}
-    />
-  );
-}
-
-function OAuthClientFormBody({
-  client,
-  level,
-  onClose,
-  onCreated,
-}: {
-  client: OAuthClient | null;
-  level?: "org" | "space";
-  onClose: () => void;
-  onCreated: (secret: CreatedSecret) => void;
-}) {
+export function OAuthClientFormModal({ client, level, onClose, onCreated }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const isEditing = !!client;
@@ -111,11 +65,7 @@ function OAuthClientFormBody({
   const formLevel = effectiveLevel ?? level;
   const isOrgLevel = formLevel === "org";
   // Either catalog feeds the org signup policy only.
-  const spacesQuery = useSpaces(isOrgLevel);
-  const rolesQuery = useSpaceRoleOptions(undefined, isOrgLevel);
-  const spaces = assignableSpaces(spacesQuery.data ?? []);
-  const catalogLoading = spacesQuery.isLoading || rolesQuery.isLoading;
-  const catalogError = spacesQuery.error || rolesQuery.error;
+  const catalog = useAssignmentCatalog(isOrgLevel);
   const isSpaceLevel = formLevel === "space";
   const createMutation = useCreateOAuthClient(effectiveLevel ?? level);
   const updateMutation = useUpdateOAuthClient({ errorHandledByCaller: true });
@@ -154,12 +104,6 @@ function OAuthClientFormBody({
   } = useAppForm<FormData>({
     defaultValues: { name: client?.name ?? "" },
   });
-
-  function handleClose() {
-    createMutation.reset();
-    updateMutation.reset();
-    onClose();
-  }
 
   function toggleScope(scope: string) {
     if (REQUIRED_SCOPES.has(scope)) return;
@@ -218,13 +162,13 @@ function OAuthClientFormBody({
     const signupSpaceAssignments = assignmentsFor(signupRole, toSpaceAssignments(assignments));
     if (isOrgLevel && signupRole !== "admin" && assignments.length) {
       if (
-        catalogLoading ||
-        catalogError ||
-        hasUnavailableAssignments(assignments, spaces, rolesQuery.options)
+        catalog.loading ||
+        catalog.error ||
+        hasUnavailableAssignments(assignments, catalog.spaces, catalog.roleOptions)
       ) {
         setError("root", {
           message: t(
-            catalogLoading || catalogError
+            catalog.loading || catalog.error
               ? "settings:orgSettings.assignmentsNotReady"
               : "settings:orgSettings.assignmentsUnavailable",
           ),
@@ -261,7 +205,7 @@ function OAuthClientFormBody({
         {
           onSuccess: () => {
             toast.success(t("settings:oauthClients.updated"));
-            handleClose();
+            onClose();
           },
           onError: (err) => {
             setError("root", { message: errorMessage(err) });
@@ -291,145 +235,146 @@ function OAuthClientFormBody({
     }
   }
 
-  const title = isEditing
-    ? t("settings:oauthClients.editTitle")
-    : t("settings:oauthClients.createTitle");
-
   return (
-    <Modal
-      open
-      onClose={handleClose}
-      title={title}
-      className="flex max-h-[85dvh] flex-col overflow-hidden"
-      actions={
-        <>
-          <Button variant="outline" type="button" onClick={handleClose}>
-            {t("common:btn.cancel")}
-          </Button>
-          <Button type="submit" form="oauth-client-form" disabled={isPending}>
-            {isPending ? <Spinner /> : t("common:btn.save")}
-          </Button>
-        </>
+    <FormModal
+      onClose={onClose}
+      title={
+        isEditing ? t("settings:oauthClients.editTitle") : t("settings:oauthClients.createTitle")
       }
+      className="flex max-h-[85dvh] flex-col overflow-hidden"
+      onSubmit={handleSubmit(onSubmit)}
+      isPending={isPending}
+      error={errors.root?.message}
+      formProps={{ className: "flex min-h-0 flex-col gap-4 overflow-y-auto pr-1" }}
     >
-      <form
-        id="oauth-client-form"
-        onSubmit={handleSubmit(onSubmit)}
-        className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1"
+      <FormItem
+        id="oauth-client-name"
+        label={t("settings:oauthClients.nameLabel")}
+        hint={isEditing ? t("settings:oauthClients.nameReadonlyHint") : undefined}
+        error={showError("name") ? t("common:validation.required") : undefined}
       >
-        <FormItem
-          id="oauth-client-name"
-          label={t("settings:oauthClients.nameLabel")}
-          hint={isEditing ? t("settings:oauthClients.nameReadonlyHint") : undefined}
-          error={showError("name") ? t("common:validation.required") : undefined}
-        >
-          <Input
-            type="text"
-            {...register("name", { required: !isEditing, maxLength: 200 })}
-            placeholder={t("settings:oauthClients.namePlaceholder")}
-            disabled={isEditing}
-            autoFocus={!isEditing}
+        <Input
+          type="text"
+          {...register("name", { required: !isEditing, maxLength: 200 })}
+          placeholder={t("settings:oauthClients.namePlaceholder")}
+          disabled={isEditing}
+          autoFocus={!isEditing}
+        />
+      </FormItem>
+
+      <RowsEditor
+        label={t("settings:oauthClients.redirectUris")}
+        hint={t("settings:oauthClients.redirectUrisHint")}
+        rows={redirectUris}
+        onChange={setRedirectUris}
+        newRow=""
+        minRows={1}
+        addLabel={t("settings:oauthClients.addRedirectUri")}
+        renderRow={(uri, update) => (
+          <UriInput
+            value={uri}
+            onChange={update}
+            placeholder="https://example.com/oauth/callback"
           />
-        </FormItem>
+        )}
+      />
 
-        <UriListField
-          label={t("settings:oauthClients.redirectUris")}
-          hint={t("settings:oauthClients.redirectUrisHint")}
-          uris={redirectUris}
-          onChange={setRedirectUris}
-          placeholder="https://example.com/oauth/callback"
-          addLabel={t("settings:oauthClients.addRedirectUri")}
-        />
+      <RowsEditor
+        label={t("settings:oauthClients.postLogoutRedirectUris")}
+        hint={t("settings:oauthClients.postLogoutRedirectUrisHint")}
+        rows={postLogoutRedirectUris}
+        onChange={setPostLogoutRedirectUris}
+        newRow=""
+        minRows={1}
+        addLabel={t("settings:oauthClients.addRedirectUri")}
+        renderRow={(uri, update, index) => (
+          <UriInput
+            value={uri}
+            onChange={update}
+            placeholder="https://example.com/"
+            // An empty first field offers the origin of the redirect URI, on a new client.
+            onFocus={
+              index === 0 && !isEditing && uri.trim().length === 0
+                ? suggestPostLogoutFromRedirects
+                : undefined
+            }
+          />
+        )}
+      />
 
-        <UriListField
-          label={t("settings:oauthClients.postLogoutRedirectUris")}
-          hint={t("settings:oauthClients.postLogoutRedirectUrisHint")}
-          uris={postLogoutRedirectUris}
-          onChange={setPostLogoutRedirectUris}
-          placeholder="https://example.com/"
-          addLabel={t("settings:oauthClients.addRedirectUri")}
-          onFirstInputFocus={isEditing ? undefined : suggestPostLogoutFromRedirects}
-        />
-
-        <div className="space-y-2">
-          <Label>{t("settings:oauthClients.scopesLabel")}</Label>
-          <p className="text-muted-foreground text-xs">{t("settings:oauthClients.scopesHint")}</p>
-          <div className="flex flex-col gap-1.5">
-            {(availableScopes ?? Array.from(REQUIRED_SCOPES)).map((scope) => {
-              const required = REQUIRED_SCOPES.has(scope);
-              return (
-                <CheckboxField
-                  key={scope}
-                  id={`oauth-scope-${scope}`}
-                  checked={selectedScopes.has(scope)}
-                  disabled={required}
-                  onCheckedChange={() => toggleScope(scope)}
-                  label={
-                    <span className="flex items-center gap-2">
-                      <span>
-                        {t(`oauthClients.scopeLabels.${scope}`, {
-                          ns: "settings",
-                          keySeparator: false,
-                          nsSeparator: false,
-                          defaultValue: scope,
-                        })}
-                      </span>
-                      {required && (
-                        <span className="text-muted-foreground text-xs">
-                          ({t("settings:oauthClients.scopeRequired")})
-                        </span>
-                      )}
+      <div className="space-y-2">
+        <Label>{t("settings:oauthClients.scopesLabel")}</Label>
+        <p className="text-muted-foreground text-xs">{t("settings:oauthClients.scopesHint")}</p>
+        <div className="flex flex-col gap-1.5">
+          {(availableScopes ?? Array.from(REQUIRED_SCOPES)).map((scope) => {
+            const required = REQUIRED_SCOPES.has(scope);
+            return (
+              <CheckboxField
+                key={scope}
+                id={`oauth-scope-${scope}`}
+                checked={selectedScopes.has(scope)}
+                disabled={required}
+                onCheckedChange={() => toggleScope(scope)}
+                label={
+                  <span className="flex items-center gap-2">
+                    <span>
+                      {t(`oauthClients.scopeLabels.${scope}`, {
+                        ns: "settings",
+                        keySeparator: false,
+                        nsSeparator: false,
+                        defaultValue: scope,
+                      })}
                     </span>
-                  }
-                  description={<span className="font-mono">{scope}</span>}
-                />
-              );
-            })}
-          </div>
+                    {required && (
+                      <span className="text-muted-foreground text-xs">
+                        ({t("settings:oauthClients.scopeRequired")})
+                      </span>
+                    )}
+                  </span>
+                }
+                description={<span className="font-mono">{scope}</span>}
+              />
+            );
+          })}
         </div>
+      </div>
 
-        {can("oauth-clients:write") && (
-          <div className="space-y-2">
-            <CheckboxField
-              id="oauth-client-first-party"
-              checked={isFirstParty}
-              onCheckedChange={(checked) => setIsFirstParty(checked === true)}
-              label={t("settings:oauthClients.isFirstPartyLabel")}
-              description={t("settings:oauthClients.isFirstPartyHint")}
-            />
-          </div>
-        )}
-
-        {(isOrgLevel || isSpaceLevel) && (
-          <SignupPolicyFields
-            isOrgLevel={isOrgLevel}
-            allowSignup={allowSignup}
-            onAllowSignupChange={() => setAllowSignup((v) => !v)}
-            signupRole={signupRole}
-            onSignupRoleChange={(role) => {
-              setSignupRole(role);
-              clearErrors("root");
-            }}
-            assignments={assignments}
-            onAssignmentsChange={(value) => {
-              setAssignments(value);
-              clearErrors("root");
-            }}
-            isPending={isPending}
-            spaces={spaces}
-            roleOptions={rolesQuery.options}
-            catalogLoading={catalogLoading}
-            catalogError={catalogError}
-            onRetryCatalog={() => {
-              void spacesQuery.refetch();
-              void rolesQuery.refetch();
-            }}
+      {can("oauth-clients:write") && (
+        <div className="space-y-2">
+          <CheckboxField
+            id="oauth-client-first-party"
+            checked={isFirstParty}
+            onCheckedChange={(checked) => setIsFirstParty(checked === true)}
+            label={t("settings:oauthClients.isFirstPartyLabel")}
+            description={t("settings:oauthClients.isFirstPartyHint")}
           />
-        )}
+        </div>
+      )}
 
-        <FieldError>{errors.root?.message}</FieldError>
-      </form>
-    </Modal>
+      {(isOrgLevel || isSpaceLevel) && (
+        <SignupPolicyFields
+          isOrgLevel={isOrgLevel}
+          allowSignup={allowSignup}
+          onAllowSignupChange={() => setAllowSignup((v) => !v)}
+          signupRole={signupRole}
+          onSignupRoleChange={(role) => {
+            setSignupRole(role);
+            clearErrors("root");
+          }}
+          assignments={assignments}
+          onAssignmentsChange={(value) => {
+            setAssignments(value);
+            clearErrors("root");
+          }}
+          isPending={isPending}
+          spaces={catalog.spaces}
+          roleOptions={catalog.roleOptions}
+          catalogLoading={catalog.loading}
+          catalogError={catalog.error}
+          onRetryCatalog={catalog.retry}
+        />
+      )}
+    </FormModal>
   );
 }
 
@@ -524,67 +469,24 @@ export function SignupPolicyFields({
   );
 }
 
-/** Reusable URI list field with add/remove controls. */
-function UriListField({
-  label,
-  hint,
-  uris,
+function UriInput({
+  value,
   onChange,
   placeholder,
-  addLabel,
-  onFirstInputFocus,
+  onFocus,
 }: {
-  label: string;
-  hint: string;
-  uris: string[];
-  onChange: (uris: string[]) => void;
+  value: string;
+  onChange: (value: string) => void;
   placeholder: string;
-  addLabel: string;
-  /**
-   * Called when the first input receives focus while empty. Used to offer
-   * a suggested default (e.g. derive post-logout URI from redirect URI
-   * origin) without forcing a value on the user.
-   */
-  onFirstInputFocus?: () => void;
+  onFocus?: () => void;
 }) {
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      <p className="text-muted-foreground text-xs">{hint}</p>
-      <div className="flex flex-col gap-2">
-        {uris.map((uri, index) => (
-          <div key={index} className="flex gap-2">
-            <Input
-              type="url"
-              value={uri}
-              onChange={(e) => {
-                const next = [...uris];
-                next[index] = e.target.value;
-                onChange(next);
-              }}
-              onFocus={
-                index === 0 && uri.trim().length === 0 && onFirstInputFocus
-                  ? onFirstInputFocus
-                  : undefined
-              }
-              placeholder={placeholder}
-            />
-            {uris.length > 1 && (
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => onChange(uris.filter((_, i) => i !== index))}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        ))}
-        <Button type="button" variant="outline" size="sm" onClick={() => onChange([...uris, ""])}>
-          <Plus className="h-4 w-4" /> {addLabel}
-        </Button>
-      </div>
-    </div>
+    <Input
+      type="url"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={onFocus}
+      placeholder={placeholder}
+    />
   );
 }

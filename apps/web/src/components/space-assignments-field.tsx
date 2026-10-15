@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { Input } from "@appstrate/ui/components/input";
 import { Button } from "@appstrate/ui/components/button";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import {
   Select,
   SelectContent,
@@ -69,7 +70,6 @@ export function SpaceAssignmentsField({
             isLoading={loading}
             error={error}
             refetch={onRetry}
-            loadingMessage={t("orgSettings.assignmentsLoading")}
             emptyMessage={spaces.length === 0 ? t("orgSettings.assignmentsNoSpaces") : null}
           />
           {value.map((assignment, index) => {
@@ -80,20 +80,29 @@ export function SpaceAssignmentsField({
                 key={assignment.spaceId}
                 className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
               >
-                <span className="col-span-2 text-sm font-medium break-words sm:col-span-1">
-                  {spaceName}
-                </span>
-                <SpaceRoleSelect
-                  value={assignment.role}
-                  options={roleOptions}
-                  fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
-                  disabled={unavailable}
-                  className="w-full min-w-0"
-                  ariaLabel={t("orgSettings.inviteSpaceRoleAriaLabel", { space: spaceName })}
-                  onValueChange={(role) =>
-                    onChange(value.map((a, i) => (i === index ? { ...a, role } : a)))
-                  }
-                />
+                {loading ? (
+                  <>
+                    <Skeleton className="col-span-2 h-4 w-32 sm:col-span-1" />
+                    <Skeleton className="h-9 w-full min-w-0" />
+                  </>
+                ) : (
+                  <>
+                    <span className="col-span-2 text-sm font-medium break-words sm:col-span-1">
+                      {spaceName}
+                    </span>
+                    <SpaceRoleSelect
+                      value={assignment.role}
+                      options={roleOptions}
+                      fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
+                      disabled={unavailable}
+                      className="w-full min-w-0"
+                      ariaLabel={t("orgSettings.inviteSpaceRoleAriaLabel", { space: spaceName })}
+                      onValueChange={(role) =>
+                        onChange(value.map((a, i) => (i === index ? { ...a, role } : a)))
+                      }
+                    />
+                  </>
+                )}
                 <Button
                   type="button"
                   variant="ghost"

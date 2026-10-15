@@ -11,7 +11,7 @@
  * both without anyone remembering to.
  */
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { LibraryBig, Menu, PanelLeft, Settings } from "lucide-react";
@@ -27,7 +27,8 @@ import { useOverlayPath } from "@/lib/modal-route";
 import { useCanReach } from "@/hooks/use-can-reach";
 import { usePendingShares } from "@/hooks/use-pending-offers";
 import { catalogueHref } from "@/lib/catalogue-link";
-import { isSettingsPath, isUnder } from "@/lib/route-access";
+import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
+import { isSettingsPath, isUnder, SETTINGS_INDEX } from "@/lib/route-access";
 import { cn } from "@appstrate/ui/cn";
 import {
   Sidebar,
@@ -67,6 +68,9 @@ export function ShellHeaderActions({ children }: { children: ReactNode }) {
   return slot ? createPortal(children, slot) : null;
 }
 
+/** Where the sidebar's settings entry lands: the organization scope's index. */
+const SETTINGS_ENTRY = SETTINGS_INDEX.organization;
+
 export function ShellSidebar({
   children,
   contentClassName,
@@ -84,6 +88,17 @@ export function ShellSidebar({
   const overlayPath = useOverlayPath() ?? "";
   const settingsActive = isSettingsPath(overlayPath);
   const catalogueActive = isUnder(overlayPath, "/catalogue");
+  const catalogueReachable = canReach("/catalogue");
+  const catalogueTo = pendingShares.href ?? catalogueHref("agent");
+  // The two entries below are always on screen, so their overlays' code is
+  // fetched ahead of any click (`lib/overlay-chunks.ts`).
+  useEffect(
+    () =>
+      preloadOverlaysWhenIdle(
+        catalogueReachable ? [SETTINGS_ENTRY, "/catalogue"] : [SETTINGS_ENTRY],
+      ),
+    [catalogueReachable],
+  );
 
   return (
     <Sidebar>
@@ -115,7 +130,7 @@ export function ShellSidebar({
           inside the context switcher. It sits above the user boundary and
           represents the settings overlay as the active destination. */}
       <SidebarFooter className="gap-0 p-0">
-        <SidebarMenu className="px-2 pb-2" hidden={!canReach("/catalogue")}>
+        <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
           <SidebarMenuItem>
             <SidebarMenuButton asChild isActive={catalogueActive}>
               {/* Where you are is not a control: nothing to click. */}
@@ -128,7 +143,8 @@ export function ShellSidebar({
                 <Link
                   // With shares waiting, the entry opens ON them: the count is a
                   // promise, and the first click keeps it.
-                  to={pendingShares.href ?? catalogueHref("agent")}
+                  to={catalogueTo}
+                  {...overlayIntent(catalogueTo)}
                 >
                   <LibraryBig />
                   <span>{t("nav.catalogue")}</span>
@@ -159,7 +175,7 @@ export function ShellSidebar({
                   <span>{t("nav.settings")}</span>
                 </span>
               ) : (
-                <Link to="/org-settings">
+                <Link to={SETTINGS_ENTRY} {...overlayIntent(SETTINGS_ENTRY)}>
                   <Settings />
                   <span>{t("nav.settings")}</span>
                 </Link>

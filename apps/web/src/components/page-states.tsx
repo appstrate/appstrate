@@ -3,18 +3,10 @@
 import { useTranslation } from "react-i18next";
 import { Plus, SearchX, TriangleAlert, type LucideIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
 import { cn } from "@appstrate/ui/cn";
 import { errorDetail } from "../lib/mutation-error";
 import { ApiError } from "../api/errors";
-
-export function LoadingState() {
-  return (
-    <div className="text-muted-foreground flex flex-col items-center justify-center py-16">
-      <Spinner className="h-6 w-6" />
-    </div>
-  );
-}
+import type { MenuAction } from "../lib/menu-action";
 
 /**
  * The request failed — drawn the way the empty state is drawn.
@@ -148,7 +140,7 @@ export function EmptyState({
       {hint && (
         <p className="text-muted-foreground mt-1 max-w-sm text-sm leading-relaxed">{hint}</p>
       )}
-      {children && <div className="mt-4 flex items-center gap-2">{children}</div>}
+      {children && <div className="mt-4 flex items-center gap-2 empty:hidden">{children}</div>}
     </div>
   );
 }
@@ -181,15 +173,20 @@ export function NoMatchState({
 /**
  * The creation button of an empty collection, in the treatment every addition has
  * (a white outline button with a `+`). It does exactly what the page's Actions menu
- * entry does, so the caller hands it the same label and the same handler, and
- * renders it only under the same permission; a person who may not create gets no
- * button.
+ * entry does, so the page declares that `MenuAction` once and hands it to both; a
+ * `hidden` action (a person who may not create) renders nothing. A caller with no
+ * menu entry passes an inline `{ label, onSelect }`. A `to` or `href` action has no button here.
  */
-export function EmptyStateAction({ label, onClick }: { label: string; onClick: () => void }) {
+export function EmptyStateAction({
+  action,
+}: {
+  action: Pick<MenuAction, "label" | "onSelect" | "hidden">;
+}) {
+  if (action.hidden) return null;
   return (
-    <Button type="button" variant="outline" size="sm" onClick={onClick}>
+    <Button type="button" variant="outline" size="sm" onClick={action.onSelect}>
       <Plus />
-      {label}
+      {action.label}
     </Button>
   );
 }

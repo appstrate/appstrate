@@ -18,7 +18,7 @@ import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "../../components/modal";
-import { Spinner } from "../../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { AgentConnectionsSection } from "../../components/package-detail/agent-connections-section";
 import { AgentMemoryTab } from "../../components/package-detail/agent-tabs";
 import {
@@ -84,13 +84,14 @@ function ModelPanel({ packageId }: { packageId: string }) {
         <Plus className="mr-1.5 size-3.5" />
         {t("settings:models.add")}
       </Button>
-      <ModelFormModal
-        open={adding.value !== null}
-        onClose={adding.close}
-        model={null}
-        isPending={isPending}
-        onSubmit={onSubmit}
-      />
+      {adding.value !== null && (
+        <ModelFormModal
+          onClose={adding.close}
+          model={null}
+          isPending={isPending}
+          onSubmit={onSubmit}
+        />
+      )}
     </div>
   );
 }

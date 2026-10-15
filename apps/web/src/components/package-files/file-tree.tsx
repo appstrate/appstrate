@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ChevronDown,
@@ -58,12 +59,6 @@ interface FileTreeActions {
   isPinned: (path: string) => boolean;
   /** A write is in flight: every gesture is refused until the tree is current again. */
   isBusy: boolean;
-  labels: {
-    newFile: string;
-    upload: string;
-    rename: string;
-    delete: string;
-  };
 }
 
 interface FileTreeProps {
@@ -104,6 +99,7 @@ export function FileTree({
   showToolbar = true,
   className,
 }: FileTreeProps) {
+  const { t } = useTranslation("agents");
   const tree = useMemo(() => buildFileTree(entries, directories), [directories, entries]);
   // The user's CLOSED directories, not their open ones. Package archives are
   // small (tens of files), so the whole artifact is visible at a glance by
@@ -229,7 +225,7 @@ export function FileTree({
             disabled={actions.isBusy}
           >
             <FilePlus size={13} />
-            {actions.labels.newFile}
+            {t("files.newFile")}
           </Button>
           <Button
             variant="ghost"
@@ -239,7 +235,7 @@ export function FileTree({
             disabled={actions.isBusy}
           >
             <Upload size={13} />
-            {actions.labels.upload}
+            {t("files.upload")}
           </Button>
         </div>
       )}
@@ -315,13 +311,13 @@ export function FileTree({
                   <span className="flex shrink-0 items-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
                     <RowAction
                       icon={Pencil}
-                      label={actions.labels.rename}
+                      label={t("files.rename")}
                       disabled={actions.isBusy}
                       onClick={() => actions.onRename(node.entry.path)}
                     />
                     <RowAction
                       icon={Trash2}
-                      label={actions.labels.delete}
+                      label={t("files.delete")}
                       disabled={actions.isBusy}
                       onClick={() => actions.onDelete(node.entry.path)}
                     />

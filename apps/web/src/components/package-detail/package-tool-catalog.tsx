@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Wrench } from "lucide-react";
 import type {
@@ -16,7 +16,12 @@ import { Modal } from "../modal";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { CellEmpty } from "../table-cells";
 import { rowActionsColumn } from "../row-actions-column";
+import { useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
+
+const EXPOSURES = ["available", "hidden", "not_in_catalog"] as const;
+const RULE_FILTERS = ["with", "without"] as const;
+const ORIGINS = ["mcp_package", "manifest", "appstrate"] as const;
 
 export interface PackageTool {
   name: string;
@@ -54,13 +59,7 @@ export function PackageToolCatalog({
     onToggle: (name: string) => void;
   };
 }) {
-  const { t } = useTranslation("agents");
-  const { t: ti } = useTranslation("settings");
-  const [search, setSearch] = useState("");
-  const [auths, setAuths] = useState<string[]>([]);
-  const [exposures, setExposures] = useState<string[]>([]);
-  const [rules, setRules] = useState<string[]>([]);
-  const [origins, setOrigins] = useState<string[]>([]);
+  const { t } = useTranslation(["agents", "settings"]);
   const inspectParam = useModalParam("inspectTool");
   // Inspection is read-only and must never feed a bundle selection control.
   const inventory = !selection ? inspection : undefined;
@@ -90,10 +89,10 @@ export function PackageToolCatalog({
   const rulesLabel = (tool: PackageTool) =>
     [
       ...(tool.inspection?.hidden_reason
-        ? [ti(`integration.inventory.rules.${tool.inspection.hidden_reason}`)]
+        ? [t(`settings:integration.inventory.rules.${tool.inspection.hidden_reason}`)]
         : []),
-      ...(hasScopes(tool) ? [ti("integration.inventory.rules.required")] : []),
-    ].join(" · ") || ti("integration.inventory.rules.none");
+      ...(hasScopes(tool) ? [t("settings:integration.inventory.rules.required")] : []),
+    ].join(" · ") || t("settings:integration.inventory.rules.none");
   const authKeys = [
     ...new Set(
       catalog.flatMap((tool) =>
@@ -103,9 +102,14 @@ export function PackageToolCatalog({
       ),
     ),
   ];
+  const list = useLocalListParams();
+  const auths = list.values("auth", authKeys);
+  const exposures = list.values("exposure", EXPOSURES);
+  const rules = list.values("rules", RULE_FILTERS);
+  const origins = list.values("origin", ORIGINS);
   const rows = catalog.filter(
     (tool) =>
-      matchesSearch(search, [tool.name, tool.description]) &&
+      matchesSearch(list.search, [tool.name, tool.description]) &&
       (auths.length === 0 || auths.some((key) => (tool.permissions?.[key]?.length ?? 0) > 0)) &&
       (!inventory ||
         ((exposures.length === 0 || exposures.includes(tool.inspection!.exposure)) &&
@@ -163,7 +167,7 @@ export function PackageToolCatalog({
       : [
           {
             id: "exposure",
-            header: ti("integration.inventory.exposure"),
+            header: t("settings:integration.inventory.exposure"),
             width: "minmax(120px,1fr)" as const,
             cell: (tool: PackageTool) => (
               <Badge
@@ -175,23 +179,23 @@ export function PackageToolCatalog({
                       : "warning"
                 }
               >
-                {ti(`integration.inventory.exposure.${tool.inspection!.exposure}`)}
+                {t(`settings:integration.inventory.exposure.${tool.inspection!.exposure}`)}
               </Badge>
             ),
           },
           {
             id: "origin",
-            header: ti("integration.inventory.origin"),
+            header: t("settings:integration.inventory.origin"),
             width: "minmax(130px,1fr)" as const,
             cell: (tool: PackageTool) => (
               <span className="text-muted-foreground text-xs">
-                {ti(`integration.inventory.origin.${tool.inspection!.origin}`)}
+                {t(`settings:integration.inventory.origin.${tool.inspection!.origin}`)}
               </span>
             ),
           },
           {
             id: "rules",
-            header: ti("integration.inventory.rules"),
+            header: t("settings:integration.inventory.rules"),
             width: "minmax(110px,1fr)" as const,
             cell: (tool: PackageTool) => (
               <span className="text-muted-foreground text-xs">{rulesLabel(tool)}</span>
@@ -233,45 +237,49 @@ export function PackageToolCatalog({
           className="text-muted-foreground text-sm leading-relaxed"
           data-testid="tool-inventory-basis"
         >
-          {ti(`integration.inventory.basis.${inventory.basis}`)}
+          {t(`settings:integration.inventory.basis.${inventory.basis}`)}
         </p>
       )}
       <ListToolbar
         placement="panel"
         actions={actions}
-        search={{ value: search, onChange: setSearch, placeholder: t("packageTools.search") }}
+        search={{
+          value: list.search,
+          onChange: list.setSearch,
+          placeholder: t("packageTools.search"),
+        }}
         filters={[
           ...(inventory
             ? [
                 {
                   id: "exposure",
-                  label: ti("integration.inventory.exposure"),
+                  label: t("settings:integration.inventory.exposure"),
                   values: exposures,
-                  options: ["available", "hidden", "not_in_catalog"].map((value) => ({
+                  options: EXPOSURES.map((value) => ({
                     value,
-                    label: ti(`integration.inventory.exposure.${value}`),
+                    label: t(`settings:integration.inventory.exposure.${value}`),
                   })),
-                  onChange: setExposures,
+                  onChange: list.setValues("exposure"),
                 },
                 {
                   id: "rules",
-                  label: ti("integration.inventory.rules"),
+                  label: t("settings:integration.inventory.rules"),
                   values: rules,
-                  options: ["with", "without"].map((value) => ({
+                  options: RULE_FILTERS.map((value) => ({
                     value,
-                    label: ti(`integration.inventory.filter.${value}`),
+                    label: t(`settings:integration.inventory.filter.${value}`),
                   })),
-                  onChange: setRules,
+                  onChange: list.setValues("rules"),
                 },
                 {
                   id: "origin",
-                  label: ti("integration.inventory.origin"),
+                  label: t("settings:integration.inventory.origin"),
                   values: origins,
-                  options: ["mcp_package", "manifest", "appstrate"].map((value) => ({
+                  options: ORIGINS.map((value) => ({
                     value,
-                    label: ti(`integration.inventory.origin.${value}`),
+                    label: t(`settings:integration.inventory.origin.${value}`),
                   })),
-                  onChange: setOrigins,
+                  onChange: list.setValues("origin"),
                 },
               ]
             : []),
@@ -282,18 +290,12 @@ export function PackageToolCatalog({
                   label: t("packageTools.auth"),
                   values: auths,
                   options: authKeys.map((key) => ({ value: key, label: key })),
-                  onChange: setAuths,
+                  onChange: list.setValues("auth"),
                 },
               ]
             : []),
         ]}
-        onReset={() => {
-          setSearch("");
-          setAuths([]);
-          setExposures([]);
-          setRules([]);
-          setOrigins([]);
-        }}
+        onReset={list.reset}
       />
       <DataTable
         tableId="package-tools"
@@ -304,7 +306,7 @@ export function PackageToolCatalog({
         rowAction={
           inventory ? (tool) => inspectParam.open(`${inspectPrefix}${tool.name}`) : undefined
         }
-        rowLabel={(tool) => ti("integration.inventory.inspect", { name: tool.name })}
+        rowLabel={(tool) => t("settings:integration.inventory.inspect", { name: tool.name })}
         surface="integrated"
         columnMode="scroll"
         empty={
@@ -322,35 +324,35 @@ export function PackageToolCatalog({
             <dl className="space-y-4">
               <div>
                 <dt className="text-muted-foreground text-xs">
-                  {ti("integration.inventory.origin")}
+                  {t("settings:integration.inventory.origin")}
                 </dt>
                 <dd className="mt-1">
-                  {ti(`integration.inventory.origin.${selected.inspection.origin}`)}
+                  {t(`settings:integration.inventory.origin.${selected.inspection.origin}`)}
                 </dd>
                 <dd className="text-muted-foreground mt-1 text-xs">
-                  {ti(`integration.inventory.originDetail.${selected.inspection.origin}`)}
+                  {t(`settings:integration.inventory.originDetail.${selected.inspection.origin}`)}
                 </dd>
               </div>
               <div>
                 <dt className="text-muted-foreground text-xs">
-                  {ti("integration.inventory.exposure")}
+                  {t("settings:integration.inventory.exposure")}
                 </dt>
                 <dd className="mt-1">
-                  {ti(`integration.inventory.exposure.${selected.inspection.exposure}`)}
+                  {t(`settings:integration.inventory.exposure.${selected.inspection.exposure}`)}
                 </dd>
                 <dd className="text-muted-foreground mt-1">
-                  {ti(
+                  {t(
                     selected.inspection.hidden_reason
-                      ? `integration.inventory.reason.${selected.inspection.hidden_reason}`
+                      ? `settings:integration.inventory.reason.${selected.inspection.hidden_reason}`
                       : selected.inspection.exposure === "not_in_catalog"
-                        ? "integration.inventory.reason.not_in_catalog"
-                        : "integration.inventory.agentSelection",
+                        ? "settings:integration.inventory.reason.not_in_catalog"
+                        : "settings:integration.inventory.agentSelection",
                   )}
                 </dd>
               </div>
               <div>
                 <dt className="text-muted-foreground text-xs">
-                  {ti("integration.inventory.rules")}
+                  {t("settings:integration.inventory.rules")}
                 </dt>
                 <dd className="mt-1">
                   {hasScopes(selected) ? (

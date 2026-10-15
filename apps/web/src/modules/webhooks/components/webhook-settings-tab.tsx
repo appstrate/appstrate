@@ -5,11 +5,10 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@appstrate/ui/components/checkbox";
 import { ConfirmModal } from "@/components/confirm-modal";
-import { Spinner } from "@/components/spinner";
 import { WebhookFormFields } from "./webhook-form-fields";
-import { toggleEvent } from "../hooks/use-webhooks";
+import { toggleValue } from "@/lib/toggle-value";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { toast } from "sonner";
 import {
@@ -109,28 +108,24 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
 
       <WebhookFormFields
         selectedEvents={selectedEvents}
-        onToggleEvent={(e) => toggleEvent(e, setSelectedEvents)}
+        onToggleEvent={(e) => setSelectedEvents((prev) => toggleValue(prev, e))}
         payloadMode={payloadMode}
         onPayloadModeChange={setPayloadMode}
         idPrefix="edit-"
       />
 
       {/* Active toggle */}
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id="webhook-active"
-          checked={active}
-          onCheckedChange={(checked) => setActive(checked === true)}
-        />
-        <Label htmlFor="webhook-active" className="cursor-pointer">
-          {t("settings:webhooks.active")}
-        </Label>
-      </div>
+      <CheckboxField
+        id="webhook-active"
+        checked={active}
+        onCheckedChange={(checked) => setActive(checked === true)}
+        label={t("settings:webhooks.active")}
+      />
 
       {/* Save */}
       {canWrite && (
-        <Button onClick={handleSave} disabled={updateMutation.isPending}>
-          {updateMutation.isPending ? <Spinner /> : t("settings:webhooks.saveSettings")}
+        <Button onClick={handleSave} pending={updateMutation.isPending}>
+          {t("settings:webhooks.saveSettings")}
         </Button>
       )}
 
@@ -165,23 +160,18 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       {/* Rotated secret display */}
       {rotatedSecret && (
         <SecretRevealModal
-          open={!!rotatedSecret}
           onClose={() => setRotatedSecret(null)}
           title={t("settings:webhooks.newSecret")}
           secret={rotatedSecret}
+          warning={t("settings:webhooks.secretWarning")}
         />
       )}
 
       {/* Test — `POST /api/webhooks/:id/test` is guarded by `write`, not `read`. */}
       {canWrite && (
         <div className="border-border border-t pt-4">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleTest}
-            disabled={testMutation.isPending}
-          >
-            {testMutation.isPending ? <Spinner /> : t("settings:webhooks.sendTest")}
+          <Button variant="outline" size="sm" onClick={handleTest} pending={testMutation.isPending}>
+            {t("settings:webhooks.sendTest")}
           </Button>
         </div>
       )}
@@ -196,9 +186,9 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
             variant="destructive"
             size="sm"
             onClick={() => setDeleteConfirmOpen(true)}
-            disabled={deleteMutation.isPending}
+            pending={deleteMutation.isPending}
           >
-            {deleteMutation.isPending ? <Spinner /> : t("settings:webhooks.deleteBtn")}
+            {t("settings:webhooks.deleteBtn")}
           </Button>
         </div>
       )}

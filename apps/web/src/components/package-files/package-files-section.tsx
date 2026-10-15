@@ -11,38 +11,15 @@
  * here opens its file there.
  */
 import { useTranslation } from "react-i18next";
-import { FolderOpen } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
-import { formatBytes } from "../../lib/format-bytes";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@appstrate/ui/components/table";
-import { $api } from "../../api/client";
 import { useModalParam } from "../../hooks/use-modal-param";
-import { useOrgScope } from "../../hooks/use-org-scope";
 import { bundleFileRole, type BundleFileRole } from "../../lib/bundle-file-role";
-import { splitPackageRef } from "../../lib/package-paths";
+import { DataTable } from "../data-table";
 import { JsonEditor } from "../json-editor";
 import { Modal } from "../modal";
-import { LoadingState } from "../page-states";
 import { SettingsHeading } from "../settings/settings-heading";
-import { TableRowActions } from "../table-row-actions";
-
-const ROLE_LABEL: Record<BundleFileRole, string> = {
-  manifest: "editor.fileRole.manifest",
-  main: "editor.fileRole.main",
-  documentation: "editor.fileRole.documentation",
-  "entry-point": "editor.fileRole.entryPoint",
-  reference: "editor.fileRole.reference",
-  script: "editor.fileRole.script",
-  asset: "editor.fileRole.asset",
-  other: "editor.fileRole.other",
-};
+import { usePackageFileColumns } from "./package-files-columns";
+import { usePackageFileIndex } from "./use-package-file-index";
 
 /** The manifest first, then the main file, then the rest by path. */
 const ROLE_ORDER: BundleFileRole[] = ["manifest", "main", "documentation", "entry-point"];
@@ -61,13 +38,8 @@ export function PackageFilesSection({
   filesHref: (path: string) => string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const scope = useOrgScope();
-  const { data } = $api.useQuery(
-    "get",
-    "/api/packages/{scope}/{name}/files",
-    { params: { path: splitPackageRef(packageId), header: scope.header } },
-    { enabled: scope.enabled },
-  );
+  const { data, error } = usePackageFileIndex(packageId);
+  const columns = usePackageFileColumns(type, manifest);
   const rank = (path: string) => {
     const index = ROLE_ORDER.indexOf(bundleFileRole(type, path, manifest));
     return index === -1 ? ROLE_ORDER.length : index;
@@ -82,48 +54,17 @@ export function PackageFilesSection({
         title={t("editor.tabPackageFiles")}
         description={t("editor.description.packageFiles")}
       />
-      {!data ? (
-        <LoadingState />
-      ) : (
-        <div className="overflow-hidden rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("editor.bundleFileColumn")}</TableHead>
-                <TableHead className="w-44">{t("editor.bundleTypeColumn")}</TableHead>
-                <TableHead className="w-24 text-right">{t("editor.bundleSizeColumn")}</TableHead>
-                <TableHead className="w-12" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {entries.map((entry) => (
-                <TableRow key={entry.path}>
-                  <TableCell className="text-sm">{entry.path}</TableCell>
-                  <TableCell className="text-muted-foreground text-xs">
-                    {t(ROLE_LABEL[bundleFileRole(type, entry.path, manifest)])}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
-                    {formatBytes(entry.size)}
-                  </TableCell>
-                  <TableCell>
-                    <TableRowActions
-                      menuLabel={t("editor.rowActions", { name: entry.path })}
-                      actions={[
-                        {
-                          id: "view-in-explorer",
-                          label: t("editor.viewInExplorer"),
-                          icon: FolderOpen,
-                          href: filesHref(entry.path),
-                        },
-                      ]}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+      <DataTable
+        tableId="package-files"
+        label={t("editor.tabPackageFiles")}
+        columns={columns}
+        rows={entries}
+        rowKey={(entry) => entry.path}
+        rowHref={(entry) => filesHref(entry.path)}
+        rowLabel={(entry) => entry.path}
+        isLoading={!data && !error}
+        failure={error}
+      />
       <p className="text-muted-foreground text-xs">{t("editor.bundleFilesHint")}</p>
     </div>
   );

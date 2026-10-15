@@ -20,6 +20,7 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { usePermissions } from "../../hooks/use-permissions";
 import { errorMessage, toastError } from "../../lib/mutation-error";
 import { agentScopes, type ScopeTarget } from "./connect-scope-choice";
+import { TextSkeleton } from "../loading-skeletons";
 
 type PickState = "idle" | "picking" | "nothing";
 
@@ -92,7 +93,7 @@ export function AgentQuickFillMenu({
         {t("integration.auth.scopeChoice.forAgent")}
       </p>
       {list.isLoading ? (
-        <p className="text-muted-foreground text-xs">{t("common:loading")}</p>
+        <TextSkeleton lines={1} />
       ) : list.error ? (
         <p className="text-destructive text-xs" data-testid={`${id}-error`}>
           {errorMessage(list.error)}

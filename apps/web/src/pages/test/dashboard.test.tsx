@@ -168,6 +168,13 @@ describe("the dashboard", () => {
     expect(listed).toEqual(["1", "2", "3", "4", "5"]);
   });
 
+  it("names an unnamed schedule as such, never by its id", () => {
+    const schedules = [makeSchedule(1, { name: null })];
+    const html = asOrgMember(READER, <DashboardContent {...content({ schedules })} />);
+    expect(html).toContain("Sans nom");
+    expect(html).not.toContain("sch_1<");
+  });
+
   it("says no run is coming when no active schedule has a next run", () => {
     const schedules = [makeSchedule(1, { next_run_at: null })];
     const html = asOrgMember(

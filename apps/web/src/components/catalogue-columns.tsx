@@ -24,7 +24,7 @@ import { CatalogueRowMenu } from "./catalogue-row";
 import { rowActionsColumn } from "./row-actions-column";
 import { CellEmpty, CellText } from "./table-cells";
 import { MetaBadge } from "./status-badge";
-import type { CardItem } from "../pages/package-list";
+import type { CardItem } from "../lib/package-card-item";
 import type { IntegrationProtocol } from "../lib/integration-collection";
 
 /** What the catalogue knows about one row beyond the package itself. */

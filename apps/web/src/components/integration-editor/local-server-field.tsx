@@ -18,6 +18,7 @@ import { matchVersion } from "@appstrate/core/semver";
 import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import {
   Select,
   SelectContent,
@@ -63,46 +64,44 @@ export function LocalServerField({
           {t("integrationEditor.source.server")}
           {" *"}
         </Label>
-        <Select
-          value={known ? name : ""}
-          onValueChange={(next) => {
-            if (next === IMPORT_ITEM) importParam.open();
-            else onChange({ serverName: next });
-          }}
-        >
-          <SelectTrigger id="int-source-server" aria-describedby="hint-int-source-server">
-            <SelectValue
-              placeholder={
-                isLoading
-                  ? t("loading", { ns: "common" })
-                  : t("integrationEditor.source.serverPick")
-              }
-            />
-          </SelectTrigger>
-          <SelectContent>
-            {servers.map((server) => (
-              <SelectItem key={server.id} value={server.id}>
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="truncate">{server.name || server.id}</span>
-                  <span className="text-muted-foreground truncate font-mono text-xs">
-                    {server.id}
-                  </span>
-                  {server.source === "system" && (
-                    <span className="text-muted-foreground text-xs">
-                      {t("catalogue.sourceSystem", { ns: "settings" })}
+        {isLoading ? (
+          <Skeleton className="h-9 w-full" />
+        ) : (
+          <Select
+            value={known ? name : ""}
+            onValueChange={(next) => {
+              if (next === IMPORT_ITEM) importParam.open();
+              else onChange({ serverName: next });
+            }}
+          >
+            <SelectTrigger id="int-source-server" aria-describedby="hint-int-source-server">
+              <SelectValue placeholder={t("integrationEditor.source.serverPick")} />
+            </SelectTrigger>
+            <SelectContent>
+              {servers.map((server) => (
+                <SelectItem key={server.id} value={server.id}>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate">{server.name || server.id}</span>
+                    <span className="text-muted-foreground truncate font-mono text-xs">
+                      {server.id}
                     </span>
-                  )}
+                    {server.source === "system" && (
+                      <span className="text-muted-foreground text-xs">
+                        {t("catalogue.sourceSystem", { ns: "settings" })}
+                      </span>
+                    )}
+                  </span>
+                </SelectItem>
+              ))}
+              <SelectItem value={IMPORT_ITEM}>
+                <span className="flex items-center gap-2">
+                  <Upload className="size-4" />
+                  {t("integrationEditor.source.serverImport")}
                 </span>
               </SelectItem>
-            ))}
-            <SelectItem value={IMPORT_ITEM}>
-              <span className="flex items-center gap-2">
-                <Upload className="size-4" />
-                {t("integrationEditor.source.serverImport")}
-              </span>
-            </SelectItem>
-          </SelectContent>
-        </Select>
+            </SelectContent>
+          </Select>
+        )}
         <p id="hint-int-source-server" className="text-muted-foreground text-sm">
           {t("integrationEditor.source.serverDesc")}
         </p>

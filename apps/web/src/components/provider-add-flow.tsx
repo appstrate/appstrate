@@ -34,7 +34,6 @@ export function ProviderAddFlow({
   }
   return (
     <CredentialFormModal
-      open
       onClose={onClose}
       credential={null}
       isPending={false}

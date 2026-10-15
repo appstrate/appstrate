@@ -23,9 +23,15 @@ export type AgentDefinitionSection = (typeof AGENT_DEFINITION_SECTIONS)[number];
  * `map` is the agent map, present only with the `agent-map` module.
  */
 export type AgentSettingsSection =
-  ConfigurationSection | AgentDefinitionSection | "bundle" | "files" | "versions" | "map";
+  ConfigurationSection | AgentDefinitionSection | PackageCommonSectionId | "map";
 
-export type PackageSettingsSection = "files" | "versions" | "general" | "bundle";
+/** The sections every package's Paramètres has (`PackageCommonSection`). */
+export type PackageCommonSectionId = "files" | "versions" | "bundle";
+
+export const isPackageCommonSection = (section: string): section is PackageCommonSectionId =>
+  section === "files" || section === "versions" || section === "bundle";
+
+export type PackageSettingsSection = PackageCommonSectionId | "general";
 
 export type IntegrationSettingsSection =
   | "map"
@@ -55,14 +61,6 @@ export function sectionHref(
 
 export function agentSettingsHref(pathname: string, section: AgentSettingsSection, extra?: Extra) {
   return sectionHref(pathname, "settings", "agentSettings", section, extra);
-}
-
-export function packageSettingsHref(
-  pathname: string,
-  section: PackageSettingsSection,
-  extra?: Extra,
-) {
-  return sectionHref(pathname, "settings", "packageSettings", section, extra);
 }
 
 /** An integration's Paramètres is its `configuration` tab. */

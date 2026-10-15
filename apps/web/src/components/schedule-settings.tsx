@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ArrowRight, Lock, Pause, Play, Trash2, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
@@ -21,9 +21,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "./page-actions-menu";
 import { toastScheduleConnectionChoice } from "../lib/mutation-error";
-import { AgentDetailSplit } from "./agent-detail/agent-detail-split";
 import { SettingsHeading } from "./settings/settings-heading";
-import { SectionRail } from "./settings/section-rail";
+import { SettingsRailView } from "./settings/settings-rail-view";
 import { SettingRow } from "./settings/setting-row";
 import { InlineTextSetting } from "./settings/inline-text-setting";
 import { RoleLimitNotice } from "./role-limit-notice";
@@ -31,13 +30,16 @@ import { ActorSelect } from "./actor-select";
 import { useActorName } from "../hooks/use-actor-name";
 import { PackageVersionSelect } from "./package-version-select";
 import { RunOverridesPanel } from "./run-overrides-panel";
-import { AgentIdentityTile } from "./agent-identity";
+import { PackageIcon } from "./package-icon";
 import { AgentIntegrationsBlock } from "./package-detail/agent-integrations-block";
 import { InputFieldRow } from "./settings/input-field-row";
 import { SaveFeedback } from "./settings/save-feedback";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
-import { EmptyState, ErrorState, LoadingState } from "./page-states";
+import { EmptyState, ErrorState } from "./page-states";
+import { SettingsSkeleton } from "./loading-skeletons";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { isQueryInFlight } from "../lib/query-state";
 import { FrequencyComposer } from "./frequency-composer";
 import { NoAccessState } from "./route-gate";
 import { useAuth } from "../hooks/use-auth";
@@ -74,7 +76,6 @@ import { VERSION_PUBLISHED } from "../lib/version-selector";
 import {
   SCHEDULE_SETTINGS_SECTIONS as SECTIONS,
   type ScheduleSettingsSection,
-  scheduleSettingsHref,
   sectionWriteState,
   scheduleVersionOptions,
   VERSION_INHERIT,
@@ -183,11 +184,7 @@ export function ScheduleActionsMenu({
       {can("schedules:delete") && (
         <>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={onDelete}
-            disabled={deletePending}
-            className="text-destructive focus:text-destructive"
-          >
+          <DropdownMenuItem onSelect={onDelete} disabled={deletePending} variant="destructive">
             <Trash2 size={14} />
             {t("schedule.delete")}
           </DropdownMenuItem>
@@ -323,13 +320,54 @@ function RefusedWriteForm({
 
 export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   const { t } = useTranslation(["agents", "common"]);
-  const location = useLocation();
   const { can } = usePermissions();
   const governs = useCanWriteSchedule(schedule);
   const mayWrite = can("schedules:write") && governs;
-  const requested = new URLSearchParams(location.search).get("scheduleSettings");
-  const active = SECTIONS.find((s) => s.id === requested) ?? SECTIONS[0];
+
+  return (
+    <SettingsRailView
+      param="scheduleSettings"
+      tab="settings"
+      label={t("schedule.tabSettings")}
+      groups={[
+        {
+          title: t("detail.settings.configurationGroup"),
+          items: SECTIONS.map((section) => ({
+            id: section.id,
+            icon: section.icon,
+            label: t(section.labelKey),
+            locked: !mayWrite,
+          })),
+        },
+      ]}
+      resolve={(requested) => SECTIONS.find((s) => s.id === requested)?.id ?? SECTIONS[0].id}
+    >
+      {({ active }) => (
+        <ScheduleSettingsPanel schedule={schedule} section={active} mayWrite={mayWrite} />
+      )}
+    </SettingsRailView>
+  );
+}
+
+function ScheduleSettingsPanel({
+  schedule,
+  section,
+  mayWrite,
+}: {
+  schedule: Schedule;
+  section: ScheduleSettingsSection;
+  mayWrite: boolean;
+}) {
+  const { t } = useTranslation(["agents", "common"]);
+  const { can } = usePermissions();
+  const active = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
   const write = useScheduleWrite(schedule);
+  // Read alongside the write's facts, not once the section mounts: the agent-bound sections
+  // wait for it under the same skeleton.
+  const formDeps = useScheduleFormDeps(schedule.packageId);
+  const agentBound =
+    active.id !== "general" && active.id !== "recurrence" && active.id !== "identity";
+  const formDepsSettled = !agentBound || !!formDeps.deps || !!formDeps.error || formDeps.denied;
   // The section the last field write came from: its state is that section's to say.
   const [writtenFrom, setWrittenFrom] = useState<ScheduleSettingsSection | null>(null);
   const update: Save = {
@@ -345,57 +383,35 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   const move = useScheduleMove(schedule, moveWrite);
 
   return (
-    <AgentDetailSplit
-      data-schedule-settings
-      phoneMenu={t("schedule.tabSettings")}
-      rail={
-        <SectionRail
-          label={t("schedule.tabSettings")}
-          active={active.id}
-          groups={[
-            {
-              title: t("detail.settings.configurationGroup"),
-              items: SECTIONS.map((section) => ({
-                id: section.id,
-                to: scheduleSettingsHref(schedule.id, section.id),
-                icon: section.icon,
-                label: t(section.labelKey),
-                locked: !mayWrite,
-              })),
-            },
-          ]}
-        />
-      }
-    >
-      <section className="min-w-0 p-6">
-        <SettingsHeading title={t(active.labelKey)} description={t(active.descriptionKey)} />
-        {/* Same tabs and sections for every role: what a role does not allow
-            is said where the controls would be. */}
-        {!mayWrite ? (
-          <RoleLimitNotice>
-            {t(can("schedules:write") ? "schedule.memberGoverned" : "schedule.settings.roleLimit")}
-          </RoleLimitNotice>
-        ) : (
-          <>
-            <RefusedWriteAnswer schedule={schedule} update={write} />
-            <RefusedWriteAnswer schedule={schedule} update={moveWrite} />
-            {/* Every control writes: none is offered before its write can name the
-                connections the server re-checks. */}
-            {update.ready ? (
-              <SectionBody
-                section={active.id}
-                schedule={schedule}
-                update={update}
-                moveWrite={moveWrite}
-                move={move}
-              />
-            ) : (
-              <LoadingState />
-            )}
-          </>
-        )}
-      </section>
-    </AgentDetailSplit>
+    <section className="min-w-0 p-6">
+      <SettingsHeading title={t(active.labelKey)} description={t(active.descriptionKey)} />
+      {/* Same tabs and sections for every role: what a role does not allow
+          is said where the controls would be. */}
+      {!mayWrite ? (
+        <RoleLimitNotice>
+          {t(can("schedules:write") ? "schedule.memberGoverned" : "schedule.settings.roleLimit")}
+        </RoleLimitNotice>
+      ) : (
+        <>
+          <RefusedWriteAnswer schedule={schedule} update={write} />
+          <RefusedWriteAnswer schedule={schedule} update={moveWrite} />
+          {/* Every control writes: none is offered before its write can name the
+              connections the server re-checks. */}
+          {update.ready && formDepsSettled ? (
+            <SectionBody
+              section={active.id}
+              schedule={schedule}
+              update={update}
+              moveWrite={moveWrite}
+              move={move}
+              formDeps={formDeps}
+            />
+          ) : (
+            <SettingsSkeleton />
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -404,6 +420,8 @@ interface SectionWrites {
   update: Save;
   moveWrite: Save;
   move: ScheduleMove;
+  /** The agent's settings, already read by the tab. */
+  formDeps: ReturnType<typeof useScheduleFormDeps>;
 }
 
 function SectionBody({ section, ...writes }: SectionWrites & { section: ScheduleSettingsSection }) {
@@ -418,8 +436,9 @@ function SectionBody({ section, ...writes }: SectionWrites & { section: Schedule
 
 function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save }) {
   const { t } = useTranslation(["agents"]);
-  const { data: agents } = useAgents();
-  const agent = agents?.find((a) => a.id === schedule.packageId);
+  const agentsQuery = useAgents();
+  const agent = agentsQuery.data?.find((a) => a.id === schedule.packageId);
+  const agentPending = isQueryInFlight(agentsQuery);
   return (
     <>
       <SettingRow
@@ -445,21 +464,34 @@ function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save
           to={`/agents/${schedule.packageId}`}
           className="border-border bg-muted/20 hover:bg-muted/40 flex w-full items-center gap-3 rounded-lg border p-3 transition-colors"
         >
-          <AgentIdentityTile
-            agentId={schedule.packageId}
-            icon={agent?.icon}
-            color={agent?.color}
-            className="size-11 rounded-xl"
-            iconClassName="size-5"
-          />
+          {agentPending ? (
+            <Skeleton className="size-11 shrink-0 rounded-xl" />
+          ) : (
+            <PackageIcon
+              type="agent"
+              icon={agent?.icon}
+              color={agent?.color}
+              className="size-11 rounded-xl"
+              iconClassName="size-5"
+            />
+          )}
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium">
-              {agent?.display_name || schedule.packageId}
-            </span>
-            {agent?.description && (
-              <span className="text-muted-foreground block truncate text-xs">
-                {agent.description}
-              </span>
+            {agentPending ? (
+              <>
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="mt-1.5 h-3 w-48 max-w-full" />
+              </>
+            ) : (
+              <>
+                <span className="block text-sm font-medium">
+                  {agent?.display_name || schedule.packageId}
+                </span>
+                {agent?.description && (
+                  <span className="text-muted-foreground block truncate text-xs">
+                    {agent.description}
+                  </span>
+                )}
+              </>
             )}
           </span>
           <ArrowRight className="text-muted-foreground size-4 shrink-0" aria-hidden />
@@ -533,11 +565,11 @@ function AgentBoundSection({
   section,
   ...writes
 }: SectionWrites & { section: "inputs" | "execution" | "connections" }) {
-  const { schedule, update } = writes;
-  const { deps, error, denied } = useScheduleFormDeps(schedule.packageId);
+  const { schedule, update, formDeps } = writes;
+  const { deps, error, denied } = formDeps;
   if (error) return <ErrorState error={error} />;
   if (denied) return <NoAccessState />;
-  if (!deps) return <LoadingState />;
+  if (!deps) return <SettingsSkeleton />;
   // Keyed on the schedule: each section seeds its local state once.
   if (section === "inputs")
     return <InputsSection key={schedule.id} schedule={schedule} deps={deps} update={update} />;
@@ -735,7 +767,7 @@ function ConnectionsSection({ schedule, update, moveWrite }: SectionWrites) {
     });
 
   if (fired.error) return <ErrorState error={fired.error} />;
-  if (!integrations) return <LoadingState />;
+  if (!integrations) return <SettingsSkeleton rows={2} />;
   if (integrations.length === 0) {
     return (
       <EmptyState

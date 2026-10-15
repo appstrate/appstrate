@@ -3,8 +3,10 @@
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { LoadingState, ResourceErrorState } from "@/components/page-states";
+import { ResourceErrorState } from "@/components/page-states";
+import { SettingsSkeleton } from "@/components/loading-skeletons";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
 import { useBreadcrumb } from "@/stores/breadcrumb-store";
 import { WebhookDeliveriesTab } from "../components/webhook-deliveries-tab";
@@ -21,21 +23,26 @@ export function WebhookDetailPage() {
   const [tab, setTab] = useTabWithHash(["deliveries", "settings"] as const, "deliveries");
   useBreadcrumb("overlayPage", webhook ? [{ label: webhook.url }] : []);
 
-  if (isLoading) return <LoadingState />;
-  if (error || !webhook) return <ResourceErrorState error={error} />;
+  if (error || (!isLoading && !webhook)) return <ResourceErrorState error={error} />;
 
   return (
     <div>
-      <SettingsPageActions>
-        {webhook.level === "org" && (
-          <Badge variant="outline">{t("settings:webhooks.levelBadge.org")}</Badge>
-        )}
-        <Badge variant={webhook.enabled ? "success" : "secondary"}>
-          {webhook.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
-        </Badge>
-      </SettingsPageActions>
+      {webhook && (
+        <SettingsPageActions>
+          {webhook.level === "org" && (
+            <Badge variant="outline">{t("settings:webhooks.levelBadge.org")}</Badge>
+          )}
+          <Badge variant={webhook.enabled ? "success" : "secondary"}>
+            {webhook.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
+          </Badge>
+        </SettingsPageActions>
+      )}
 
-      <p className="text-muted-foreground font-mono text-sm break-all">{webhook.url}</p>
+      {webhook ? (
+        <p className="text-muted-foreground font-mono text-sm break-all">{webhook.url}</p>
+      ) : (
+        <Skeleton className="h-4 w-80 max-w-full" />
+      )}
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="mt-4 mb-4">
         <TabsList>
           <TabsTrigger value="deliveries">{t("settings:webhooks.deliveries")}</TabsTrigger>
@@ -44,7 +51,12 @@ export function WebhookDetailPage() {
       </Tabs>
 
       {tab === "deliveries" && <WebhookDeliveriesTab webhookId={id!} />}
-      {tab === "settings" && <WebhookSettingsTab key={webhook.id} webhook={webhook} />}
+      {tab === "settings" &&
+        (webhook ? (
+          <WebhookSettingsTab key={webhook.id} webhook={webhook} />
+        ) : (
+          <SettingsSkeleton />
+        ))}
     </div>
   );
 }

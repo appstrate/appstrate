@@ -22,7 +22,7 @@ import { Button } from "@appstrate/ui/components/button";
 import type { ResourceEntry } from "@appstrate/shared-types";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { Modal } from "../../components/modal";
-import { Spinner } from "../../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { ResourceSection } from "../../components/agent-editor/resource-section";
 import { ContentEditor } from "../../components/package-editor/content-editor";
 import { RuntimeToolsGroup } from "../../components/agent-editor/runtime-tools-group";

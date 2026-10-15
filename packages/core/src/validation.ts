@@ -220,8 +220,10 @@ export const AGENT_RESOURCES_META_KEY = "dev.appstrate/resources";
 export const AGENT_UI_META_KEY = "dev.appstrate/ui";
 
 /**
- * An agent's identity tile: the AFPS manifest `icon`, and the `color` held
- * under `_meta[AGENT_UI_META_KEY]`. A field that is not a string is left out.
+ * An agent's identity tile: the AFPS manifest `icon` (its grammar is
+ * `@appstrate/core/manifest-icon`; a picked icon is `lucide:<name>`), and the
+ * `color` held under `_meta[AGENT_UI_META_KEY]`. A field that is not a string
+ * is left out.
  */
 export function readAgentAppearance(manifest: Record<string, unknown>): {
   icon?: string;
@@ -236,12 +238,8 @@ export function readAgentAppearance(manifest: Record<string, unknown>): {
   };
 }
 
-/** Prefix of an organization logo that is one emoji: `emoji:<grapheme>`. */
-export const ORG_LOGO_EMOJI_PREFIX = "emoji:";
-/** Prefix of an organization logo that is a base64 WebP image. */
-export const ORG_LOGO_WEBP_PREFIX = "data:image/webp;base64,";
-/** Longest organization logo accepted, in characters: a WebP of about 35 KiB. */
-export const ORG_LOGO_MAX_LENGTH = 48_000;
+/** Largest organization logo image accepted, in bytes. */
+export const ORG_LOGO_MAX_BYTES = 36_000;
 
 /**
  * Agent-authored resource hints read from `_meta["dev.appstrate/resources"]`.

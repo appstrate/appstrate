@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { MonacoEditor as Editor } from "./monaco";
 import { useTheme } from "../stores/theme-store";
@@ -97,9 +98,9 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
         }}
       />
       {parseError && (
-        <div className="text-destructive bg-destructive/10 border-destructive/30 rounded-md border px-3 py-2 text-sm">
-          {parseError}
-        </div>
+        <Alert variant="destructive">
+          <AlertDescription>{parseError}</AlertDescription>
+        </Alert>
       )}
       <div className="flex justify-end">
         <Button type="button" onClick={handleApply}>

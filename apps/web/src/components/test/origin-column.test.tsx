@@ -6,7 +6,7 @@ import { describe, expect, it } from "bun:test";
 import type { ReactElement } from "react";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import type { DataColumn } from "../data-table.tsx";
-import type { CardItem } from "../../pages/package-list.tsx";
+import type { CardItem } from "../../lib/package-card-item.ts";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });

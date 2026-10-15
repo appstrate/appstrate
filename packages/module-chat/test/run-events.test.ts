@@ -298,7 +298,7 @@ describe("run-events helpers", () => {
 
   it("builds SSE URLs from org/app headers", () => {
     expect(buildRunSseUrl({ runId: "run a/b", orgId: "o", spaceId: "a" })).toBe(
-      "/api/realtime/runs/run%20a%2Fb?orgId=o&spaceId=a&verbose=true",
+      "/api/realtime/runs/run%20a%2Fb?orgId=o&spaceId=a&verbose=true&channels=run_update%2Crun_log",
     );
     expect(buildRunSseUrl({ runId: "run_1", orgId: undefined, spaceId: "a" })).toBeUndefined();
     // The realtime routes REFUSE the `X-View-As` header, so a host under a
@@ -311,7 +311,7 @@ describe("run-events helpers", () => {
         viewAs: "org_role=member; space=spc_1; role=preset:viewer",
       }),
     ).toBe(
-      "/api/realtime/runs/run_1?orgId=o&spaceId=a&verbose=true&view_as=org_role%3Dmember%3B+space%3Dspc_1%3B+role%3Dpreset%3Aviewer",
+      "/api/realtime/runs/run_1?orgId=o&spaceId=a&verbose=true&channels=run_update%2Crun_log&view_as=org_role%3Dmember%3B+space%3Dspc_1%3B+role%3Dpreset%3Aviewer",
     );
 
     expect(orgSpaceFromHeaders({ "X-Org-Id": "o", "X-Space-Id": "a" })).toEqual({

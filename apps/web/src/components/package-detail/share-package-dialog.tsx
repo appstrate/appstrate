@@ -20,7 +20,6 @@ import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../../api/errors";
 import { Modal } from "../modal";
-import { Spinner } from "../spinner";
 import { SpaceRoleSelect } from "../space-role-select";
 import { splitPackageRef } from "../../lib/package-paths";
 import { useOrgDetail } from "../../hooks/use-org";
@@ -41,7 +40,9 @@ import {
   useRevokePackageShare,
   useSharePackage,
 } from "../../hooks/use-package-shares";
+import { memberLabel } from "../../lib/members";
 import { toastError } from "../../lib/mutation-error";
+import { TextSkeleton } from "../loading-skeletons";
 
 /** The subject of one offer, as the picker encodes it. */
 type ShareTarget = { kind: "user"; userId: string } | { kind: "space"; spaceId: string };
@@ -252,7 +253,7 @@ export function SharePackageDialog({
                         key={member.userId}
                         value={targetValue({ kind: "user", userId: member.userId })}
                       >
-                        {member.displayName || member.email || member.userId}
+                        {memberLabel(member)}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -274,10 +275,11 @@ export function SharePackageDialog({
             </Select>
             <Button
               type="button"
-              disabled={!selected || share.isPending}
+              pending={share.isPending}
+              disabled={!selected}
               onClick={() => selected && submit(selected)}
             >
-              {share.isPending ? <Spinner /> : t("packages.shareSubmit")}
+              {t("packages.shareSubmit")}
             </Button>
           </div>
           {/*
@@ -317,10 +319,11 @@ export function SharePackageDialog({
                 <Button
                   type="button"
                   size="sm"
-                  disabled={publish.isPending || share.isPending}
+                  pending={publish.isPending}
+                  disabled={share.isPending}
                   onClick={() => void publishAndShare()}
                 >
-                  {publish.isPending ? <Spinner /> : t("packages.sharePublishAndShare")}
+                  {t("packages.sharePublishAndShare")}
                 </Button>
               ) : (
                 <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
@@ -331,7 +334,7 @@ export function SharePackageDialog({
           <div className="mt-4 space-y-1 border-t pt-4">
             <p className="text-sm font-medium">{t("packages.shareCurrent")}</p>
             {isLoading ? (
-              <Spinner />
+              <TextSkeleton lines={2} className="py-1.5" />
             ) : (shares ?? []).length === 0 ? (
               <p className="text-muted-foreground text-sm">{t("packages.shareEmpty")}</p>
             ) : (
@@ -429,7 +432,7 @@ function CoeditTab({
   const reached = useMemo(() => new Set((existing ?? []).map((row) => row.userId)), [existing]);
   const candidates = orgMembers.filter((candidate) => !reached.has(candidate.userId));
 
-  if (verdict === "unknown") return <Spinner />;
+  if (verdict === "unknown") return <TextSkeleton lines={2} />;
 
   // A personal space belongs to ONE member and takes no others
   // (`personal_space_has_no_members`), and it is never converted while it lives
@@ -494,7 +497,7 @@ function CoeditTab({
           className="w-full"
           options={candidates.map((candidate) => ({
             value: candidate.userId,
-            label: candidate.displayName || candidate.email || candidate.userId,
+            label: memberLabel(candidate),
           }))}
         />
         <SpaceRoleSelect
@@ -506,8 +509,8 @@ function CoeditTab({
           ariaLabel={t("packages.coeditRoleLabel")}
           onValueChange={setRole}
         />
-        <Button type="button" disabled={!member || addMember.isPending} onClick={submit}>
-          {addMember.isPending ? <Spinner /> : t("packages.coeditSubmit")}
+        <Button type="button" pending={addMember.isPending} disabled={!member} onClick={submit}>
+          {t("packages.coeditSubmit")}
         </Button>
       </div>
       <p className="text-muted-foreground text-sm">

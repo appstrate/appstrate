@@ -58,14 +58,8 @@ export function AgentConfigurationView({
   };
 
   const sectionBody = (() => {
-    if (section === "model") {
-      return <AgentConfigurationTab {...sharedConfigurationProps} section="model" />;
-    }
-    if (section === "proxy") {
-      return <AgentConfigurationTab {...sharedConfigurationProps} section="proxy" />;
-    }
-    if (section === "inputs") {
-      return <AgentConfigurationTab {...sharedConfigurationProps} section="inputs" />;
+    if (section === "model" || section === "proxy" || section === "inputs") {
+      return <AgentConfigurationTab {...sharedConfigurationProps} section={section} />;
     }
     // Both are set per space, whatever version is being read.
     if (section === "connections") {

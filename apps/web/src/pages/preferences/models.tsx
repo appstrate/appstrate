@@ -11,12 +11,12 @@ import { useStore } from "zustand";
 import { useQueryClient } from "@tanstack/react-query";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { AlertTriangle, Plus } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { ProvidersTable } from "../../components/providers-table";
-import { PageActionsMenu } from "../../components/page-actions-menu";
+import type { MenuAction } from "../../lib/menu-action";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import {
   deduplicateLabel,
   useCreateModelProviderCredential,
@@ -34,6 +34,7 @@ import {
   ownPersonalCredentials,
   personalApiKeyBody,
 } from "../../lib/personal-model-credentials";
+import { invalidatePaths } from "../../lib/query-keys";
 import { providerRows } from "../../lib/model-providers";
 import { authStore } from "../../stores/auth-store";
 import { EmptyStateAction } from "../../components/page-states";
@@ -72,7 +73,7 @@ export function PreferencesModelsPage() {
 
   // A credential's add, rename, delete or pairing changes which models the caller can use.
   const refreshModels = () => {
-    void queryClient.invalidateQueries({ queryKey: ["get", "/api/models"] });
+    void invalidatePaths(queryClient, ["/api/models"]);
   };
 
   const closeForm = () => {
@@ -116,6 +117,14 @@ export function PreferencesModelsPage() {
     );
   };
 
+  const addCredential: MenuAction = {
+    id: "create-credential",
+    icon: Plus,
+    label: t("credentials.addPersonal"),
+    onSelect: openCreate,
+    hidden: !canAdd,
+  };
+
   return (
     <>
       {personalModelCredentialsDisabled && (
@@ -125,18 +134,9 @@ export function PreferencesModelsPage() {
         </Alert>
       )}
 
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <p className="text-muted-foreground text-sm">{t("modelCredentials.description")}</p>
-        {/* The same Actions menu as the organization's pages. */}
-        {canAdd && (
-          <PageActionsMenu>
-            <DropdownMenuItem data-page-action="create-credential" onSelect={openCreate}>
-              <Plus />
-              {t("credentials.addPersonal")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        )}
-      </div>
+      <SettingsPageActions actions={[addCredential]} />
+
+      <p className="text-muted-foreground mb-4 text-sm">{t("modelCredentials.description")}</p>
 
       <ProvidersTable
         label={t("preferences.tabModels")}
@@ -149,9 +149,7 @@ export function PreferencesModelsPage() {
         empty={{
           message: t("modelCredentials.empty"),
           hint: t("modelCredentials.emptyHint"),
-          action: canAdd ? (
-            <EmptyStateAction label={t("credentials.addPersonal")} onClick={openCreate} />
-          ) : undefined,
+          action: <EmptyStateAction action={addCredential} />,
         }}
         canWriteModels={false}
         onRename={renameCredential}
@@ -160,14 +158,16 @@ export function PreferencesModelsPage() {
         onDelete={setConfirmDelete}
       />
 
-      <CredentialFormModal
-        open={formOpen}
-        onClose={closeForm}
-        credential={editCredential}
-        isPending={createCredential.isPending || updateCredential.isPending}
-        onSubmit={submitForm}
-        personal
-      />
+      {formOpen && (
+        <CredentialFormModal
+          key={editCredential?.id ?? "__create__"}
+          onClose={closeForm}
+          credential={editCredential}
+          isPending={createCredential.isPending || updateCredential.isPending}
+          onSubmit={submitForm}
+          personal
+        />
+      )}
 
       <ConfirmModal
         open={!!confirmDelete}
