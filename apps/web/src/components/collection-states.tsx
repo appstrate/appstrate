@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import type { ReactNode } from "react";
 import type { CollectionState, CollectionVerdict } from "./collection";
 import { ErrorState } from "./page-states";
@@ -19,11 +20,11 @@ export function CollectionStates({
 }) {
   if (verdict === "loading") return skeleton;
   return (
-    <div className="bg-card overflow-hidden rounded-lg border">
+    <Card className="overflow-hidden">
       {/* A failure always draws something, written by the caller or not. */}
       {verdict === "error"
         ? (state.error ?? <ErrorState error={state.failure} compact />)
         : state.empty}
-    </div>
+    </Card>
   );
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { Alert } from "@appstrate/ui/components/alert";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, CreditCard } from "lucide-react";
@@ -151,7 +152,7 @@ function BillingOverview() {
 
   return (
     <>
-      <div className="border-border bg-card mb-4 rounded-lg border p-5">
+      <Card className="mb-4 p-5">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h3 className="text-[0.95rem] font-semibold">
@@ -214,7 +215,7 @@ function BillingOverview() {
             }
           />
         )}
-      </div>
+      </Card>
 
       {billing.status === "past_due" && (
         <Alert variant="warning" className="mb-4">
@@ -236,7 +237,7 @@ function BillingOverview() {
       )}
 
       {billing.plans.length > 0 && (
-        <div className="border-border bg-card mb-4 rounded-lg border p-5">
+        <Card className="mb-4 p-5">
           <h3 className="mb-3 text-[0.95rem] font-semibold">{t("billing.upgradePlans")}</h3>
           <PlanGrid
             plans={billing.plans}
@@ -245,7 +246,7 @@ function BillingOverview() {
             disabled={checkoutMutation.isPending || changePlanMutation.isPending}
             onSelect={handleSelectPlan}
           />
-        </div>
+        </Card>
       )}
     </>
   );

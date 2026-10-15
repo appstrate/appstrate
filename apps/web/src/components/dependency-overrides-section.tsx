@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
 import { PackageVersionSelect } from "./package-version-select";
@@ -52,7 +53,7 @@ export function DependencyOverridesSection({
     <div className="flex flex-col gap-2">
       <Label className="mb-0">{t("run.overrides.dependencyLabel")}</Label>
       <p className="text-muted-foreground text-xs">{t("run.overrides.dependencyHint")}</p>
-      <div className="border-border bg-card flex flex-col gap-3 rounded-md border p-3">
+      <Card className="flex flex-col gap-3 rounded-md p-3">
         {skills.map((skill) => (
           <DependencyOverrideRow
             key={skill.id}
@@ -66,7 +67,7 @@ export function DependencyOverridesSection({
             }}
           />
         ))}
-      </div>
+      </Card>
     </div>
   );
 }

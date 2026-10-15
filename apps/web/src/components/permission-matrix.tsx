@@ -10,6 +10,7 @@
  * outgrow the container. Sized to its content instead (`w-max`), the longest
  * label would refuse to wrap and push a role that fits out of view.
  */
+import { Card } from "@appstrate/ui/components/card";
 import { Fragment, type ReactNode } from "react";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -49,7 +50,7 @@ export function PermissionMatrix<Column extends string>({
   }[];
 }) {
   return (
-    <div className="bg-card overflow-hidden rounded-lg border">
+    <Card className="overflow-hidden">
       <Table
         aria-label={ariaLabel}
         className="w-full"
@@ -106,6 +107,6 @@ export function PermissionMatrix<Column extends string>({
           ))}
         </TableBody>
       </Table>
-    </div>
+    </Card>
   );
 }

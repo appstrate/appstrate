@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
@@ -114,13 +115,10 @@ function IntegrationChoiceBox({
 }) {
   const name = useIntegrationName(integrationId);
   return (
-    <div
-      className="border-border bg-card flex flex-col gap-1.5 rounded-md border p-3"
-      data-testid={testId}
-    >
+    <Card className="flex flex-col gap-1.5 rounded-md p-3" data-testid={testId}>
       <div className="text-sm font-medium">{name}</div>
       {children}
-    </div>
+    </Card>
   );
 }
 

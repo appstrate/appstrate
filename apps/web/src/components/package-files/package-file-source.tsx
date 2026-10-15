@@ -12,6 +12,7 @@
  * product call, not a safety one (`shared-header.tsx` renders Markdown without `rehype-raw`).
  */
 
+import { Card } from "@appstrate/ui/components/card";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Download, FileWarning } from "lucide-react";
@@ -62,11 +63,11 @@ export function PackageFileSource({
 
   return (
     // Named after the file: a landmark reached from the tree must say which file is in it.
-    <div
+    <Card
       id={id}
       role="region"
       aria-label={entry.path}
-      className={cn("border-border bg-card flex min-w-0 flex-col rounded-lg border", className)}
+      className={cn("flex min-w-0 flex-col", className)}
     >
       {!hideHeader && (
         <div className="border-border flex h-14 min-h-14 items-center gap-3 border-b px-3 py-2">
@@ -138,6 +139,6 @@ export function PackageFileSource({
           }}
         />
       )}
-    </div>
+    </Card>
   );
 }

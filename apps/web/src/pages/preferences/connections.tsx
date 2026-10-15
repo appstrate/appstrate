@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -223,7 +224,7 @@ function SourceGroupCard({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   return (
-    <div className="border-border bg-card rounded-lg border p-5">
+    <Card className="p-5">
       <div className="flex cursor-pointer items-center justify-between" onClick={onToggle}>
         <div className="flex items-center gap-3">
           <PackageIcon type="integration" icon={group.logo} size="sm" />
@@ -256,7 +257,7 @@ function SourceGroupCard({
           ))}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -303,7 +304,7 @@ export function PreferencesConnectionsPage() {
         )}
       </div>
 
-      <div className="border-border bg-card mb-4 rounded-lg border p-5">
+      <Card className="mb-4 p-5">
         <p className="text-muted-foreground text-sm">
           {t("connections.descriptionUnified")}
           {canBrowseIntegrations && (
@@ -318,7 +319,7 @@ export function PreferencesConnectionsPage() {
             </>
           )}
         </p>
-      </div>
+      </Card>
 
       <ItemList
         items={groups ?? []}

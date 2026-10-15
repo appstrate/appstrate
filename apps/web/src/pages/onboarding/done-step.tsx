@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -95,7 +96,7 @@ function SummaryCard({
   aside?: ReactNode;
 }) {
   return (
-    <div className="border-border bg-card rounded-lg border p-4">
+    <Card className="p-4">
       <div className="flex items-center gap-3">
         <CheckCircle2
           size={20}
@@ -107,6 +108,6 @@ function SummaryCard({
         </div>
         {aside}
       </div>
-    </div>
+    </Card>
   );
 }

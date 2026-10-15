@@ -10,6 +10,7 @@
  * draws while loading, so the chunk and the data wait under one shape.
  */
 
+import { Card } from "@appstrate/ui/components/card";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
@@ -113,9 +114,9 @@ export function DetailPageSkeleton({
   return (
     <Waiting>
       <DetailBarSkeleton title={title} parent={parent} tabCount={tabCount} />
-      <div className="bg-card rounded-lg border p-6">
+      <Card className="p-6">
         <CardBlocks count={3} />
-      </div>
+      </Card>
     </Waiting>
   );
 }
@@ -188,7 +189,7 @@ export function ListPageSkeleton() {
         <Skeleton className="h-9 w-72 max-w-full" />
         <Skeleton className="h-9 w-24" />
       </div>
-      <div className="bg-card overflow-hidden rounded-lg border">
+      <Card className="overflow-hidden">
         <div className="border-border flex h-10 items-center border-b px-4">
           <Skeleton className="h-3 w-1/3" />
         </div>
@@ -200,7 +201,7 @@ export function ListPageSkeleton() {
             <Skeleton className="h-3.5 w-full" />
           </div>
         ))}
-      </div>
+      </Card>
     </Waiting>
   );
 }
@@ -251,7 +252,7 @@ export function DashboardBodySkeleton() {
         {[3, 2].map((rows, i) => (
           <div key={i}>
             <Skeleton className="mb-3 h-5 w-40" />
-            <div className="bg-card divide-border divide-y rounded-xl border">
+            <Card className="divide-border divide-y rounded-xl">
               {Array.from({ length: rows }, (_, j) => (
                 <div key={j} className="flex min-h-[74px] items-center gap-3 px-4">
                   <Skeleton className="size-8 shrink-0 rounded-md" />
@@ -261,7 +262,7 @@ export function DashboardBodySkeleton() {
                   </div>
                 </div>
               ))}
-            </div>
+            </Card>
           </div>
         ))}
       </div>

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { Badge } from "@appstrate/ui/components/badge";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo } from "react";
@@ -71,7 +72,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
         renderItem={(d) => {
           const variant = deliveryStatusVariant(d);
           return (
-            <div className="border-border bg-card rounded-lg border p-3">
+            <Card className="p-3">
               <div className="mb-1 flex items-center gap-2">
                 <span className="text-muted-foreground truncate font-mono text-xs">
                   {d.eventId}
@@ -85,7 +86,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
                 <span>{formatRelativeTime(d.createdAt, t)}</span>
               </div>
               {d.error && <p className="text-destructive mt-1 text-xs">{d.error}</p>}
-            </div>
+            </Card>
           );
         }}
       />

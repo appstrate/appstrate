@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { Badge } from "@appstrate/ui/components/badge";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -69,7 +70,7 @@ export function OnboardingMembersStep() {
               {t("onboarding.pendingInvitations")}
             </div>
             {invitations.map((inv) => (
-              <div key={inv.id} className="border-border bg-card rounded-lg border p-3">
+              <Card key={inv.id} className="p-3">
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{inv.email}</span>
@@ -77,7 +78,7 @@ export function OnboardingMembersStep() {
                   <CopyLinkButton token={inv.token} />
                   <Badge variant="pending">{t(roleI18nKey(inv.role))}</Badge>
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
         )}

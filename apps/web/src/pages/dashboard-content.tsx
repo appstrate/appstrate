@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { usePermissions } from "../hooks/use-permissions";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -152,19 +153,13 @@ function MetricCard({
   className?: string;
 }) {
   return (
-    <div
-      className={cn(
-        "border-border bg-card rounded-xl border p-4",
-        "flex min-h-32 flex-col justify-between",
-        className,
-      )}
-    >
+    <Card className={cn("flex min-h-32 flex-col justify-between rounded-xl p-4", className)}>
       <span className="text-muted-foreground text-xs font-medium">{label}</span>
       <div>
         <p className="text-3xl font-semibold tabular-nums">{value}</p>
         <p className="text-muted-foreground mt-1 text-xs">{detail}</p>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -198,7 +193,7 @@ function RecentRuns({
   limit?: number;
 }) {
   return (
-    <div className="border-border bg-card divide-border divide-y rounded-xl border shadow-sm">
+    <Card className="divide-border divide-y rounded-xl shadow-sm">
       {runs.slice(0, limit).map((run) => (
         <RunRow
           key={run.id}
@@ -208,7 +203,7 @@ function RecentRuns({
           className="first:rounded-t-xl last:rounded-b-xl"
         />
       ))}
-    </div>
+    </Card>
   );
 }
 
@@ -256,7 +251,7 @@ function UpcomingSchedules({
   agentById: Map<string, AgentListItem>;
 }) {
   return (
-    <div className="border-border bg-card divide-border divide-y rounded-xl border shadow-sm">
+    <Card className="divide-border divide-y rounded-xl shadow-sm">
       {schedules.map((schedule) => (
         <DashboardScheduleRow
           key={schedule.id}
@@ -264,7 +259,7 @@ function UpcomingSchedules({
           agent={agentById.get(schedule.packageId)}
         />
       ))}
-    </div>
+    </Card>
   );
 }
 
