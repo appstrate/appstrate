@@ -25,7 +25,11 @@ import {
   uploadPackageFiles,
   downloadPackageFiles,
 } from "../../../src/services/package-items/storage.ts";
-import { uploadPackageZip } from "../../../src/services/package-storage.ts";
+import { uploadPackageZip, buildAgentPackage } from "../../../src/services/package-storage.ts";
+import { unzipPackageArchive } from "../../../src/services/package-archive.ts";
+import { freezeRunSpawnDependencies } from "../../../src/services/run-pipeline.ts";
+import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
+import type { AgentManifest, LoadedPackage } from "../../../src/types/index.ts";
 
 const app = getTestApp();
 const encoder = new TextEncoder();
@@ -187,6 +191,22 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(DOC);
     });
 
+    it("stores the doc of THIS save, not the previous one, where publish reads it", async () => {
+      const next = "# Gmail\n\nList labels first.\n";
+      const res = await app.request(`/api/packages/integrations/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(await lockVersionOf(ctx, id)),
+        }),
+        body: JSON.stringify({ content: next }),
+      });
+      expect(res.status).toBe(200);
+
+      expect(await draftContentOf(id)).toBe(next);
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(next);
+    });
+
     it("does not let a manifest-only PUT write the docs into manifest.json", async () => {
       // `content` is optional on the update body and falls back to the stored
       // `draft_content` — which for a documented integration is its
@@ -323,6 +343,110 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       expect((await listFiles(ctx, id)).find((e) => e.path === "INTEGRATION.md")!.inline).toBe(
         VERSIONED_DOC,
       );
+    });
+  });
+
+  // ─── The JSON `content` field: the stored tree publish freezes ─────────────
+
+  describe("an integration documented through the JSON content field", () => {
+    const id = "@intdocs/authored";
+
+    async function create(version = "1.0.0"): Promise<Response> {
+      return app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: integrationManifest(id, version), content: DOC }),
+      });
+    }
+
+    async function saveContent(content: string, version: string): Promise<Response> {
+      return app.request(`/api/packages/integrations/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(await lockVersionOf(ctx, id)),
+        }),
+        body: JSON.stringify({ manifest: integrationManifest(id, version), content }),
+      });
+    }
+
+    async function publish(version: string): Promise<void> {
+      const res = await app.request(`/api/packages/integrations/${id}/versions`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ version }),
+      });
+      expect(res.status).toBe(201);
+    }
+
+    async function frozenDoc(version: string): Promise<string | undefined> {
+      const res = await app.request(`/api/packages/${id}/${version}/download`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const bytes = unzipPackageArchive(new Uint8Array(await res.arrayBuffer()))["INTEGRATION.md"];
+      return bytes ? decoder.decode(bytes) : undefined;
+    }
+
+    it("stores INTEGRATION.md and freezes it into the version minted at creation", async () => {
+      expect((await create()).status).toBe(201);
+
+      expect(await draftContentOf(id)).toBe(DOC);
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(DOC);
+      expect(await frozenDoc("1.0.0")).toBe(DOC);
+    });
+
+    it("freezes the doc of the LAST save into a published version", async () => {
+      expect((await create()).status).toBe(201);
+      const next = "# Gmail\n\nRevised after review.\n";
+      expect((await saveContent(next, "1.1.0")).status).toBe(200);
+
+      // The draft overlay hands the save the PREVIOUS column; the stored copy
+      // must follow this save, not trail it by one.
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(next);
+      await publish("1.1.0");
+      expect(await frozenDoc("1.1.0")).toBe(next);
+    });
+
+    it("writes no INTEGRATION.md for the manifest-text value the dashboard sends", async () => {
+      const manifest = integrationManifest(id);
+      const res = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest, content: JSON.stringify(manifest, null, 2) }),
+      });
+      expect(res.status).toBe(201);
+
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBeUndefined();
+      expect(await frozenDoc("1.0.0")).toBeUndefined();
+    });
+
+    it("hands the published doc to a run bundle pinning that version", async () => {
+      expect((await create()).status).toBe(201);
+      const manifest = {
+        schema_version: "0.2",
+        type: "agent",
+        name: "@intdocs/agent",
+        version: "1.0.0",
+        display_name: "Agent",
+        dependencies: { integrations: { [id]: "^1.0.0" } },
+        integrations_configuration: { [id]: {} },
+      };
+      const agent: LoadedPackage = {
+        id: manifest.name,
+        manifest: manifest as unknown as AgentManifest,
+        prompt: "Do the thing.",
+        source: "local",
+      };
+
+      const integrationVersions = await freezeRunSpawnDependencies({ agent, orgId: ctx.orgId });
+      expect(integrationVersions[id]).toEqual({ version: "1.0.0", source: "version" });
+      const { zip } = await buildAgentPackage(agent, ctx.orgId, { integrationVersions });
+      const member = [...readBundleFromBuffer(new Uint8Array(zip)).packages.values()].find(
+        (p) => p.identity === `${id}@1.0.0`,
+      );
+      expect(member).toBeDefined();
+      expect(decoder.decode(member!.files.get("INTEGRATION.md"))).toBe(DOC);
     });
   });
 

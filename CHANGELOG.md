@@ -89,6 +89,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 --local` on an agent that depends on a never-published integration now
     answers that same 422, as a server-side run without
     `dependency_overrides` does.
+  - **An integration member is bundled alone**: the dependencies its own
+    manifest declares (a `dependencies.skills` entry, say) are not bundled.
+  - **Integrity**: a declared integration whose stored archive no longer
+    matches its published hash fails the run (`bundle_integrity_mismatch`),
+    even when the run does not start that integration, as for a skill. A
+    missing archive or a signature-policy refusal only withholds its doc.
   - **System integrations** are served into the bundle from the registry
     loaded at boot, at the version that registry holds.
   - **`AFPS_SIGNATURE_POLICY`** applies to an organization's published
