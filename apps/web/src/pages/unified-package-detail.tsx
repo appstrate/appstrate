@@ -57,45 +57,59 @@ import { EditorDirtyReportContext } from "../hooks/use-editor-state";
 
 type PackageTab = "overview" | "runs" | "settings" | "memory" | "usedBy";
 
-const AGENT_DETAIL_TABS = ["overview", "runs", "memory", "settings"] as const;
+type TabSpec = {
+  value: PackageTab;
+  labelKey: string;
+  icon: NonNullable<DetailTab<PackageTab>["icon"]>;
+};
+
+const AGENT_TABS: TabSpec[] = [
+  { value: "overview", labelKey: "detail.overview.summary", icon: LayoutGrid },
+  { value: "runs", labelKey: "detail.tabRuns", icon: Play },
+  { value: "memory", labelKey: "detail.tabMemory", icon: Database },
+  { value: "settings", labelKey: "detail.tabSettings", icon: Settings2 },
+];
+
+const PACKAGE_TABS: TabSpec[] = [
+  { value: "overview", labelKey: "detail.overview.summary", icon: LayoutGrid },
+  { value: "settings", labelKey: "detail.tabSettings", icon: Settings2 },
+  { value: "usedBy", labelKey: "packages.usedBy", icon: Layers },
+];
 
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
+
+const MODEL_ALERT_COPY = {
+  "detail.titleModel": {
+    title: "models.alert.noModel",
+    description: "models.alert.noModelDescription",
+    askAdmin: "models.alert.noModelAskAdmin",
+  },
+  "detail.titleNoDefaultModel": {
+    title: "models.alert.noDefaultModel",
+    description: "models.alert.noDefaultModelDescription",
+    askAdmin: "models.alert.noDefaultModelAskAdmin",
+  },
+} as const;
+
+function stringOr<T>(value: unknown, fallback: T): string | T {
+  return typeof value === "string" ? value : fallback;
+}
 
 /** No model a run could use: said where it can be acted on, graded by who may act. */
 function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentModelBlocker> }) {
   const { t } = useTranslation(["settings"]);
   const { can } = usePermissions();
 
-  const copy =
-    blocker === "detail.titleModel"
-      ? {
-          title: t("models.alert.noModel"),
-          // Only `models:write` can act on "configure a model" (POST /api/models).
-          description: t(
-            can("models:write")
-              ? "models.alert.noModelDescription"
-              : "models.alert.noModelAskAdmin",
-          ),
-        }
-      : blocker === "detail.titleNoDefaultModel"
-        ? {
-            title: t("models.alert.noDefaultModel"),
-            // Only `models:write` can set the default (PUT /api/models/default).
-            description: t(
-              can("models:write")
-                ? "models.alert.noDefaultModelDescription"
-                : "models.alert.noDefaultModelAskAdmin",
-            ),
-          }
-        : null;
+  const copy = blocker && MODEL_ALERT_COPY[blocker];
   if (!copy) return null;
 
   return (
     <Alert variant="destructive" className="mb-4">
       <TriangleAlert className="h-4 w-4" />
-      <AlertTitle>{copy.title}</AlertTitle>
-      <AlertDescription className="flex items-center justify-between">
-        <span>{copy.description}</span>
+      <AlertTitle>{t(copy.title)}</AlertTitle>
+      {/* Only `models:write` can act on it (POST /api/models, PUT /api/models/default). */}
+      <AlertDescription>
+        {t(can("models:write") ? copy.description : copy.askAdmin)}
       </AlertDescription>
     </Alert>
   );
@@ -131,34 +145,27 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // here, beside the detail, so the alert does not wait for the loading gate.
   const modelBlocker = useAgentModelBlocker(type === "agent" ? packageId : undefined);
 
-  // Agents list for "Used by" tab enrichment
-
   // Type-narrowed aliases for type-specific branches
   const agentDetail = type === "agent" ? (detail as Versioned<AgentDetail> | undefined) : undefined;
   const pkgDetail =
     type !== "agent" ? (detail as Versioned<OrgPackageItemDetail> | undefined) : undefined;
 
+  const base = agentDetail ?? pkgDetail;
   const displayName = agentDetail?.display_name ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
-  const source = agentDetail?.source ?? pkgDetail?.source;
-  // WHICH definition the server projected. Every type answers it now, from the
-  // one function that decides it, so the read-only banner below is a single
-  // condition rather than one per type.
-  const definition = (agentDetail ?? pkgDetail)?.definition;
-  const version = agentDetail?.version ?? pkgDetail?.version;
-  const hasUnarchivedChanges =
-    agentDetail?.has_unarchived_changes ?? pkgDetail?.has_unarchived_changes;
-  const forkedFrom = agentDetail?.forked_from ?? pkgDetail?.forked_from ?? null;
+  const source = base?.source;
+  // Which definition (draft or published) the server projected, for every type.
+  const definition = base?.definition;
+  const version = base?.version;
+  const hasUnarchivedChanges = base?.has_unarchived_changes;
+  const forkedFrom = base?.forked_from ?? null;
   const isOwned = isOwnedSource(source);
 
   const versionQuery = useVersionDetail(type, packageId, versionParam);
   const { data: versionDetail, error: versionError } = versionQuery;
   const versionLoading = isQueryInFlight(versionQuery);
 
-  // The server's own flag gates publishing (the header badge and the publish
-  // dialog), as it does for `appstrate packages publish`: the server judges the
-  // content itself — annexes included, which the manifest/prompt comparison
-  // below cannot see — and answers `409 no_changes` when nothing moved. The
-  // comparison only decides whether a diff tab has anything to show.
+  // The server's flag gates publishing (it sees annexes the manifest/prompt
+  // comparison below cannot); the comparison only decides whether a diff has content.
   const hasTimestampChanges = source !== "system" && !!hasUnarchivedChanges;
   const latestDiffQuery = useVersionDetail(
     type,
@@ -166,8 +173,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     hasTimestampChanges ? "latest" : undefined,
   );
   const { data: latestVersionForDiff } = latestDiffQuery;
-  // An agent's header names its draft only once this comparison has settled:
-  // answering before it would show « Brouillon » and then swap it for the version.
+  // The header names the draft only once this has settled, or « Brouillon » would flash.
   const draftVerdictPending = type === "agent" && isQueryInFlight(latestDiffQuery);
   // Refine: once we have the latest version data, check for real content diff
   const currentManifest = type === "agent" ? agentDetail?.manifest : pkgDetail?.manifest;
@@ -179,34 +185,22 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const downloadPackage = usePackageDownload(scope, name);
   const downloadBundle = useAgentBundleExport(scope, name);
-  // Only a skill or an MCP server needs this: their detail response carries no
-  // `active`, so the library's projection of the placement is the only answer
-  // available. An agent's detail answers for itself (`AgentDetail.active`,
-  // read by `AgentRunButton`, `AgentActions` and the banner below), and
-  // asking the library too would be one page reading one fact twice — so the
-  // query is not even mounted there.
+  // Skill and MCP-server details carry no `active`; an agent's does, so the query is not mounted there.
   const { isActiveInCurrentSpace } = usePackageActivationState(packageId, {
     enabled: type !== "agent",
   });
-  // The package's own detail response is the authority on both halves of the
-  // home contract: the id (only when this caller reaches that space) and the
-  // write verdict. `undefined` means "not loaded yet", which every gate reads
-  // as "no".
-  const homeSpaceId = (agentDetail ?? pkgDetail)?.home_space_id;
-  const homeWritable = (agentDetail ?? pkgDetail)?.home_writable;
-  const homeDeletable = (agentDetail ?? pkgDetail)?.home_deletable;
+  // The detail response is the authority on the home contract; `undefined` (not loaded) reads as "no".
+  const homeSpaceId = base?.home_space_id;
+  const homeWritable = base?.home_writable;
+  const homeDeletable = base?.home_deletable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
 
   // ── State ──
-  // The tabs this caller may MOUNT — the single gate, since `useTabWithHash`
-  // falls back to the default tab for a hash naming anything outside the list.
-  // An agent's tabs are the same for every role: a tab whose read the caller
-  // lacks says so in its panel (`RoleLimitNotice`) instead of disappearing, so
-  // the page reads the same whatever the role and only its content changes.
-  const allValidTabs: readonly PackageTab[] =
-    type === "agent" ? AGENT_DETAIL_TABS : ["overview", "settings", "usedBy"];
-  // Every detail opens on its summary; an agent the reader may only run opens on
-  // its runs when that role reads them.
+  // `useTabWithHash` falls back to the default tab for any hash outside this list. An agent's
+  // tabs are the same for every role: a tab whose read is missing says so in its panel.
+  const tabs = type === "agent" ? AGENT_TABS : PACKAGE_TABS;
+  const allValidTabs = tabs.map((entry) => entry.value);
+  // An agent the reader may only run opens on its runs when that role reads them.
   const defaultTab: PackageTab = !fullRead && tabReads.runs ? "runs" : "overview";
   const [tab, setTab] = useTabWithHash<PackageTab>(allValidTabs, defaultTab);
   const newVersion = useModalParam("newVersion");
@@ -265,14 +259,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
 
   // ── Unified detail for the header and the overview ──
-  const historicalManifestName =
-    typeof versionDetail?.manifest?.display_name === "string"
-      ? versionDetail.manifest.display_name
-      : packageId;
-  const historicalManifestDescription =
-    typeof versionDetail?.manifest?.description === "string"
-      ? versionDetail.manifest.description
-      : "";
+  const historicalManifestName = stringOr(versionDetail?.manifest?.display_name, packageId);
+  const historicalManifestDescription = stringOr(versionDetail?.manifest?.description, "");
   const unifiedForHeader = {
     id: packageId,
     displayName: isHistoricalVersion ? historicalManifestName : displayName,
@@ -285,12 +273,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     type,
     // The header names the version on screen, not the live one behind it.
     version: downloadVersion,
-    icon:
-      type === "agent"
-        ? agentDetail?.icon
-        : typeof pkgDetail?.manifest?.icon === "string"
-          ? pkgDetail.manifest.icon
-          : undefined,
+    icon: type === "agent" ? agentDetail?.icon : stringOr(pkgDetail?.manifest?.icon, undefined),
     color: type === "agent" ? agentDetail?.color : undefined,
     readsPublished: type === "agent" && agentDetail?.definition === "published",
     homeSpaceName,
@@ -299,40 +282,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // ── Render ──
   const isBuiltIn = source === "system";
 
-  // Determine available tabs based on type
-
-  // The rendered manifest, next to the raw artifact it comes from.
-  const overviewTab: DetailTab<PackageTab> = {
-    value: "overview",
-    label: t("detail.overview.summary"),
-    icon: LayoutGrid,
-  };
-
-  const agentTabLabels: Record<(typeof AGENT_DETAIL_TABS)[number], string> = {
-    overview: t("detail.overview.summary"),
-    runs: t("detail.tabRuns"),
-    memory: t("detail.tabMemory"),
-    settings: t("detail.tabSettings"),
-  };
-  const agentTabIcons: Record<(typeof AGENT_DETAIL_TABS)[number], DetailTab<PackageTab>["icon"]> = {
-    overview: LayoutGrid,
-    runs: Play,
-    memory: Database,
-    settings: Settings2,
-  };
-  const agentTabs: Array<DetailTab<PackageTab>> = AGENT_DETAIL_TABS.map((value) => ({
+  const tabDefs: DetailTab<PackageTab>[] = tabs.map(({ value, labelKey, icon }) => ({
     value,
-    label: agentTabLabels[value],
-    icon: agentTabIcons[value],
+    label: t(labelKey),
+    icon,
   }));
-
-  const pkgTabs: Array<DetailTab<PackageTab>> = [
-    overviewTab,
-    { value: "settings", label: t("detail.tabSettings"), icon: Settings2 },
-    { value: "usedBy", label: t("packages.usedBy"), icon: Layers },
-  ];
-
-  const tabDefs = type === "agent" ? agentTabs : pkgTabs;
 
   // The trigger's own verdict, which also bounds its `?newVersion` URL.
   const canCreateVersion = !!homeWritable && !isBuiltIn && !isHistoricalVersion && isOwned;
@@ -390,7 +344,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             draftVerdictPending={draftVerdictPending}
             hasUnarchivedChanges={!!hasArchivableChanges}
             latestPublishedVersion={versionInfo?.latest_published_version}
-            tabs={agentTabs}
+            tabs={tabDefs}
             actions={
               <div className="flex items-center gap-2">
                 {catalogueLink}
@@ -447,12 +401,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           would otherwise turn a click into a 404. */}
         {agentDetail && !agentDetail.active && <AgentInactiveAlert packageId={packageId} />}
 
-        {/* Nothing has ever been published and the working copy is not this
-          reader's: what the page renders below is the author's work in
-          progress. Saying it is what makes the greyed-out Run button legible
-          — and the page renders at all precisely because reading a definition
-          is not running it. True of every package type: the server answers
-          `definition` for all four from one function. */}
+        {/* Nothing published and the working copy is not this reader's: says why Run is greyed out. */}
         <PackageOwnershipNotice
           type={type}
           isOwned={isOwned}
@@ -461,7 +410,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         />
 
         {type === "agent" && agentDetail && (
-          <div className="overflow-visible" data-agent-detail-surface>
+          <>
             <DetailTabPanel value="overview">
               <div className="flex flex-col gap-8">
                 <AgentIdentity
@@ -518,7 +467,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 <RoleLimitNotice className="m-6">{t("detail.roleLimit.memory")}</RoleLimitNotice>
               )}
             </DetailTabPanel>
-          </div>
+          </>
         )}
 
         {type !== "agent" && (
@@ -571,7 +520,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             type={type}
             packageId={packageId}
             hasUnarchivedChanges={hasTimestampChanges}
-            etag={(agentDetail ?? pkgDetail)?.etag}
+            etag={base?.etag}
           />
         )}
       </DetailTabs>

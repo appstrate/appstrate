@@ -19,7 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ArrowLeft, Check, ExternalLink, Inbox, LibraryBig, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, Inbox, LibraryBig } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
@@ -53,7 +53,7 @@ import {
   useSetPackageActive,
   type LibraryPackageItem,
 } from "../hooks/use-library";
-import { activationGate, catalogueDeeds, type ActivationGate } from "../lib/catalogue-gates";
+import { activationGate, catalogueDeeds } from "../lib/catalogue-gates";
 import {
   cataloguePlacement,
   detailSpace,
@@ -86,19 +86,17 @@ import {
   useCatalogueOriginColumn,
   useCatalogueSpaceColumns,
   useCatalogueSelectColumn,
-  type CatalogueRowState,
 } from "./catalogue-columns";
 import { RailLink } from "./settings/rail-link";
 import { RailGroup, RailHeader } from "./settings/rail-shell";
 import { SettingsHeading } from "./settings/settings-heading";
 
-const KIND: Record<PackageType, { icon: LucideIcon; titleKey: string }> = {
-  agent: { icon: PACKAGE_TYPE_ICON.agent, titleKey: "packages.type.agents" },
-  skill: { icon: PACKAGE_TYPE_ICON.skill, titleKey: "packages.type.skills" },
-  "mcp-server": { icon: PACKAGE_TYPE_ICON["mcp-server"], titleKey: "packages.type.mcp-servers" },
-  integration: { icon: PACKAGE_TYPE_ICON.integration, titleKey: "packages.type.integrations" },
+const TITLE_KEY: Record<PackageType, string> = {
+  agent: "packages.type.agents",
+  skill: "packages.type.skills",
+  "mcp-server": "packages.type.mcp-servers",
+  integration: "packages.type.integrations",
 };
-const KINDS = CATALOGUE_KINDS.map((type) => ({ type, ...KIND[type] }));
 
 /**
  * Columns the catalogue drops. `origin` is drawn again with each package's home
@@ -108,6 +106,14 @@ const CATALOGUE_DROPS = ["state", "actions", "origin", "keywords"];
 
 /** The parameter that qualifies the sheet's `?package=`, and leaves with it. */
 const SHEET_COMPANIONS = [CATALOGUE_VERSION_PARAM];
+
+const toCardItem = (pkg: LibraryPackageItem): CardItem => ({
+  id: pkg.id,
+  displayName: pkg.name || pkg.id,
+  description: pkg.description,
+  type: pkg.type,
+  source: pkg.source as CardItem["source"],
+});
 
 /** One activation waiting on the integration question. */
 interface Closure {
@@ -147,7 +153,7 @@ export function OrgCatalogueModal({
 
   const discovering = reading === "discover";
   const view: "cards" | "table" = discovering ? "cards" : "table";
-  const kind = KIND[active];
+  const titleKey = TITLE_KEY[active];
   const orgName = currentOrg?.name ?? "";
 
   // Integrations resolve their activation server-side; only their view pays for the request.
@@ -205,26 +211,18 @@ export function OrgCatalogueModal({
     const placement = placementById.get(item.id);
     return placement ? inPlacedTab(placement) : false;
   });
-  const stateOf = (item: CardItem): CatalogueRowState => {
-    const placement = placementById.get(item.id);
-    if (!placement) return { activeIn: [], activeHere: false };
-    return {
-      activeIn: placement.activeIn.map(spaceNameOf),
-      activeHere: placement.here === "active",
-      placedHere: placement.here === "inactive",
-      offeredHere: placement.here === "offered",
-    };
-  };
-  /** The reader's verdict for one switch, in the direction it would go (`lib/catalogue-gates`). */
-  const gateOf = (pkg: LibraryPackageItem, targetSpaceId: string, next: boolean): ActivationGate =>
-    activationGate(pkg, targetSpaceId, next);
   const mayActivateIn = (pkg: LibraryPackageItem, targetSpaceId: string) =>
-    gateOf(pkg, targetSpaceId, true).allowed;
+    activationGate(pkg, targetSpaceId, true).allowed;
   const rowOf = (item: Pick<CardItem, "id">) => ofKind.find((row) => row.id === item.id);
   /** A row joins a bulk activation only when there is something the reader may switch on here. */
   const canActivate = (item: CardItem) => {
     const row = rowOf(item);
-    return !!row && !!spaceId && !stateOf(item).activeHere && mayActivateIn(row, spaceId);
+    return (
+      !!row &&
+      !!spaceId &&
+      placementById.get(item.id)?.here !== "active" &&
+      mayActivateIn(row, spaceId)
+    );
   };
   const writableOf = (item: Pick<CardItem, "id">) => rowOf(item)?.home_writable === true;
   const deedsOf = (item: Pick<CardItem, "id">) => {
@@ -284,11 +282,7 @@ export function OrgCatalogueModal({
   const offered: CardItem[] = rows.map((item) => {
     const look = agentLook.get(item.id);
     const row: CardItem = {
-      id: item.id,
-      displayName: item.name || item.id,
-      description: item.description,
-      type: active,
-      source: item.source as CardItem["source"],
+      ...toCardItem(item),
       ...(active === "agent" && { identity: { icon: look?.icon, color: look?.color } }),
       ...(active === "integration" && { logo: integrationById.get(item.id)?.manifest.icon }),
     };
@@ -368,15 +362,7 @@ export function OrgCatalogueModal({
       { replace: true, state: location.state },
     );
   };
-  const previewedItem: CardItem | undefined = previewed
-    ? {
-        id: previewed.id,
-        displayName: previewed.name || previewed.id,
-        description: previewed.description,
-        type: active,
-        source: previewed.source as CardItem["source"],
-      }
-    : undefined;
+  const previewedItem = previewed ? toCardItem(previewed) : undefined;
 
   const selectColumn = useCatalogueSelectColumn({
     selected,
@@ -444,7 +430,7 @@ export function OrgCatalogueModal({
     placementOf: (item) => placementById.get(item.id),
     gateOf: (item, targetSpaceId, next) => {
       const row = rowOf(item);
-      return row ? gateOf(row, targetSpaceId, next) : { allowed: false, refusal: null };
+      return row ? activationGate(row, targetSpaceId, next) : { allowed: false, refusal: null };
     },
     busy: activate.isPending,
     onSetActive: (item, targetSpaceId, next) => void onSetActive(item, targetSpaceId, next),
@@ -493,16 +479,16 @@ export function OrgCatalogueModal({
       ))}
     </div>
   );
-  const kindRows = KINDS.map((entry) => (
+  const kindRows = CATALOGUE_KINDS.map((type) => (
     <RailLink
-      key={entry.type}
+      key={type}
       item={{
-        to: hrefOf(reading === "shared" ? "discover" : reading, entry.type),
-        icon: entry.icon,
+        to: hrefOf(reading === "shared" ? "discover" : reading, type),
+        icon: PACKAGE_TYPE_ICON[type],
       }}
-      label={t(entry.titleKey)}
-      count={library?.packages[entry.type]?.length}
-      active={reading !== "shared" && entry.type === active}
+      label={t(TITLE_KEY[type])}
+      count={library?.packages[type]?.length}
+      active={reading !== "shared" && type === active}
     />
   ));
   // Shown while any share waits and while open, so the last activation leaves the reader on its empty state.
@@ -567,7 +553,7 @@ export function OrgCatalogueModal({
               stuck ? "opacity-100" : "opacity-0",
             )}
           >
-            {t(kind.titleKey)}
+            {t(titleKey)}
           </span>
         )
       }
@@ -579,16 +565,7 @@ export function OrgCatalogueModal({
           mayActivateIn={mayActivateIn}
           busy={activate.isPending}
           onActivate={(pkg, targetSpaceId) =>
-            void onSetActive(
-              {
-                id: pkg.id,
-                displayName: pkg.name || pkg.id,
-                type: pkg.type,
-                source: pkg.source as CardItem["source"],
-              },
-              targetSpaceId,
-              true,
-            )
+            void onSetActive(toCardItem(pkg), targetSpaceId, true)
           }
           // Opens in the package's own kind, pushed as the sheet's own opening so Back returns to this list.
           onOpen={(pkg) =>
@@ -603,7 +580,7 @@ export function OrgCatalogueModal({
           type={active}
           spaces={librarySpaces}
           placement={placementOf(previewed)}
-          gateOf={(targetSpaceId, next) => gateOf(previewed, targetSpaceId, next)}
+          gateOf={(targetSpaceId, next) => activationGate(previewed, targetSpaceId, next)}
           mayConfigureIn={(targetSpaceId) =>
             mayConfigurePackage(grantById.get(targetSpaceId), active)
           }
@@ -656,17 +633,13 @@ export function OrgCatalogueModal({
           }
           holds={active}
           tableId={`catalogue-${active}`}
-          entity={t(kind.titleKey)}
+          entity={t(titleKey)}
           emptyMessage={t(discovering ? "catalogue.emptyDiscover" : "catalogue.emptyPlaced")}
           emptyHint={t(discovering ? "catalogue.emptyDiscoverHint" : "catalogue.emptyPlacedHint")}
-          emptyIcon={kind.icon}
+          emptyIcon={PACKAGE_TYPE_ICON[active]}
           list={list}
           view={view}
-          header={
-            <>
-              <SettingsHeading className="mb-4" title={t(kind.titleKey)} />
-            </>
-          }
+          header={<SettingsHeading className="mb-4" title={t(titleKey)} />}
           tabs={
             active === "integration" ? (
               <CollectionTabs

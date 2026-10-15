@@ -229,6 +229,32 @@ const PRE_SHELL_PAGES = [
 ] as const;
 
 /**
+ * Signed-out auth-entry routes go through `HostedAuthGate`: in OIDC mode it redirects to the
+ * hosted page before the native form mounts. `/register` stays mounted when `signupDisabled`
+ * so an invited address can sign up; the real barrier is server-side
+ * (`databaseHooks.user.create.before`).
+ */
+const AUTH_GATE_PAGES = [
+  ["/login", LoginPage, "login"],
+  ["/register", RegisterPage, "signup"],
+  ["/forgot-password", ForgotPasswordPage, "login"],
+  ["/reset-password", ResetPasswordPage, "login"],
+  ["/magic-link", MagicLinkPage, "login"],
+] as const;
+
+/** Mounted signed out AND signed in: the session cookie is already set when the browser lands, so the stashed `returnTo` is consumed on either tree. */
+const authCallbackRoute = (
+  <Route
+    path="/auth/callback"
+    element={
+      <PreShellRoute>
+        <AuthCallbackPage />
+      </PreShellRoute>
+    }
+  />
+);
+
+/**
  * The page of every signed-in route, keyed like its access declaration
  * (`lib/route-access.ts`): a route without one, or one without a page, fails to compile.
  */
@@ -290,22 +316,17 @@ const PAGES: Record<RoutePath, ReactNode> = {
 
 const PATHS = Object.keys(PAGES) as RoutePath[];
 
-/**
- * Routed modals mount in the overlay tree ONLY (the main tree renders the
- * background location, so a copy there could never match).
- */
-function mountOf(path: RoutePath): "main" | "overlay" {
-  return isOverlayPath(path) ? "overlay" : "main";
-}
-
 /** The nested layouts: the settings scopes, each index opening the scope's first page. */
 const LAYOUTS = Object.values(SETTINGS_INDEX);
 type LayoutPath = (typeof LAYOUTS)[number];
 const inLayout = (path: RoutePath) => LAYOUTS.some((layout) => isUnder(path, layout));
 
-/** A mount's routes that no layout nests. */
-const flatPaths = (mount: ReturnType<typeof mountOf>) =>
-  PATHS.filter((path) => mountOf(path) === mount && !inLayout(path));
+/**
+ * A tree's routes that no layout nests. Routed modals mount in the overlay tree ONLY (the main
+ * tree renders the background location, so a copy there could never match).
+ */
+const flatPaths = (overlay: boolean) =>
+  PATHS.filter((path) => isOverlayPath(path) === overlay && !inLayout(path));
 
 /** The package detail routes, by family. */
 const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
@@ -550,66 +571,24 @@ export function App() {
     return (
       <ErrorBoundary>
         <Routes>
-          {/* Auth-entry routes go through `HostedAuthGate`: in OIDC mode it redirects to the
-              hosted page before the native form mounts. */}
-          <Route
-            path="/login"
-            element={
-              <HostedAuthGate starter="login">
-                <LoginPage />
-              </HostedAuthGate>
-            }
-          />
-          {/* `/register` stays mounted when `signupDisabled` so an invited address can sign up;
-              the real barrier is server-side (`databaseHooks.user.create.before`). */}
-          <Route
-            path="/register"
-            element={
-              <HostedAuthGate starter="signup">
-                <RegisterPage />
-              </HostedAuthGate>
-            }
-          />
+          {AUTH_GATE_PAGES.map(([path, Page, starter]) => (
+            <Route
+              key={path}
+              path={path}
+              element={
+                <HostedAuthGate starter={starter}>
+                  <Page />
+                </HostedAuthGate>
+              }
+            />
+          ))}
           {/* Server-rendered flows (device-flow `/activate`) land here with `?returnTo=`;
               the bridge moves it into `state.from` for `LoginPage`. */}
           <Route path="/auth/login" element={<AuthLoginReturnToBridge />} />
-          {features.oidc && (
-            <Route
-              path="/auth/callback"
-              element={
-                <Suspense fallback={<BootScreen />}>
-                  <AuthCallbackPage />
-                </Suspense>
-              }
-            />
-          )}
+          {features.oidc && authCallbackRoute}
           {/* `/verify-email` is deliberately NOT gated: in OIDC + SMTP mode the server-rendered
               register flow routes unauthenticated visitors here (see verify-email.tsx). */}
           <Route path="/verify-email" element={<VerifyEmailPage />} />
-          <Route
-            path="/forgot-password"
-            element={
-              <HostedAuthGate starter="login">
-                <ForgotPasswordPage />
-              </HostedAuthGate>
-            }
-          />
-          <Route
-            path="/reset-password"
-            element={
-              <HostedAuthGate starter="login">
-                <ResetPasswordPage />
-              </HostedAuthGate>
-            }
-          />
-          <Route
-            path="/magic-link"
-            element={
-              <HostedAuthGate starter="login">
-                <MagicLinkPage />
-              </HostedAuthGate>
-            }
-          />
           {/* `/invite/:token` is NOT wrapped: it drives `useHostedAuthRedirect` itself (invite-accept.tsx). */}
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="*" element={<SignedOutFallback />} />
@@ -639,18 +618,7 @@ export function App() {
             <Routes location={page}>
               <Route path="/login" element={<Navigate to="/" replace />} />
               <Route path="/register" element={<Navigate to="/" replace />} />
-              {/* `/auth/callback` must also exist here: the session cookie is already set when the
-                  browser lands, so without it the stashed `returnTo` is never consumed. */}
-              {features.oidc && (
-                <Route
-                  path="/auth/callback"
-                  element={
-                    <Suspense fallback={<BootScreen />}>
-                      <AuthCallbackPage />
-                    </Suspense>
-                  }
-                />
-              )}
+              {features.oidc && authCallbackRoute}
               <Route path="/invite/:token" element={<InviteAcceptPage />} />
               {PRE_SHELL_PAGES.map(([path, Page]) => (
                 <Route
@@ -664,7 +632,7 @@ export function App() {
                 />
               ))}
               <Route element={<MainLayout />}>
-                {flatPaths("main").map(pageRoute)}
+                {flatPaths(false).map(pageRoute)}
                 <Route path="*" element={<NotFoundPage />} />
               </Route>
             </Routes>
@@ -675,7 +643,7 @@ export function App() {
                   {/* One dialog for every panel overlay: it opens once and its
                       panes (skeleton, then page) change inside it. */}
                   <Route element={<OverlayFrame />}>
-                    {flatPaths("overlay").map(pageRoute)}
+                    {flatPaths(true).map(pageRoute)}
                     <Route
                       element={
                         <Suspense fallback={<OverlayPanelSkeleton />}>

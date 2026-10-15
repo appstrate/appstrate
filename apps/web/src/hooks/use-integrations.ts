@@ -248,13 +248,6 @@ export function useAgentConnectionReadiness(agentPackageId: string | undefined, 
 type AgentConnectionReadiness =
   paths["/api/agents/{scope}/{name}/connection-readiness"]["get"]["responses"]["200"]["content"]["application/json"];
 
-/** One integration's verdict out of the bulk readiness payload. */
-function resolutionOf(data: AgentConnectionReadiness, integrationId: string | undefined) {
-  return (
-    data.integrations.find((i) => i.integration_package_id === integrationId)?.resolution ?? null
-  );
-}
-
 /** The declared integrations whose connection refuses a launch (the server's `run_blocking`). */
 export function blockingIntegrationIds(data: AgentConnectionReadiness): string[] {
   return data.integrations.filter((i) => i.run_blocking).map((i) => i.integration_package_id);
@@ -274,7 +267,10 @@ export function useReadIntegrationResolution(
   return () => {
     const state = qc.getQueryState<AgentConnectionReadiness>(queryKey);
     if (state?.status === "error") throw state.error;
-    return state?.data ? resolutionOf(state.data, integrationId) : null;
+    return (
+      state?.data?.integrations.find((i) => i.integration_package_id === integrationId)
+        ?.resolution ?? null
+    );
   };
 }
 
@@ -295,23 +291,8 @@ export function useIntegrationReadinessEntry(
 
 /** Mint a hosted-connect-portal session. Auth-type-agnostic: `connect_url` dispatches server-side to the OAuth screen or credential form. */
 export function useInitiateIntegrationConnect() {
-  return useMutation({
+  return $api.useMutation("post", "/api/integrations/{packageId}/auths/{authKey}/connect/session", {
     meta: { errorHandledByCaller: true },
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; authKey: string } };
-      body: {
-        scopes?: string[];
-        force_account_select?: boolean;
-        connection_id?: string;
-      };
-    }) => {
-      const { data } = await client.POST(
-        "/api/integrations/{packageId}/auths/{authKey}/connect/session",
-        vars,
-      );
-      if (!data) throw new Error("empty response");
-      return data;
-    },
   });
 }
 
@@ -447,16 +428,13 @@ export function useSetDefaultIntegrationClient(tier: IntegrationClientTier) {
 /** Move a space client to the org tier. Its id is unchanged, so existing connections keep working. */
 export function usePromoteIntegrationOAuthClient() {
   const onSuccess = useClientMutationSuccess("integration.clients.promote.success");
-  return useMutation({
-    mutationFn: async (vars: { params: ClientPath }) => {
-      const { data } = await client.POST(
-        "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
-        vars,
-      );
-      return data;
+  return $api.useMutation(
+    "post",
+    "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
+    {
+      onSuccess,
     },
-    onSuccess,
-  });
+  );
 }
 
 /** Also deletes the connections it minted — in every space for an org client. */
@@ -519,16 +497,7 @@ export function useAgentsConsumingIntegration(packageId: string | undefined) {
 export function useUpdateIntegrationSettings() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string } };
-      body: { block_user_connections: boolean };
-    }) => {
-      const { data } = await client.PATCH("/api/integrations/{packageId}/settings", {
-        ...vars,
-      });
-      return data;
-    },
+  return $api.useMutation("patch", "/api/integrations/{packageId}/settings", {
     onSuccess: () => {
       toast.success(t("integration.admin.blockUserConnections.updated"));
       void invalidatePaths(qc, ["/api/integrations/{packageId}"]);
@@ -539,17 +508,8 @@ export function useUpdateIntegrationSettings() {
 export function useUpsertIntegrationPin() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; agentPackageId: string } };
-      /** The WHOLE pinned set — this write replaces it. */
-      body: { connection_ids: string[] };
-    }) => {
-      const { data } = await client.PUT("/api/integrations/{packageId}/pins/{agentPackageId}", {
-        ...vars,
-      });
-      return data;
-    },
+  // The body is the WHOLE pinned set — this write replaces it.
+  return $api.useMutation("put", "/api/integrations/{packageId}/pins/{agentPackageId}", {
     onSuccess: () => {
       toast.success(t("integration.admin.pin.upserted"));
       // Admin pins top the resolver cascade: every readiness verdict moves with them.
@@ -561,15 +521,7 @@ export function useUpsertIntegrationPin() {
 export function useDeleteIntegrationPin() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; agentPackageId: string } };
-    }) => {
-      const { data } = await client.DELETE("/api/integrations/{packageId}/pins/{agentPackageId}", {
-        ...vars,
-      });
-      return data!;
-    },
+  return $api.useMutation("delete", "/api/integrations/{packageId}/pins/{agentPackageId}", {
     onSuccess: ({ schedules_disabled_count: disabledCount }) => {
       if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
       else toast.success(t("integration.admin.pin.deleted"));
@@ -599,17 +551,8 @@ export function useIntegrationOrgDefault(packageId: string | undefined) {
 export function useUpsertIntegrationOrgDefault() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string } };
-      /** The WHOLE default set — this write replaces it. */
-      body: { connection_ids: string[]; enforce: boolean };
-    }) => {
-      const { data } = await client.PUT("/api/integrations/{packageId}/default", {
-        ...vars,
-      });
-      return data;
-    },
+  // The body is the WHOLE default set — this write replaces it.
+  return $api.useMutation("put", "/api/integrations/{packageId}/default", {
     onSuccess: () => {
       toast.success(t("integration.admin.orgDefault.updated"));
       // Agent-page picker verdicts depend on the org default.
@@ -621,13 +564,7 @@ export function useUpsertIntegrationOrgDefault() {
 export function useDeleteIntegrationOrgDefault() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: { params: { path: { packageId: string } } }) => {
-      const { data } = await client.DELETE("/api/integrations/{packageId}/default", {
-        ...vars,
-      });
-      return data!;
-    },
+  return $api.useMutation("delete", "/api/integrations/{packageId}/default", {
     onSuccess: ({ schedules_disabled_count: disabledCount }) => {
       if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
       else toast.success(t("integration.admin.orgDefault.deleted"));
@@ -638,21 +575,9 @@ export function useDeleteIntegrationOrgDefault() {
 
 export function useRenameIntegrationConnection() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; connectionId: string } };
-      body: { label: string };
-    }) => {
-      const { data } = await client.PATCH(
-        "/api/integrations/{packageId}/connections/{connectionId}",
-        vars,
-      );
-      return data;
-    },
-    onSuccess: () => {
-      // A label shows on every picker and readiness view, not just the connection list.
-      return invalidateIntegrationQueries(qc);
-    },
+  return $api.useMutation("patch", "/api/integrations/{packageId}/connections/{connectionId}", {
+    // A label shows on every picker and readiness view, not just the connection list.
+    onSuccess: () => invalidateIntegrationQueries(qc),
   });
 }
 

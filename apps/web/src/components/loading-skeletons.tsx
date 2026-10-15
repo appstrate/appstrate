@@ -27,7 +27,7 @@ import { usePackageListCrumb } from "../hooks/use-package-list-crumb";
 import { DetailBarSkeleton } from "./detail-bar";
 
 /** One `status` for assistive technology; the blocks themselves are hidden from it. */
-function Waiting({ className, children }: { className?: string; children: ReactNode }) {
+export function Waiting({ className, children }: { className?: string; children: ReactNode }) {
   const { t } = useTranslation("common");
   return (
     <div role="status" aria-busy="true" aria-label={t("loading")} className={className}>

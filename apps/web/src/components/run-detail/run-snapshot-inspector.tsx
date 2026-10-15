@@ -16,7 +16,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
-import { FILE_URI_PREFIX } from "@appstrate/core/file-uri";
+import { extractFileIds } from "@appstrate/core/file-uri";
 import { RunTurnsDetail } from "./run-turns-detail";
 import { journalLevel, type RunTurnRow } from "../log-utils";
 import { RunCostReadout } from "../run-cost-readout";
@@ -45,6 +45,7 @@ import { readRunContext } from "../run-context";
 import { ContextGaugeReadout } from "./run-context-gauge";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { OperationalStat } from "../operational-stat";
+import { cn } from "@appstrate/ui/cn";
 
 export function RunSnapshotInspector({
   run,
@@ -100,38 +101,46 @@ export function RunSnapshotInspector({
   // problem, so it opens the overview as a neutral card of its own.
   const problem = run.error && (run.status === "failed" || run.status === "timeout");
   const cancelled = run.status === "cancelled";
-  const statSkeleton = <Skeleton className="h-6 w-10" />;
+  // A count the run never reported stays absent; a reported zero is shown.
+  const tokenFacts = [
+    { label: t("run.usageInputTokens"), count: usage?.input_tokens },
+    { label: t("run.usageOutputTokens"), count: usage?.output_tokens },
+    { label: t("run.usageCacheCreation"), count: usage?.cache_creation_input_tokens },
+    { label: t("run.usageCacheRead"), count: usage?.cache_read_input_tokens },
+  ];
+  const ending = problem
+    ? {
+        title: t("run.overview.problem"),
+        tone: "blocking",
+        itemTitle: runErrorText(run, t),
+        actions: (
+          <HealthAction onClick={() => onOpenJournal("errors")}>
+            {t("run.overview.problemJournal")}
+          </HealthAction>
+        ),
+      }
+    : cancelled
+      ? {
+          title: t("run.overview.cancelled"),
+          tone: "neutral",
+          // The run keeps no name for who stopped it: the platform's reason and the time do.
+          itemTitle: run.error ? runErrorText(run, t) : t("run.cancelledByUser"),
+          description: run.completed_at ? formatDateField(run.completed_at, "datetime") : undefined,
+          actions: null,
+        }
+      : null;
 
   return (
     <>
       <div data-run-snapshot>
-        {problem && (
+        {ending && (
           <div className="mb-6">
-            <HealthCard title={t("run.overview.problem")} tone="blocking" badge={null}>
+            <HealthCard title={ending.title} tone={ending.tone} badge={null}>
               <ul className="px-4">
                 <HealthCardItem
-                  title={runErrorText(run, t)}
-                  actions={
-                    <HealthAction onClick={() => onOpenJournal("errors")}>
-                      {t("run.overview.problemJournal")}
-                    </HealthAction>
-                  }
-                />
-              </ul>
-            </HealthCard>
-          </div>
-        )}
-        {cancelled && (
-          <div className="mb-6">
-            <HealthCard title={t("run.overview.cancelled")} tone="neutral" badge={null}>
-              <ul className="px-4">
-                {/* The run keeps no name for who stopped it: the platform's reason and the time do. */}
-                <HealthCardItem
-                  title={run.error ? runErrorText(run, t) : t("run.cancelledByUser")}
-                  description={
-                    run.completed_at ? formatDateField(run.completed_at, "datetime") : undefined
-                  }
-                  actions={null}
+                  title={ending.itemTitle}
+                  description={ending.description}
+                  actions={ending.actions}
                 />
               </ul>
             </HealthCard>
@@ -205,33 +214,15 @@ export function RunSnapshotInspector({
                   : undefined
               }
             >
-              <dl className="grid grid-cols-2">
-                <OperationalStat
-                  className="border-border border-r border-b"
-                  label={t("run.overview.logEvents")}
-                  value={logsLoading ? statSkeleton : formatNumber(logs.length)}
-                  target={logs.length > 0 ? { onClick: () => onOpenJournal() } : undefined}
-                />
-                <OperationalStat
-                  className="border-border border-b"
-                  label={t("run.overview.toolCalls")}
-                  value={logsLoading ? statSkeleton : formatNumber(toolCallCount)}
-                  target={toolCallCount > 0 ? { onClick: () => onOpenJournal("tools") } : undefined}
-                />
-                <OperationalStat
-                  className="border-border border-r"
-                  label={t("run.overview.warnings")}
-                  value={logsLoading ? statSkeleton : formatNumber(warningCount)}
-                  target={
-                    warningCount > 0 ? { onClick: () => onOpenJournal("warnings") } : undefined
-                  }
-                />
-                <OperationalStat
-                  label={t("run.overview.errors")}
-                  value={logsLoading ? statSkeleton : formatNumber(errorCount)}
-                  target={errorCount > 0 ? { onClick: () => onOpenJournal("errors") } : undefined}
-                />
-              </dl>
+              <StatGrid
+                loading={logsLoading}
+                stats={[
+                  [t("run.overview.logEvents"), logs.length, () => onOpenJournal()],
+                  [t("run.overview.toolCalls"), toolCallCount, () => onOpenJournal("tools")],
+                  [t("run.overview.warnings"), warningCount, () => onOpenJournal("warnings")],
+                  [t("run.overview.errors"), errorCount, () => onOpenJournal("errors")],
+                ]}
+              />
             </DetailSectionCard>
 
             <DetailSectionCard
@@ -247,26 +238,23 @@ export function RunSnapshotInspector({
                   : undefined
               }
             >
-              <dl className="grid grid-cols-2">
-                <OperationalStat
-                  className="border-border border-r border-b"
-                  label={t("run.overview.outputFiles")}
-                  value={formatNumber(run.file_counts.output)}
-                  target={run.file_counts.output > 0 ? { onClick: onOpenResults } : undefined}
-                />
-                <OperationalStat
-                  className="border-border border-b"
-                  label={t("run.overview.structuredFields")}
-                  value={logsLoading ? statSkeleton : formatNumber(structuredFieldCount)}
-                  target={structuredFieldCount > 0 ? { onClick: onOpenResults } : undefined}
-                />
-                <OperationalStat
-                  className="col-span-2"
-                  label={t("run.overview.memoryChanges")}
-                  value={memoryLoading ? statSkeleton : formatNumber(memoryChangeCount)}
-                  target={memoryChangeCount > 0 ? { onClick: onOpenResults } : undefined}
-                />
-              </dl>
+              <StatGrid
+                stats={[
+                  [t("run.overview.outputFiles"), run.file_counts.output, onOpenResults],
+                  [
+                    t("run.overview.structuredFields"),
+                    structuredFieldCount,
+                    onOpenResults,
+                    logsLoading,
+                  ],
+                  [
+                    t("run.overview.memoryChanges"),
+                    memoryChangeCount,
+                    onOpenResults,
+                    memoryLoading,
+                  ],
+                ]}
+              />
             </DetailSectionCard>
           </div>
 
@@ -291,25 +279,13 @@ export function RunSnapshotInspector({
                     </Fact>
                   )}
                   {run.model_label && <Fact label={t("run.usageModel")}>{run.model_label}</Fact>}
-                  {usage?.input_tokens != null && (
-                    <Fact label={t("run.usageInputTokens")}>
-                      {formatNumber(usage.input_tokens)}
-                    </Fact>
-                  )}
-                  {usage?.output_tokens != null && (
-                    <Fact label={t("run.usageOutputTokens")}>
-                      {formatNumber(usage.output_tokens)}
-                    </Fact>
-                  )}
-                  {usage?.cache_creation_input_tokens != null && (
-                    <Fact label={t("run.usageCacheCreation")}>
-                      {formatNumber(usage.cache_creation_input_tokens)}
-                    </Fact>
-                  )}
-                  {usage?.cache_read_input_tokens != null && (
-                    <Fact label={t("run.usageCacheRead")}>
-                      {formatNumber(usage.cache_read_input_tokens)}
-                    </Fact>
+                  {tokenFacts.map(
+                    ({ label, count }) =>
+                      count != null && (
+                        <Fact key={label} label={label}>
+                          {formatNumber(count)}
+                        </Fact>
+                      ),
                   )}
                   {logsLoading ? (
                     <Fact label={t("run.usageContext")}>
@@ -434,6 +410,29 @@ export function RunSnapshotInspector({
   );
 }
 
+/** A figure and where it leads; `loading` overrides the grid's own while its source is read. */
+type Stat = [label: string, count: number, onClick: () => void, loading?: boolean];
+
+function StatGrid({ stats, loading = false }: { stats: Stat[]; loading?: boolean }) {
+  return (
+    <dl className="grid grid-cols-2">
+      {stats.map(([label, count, onClick, busy = loading], i) => (
+        <OperationalStat
+          key={label}
+          className={cn(
+            i % 2 === 0 && i + 1 < stats.length && "border-border border-r",
+            Math.floor(i / 2) < Math.floor((stats.length - 1) / 2) && "border-border border-b",
+            i % 2 === 0 && i === stats.length - 1 && "col-span-2",
+          )}
+          label={label}
+          value={busy ? <Skeleton className="h-6 w-10" /> : formatNumber(count)}
+          target={count > 0 ? { onClick } : undefined}
+        />
+      ))}
+    </dl>
+  );
+}
+
 /**
  * The input the run was given: its values, then the files it consumed. Fed an
  * already-resolved file list, so what it says without `files:read` or under a
@@ -461,9 +460,10 @@ export function RunInputFacts({
   const inputDocuments = files.filter((file) => runFileDirection(file, run.id) === "input");
   const input = (run.input as Record<string, unknown> | null) ?? null;
   const inputEntries = input ? Object.entries(input) : [];
-  const inputValueEntries = inputEntries.filter(([, value]) => !hasDocumentReference(value));
-  const inputDocumentEntries = inputEntries.filter(([, value]) => hasDocumentReference(value));
-  const inputFileCount = Math.max(run.file_counts.input, countDocumentReferences(input));
+  const isDocumentEntry = ([, value]: [string, unknown]) => extractFileIds(value).length > 0;
+  const inputValueEntries = inputEntries.filter((entry) => !isDocumentEntry(entry));
+  const inputDocumentEntries = inputEntries.filter(isDocumentEntry);
+  const inputFileCount = run.file_counts.input;
   const inputDocumentLabel =
     inputDocumentEntries.length === 1
       ? humanizeInputKey(inputDocumentEntries[0]![0])
@@ -519,36 +519,6 @@ function humanizeInputKey(key: string): string {
     .replace(/[_-]+/g, " ")
     .trim();
   return label ? label.charAt(0).toLocaleUpperCase() + label.slice(1) : key;
-}
-
-function hasDocumentReference(value: unknown): boolean {
-  if (typeof value === "string") return value.startsWith(FILE_URI_PREFIX);
-  if (Array.isArray(value)) return value.some(hasDocumentReference);
-  if (value && typeof value === "object") {
-    return Object.values(value as Record<string, unknown>).some(hasDocumentReference);
-  }
-  return false;
-}
-
-function countDocumentReferences(value: unknown): number {
-  const references = new Set<string>();
-
-  const visit = (candidate: unknown) => {
-    if (typeof candidate === "string") {
-      if (candidate.startsWith(FILE_URI_PREFIX)) references.add(candidate);
-      return;
-    }
-    if (Array.isArray(candidate)) {
-      candidate.forEach(visit);
-      return;
-    }
-    if (candidate && typeof candidate === "object") {
-      Object.values(candidate as Record<string, unknown>).forEach(visit);
-    }
-  };
-
-  visit(value);
-  return references.size;
 }
 
 /**

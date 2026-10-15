@@ -22,17 +22,6 @@ import { MetaBadge } from "./status-badge";
 import type { CardItem } from "../lib/package-card-item";
 import type { IntegrationProtocol } from "../lib/integration-collection";
 
-/** What the catalogue knows about one row beyond the package itself. */
-export interface CatalogueRowState {
-  /** Names of the spaces this caller can see where the package is active. */
-  activeIn: string[];
-  activeHere: boolean;
-  /** Placed here and switched off: its per-space settings are kept. */
-  placedHere?: boolean;
-  /** Offered here and switched on by nobody (a placement whose state is `none`). */
-  offeredHere?: boolean;
-}
-
 export function useCatalogueSelectColumn({
   selected,
   allSelected,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const SAVE_PAUSE_MS = 650;
 
@@ -40,18 +40,16 @@ export function createPauseSaver<T>(delayMs = SAVE_PAUSE_MS) {
 }
 
 /**
- * Debounced save of a continuously edited value: `save` runs a pause after the last change, after
- * `done` clears the edited flag. A pending save is sent at unmount / pagehide. `value` must keep
- * its identity between renders that did not change it: it re-arms the timer.
+ * Debounced save of a continuously edited value: the returned `markEdited` arms it, `save` runs a
+ * pause after the last change and clears the edited flag. A pending save is sent at unmount /
+ * pagehide. `value` must keep its identity between renders that did not change it: it re-arms the
+ * timer. While `enabled` is false an edit stays marked but nothing is saved.
  */
-export function useSaveAfterPause<T>(
-  value: T,
-  edited: boolean,
-  save: (value: T) => void,
-  done: () => void,
-) {
+export function useSaveAfterPause<T>(value: T, save: (value: T) => void, enabled = true) {
   const [saver] = useState(() => createPauseSaver<T>());
-  useEffect(() => saver.sync(value, edited, save, done));
+  const [edited, setEdited] = useState(false);
+  const markEdited = useCallback(() => setEdited(true), []);
+  useEffect(() => saver.sync(value, edited && enabled, save, () => setEdited(false)));
   useEffect(() => {
     window.addEventListener("pagehide", saver.flush);
     return () => {
@@ -59,4 +57,5 @@ export function useSaveAfterPause<T>(
       saver.flush();
     };
   }, [saver]);
+  return markEdited;
 }

@@ -445,24 +445,23 @@ function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save
           className="border-border bg-muted/20 hover:bg-muted/40 flex w-full items-center gap-3 rounded-lg border p-3 transition-colors"
         >
           {agentPending ? (
-            <Skeleton className="size-11 shrink-0 rounded-xl" />
-          ) : (
-            <PackageIcon
-              type="agent"
-              icon={agent?.icon}
-              color={agent?.color}
-              className="size-11 rounded-xl"
-              iconClassName="size-5"
-            />
-          )}
-          <span className="min-w-0 flex-1">
-            {agentPending ? (
-              <>
+            <>
+              <Skeleton className="size-11 shrink-0 rounded-xl" />
+              <span className="min-w-0 flex-1">
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="mt-1.5 h-3 w-48 max-w-full" />
-              </>
-            ) : (
-              <>
+              </span>
+            </>
+          ) : (
+            <>
+              <PackageIcon
+                type="agent"
+                icon={agent?.icon}
+                color={agent?.color}
+                className="size-11 rounded-xl"
+                iconClassName="size-5"
+              />
+              <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium">
                   {agent?.display_name || schedule.packageId}
                 </span>
@@ -471,9 +470,9 @@ function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save
                     {agent.description}
                   </span>
                 )}
-              </>
-            )}
-          </span>
+              </span>
+            </>
+          )}
           <ArrowRight className="text-muted-foreground size-4 shrink-0" aria-hidden />
         </Link>
       </SettingRow>
@@ -487,12 +486,8 @@ function RecurrenceSection({ schedule, update }: { schedule: Schedule; update: S
   // A rhythm is composed field by field (a number typed, a day ticked): it is
   // saved once the composing pauses, and only when it is complete.
   const [cron, setCron] = useState(schedule.cron_expression);
-  const [edited, setEdited] = useState(false);
-  useSaveAfterPause(
-    cron,
-    edited,
-    (next) => update.mutate({ id: schedule.id, cron_expression: next }),
-    () => setEdited(false),
+  const markEdited = useSaveAfterPause(cron, (next) =>
+    update.mutate({ id: schedule.id, cron_expression: next }),
   );
   return (
     <>
@@ -502,7 +497,7 @@ function RecurrenceSection({ schedule, update }: { schedule: Schedule; update: S
         onChange={(next) => {
           if (!next || next === cron) return;
           setCron(next);
-          setEdited(true);
+          markEdited();
         }}
         onTimezoneChange={(timezone) => update.mutate({ id: schedule.id, timezone })}
       />
@@ -579,12 +574,8 @@ function InputsSection({
   const [values, setValues] = useState<Record<string, unknown>>(() =>
     initialInputValues(wrapper, wrapper, schedule.input ?? undefined),
   );
-  const [edited, setEdited] = useState(false);
-  useSaveAfterPause(
-    values,
-    edited,
-    (next) => update.mutate({ id: schedule.id, input: changedInputValues(wrapper, wrapper, next) }),
-    () => setEdited(false),
+  const markEdited = useSaveAfterPause(values, (next) =>
+    update.mutate({ id: schedule.id, input: changedInputValues(wrapper, wrapper, next) }),
   );
 
   if (deps.hasFileInputs) {
@@ -616,7 +607,7 @@ function InputsSection({
                 else out[key] = next;
                 return out;
               });
-              setEdited(true);
+              markEdited();
             }}
             hint={
               locked ? (
@@ -655,12 +646,8 @@ function ExecutionSection({
       : {}),
     ...(schedule.proxy_id_override ? { proxy_id_override: schedule.proxy_id_override } : {}),
   }));
-  const [edited, setEdited] = useState(false);
-  useSaveAfterPause(
-    overrides,
-    edited,
-    (next) => update.mutate({ id: schedule.id, ...scheduleExecutionPayload(next) }),
-    () => setEdited(false),
+  const markEdited = useSaveAfterPause(overrides, (next) =>
+    update.mutate({ id: schedule.id, ...scheduleExecutionPayload(next) }),
   );
   const storedVersion = schedule.version_override ?? VERSION_INHERIT;
   const moving = shownMove(schedule, move, moveWrite).versionOverride;
@@ -708,7 +695,7 @@ function ExecutionSection({
         value={overrides}
         onChange={(next) => {
           setOverrides(next);
-          setEdited(true);
+          markEdited();
         }}
         version={firedVersion(schedule.version_override)}
       />

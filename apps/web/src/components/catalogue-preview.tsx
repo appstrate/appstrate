@@ -96,6 +96,36 @@ function inputNames(detail: AgentDetail): string[] {
   return order.map((key) => properties[key]?.title ?? key);
 }
 
+/** An alert with its icon, a title over a muted line, and at most one action on the right. */
+function BannerAlert({
+  variant,
+  className,
+  icon,
+  title,
+  body,
+  action,
+}: {
+  variant: "info" | "warning";
+  className: string;
+  icon: ReactNode;
+  title: string;
+  body: string;
+  action: ReactNode;
+}) {
+  return (
+    <Alert variant={variant} className={className}>
+      {icon}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <AlertTitle>{title}</AlertTitle>
+          <p className="text-muted-foreground mt-0.5 text-xs">{body}</p>
+        </div>
+        {action}
+      </div>
+    </Alert>
+  );
+}
+
 /** One fact about the package: icon and label on the left, value on the right. */
 function PropertyRow({
   icon: Icon,
@@ -327,26 +357,25 @@ export function CataloguePreview({
   return (
     <div>
       {offers.map((offer) => (
-        <Alert key={offer.id} variant="info" className="mb-5">
-          <Inbox className="size-4" />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <AlertTitle>
-                {offer.offeredBy
-                  ? t("catalogue.sheet.offerBy", { name: offer.offeredBy, space: offer.name })
-                  : t("catalogue.sheet.offer", { space: offer.name })}
-              </AlertTitle>
-              <p className="text-muted-foreground mt-0.5 text-xs">
-                {missingText(offer.id) ?? t("catalogue.sheet.offerCredentials")}
-              </p>
-            </div>
-            {offer.mayToggle && (
+        <BannerAlert
+          key={offer.id}
+          variant="info"
+          className="mb-5"
+          icon={<Inbox className="size-4" />}
+          title={
+            offer.offeredBy
+              ? t("catalogue.sheet.offerBy", { name: offer.offeredBy, space: offer.name })
+              : t("catalogue.sheet.offer", { space: offer.name })
+          }
+          body={missingText(offer.id) ?? t("catalogue.sheet.offerCredentials")}
+          action={
+            offer.mayToggle && (
               <Button size="sm" disabled={busy} onClick={() => onSetActive(offer.id, true)}>
                 {t("catalogue.sheet.activateIn", { space: offer.name })}
               </Button>
-            )}
-          </div>
-        </Alert>
+            )
+          }
+        />
       ))}
 
       <div className="flex items-start justify-between gap-4">
@@ -375,27 +404,23 @@ export function CataloguePreview({
       {/* A version read by address is not the one the spaces run: say so, and
           offer the way back, rather than leave the reader to infer it from a badge. */}
       {(pinState === "missing" || pinState === "behind") && (
-        <Alert variant={pinState === "missing" ? "warning" : "info"} className="mt-4">
-          <History className="h-4 w-4" />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <AlertTitle>
-                {t(PINNED_ALERT_KEYS[pinState].title, { version: pinnedVersion })}
-              </AlertTitle>
-              <p className="text-muted-foreground mt-0.5 text-xs">
-                {t(PINNED_ALERT_KEYS[pinState].body, {
-                  version: pinnedVersion,
-                  latest: versionInfo?.latest_published_version,
-                })}
-              </p>
-            </div>
-            {onUnpin && (
+        <BannerAlert
+          variant={pinState === "missing" ? "warning" : "info"}
+          className="mt-4"
+          icon={<History className="h-4 w-4" />}
+          title={t(PINNED_ALERT_KEYS[pinState].title, { version: pinnedVersion })}
+          body={t(PINNED_ALERT_KEYS[pinState].body, {
+            version: pinnedVersion,
+            latest: versionInfo?.latest_published_version,
+          })}
+          action={
+            onUnpin && (
               <Button variant="outline" size="sm" onClick={onUnpin}>
                 {t("catalogue.sheet.pinned.unpin")}
               </Button>
-            )}
-          </div>
-        </Alert>
+            )
+          }
+        />
       )}
 
       {description && <p className="mt-4 text-sm">{description}</p>}

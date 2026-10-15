@@ -46,8 +46,6 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { packagePermission } from "@appstrate/core/permissions";
 import { TextSkeleton } from "../loading-skeletons";
 
-type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
-
 type CatalogItem = NonNullable<ReturnType<typeof usePackageList>["data"]>[number];
 
 /**
@@ -70,7 +68,7 @@ export function ResourceSection({
   title: string;
   emptyLabel: string;
   selectedEntries: ResourceEntry[];
-  onChange: (updater: ResourceEntriesUpdater) => void;
+  onChange: (update: (prev: ResourceEntry[]) => ResourceEntry[]) => void;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const fileInputRef = useRef<HTMLInputElement>(null);

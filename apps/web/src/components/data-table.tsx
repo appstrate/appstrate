@@ -149,6 +149,9 @@ function holdStyle(hold: Hold): CSSProperties {
 /** Opaque, so what scrolls behind it stays hidden; it follows the row's hover colour. */
 const HELD = "sticky z-20 bg-(--dt-surface)";
 const HELD_HOVER = "group-hover/row:bg-(--dt-surface-hover)";
+/** A held body cell paints over the row's collapsed border: it draws the border itself. */
+const HELD_RULE =
+  "shadow-[inset_0_-1px_0_color-mix(in_oklab,var(--color-border)_60%,transparent)] group-last/row:shadow-none";
 
 /** What answers a click by itself: a click on it is its own, not the row's. */
 const OWN_CLICK =
@@ -293,8 +296,8 @@ export function DataTable<T>({
     "--dt-floor-3": floorOf(columns),
   } as CSSProperties;
   const cellClass = (column: DataColumn<T>) => cn(tiered && tierClass(column), "px-3");
-  const heldClass = (hold: Hold | undefined, hover: boolean) =>
-    hold && cn(HELD, hover && HELD_HOVER);
+  const heldClass = (hold: Hold | undefined, body: boolean, hover = false) =>
+    hold && cn(HELD, body && HELD_RULE, hover && HELD_HOVER);
 
   return (
     <div className={frameClass}>
@@ -398,7 +401,11 @@ export function DataTable<T>({
                           key={column.id}
                           data-column={column.id}
                           style={hold && holdStyle(hold)}
-                          className={cn(cellClass(column), "py-2", heldClass(hold, interactive))}
+                          className={cn(
+                            cellClass(column),
+                            "py-2",
+                            heldClass(hold, true, interactive),
+                          )}
                         >
                           {i === coverColumn && href && (
                             <Link

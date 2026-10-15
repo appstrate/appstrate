@@ -11,7 +11,7 @@
  */
 
 import { toggleValue } from "../../lib/toggle-value";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
@@ -26,6 +26,7 @@ import {
   replaceNativeToolSelection,
   toggleApiCallToolSelection,
 } from "./tool-selection.ts";
+import { cn } from "@appstrate/ui/cn";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Button } from "@appstrate/ui/components/button";
 import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
@@ -201,16 +202,12 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   const pinnedOnlyScopes = [...selectedScopes].filter((s) => !inferredScopes.has(s));
 
   const toggleTool = (name: string) => {
-    // A stray click must not replace the wildcard with an array.
-    if (wildcardSelected) return;
-    const current = arrayTools;
-    const next = toggleValue(current, name);
+    const next = toggleValue(arrayTools, name);
     onChange({ ...entry, tools: next });
   };
 
   // Toggles the api_call and its `api_upload` companion as one: the resolver grants both from either name.
   const toggleApiCallTool = (name: string) => {
-    if (wildcardSelected) return;
     onChange({
       ...entry,
       tools: toggleApiCallToolSelection(arrayTools, name, visibleSyntheticApiUploadNames),
@@ -229,24 +226,14 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
     onChange({ ...entry, scopes: next.length > 0 ? next : undefined });
   };
 
-  const selectAllTools = () =>
+  const setNative = (all: boolean) =>
     onChange({
       ...entry,
       tools: replaceNativeToolSelection(
         arrayTools,
         declaredToolNames,
         visibleSyntheticToolNames,
-        true,
-      ),
-    });
-  const selectNoTools = () =>
-    onChange({
-      ...entry,
-      tools: replaceNativeToolSelection(
-        arrayTools,
-        declaredToolNames,
-        visibleSyntheticToolNames,
-        false,
+        all,
       ),
     });
 
@@ -255,10 +242,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   if (!hasToolCatalog && !hasScopeCatalog && !isApiCall && !hasMultipleAuths) {
     if (wildcardEnabled) {
       return (
-        <div
-          className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3">
           <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
             <label
               className="flex cursor-pointer items-start gap-2"
@@ -295,10 +279,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   }
 
   return (
-    <div
-      className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3"
-      onClick={(e) => e.stopPropagation()}
-    >
+    <div className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3">
       {selectsNothing && (
         <p className="text-warning text-[11px]" data-testid={`integ-no-tools-${packageId}`}>
           {t("agentEditor.integrations.tools.noneNotice")}
@@ -406,7 +387,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={selectAllTools}
+                onClick={() => setNative(true)}
                 disabled={allSelected}
                 data-testid={`integ-tools-select-all-${packageId}`}
               >
@@ -416,7 +397,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={selectNoTools}
+                onClick={() => setNative(false)}
                 disabled={noneSelected}
                 data-testid={`integ-tools-select-none-${packageId}`}
               >
@@ -450,37 +431,32 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
             {[...inferredScopes.entries()].map(([scope, tools]) => {
               const meta = scopeCatalog.get(scope);
               return (
-                <span
+                <ScopeChip
                   key={scope}
-                  className="bg-background inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[11px]"
-                  data-testid={`integ-inferred-scope-${packageId}-${scope}`}
+                  scope={scope}
+                  testId={`integ-inferred-scope-${packageId}-${scope}`}
                   title={
                     t("agentEditor.integrations.scopes.requiredBy", {
                       tools: tools.join(", "),
                     }) + (meta?.description ? ` — ${meta.description}` : "")
                   }
                 >
-                  <span className="font-mono">{scope}</span>
-                  <span className="text-muted-foreground text-[10px]">
-                    {tools.length === 1
-                      ? t("agentEditor.integrations.scopes.requiredBy1", { tool: tools[0] })
-                      : t("agentEditor.integrations.scopes.requiredByN", { count: tools.length })}
-                  </span>
-                </span>
+                  {tools.length === 1
+                    ? t("agentEditor.integrations.scopes.requiredBy1", { tool: tools[0] })
+                    : t("agentEditor.integrations.scopes.requiredByN", { count: tools.length })}
+                </ScopeChip>
               );
             })}
             {pinnedOnlyScopes.map((scope) => (
-              <span
+              <ScopeChip
                 key={scope}
-                className="bg-background inline-flex items-center gap-1.5 rounded border border-dashed px-1.5 py-0.5 text-[11px]"
-                data-testid={`integ-pinned-scope-${packageId}-${scope}`}
+                dashed
+                scope={scope}
+                testId={`integ-pinned-scope-${packageId}-${scope}`}
                 title={t("agentEditor.integrations.scopes.pinnedHint")}
               >
-                <span className="font-mono">{scope}</span>
-                <span className="text-muted-foreground text-[10px]">
-                  {t("agentEditor.integrations.scopes.pinnedBadge")}
-                </span>
-              </span>
+                {t("agentEditor.integrations.scopes.pinnedBadge")}
+              </ScopeChip>
             ))}
           </div>
         </div>
@@ -548,5 +524,34 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
         </div>
       )}
     </div>
+  );
+}
+
+/** A scope the selection needs (solid) or that is pinned by hand (dashed). */
+function ScopeChip({
+  dashed,
+  scope,
+  testId,
+  title,
+  children,
+}: {
+  dashed?: boolean;
+  scope: string;
+  testId: string;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "bg-background inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[11px]",
+        dashed && "border-dashed",
+      )}
+      data-testid={testId}
+      title={title}
+    >
+      <span className="font-mono">{scope}</span>
+      <span className="text-muted-foreground text-[10px]">{children}</span>
+    </span>
   );
 }

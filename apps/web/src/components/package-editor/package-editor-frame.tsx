@@ -57,7 +57,8 @@ export function PackageEditorFrame({
   children,
 }: {
   editor: PackageEditor;
-  tabs: Array<{ id: PackageEditorTab; label: string }>;
+  /** `createOnly` tabs show on the creation page only; editing is the settings rail's. */
+  tabs: Array<{ id: PackageEditorTab; label: string; createOnly?: boolean }>;
   /** Editing: the line under the open section's heading. */
   descriptions?: Partial<Record<PackageEditorTab, string>>;
   children: ReactNode;
@@ -65,6 +66,7 @@ export function PackageEditorFrame({
   const { t } = useTranslation(["agents", "settings", "common"]);
   const navigate = useNavigate();
   const { type, packageId, isEdit, state, setState, activeTab, setActiveTab, isPending } = editor;
+  const visibleTabs = tabs.filter((tab) => !tab.createOnly || !isEdit);
   const schema = { uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type] };
 
   const body = (
@@ -145,7 +147,7 @@ export function PackageEditorFrame({
       <div className="flex min-h-full flex-col">
         <div className="flex flex-1 flex-col gap-4 p-6">
           <SettingsHeading
-            title={tabs.find((tab) => tab.id === activeTab)?.label}
+            title={visibleTabs.find((tab) => tab.id === activeTab)?.label}
             description={descriptions?.[activeTab]}
             className="mb-2"
           />
@@ -178,7 +180,7 @@ export function PackageEditorFrame({
       <DetailBar
         title={t(page.title)}
         parent={{ label: t(page.list.key, { ns: page.list.ns }), href: listPath }}
-        tabs={tabs.map(({ id, label }) => ({ value: id, label }))}
+        tabs={visibleTabs.map(({ id, label }) => ({ value: id, label }))}
       />
 
       <div className="flex flex-col gap-4">

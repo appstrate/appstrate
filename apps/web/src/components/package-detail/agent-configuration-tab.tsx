@@ -80,15 +80,9 @@ function InputSettingsSection({
   const upload = useUploadClient();
   const [values, setValues] = useState<Record<string, unknown>>(initialValues);
   const [locked, setLocked] = useState<string[]>(initialLocked);
-  const [hasEdited, setHasEdited] = useState(false);
 
   const settings = useMemo(() => ({ values, locked_fields: locked }), [values, locked]);
-  useSaveAfterPause(
-    settings,
-    hasEdited && !isHistorical,
-    (next) => mutation.mutate(next),
-    () => setHasEdited(false),
-  );
+  const markEdited = useSaveAfterPause(settings, (next) => mutation.mutate(next), !isHistorical);
 
   const defaults = authorDefaults(wrapper.schema);
   const keys = getOrderedKeys(wrapper.schema, wrapper.property_order);
@@ -100,12 +94,12 @@ function InputSettingsSection({
       else out[key] = next;
       return out;
     });
-    setHasEdited(true);
+    markEdited();
   };
 
   const toggleLock = (key: string, on: boolean) => {
     setLocked((prev) => (on ? [...prev, key] : prev.filter((k) => k !== key)));
-    setHasEdited(true);
+    markEdited();
   };
 
   return (
