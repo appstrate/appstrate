@@ -76,7 +76,6 @@ export function NewScheduleModalHost() {
   if (!param.value || !can("schedules:write")) return null;
   return (
     <Modal
-      open
       onClose={param.close}
       title={t("schedule.titleNew")}
       className="max-h-[90svh] overflow-y-auto sm:max-w-xl"
@@ -112,7 +111,7 @@ function NewScheduleForm({
   const agentId = picked ?? agents?.[0]?.id;
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5">
       <FormItem id="new-schedule-agent" label={t("schedule.agent")}>
         {agentsPending ? (
           <Skeleton className="h-9 w-full" />

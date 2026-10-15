@@ -71,7 +71,7 @@ export function CheckboxWidget(props: WidgetProps) {
         checked={Boolean(value)}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="border-primary text-primary focus-visible:ring-ring h-4 w-4 shrink-0 rounded-sm border shadow focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        className="border-primary text-primary focus-visible:ring-ring size-4 shrink-0 rounded-sm border shadow focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
       />
       {label && (
         <label htmlFor={id} className={cn(LABEL_CLASS, "cursor-pointer font-normal")}>

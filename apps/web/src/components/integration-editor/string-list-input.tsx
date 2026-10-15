@@ -48,7 +48,7 @@ export function StringListInput({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="text-muted-foreground hover:text-destructive h-auto w-auto p-0 text-sm leading-none"
+                className="text-muted-foreground hover:text-destructive size-auto p-0 text-sm leading-none"
                 onClick={() => onChange(values.filter((x) => x !== v))}
               >
                 &times;

@@ -35,7 +35,7 @@ export function FormItem({
   const errorId = error ? `${id}-error` : undefined;
   const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
   return (
-    <div data-slot="form-item" className={cn("space-y-2", className)}>
+    <div data-slot="form-item" className={cn("flex flex-col gap-2", className)}>
       <Label htmlFor={id}>{label}</Label>
       {cloneElement(children as ReactElement<ControlProps>, {
         id,

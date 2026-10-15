@@ -116,7 +116,7 @@ export function NotificationContent({
             className="text-muted-foreground hover:text-foreground h-auto px-2 py-1 text-xs"
             onClick={markAllRead}
           >
-            <CheckCheck size={14} className="mr-1.5" />
+            <CheckCheck className="mr-1.5" />
             {t("notifications.markAllRead")}
           </Button>
         )}
@@ -129,7 +129,7 @@ export function NotificationContent({
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex gap-3 px-4 py-3">
               <Skeleton className="mt-1.5 size-2 shrink-0 rounded-full" />
-              <div className="flex-1 space-y-2">
+              <div className="flex flex-1 flex-col gap-2">
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="h-3 w-24" />
               </div>

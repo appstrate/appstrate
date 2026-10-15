@@ -256,7 +256,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
     if (wildcardEnabled) {
       return (
         <div
-          className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
+          className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
@@ -296,7 +296,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
 
   return (
     <div
-      className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
+      className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3"
       onClick={(e) => e.stopPropagation()}
     >
       {selectsNothing && (
@@ -496,9 +496,9 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
             data-testid={`integ-advanced-toggle-${packageId}`}
           >
             {advancedOpen ? (
-              <ChevronDown className="h-3 w-3" />
+              <ChevronDown className="size-3" />
             ) : (
-              <ChevronRight className="h-3 w-3" />
+              <ChevronRight className="size-3" />
             )}
             {t("agentEditor.integrations.scopes.advancedToggle")}
           </button>

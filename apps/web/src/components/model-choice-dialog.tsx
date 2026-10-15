@@ -109,7 +109,6 @@ function ChoiceDialog({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={title}
       actions={
@@ -139,7 +138,7 @@ function ChoiceDialog({
         </>
       }
     >
-      <fieldset disabled={isPending} className="min-w-0 space-y-3">
+      <fieldset disabled={isPending} className="flex min-w-0 flex-col gap-3">
         {intro && <p className="text-muted-foreground text-sm">{intro}</p>}
         {header}
         <ModelChoiceList
@@ -189,7 +188,7 @@ export function ProviderModelsModal({
 
   if (!registry || !modelsQuery.data) {
     return (
-      <Modal open onClose={onClose} title={t("models.choice.title")}>
+      <Modal onClose={onClose} title={t("models.choice.title")}>
         {registryQuery.error || modelsQuery.error ? (
           <ErrorState error={registryQuery.error ?? modelsQuery.error} compact />
         ) : (
@@ -200,7 +199,7 @@ export function ProviderModelsModal({
   }
   if (!provider) {
     return (
-      <Modal open onClose={onClose} title={t("models.choice.title")}>
+      <Modal onClose={onClose} title={t("models.choice.title")}>
         <ErrorState message={t("models.form.providerUnavailable")} compact />
       </Modal>
     );
@@ -246,7 +245,7 @@ export function PersonalModelsModal({
 
   if (!models || !provider) {
     return (
-      <Modal open onClose={onClose} title={t("models.choice.personalTitle")}>
+      <Modal onClose={onClose} title={t("models.choice.personalTitle")}>
         {modelsQuery.error ? (
           <ErrorState error={modelsQuery.error} compact />
         ) : (
@@ -303,7 +302,7 @@ export function NewProviderModelsModal({
 
   if (!registryQuery.data || !modelsQuery.data || !provider) {
     return (
-      <Modal open onClose={onClose} title={t("credentials.form.title")}>
+      <Modal onClose={onClose} title={t("credentials.form.title")}>
         {registryQuery.error || modelsQuery.error ? (
           <ErrorState error={registryQuery.error ?? modelsQuery.error} compact />
         ) : registryQuery.data ? (

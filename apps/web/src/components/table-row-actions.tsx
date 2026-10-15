@@ -63,12 +63,12 @@ export function TableRowActions({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-7 w-7 p-0"
+              className="size-7 p-0"
               title={menuLabel}
               aria-label={menuLabel}
               disabled={isPending}
             >
-              <MoreHorizontal size={14} />
+              <MoreHorizontal />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent

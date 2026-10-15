@@ -42,7 +42,7 @@ export function PackageOverview({
   const server = readMcpServerDetails(manifest);
   const instructions = type === "skill" && content ? skillBody(content) : "";
   return (
-    <div className="space-y-6" data-testid="package-overview">
+    <div className="flex flex-col gap-6" data-testid="package-overview">
       <div className="grid items-start gap-6 lg:grid-cols-2">
         <DetailSectionCard
           title={t("packageOverview.role")}

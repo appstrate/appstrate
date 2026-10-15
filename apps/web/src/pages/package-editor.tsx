@@ -185,7 +185,7 @@ function AgentEditorInner({
             <AgentAppearanceFields manifest={state.manifest} onChange={updateManifest} />
           }
         >
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <FormField
               id="meta-timeout"
               label={t("editor.execTimeout")}
@@ -223,7 +223,7 @@ function AgentEditorInner({
         />
       )}
       {activeTab === "schema" && (
-        <div className="space-y-6">
+        <div className="flex flex-col gap-6">
           <SchemaFieldList
             title={t("editor.inputTitle")}
             mode="input"

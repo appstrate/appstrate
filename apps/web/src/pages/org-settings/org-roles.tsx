@@ -49,7 +49,7 @@ export function OrgRolesMatrix() {
               return granted ? (
                 <PermissionMark granted={holdsCapability(capability, granted)} />
               ) : (
-                <Skeleton className="mx-auto h-4 w-4" />
+                <Skeleton className="mx-auto size-4" />
               );
             },
           })),

@@ -126,9 +126,8 @@ export function OrgSettingsMembersPage() {
       {/* The invitation is one form wherever it is made: the org role, then the
           spaces it opens and the role in each — which is what a guest needs,
           having no implicit access anywhere. */}
-      {canInvite && orgId && (
+      {canInvite && orgId && invite.value !== null && (
         <Modal
-          open={invite.value !== null}
           onClose={invite.close}
           title={t("orgSettings.inviteMember")}
           className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"

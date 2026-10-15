@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Lock, Plus, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -22,13 +23,14 @@ export const AMBER_TEXT = "text-warning";
 
 export function PickerWarning({ testId, children }: { testId: string; children: ReactNode }) {
   return (
-    <div
-      className="border-warning/40 bg-warning/10 text-warning mt-1.5 flex items-center gap-1.5 rounded-md border p-2 text-[0.7rem]"
+    <Alert
+      variant="warning"
+      className="bg-warning/10 mt-1.5 rounded-md p-2 text-[0.7rem] [&>svg]:top-[0.65rem] [&>svg]:left-2 [&>svg+div]:translate-y-0 [&>svg~*]:pl-5"
       data-testid={testId}
     >
-      <AlertTriangle className="size-3 shrink-0" />
-      <span>{children}</span>
-    </div>
+      <AlertTriangle className="size-3" />
+      <AlertDescription className="text-[0.7rem]">{children}</AlertDescription>
+    </Alert>
   );
 }
 
@@ -53,7 +55,7 @@ export function FailedPicker({ integrationId }: { integrationId: string }) {
         title={t("detail.integrationMemberPicker.resolutionFailedHint")}
         data-testid={`member-pick-failed-${integrationId}`}
       >
-        <AlertTriangle className="text-destructive size-3" />
+        <AlertTriangle className="text-destructive" />
         <span className="truncate">{t("detail.integrationMemberPicker.resolutionFailed")}</span>
       </Button>
     </div>
@@ -73,7 +75,7 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
           className="text-warning h-7 justify-start gap-1.5 text-xs"
           data-testid={`member-pick-reconfigure-${integrationId}`}
         >
-          <AlertTriangle className="size-3" />
+          <AlertTriangle />
           <span className="truncate">{t("detail.integrationMemberPicker.reconfigureLabel")}</span>
         </Button>
       </DisabledReasonTooltip>
@@ -123,7 +125,7 @@ export function LockedPicker({
         className={`h-7 justify-start gap-1.5 text-xs ${warn ? AMBER_TEXT : ""}`}
         data-testid={`member-pick-locked-${integrationId}`}
       >
-        {warn ? <AlertTriangle className="size-3" /> : <Lock className="size-3" />}
+        {warn ? <AlertTriangle /> : <Lock />}
         <span className="truncate">
           {bindingIds.length === 0
             ? t("detail.integrationMemberPicker.none")
@@ -190,7 +192,7 @@ export function BlockedPicker({
         className="h-7 justify-start gap-1.5 text-xs"
         data-testid={`member-pick-blocked-${integrationId}`}
       >
-        <Lock className="size-3" />
+        <Lock />
         <span className="truncate">
           {t(
             canConnect
@@ -295,7 +297,7 @@ export function UnderScopedWarning({
               onClick={() => void triggerConnect(conn.auth_key, { replacing: conn.id })}
               data-testid={`member-pick-new-for-agent-${conn.id}`}
             >
-              <Plus className="mr-1 size-3" />
+              <Plus className="mr-1" />
               {t("detail.integrationMemberPicker.newWithAgentScopes")}
             </Button>
           )}
@@ -307,7 +309,7 @@ export function UnderScopedWarning({
               onClick={() => setUpgradeTargetId(conn.id)}
               data-testid={`member-pick-upgrade-${conn.id}`}
             >
-              <RefreshCw className="mr-1 size-3" />
+              <RefreshCw className="mr-1" />
               {t("detail.integrationMemberPicker.upgradeButton")}
             </Button>
           )}

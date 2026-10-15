@@ -144,7 +144,7 @@ export function MetadataSection({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="text-muted-foreground hover:text-destructive h-auto w-auto p-0 text-sm leading-none"
+                className="text-muted-foreground hover:text-destructive size-auto p-0 text-sm leading-none"
                 onClick={() => removeKeyword(keyword)}
               >
                 &times;
@@ -179,7 +179,7 @@ export function MetadataSection({
 
   if (surface === "settings") {
     return (
-      <div className="space-y-8">
+      <div className="flex flex-col gap-8">
         <SettingsFieldGroup title={t("editor.identity")}>{identityFields}</SettingsFieldGroup>
         <SettingsFieldGroup title={t("editor.publication")}>{publicationFields}</SettingsFieldGroup>
         {children && (

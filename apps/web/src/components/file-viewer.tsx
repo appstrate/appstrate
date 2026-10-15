@@ -91,7 +91,7 @@ function MarkdownPreview({ id, unavailable }: { id: string; unavailable: string 
   if (state.failed) return <ErrorState message={unavailable} />;
   if (state.text === undefined) return <TextSkeleton lines={6} />;
   return (
-    <div className="bg-background h-full w-full overflow-auto p-4">
+    <div className="bg-background size-full overflow-auto p-4">
       <Markdown>{state.text}</Markdown>
     </div>
   );
@@ -108,7 +108,7 @@ function TextPreview({ url, unavailable }: { url: string; unavailable: string })
   if (state.failed) return <ErrorState message={unavailable} />;
   if (state.text === undefined) return <TextSkeleton lines={6} />;
   return (
-    <pre className="text-foreground h-full w-full overflow-auto p-4 font-mono text-xs break-words whitespace-pre-wrap">
+    <pre className="text-foreground size-full overflow-auto p-4 font-mono text-xs break-words whitespace-pre-wrap">
       {state.text}
     </pre>
   );
@@ -170,7 +170,7 @@ export function FileViewer({
           referrerPolicy="no-referrer"
           src={previewUrl}
           title={frameTitle}
-          className="h-full w-full border-0 bg-white"
+          className="size-full border-0 bg-white"
         />
       );
     }
@@ -186,7 +186,7 @@ export function FileViewer({
         referrerPolicy="no-referrer"
         src={previewUrl}
         title={frameTitle}
-        className="h-full w-full border-0 bg-white"
+        className="size-full border-0 bg-white"
       />
     );
   }

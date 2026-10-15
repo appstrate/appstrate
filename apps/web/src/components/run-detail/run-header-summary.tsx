@@ -90,7 +90,7 @@ export function RunHeaderActions({
             onClick={onRerun}
             disabled={rerunPending || !!rerunRefusal}
           >
-            <Play className="text-primary size-3.5" />
+            <Play className="text-primary" />
             {t("run.rerun")}
           </Button>
         </DisabledReasonTooltip>
@@ -103,7 +103,7 @@ export function RunHeaderActions({
           onClick={onCancel}
           disabled={cancelPending}
         >
-          <Square className="text-destructive size-3.5" />
+          <Square className="text-destructive" />
           {t("btn.cancel")}
         </Button>
       )}

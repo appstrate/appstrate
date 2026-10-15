@@ -36,7 +36,6 @@ export function ActivationClosureDialog({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={t("catalogue.closureTitle", { name: packageName })}
       actions={
@@ -55,7 +54,7 @@ export function ActivationClosureDialog({
         </>
       }
     >
-      <div className="space-y-3 text-sm">
+      <div className="flex flex-col gap-3 text-sm">
         <p>{t("catalogue.closureBody", { space: spaceName })}</p>
         <ul className="border-border divide-border divide-y rounded-lg border">
           {missing.map((entry) => (

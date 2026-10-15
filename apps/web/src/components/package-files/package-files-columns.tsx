@@ -4,13 +4,9 @@ import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
 import { formatBytes } from "../../lib/format-bytes";
 import { bundleFileRole, type BundleFileRole } from "../../lib/bundle-file-role";
+import type { PackageFileEntry } from "../../lib/package-file-tree";
 import type { DataColumn } from "../data-table";
 import { CellText } from "../table-cells";
-
-export interface PackageFileEntry {
-  path: string;
-  size: number;
-}
 
 const ROLE_LABEL: Record<BundleFileRole, string> = {
   manifest: "editor.fileRole.manifest",

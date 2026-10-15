@@ -248,7 +248,7 @@ function IntegrationSettings({
                 {detail.auths.length === 0 && (
                   <p className="text-sm">{t("integration.auth.none")}</p>
                 )}
-                <div className="space-y-8">
+                <div className="flex flex-col gap-8">
                   {detail.auths.map((status) => {
                     const authDecl = detail.manifest.auths?.[status.auth_key];
                     if (!authDecl) return null;

@@ -227,7 +227,7 @@ export function PickerMenu({
           data-testid={`member-pick-renew-${c.id}`}
           aria-label={t("detail.integrationMemberPicker.renew")}
         >
-          <RefreshCw className="size-3" />
+          <RefreshCw />
           {t("detail.integrationMemberPicker.renew")}
         </Button>
       ) : undefined,
@@ -292,7 +292,7 @@ export function PickerMenu({
                 onSelect={() => void triggerConnect(k)}
                 data-testid={`member-pick-add-${integrationId}-${k}`}
               >
-                <Plus className="size-3.5" />
+                <Plus />
                 <span>{addLabel(k)}</span>
               </DropdownMenuItem>
             ))}
@@ -305,7 +305,7 @@ export function PickerMenu({
                 onSelect={() => (onLeave ? onLeave(integrationPath) : navigate(integrationPath))}
                 data-testid={`member-pick-manage-${integrationId}`}
               >
-                <Settings className="size-3.5" />
+                <Settings />
                 <span>{t("detail.integrationMemberPicker.manageConnections")}</span>
               </DropdownMenuItem>
             </>

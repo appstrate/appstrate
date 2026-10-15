@@ -12,7 +12,6 @@ import {
 import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 
 interface ModalProps {
-  open: boolean;
   onClose: () => void;
   preventClose?: boolean;
   title: string;
@@ -24,7 +23,6 @@ interface ModalProps {
 }
 
 export function Modal({
-  open,
   onClose,
   preventClose = false,
   title,
@@ -34,7 +32,7 @@ export function Modal({
   className,
 }: ModalProps) {
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && !preventClose && onClose()}>
+    <Dialog open onOpenChange={(v) => !v && !preventClose && onClose()}>
       <DialogContent
         className={className}
         onEscapeKeyDown={keepOpenWhileRenaming}

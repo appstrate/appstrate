@@ -4,6 +4,14 @@ import { useTranslation } from "react-i18next";
 import { Plus, SearchX, TriangleAlert, type LucideIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@appstrate/ui/components/empty";
 import { errorDetail } from "../lib/mutation-error";
 import { ApiError } from "../api/errors";
 import type { MenuAction } from "../lib/menu-action";
@@ -83,39 +91,37 @@ export function EmptyState({
   children?: React.ReactNode;
 }) {
   return (
-    <div className={cn("flex flex-col items-center px-8 text-center", compact ? "py-10" : "py-14")}>
-      {/* The outermost ring overflows this box on purpose; shrink its height or the padding above and the frame clips it. */}
-      <div
-        className={cn(
-          "relative grid place-items-center",
-          compact ? "mb-3 h-28 w-40" : "mb-4 h-32 w-52",
-        )}
-      >
-        <Ring className={compact ? "size-24" : "size-28"} />
-        <Ring className={compact ? "size-34 opacity-60" : "size-40 opacity-60"} />
-        <Ring className={compact ? "size-44 opacity-35" : "size-52 opacity-35"} />
-        <div
+    <Empty className={compact ? "py-10" : undefined}>
+      <EmptyHeader>
+        {/* The outermost ring overflows this box on purpose; shrink its height or the padding above and the frame clips it. */}
+        <EmptyMedia
           className={cn(
-            "bg-card border-border relative grid place-items-center rounded-2xl border",
-            compact ? "size-14" : "size-16",
+            "relative grid place-items-center",
+            compact ? "mb-3 h-28 w-40" : "mb-4 h-32 w-52",
           )}
         >
-          <Icon
+          <Ring className={compact ? "size-24" : "size-28"} />
+          <Ring className={compact ? "size-34 opacity-60" : "size-40 opacity-60"} />
+          <Ring className={compact ? "size-44 opacity-35" : "size-52 opacity-35"} />
+          <div
             className={cn(
-              "size-6",
-              tone === "danger" ? "text-destructive" : "text-muted-foreground",
+              "bg-card border-border relative grid place-items-center rounded-2xl border",
+              compact ? "size-14" : "size-16",
             )}
-          />
-        </div>
-      </div>
-      <p className={cn("font-semibold tracking-tight", compact ? "text-[0.98rem]" : "text-base")}>
-        {message}
-      </p>
-      {hint && (
-        <p className="text-muted-foreground mt-1 max-w-sm text-sm leading-relaxed">{hint}</p>
-      )}
-      {children && <div className="mt-4 flex items-center gap-2 empty:hidden">{children}</div>}
-    </div>
+          >
+            <Icon
+              className={cn(
+                "size-6",
+                tone === "danger" ? "text-destructive" : "text-muted-foreground",
+              )}
+            />
+          </div>
+        </EmptyMedia>
+        <EmptyTitle className={compact ? "text-[0.98rem]" : undefined}>{message}</EmptyTitle>
+        {hint && <EmptyDescription className="leading-relaxed">{hint}</EmptyDescription>}
+      </EmptyHeader>
+      {children && <EmptyContent>{children}</EmptyContent>}
+    </Empty>
   );
 }
 

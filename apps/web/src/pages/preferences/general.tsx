@@ -93,7 +93,7 @@ export function EmailChangeField({
   const invalid = dirty && !EMAIL_FORMAT.test(next);
 
   return (
-    <div className="w-full space-y-1.5">
+    <div className="flex w-full flex-col gap-1.5">
       <form
         className="flex w-full items-center gap-2"
         onSubmit={(e) => {

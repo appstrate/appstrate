@@ -238,7 +238,7 @@ export function PackageCollection({
           empty={emptyBody}
         />
       ) : cardSections && !isLoading && !error && shown.length > 0 ? (
-        <div className="space-y-8 pt-2">
+        <div className="flex flex-col gap-8 pt-2">
           {cardSections(shown)
             .filter((section) => section.items.length > 0)
             .map((section) => (

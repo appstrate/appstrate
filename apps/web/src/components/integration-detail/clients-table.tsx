@@ -146,7 +146,6 @@ function OAuthClientModal({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={
         mode === "create"
@@ -207,7 +206,7 @@ function OAuthClientModal({
               error, so the admin is shown the exact string to register rather
               than left to reconstruct it from the browser's origin (which is
               NOT authoritative — `APP_URL` is). */}
-          <div className="space-y-1">
+          <div className="flex flex-col gap-1">
             <p className="text-muted-foreground text-[0.7rem]">
               {t("integration.oauthClient.platformRedirectUri")}
             </p>
@@ -384,9 +383,9 @@ export function ClientsTable({
         data-testid={inEmpty ? undefined : `oauth-client-register-${authKey}`}
         onClick={canManageOrg ? undefined : () => newClient.open(`${authKey}:space`)}
       >
-        <Plus size={14} />
+        <Plus />
         {t("integration.clients.register")}
-        {canManageOrg && <ChevronDown size={14} />}
+        {canManageOrg && <ChevronDown />}
       </Button>
     );
     // Two levels to register at: the level is chosen before the form,

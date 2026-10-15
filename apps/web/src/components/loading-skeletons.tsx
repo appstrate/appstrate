@@ -40,7 +40,7 @@ const LINE_WIDTHS = ["w-full", "w-11/12", "w-4/5", "w-full", "w-3/4"];
 
 function Lines({ lines }: { lines: number }) {
   return (
-    <div className="space-y-2.5">
+    <div className="flex flex-col gap-2.5">
       {Array.from({ length: lines }, (_, i) => (
         <Skeleton
           key={i}
@@ -95,7 +95,7 @@ function HeaderBlocks({
         {actions && <Skeleton className="h-8 w-24 shrink-0" />}
       </div>
       {subtitle === "lines" && (
-        <div className="mt-2 space-y-2">
+        <div className="mt-2 flex flex-col gap-2">
           <Skeleton className="h-3 w-40" />
           <Skeleton className="h-3.5 w-80 max-w-full" />
         </div>
@@ -126,7 +126,7 @@ function CardBlocks({ count }: { count: number }) {
   return (
     <div className="grid gap-4 md:grid-cols-3">
       {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="space-y-4 rounded-lg border p-4">
+        <div key={i} className="flex flex-col gap-4 rounded-lg border p-4">
           <Skeleton className="h-4 w-24" />
           <Lines lines={3} />
         </div>
@@ -298,7 +298,7 @@ export function DashboardBodySkeleton() {
               {Array.from({ length: rows }, (_, j) => (
                 <div key={j} className="flex min-h-[74px] items-center gap-3 px-4">
                   <Skeleton className="size-8 shrink-0 rounded-md" />
-                  <div className="flex-1 space-y-2">
+                  <div className="flex flex-1 flex-col gap-2">
                     <Skeleton className="h-3.5 w-1/2" />
                     <Skeleton className="h-3 w-1/3" />
                   </div>
@@ -319,7 +319,7 @@ export function DashboardSkeleton() {
   return (
     <div className="mx-auto w-full max-w-[1300px] space-y-8">
       <div className="mb-4 flex min-h-9 items-start justify-between gap-4">
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <Skeleton className="h-9 w-64" />
           <Skeleton className="h-3.5 w-56" />
         </div>
@@ -340,7 +340,7 @@ export function OverlayPanelSkeleton({ list }: { list?: boolean }) {
     <Dialog open>
       <DialogContent className="flex h-[min(720px,calc(100dvh-6rem))] w-[min(1080px,calc(100vw-4rem))] max-w-none gap-0 overflow-hidden p-0 max-sm:-m-4 max-sm:h-[100dvh] max-sm:w-[100vw] max-sm:rounded-none max-sm:border-0 [&>button]:hidden">
         <DialogTitle className="sr-only">…</DialogTitle>
-        <aside className="bg-sidebar border-sidebar-border w-56 shrink-0 space-y-2 border-r p-3 max-md:hidden">
+        <aside className="bg-sidebar border-sidebar-border flex w-56 shrink-0 flex-col gap-2 border-r p-3 max-md:hidden">
           {Array.from({ length: 8 }, (_, i) => (
             <Skeleton key={i} className="h-7 w-full" />
           ))}
@@ -357,7 +357,7 @@ export function OverlayPanelSkeleton({ list }: { list?: boolean }) {
 /** The chat panel while its code loads: the welcome lines over the composer. */
 export function ChatPanelSkeleton() {
   return (
-    <Waiting className="mx-auto flex h-full w-full max-w-3xl flex-col items-center justify-center gap-3 px-4">
+    <Waiting className="mx-auto flex size-full max-w-3xl flex-col items-center justify-center gap-3 px-4">
       <Skeleton className="h-5 w-40" />
       <Skeleton className="h-3.5 w-72 max-w-full" />
       <Skeleton className="mt-3 h-28 w-full rounded-2xl" />

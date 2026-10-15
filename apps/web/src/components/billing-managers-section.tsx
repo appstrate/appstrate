@@ -147,7 +147,7 @@ export function BillingManagersSection() {
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger asChild>
             <Button variant="outline" size="sm" disabled={replace.isPending}>
-              <Plus size={16} />
+              <Plus />
               {t("billingManagers.add")}
             </Button>
           </PopoverTrigger>

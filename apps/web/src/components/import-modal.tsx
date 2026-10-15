@@ -6,6 +6,7 @@ import { useForm, useWatch } from "react-hook-form";
 import { FormModal } from "./form-modal";
 import { cn } from "@appstrate/ui/cn";
 import { FieldError } from "@appstrate/ui/components/field";
+import { Separator } from "@appstrate/ui/components/separator";
 import { useImportPackage, useImportFromGithub } from "../hooks/use-mutations";
 import { ApiError } from "../api/errors";
 import { packageDetailPath } from "../lib/package-paths";
@@ -235,7 +236,7 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
       {/* --- Separator --- */}
       <div className="relative my-4">
         <div className="absolute inset-0 flex items-center">
-          <div className="border-border w-full border-t" />
+          <Separator />
         </div>
         <div className="relative flex justify-center text-xs">
           <span className="bg-popover text-muted-foreground px-2">{t("import.or")}</span>

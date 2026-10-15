@@ -90,7 +90,6 @@ export function CreateVersionModal({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={t("version.createVersion")}
       actions={
@@ -105,8 +104,8 @@ export function CreateVersionModal({
         </PendingButton>
       }
     >
-      <div className="space-y-4">
-        <div className="space-y-2">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
           {latestVersion && (
             <Label className="block text-sm">
               <Trans
@@ -130,7 +129,7 @@ export function CreateVersionModal({
         </div>
 
         {needsBump && latestVersion && hasUnarchivedChanges && (
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Label className="block text-sm font-medium">{t("version.bumpLabel")}</Label>
             <div className="flex gap-2">
               {bumpOptions.map((opt) => {

@@ -28,7 +28,7 @@ export function DiscoveryControls({
   const { t } = useTranslation(["settings", "common"]);
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-2">
         <PendingButton
           type="button"

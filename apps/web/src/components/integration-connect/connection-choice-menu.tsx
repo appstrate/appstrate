@@ -169,9 +169,9 @@ export function ConnectionChoiceMenu({
           }
           data-testid={`${testPrefix}-${testKey}`}
         >
-          <TriggerIcon className={compact ? "size-3" : "size-4"} />
+          <TriggerIcon />
           <span className="max-w-[14rem] min-w-0 truncate">{trigger.label}</span>
-          <ChevronDown className={`${compact ? "size-3" : "size-4"} ml-auto opacity-60`} />
+          <ChevronDown className="ml-auto opacity-60" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -319,7 +319,7 @@ export function ConnectionChoiceMenu({
               }}
               data-testid={`${testPrefix}-apply-${testKey}`}
             >
-              <Check className="size-3.5" />
+              <Check />
               <span className="font-medium">
                 {t("detail.integrationMemberPicker.apply", { count: checkedIds.length })}
               </span>

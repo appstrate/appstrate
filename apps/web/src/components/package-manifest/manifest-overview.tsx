@@ -16,19 +16,22 @@ export function ManifestOverview({ manifest }: { manifest: unknown }) {
   return (
     <div className="grid items-start gap-6 lg:grid-cols-2">
       {overview.longDescription && (
-        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.longDescription")}>
+        <DetailSectionCard
+          bodyClassName="flex flex-col gap-4 p-4"
+          title={t("manifest.longDescription")}
+        >
           <p className="text-sm whitespace-pre-wrap">{overview.longDescription}</p>
         </DetailSectionCard>
       )}
 
       {overview.facts.length > 0 && (
-        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.metadata")}>
+        <DetailSectionCard bodyClassName="flex flex-col gap-4 p-4" title={t("manifest.metadata")}>
           <ManifestFacts facts={overview.facts} />
         </DetailSectionCard>
       )}
 
       {overview.keywords.length > 0 && (
-        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.keywords")}>
+        <DetailSectionCard bodyClassName="flex flex-col gap-4 p-4" title={t("manifest.keywords")}>
           <div className="flex flex-wrap gap-1.5">
             {/* Index in the key: `keywords` is author-controlled jsonb and the
                 reader keeps duplicates verbatim rather than editing the data to
@@ -43,17 +46,20 @@ export function ManifestOverview({ manifest }: { manifest: unknown }) {
       )}
 
       {overview.links.length > 0 && (
-        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.links")}>
+        <DetailSectionCard bodyClassName="flex flex-col gap-4 p-4" title={t("manifest.links")}>
           <ManifestFacts facts={overview.links} />
         </DetailSectionCard>
       )}
 
       {overview.dependencies.length > 0 && (
-        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.dependencies")}>
+        <DetailSectionCard
+          bodyClassName="flex flex-col gap-4 p-4"
+          title={t("manifest.dependencies")}
+        >
           {overview.dependencies.map((group) => (
             <div key={group.labelKey}>
               <p className="text-muted-foreground text-xs">{t(group.labelKey)}</p>
-              <ul className="mt-1 space-y-0.5">
+              <ul className="mt-1 flex flex-col gap-0.5">
                 {group.entries.map((entry) => (
                   <li key={entry.id} className="font-mono text-sm">
                     {entry.id} <span className="text-muted-foreground">{entry.range}</span>

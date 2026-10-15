@@ -707,7 +707,6 @@ export function PackageFilesView({
       {staged.dialogs}
       {editing && editingFile.value !== null && (
         <Modal
-          open
           onClose={editingFile.close}
           title={t("editor.editFile", { name: editingFile.value })}
           className="sm:max-w-5xl"

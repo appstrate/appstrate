@@ -67,7 +67,7 @@ export function ToolsPolicySection({
       title={t("integrationEditor.toolsPolicy.title")}
       headerRight={
         <Button type="button" size="sm" variant="outline" onClick={addPolicy}>
-          <Plus size={14} />
+          <Plus />
           {t("integrationEditor.toolsPolicy.add")}
         </Button>
       }
@@ -106,7 +106,7 @@ export function ToolsPolicySection({
       </div>
 
       {rows.map((policy, idx) => (
-        <div key={idx} className="border-border space-y-3 rounded-md border p-3">
+        <div key={idx} className="border-border flex flex-col gap-3 rounded-md border p-3">
           <div className="flex items-center gap-2">
             <FormItem
               id={`tp-name-${idx}`}
@@ -127,7 +127,7 @@ export function ToolsPolicySection({
               className="mt-7"
               onClick={() => commit(rows.filter((_, i) => i !== idx))}
             >
-              <Trash2 size={14} className="text-destructive" />
+              <Trash2 className="text-destructive" />
             </Button>
           </div>
 

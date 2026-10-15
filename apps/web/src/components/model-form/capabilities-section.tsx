@@ -43,7 +43,7 @@ export function CapabilitiesSection({
   const { t } = useTranslation(["settings", "common"]);
 
   return (
-    <div className="mt-2 space-y-4 border-t pt-4">
+    <div className="mt-2 flex flex-col gap-4 border-t pt-4">
       <CheckboxField
         id="mdl-capabilities-explicit"
         label={t("models.form.capabilitiesExplicit")}

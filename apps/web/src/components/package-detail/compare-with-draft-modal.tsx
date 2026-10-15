@@ -32,9 +32,10 @@ export function CompareWithDraftModal({
   const { data: fetched } = useVersionDetail(type, packageId, isLatest ? undefined : version);
   const compared = isLatest ? latestVersion : fetched;
 
+  if (version === undefined) return null;
+
   return (
     <Modal
-      open={version !== undefined}
       onClose={compare.close}
       title={t("detail.files.compareTitle", { version })}
       className="max-w-5xl"

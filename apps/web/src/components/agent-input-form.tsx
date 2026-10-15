@@ -104,10 +104,10 @@ export function AgentInputForm({
   if (!hasInputFields(wrapper)) return null;
 
   return (
-    <div className="space-y-3" data-testid="agent-input-form">
+    <div className="flex flex-col gap-3" data-testid="agent-input-form">
       {partition.locked.length > 0 && (
         <div
-          className="border-border bg-muted/40 space-y-2 rounded-md border p-3"
+          className="border-border bg-muted/40 flex flex-col gap-2 rounded-md border p-3"
           data-testid="locked-input-fields"
         >
           <div className="text-foreground flex items-center gap-1.5 text-xs font-medium">
@@ -115,7 +115,7 @@ export function AgentInputForm({
             {t("input.lockedTitle")}
           </div>
           <p className="text-muted-foreground text-xs">{t("input.lockedHint")}</p>
-          <dl className="space-y-1.5">
+          <dl className="flex flex-col gap-1.5">
             {partition.locked.map((key) => (
               <div
                 key={key}

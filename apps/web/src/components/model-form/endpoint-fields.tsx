@@ -157,10 +157,10 @@ function CredentialChip({
         type="button"
         variant="ghost"
         size="icon"
-        className="h-9 w-9 shrink-0"
+        className="size-9 shrink-0"
         onClick={onClear}
       >
-        <X className="size-4" />
+        <X />
         <span className="sr-only">{t("btn.cancel")}</span>
       </Button>
     </div>

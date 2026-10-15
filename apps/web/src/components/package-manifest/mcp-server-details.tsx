@@ -32,14 +32,14 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
   return (
     <>
       {facts.length > 0 && (
-        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.server")}>
+        <DetailSectionCard bodyClassName="flex flex-col gap-4 p-4" title={t("manifest.server")}>
           <ManifestFacts facts={facts} />
         </DetailSectionCard>
       )}
 
       {tools.length > 0 && (
         <DetailSectionCard
-          bodyClassName="space-y-4 p-4"
+          bodyClassName="flex flex-col gap-4 p-4"
           title={t("manifest.tools")}
           className="lg:col-span-2"
         >
@@ -48,7 +48,7 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
       )}
 
       {userConfig.length > 0 && (
-        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.userConfig")}>
+        <DetailSectionCard bodyClassName="flex flex-col gap-4 p-4" title={t("manifest.userConfig")}>
           {userConfig.map((entry) => (
             <div key={entry.key}>
               <div className="flex flex-wrap items-center gap-2">

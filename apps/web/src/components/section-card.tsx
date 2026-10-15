@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useId } from "react";
+import { Card, CardContent, CardHeader } from "@appstrate/ui/components/card";
 
 interface SectionCardProps {
   title: string;
@@ -20,16 +21,12 @@ interface SectionCardProps {
 export function SectionCard({ title, headerRight, children }: SectionCardProps) {
   const titleId = useId();
   return (
-    <div
-      role="group"
-      aria-labelledby={titleId}
-      className="border-border bg-card mb-4 overflow-hidden rounded-lg border"
-    >
-      <div className="bg-background text-foreground border-border flex items-center justify-between border-b px-4 py-3 text-xs font-semibold tracking-wide uppercase">
+    <Card role="group" aria-labelledby={titleId} className="mb-4 overflow-hidden">
+      <CardHeader className="bg-background flex-row items-center justify-between gap-0 border-b py-3 text-xs font-semibold tracking-wide uppercase">
         <h3 id={titleId}>{title}</h3>
         {headerRight}
-      </div>
-      <div className="space-y-3 p-4">{children}</div>
-    </div>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 p-4">{children}</CardContent>
+    </Card>
   );
 }

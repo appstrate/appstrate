@@ -18,6 +18,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Switch } from "@appstrate/ui/components/switch";
 import { FormItem } from "@/components/app-ui/form-item";
@@ -79,14 +80,14 @@ export function IntegrationToolsSection({
         <AllowUndeclaredToggle manifest={edit.manifest} onChange={edit.onChange} />
       ) : (
         allowUndeclared && (
-          <div className="rounded-md border-l-2 border-amber-500/30 bg-amber-500/5 p-3 text-xs">
-            <p className="font-medium">
+          <Alert variant="warning" className="p-3 text-xs">
+            <AlertTitle className="font-medium">
               {t("integration.tools.wildcardNotice.title", { ns: "settings" })}
-            </p>
-            <p className="text-muted-foreground mt-1">
+            </AlertTitle>
+            <AlertDescription className="text-muted-foreground text-xs">
               {t("integration.tools.wildcardNotice.body", { ns: "settings" })}
-            </p>
-          </div>
+            </AlertDescription>
+          </Alert>
         )
       )}
       <PackageToolCatalog
@@ -134,7 +135,6 @@ export function IntegrationToolsSection({
 
       {edit && policies && policyModal.value !== null && (
         <Modal
-          open
           onClose={policyModal.close}
           title={
             policyModal.value === "new"
@@ -188,7 +188,7 @@ function ToolPolicyForm({
         ? t("integrationEditor.toolsPolicy.nameTaken")
         : null;
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5">
       {isNew && (
         <FormItem
           id="tool-policy-name"

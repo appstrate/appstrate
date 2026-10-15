@@ -160,7 +160,7 @@ export function LoginForm({
                   type="button"
                   onClick={() => navigate("/magic-link", { state: { email: getValues("email") } })}
                 >
-                  <Mail className="h-4 w-4" />
+                  <Mail />
                   {t("login.magicLink")}
                 </Button>
               )}

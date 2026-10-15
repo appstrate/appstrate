@@ -30,21 +30,19 @@ export function RunLaunchModal({
   const { t } = useTranslation(["agents", "common"]);
   const formRef = useRef<AgentInputFormHandle>(null);
 
-  return (
-    <Modal open={open} onClose={onClose} preventClose={isPending} title={title}>
-      {open && (
-        <div className="space-y-5">
-          {children(formRef)}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" onClick={onClose} disabled={isPending}>
-              {t("btn.cancel")}
-            </Button>
-            <PendingButton onClick={() => formRef.current?.submit()} pending={isPending}>
-              {t("input.run")}
-            </PendingButton>
-          </div>
+  return open ? (
+    <Modal onClose={onClose} preventClose={isPending} title={title}>
+      <div className="flex flex-col gap-5">
+        {children(formRef)}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
+            {t("btn.cancel")}
+          </Button>
+          <PendingButton onClick={() => formRef.current?.submit()} pending={isPending}>
+            {t("input.run")}
+          </PendingButton>
         </div>
-      )}
+      </div>
     </Modal>
-  );
+  ) : null;
 }

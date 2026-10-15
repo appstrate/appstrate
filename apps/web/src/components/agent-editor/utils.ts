@@ -462,7 +462,7 @@ export function itemsEnumText(prop: JSONSchema7): TextValue {
 
 // ─── Manifest wrapper ⇄ fields ──────────────────────────────
 
-export function schemaToFields(
+function schemaToFields(
   schema: JSONSchemaObject | undefined,
   mode: "input" | "output",
   wrapper?: {

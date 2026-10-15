@@ -553,7 +553,6 @@ export function ModelFormModal({
 
   return (
     <Modal
-      open
       onClose={onClose}
       preventClose={isPending}
       title={model ? t("models.form.editTitle") : t("models.form.title")}

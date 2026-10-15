@@ -45,7 +45,7 @@ export function ConnectionDeleteImpact({
       <AlertTitle>{t("connections.impact.title")}</AlertTitle>
       <AlertDescription>
         {(data.pins.length > 0 || data.schedules.length > 0) && (
-          <ul className="mt-1 list-disc space-y-1 pl-5">
+          <ul className="mt-1 flex list-disc flex-col gap-1 pl-5">
             {data.pins.map((pin) => {
               const effect =
                 pin.connection_count > 1

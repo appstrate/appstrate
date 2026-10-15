@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
-import { cn } from "@appstrate/ui/cn";
+import { Progress } from "@appstrate/ui/components/progress";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { getUsageBarColor } from "../lib/usage-severity";
 
@@ -20,19 +20,12 @@ export function UsageBar({
 }) {
   const value = Math.min(100, Math.max(0, percent));
   return (
-    <div
-      className={cn("bg-muted h-2 w-full overflow-hidden rounded-full", className)}
-      role="progressbar"
-      aria-valuenow={value}
-      aria-valuemin={0}
-      aria-valuemax={100}
+    <Progress
+      value={value}
       aria-label={label}
-    >
-      <div
-        className={cn("h-full rounded-full transition-all", getUsageBarColor(value))}
-        style={{ width: `${value}%` }}
-      />
-    </div>
+      className={className}
+      indicatorClassName={getUsageBarColor(value)}
+    />
   );
 }
 

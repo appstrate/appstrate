@@ -123,12 +123,7 @@ export function DashboardHeader({
       </PageHeader>
 
       {assist.value !== null && (
-        <Modal
-          open
-          onClose={assist.close}
-          title={t("dashboard.askAi.title")}
-          className="sm:max-w-xl"
-        >
+        <Modal onClose={assist.close} title={t("dashboard.askAi.title")} className="sm:max-w-xl">
           <p className="text-muted-foreground text-sm">{t("dashboard.askAi.description")}</p>
           <div className="space-y-2">
             {/* Offered where `/chat` opens: the module loaded AND the caller's grants. */}

@@ -78,7 +78,7 @@ export function ManualModelEntry({ onAdd }: { onAdd: (row: ModelPickRow) => void
       className="text-muted-foreground w-full justify-start rounded-none px-3"
       onClick={() => setOpen(true)}
     >
-      <Plus className="size-4" />
+      <Plus />
       {t("models.choice.manualAdd")}
     </Button>
   );

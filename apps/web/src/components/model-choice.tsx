@@ -32,7 +32,7 @@ export function ModelChoiceList({
   const { source, discovery } = choice;
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       {source === "discover" && (
         <div className="space-y-2">
           <PendingButton

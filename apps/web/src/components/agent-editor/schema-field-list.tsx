@@ -122,7 +122,7 @@ export function SchemaFieldList({
   };
 
   return (
-    <section aria-label={title} className="space-y-3">
+    <section aria-label={title} className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold">{title}</h3>
@@ -243,7 +243,7 @@ function FieldRow({
           {...attributes}
           {...listeners}
         >
-          <GripVertical className="size-4" />
+          <GripVertical />
         </Button>
       </TableCell>
       <TableCell className="text-sm">{field.key || "—"}</TableCell>
@@ -319,7 +319,6 @@ function FieldModal({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={field ? t("editor.fieldEditTitle", { name: field.key }) : t("editor.fieldNew")}
       className="sm:max-w-xl"
@@ -338,7 +337,7 @@ function FieldModal({
         </>
       }
     >
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <Row label={t("editor.fieldKeyLabel")} error={draft.key ? keyError : null}>
             {(id) => (

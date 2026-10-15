@@ -106,14 +106,14 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
         {!minimal && (
           <DropdownMenuItem asChild>
             <Link to="/preferences" className="flex items-center gap-2">
-              <Settings size={14} />
+              <Settings />
               {t("userMenu.preferences")}
             </Link>
           </DropdownMenuItem>
         )}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
-            <Palette size={14} />
+            <Palette />
             {t("userMenu.theme")}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
@@ -123,10 +123,10 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
                 onSelect={() => setTheme(value)}
                 className="flex items-center gap-2"
               >
-                <Icon size={14} />
+                <Icon />
                 {t(labelKey)}
                 {theme === value && (
-                  <Check size={14} strokeWidth={2.5} className="text-primary ml-auto shrink-0" />
+                  <Check strokeWidth={2.5} className="text-primary ml-auto shrink-0" />
                 )}
               </DropdownMenuItem>
             ))}
@@ -143,7 +143,7 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
             rel="noopener noreferrer"
             className="flex items-center gap-2"
           >
-            <BookOpen size={14} />
+            <BookOpen />
             {t("userMenu.documentation")}
           </a>
         </DropdownMenuItem>
@@ -154,7 +154,7 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
             rel="noopener noreferrer"
             className="flex items-center gap-2"
           >
-            <LifeBuoy size={14} />
+            <LifeBuoy />
             {t("userMenu.getHelp")}
           </a>
         </DropdownMenuItem>
@@ -166,14 +166,14 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
               rel="noopener noreferrer"
               className="flex items-center gap-2"
             >
-              <FileText size={14} />
+              <FileText />
               {t("userMenu.apiDocs")}
             </a>
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => void logout()} className="flex items-center gap-2">
-          <LogOut size={14} />
+          <LogOut />
           {t("userMenu.logout")}
         </DropdownMenuItem>
       </DropdownMenuContent>

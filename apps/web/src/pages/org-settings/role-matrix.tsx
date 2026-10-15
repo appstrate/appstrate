@@ -28,7 +28,7 @@ export function RoleMatrix({ roles }: { roles: RoleObject[] }) {
   const firstCustom = roles.find((role) => role.kind === "custom");
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
         {t("roles.matrixOrgNote")}
       </p>

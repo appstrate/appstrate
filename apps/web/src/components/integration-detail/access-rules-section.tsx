@@ -21,7 +21,7 @@ export function AccessRulesSection({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <div className="space-y-8" data-testid="access-rules-section">
+    <div className="flex flex-col gap-8" data-testid="access-rules-section">
       <section>
         <SettingsHeading level="group" title={t("integration.admin.accounts.title")} />
         <BlockUserConnectionsToggle packageId={packageId} initialBlocked={blockUserConnections} />

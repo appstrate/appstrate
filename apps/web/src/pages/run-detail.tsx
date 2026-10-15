@@ -339,7 +339,7 @@ export function RunDetailPage() {
                 run.status === "success" && hasDurableResults ? (
                   <Button variant="outline" size="sm" onClick={() => setTab("results")}>
                     {t("run.viewResults")}
-                    <ArrowRight className="size-3.5" />
+                    <ArrowRight />
                   </Button>
                 ) : undefined
               }

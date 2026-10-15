@@ -199,7 +199,7 @@ export function FileTree({
             onClick={actions.onCreate}
             disabled={actions.isBusy}
           >
-            <FilePlus size={13} />
+            <FilePlus />
             {t("files.newFile")}
           </Button>
           <Button
@@ -209,7 +209,7 @@ export function FileTree({
             onClick={actions.onUpload}
             disabled={actions.isBusy}
           >
-            <Upload size={13} />
+            <Upload />
             {t("files.upload")}
           </Button>
         </div>

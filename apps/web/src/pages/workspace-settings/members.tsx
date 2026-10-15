@@ -408,7 +408,7 @@ function AddSpaceMemberModal({
 
   if (invitationToken) {
     return (
-      <Modal open onClose={onClose} title={t("spaceMembers.addTitle")}>
+      <Modal onClose={onClose} title={t("spaceMembers.addTitle")}>
         <div className="flex flex-col items-start gap-4">
           <p>{t("spaceMembers.invited", { email: email.trim() })}</p>
           <p className="text-muted-foreground text-sm">{t("spaceMembers.invitationLinkHint")}</p>

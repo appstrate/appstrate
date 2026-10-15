@@ -93,7 +93,7 @@ function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentMo
 
   return (
     <Alert variant="destructive" className="mb-4">
-      <TriangleAlert className="h-4 w-4" />
+      <TriangleAlert className="size-4" />
       <AlertTitle>{copy.title}</AlertTitle>
       <AlertDescription className="flex items-center justify-between">
         <span>{copy.description}</span>

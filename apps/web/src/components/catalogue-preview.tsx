@@ -289,7 +289,7 @@ export function CataloguePreview({
     <div>
       {offers.map((offer) => (
         <Alert key={offer.id} variant="info" className="mb-5">
-          <Inbox className="h-4 w-4" />
+          <Inbox className="size-4" />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <AlertTitle>

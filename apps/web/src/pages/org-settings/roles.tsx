@@ -289,7 +289,6 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={spaceRoleLabel(role, t) ?? role.name}
       className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-lg"
@@ -309,7 +308,7 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
                 >
                   <dt className="text-sm font-medium">{permissionResourceLabel(resource, t)}</dt>
                   <dd>
-                    <ul className="text-muted-foreground space-y-0.5 text-sm">
+                    <ul className="text-muted-foreground flex flex-col gap-0.5 text-sm">
                       {permissions.map((permission) => (
                         <li key={permission} title={permission}>
                           {permissionLabel(permission, t)}

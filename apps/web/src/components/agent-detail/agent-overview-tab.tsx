@@ -74,7 +74,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
     (pinned?.length ?? 0) + (memories?.length ?? 0) > 0 ? destination("#memory") : undefined;
 
   return (
-    <div className="space-y-8" data-agent-operational-overview>
+    <div className="flex flex-col gap-8" data-agent-operational-overview>
       <div className="grid gap-6 xl:grid-cols-3">
         <DetailSectionCard title={t("detail.overview.runs")} icon={PlayCircle} bodyClassName="p-0">
           <dl className="grid h-full divide-y">

@@ -69,7 +69,7 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
       title={t("integrationEditor.auths.title")}
       headerRight={
         <Button type="button" size="sm" variant="outline" onClick={addAuth}>
-          <Plus size={14} />
+          <Plus />
           {t("integrationEditor.auths.add")}
         </Button>
       }
@@ -79,7 +79,7 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
       )}
 
       {rows.map((auth, idx) => (
-        <div key={idx} className="border-border space-y-3 rounded-md border p-3">
+        <div key={idx} className="border-border flex flex-col gap-3 rounded-md border p-3">
           <div className="flex items-center gap-2">
             <FormItem
               id={`auth-key-${idx}`}
@@ -101,7 +101,7 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
               onClick={() => removeAuth(idx)}
               title={t("btn.delete", { ns: "common" })}
             >
-              <Trash2 size={14} className="text-destructive" />
+              <Trash2 className="text-destructive" />
             </Button>
           </div>
 
@@ -181,7 +181,7 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
           )}
 
           {auth.type === "oauth2" ? (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               <FormField
                 id={`auth-authz-${idx}`}
                 label={t("integrationEditor.auths.authorizationEndpoint")}

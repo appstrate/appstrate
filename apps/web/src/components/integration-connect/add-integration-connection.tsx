@@ -99,7 +99,7 @@ function AddButton({
         disabled
         data-testid={testId}
       >
-        <Plus className="size-4" />
+        <Plus />
         <span className="hidden @sm/bar:inline">{label}</span>
       </Button>
     </DisabledReasonTooltip>
@@ -118,7 +118,7 @@ function AddButton({
         title={t("integration.presentation.configureAuth")}
         onClick={() => onConfigure(detail.auths[0]?.auth_key)}
       >
-        <Settings2 className="size-4" />
+        <Settings2 />
         <span className="hidden @sm/bar:inline">{t("integration.presentation.configureAuth")}</span>
       </Button>
     );
@@ -140,7 +140,7 @@ function AddButton({
         onClick={() => connect(detail.auths[0]!)}
         disabled={isPending}
       >
-        <Plus className="size-4" />
+        <Plus />
         <span className="hidden @sm/bar:inline">{label}</span>
       </Button>
     );
@@ -155,9 +155,9 @@ function AddButton({
           title={label}
           disabled={isPending}
         >
-          <Plus className="size-4" />
+          <Plus />
           <span className="hidden @sm/bar:inline">{label}</span>
-          <ChevronDown className="hidden size-4 @sm/bar:inline" />
+          <ChevronDown className="hidden @sm/bar:inline" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

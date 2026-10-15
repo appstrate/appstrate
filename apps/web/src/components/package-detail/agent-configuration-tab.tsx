@@ -109,11 +109,11 @@ function InputSettingsSection({
   };
 
   return (
-    <div className="space-y-3 py-4">
+    <div className="flex flex-col gap-3 py-4">
       {showDescription && (
         <p className="text-muted-foreground text-sm">{t("detail.inputSettings.hint")}</p>
       )}
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         {keys.map((key) => (
           <InputSettingRow
             key={key}
@@ -409,7 +409,7 @@ export function AgentConfigurationTab({
   // settings belong to the installation, not to the frozen bundle.
   if (isHistorical) {
     return (
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         <p className="text-muted-foreground text-sm">
           {t("detail.configuration.historicalDefaultsUnavailable")}
         </p>

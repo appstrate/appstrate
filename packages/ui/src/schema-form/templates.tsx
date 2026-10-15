@@ -138,7 +138,7 @@ export function FieldTemplate(props: FieldTemplateProps) {
       {showDescription && <p className="text-muted-foreground text-xs">{rawDescription}</p>}
       {children}
       {rawErrors && rawErrors.length > 0 && (
-        <ul className="space-y-0.5">
+        <ul className="flex flex-col gap-0.5">
           {rawErrors.map((err, i) => (
             <li key={i} className="text-destructive text-xs">
               {err}
@@ -185,7 +185,7 @@ export function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
   const { title, description, properties, fieldPathId } = props;
   const isRoot = fieldPathId?.$id === "root";
   return (
-    <div className={isRoot ? "space-y-6" : "space-y-4"}>
+    <div className={isRoot ? "flex flex-col gap-6" : "flex flex-col gap-4"}>
       {title && !isRoot && <h3 className="text-sm font-medium">{title}</h3>}
       {description && !isRoot && <p className="text-muted-foreground text-xs">{description}</p>}
       {properties.map((p) => (
@@ -208,8 +208,8 @@ export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
     onRemoveItem,
   } = buttonsProps;
   return (
-    <div className="border-border bg-muted/30 relative space-y-2 rounded-md border p-3">
-      <div className="space-y-3">{children}</div>
+    <div className="border-border bg-muted/30 relative flex flex-col gap-2 rounded-md border p-3">
+      <div className="flex flex-col gap-3">{children}</div>
       {hasToolbar && (hasMoveUp || hasMoveDown || hasRemove) && !disabled && (
         <div className="flex justify-end gap-1">
           {hasMoveUp && (
@@ -220,7 +220,7 @@ export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
               onClick={onMoveUpItem}
               aria-label={labels?.moveItemUp ?? "Move up"}
             >
-              <ArrowUp className="h-4 w-4" />
+              <ArrowUp className="size-4" />
             </Button>
           )}
           {hasMoveDown && (
@@ -231,7 +231,7 @@ export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
               onClick={onMoveDownItem}
               aria-label={labels?.moveItemDown ?? "Move down"}
             >
-              <ArrowDown className="h-4 w-4" />
+              <ArrowDown className="size-4" />
             </Button>
           )}
           {hasRemove && (
@@ -242,7 +242,7 @@ export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
               onClick={onRemoveItem}
               aria-label={labels?.removeItem ?? "Remove"}
             >
-              <Trash2 className="text-destructive h-4 w-4" />
+              <Trash2 className="text-destructive size-4" />
             </Button>
           )}
         </div>
@@ -260,10 +260,10 @@ export function ArrayFieldTemplate(props: ArrayFieldTemplateProps) {
     <div className="space-y-3">
       {title && <h3 className="text-sm font-medium">{title}</h3>}
       {description && <p className="text-muted-foreground text-xs">{description}</p>}
-      {items && items.length > 0 && <div className="space-y-2">{items}</div>}
+      {items && items.length > 0 && <div className="flex flex-col gap-2">{items}</div>}
       {canAdd && !readonly && (
         <Button type="button" variant="outline" size="sm" onClick={onAddClick} disabled={disabled}>
-          <Plus className="mr-1 h-4 w-4" />
+          <Plus className="mr-1 size-4" />
           {ctx.labels?.addItem ?? "Add"}
         </Button>
       )}

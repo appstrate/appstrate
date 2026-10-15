@@ -125,7 +125,7 @@ function ResolvedModelHint({ packageId }: { packageId: string }) {
   const source = pinned ? t("input.modelSourceAgent") : t("input.modelSourceOrgDefault");
 
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       <p className="text-muted-foreground text-xs" data-testid="run-resolved-model">
         {t("input.modelResolved", { name: resolved.label, source })}{" "}
         <ModelBillingHint billedTo={resolved.billed_to} />

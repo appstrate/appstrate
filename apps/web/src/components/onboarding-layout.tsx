@@ -156,7 +156,7 @@ export function OnboardingLayout({
         <div className="border-border flex items-center gap-2 border-t pt-4">
           {onBack ? (
             <Button variant="ghost" size="sm" onClick={onBack}>
-              <ArrowLeft size={16} className="mr-1" />
+              <ArrowLeft className="mr-1" />
               {t("btn.back")}
             </Button>
           ) : (
@@ -166,7 +166,7 @@ export function OnboardingLayout({
             {onNext && (
               <Button onClick={onNext} disabled={nextDisabled || nextPending}>
                 {nextPending ? t("onboarding.saving") : nextLabel || t("onboarding.next")}
-                {!nextPending && <ArrowRight size={16} className="ml-1" />}
+                {!nextPending && <ArrowRight className="ml-1" />}
               </Button>
             )}
           </div>

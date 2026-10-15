@@ -49,12 +49,12 @@ function Step({ step, index }: { step: HandoffStep; index: number }) {
             {t("integration.connect.handoffPanel.deferredHint")}
           </span>
         </summary>
-        <div className="mt-2 space-y-2">{body}</div>
+        <div className="mt-2 flex flex-col gap-2">{body}</div>
       </details>
     );
   }
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <span className="block text-xs font-semibold">{label}</span>
       {body}
     </div>
@@ -64,7 +64,7 @@ function Step({ step, index }: { step: HandoffStep; index: number }) {
 export function HandoffSteps({ steps }: { steps: readonly HandoffStep[] }) {
   if (steps.length === 0) return null;
   return (
-    <div className="space-y-5" data-testid="handoff-steps">
+    <div className="flex flex-col gap-5" data-testid="handoff-steps">
       {steps.map((step, i) => (
         <Step key={i} step={step} index={i} />
       ))}

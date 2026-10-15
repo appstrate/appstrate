@@ -30,7 +30,7 @@ export function ItemList<T>({
         verdict={verdict}
         state={state}
         skeleton={
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             {Array.from({ length: SKELETON_ITEMS }, (_, i) => (
               <Skeleton key={i} className="h-14 rounded-lg" />
             ))}
@@ -41,7 +41,7 @@ export function ItemList<T>({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       {items.map((item) => (
         <div key={itemKey(item)}>{renderItem(item)}</div>
       ))}

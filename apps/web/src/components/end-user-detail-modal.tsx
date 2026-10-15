@@ -129,7 +129,6 @@ export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDe
   return (
     <>
       <Modal
-        open
         onClose={onClose}
         title={endUserLabel(endUser, t("spaces.endUserDetail"))}
         actions={
@@ -150,7 +149,7 @@ export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDe
           ) : undefined
         }
       >
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           <CopyableField label="ID" value={endUser.id} />
           <ReadOnlyField label={t("spaces.endUserName")} value={endUser.name} />
           <ReadOnlyField label={t("spaces.endUserEmail")} value={endUser.email} />

@@ -118,7 +118,7 @@ export function OnboardingModelStep() {
         )}
 
         <Button variant="outline" size="sm" className="self-center" onClick={() => newModel.open()}>
-          <Plus className="mr-1.5 size-3.5" />
+          <Plus className="mr-1.5" />
           {hasModels ? t("onboarding.modelSeed.addAnother") : t("models.add")}
         </Button>
       </div>

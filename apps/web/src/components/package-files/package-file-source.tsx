@@ -90,7 +90,7 @@ export function PackageFileSource({
             disabled={downloadPath === null}
             onClick={() => downloadPath !== null && void download(downloadPath)}
           >
-            <Download size={14} />
+            <Download />
             <span className="hidden sm:inline">{t("files.downloadFile")}</span>
           </Button>
           {actions}
@@ -99,7 +99,7 @@ export function PackageFileSource({
 
       {blocked ? (
         <div className="text-muted-foreground flex flex-col items-center justify-center gap-3 px-4 py-16 text-center">
-          <FileWarning className="h-10 w-10 opacity-40" aria-hidden />
+          <FileWarning className="size-10 opacity-40" aria-hidden />
           <p className="font-mono text-sm">{baseName(entry.path)}</p>
           <p className="text-xs">
             {t("files.mediaKind", {

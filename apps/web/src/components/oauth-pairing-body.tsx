@@ -135,7 +135,7 @@ function PairingBody({
             )}
           </p>
           <Button type="button" variant="outline" size="sm" onClick={handleRegenerate}>
-            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            <RefreshCw className="mr-1.5" />
             {t("credentials.oauth.regenerateCommand")}
           </Button>
         </div>
@@ -151,7 +151,7 @@ function PairingBody({
               className="shrink-0"
             />
           </div>
-          <ul className="text-muted-foreground list-disc space-y-1 pl-4 text-xs">
+          <ul className="text-muted-foreground flex list-disc flex-col gap-1 pl-4 text-xs">
             <li>{t("credentials.oauth.cliStepNode")}</li>
             <li>{t("credentials.oauth.cliStepBrowser")}</li>
             <li>{t("credentials.oauth.cliStepKeepOpen")}</li>

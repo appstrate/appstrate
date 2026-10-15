@@ -19,7 +19,7 @@ export function EditorSection({
 }) {
   if (surface === "settings") {
     return (
-      <section className="max-w-2xl space-y-5">
+      <section className="flex max-w-2xl flex-col gap-5">
         {headerRight && <div className="flex justify-end">{headerRight}</div>}
         {children}
       </section>

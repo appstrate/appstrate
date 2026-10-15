@@ -94,7 +94,7 @@ export function ChatCapabilityList({
 }) {
   const { t } = useTranslation(["chat"]);
   return (
-    <ul className="mt-2 space-y-1">
+    <ul className="mt-2 flex flex-col gap-1">
       {capabilities.map((capability) => {
         const off = capability.verdict === "off";
         const granted = capability.verdict === "granted";

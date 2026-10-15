@@ -421,14 +421,15 @@ export function RunSnapshotInspector({
         </div>
       </div>
 
-      <Modal
-        open={turnsParam.value !== null}
-        onClose={turnsParam.close}
-        title={t("run.turnsTitle")}
-        className="max-h-[85vh] max-w-4xl overflow-y-auto"
-      >
-        <RunTurnsDetail turns={turns} />
-      </Modal>
+      {turnsParam.value !== null && (
+        <Modal
+          onClose={turnsParam.close}
+          title={t("run.turnsTitle")}
+          className="max-h-[85vh] max-w-4xl overflow-y-auto"
+        >
+          <RunTurnsDetail turns={turns} />
+        </Modal>
+      )}
     </>
   );
 }

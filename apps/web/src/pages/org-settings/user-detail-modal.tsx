@@ -73,7 +73,6 @@ export function UserDetailModal({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={memberLabel(member)}
       className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-2xl"

@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { CopyBlock } from "./copy-block";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 
 interface Props {
@@ -25,13 +26,14 @@ export function SecretRevealModal({ onClose, title, secret, warning, children, c
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={title}
       className={className}
       actions={<Button onClick={onClose}>{t("btn.done")}</Button>}
     >
-      <p className="text-warning bg-warning/10 rounded-md px-3 py-2 text-sm">{warning}</p>
+      <Alert variant="warning" className="px-3 py-2">
+        <AlertDescription>{warning}</AlertDescription>
+      </Alert>
       <CopyBlock value={secret} />
       {children}
     </Modal>

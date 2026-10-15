@@ -199,7 +199,7 @@ export function RunOverridesPanel({
   const proxySelectValue = value.proxy_id_override ?? INHERIT;
 
   return (
-    <div className={layout === "launch" ? "space-y-4" : undefined}>
+    <div className={layout === "launch" ? "flex flex-col gap-4" : undefined}>
       {(modelsPending || (orgModels && orgModels.length > 0)) && (
         <OverrideRow
           layout={layout}
@@ -354,7 +354,7 @@ function ConnectionOverridesSection({
       <p className="text-muted-foreground text-xs">
         {scheduled ? t("schedule.connectionOverrides.hint") : t("run.overrides.connectionHint")}
       </p>
-      <div className="border-border bg-card space-y-3 rounded-md border p-3">
+      <div className="border-border bg-card flex flex-col gap-3 rounded-md border p-3">
         {integrations.map((integ) => (
           <IntegrationOverrideRow
             key={integ.id}
@@ -396,7 +396,7 @@ function IntegrationOverrideRow({
   if (!detail) {
     if (!isQueryInFlight(detailQuery)) return null;
     return (
-      <div className="space-y-1.5">
+      <div className="flex flex-col gap-1.5">
         <Skeleton className="h-4 w-24" />
         <Skeleton className="h-8 w-full" />
       </div>
@@ -406,7 +406,7 @@ function IntegrationOverrideRow({
   if (connectableAuthKeysForAgent(detail.manifest, effectiveTools).length === 0) return null;
 
   return (
-    <div className="space-y-1.5" data-testid={`conn-override-row-${integration.id}`}>
+    <div className="flex flex-col gap-1.5" data-testid={`conn-override-row-${integration.id}`}>
       <div className="text-xs font-medium">{displayName}</div>
       <IntegrationConnectionPicker
         integration={integration}

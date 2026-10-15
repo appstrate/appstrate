@@ -157,7 +157,7 @@ export function ScheduleActionsMenu({
         }
         disabled={toggle.isPending || !toggle.ready}
       >
-        {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
+        {schedule.enabled ? <Pause /> : <Play />}
         {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
       </DropdownMenuItem>
       {can("schedules:delete") && (
@@ -168,7 +168,7 @@ export function ScheduleActionsMenu({
             disabled={deletePending}
             className="text-destructive focus:text-destructive"
           >
-            <Trash2 size={14} />
+            <Trash2 />
             {t("schedule.delete")}
           </DropdownMenuItem>
         </>
@@ -594,7 +594,7 @@ function InputsSection({
   }
   const defaults = authorDefaults(wrapper.schema);
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       {getOrderedKeys(wrapper.schema, wrapper.property_order).map((key) => {
         // A field the agent locks is the agent's value at every fire.
         const locked = wrapper.locked_fields.includes(key);

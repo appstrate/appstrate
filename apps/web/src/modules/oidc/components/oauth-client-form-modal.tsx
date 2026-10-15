@@ -340,7 +340,7 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
       </div>
 
       {can("oauth-clients:write") && (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <CheckboxField
             id="oauth-client-first-party"
             checked={isFirstParty}
@@ -416,7 +416,7 @@ export function SignupPolicyFields({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   return (
-    <div className="space-y-3 rounded-md border p-3">
+    <div className="flex flex-col gap-3 rounded-md border p-3">
       <CheckboxField
         id="oauth-client-allow-signup"
         checked={allowSignup}

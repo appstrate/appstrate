@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
@@ -174,7 +175,7 @@ export function HostedConnectPage() {
     <div className="bg-background text-foreground flex min-h-screen items-center justify-center p-4">
       {/* The install block is a shell script — wrapping it into a 28rem column
           would make it unreadable, so that one phase gets a wider page. */}
-      <div className={`w-full space-y-6 ${handoffSteps ? "max-w-2xl" : "max-w-md"}`}>
+      <div className={`flex w-full flex-col gap-6 ${handoffSteps ? "max-w-2xl" : "max-w-md"}`}>
         {phase === "loading" && (
           <div className="flex justify-center py-12">
             <Spinner />
@@ -182,7 +183,7 @@ export function HostedConnectPage() {
         )}
 
         {phase === "error" && (
-          <div className="space-y-2 text-center">
+          <div className="flex flex-col gap-2 text-center">
             <h1 className="text-lg font-semibold">{t("integration.connect.hosted.errorTitle")}</h1>
             <p className="text-muted-foreground text-sm">
               {t("integration.connect.hosted.errorBody")}
@@ -222,7 +223,7 @@ export function HostedConnectPage() {
         )}
 
         {phase === "done" && !handoffSteps && (
-          <div className="space-y-2 text-center">
+          <div className="flex flex-col gap-2 text-center">
             <h1 className="text-lg font-semibold text-green-400">
               {t("integration.connect.hosted.doneTitle")}
             </h1>
@@ -258,9 +259,9 @@ export function HostedConnectPage() {
                 <CredentialFields auth={context.auth} values={values} onChange={setValues} />
               )}
               {error && (
-                <p className="text-sm text-red-400" role="alert">
-                  {error}
-                </p>
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
               )}
               <Button type="submit" className="w-full" disabled={phase === "submitting"}>
                 {isOAuth

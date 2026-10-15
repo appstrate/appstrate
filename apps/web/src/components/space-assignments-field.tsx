@@ -111,7 +111,7 @@ export function SpaceAssignmentsField({
                   aria-label={t("orgSettings.inviteSpaceRemove")}
                   onClick={() => onChange(value.filter((_, i) => i !== index))}
                 >
-                  <X size={16} />
+                  <X />
                 </Button>
               </div>
             );

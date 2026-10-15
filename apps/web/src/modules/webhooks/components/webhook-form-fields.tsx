@@ -27,7 +27,7 @@ export function WebhookFormFields({
     <>
       <div className="space-y-2">
         <Label>{t("webhooks.eventsLabel")}</Label>
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           {WEBHOOK_EVENTS.map((event) => (
             <CheckboxField
               key={event}

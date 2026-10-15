@@ -71,7 +71,7 @@ export function IntegrationOverview({
     : [];
 
   return (
-    <div className="space-y-6" data-testid="integration-overview">
+    <div className="flex flex-col gap-6" data-testid="integration-overview">
       {issues.length > 0 && (
         <HealthCard
           title={t("integration.health.title")}

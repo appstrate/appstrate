@@ -379,7 +379,7 @@ function Composer({
               className="size-8 shrink-0 rounded-lg"
               aria-label={t("composer.stop")}
             >
-              <SquareIcon className="size-3 fill-current" />
+              <SquareIcon className="fill-current" />
             </Button>
           </ComposerPrimitive.Cancel>
         </ThreadPrimitive.If>
@@ -539,7 +539,7 @@ export function MessageError() {
             asChild
           >
             <Button type="button" variant="outline" size="sm" className="shrink-0">
-              <RotateCcwIcon className="size-3.5" />
+              <RotateCcwIcon />
               {t("turn.retry")}
             </Button>
           </ThreadPrimitive.Suggestion>

@@ -181,7 +181,7 @@ export function PackageActionsDropdown({
       onSelect={() => !createVersionBlockedReason && onCreateVersion()}
       disabled={!!createVersionBlockedReason}
     >
-      <GitBranchPlus size={14} />
+      <GitBranchPlus />
       <DisabledItemLabel label={t("version.createVersion")} reason={createVersionBlockedReason} />
     </DropdownMenuItem>
   );
@@ -191,25 +191,25 @@ export function PackageActionsDropdown({
     <>
       {showActivate && (
         <DropdownMenuItem disabled={activation.pending} onSelect={() => activation.activate()}>
-          <PackagePlus size={14} />
+          <PackagePlus />
           {t("packages.activate", { ns: "settings" })}
         </DropdownMenuItem>
       )}
       {showDeactivate && (
         <DropdownMenuItem disabled={activation.pending} onSelect={() => askConfirm("deactivate")}>
-          <PackagePlus size={14} className="rotate-180" />
+          <PackagePlus className="rotate-180" />
           {t("packages.deactivate", { ns: "settings" })}
         </DropdownMenuItem>
       )}
       {isMutable && (
         <DropdownMenuItem onSelect={() => moveHome.open(packageId)}>
-          <FolderInput size={14} />
+          <FolderInput />
           {t("packages.moveHome", { ns: "settings" })}
         </DropdownMenuItem>
       )}
       {canShare && (
         <DropdownMenuItem onSelect={() => share.open(packageId)}>
-          <Share2 size={14} />
+          <Share2 />
           {t("packages.share", { ns: "settings" })}
         </DropdownMenuItem>
       )}
@@ -227,7 +227,7 @@ export function PackageActionsDropdown({
                 {createVersionItem}
                 {showFork && (
                   <DropdownMenuItem onSelect={() => fork.open()}>
-                    <GitFork size={14} />
+                    <GitFork />
                     {t("fork.button")}
                   </DropdownMenuItem>
                 )}
@@ -243,7 +243,7 @@ export function PackageActionsDropdown({
                     onSelect={() => !runBlockedReason && onRunWithOptions()}
                     disabled={!!runBlockedReason}
                   >
-                    <SlidersHorizontal size={14} />
+                    <SlidersHorizontal />
                     <DisabledItemLabel
                       label={t("run.options.menuItem")}
                       reason={runBlockedReason}
@@ -252,7 +252,7 @@ export function PackageActionsDropdown({
                 )}
                 {can("schedules:write") && !hasFileInput && onAddSchedule && (
                   <DropdownMenuItem onSelect={onAddSchedule}>
-                    <CalendarPlus size={14} />
+                    <CalendarPlus />
                     {t("schedule.titleNew")}
                   </DropdownMenuItem>
                 )}
@@ -265,7 +265,7 @@ export function PackageActionsDropdown({
                 <DropdownMenuLabel>{t("detail.actions.export")}</DropdownMenuLabel>
                 {downloadVersion && onDownload && (
                   <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
-                    <Download size={14} />
+                    <Download />
                     {t("btn.download", { ns: "common" })}
                   </DropdownMenuItem>
                 )}
@@ -274,7 +274,7 @@ export function PackageActionsDropdown({
                     onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
                     disabled={!hasPublishedVersion}
                   >
-                    <Package size={14} />
+                    <Package />
                     <DisabledItemLabel
                       label={t("bundle.download")}
                       reason={hasPublishedVersion ? undefined : t("bundle.requiresVersion")}
@@ -296,7 +296,7 @@ export function PackageActionsDropdown({
                     disabled={runningRuns > 0}
                     className="text-destructive focus:text-destructive"
                   >
-                    <Trash2 size={14} />
+                    <Trash2 />
                     {t("detail.clearRuns")}
                   </DropdownMenuItem>
                 )}
@@ -305,7 +305,7 @@ export function PackageActionsDropdown({
                     onSelect={onDeleteMemories}
                     className="text-destructive focus:text-destructive"
                   >
-                    <Trash2 size={14} />
+                    <Trash2 />
                     {t("detail.clearMemories")}
                   </DropdownMenuItem>
                 )}
@@ -316,7 +316,7 @@ export function PackageActionsDropdown({
                     disabled={runningRuns > 0}
                     className="text-destructive focus:text-destructive"
                   >
-                    <Trash2 size={14} />
+                    <Trash2 />
                     {t("btn.delete")}
                   </DropdownMenuItem>
                 )}
@@ -327,14 +327,14 @@ export function PackageActionsDropdown({
           <>
             {canRead && downloadVersion && onDownload && (
               <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
-                <Download size={14} />
+                <Download />
                 {t("btn.download", { ns: "common" })}
               </DropdownMenuItem>
             )}
             {createVersionItem}
             {showFork && (
               <DropdownMenuItem onSelect={() => fork.open()}>
-                <GitFork size={14} />
+                <GitFork />
                 {t("fork.button")}
               </DropdownMenuItem>
             )}
@@ -347,7 +347,7 @@ export function PackageActionsDropdown({
                     onSelect={() => askConfirm("delete")}
                     className="text-destructive focus:text-destructive"
                   >
-                    <Trash2 size={14} />
+                    <Trash2 />
                     {t("btn.delete")}
                   </DropdownMenuItem>
                 )}

@@ -95,7 +95,7 @@ export function AgentAppearanceFields({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5">
       <div>
         <Label>{t("editor.appearancePreview")}</Label>
         <div className="border-border bg-muted/20 mt-2 flex items-center gap-3 rounded-lg border p-3">
@@ -131,7 +131,7 @@ export function AgentAppearanceFields({
                 {pickedIcon && <DynamicIcon name={pickedIcon} className="size-4 shrink-0" />}
                 <span className="truncate">{pickedIcon ? iconLabel(pickedIcon) : icon}</span>
               </span>
-              <ChevronsUpDown className="text-muted-foreground size-4 shrink-0" />
+              <ChevronsUpDown className="text-muted-foreground shrink-0" />
             </Button>
           </PopoverTrigger>
           <PopoverContent align="start" className="w-[32rem] max-w-[calc(100vw-2rem)] p-0">
@@ -165,7 +165,7 @@ export function AgentAppearanceFields({
                         <span className="truncate text-xs">{iconLabel(name)}</span>
                         <Check
                           className={cn(
-                            "ml-auto size-3.5 shrink-0",
+                            "ml-auto shrink-0",
                             pickedIcon === name ? "opacity-100" : "opacity-0",
                           )}
                         />

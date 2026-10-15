@@ -110,7 +110,7 @@ export function LocalServerField({
         )}
       </div>
 
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         <FormItem
           id="int-source-server-version"
           label={t("integrationEditor.source.serverVersion")}

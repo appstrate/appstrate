@@ -466,7 +466,7 @@ export function LogViewer({
           <div className="h-[400px] overflow-y-auto" ref={scrollRef}>
             {isLoading && entries.length === 0 ? (
               <div role="status" aria-busy="true" aria-label={t("loading", { ns: "common" })}>
-                <div aria-hidden className="space-y-2 p-4">
+                <div aria-hidden className="flex flex-col gap-2 p-4">
                   {Array.from({ length: 8 }, (_, i) => (
                     <Skeleton key={i} className="h-8 w-full" />
                   ))}
@@ -604,7 +604,7 @@ export function LogEntryInspector({
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-5 p-4">
+        <div className="flex flex-col gap-5 p-4">
           <FactGrid columns={1}>
             <Fact label={t("log.filterType")}>{t(`log.type.${type}`)}</Fact>
             {entry.createdAt && (
@@ -632,7 +632,7 @@ export function LogEntryInspector({
                 <InspectorCode label={t("log.arguments")} value={entry.args} />
               )}
               {entry.result !== undefined && (
-                <section className="space-y-2">
+                <section className="flex flex-col gap-2">
                   <h3 className="text-sm font-medium">{t("log.result")}</h3>
                   <ToolResult key={entry.id} tool={entry.tool} result={entry.result} />
                 </section>
@@ -652,7 +652,7 @@ export function LogEntryInspector({
 
 function InspectorText({ label, value }: { label: string; value: string }) {
   return (
-    <section className="space-y-2">
+    <section className="flex flex-col gap-2">
       <h3 className="text-sm font-medium">{label}</h3>
       <p className="text-foreground/80 text-sm break-words whitespace-pre-wrap">{value}</p>
     </section>
@@ -661,7 +661,7 @@ function InspectorText({ label, value }: { label: string; value: string }) {
 
 function InspectorCode({ label, value }: { label: string; value: unknown }) {
   return (
-    <section className="space-y-2">
+    <section className="flex flex-col gap-2">
       <h3 className="text-sm font-medium">{label}</h3>
       <pre className="bg-muted text-foreground/80 overflow-x-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap select-text">
         {formatStructuredValue(value)}

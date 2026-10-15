@@ -23,7 +23,7 @@ interface FormModalProps {
   secondaryActions?: ReactNode;
   /** The dialog's own classes. */
   className?: string;
-  /** The form attributes a caller needs; a `className` replaces the default `space-y-4`. */
+  /** The form attributes a caller needs; a `className` replaces the default `flex flex-col gap-4`. */
   formProps?: Pick<ComponentProps<"form">, "noValidate" | "onChange" | "className">;
   children: ReactNode;
 }
@@ -51,7 +51,6 @@ export function FormModal({
 
   return (
     <Modal
-      open
       onClose={onClose}
       preventClose={isPending}
       title={title}
@@ -74,7 +73,7 @@ export function FormModal({
         </>
       }
     >
-      <form className="space-y-4" {...formProps} id={formId} onSubmit={onSubmit}>
+      <form className="flex flex-col gap-4" {...formProps} id={formId} onSubmit={onSubmit}>
         {children}
         <FieldError>{error}</FieldError>
       </form>

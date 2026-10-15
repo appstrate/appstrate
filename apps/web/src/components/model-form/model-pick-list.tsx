@@ -97,12 +97,7 @@ function PickRow({
           disabled={starBlocked}
           onClick={() => extras.onDefaultChange?.(row.id)}
         >
-          <Star
-            className={cn(
-              "size-4",
-              isDefault ? "fill-warning text-warning" : "text-muted-foreground",
-            )}
-          />
+          <Star className={cn(isDefault ? "fill-warning text-warning" : "text-muted-foreground")} />
         </Button>
       )}
     </div>
@@ -163,7 +158,7 @@ export function ModelPickList({
   );
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <Input
         id="mdl-modelSearch"
         type="search"

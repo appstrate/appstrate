@@ -326,7 +326,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
               onNavigate={closeSwitcherAndSidebar}
             />
             {exploredSpaces.isPending ? (
-              <div className="space-y-1 p-2">
+              <div className="flex flex-col gap-1 p-2">
                 <Skeleton className="h-5 w-2/3" />
                 <Skeleton className="h-5 w-1/2" />
               </div>

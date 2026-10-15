@@ -16,6 +16,7 @@ import {
 } from "@appstrate/ui/components/select";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
@@ -176,7 +177,6 @@ export function SharePackageDialog({
 
   return (
     <Modal
-      open
       onClose={close}
       title={t("packages.shareTitle")}
       actions={
@@ -253,28 +253,31 @@ export function SharePackageDialog({
           )}
 
           {needsVersion && (
-            <div
+            <Alert
+              variant="warning"
               data-testid="share-needs-version"
-              className="border-warning/40 bg-warning/10 mt-4 space-y-2 rounded-md border p-3 text-sm"
+              className="bg-warning/10 mt-4 rounded-md p-3"
             >
-              <p>{t("packages.shareNeedsVersion")}</p>
-              {canPublish ? (
-                <PendingButton
-                  type="button"
-                  size="sm"
-                  pending={publish.isPending}
-                  disabled={share.isPending}
-                  onClick={() => void publishAndShare()}
-                >
-                  {t("packages.sharePublishAndShare")}
-                </PendingButton>
-              ) : (
-                <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
-              )}
-            </div>
+              <AlertDescription className="space-y-2">
+                <p>{t("packages.shareNeedsVersion")}</p>
+                {canPublish ? (
+                  <PendingButton
+                    type="button"
+                    size="sm"
+                    pending={publish.isPending}
+                    disabled={share.isPending}
+                    onClick={() => void publishAndShare()}
+                  >
+                    {t("packages.sharePublishAndShare")}
+                  </PendingButton>
+                ) : (
+                  <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
+                )}
+              </AlertDescription>
+            </Alert>
           )}
 
-          <div className="mt-4 space-y-1 border-t pt-4">
+          <div className="mt-4 flex flex-col gap-1 border-t pt-4">
             <p className="text-sm font-medium">{t("packages.shareCurrent")}</p>
             {isLoading ? (
               <TextSkeleton lines={2} className="py-1.5" />
@@ -314,7 +317,7 @@ export function SharePackageDialog({
                         )
                       }
                     >
-                      <Trash2 size={14} />
+                      <Trash2 />
                     </Button>
                   </li>
                 ))}

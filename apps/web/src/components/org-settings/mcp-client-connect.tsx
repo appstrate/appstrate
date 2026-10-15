@@ -62,7 +62,7 @@ export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
     : buildMcpClientConfig(`appstrate-${orgSlug}`, base);
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div>
         <p className="text-muted-foreground mb-1 text-xs font-medium">
           {t("orgSettings.mcpScopeLabel")}

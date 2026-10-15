@@ -40,7 +40,7 @@ export function ScheduleConnectionRefusals({
           <AlertTriangle />
           <AlertTitle>{t("schedule.connectionOverrides.refusedTitle")}</AlertTitle>
           <AlertDescription>
-            <ul className="list-disc space-y-1 pl-5 text-xs">
+            <ul className="flex list-disc flex-col gap-1 pl-5 text-xs">
               {refusals.map((choice) => (
                 <RefusalItem key={choice.integrationId} choice={choice} />
               ))}

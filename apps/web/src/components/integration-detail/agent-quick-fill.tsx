@@ -110,7 +110,7 @@ export function AgentQuickFillMenu({
               data-testid={id}
             >
               {t("integration.auth.scopeChoice.forAgentPlaceholder")}
-              <ChevronDown className="ml-1 size-3" />
+              <ChevronDown className="ml-1" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">

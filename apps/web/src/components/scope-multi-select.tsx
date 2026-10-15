@@ -120,7 +120,7 @@ export function ScopeMultiSelect({
             disabled={disabled}
           >
             <span className="truncate">{label}</span>
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            <ChevronsUpDown className="ml-2 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-80 p-0" align="start">
@@ -130,9 +130,7 @@ export function ScopeMultiSelect({
               <CommandEmpty>{text.empty}</CommandEmpty>
               <CommandGroup>
                 <CommandItem onSelect={toggleAll}>
-                  <Check
-                    className={cn("mr-2 h-4 w-4", allSelected ? "opacity-100" : "opacity-0")}
-                  />
+                  <Check className={cn("mr-2", allSelected ? "opacity-100" : "opacity-0")} />
                   {allSelected ? t("apiKeys.deselectAll") : t("apiKeys.selectAll")}
                 </CommandItem>
               </CommandGroup>
@@ -152,9 +150,7 @@ export function ScopeMultiSelect({
                         title={scope}
                         onSelect={() => toggle(scope)}
                       >
-                        <Check
-                          className={cn("mr-2 h-4 w-4", isSelected ? "opacity-100" : "opacity-0")}
-                        />
+                        <Check className={cn("mr-2", isSelected ? "opacity-100" : "opacity-0")} />
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span>{label}</span>
                           {note && <span className="text-muted-foreground text-xs">{note}</span>}

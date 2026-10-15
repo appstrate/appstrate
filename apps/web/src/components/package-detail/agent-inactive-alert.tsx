@@ -17,7 +17,7 @@ export function AgentInactiveAlert({ packageId }: { packageId: string }) {
 
   return (
     <Alert variant="destructive" className="mb-4">
-      <AlertTriangle className="h-4 w-4" />
+      <AlertTriangle className="size-4" />
       <div className="flex items-start justify-between gap-3">
         <AlertTitle>{t("detail.deactivatedHere")}</AlertTitle>
         {mayActivate && (

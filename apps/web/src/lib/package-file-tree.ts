@@ -315,7 +315,7 @@ export function isPinnedEntry(type: PackageType, path: string): boolean {
  * - `exists` — a `write` would silently overwrite, which "new file" and "rename" must not do.
  * - `conflict` — one path both file and directory, either direction (`path_conflict`).
  */
-export type NewPathRejection = "invalid" | "reserved" | "exists" | "conflict";
+type NewPathRejection = "invalid" | "reserved" | "exists" | "conflict";
 
 export const NEW_PATH_ERROR_KEYS: Record<NewPathRejection, string> = {
   invalid: "files.errorInvalidPath",

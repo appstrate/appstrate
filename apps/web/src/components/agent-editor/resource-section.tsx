@@ -328,7 +328,7 @@ export function ResourceSection({
                     <span className="flex items-center gap-1.5 truncate text-sm font-medium">
                       {item.name || item.id}
                       {isBuiltIn && (
-                        <ShieldCheck className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+                        <ShieldCheck className="text-muted-foreground size-3.5 shrink-0" />
                       )}
                     </span>
                     {item.description && (
@@ -354,7 +354,7 @@ export function ResourceSection({
                       rel="noopener noreferrer"
                       aria-label={t("editor.resourceOpen", { name: item.name || item.id })}
                     >
-                      <ArrowUpRight className="size-4" />
+                      <ArrowUpRight />
                     </Link>
                   </Button>
                 </div>
@@ -397,7 +397,7 @@ export function ResourceSection({
                     {id}
                     {canReadCatalog && (
                       <span className="text-destructive inline-flex items-center gap-1 text-xs font-normal">
-                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                        <AlertTriangle className="size-3.5 shrink-0" />
                         {type === "integration"
                           ? t("editor.integrationInactive")
                           : t("editor.dependencyMissing")}
@@ -534,7 +534,7 @@ function SelectedResources({
           : entry.tools.join(", ");
 
   return (
-    <section aria-label={title} className="space-y-3">
+    <section aria-label={title} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold">{title}</h3>
@@ -769,7 +769,6 @@ function ResourcePicker({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={title}
       className="sm:max-w-2xl"

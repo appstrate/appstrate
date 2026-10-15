@@ -263,19 +263,18 @@ function AgentMemoryCollection({
   return (
     <>
       {collection}
-      <Modal
-        open={selected !== null}
-        onClose={memoryParam.close}
-        title={
-          selected?.key ??
-          (selected?.kind === "pinned"
-            ? t("agents:detail.memoryTypePinned")
-            : t("agents:detail.memoryTypeArchive"))
-        }
-        className="max-w-3xl"
-      >
-        {selected && (
-          <div className="space-y-4">
+      {selected !== null && (
+        <Modal
+          onClose={memoryParam.close}
+          title={
+            selected.key ??
+            (selected.kind === "pinned"
+              ? t("agents:detail.memoryTypePinned")
+              : t("agents:detail.memoryTypeArchive"))
+          }
+          className="max-w-3xl"
+        >
+          <div className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-muted-foreground text-sm">
                 {selected.kind === "pinned"
@@ -293,8 +292,8 @@ function AgentMemoryCollection({
               {memoryText(selected.content)}
             </pre>
           </div>
-        )}
-      </Modal>
+        </Modal>
+      )}
     </>
   );
 }

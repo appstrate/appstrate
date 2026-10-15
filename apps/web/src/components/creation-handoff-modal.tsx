@@ -60,8 +60,8 @@ export function CreationHandoffModal({
   ];
 
   return (
-    <Modal open onClose={onClose} title={t(TITLE_KEYS[resource])} className="sm:max-w-xl">
-      <div className="space-y-2">
+    <Modal onClose={onClose} title={t(TITLE_KEYS[resource])} className="sm:max-w-xl">
+      <div className="flex flex-col gap-2">
         {methods.map(({ id, ...method }) => (
           <ChoiceCard
             key={id}

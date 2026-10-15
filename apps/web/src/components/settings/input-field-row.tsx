@@ -38,7 +38,7 @@ export function InputFieldRow({
   const fieldWrapper: SchemaWrapper = { ...subset, schema: fieldSchema };
 
   return (
-    <div className="space-y-1.5" data-testid={`input-setting-${fieldKey}`}>
+    <div className="flex flex-col gap-1.5" data-testid={`input-setting-${fieldKey}`}>
       <SchemaForm
         wrapper={fieldWrapper}
         formData={value === undefined ? {} : { [fieldKey]: value }}

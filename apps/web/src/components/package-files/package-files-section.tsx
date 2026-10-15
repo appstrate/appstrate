@@ -93,7 +93,6 @@ export function ManifestEditEntry({
   if (editing.value === null) return null;
   return (
     <Modal
-      open
       onClose={editing.close}
       title={t("editor.editFile", { name: "manifest.json" })}
       className="sm:max-w-5xl"

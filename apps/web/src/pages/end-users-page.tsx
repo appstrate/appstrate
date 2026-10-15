@@ -161,7 +161,7 @@ function EndUsersPageContent() {
       )}
 
       {selectedUserId && !selectedUser && (
-        <Modal open onClose={closeUser} title={t("spaces.endUserDetail")}>
+        <Modal onClose={closeUser} title={t("spaces.endUserDetail")}>
           {selectedUserLoading ? (
             <SettingsSkeleton />
           ) : (

@@ -30,7 +30,7 @@ function AuthTechnicalSettings({ packageId, authKey }: { packageId: string; auth
     <section className="mt-8">
       <h4 className="mb-4 text-sm font-medium">{t("integration.presentation.technicalDetails")}</h4>
       {redirectUri && (
-        <div className="mb-4 space-y-2">
+        <div className="mb-4 flex flex-col gap-2">
           <p className="text-muted-foreground text-sm">
             {t("integration.oauthClient.platformRedirectUri")}
           </p>

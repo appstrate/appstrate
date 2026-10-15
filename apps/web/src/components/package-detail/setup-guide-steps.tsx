@@ -18,7 +18,7 @@ export function SetupGuideSteps({
       aria-label={t("integration.setup_guide.step_label")}
     >
       <h3 className="mb-2 text-sm font-semibold">{t("integration.setup_guide.title")}</h3>
-      <ol className="text-muted-foreground list-decimal space-y-1 pl-5 text-xs">
+      <ol className="text-muted-foreground flex list-decimal flex-col gap-1 pl-5 text-xs">
         {steps.map((step, i) => {
           const href = normalizeHttpUrl(step.url);
           return (

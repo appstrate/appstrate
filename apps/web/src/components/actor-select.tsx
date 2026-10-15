@@ -165,7 +165,7 @@ export function ActorSelect({
           <span className="truncate">
             {selectedLabel ?? placeholder ?? t("actorSelect.placeholder")}
           </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <ChevronsUpDown className="ml-2 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
@@ -188,10 +188,7 @@ export function ActorSelect({
                     onSelect={() => select(o.actor)}
                   >
                     <Check
-                      className={cn(
-                        "mr-2 h-4 w-4",
-                        isActive(o.actor) ? "opacity-100" : "opacity-0",
-                      )}
+                      className={cn("mr-2", isActive(o.actor) ? "opacity-100" : "opacity-0")}
                     />
                     <div className="flex min-w-0 flex-col">
                       <span className="truncate">{o.name}</span>
@@ -215,10 +212,7 @@ export function ActorSelect({
                     onSelect={() => select(o.actor)}
                   >
                     <Check
-                      className={cn(
-                        "mr-2 h-4 w-4",
-                        isActive(o.actor) ? "opacity-100" : "opacity-0",
-                      )}
+                      className={cn("mr-2", isActive(o.actor) ? "opacity-100" : "opacity-0")}
                     />
                     <div className="flex min-w-0 flex-col">
                       <span className="truncate">{o.name}</span>
@@ -234,7 +228,7 @@ export function ActorSelect({
               </CommandGroup>
             )}
             {pending && (
-              <div className="space-y-1 p-1" aria-hidden>
+              <div className="flex flex-col gap-1 p-1" aria-hidden>
                 <Skeleton className="h-7 w-full" />
                 <Skeleton className="h-7 w-full" />
                 <Skeleton className="h-7 w-full" />

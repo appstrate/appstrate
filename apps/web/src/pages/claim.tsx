@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AuthLayout } from "../components/auth-layout";
 import { Input } from "@appstrate/ui/components/input";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { FormItem } from "@/components/app-ui/form-item";
 import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 import { client } from "../api/client";
@@ -51,10 +51,12 @@ export function ClaimPage() {
   return (
     <AuthLayout>
       <div className="flex flex-col gap-6">
-        <div className="border-primary/30 bg-primary/5 rounded-lg border px-4 py-3 text-sm">
-          <p className="font-medium">{t("claim.title")}</p>
-          <p className="text-muted-foreground mt-1">{t("claim.subtitle")}</p>
-        </div>
+        <Alert variant="info" className="px-4 py-3 text-sm">
+          <AlertTitle>{t("claim.title")}</AlertTitle>
+          <AlertDescription className="text-muted-foreground">
+            {t("claim.subtitle")}
+          </AlertDescription>
+        </Alert>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
           <FormItem id="claim-token" label={t("claim.tokenLabel")} hint={t("claim.tokenHelp")}>

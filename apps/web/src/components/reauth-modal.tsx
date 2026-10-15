@@ -55,9 +55,9 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
     }
   };
 
-  return (
-    <Modal open={open} onClose={handleClose} title={t("preferences.reauthTitle")}>
-      <div className="space-y-4">
+  return open ? (
+    <Modal onClose={handleClose} title={t("preferences.reauthTitle")}>
+      <div className="flex flex-col gap-4">
         <p className="text-muted-foreground text-sm">{t("preferences.reauthDescription")}</p>
 
         {methods.length === 0 ? (
@@ -98,5 +98,5 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
         )}
       </div>
     </Modal>
-  );
+  ) : null;
 }

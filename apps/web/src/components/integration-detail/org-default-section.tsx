@@ -84,7 +84,7 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   );
 
   return (
-    <div className="space-y-4" data-testid="org-default-section">
+    <div className="flex flex-col gap-4" data-testid="org-default-section">
       {unavailableIds.length > 0 && (
         <Alert variant="warning" data-testid="org-default-unavailable-warning">
           <AlertTriangle className="size-4" />
