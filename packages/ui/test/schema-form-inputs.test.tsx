@@ -98,7 +98,7 @@ describe("SelectWidget option matching", () => {
 
   it("matches multi-select object values regardless of key order", () => {
     const html = render(MultiSelectWidget, [{ b: 1, a: 2 }]);
-    expect(html).toContain("Alpha");
-    expect(html).not.toContain("Beta");
+    expect(html.match(/aria-checked="true"/g)).toHaveLength(1);
+    expect(html.indexOf("Alpha")).toBeLessThan(html.indexOf('aria-checked="false"'));
   });
 });

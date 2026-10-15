@@ -3,7 +3,8 @@
 /**
  * A page of runs: the query, the paging, and the table underneath.
  *
- * Agent names resolve in `use-run-agent-name.ts`; the table draws the rows.
+ * Agent names resolve in `use-run-agent-name.ts` and their tiles in
+ * `use-run-agent-identity.ts`; the table draws the rows.
  * What is left here is fetching.
  */
 
@@ -12,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { usePaginatedRuns, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
+import { useRunAgentIdentity } from "../hooks/use-run-agent-identity";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
 import { RunsTable } from "./runs-table";
 import { useRunColumns } from "./run-columns";
@@ -84,7 +86,8 @@ export function RunList({
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const agentName = useRunAgentName(fixedAgentName);
-  const allColumns = useRunColumns({ agentName, hideAgentName });
+  const agentIdentity = useRunAgentIdentity();
+  const allColumns = useRunColumns({ agentName, agentIdentity, hideAgentName });
   // Per TABLE, not per screen: the run list keeps its columns wherever it is
   // shown — the runs page, an agent's tab, a schedule's history.
   const { columns, menu } = useColumnVisibility("runs", allColumns);

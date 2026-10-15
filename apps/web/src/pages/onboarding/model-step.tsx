@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { Badge } from "@appstrate/ui/components/badge";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -74,10 +75,7 @@ export function OnboardingModelStep() {
               {models.map((m) => {
                 const ProviderIcon = getModelIcon(m, registry ?? []);
                 return (
-                  <div
-                    key={m.id}
-                    className="border-border bg-card flex items-center gap-3 rounded-md border px-3 py-2"
-                  >
+                  <Card key={m.id} className="flex items-center gap-3 rounded-md px-3 py-2">
                     {ProviderIcon ? (
                       <ProviderIcon className="size-4 shrink-0" />
                     ) : (
@@ -95,7 +93,7 @@ export function OnboardingModelStep() {
                         {t("models.default")}
                       </Badge>
                     )}
-                  </div>
+                  </Card>
                 );
               })}
             </div>

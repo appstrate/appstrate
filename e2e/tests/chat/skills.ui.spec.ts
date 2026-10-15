@@ -9,6 +9,7 @@
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createSkill } from "../../helpers/seed.ts";
+import { openRow } from "../../helpers/table.ts";
 
 test("carries the chosen mode and skills with the first message, and writes nothing before", async ({
   authedPage: page,
@@ -74,14 +75,14 @@ test("a skill imposed from the space library is locked in the picker, after a co
   // The catalogue's « Par espace » view lists what is placed here; the skill's
   // sheet carries one « Imposé dans le chat » switch per space.
   await page.goto("/catalogue/placed/skill");
-  await page.getByRole("button", { name: `Test Skill ${name}`, exact: true }).click();
+  await openRow(page, `Test Skill ${name}`);
   const enforce = page.getByRole("switch", { name: /dans le chat|in the chat/ });
   await expect(enforce).not.toBeChecked();
   await enforce.click();
 
   // Imposing discloses the content to every member who chats here: the reader
   // is told so before anything is written.
-  const dialog = page.getByRole("dialog", { name: /Imposer ce skill|Require this skill/ });
+  const dialog = page.getByRole("alertdialog", { name: /Imposer ce skill|Require this skill/ });
   await expect(dialog).toContainText(/quels que soient leurs droits|whatever their skill/);
   const patched = page.waitForResponse(
     (response) =>

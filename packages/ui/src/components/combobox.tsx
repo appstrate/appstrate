@@ -12,6 +12,8 @@ interface ComboboxOption {
   value: string;
   /** Shown in the list and in the trigger; defaults to `value`. */
   label?: React.ReactNode;
+  /** What the search matches besides `value`: the label's text when `value` is an opaque key. */
+  keywords?: string[];
 }
 
 interface ComboboxProps {
@@ -21,6 +23,10 @@ interface ComboboxProps {
   options: ComboboxOption[];
   searchPlaceholder: string;
   emptyText: string;
+  /** Shown while nothing is selected. */
+  placeholder?: string;
+  /** Picking the selected option again clears the value (`""`). */
+  clearable?: boolean;
   disabled?: boolean;
   className?: string;
 }
@@ -33,6 +39,8 @@ function Combobox({
   options,
   searchPlaceholder,
   emptyText,
+  placeholder,
+  clearable,
   disabled,
   className,
 }: ComboboxProps) {
@@ -49,7 +57,9 @@ function Combobox({
           disabled={disabled}
           className={cn("w-full justify-between font-normal", className)}
         >
-          <span className="truncate">{selected?.label ?? selected?.value ?? value}</span>
+          <span className={cn("truncate", !value && "text-muted-foreground")}>
+            {value ? (selected?.label ?? selected?.value ?? value) : placeholder}
+          </span>
           <ChevronsUpDown className="text-muted-foreground shrink-0" />
         </Button>
       </PopoverTrigger>
@@ -62,8 +72,9 @@ function Combobox({
               <CommandItem
                 key={option.value}
                 value={option.value}
+                keywords={option.keywords}
                 onSelect={() => {
-                  onValueChange(option.value);
+                  onValueChange(clearable && option.value === value ? "" : option.value);
                   setOpen(false);
                 }}
               >

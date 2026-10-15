@@ -1,6 +1,8 @@
 # Plan de ménage UI post-#1937 — `apps/web` + `packages/ui`
 
-Statut : **plan, rien d'exécuté.** Base : `main` @ `2b2148ea0` (PR #1937 fusionnée, parent `6ffa3d05b`).
+Statut : **phases 0 à 5 exécutées par #2011** (plus les coupes D-M3, D-M4 et D-P1 pour les agents). Le reste est
+suivi dans `web-ui-cleanup-round-2.md`. Les sections ci-dessous décrivent le plan tel qu'il était avant exécution.
+Base du diagnostic : `main` @ `2b2148ea0` (PR #1937 fusionnée, parent `6ffa3d05b`).
 Méthode : 5 audits en lecture seule (tables/listes · dialogues/formulaires · shell/primitives ·
 packages/agents · intégrations/runs/réglages), comparaison de chaque primitive au registre shadcn
 (`shadcn view` / `add --dry-run --diff`), comptage des importeurs par fichier. Les affirmations

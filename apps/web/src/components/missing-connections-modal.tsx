@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, XCircle, Puzzle, Check } from "lucide-react";
@@ -155,7 +156,7 @@ export function MissingRow({
       : "text-amber-500";
 
   return (
-    <div className="border-border bg-card flex flex-col gap-2 rounded-md border px-3 py-2">
+    <Card className="flex flex-col gap-2 rounded-md px-3 py-2">
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Puzzle className="text-muted-foreground size-4 shrink-0" />
@@ -183,6 +184,6 @@ export function MissingRow({
           />
         </div>
       )}
-    </div>
+    </Card>
   );
 }

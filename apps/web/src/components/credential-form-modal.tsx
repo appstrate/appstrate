@@ -189,7 +189,10 @@ export function CredentialFormModal({
     });
   });
 
+  // The field is registered on every render but only shown for an overridable provider: a pinned
+  // one has no URL to ask, and a required rule on an input that is not there blocks the submit.
   const baseUrlValidate = (v: string) => {
+    if (!needsBaseUrlOverride) return undefined;
     if (!v.trim()) return t("validation.required", { ns: "common" });
     return parsesAsUrl(v) ? undefined : t("validation.urlFormat", { ns: "common" });
   };

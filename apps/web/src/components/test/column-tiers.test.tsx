@@ -145,7 +145,10 @@ const SETS = {
         onCancel: () => {},
       }),
     ),
-  runs: () => columnsFrom(() => useRunColumns({ agentName: () => "Compta trimestrielle" })),
+  runs: () =>
+    columnsFrom(() =>
+      useRunColumns({ agentName: () => "Compta trimestrielle", agentIdentity: () => ({}) }),
+    ),
   schedules: () => columnsFrom(() => useScheduleColumns({ agentName: () => "Wiki-brain" })),
   packages: () => columnsFrom(() => usePackageColumns("agent")),
   // The organization's providers table, no Type column.

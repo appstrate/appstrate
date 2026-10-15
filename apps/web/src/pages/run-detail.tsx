@@ -16,6 +16,7 @@ import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { DetailBar } from "../components/detail-bar";
+import { PackageIcon } from "../components/package-icon";
 import { ResourceErrorState } from "../components/page-states";
 import { RunDetailSkeleton } from "../components/loading-skeletons";
 import { useMarkReadByRun } from "../hooks/use-notifications";
@@ -241,9 +242,13 @@ function RunDetailBody() {
   const rerunRefusal = agent ? agentLaunchRefusal(agent) : null;
 
   const enrichedRun = run;
-  const knownAgentName = qc
+  const knownAgent = qc
     .getQueryData<AgentListItem[]>(agentsKeys.list(orgId, spaceId))
-    ?.find((candidate) => candidate.id === packageId)?.display_name;
+    ?.find((candidate) => candidate.id === packageId);
+  const knownAgentName = knownAgent?.display_name;
+  // The agent's own tile, as its page and its cards draw it. An inline run has
+  // no agent to read it from and gets the default tile.
+  const identity = isInlinePath ? undefined : (agent ?? knownAgent);
   const date = run.started_at ? formatDateField(run.started_at) : "";
   const isInline = enrichedRun.package_ephemeral;
   const canRerun = !isRunning && !isInline && !!agent && permissionsReady && can("agents:run");
@@ -279,6 +284,7 @@ function RunDetailBody() {
   return (
     <DetailTabs value={tab} onChange={setTab}>
       <DetailBar
+        icon={<PackageIcon type="agent" icon={identity?.icon} color={identity?.color} />}
         title={title}
         parent={parent}
         tabs={tabs}
