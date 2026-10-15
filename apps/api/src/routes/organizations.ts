@@ -7,7 +7,14 @@ import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import { resolveListingViewAs } from "../lib/view-as.ts";
+import {
+  callerOrgRole,
+  callerPersonalOwnerId,
+  effectiveInSpace,
+  personaFor,
+  personaMemberships,
+  resolveListingViewAs,
+} from "../lib/view-as.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   createOrganization,
@@ -49,12 +56,13 @@ import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
 import { mayCreateOrganization } from "@appstrate/db/auth-policy";
-import { createDefaultSpace } from "../services/spaces.ts";
+import { createDefaultSpace, listSpacesForPrincipal } from "../services/spaces.ts";
+import { listSpacesOfMembers } from "../services/space-members.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { recordSharesRemoved } from "../services/connection-shares.ts";
-import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
+import { ASSIGNABLE_ORG_ROLES, type OrganizationMemberSpace } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
 import { ORG_LOGO_MAX_BYTES } from "@appstrate/core/validation";
 import {
@@ -255,14 +263,45 @@ router.post("/", async (c) => {
 
 // --- Routes below require org context (orgId from params, verified via membership) ---
 
+/**
+ * The spaces each org member reaches, among those whose member list the caller
+ * may read: `GET /api/spaces/{id}/members`'s own guard, applied per space —
+ * `space-members:read` there opens the explicit rows, `members:read` on top the
+ * implicit ones — over the spaces the caller reaches, the one a pinned
+ * credential is bound to only. So the member payload discloses no more than the
+ * per-space reads it replaces.
+ */
+async function memberSpacesForCaller(
+  c: Context<AppEnv>,
+  orgId: string,
+): Promise<Map<string, OrganizationMemberSpace[]>> {
+  const entries = await listSpacesForPrincipal(
+    orgId,
+    callerOrgRole(c, orgId),
+    c.get("user").id,
+    callerPersonalOwnerId(c, orgId),
+    personaMemberships(personaFor(c, orgId)),
+  );
+  const pinnedSpaceId = c.get("spaceId");
+  const readable = entries.flatMap(({ space, role }) => {
+    if (pinnedSpaceId && space.id !== pinnedSpaceId) return [];
+    const permissions = effectiveInSpace(c, role);
+    if (!permissions.has("space-members:read")) return [];
+    return [{ spaceId: space.id, includeImplicit: permissions.has("members:read") }];
+  });
+  return listSpacesOfMembers(orgId, readable);
+}
+
 // OrgDetail serializer — shared by GET /:orgId and PATCH /:orgId so the update
 // response is the exact same resource shape as the detail read.
 async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
   const permissions = c.get("permissions");
-  const [org, members, invitations] = await Promise.all([
+  const readsMembers = permissions?.has("members:read") ?? false;
+  const [org, members, invitations, memberSpaces] = await Promise.all([
     getOrgById(orgId),
-    permissions?.has("members:read") ? getOrgMembers(orgId) : Promise.resolve([]),
+    readsMembers ? getOrgMembers(orgId) : Promise.resolve([]),
     permissions?.has("members:invite") ? getOrgInvitations(orgId) : Promise.resolve([]),
+    readsMembers ? memberSpacesForCaller(c, orgId) : Promise.resolve(new Map()),
   ]);
   if (!org) {
     throw notFound("Organization not found");
@@ -296,6 +335,7 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
       joinedAt: m.joinedAt,
       displayName: m.displayName,
       email: m.email,
+      spaces: memberSpaces.get(m.userId) ?? [],
     })),
     invitations: invitations.map((inv) => ({
       id: inv.id,
@@ -668,12 +708,14 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
   if (!updated) {
     throw notFound("Member not found");
   }
+  const memberSpaces = await memberSpacesForCaller(c, orgId);
   return c.json({
     userId: updated.userId,
     role: updated.role,
     joinedAt: updated.joinedAt,
     displayName: updated.displayName,
     email: updated.email,
+    spaces: memberSpaces.get(targetUserId) ?? [],
   });
 });
 

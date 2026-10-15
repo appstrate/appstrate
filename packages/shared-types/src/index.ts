@@ -409,6 +409,16 @@ export interface OrganizationMember {
   joinedAt: string;
   displayName?: string;
   email?: string;
+  /** The spaces this member reaches, among those whose member list the caller may read. */
+  spaces: OrganizationMemberSpace[];
+}
+
+/** One space an org member reaches — the per-member projection of `GET /api/spaces/:id/members`. */
+export interface OrganizationMemberSpace {
+  id: string;
+  name: string;
+  source: SpaceMember["source"];
+  role: SpaceMember["role"];
 }
 
 /** Mirrored by an OpenAPI response schema and reached only by name — see

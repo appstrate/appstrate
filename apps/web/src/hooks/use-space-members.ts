@@ -9,6 +9,8 @@ import { useOrgOnlyScope } from "./use-org-scope";
 import { spaceRoleAssignment, useInvalidateRoles, type SpaceRoleOption } from "./use-roles";
 
 export type SpaceMemberObject = components["schemas"]["SpaceMemberObject"];
+/** What a seat control reads of a person in a space: who, how they reach it, and as what. */
+export type SpaceSeat = Pick<SpaceMemberObject, "userId" | "org_role" | "source" | "role">;
 
 /**
  * Everyone who actually reaches the space: explicit rows, org owners/admins
@@ -51,7 +53,7 @@ export function useAssignSpaceRole(roleOptions: SpaceRoleOption[]) {
   const updateMember = useUpdateSpaceMember();
 
   const assign = (
-    { spaceId, member, name }: { spaceId: string; member: SpaceMemberObject; name: string },
+    { spaceId, member, name }: { spaceId: string; member: SpaceSeat; name: string },
     value: string,
   ) => {
     const body = spaceRoleAssignment(value);

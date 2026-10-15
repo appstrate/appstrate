@@ -153,6 +153,14 @@ export const organizationsPaths = {
                     email: "alice@acme.com",
                     role: "owner",
                     joinedAt: "2026-01-10T08:00:00Z",
+                    spaces: [
+                      {
+                        id: "spc_default",
+                        name: "Default",
+                        source: "org_role",
+                        role: { kind: "preset", key: "admin", name: "admin" },
+                      },
+                    ],
                   },
                   {
                     userId: "usr_def456",
@@ -160,6 +168,14 @@ export const organizationsPaths = {
                     email: "bob@acme.com",
                     role: "member",
                     joinedAt: "2026-01-12T10:00:00Z",
+                    spaces: [
+                      {
+                        id: "spc_default",
+                        name: "Default",
+                        source: "open_space",
+                        role: { kind: "preset", key: "operator", name: "operator" },
+                      },
+                    ],
                   },
                 ],
                 invitations: [],
@@ -430,6 +446,14 @@ export const organizationsPaths = {
                 email: "bob@acme.com",
                 role: "admin",
                 joinedAt: "2026-01-12T10:00:00Z",
+                spaces: [
+                  {
+                    id: "spc_default",
+                    name: "Default",
+                    source: "org_role",
+                    role: { kind: "preset", key: "admin", name: "admin" },
+                  },
+                ],
               },
             },
           },

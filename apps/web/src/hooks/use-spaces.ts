@@ -76,7 +76,7 @@ export function useSpace(spaceId: string) {
 /**
  * List and detail live under different path strings, so both are invalidated
  * after a write; visibility and the default role determine implicit member rows
- * and roles.
+ * and roles, which each org member also carries (`/api/orgs/{orgId}`).
  */
 const useInvalidateSpaces = () =>
   useInvalidatePaths(
@@ -84,6 +84,7 @@ const useInvalidateSpaces = () =>
     "/api/spaces/{id}",
     "/api/spaces/{id}/roles",
     "/api/spaces/{id}/members",
+    "/api/orgs/{orgId}",
   );
 
 export function useCreateSpace() {
@@ -112,7 +113,8 @@ export function useDeleteSpace() {
   return $api.useMutation("delete", "/api/spaces/{id}", {
     meta: { errorHandledByCaller: true },
     onSuccess: () => {
-      void invalidatePaths(qc, ["/api/spaces"]);
+      // Each org member lists the spaces they reach.
+      void invalidatePaths(qc, ["/api/spaces", "/api/orgs/{orgId}"]);
       // The page still showing the deleted space would re-read it, a 404: stale only.
       void invalidatePaths(
         qc,

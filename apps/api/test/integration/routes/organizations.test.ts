@@ -1055,6 +1055,7 @@ describe("Organizations API", () => {
         "email",
         "joinedAt",
         "role",
+        "spaces",
         "userId",
       ]);
 

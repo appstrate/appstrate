@@ -144,6 +144,7 @@ const SETS = {
   userSpaces: () =>
     columnsFrom(() =>
       useUserSpaceColumns({
+        member: { userId: "usr_x", role: "member" },
         editable: () => true,
         roles: [],
         roleOptions: [],

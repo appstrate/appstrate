@@ -45,6 +45,8 @@ export const useInvalidateRoles = () =>
     "/api/spaces/{id}/roles",
     "/api/spaces",
     "/api/spaces/{id}/members",
+    // Each org member carries the spaces they reach and their role there.
+    "/api/orgs/{orgId}",
   );
 
 export function useCreateRole() {

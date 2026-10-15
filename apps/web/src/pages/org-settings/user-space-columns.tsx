@@ -13,25 +13,36 @@ import type { DataColumn } from "../../components/data-table";
 import { CellText } from "../../components/table-cells";
 import { useSpaceSeatColumns } from "../../components/space-seat-columns";
 import type { RoleObject, SpaceRoleOption } from "../../hooks/use-roles";
-import type { SpaceMembership } from "../../hooks/use-space-memberships";
+import type { components } from "../../api/client";
+
+type OrgMember = components["schemas"]["OrgMember"];
+type OrgMemberSpace = components["schemas"]["OrgMemberSpace"];
 
 export function useUserSpaceColumns({
+  member,
   editable,
   roles,
   roleOptions,
   isChangingRole,
   onChangeRole,
 }: {
-  editable: (membership: SpaceMembership) => boolean;
+  /** The person whose spaces these are; their org role is what an `org_role` seat reads as. */
+  member: Pick<OrgMember, "userId" | "role">;
+  editable: (space: OrgMemberSpace) => boolean;
   roles: RoleObject[] | undefined;
   roleOptions: SpaceRoleOption[];
   isChangingRole: boolean;
-  onChangeRole: (membership: SpaceMembership, value: string) => void;
-}): DataColumn<SpaceMembership>[] {
+  onChangeRole: (space: OrgMemberSpace, value: string) => void;
+}): DataColumn<OrgMemberSpace>[] {
   const { t } = useTranslation(["settings", "common"]);
-  const seatColumns = useSpaceSeatColumns<SpaceMembership>({
-    seat: ({ member }) => member,
-    seatName: ({ space }) => space.name,
+  const seatColumns = useSpaceSeatColumns<OrgMemberSpace>({
+    seat: (space) => ({
+      userId: member.userId,
+      org_role: member.role,
+      source: space.source,
+      role: space.role,
+    }),
+    seatName: (space) => space.name,
     editable,
     roles,
     roleOptions,
@@ -44,7 +55,7 @@ export function useUserSpaceColumns({
       id: "space",
       header: t("userDetail.colSpace"),
       width: "minmax(120px,1.4fr)",
-      cell: ({ space }) => (
+      cell: (space) => (
         <CellText strong title={space.name}>
           {space.name}
         </CellText>

@@ -18,7 +18,7 @@ import {
   type RoleObject,
   type SpaceRoleOption,
 } from "../hooks/use-roles";
-import type { SpaceMemberObject } from "../hooks/use-space-members";
+import type { SpaceSeat } from "../hooks/use-space-members";
 
 export function useSpaceSeatColumns<Row>({
   seat,
@@ -29,7 +29,7 @@ export function useSpaceSeatColumns<Row>({
   isChangingRole,
   onChangeRole,
 }: {
-  seat: (row: Row) => SpaceMemberObject;
+  seat: (row: Row) => SpaceSeat;
   /** Names the row for the role control's accessible label. */
   seatName: (row: Row) => string;
   /** Whether this row's role is the caller's to change. */
