@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Eye, Grid3x3, Plus, Rows3, ShieldCheck } from "lucide-react";
+import { Eye, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
@@ -41,10 +41,8 @@ import { ViewAsDialog } from "../../components/view-as-dialog";
 import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useRoleColumns } from "./role-columns";
-import { RoleMatrix } from "./role-matrix";
 import { CollectionTabs } from "../../components/detail-tabs";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { OrgRolesList, OrgRolesMatrix } from "./org-roles";
+import { OrgRolesList } from "./org-roles";
 import {
   groupPermissionsByResource,
   permissionLabel,
@@ -54,7 +52,6 @@ import { rolesPageDeeds } from "./rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
 import type { ViewAsPreset } from "../../lib/view-as-preset";
 
-type RoleView = "list" | "matrix";
 type RoleTab = "org" | "space";
 
 export function OrgSettingsRolesPage() {
@@ -68,17 +65,15 @@ export function OrgSettingsRolesPage() {
   const [creating, setCreating] = useState(false);
   // The preview dialog, open on a preset or on none.
   const [preview, setPreview] = useState<{ preset?: ViewAsPreset } | null>(null);
-  // Tab and view are places too: `?tab=space&view=matrix` opens exactly that,
-  // and Back undoes a switch. Each defaults to its first option, which is
-  // then left out of the URL.
+  // The tab is a place too: `?tab=space` opens exactly that, and Back undoes
+  // a switch. It defaults to the first option, which is then left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: RoleTab = searchParams.get("tab") === "space" ? "space" : "org";
-  const view: RoleView = searchParams.get("view") === "matrix" ? "matrix" : "list";
-  const setParam = (name: "tab" | "view", value: string, fallback: string) =>
+  const setTab = (value: RoleTab) =>
     setSearchParams((prev) => {
       const out = new URLSearchParams(prev);
-      if (value === fallback) out.delete(name);
-      else out.set(name, value);
+      if (value === "org") out.delete("tab");
+      else out.set("tab", value);
       return out;
     });
   const [confirmDelete, setConfirmDelete] = useState<RoleObject | null>(null);
@@ -180,76 +175,53 @@ export function OrgSettingsRolesPage() {
     <>
       <SettingsPageActions actions={[create, viewAs]} />
 
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-6">
         <CollectionTabs
           value={tab}
           label={t("roles.tabTitle")}
-          onChange={(next) => setParam("tab", next, "org")}
+          onChange={setTab}
           options={[
             { value: "org", label: t("roles.tabOrg") },
             { value: "space", label: t("roles.tabSpace") },
           ]}
         />
-        <Tabs value={view} onValueChange={(next) => setParam("view", next, "list")}>
-          <TabsList className="h-9">
-            <TabsTrigger value="list" aria-label={t("roles.viewList")}>
-              <Rows3 className="size-4" />
-            </TabsTrigger>
-            <TabsTrigger value="matrix" aria-label={t("roles.viewMatrix")}>
-              <Grid3x3 className="size-4" />
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
       </div>
-      {tab === "org" &&
-        (view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList onPreview={previewOrgRole} />)}
+      {tab === "org" && <OrgRolesList onPreview={previewOrgRole} />}
       {tab === "space" && (
         <>
-          {view === "matrix" ? (
-            isLoading ? (
-              <TextSkeleton lines={6} />
-            ) : error ? (
-              <ErrorState error={error} />
-            ) : (
-              <RoleMatrix roles={roles ?? []} />
-            )
-          ) : (
-            <>
-              <SettingsGroup title={t("roles.presetsSection")}>
-                <DataTable
-                  label={t("roles.presetsSection")}
-                  columns={presetColumns}
-                  rows={presets}
-                  rowKey={(role) => role.key}
-                  rowAction={openRole}
-                  rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
-                  {...tableState}
-                />
-              </SettingsGroup>
+          <SettingsGroup title={t("roles.presetsSection")}>
+            <DataTable
+              label={t("roles.presetsSection")}
+              columns={presetColumns}
+              rows={presets}
+              rowKey={(role) => role.key}
+              rowAction={openRole}
+              rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
+              {...tableState}
+            />
+          </SettingsGroup>
 
-              <SettingsGroup title={t("roles.customSection")}>
-                <DataTable
-                  label={t("roles.customSection")}
-                  columns={customColumns}
-                  rows={custom}
-                  rowKey={(role) => role.id ?? role.key}
-                  rowAction={openRole}
-                  rowLabel={(role) => role.name}
-                  {...tableState}
-                  empty={
-                    <EmptyState
-                      message={t("roles.empty")}
-                      hint={t("roles.emptyHint")}
-                      icon={ShieldCheck}
-                      compact
-                    >
-                      <EmptyStateAction action={create} />
-                    </EmptyState>
-                  }
-                />
-              </SettingsGroup>
-            </>
-          )}
+          <SettingsGroup title={t("roles.customSection")}>
+            <DataTable
+              label={t("roles.customSection")}
+              columns={customColumns}
+              rows={custom}
+              rowKey={(role) => role.id ?? role.key}
+              rowAction={openRole}
+              rowLabel={(role) => role.name}
+              {...tableState}
+              empty={
+                <EmptyState
+                  message={t("roles.empty")}
+                  hint={t("roles.emptyHint")}
+                  icon={ShieldCheck}
+                  compact
+                >
+                  <EmptyStateAction action={create} />
+                </EmptyState>
+              }
+            />
+          </SettingsGroup>
         </>
       )}
 

@@ -745,7 +745,7 @@ that needs a module says so in `lib/route-access.ts` (`feature`).
   external OAuth application.
 - No development wording in the product (« à brancher », « dev », TODO).
 - A permission is always named by its sentence (`lib/permission-labels.ts`:
-  `permissionLabel`, `permissionResourceLabel`), in the matrix, in the pickers
+  `permissionLabel`, `permissionResourceLabel`), in the role view, in the pickers
   (`ScopeMultiSelect`) and in badges, never by its wire string (`agents:share`).
 
 ## 16. Motion

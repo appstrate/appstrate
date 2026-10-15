@@ -2,8 +2,7 @@
 
 /**
  * The organization roles as data: the four roles, how far each reaches into
- * spaces, and the list's column set (what each can do is
- * `lib/org-role-capabilities.ts`). Out of the component file so
+ * spaces, and the list's column set. Out of the component file so
  * `column-tiers.test.tsx` can measure the columns.
  */
 import { useTranslation } from "react-i18next";
@@ -16,7 +15,7 @@ import { rowActionsColumn } from "../../components/row-actions-column";
 import { roleI18nKey } from "../../hooks/use-permissions";
 
 /** How far each org role reaches into spaces (`resolveSpaceRole`). */
-export const ORG_ROLE_SPACE_ACCESS: Record<OrgRole, "all" | "open" | "assigned"> = {
+const ORG_ROLE_SPACE_ACCESS: Record<OrgRole, "all" | "open" | "assigned"> = {
   owner: "all",
   admin: "all",
   member: "open",
