@@ -2552,7 +2552,7 @@ export interface paths {
         put?: never;
         /**
          * Apply a model-provider choice in one transaction
-         * @description One write for a provider choice: the credential its models run on (an existing organization credential `{ id }`, a new organization API key — the `POST /api/model-provider-credentials` body without `owner_type` —, or `null` for models each member serves with their own credential, `providerId` then naming the service), the models to create (`add`), the ones to switch on (`enable`) and off (`disable`), and the default (`default_model_id`, the `modelId` of a model of this choice). Applied in that order — the key, the models, the switches on, the default, the switches off — inside ONE transaction: either all of it is written or none. Every entry is checked as its own route would check it (`POST /api/models`, `PATCH /api/models/{id}`, `PUT /api/models/default`); refusals come back together as `400 validation_failed` with one `errors[]` item per entry (`field`: `add.<i>`, `enable.<i>`, `disable.<i>`, `default_model_id`; `code`: that route's own, or `model_not_in_choice` for a model that does not run on the choice's credential), and nothing is written. Requires `models:write`, and `model-provider-credentials:write` (or `:connect`) to mint a key. Accepts `Idempotency-Key`.
+         * @description One write for a provider choice: the credential its models run on (an existing organization credential `{ id }`, a new organization API key — the `POST /api/model-provider-credentials` body without `owner_type` —, or `null` for models each member serves with their own credential, `providerId` then naming the service), the models to create (`add`), the ones to switch on (`enable`) and off (`disable`), and the default (`default_model_id`, the `modelId` of a model of this choice). Applied in that order — the key, the models, the switches on, the default, the switches off — inside ONE transaction: either all of it is written or none. Every entry is checked as its own route would check it (`POST /api/models`, `PATCH /api/models/{id}`, `PUT /api/models/default`); refusals come back together as `400 validation_failed` with one `errors[]` item per entry (`field`: `add.<i>`, `enable.<i>`, `disable.<i>`, `default_model_id`; `code`: that route's own, or `model_not_in_choice` for a model that does not run on the choice's credential), and nothing is written. Requires `models:write`, and `model-provider-credentials:write` to mint an organization key (the rule of `POST /api/model-provider-credentials` with `owner_type: org`; `:connect` alone does not suffice), rate-limited like that route. Accepts `Idempotency-Key`: a retry with the same key and body replays the first response.
          */
         post: operations["applyModelChoice"];
         delete?: never;
@@ -15110,12 +15110,12 @@ export interface operations {
                      *             ],
                      *             "activation": [
                      *               {
-                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *                 "activate": "allowed",
                      *                 "deactivate": "allowed"
                      *               },
                      *               {
-                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                      *                 "activate": "allowed",
                      *                 "deactivate": "forbidden"
                      *               }
@@ -15154,12 +15154,12 @@ export interface operations {
                      *             ],
                      *             "activation": [
                      *               {
-                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *                 "activate": "allowed",
                      *                 "deactivate": "allowed"
                      *               },
                      *               {
-                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                      *                 "activate": "forbidden",
                      *                 "deactivate": "forbidden"
                      *               }
@@ -17826,6 +17826,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization, the space and the authenticated caller — the member or end-user, the API key or OAuth client, the auth method — so the same key sent by another caller is a new request, never a replay. Only a request that executed — a 2xx — is stored, for 24 hours. A repeat by the same caller with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
             cookie?: never;
@@ -17888,6 +17890,8 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["IdempotencyConflict"];
+            429: components["responses"]["RateLimited"];
             503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
@@ -26190,12 +26194,12 @@ export interface operations {
                      *             ],
                      *             "activation": [
                      *               {
-                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *                 "activate": "allowed",
                      *                 "deactivate": "allowed"
                      *               },
                      *               {
-                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                      *                 "activate": "allowed",
                      *                 "deactivate": "forbidden"
                      *               }
@@ -26234,12 +26238,12 @@ export interface operations {
                      *             ],
                      *             "activation": [
                      *               {
-                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *                 "activate": "allowed",
                      *                 "deactivate": "allowed"
                      *               },
                      *               {
-                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                      *                 "activate": "forbidden",
                      *                 "deactivate": "forbidden"
                      *               }

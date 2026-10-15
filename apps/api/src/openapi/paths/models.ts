@@ -179,8 +179,11 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Apply a model-provider choice in one transaction",
       description:
-        "One write for a provider choice: the credential its models run on (an existing organization credential `{ id }`, a new organization API key — the `POST /api/model-provider-credentials` body without `owner_type` —, or `null` for models each member serves with their own credential, `providerId` then naming the service), the models to create (`add`), the ones to switch on (`enable`) and off (`disable`), and the default (`default_model_id`, the `modelId` of a model of this choice). Applied in that order — the key, the models, the switches on, the default, the switches off — inside ONE transaction: either all of it is written or none. Every entry is checked as its own route would check it (`POST /api/models`, `PATCH /api/models/{id}`, `PUT /api/models/default`); refusals come back together as `400 validation_failed` with one `errors[]` item per entry (`field`: `add.<i>`, `enable.<i>`, `disable.<i>`, `default_model_id`; `code`: that route's own, or `model_not_in_choice` for a model that does not run on the choice's credential), and nothing is written. Requires `models:write`, and `model-provider-credentials:write` (or `:connect`) to mint a key. Accepts `Idempotency-Key`.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+        "One write for a provider choice: the credential its models run on (an existing organization credential `{ id }`, a new organization API key — the `POST /api/model-provider-credentials` body without `owner_type` —, or `null` for models each member serves with their own credential, `providerId` then naming the service), the models to create (`add`), the ones to switch on (`enable`) and off (`disable`), and the default (`default_model_id`, the `modelId` of a model of this choice). Applied in that order — the key, the models, the switches on, the default, the switches off — inside ONE transaction: either all of it is written or none. Every entry is checked as its own route would check it (`POST /api/models`, `PATCH /api/models/{id}`, `PUT /api/models/default`); refusals come back together as `400 validation_failed` with one `errors[]` item per entry (`field`: `add.<i>`, `enable.<i>`, `disable.<i>`, `default_model_id`; `code`: that route's own, or `model_not_in_choice` for a model that does not run on the choice's credential), and nothing is written. Requires `models:write`, and `model-provider-credentials:write` to mint an organization key (the rule of `POST /api/model-provider-credentials` with `owner_type: org`; `:connect` alone does not suffice), rate-limited like that route. Accepts `Idempotency-Key`: a retry with the same key and body replays the first response.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/IdempotencyKey" },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -291,6 +294,8 @@ export const modelsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "422": { $ref: "#/components/responses/IdempotencyConflict" },
+        "429": { $ref: "#/components/responses/RateLimited" },
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },

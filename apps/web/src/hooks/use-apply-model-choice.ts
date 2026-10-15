@@ -111,5 +111,6 @@ export function useApplyModelChoice() {
   });
   const apply = (input: Parameters<typeof modelChoiceBody>[0]) =>
     mutation.mutateAsync({ body: modelChoiceBody(input) });
-  return { apply, isPending: mutation.isPending };
+  const applyBody = (body: ModelChoiceBody) => mutation.mutateAsync({ body });
+  return { apply, applyBody, isPending: mutation.isPending };
 }

@@ -12,6 +12,7 @@ import { packageSightPermissions } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { ModelFormSubmission, ModelFormSubmitOutcome } from "../lib/model-form-payload";
 import { submitModelForm } from "../lib/model-form-submit";
+import { useApplyModelChoice } from "./use-apply-model-choice";
 import {
   invalidateCredentialsAndModels,
   useCreateModelProviderCredential,
@@ -31,14 +32,6 @@ export function useModels(enabled = true) {
     { params: { header: scope.header } },
     { enabled: enabled && scope.enabled, select: (e) => e.data },
   );
-}
-
-function useCreateModel() {
-  const invalidate = useInvalidatePaths("/api/models");
-  return $api.useMutation("post", "/api/models", {
-    meta: { errorHandledByCaller: true },
-    onSuccess: invalidate,
-  });
 }
 
 function useUpdateModel() {
@@ -151,26 +144,26 @@ export function useSetAgentModel(packageId: string) {
 }
 
 /**
- * ModelFormModal submission: the inline key first if any, then one create or
- * update — or, for a batch, one create per entry against that one key.
+ * ModelFormModal submission: a creation (the inline key, the model or the batch) is ONE
+ * `POST /api/models/apply`; an edit is one `PATCH`, the inline key minted first if any.
  */
 export function useModelFormHandler(opts: {
   editModel?: OrgModelInfo | null;
   onSuccess: () => void;
 }) {
-  const createModel = useCreateModel();
+  const applyChoice = useApplyModelChoice();
   const updateModel = useUpdateModel();
   const createCredential = useCreateModelProviderCredential({ errorHandledByCaller: true });
 
   // Spans the whole submission: the per-mutation flags drop between calls.
   const [submitPending, setSubmitPending] = useState(false);
   const isPending =
-    submitPending || createModel.isPending || updateModel.isPending || createCredential.isPending;
+    submitPending || applyChoice.isPending || updateModel.isPending || createCredential.isPending;
 
   const submit = submitModelForm({
     writes: {
+      applyChoice: applyChoice.applyBody,
       createCredential: (body) => createCredential.mutateAsync({ body }),
-      createModel: (body) => createModel.mutateAsync({ body }),
       updateModel: (id, body) => updateModel.mutateAsync({ params: { path: { id } }, body }),
     },
     editModelId: opts.editModel?.id ?? null,

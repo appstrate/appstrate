@@ -5,7 +5,9 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
+import { idempotency } from "../middleware/idempotency.ts";
+import { clearResolvedModelCache } from "../services/resolved-model-cache.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModel, getSystemModelProviderCredentials } from "../services/model-registry.ts";
 import { modelCostSchema, modelInputModalitySchema } from "@appstrate/core/module";
 import {
@@ -39,12 +41,12 @@ import {
   deriveCredentialLabel,
   loadCredentialBinding,
   loadInferenceCredentials,
-  MANAGE_CREDENTIALS,
+  resolveCredentialOwner,
 } from "../services/model-providers/credentials.ts";
 import { createSchema as createCredentialSchema } from "./model-provider-credentials.ts";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import {
@@ -523,249 +525,258 @@ export function createModelsRouter() {
   });
 
   // POST /api/models/apply — a model-provider choice in one transaction
-  router.post("/apply", requirePermission("models", "write"), async (c) => {
-    const orgId = c.get("orgId");
-    const user = c.get("user");
-    const data = await readJsonBody(c, applyModelChoiceSchema);
-    const minting = data.credential !== null && !("id" in data.credential);
-    if (minting) {
-      await requireAnyPermission(MANAGE_CREDENTIALS)(c, async () => {});
-    }
+  // The rate limit is the one of `POST /api/model-provider-credentials`, whose key this may mint.
+  router.post(
+    "/apply",
+    rateLimit(10),
+    requirePermission("models", "write"),
+    idempotency(),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const user = c.get("user");
+      const data = await readJsonBody(c, applyModelChoiceSchema);
+      const minting = data.credential !== null && !("id" in data.credential);
+      // The creation rule of `POST /api/model-provider-credentials` for an organization key.
+      if (minting) resolveCredentialOwner(c, "org");
 
-    // 1. The binding, settled before any write: reads only.
-    let credentialId: string | null = null;
-    let providerId: string;
-    let newCredential: {
-      label: string;
-      providerId: string;
-      apiKey: string;
-      baseUrlOverride: string | null;
-    } | null = null;
-    if (data.credential === null) {
-      providerId = data.providerId!;
-      if (!getModelProvider(providerId)) {
-        throw invalidRequest("providerId must name a registered provider", "providerId");
-      }
-    } else if ("id" in data.credential) {
-      credentialId = data.credential.id;
-      if (getSystemModelProviderCredentials().has(credentialId)) {
-        throw invalidRequest("A built-in credential takes no custom models", "credential.id");
-      }
-      const creds = await loadInferenceCredentials(orgId, credentialId);
-      if (!creds) {
-        throw invalidRequest(
-          "credential.id is unreachable — the credential needs reconnection or no longer exists",
-          "credential.id",
-        );
-      }
-      providerId = creds.providerId;
-    } else {
-      const cfg = getModelProvider(data.credential.providerId);
-      if (!cfg) {
-        throw invalidRequest(
-          `Unknown providerId: ${data.credential.providerId}`,
-          "credential.providerId",
-        );
-      }
-      if (cfg.authMode !== "api_key") {
-        throw invalidRequest(
-          `Provider ${cfg.providerId} requires OAuth; use the OAuth pairing flow instead`,
-          "credential.providerId",
-        );
-      }
-      providerId = cfg.providerId;
-      const baseUrlOverride = data.credential.base_url_override ?? null;
-      newCredential = {
-        label: await dedupeCredentialLabel(
-          orgId,
-          data.credential.label?.trim() || deriveCredentialLabel(cfg, baseUrlOverride),
-          null,
-        ),
-        providerId,
-        apiKey: data.credential.api_key,
-        baseUrlOverride,
-      };
-    }
-
-    // 2. Every model judged before any write, each refusal kept against its entry.
-    const refusals: ValidationFieldError[] = [];
-    const refuse = (field: string, err: unknown) => {
-      if (!(err instanceof ApiError)) throw err;
-      refusals.push({ field, code: err.code, message: err.message });
-    };
-    const prepared: {
-      modelId: string;
-      label: string;
-      capabilities: Parameters<typeof createOrgModel>[5];
-    }[] = [];
-    for (const [index, entry] of data.add.entries()) {
-      try {
-        const ready = await prepareModelCreate(
-          orgId,
-          providerId,
-          entry,
-          prepared.map((p) => p.label),
-        );
-        prepared.push({ modelId: entry.modelId, ...ready });
-      } catch (err) {
-        refuse(`add.${index}`, err);
-      }
-    }
-    if (refusals.length > 0) throw validationFailed(refusals);
-
-    // 3. One transaction: the key, the models, the switches, the default — all or nothing.
-    const sameBinding = (row: { credentialId: string | null; providerId: string }) =>
-      credentialId === null && !minting
-        ? row.credentialId === null && row.providerId === providerId
-        : row.credentialId === credentialId;
-    const outcome = await db.transaction(async (tx) => {
-      const boundTo = newCredential
-        ? await createApiKeyCredential(
-            {
-              orgId,
-              userId: user.id,
-              ownerUserId: null,
-              label: newCredential.label,
-              providerId: newCredential.providerId,
-              apiKey: newCredential.apiKey,
-              baseUrlOverride: newCredential.baseUrlOverride,
-            },
-            tx,
-          )
-        : credentialId;
-      credentialId = boundTo;
-      const created = new Map<string, string>();
-      for (const [index, model] of prepared.entries()) {
-        try {
-          const id = await createOrgModel(
-            orgId,
-            model.label,
-            model.modelId,
-            user.id,
-            { credentialId: boundTo, ...(boundTo === null ? { providerId } : {}) },
-            model.capabilities,
-            tx,
+      // 1. The binding, settled before any write: reads only.
+      let credentialId: string | null = null;
+      let providerId: string;
+      let newCredential: {
+        label: string;
+        providerId: string;
+        apiKey: string;
+        baseUrlOverride: string | null;
+      } | null = null;
+      if (data.credential === null) {
+        providerId = data.providerId!;
+        if (!getModelProvider(providerId)) {
+          throw invalidRequest("providerId must name a registered provider", "providerId");
+        }
+      } else if ("id" in data.credential) {
+        credentialId = data.credential.id;
+        if (getSystemModelProviderCredentials().has(credentialId)) {
+          throw invalidRequest("A built-in credential takes no custom models", "credential.id");
+        }
+        const creds = await loadInferenceCredentials(orgId, credentialId);
+        if (!creds) {
+          throw invalidRequest(
+            "credential.id is unreachable — the credential needs reconnection or no longer exists",
+            "credential.id",
           );
-          created.set(model.modelId, id);
+        }
+        providerId = creds.providerId;
+      } else {
+        const cfg = getModelProvider(data.credential.providerId);
+        if (!cfg) {
+          throw invalidRequest(
+            `Unknown providerId: ${data.credential.providerId}`,
+            "credential.providerId",
+          );
+        }
+        if (cfg.authMode !== "api_key") {
+          throw invalidRequest(
+            `Provider ${cfg.providerId} requires OAuth; use the OAuth pairing flow instead`,
+            "credential.providerId",
+          );
+        }
+        providerId = cfg.providerId;
+        const baseUrlOverride = data.credential.base_url_override ?? null;
+        newCredential = {
+          label: await dedupeCredentialLabel(
+            orgId,
+            data.credential.label?.trim() || deriveCredentialLabel(cfg, baseUrlOverride),
+            null,
+          ),
+          providerId,
+          apiKey: data.credential.api_key,
+          baseUrlOverride,
+        };
+      }
+
+      // 2. Every model judged before any write, each refusal kept against its entry.
+      const refusals: ValidationFieldError[] = [];
+      const refuse = (field: string, err: unknown) => {
+        if (!(err instanceof ApiError)) throw err;
+        refusals.push({ field, code: err.code, message: err.message });
+      };
+      const prepared: {
+        modelId: string;
+        label: string;
+        capabilities: Parameters<typeof createOrgModel>[5];
+      }[] = [];
+      for (const [index, entry] of data.add.entries()) {
+        try {
+          const ready = await prepareModelCreate(
+            orgId,
+            providerId,
+            entry,
+            prepared.map((p) => p.label),
+          );
+          prepared.push({ modelId: entry.modelId, ...ready });
         } catch (err) {
           refuse(`add.${index}`, err);
         }
       }
-      // A switch only moves a model of this choice.
-      const switchModel = async (field: string, id: string, enabled: boolean) => {
-        const row = await getOrgModelRow(orgId, id, tx);
-        if (!row || !sameBinding(row)) {
-          refusals.push({
-            field,
-            code: "model_not_in_choice",
-            message: "This model does not run on the choice's credential",
-          });
-          return;
-        }
-        try {
-          await updateOrgModel(orgId, id, { enabled }, tx);
-        } catch (err) {
-          refuse(field, err);
-        }
-      };
-      for (const [index, id] of data.enable.entries())
-        await switchModel(`enable.${index}`, id, true);
-      let defaultId: string | null = null;
-      if (data.default_model_id !== undefined) {
-        defaultId = created.get(data.default_model_id) ?? null;
-        if (!defaultId) {
-          const [existing] = await tx
-            .select({
-              id: orgModels.id,
-              credentialId: orgModels.credentialId,
-              providerId: orgModels.providerId,
-            })
-            .from(orgModels)
-            .where(
-              and(
-                eq(orgModels.orgId, orgId),
-                eq(orgModels.modelId, data.default_model_id),
-                eq(orgModels.aliased, false),
-              ),
-            );
-          defaultId = existing && sameBinding(existing) ? existing.id : null;
-        }
-        if (!defaultId) {
-          refusals.push({
-            field: "default_model_id",
-            code: "model_not_in_choice",
-            message: `No model '${data.default_model_id}' runs on the choice's credential`,
-          });
-        } else {
+      if (refusals.length > 0) throw validationFailed(refusals);
+
+      // 3. One transaction: the key, the models, the switches, the default — all or nothing.
+      const sameBinding = (row: { credentialId: string | null; providerId: string }) =>
+        credentialId === null && !minting
+          ? row.credentialId === null && row.providerId === providerId
+          : row.credentialId === credentialId;
+      const outcome = await db.transaction(async (tx) => {
+        const boundTo = newCredential
+          ? await createApiKeyCredential(
+              {
+                orgId,
+                userId: user.id,
+                ownerUserId: null,
+                label: newCredential.label,
+                providerId: newCredential.providerId,
+                apiKey: newCredential.apiKey,
+                baseUrlOverride: newCredential.baseUrlOverride,
+              },
+              tx,
+            )
+          : credentialId;
+        credentialId = boundTo;
+        const created = new Map<string, string>();
+        for (const [index, model] of prepared.entries()) {
           try {
-            await writeDefaultModel(tx, orgId, defaultId, true);
+            const id = await createOrgModel(
+              orgId,
+              model.label,
+              model.modelId,
+              user.id,
+              { credentialId: boundTo, ...(boundTo === null ? { providerId } : {}) },
+              model.capabilities,
+              tx,
+            );
+            created.set(model.modelId, id);
           } catch (err) {
-            refuse("default_model_id", err);
+            refuse(`add.${index}`, err);
           }
         }
-      }
-      for (const [index, id] of data.disable.entries()) {
-        await switchModel(`disable.${index}`, id, false);
-      }
-      // Any refusal rolls the whole choice back: nothing is half-applied.
-      if (refusals.length > 0) throw validationFailed(refusals);
-      return { credentialId: boundTo, created, defaultId };
-    });
+        // A switch only moves a model of this choice.
+        const switchModel = async (field: string, id: string, enabled: boolean) => {
+          const row = await getOrgModelRow(orgId, id, tx);
+          if (!row || !sameBinding(row)) {
+            refusals.push({
+              field,
+              code: "model_not_in_choice",
+              message: "This model does not run on the choice's credential",
+            });
+            return;
+          }
+          try {
+            await updateOrgModel(orgId, id, { enabled }, tx);
+          } catch (err) {
+            refuse(field, err);
+          }
+        };
+        for (const [index, id] of data.enable.entries())
+          await switchModel(`enable.${index}`, id, true);
+        let defaultId: string | null = null;
+        if (data.default_model_id !== undefined) {
+          defaultId = created.get(data.default_model_id) ?? null;
+          if (!defaultId) {
+            const [existing] = await tx
+              .select({ id: orgModels.id })
+              .from(orgModels)
+              .where(
+                and(
+                  eq(orgModels.orgId, orgId),
+                  eq(orgModels.modelId, data.default_model_id),
+                  eq(orgModels.aliased, false),
+                  // The choice's own binding: the same modelId may run under another key.
+                  credentialId === null
+                    ? and(isNull(orgModels.credentialId), eq(orgModels.providerId, providerId))
+                    : eq(orgModels.credentialId, credentialId),
+                ),
+              );
+            defaultId = existing?.id ?? null;
+          }
+          if (!defaultId) {
+            refusals.push({
+              field: "default_model_id",
+              code: "model_not_in_choice",
+              message: `No model '${data.default_model_id}' runs on the choice's credential`,
+            });
+          } else {
+            try {
+              await writeDefaultModel(tx, orgId, defaultId, true);
+            } catch (err) {
+              refuse("default_model_id", err);
+            }
+          }
+        }
+        for (const [index, id] of data.disable.entries()) {
+          await switchModel(`disable.${index}`, id, false);
+        }
+        // Any refusal rolls the whole choice back: nothing is half-applied.
+        if (refusals.length > 0) throw validationFailed(refusals);
+        return { credentialId: boundTo, created, defaultId };
+      });
+      // `updateOrgModel` clears the cache before this transaction commits; clear it again once the
+      // rows are visible so no resolution in between keeps serving the previous state.
+      clearResolvedModelCache();
 
-    if (newCredential && outcome.credentialId) {
-      await recordAuditFromContext(c, {
-        action: "model_provider_credential.created",
-        resourceType: "model_provider_credential",
-        resourceId: outcome.credentialId,
-        after: {
-          label: newCredential.label,
-          providerId: newCredential.providerId,
-          baseUrlOverride: newCredential.baseUrlOverride,
-          ownerType: "org",
-        },
-      });
-    }
-    for (const [modelId, id] of outcome.created) {
-      await recordAuditFromContext(c, {
-        action: "model.created",
-        resourceType: "model",
-        resourceId: id,
-        after: { modelId, credentialId: outcome.credentialId },
-      });
-    }
-    for (const [enabled, ids] of [
-      [true, data.enable],
-      [false, data.disable],
-    ] as const) {
-      for (const id of ids) {
+      if (newCredential && outcome.credentialId) {
         await recordAuditFromContext(c, {
-          action: "model.updated",
-          resourceType: "model",
-          resourceId: id,
-          after: { enabled },
+          action: "model_provider_credential.created",
+          resourceType: "model_provider_credential",
+          resourceId: outcome.credentialId,
+          after: {
+            label: newCredential.label,
+            providerId: newCredential.providerId,
+            baseUrlOverride: newCredential.baseUrlOverride,
+            ownerType: "org",
+          },
         });
       }
-    }
-    if (outcome.defaultId) {
-      await recordAuditFromContext(c, {
-        action: "model.default_set",
-        resourceType: "model",
-        resourceId: outcome.defaultId,
-      });
-    }
+      for (const [modelId, id] of outcome.created) {
+        await recordAuditFromContext(c, {
+          action: "model.created",
+          resourceType: "model",
+          resourceId: id,
+          after: { modelId, credentialId: outcome.credentialId },
+        });
+      }
+      for (const [enabled, ids] of [
+        [true, data.enable],
+        [false, data.disable],
+      ] as const) {
+        for (const id of ids) {
+          await recordAuditFromContext(c, {
+            action: "model.updated",
+            resourceType: "model",
+            resourceId: id,
+            after: { enabled },
+          });
+        }
+      }
+      if (outcome.defaultId) {
+        await recordAuditFromContext(c, {
+          action: "model.default_set",
+          resourceType: "model",
+          resourceId: outcome.defaultId,
+        });
+      }
 
-    const payer = requestPayerUserId(c);
-    const touched = [...outcome.created.values(), ...data.enable, ...data.disable];
-    const models = (await Promise.all(touched.map((id) => getOrgModel(orgId, id, payer)))).flatMap(
-      (model) => (model ? [projectAliasedModel(model)] : []),
-    );
-    return c.json({
-      object: "model_choice" as const,
-      credential_id: outcome.credentialId,
-      models,
-      default_model_id: outcome.defaultId,
-    });
-  });
+      const payer = requestPayerUserId(c);
+      const touched = [...outcome.created.values(), ...data.enable, ...data.disable];
+      const models = (
+        await Promise.all(touched.map((id) => getOrgModel(orgId, id, payer)))
+      ).flatMap((model) => (model ? [projectAliasedModel(model)] : []));
+      return c.json({
+        object: "model_choice" as const,
+        credential_id: outcome.credentialId,
+        models,
+        default_model_id: outcome.defaultId,
+      });
+    },
+  );
 
   // GET /api/models/openrouter — search OpenRouter models (proxy)
   router.get("/openrouter", rateLimit(10), requirePermission("models", "read"), async (c) =>

@@ -11,6 +11,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, orgModels, organizations } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
+import { seedApiKey } from "../../helpers/seed.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   authHeaders,
@@ -198,5 +199,86 @@ describe("POST /api/models/apply", () => {
     const member = await memberContext(ctx, "member");
     expect((await apply({ credential: GATEWAY_KEY, add: [] }, member)).status).toBe(403);
     expect(await credentialsOf()).toEqual([]);
+  });
+
+  it("replays the first response on a retry with the same Idempotency-Key", async () => {
+    const body = { credential: GATEWAY_KEY, add: [{ modelId: "alpha" }, { modelId: "beta" }] };
+    const headers = authHeaders(ctx, {
+      "Content-Type": "application/json",
+      "Idempotency-Key": "choice-retry-1",
+    });
+    const send = () =>
+      app.request("/api/models/apply", { method: "POST", headers, body: JSON.stringify(body) });
+
+    const first = await send();
+    expect(first.status, await first.clone().text()).toBe(200);
+    const retry = await send();
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+    expect(await retry.json()).toEqual(await first.json());
+
+    // One key and one set of models: the retry wrote nothing.
+    expect(await credentialsOf()).toHaveLength(1);
+    expect(await modelsOf()).toHaveLength(2);
+
+    // The same key with another body is a conflict, not a second write.
+    const other = await app.request("/api/models/apply", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ ...body, add: [{ modelId: "gamma" }] }),
+    });
+    expect(other.status).toBe(422);
+    expect(await modelsOf()).toHaveLength(2);
+  });
+
+  it("refuses to mint a key without the organization-key grant, writing nothing", async () => {
+    // A key holding `models:write` alone: the rule is the one of `POST /api/model-provider-credentials`.
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["models:write"],
+    });
+    const res = await app.request("/api/models/apply", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key.rawKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ credential: GATEWAY_KEY, add: [{ modelId: "alpha" }] }),
+    });
+    expect(res.status).toBe(403);
+    expect(await credentialsOf()).toEqual([]);
+    expect(await modelsOf()).toEqual([]);
+
+    // CONTROL: the owner's session mints the same choice.
+    const ok = await apply({ credential: GATEWAY_KEY, add: [{ modelId: "alpha" }] });
+    expect(ok.status, await ok.clone().text()).toBe(200);
+  });
+
+  it("sets as default the model of the choice's own key when another key serves the same modelId", async () => {
+    const a = (await (
+      await apply({ credential: { ...GATEWAY_KEY, label: "A" }, add: [{ modelId: "shared" }] })
+    ).json()) as ChoiceBody;
+    const b = (await (
+      await apply({ credential: { ...GATEWAY_KEY, label: "B" }, add: [{ modelId: "shared" }] })
+    ).json()) as ChoiceBody;
+    expect(a.credential_id).not.toBe(b.credential_id);
+
+    for (const choice of [b, a]) {
+      const res = await apply({
+        credential: { id: choice.credential_id },
+        default_model_id: "shared",
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(await defaultOf()).toBe(choice.models[0]!.id);
+    }
+
+    // CONTROL: a modelId no model of the key carries is still refused.
+    const refused = await apply({
+      credential: { id: a.credential_id },
+      default_model_id: "absent",
+    });
+    expect(refused.status).toBe(400);
   });
 });
