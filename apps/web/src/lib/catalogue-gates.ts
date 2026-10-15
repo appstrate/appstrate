@@ -7,7 +7,6 @@
  */
 
 import type { LibraryPackageItem } from "../hooks/use-library";
-import { maySetPackageActive, type SpaceGrant } from "./package-permissions";
 
 /** Why a switch cannot go the way it would go — each one its own sentence. */
 export type ActivationRefusal = "notPlaced" | "activate" | "deactivate";
@@ -26,27 +25,22 @@ export const ACTIVATION_REFUSAL_KEY: Record<ActivationRefusal, string> = {
 };
 
 /**
- * May the reader switch `pkg` on (`next: true`) or off in `spaceId`?
- *
- * Two halves: the type's grant in the TARGET space (`maySetPackageActive`, the
- * owner of a personal space included), and, where the package is not placed
- * yet, the SHARE right in its home (`home_shareable`), since the route shares it
- * there before it activates it (`routes/spaces.ts`). A grant not loaded yet
- * (`undefined`) refuses without blaming either half.
+ * May the reader switch `pkg` on (`next: true`) or off in `spaceId`? The server's verdict, served
+ * on the library row (`activation`): the type's grant in the target space (the owner of a
+ * personal space needs none), and, where the package is not placed yet, the share right in its
+ * home. A space the row has no verdict for refuses without blaming either half.
  */
 export function activationGate(
-  pkg: Pick<LibraryPackageItem, "type" | "placements" | "home_shareable">,
+  pkg: Pick<LibraryPackageItem, "activation">,
   spaceId: string,
-  grant: SpaceGrant | undefined,
   next: boolean,
 ): ActivationGate {
-  if (!grant) return { allowed: false, refusal: null };
-  const placed = pkg.placements.some((placement) => placement.space_id === spaceId);
-  if (!placed && pkg.home_shareable !== true) return { allowed: false, refusal: "notPlaced" };
-  if (!maySetPackageActive(grant, pkg.type, next)) {
-    return { allowed: false, refusal: next ? "activate" : "deactivate" };
-  }
-  return { allowed: true, refusal: null };
+  const cell = pkg.activation.find((entry) => entry.space_id === spaceId);
+  if (!cell) return { allowed: false, refusal: null };
+  const verdict = next ? cell.activate : cell.deactivate;
+  if (verdict === "allowed") return { allowed: true, refusal: null };
+  if (verdict === "not_shareable") return { allowed: false, refusal: "notPlaced" };
+  return { allowed: false, refusal: next ? "activate" : "deactivate" };
 }
 
 /** The deeds on the package itself, behind a row's "…" and the sheet's Actions menu. */

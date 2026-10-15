@@ -21,7 +21,7 @@ import type {
 } from "../hooks/use-model-provider-credentials";
 import type { OrgModelInfo } from "../hooks/use-models";
 import { modelSource } from "./model-source";
-import { getProviderById, resolveProviderEntry } from "./provider-registry-helpers";
+import { resolveProviderEntry } from "./provider-registry-helpers";
 
 export type ProviderKind = "org-key" | "personal-key" | "subscription" | "system";
 
@@ -62,27 +62,6 @@ export function memberModels(models: readonly OrgModelInfo[]): OrgModelInfo[] {
   return models.filter((m) => m.binding === "user" && !isSystemModel(m));
 }
 
-/**
- * Whether a personal credential of `credentialProvider` serves the unbound model `m`: the same
- * service, or a subscription whose plan offers that model on the same API (Claude Code serves
- * Anthropic's models). The server's `servesModel` is the authority; this reads the registry.
- */
-function serves(
-  credentialProvider: ProviderRegistryEntry,
-  m: OrgModelInfo,
-  registry: readonly ProviderRegistryEntry[],
-): boolean {
-  if (m.providerId === credentialProvider.providerId) return true;
-  if (credentialProvider.authMode !== "oauth2" || !m.providerId) return false;
-  const modelProvider = getProviderById(m.providerId, registry);
-  return (
-    !!modelProvider &&
-    modelProvider.apiShape === credentialProvider.apiShape &&
-    modelProvider.defaultBaseUrl === credentialProvider.defaultBaseUrl &&
-    credentialProvider.models.some((offered) => offered.id === m.modelId)
-  );
-}
-
 function kindOf(pk: ModelProviderCredentialInfo): ProviderKind {
   if (pk.owner_type === "org") return "org-key";
   return pk.authMode === "oauth2" ? "subscription" : "personal-key";
@@ -119,9 +98,7 @@ export function providerRows(
     const bound =
       kind === "org-key"
         ? models.filter((m) => m.credentialId === pk.id && !isSystemModel(m))
-        : provider
-          ? unbound.filter((m) => serves(provider, m, registry))
-          : [];
+        : unbound.filter((m) => pk.serves_model_ids.includes(m.id));
     const served = bound.filter((m) => m.enabled);
     rows.push({
       id: pk.id,
@@ -249,7 +226,7 @@ export function personalServiceRows(
       return (
         !!provider &&
         (provider.providerId === service.providerId ||
-          served.some((m) => serves(provider, m, registry)))
+          served.some((m) => pk.serves_model_ids.includes(m.id)))
       );
     });
     if (left.length === 0 && keys.length === 0) return [];

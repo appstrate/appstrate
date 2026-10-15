@@ -164,6 +164,7 @@ const LOCAL_KEY: ModelProviderCredentialInfo = {
   created_by: null,
   allowed_actions: ["edit", "delete", "test"],
   bindable: true,
+  serves_model_ids: [],
   createdAt: "2026-07-01T10:00:00.000Z",
   updatedAt: "2026-07-01T10:00:00.000Z",
 };
@@ -211,6 +212,7 @@ const ORG_CONNECTION: ModelProviderCredentialInfo = {
   owner_id: null,
   owner_name: null,
   bindable: true,
+  serves_model_ids: [],
 };
 
 function form(

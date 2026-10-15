@@ -20,9 +20,9 @@
 
 import type { Context } from "hono";
 import { z } from "zod";
-import { eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, user } from "@appstrate/db/schema";
+import { modelProviderCredentials, orgModels, user } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { MODEL_CREDENTIAL_OWNERS } from "@appstrate/core/model-payer";
 import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
@@ -55,6 +55,7 @@ import {
   isBindableCredential,
   providerAllowsPersonalCredentials,
   requestPayerUserId,
+  servesModel,
 } from "./credential-chain.ts";
 
 /**
@@ -1173,6 +1174,20 @@ export async function listOrgModelProviderCredentials(
   const system = caller.readsOrg ? getSystemModelProviderCredentials() : new Map<string, never>();
   const personalAllowed = await personalModelCredentialsAllowed(caller.orgId);
   const now = toISORequired(new Date());
+  // The models the organization leaves to each member's own credential (no binding, no alias):
+  // what a personal credential may pay for, judged per row by `servesModel` below.
+  const memberModels = await db
+    .select({ id: orgModels.id, providerId: orgModels.providerId, modelId: orgModels.modelId })
+    .from(orgModels)
+    .where(
+      and(
+        eq(orgModels.orgId, caller.orgId),
+        isNull(orgModels.credentialId),
+        eq(orgModels.aliased, false),
+      ),
+    );
+  const servedBy = (providerId: string) =>
+    memberModels.filter((m) => servesModel(providerId, m)).map((m) => m.id);
   const rows = await db
     .select({ credential: modelProviderCredentials, ownerName: user.name })
     .from(modelProviderCredentials)
@@ -1236,6 +1251,7 @@ export async function listOrgModelProviderCredentials(
           personalAllowed,
         ),
         bindable: false,
+        serves_model_ids: [],
         created_by: null,
         createdAt: now,
         updatedAt: now,
@@ -1281,6 +1297,7 @@ export async function listOrgModelProviderCredentials(
           personalAllowed,
         ),
         bindable: isBindableCredential(r),
+        serves_model_ids: r.ownerUserId === null ? [] : servedBy(r.providerId),
         created_by: r.createdBy,
         createdAt: toISORequired(r.createdAt),
         updatedAt: toISORequired(r.updatedAt),

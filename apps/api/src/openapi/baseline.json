@@ -11229,6 +11229,7 @@
                       "owner_name": null,
                       "allowed_actions": ["edit", "delete", "test"],
                       "bindable": false,
+                      "serves_model_ids": [],
                       "created_by": "usr_cm3abc123",
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
@@ -23564,6 +23565,79 @@
         }
       }
     },
+    "/api/org-roles": {
+      "get": {
+        "operationId": "listOrgRoles",
+        "tags": ["Roles"],
+        "summary": "List organization roles",
+        "description": "The four organization roles (`owner`, `admin`, `member`, `guest`) and the org-level permissions each grants — the platform's own matrix with what the loaded modules contribute at `level: \"org\"`. The same in every organization and for every caller (no preview, no credential ceiling): it describes the roles, not the caller. Any member may read it.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization roles",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["object", "role", "permissions"],
+                        "properties": {
+                          "object": {
+                            "type": "string",
+                            "enum": ["org_role"]
+                          },
+                          "role": {
+                            "type": "string",
+                            "enum": ["owner", "admin", "member", "guest"]
+                          },
+                          "permissions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Org-level permissions the role grants, sorted."
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
     "/api/roles": {
       "get": {
         "operationId": "listRoles",
@@ -30327,6 +30401,18 @@
                               "name": "Alex"
                             }
                           }
+                        ],
+                        "activation": [
+                          {
+                            "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                            "activate": "allowed",
+                            "deactivate": "allowed"
+                          },
+                          {
+                            "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                            "activate": "allowed",
+                            "deactivate": "forbidden"
+                          }
                         ]
                       }
                     ],
@@ -30358,6 +30444,18 @@
                             "state": "inactive",
                             "chat_enforced": false,
                             "shared_by": null
+                          }
+                        ],
+                        "activation": [
+                          {
+                            "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                            "activate": "allowed",
+                            "deactivate": "allowed"
+                          },
+                          {
+                            "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                            "activate": "forbidden",
+                            "deactivate": "forbidden"
                           }
                         ]
                       }
@@ -30502,6 +30600,18 @@
                               "name": "Alex"
                             }
                           }
+                        ],
+                        "activation": [
+                          {
+                            "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                            "activate": "allowed",
+                            "deactivate": "allowed"
+                          },
+                          {
+                            "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                            "activate": "allowed",
+                            "deactivate": "forbidden"
+                          }
                         ]
                       }
                     ],
@@ -30533,6 +30643,18 @@
                             "state": "inactive",
                             "chat_enforced": false,
                             "shared_by": null
+                          }
+                        ],
+                        "activation": [
+                          {
+                            "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                            "activate": "allowed",
+                            "deactivate": "allowed"
+                          },
+                          {
+                            "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                            "activate": "forbidden",
+                            "deactivate": "forbidden"
                           }
                         ]
                       }
@@ -33578,6 +33700,7 @@
           "owner_name",
           "allowed_actions",
           "bindable",
+          "serves_model_ids",
           "created_by",
           "createdAt",
           "updatedAt"
@@ -33639,6 +33762,13 @@
           "bindable": {
             "type": "boolean",
             "description": "Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one."
+          },
+          "serves_model_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "On a personal credential, the ids of the organization models left to members' own credentials (`binding: user`) that it pays for — the same service, or a subscription offering the model on its API. `[]` on an organization or built-in credential: its models name it in `credentialId`."
           },
           "created_by": {
             "type": ["string", "null"]
@@ -34826,7 +34956,8 @@
             "home_deletable",
             "home_shareable",
             "published",
-            "placements"
+            "placements",
+            "activation"
           ],
           "properties": {
             "id": {
@@ -34868,6 +34999,27 @@
             "published": {
               "type": "boolean",
               "description": "Whether the package has a published version (a `latest` dist-tag), or is a system package. A skill can be enforced in a space's chat only when it is published."
+            },
+            "activation": {
+              "type": "array",
+              "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the offer; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
+              "items": {
+                "type": "object",
+                "required": ["space_id", "activate", "deactivate"],
+                "properties": {
+                  "space_id": {
+                    "type": "string"
+                  },
+                  "activate": {
+                    "type": "string",
+                    "enum": ["allowed", "not_shareable", "forbidden"]
+                  },
+                  "deactivate": {
+                    "type": "string",
+                    "enum": ["allowed", "not_shareable", "forbidden"]
+                  }
+                }
+              }
             },
             "placements": {
               "type": "array",

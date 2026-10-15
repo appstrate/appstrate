@@ -2989,6 +2989,26 @@ export interface paths {
         patch: operations["updateOrgIntegrationOAuthClient"];
         trace?: never;
     };
+    "/api/org-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List organization roles
+         * @description The four organization roles (`owner`, `admin`, `member`, `guest`) and the org-level permissions each grants — the platform's own matrix with what the loaded modules contribute at `level: "org"`. The same in every organization and for every caller (no preview, no credential ceiling): it describes the roles, not the caller. Any member may read it.
+         */
+        get: operations["listOrgRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs": {
         parameters: {
             query?: never;
@@ -6153,6 +6173,14 @@ export interface components {
             home_shareable: boolean;
             /** @description Whether the package has a published version (a `latest` dist-tag), or is a system package. A skill can be enforced in a space's chat only when it is published. */
             published: boolean;
+            /** @description What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the offer; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance. */
+            activation: {
+                space_id: string;
+                /** @enum {string} */
+                activate: "allowed" | "not_shareable" | "forbidden";
+                /** @enum {string} */
+                deactivate: "allowed" | "not_shareable" | "forbidden";
+            }[];
             /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (a package whose home grants them `<type>:share`). */
             placements: components["schemas"]["PackagePlacement"][];
         }[];
@@ -6233,6 +6261,8 @@ export interface components {
             allowed_actions: ("edit" | "delete" | "test" | "reconnect")[];
             /** @description Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one. */
             bindable: boolean;
+            /** @description On a personal credential, the ids of the organization models left to members' own credentials (`binding: user`) that it pays for — the same service, or a subscription offering the model on its API. `[]` on an organization or built-in credential: its models name it in `credentialId`. */
+            serves_model_ids: string[];
             created_by: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -15057,6 +15087,18 @@ export interface operations {
                      *                   "name": "Alex"
                      *                 }
                      *               }
+                     *             ],
+                     *             "activation": [
+                     *               {
+                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "allowed"
+                     *               },
+                     *               {
+                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "forbidden"
+                     *               }
                      *             ]
                      *           }
                      *         ],
@@ -15088,6 +15130,18 @@ export interface operations {
                      *                 "state": "inactive",
                      *                 "chat_enforced": false,
                      *                 "shared_by": null
+                     *               }
+                     *             ],
+                     *             "activation": [
+                     *               {
+                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "allowed"
+                     *               },
+                     *               {
+                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "activate": "forbidden",
+                     *                 "deactivate": "forbidden"
                      *               }
                      *             ]
                      *           }
@@ -16958,6 +17012,7 @@ export interface operations {
                      *             "test"
                      *           ],
                      *           "bindable": false,
+                     *           "serves_model_ids": [],
                      *           "created_by": "usr_cm3abc123",
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
@@ -19107,6 +19162,45 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listOrgRoles: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Organization roles */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @enum {string} */
+                            object: "org_role";
+                            /** @enum {string} */
+                            role: "owner" | "admin" | "member" | "guest";
+                            /** @description Org-level permissions the role grants, sorted. */
+                            permissions: string[];
+                        }[];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listOrganizations: {
@@ -26002,6 +26096,18 @@ export interface operations {
                      *                   "name": "Alex"
                      *                 }
                      *               }
+                     *             ],
+                     *             "activation": [
+                     *               {
+                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "allowed"
+                     *               },
+                     *               {
+                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "forbidden"
+                     *               }
                      *             ]
                      *           }
                      *         ],
@@ -26033,6 +26139,18 @@ export interface operations {
                      *                 "state": "inactive",
                      *                 "chat_enforced": false,
                      *                 "shared_by": null
+                     *               }
+                     *             ],
+                     *             "activation": [
+                     *               {
+                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "allowed"
+                     *               },
+                     *               {
+                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "activate": "forbidden",
+                     *                 "deactivate": "forbidden"
                      *               }
                      *             ]
                      *           }

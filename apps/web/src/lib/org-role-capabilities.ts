@@ -1,38 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { OrgLevelPermission } from "@appstrate/core/permissions";
-import type { OrgRole } from "@appstrate/shared-types";
 
 interface OrgRoleCapability {
   /** `orgRolesGuide.can.<key>` names the row. */
   key: string;
   /** The org-level permissions the capability stands for. */
   permissions: readonly OrgLevelPermission[];
-  /** The roles holding every one of them. */
-  roles: readonly OrgRole[];
 }
 
 /**
- * What each org role can do, as the roles page draws it. The roles are those
- * of `ORG_ROLE_PERMISSIONS` (`apps/api/src/lib/permissions.ts`), which the
- * browser bundle cannot import; `apps/api/test/unit/org-role-capabilities.test.ts`
- * holds the two in parity.
+ * The rows of the roles page: each a capability, the org-level permissions it stands for. Which
+ * role holds it is the server's answer (`GET /api/org-roles`, {@link holdsCapability}), never a
+ * copy of its matrix: a role holds a row when it is granted every permission of it.
  */
 export const ORG_ROLE_CAPABILITIES: readonly OrgRoleCapability[] = [
   {
     key: "view",
     permissions: ["org:read", "spaces:read", "models:read", "proxies:read"],
-    roles: ["owner", "admin", "member", "guest"],
   },
   // A guest does not enumerate the directory.
-  { key: "directory", permissions: ["members:read"], roles: ["owner", "admin", "member"] },
+  { key: "directory", permissions: ["members:read"] },
   {
     key: "manageMembers",
     permissions: ["members:invite", "members:remove", "members:change-role"],
-    roles: ["owner", "admin"],
   },
-  { key: "customRoles", permissions: ["roles:write", "roles:delete"], roles: ["owner", "admin"] },
-  { key: "spaces", permissions: ["spaces:write", "spaces:delete"], roles: ["owner", "admin"] },
+  { key: "customRoles", permissions: ["roles:write", "roles:delete"] },
+  { key: "spaces", permissions: ["spaces:write", "spaces:delete"] },
   {
     key: "infrastructure",
     permissions: [
@@ -47,9 +41,16 @@ export const ORG_ROLE_CAPABILITIES: readonly OrgRoleCapability[] = [
       "proxies:write",
       "proxies:delete",
     ],
-    roles: ["owner", "admin"],
   },
-  { key: "settings", permissions: ["org:settings"], roles: ["owner", "admin"] },
+  { key: "settings", permissions: ["org:settings"] },
   // The org's identity is owner-only.
-  { key: "identity", permissions: ["org:update", "org:delete"], roles: ["owner"] },
+  { key: "identity", permissions: ["org:update", "org:delete"] },
 ];
+
+/** Whether a role granted `granted` holds `capability`: every permission it stands for. */
+export function holdsCapability(
+  capability: OrgRoleCapability,
+  granted: ReadonlySet<string>,
+): boolean {
+  return capability.permissions.every((permission) => granted.has(permission));
+}

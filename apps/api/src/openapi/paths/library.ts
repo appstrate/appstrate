@@ -78,6 +78,18 @@ const PACKAGES_EXAMPLE = {
           shared_by: { user_id: "usr_1", name: "Alex" },
         },
       ],
+      activation: [
+        {
+          space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+          activate: "allowed",
+          deactivate: "allowed",
+        },
+        {
+          space_id: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+          activate: "allowed",
+          deactivate: "forbidden",
+        },
+      ],
     },
   ],
   skill: [],
@@ -108,6 +120,18 @@ const PACKAGES_EXAMPLE = {
           state: "inactive",
           chat_enforced: false,
           shared_by: null,
+        },
+      ],
+      activation: [
+        {
+          space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+          activate: "allowed",
+          deactivate: "allowed",
+        },
+        {
+          space_id: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+          activate: "forbidden",
+          deactivate: "forbidden",
         },
       ],
     },
