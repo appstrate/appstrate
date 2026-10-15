@@ -4,8 +4,9 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import type { WebhookDelivery } from "@appstrate/shared-types";
 import { $api, client, type components, type paths } from "@/api/client";
 import { invalidatePaths } from "@/lib/query-keys";
+import { keysetPaging } from "@/lib/keyset-paging";
 import { useInvalidatePaths } from "@/hooks/use-invalidate-paths";
-import { useCurrentOrgId } from "@/hooks/use-org";
+import { useOrgOnlyScope } from "@/hooks/use-org-scope";
 import { useCurrentSpaceId } from "@/hooks/use-current-space";
 import { usePermissions } from "@/hooks/use-permissions";
 
@@ -36,13 +37,9 @@ export const WEBHOOK_EVENTS = Object.keys(WEBHOOK_EVENT_SET) as WebhookEvent[];
  * instead of serving another org's cached page.
  */
 function useWebhookScope() {
-  const orgId = useCurrentOrgId();
+  const org = useOrgOnlyScope();
   const spaceId = useCurrentSpaceId();
-  return {
-    enabled: !!orgId && !!spaceId,
-    header: { "X-Org-Id": orgId ?? undefined },
-    spaceId,
-  };
+  return { enabled: org.enabled && !!spaceId, header: org.header, spaceId };
 }
 
 /**
@@ -158,8 +155,7 @@ export function useWebhookDeliveries(webhookId: string) {
       if (!data) throw new Error("empty response");
       return data;
     },
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => (last.hasMore ? last.data[last.data.length - 1]?.id : undefined),
+    ...keysetPaging,
     enabled: scope.enabled && !!webhookId,
   });
 }

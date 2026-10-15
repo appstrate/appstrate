@@ -102,7 +102,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
           <Button
             variant="outline"
             size="sm"
-            disabled={isFetchingNextPage}
+            pending={isFetchingNextPage}
             onClick={() => void fetchNextPage()}
           >
             {isFetchNextPageError

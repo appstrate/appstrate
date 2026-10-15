@@ -5,7 +5,6 @@ import { AlertTriangle, XCircle, Puzzle, Check } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { unboundLabel } from "./integration-connect/integration-run-readiness";
@@ -73,8 +72,12 @@ export function MissingConnectionsModal({
       actions={
         <div className="flex items-center gap-2">
           {showRetry && (
-            <Button onClick={onRetry} disabled={!canRetry} data-testid="missing-connections-retry">
-              {retrying && <Spinner />}
+            <Button
+              onClick={onRetry}
+              pending={retrying}
+              disabled={!canRetry}
+              data-testid="missing-connections-retry"
+            >
               {t("missingConnections.retry")}
             </Button>
           )}

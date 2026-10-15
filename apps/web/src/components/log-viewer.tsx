@@ -36,7 +36,7 @@ import {
 } from "./log-utils";
 import { ItemList } from "./item-list";
 import { EmptyState } from "./page-states";
-import { Fact, FactGrid } from "./fact-grid";
+import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { Badge } from "./status-badge";
 import { formatDateField } from "../lib/format-date";
 import { historyRuns, recalledMemories } from "../lib/runtime-tool-results";
@@ -477,17 +477,19 @@ export function LogViewer({
                 <EmptyState compact icon={ScrollText} message={t("log.empty")} />
               </div>
             ) : visibleEntries.length === 0 ? (
-              <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-                <SearchX className="text-muted-foreground mb-3 size-7" />
-                <p className="text-sm font-medium">{t("log.noMatches")}</p>
-                <p className="text-muted-foreground mt-1 max-w-sm text-xs">
-                  {t("log.noMatchesHint")}
-                </p>
-                {hasActiveQueryOrFilters && (
-                  <Button variant="ghost" size="sm" className="mt-2" onClick={clearJournalFilters}>
-                    {t("log.clearAll")}
-                  </Button>
-                )}
+              <div className="flex h-full items-center justify-center">
+                <EmptyState
+                  compact
+                  icon={SearchX}
+                  message={t("log.noMatches")}
+                  hint={t("log.noMatchesHint")}
+                >
+                  {hasActiveQueryOrFilters && (
+                    <Button variant="ghost" size="sm" onClick={clearJournalFilters}>
+                      {t("log.clearAll")}
+                    </Button>
+                  )}
+                </EmptyState>
               </div>
             ) : (
               <div

@@ -6,7 +6,6 @@ import { Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
@@ -156,13 +155,12 @@ export function RunAgentButton({
           size={size}
           className={cn("relative", className)}
           onClick={handleClick}
+          pending={isPending}
           disabled={isDisabled}
           title={blockedTitle ? undefined : t("detail.run")}
           aria-label={showLabel ? undefined : t("detail.run")}
         >
-          {isPending ? (
-            <Spinner />
-          ) : (
+          {!isPending && (
             <Play
               className={cn("size-3.5", showLabel && variant === "outline" && "text-primary")}
             />

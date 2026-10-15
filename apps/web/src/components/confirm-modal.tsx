@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { createConfirmer } from "../lib/confirm-settle";
 
 interface ConfirmModalProps {
@@ -64,8 +63,13 @@ export function ConfirmModal({
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button variant={variant} onClick={confirm} disabled={isPending || confirmDisabled}>
-            {isPending ? <Spinner label={t("loading")} /> : (confirmLabel ?? t("btn.confirm"))}
+          <Button
+            variant={variant}
+            onClick={confirm}
+            pending={isPending}
+            disabled={confirmDisabled}
+          >
+            {confirmLabel ?? t("btn.confirm")}
           </Button>
         </>
       }

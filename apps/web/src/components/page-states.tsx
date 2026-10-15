@@ -6,7 +6,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { errorDetail } from "../lib/mutation-error";
 import { ApiError } from "../api/errors";
-import type { MenuAction } from "./menu-action";
+import type { MenuAction } from "../lib/menu-action";
 
 /**
  * The request failed — drawn the way the empty state is drawn.

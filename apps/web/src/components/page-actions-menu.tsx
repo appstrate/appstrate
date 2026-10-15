@@ -10,7 +10,8 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { TOOLBAR_ACTION } from "../lib/toolbar-button";
-import { MenuActionItem, type MenuAction } from "./menu-action";
+import { MenuActionItem } from "./menu-action";
+import type { MenuAction } from "../lib/menu-action";
 
 /**
  * One stable page deed at every width; the menu carries the available actions:

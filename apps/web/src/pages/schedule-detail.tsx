@@ -15,7 +15,7 @@ import {
   type DetailTab,
 } from "../components/detail-tabs";
 import { DetailSectionCard } from "../components/detail-section-card";
-import { Fact, FactGrid } from "../components/fact-grid";
+import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { ManifestFacts } from "../components/package-manifest/manifest-fact";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { PageActionsMenu } from "../components/page-actions-menu";
@@ -367,11 +367,8 @@ function ScheduleHistory({
       scope={{ scheduleId: schedule.id, agentName }}
       banner={previewRow}
       emptyState={
-        <div>
-          {previewRow}
-          <div className="p-6">
-            <EmptyState message={t("schedule.noRuns")} icon={Clock} compact />
-          </div>
+        <div className="p-6">
+          <EmptyState message={t("schedule.noRuns")} icon={Clock} compact />
         </div>
       }
     />

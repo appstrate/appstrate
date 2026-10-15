@@ -79,6 +79,7 @@ import {
   type DraftFile,
 } from "../../lib/package-file-drafts";
 import { errorMessage } from "../../lib/mutation-error";
+import { invalidatePaths } from "../../lib/query-keys";
 import { packageFilesErrorKey, primaryDisplayFile } from "../../lib/package-files";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { CompareWithDraftModal } from "../package-detail/compare-with-draft-modal";
@@ -281,7 +282,7 @@ export function PackageFilesView({
         body: packageUpdateBody({ manifest: base.manifest, operations }),
       });
       // Start again from what the server now holds, not from the staged tree.
-      await queryClient.refetchQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/files"] });
+      await invalidatePaths(queryClient, ["/api/packages/{scope}/{name}/files"], "all");
       discardEdits();
       toast.success(t("files.saved"));
     } catch (error) {

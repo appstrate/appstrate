@@ -411,9 +411,7 @@ function useClientMutationSuccess(messageKey?: string) {
   const qc = useQueryClient();
   return () => {
     if (messageKey) toast.success(t(messageKey));
-    for (const path of [SPACE_CLIENTS, ORG_CLIENTS, "/api/integrations/{packageId}"]) {
-      void qc.invalidateQueries({ queryKey: ["get", path] });
-    }
+    void invalidatePaths(qc, [SPACE_CLIENTS, ORG_CLIENTS, "/api/integrations/{packageId}"]);
   };
 }
 

@@ -16,7 +16,7 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { Loader2 } from "lucide-react";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
 import type { DataColumn } from "./data-table";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
@@ -94,9 +94,9 @@ export function useScheduleColumns({
         <>
           <ScheduleStatusBadge schedule={schedule} />
           {schedule.running_runs > 0 && (
-            <Loader2
-              className="text-primary size-3.5 shrink-0 animate-spin"
-              aria-label={t("status.running", { ns: "common" })}
+            <Spinner
+              className="text-primary size-3.5 shrink-0"
+              label={t("status.running", { ns: "common" })}
             />
           )}
         </>

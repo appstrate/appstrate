@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { SocialSignInButton } from "./social-sign-in-button";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
@@ -80,8 +79,8 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
                   />
                 </div>
                 <FieldError>{error}</FieldError>
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? <Spinner /> : t("preferences.reauthConfirm")}
+                <Button type="submit" pending={submitting}>
+                  {t("preferences.reauthConfirm")}
                 </Button>
               </form>
             )}

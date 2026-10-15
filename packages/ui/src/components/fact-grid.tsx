@@ -7,7 +7,7 @@
  */
 
 import type { ReactNode } from "react";
-import { cn } from "@appstrate/ui/cn";
+import { cn } from "../cn.ts";
 
 const COLUMNS = {
   1: "grid gap-y-3",

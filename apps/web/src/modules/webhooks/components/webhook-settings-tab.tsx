@@ -5,9 +5,8 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@appstrate/ui/components/checkbox";
 import { ConfirmModal } from "@/components/confirm-modal";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleValue } from "@/lib/toggle-value";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
@@ -116,21 +115,16 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       />
 
       {/* Active toggle */}
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id="webhook-active"
-          checked={active}
-          onCheckedChange={(checked) => setActive(checked === true)}
-        />
-        <Label htmlFor="webhook-active" className="cursor-pointer">
-          {t("settings:webhooks.active")}
-        </Label>
-      </div>
+      <CheckboxField
+        id="webhook-active"
+        checked={active}
+        onCheckedChange={(checked) => setActive(checked === true)}
+        label={t("settings:webhooks.active")}
+      />
 
       {/* Save */}
       {canWrite && (
-        <Button onClick={handleSave} disabled={updateMutation.isPending}>
-          {updateMutation.isPending && <Spinner />}
+        <Button onClick={handleSave} pending={updateMutation.isPending}>
           {t("settings:webhooks.saveSettings")}
         </Button>
       )}
@@ -176,13 +170,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       {/* Test — `POST /api/webhooks/:id/test` is guarded by `write`, not `read`. */}
       {canWrite && (
         <div className="border-border border-t pt-4">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleTest}
-            disabled={testMutation.isPending}
-          >
-            {testMutation.isPending && <Spinner />}
+          <Button variant="outline" size="sm" onClick={handleTest} pending={testMutation.isPending}>
             {t("settings:webhooks.sendTest")}
           </Button>
         </div>
@@ -198,9 +186,8 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
             variant="destructive"
             size="sm"
             onClick={() => setDeleteConfirmOpen(true)}
-            disabled={deleteMutation.isPending}
+            pending={deleteMutation.isPending}
           >
-            {deleteMutation.isPending && <Spinner />}
             {t("settings:webhooks.deleteBtn")}
           </Button>
         </div>

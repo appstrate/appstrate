@@ -4,7 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { Fragment, isValidElement, type ReactElement, type ReactNode } from "react";
 import { DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../data-table.tsx";
-import { splitMenuActions, type MenuAction } from "../menu-action.tsx";
+import { splitMenuActions, type MenuAction } from "../../lib/menu-action.ts";
 import { useDocumentColumns } from "../document-columns.tsx";
 import type { FileDto } from "../../hooks/use-files.ts";
 import i18n, { i18nReady } from "../../i18n.ts";

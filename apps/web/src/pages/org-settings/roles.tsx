@@ -33,7 +33,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { DataTable } from "../../components/data-table";
 import { Modal } from "../../components/modal";
 import { FormModal } from "../../components/form-modal";
-import type { MenuAction } from "../../components/menu-action";
+import type { MenuAction } from "../../lib/menu-action";
 import { ScopeMultiSelect } from "../../components/scope-multi-select";
 import { SettingsGroup } from "../../components/settings/setting-row";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";

@@ -18,7 +18,6 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "./modal";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import type { MissingDependency } from "../lib/activation-closure";
 
 export function ActivationClosureDialog({
@@ -56,8 +55,8 @@ export function ActivationClosureDialog({
             {t("catalogue.closureAgentOnly")}
           </Button>
           {canActivateAll && (
-            <Button onClick={onActivateAll} disabled={isPending}>
-              {isPending ? <Spinner /> : t("catalogue.closureActivateAll")}
+            <Button onClick={onActivateAll} pending={isPending}>
+              {t("catalogue.closureActivateAll")}
             </Button>
           )}
         </>

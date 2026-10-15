@@ -20,7 +20,14 @@ import {
   TableHeader,
   TableRow,
 } from "@appstrate/ui/components/table";
-import { MATRIX_HEAD } from "../lib/matrix-head";
+
+/**
+ * The head band of a matrix, written like `DataTable`'s head so a matrix reads as
+ * the same family while keeping the raw table a matrix needs: it scrolls where a
+ * list degrades.
+ */
+const MATRIX_HEAD =
+  "text-muted-foreground h-10 text-[0.68rem] font-semibold tracking-[0.05em] uppercase";
 
 const LABEL_COLUMN = 224;
 const ROLE_COLUMN = 96;

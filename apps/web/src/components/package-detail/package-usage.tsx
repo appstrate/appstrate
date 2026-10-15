@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Layers } from "lucide-react";
 import { useAgents } from "../../hooks/use-packages";
 import { agentCardItem, type CardItem } from "../../lib/package-card-item";
+import { useState } from "react";
 import { matchesSearch } from "../../lib/strings";
 import { PackagesTable } from "../packages-table";
 import { usePackageColumns } from "../package-columns";
@@ -25,8 +25,6 @@ export function PackageUsage({ agentIds }: { agentIds: string[] }) {
       <ListToolbar
         placement="panel"
         search={{ value: search, onChange: setSearch, placeholder: t("packages.usageSearch") }}
-        filters={[]}
-        onReset={() => setSearch("")}
       />
       <PackagesTable
         tableId="package-usage"

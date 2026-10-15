@@ -10,9 +10,8 @@ import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { useCliSessionColumns } from "../../components/cli-session-columns";
 import { $api } from "../../api/client";
+import { invalidatePaths } from "../../lib/query-keys";
 import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
-
-const SESSIONS_QUERY_KEY = ["get", "/api/auth/cli/sessions"] as const;
 
 export function PreferencesDevicesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -30,13 +29,13 @@ export function PreferencesDevicesPage() {
 
   const revokeOne = $api.useMutation("post", "/api/auth/cli/sessions/revoke", {
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+      void invalidatePaths(queryClient, ["/api/auth/cli/sessions"]);
     },
   });
 
   const revokeAll = $api.useMutation("post", "/api/auth/cli/sessions/revoke-all", {
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+      void invalidatePaths(queryClient, ["/api/auth/cli/sessions"]);
     },
   });
 

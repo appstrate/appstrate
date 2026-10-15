@@ -7,7 +7,7 @@ import { Pencil, Power, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { SecretRevealModal } from "../../../components/secret-reveal-modal";
 import { TableRowActions } from "../../../components/table-row-actions";
-import type { MenuAction } from "../../../components/menu-action";
+import type { MenuAction } from "../../../lib/menu-action";
 import { usePermissions } from "../../../hooks/use-permissions";
 import {
   useDeleteOAuthClient,

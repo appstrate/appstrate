@@ -22,7 +22,6 @@ import {
   type AssignmentDraft,
 } from "../lib/space-assignments";
 import { SpaceAssignmentsField } from "./space-assignments-field";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { errorMessage } from "../lib/mutation-error";
 
 interface InviteFormValues {
@@ -221,10 +220,9 @@ export function OrgInvitationForm({
         )}
         <Button
           type="submit"
-          disabled={isPending}
+          pending={isPending}
           className={invitation || onCancel ? "" : "sm:mr-auto"}
         >
-          {isPending && <Spinner />}
           {t(invitation ? "common:btn.save" : "onboarding.invite")}
         </Button>
       </div>

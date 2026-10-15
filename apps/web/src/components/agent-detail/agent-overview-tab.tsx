@@ -93,7 +93,9 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
                   <span className="text-muted-foreground">{t("detail.overview.noRuns")}</span>
                 )
               }
-              to={detail.last_run ? runDetailPath(packageId, detail.last_run.id) : undefined}
+              target={
+                detail.last_run ? { to: runDetailPath(packageId, detail.last_run.id) } : undefined
+              }
             />
             <OperationalStat
               size="sm"
@@ -109,9 +111,9 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
                   </span>
                 )
               }
-              to={
+              target={
                 nextSchedule?.next_run_at
-                  ? agentSettingsHref(location.pathname, "schedules")
+                  ? { to: agentSettingsHref(location.pathname, "schedules") }
                   : undefined
               }
             />
@@ -127,9 +129,9 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
             <OperationalStat
               label={t("detail.overview.runningRuns")}
               value={String(detail.running_runs)}
-              to={
+              target={
                 detail.running_runs > 0
-                  ? destination("#runs", "agentRunStatus", "running")
+                  ? { to: destination("#runs", "agentRunStatus", "running") }
                   : undefined
               }
             />
@@ -144,9 +146,9 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
                   String(activeScheduleCount)
                 )
               }
-              to={
+              target={
                 activeScheduleCount && activeScheduleCount > 0
-                  ? agentSettingsHref(location.pathname, "schedules")
+                  ? { to: agentSettingsHref(location.pathname, "schedules") }
                   : undefined
               }
             />
@@ -173,9 +175,9 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
                   String(pinned?.length ?? 0)
                 )
               }
-              to={
+              target={
                 pinned && pinned.length > 0
-                  ? destination("#memory", "agentMemory", "pinned")
+                  ? { to: destination("#memory", "agentMemory", "pinned") }
                   : undefined
               }
             />
@@ -190,9 +192,9 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
                   String(memories?.length ?? 0)
                 )
               }
-              to={
+              target={
                 memories && memories.length > 0
-                  ? destination("#memory", "agentMemory", "archive")
+                  ? { to: destination("#memory", "agentMemory", "archive") }
                   : undefined
               }
             />

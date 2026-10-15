@@ -17,7 +17,7 @@
  * way to invalidate the others.
  */
 
-import type { QueryClient } from "@tanstack/react-query";
+import type { InvalidateQueryFilters, QueryClient } from "@tanstack/react-query";
 import type { paths } from "../api/schema";
 
 type Id = string | null | undefined;
@@ -32,12 +32,13 @@ export type GetPath = {
  * `[method, path, init]` with the literal spec path, so the path alone is a
  * prefix of every entry under it; typing it against the generated spec turns a
  * typo into a compile error instead of an invalidation that matches nothing.
- * `refetchType: "none"` marks the entries stale without refetching them.
+ * `refetchType` picks what refetches: `"none"` marks the entries stale only,
+ * `"all"` refetches the inactive ones too.
  */
 export function invalidatePaths(
   qc: QueryClient,
   paths: readonly GetPath[],
-  refetchType?: "none",
+  refetchType?: InvalidateQueryFilters["refetchType"],
 ): Promise<unknown> {
   return Promise.all(
     paths.map((path) => qc.invalidateQueries({ queryKey: ["get", path], refetchType })),

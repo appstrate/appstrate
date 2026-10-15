@@ -13,7 +13,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
-import type { MenuAction } from "../../components/menu-action";
+import type { MenuAction } from "../../lib/menu-action";
 import { InvitationsTable } from "../../components/invitations-table";
 import { OrgInvitationForm } from "../../components/org-invitation-form";
 import { useMemberColumns } from "./member-columns";

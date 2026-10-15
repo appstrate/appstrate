@@ -29,7 +29,6 @@ import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
 import { FormModal } from "./form-modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { TestResultSpan } from "./test-result-span";
 import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
@@ -359,9 +358,9 @@ export function CredentialFormModal({
             type="button"
             variant="outline"
             onClick={handleTest}
-            disabled={!canTest || testMutation.isPending}
+            pending={testMutation.isPending}
+            disabled={!canTest}
           >
-            {testMutation.isPending && <Spinner />}
             {t("credentials.test")}
           </Button>
           {testResult && (

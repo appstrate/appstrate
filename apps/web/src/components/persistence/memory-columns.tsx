@@ -29,7 +29,8 @@ export function useMemoryColumns({
   onCopy,
   onDelete,
 }: {
-  isDeleting: boolean;
+  /** Only the row being deleted shows the spinner. */
+  isDeleting: (item: MemoryCollectionItem) => boolean;
   onCopy: (item: MemoryCollectionItem) => void;
   /** Absent without `persistence:delete` (and in a run view): the menu then only copies. */
   onDelete?: (item: MemoryCollectionItem) => void;
@@ -98,7 +99,7 @@ export function useMemoryColumns({
     rowActionsColumn((item: MemoryCollectionItem) => (
       <TableRowActions
         menuLabel={t("agents:detail.memoryRowActions")}
-        isPending={isDeleting}
+        isPending={isDeleting(item)}
         actions={[
           {
             id: "copy",

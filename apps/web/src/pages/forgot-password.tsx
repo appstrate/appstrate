@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Mail } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { AuthLayout } from "../components/auth-layout";
-import { AuthSuccessState } from "../components/auth-success-state";
+import { AuthLink, AuthMessage } from "../components/auth-message";
 import { useAuth } from "../hooks/use-auth";
 
 export function ForgotPasswordPage() {
@@ -35,7 +34,7 @@ export function ForgotPasswordPage() {
   if (state === "sent") {
     return (
       <AuthLayout>
-        <AuthSuccessState
+        <AuthMessage
           icon={Mail}
           title={t("forgotPassword.sentTitle")}
           description={t("forgotPassword.sentDescription")}
@@ -71,12 +70,9 @@ export function ForgotPasswordPage() {
             {state === "submitting" ? t("loading") : t("forgotPassword.submit")}
           </Button>
         </form>
-        <Link
-          to="/login"
-          className="text-muted-foreground hover:text-primary text-center text-sm underline underline-offset-4"
-        >
+        <AuthLink to="/login" className="text-center">
           {t("forgotPassword.backToLogin")}
-        </Link>
+        </AuthLink>
       </div>
     </AuthLayout>
   );

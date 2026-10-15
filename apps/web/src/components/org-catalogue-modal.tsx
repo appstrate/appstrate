@@ -107,7 +107,6 @@ import {
 import { RailLink } from "./settings/rail-link";
 import { RailGroup, RailHeader } from "./settings/rail-shell";
 import { SettingsHeading } from "./settings/settings-heading";
-import { Spinner } from "@appstrate/ui/components/spinner";
 
 const KIND: Record<PackageType, { icon: LucideIcon; titleKey: string }> = {
   agent: { icon: PACKAGE_TYPE_ICON.agent, titleKey: "packages.type.agents" },
@@ -829,10 +828,10 @@ export function OrgCatalogueModal({
                 <Button
                   type="button"
                   size="sm"
-                  disabled={activate.isPending || !spaceId}
+                  pending={activate.isPending}
+                  disabled={!spaceId}
                   onClick={activatePicked}
                 >
-                  {activate.isPending && <Spinner />}
                   {t("catalogue.activateSelection", { count: picked.length })}
                 </Button>
               ) : null}

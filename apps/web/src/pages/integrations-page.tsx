@@ -8,9 +8,7 @@
 import { useMemo } from "react";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { Boxes, LibraryBig, Plus } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
 import { CollectionTabs } from "../components/collection-tabs";
 import { CardGrid } from "../components/card-grid";
@@ -20,6 +18,7 @@ import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
 import { PageActionsMenu } from "../components/page-actions-menu";
+import type { MenuAction } from "../lib/menu-action";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
@@ -56,6 +55,13 @@ export function IntegrationsPage() {
   const canCreate = can("integrations:write");
   const canBrowse = can("integrations:install");
   const creation = useCreationHandoff("integration", canCreate);
+  const createAction: MenuAction = {
+    id: "create",
+    label: t("integrations.create"),
+    icon: Plus,
+    onSelect: creation.open,
+    hidden: !canCreate,
+  };
 
   const origins = list.values("origin", INTEGRATION_ORIGINS);
   // The execution is a tab, not a filter: it splits the collection in two
@@ -99,9 +105,7 @@ export function IntegrationsPage() {
       message={t("integrations.empty.space")}
       hint={<SpaceLibraryHint type="integration" />}
     >
-      {canCreate && (
-        <EmptyStateAction action={{ label: t("integrations.create"), onSelect: creation.open }} />
-      )}
+      <EmptyStateAction action={createAction} />
     </EmptyState>
   );
 
@@ -115,22 +119,18 @@ export function IntegrationsPage() {
         actions={
           // A reader has no deed here: no menu, rather than an empty one.
           (canBrowse || canCreate) && (
-            <PageActionsMenu>
-              {canBrowse && (
-                <DropdownMenuItem asChild data-page-action="catalogue">
-                  <Link to={catalogueHref("integration")}>
-                    <LibraryBig />
-                    {t("catalogue.browse")}
-                  </Link>
-                </DropdownMenuItem>
-              )}
-              {canCreate && (
-                <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
-                  <Plus />
-                  {t("integrations.create")}
-                </DropdownMenuItem>
-              )}
-            </PageActionsMenu>
+            <PageActionsMenu
+              actions={[
+                {
+                  id: "catalogue",
+                  label: t("catalogue.browse"),
+                  icon: LibraryBig,
+                  to: catalogueHref("integration"),
+                  hidden: !canBrowse,
+                },
+                createAction,
+              ]}
+            />
           )
         }
       >

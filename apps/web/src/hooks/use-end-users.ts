@@ -2,6 +2,7 @@
 
 import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
+import { keysetPaging } from "../lib/keyset-paging";
 import { invalidatePaths } from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
@@ -57,8 +58,7 @@ export function useEndUsersPaged({ search }: { search?: string } = {}) {
       if (!data) throw new Error("empty response");
       return data;
     },
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => (last.hasMore ? last.data[last.data.length - 1]?.id : undefined),
+    ...keysetPaging,
     placeholderData: keepPreviousData,
     enabled: scope.enabled,
   });

@@ -15,7 +15,6 @@ import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { Label } from "@appstrate/ui/components/label";
 import { type OrgModelInfo } from "../hooks/use-models";
 import { DiscoveryControls } from "./model-form/discovery-controls";
@@ -561,8 +560,12 @@ export function ModelFormModal({
           <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button type="submit" form="model-form" disabled={isPending || selectionCount === 0}>
-            {isPending && <Spinner />}
+          <Button
+            type="submit"
+            form="model-form"
+            pending={isPending}
+            disabled={selectionCount === 0}
+          >
             {selectionCount !== null
               ? t("models.form.addModels", { count: selectionCount })
               : t("btn.save")}

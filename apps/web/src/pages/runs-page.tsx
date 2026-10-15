@@ -2,7 +2,6 @@
 
 import { useTranslation } from "react-i18next";
 import { CheckCheck } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
 import { PageHeader } from "../components/page-header";
 import { NoMatchState } from "../components/page-states";
@@ -90,16 +89,17 @@ export function RunsPage() {
         variant="collection"
         breadcrumbs={[{ label: t("runs.title") }]}
         actions={
-          <PageActionsMenu>
-            <DropdownMenuItem
-              data-page-action="mark-all-read"
-              onSelect={() => markAllRead.mutate({})}
-              disabled={markAllRead.isPending || !unreadCount}
-            >
-              <CheckCheck />
-              {t("runs.markAllRead")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
+          <PageActionsMenu
+            actions={[
+              {
+                id: "mark-all-read",
+                label: t("runs.markAllRead"),
+                icon: CheckCheck,
+                onSelect: () => markAllRead.mutate({}),
+                disabled: markAllRead.isPending || !unreadCount,
+              },
+            ]}
+          />
         }
       />
 

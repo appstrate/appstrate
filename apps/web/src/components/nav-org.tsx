@@ -9,11 +9,11 @@ import {
   Activity,
   Calendar,
   Wrench,
-  Loader2,
   Boxes,
   FileText,
   type LucideIcon,
 } from "lucide-react";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { CountBadge } from "./count-badge";
@@ -149,11 +149,7 @@ export function NavOrg() {
                 >
                   <Link to="/runs">
                     <span className="flex size-4 shrink-0 items-center justify-center">
-                      {hasRunning ? (
-                        <Loader2 size={16} className="animate-spin" />
-                      ) : (
-                        <Activity size={16} />
-                      )}
+                      {hasRunning ? <Spinner /> : <Activity size={16} />}
                     </span>
                     <span>{t("nav.runs")}</span>
                   </Link>

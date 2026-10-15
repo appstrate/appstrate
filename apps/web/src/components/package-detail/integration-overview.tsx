@@ -108,12 +108,12 @@ export function IntegrationOverview({
             <OperationalStat
               label={t("integration.summary.connections")}
               value={connections.length}
-              to={connections.length ? connectionsTo : undefined}
+              target={connections.length ? { to: connectionsTo } : undefined}
             />
             <OperationalStat
               label={t("integration.summary.reauthorize")}
               value={reconnect}
-              to={reconnect ? connectionsTo : undefined}
+              target={reconnect ? { to: connectionsTo } : undefined}
             />
           </dl>
         </DetailSectionCard>
@@ -141,7 +141,9 @@ export function IntegrationOverview({
                   </span>
                 )
               }
-              to={previewAgent ? packageDetailPath("agent", previewAgent.id) : undefined}
+              target={
+                previewAgent ? { to: packageDetailPath("agent", previewAgent.id) } : undefined
+              }
             />
           </dl>
         </DetailSectionCard>
@@ -150,7 +152,7 @@ export function IntegrationOverview({
             <OperationalStat
               label={t("integration.summary.availableTools")}
               value={available}
-              to={available ? toolsTo : undefined}
+              target={available ? { to: toolsTo } : undefined}
             />
           </dl>
         </DetailSectionCard>

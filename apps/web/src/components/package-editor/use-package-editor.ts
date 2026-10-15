@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useEditorState, type EditorState } from "../../hooks/use-editor-state";
-import type { EditablePackageType } from "../editor-shell";
+import type { EditablePackageType } from "./package-editor-frame";
 import type { MetadataState } from "../agent-editor/metadata-section";
 import {
   getManifestName,

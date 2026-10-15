@@ -15,7 +15,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { ProvidersTable } from "../../components/providers-table";
-import type { MenuAction } from "../../components/menu-action";
+import type { MenuAction } from "../../lib/menu-action";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import {
   deduplicateLabel,

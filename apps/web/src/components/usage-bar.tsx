@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { cn } from "@appstrate/ui/cn";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { getUsageBarColor } from "../lib/usage-severity";
 
 /**
@@ -30,6 +32,42 @@ export function UsageBar({
         className={cn("h-full rounded-full transition-all", getUsageBarColor(value))}
         style={{ width: `${value}%` }}
       />
+    </div>
+  );
+}
+
+/**
+ * A labelled usage row: the name on the left, `summary` on the right, the gauge underneath
+ * (omitted when `percent` is null — an unlimited quota). `loading` draws the skeleton of both.
+ */
+export function UsageMeter({
+  label,
+  summary,
+  percent,
+  loading = false,
+  className,
+}: {
+  label: string;
+  summary?: ReactNode;
+  percent: number | null;
+  loading?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <div className="mb-1 flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">{label}</span>
+        {loading ? (
+          <Skeleton className="h-4 w-32" />
+        ) : (
+          <span className="font-medium">{summary}</span>
+        )}
+      </div>
+      {loading ? (
+        <Skeleton className="h-2 w-full rounded-full" />
+      ) : percent !== null ? (
+        <UsageBar percent={percent} label={label} />
+      ) : null}
     </div>
   );
 }

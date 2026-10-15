@@ -29,7 +29,6 @@ import { OptionSelect } from "@appstrate/ui/components/select";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SettingsSkeleton } from "@/components/loading-skeletons";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { Modal } from "@/components/modal";
 import { GitHubIcon, GoogleIcon } from "@/components/icons";
@@ -199,8 +198,8 @@ function SmtpSection({ personal }: { personal: boolean }) {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={upsert.isPending}>
-                {upsert.isPending ? <Spinner /> : t("common:btn.save")}
+              <Button type="submit" pending={upsert.isPending}>
+                {t("common:btn.save")}
               </Button>
               {initial && (
                 <Button type="button" variant="outline" onClick={() => smtpTest.open()}>
@@ -256,8 +255,8 @@ function SmtpTestModal({
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             {t("common:btn.cancel")}
           </Button>
-          <Button onClick={() => onSend(to)} disabled={isPending || !to}>
-            {isPending ? <Spinner /> : t("settings:spaceAuth.smtpTest")}
+          <Button onClick={() => onSend(to)} pending={isPending} disabled={!to}>
+            {t("settings:spaceAuth.smtpTest")}
           </Button>
         </>
       }
@@ -358,8 +357,8 @@ function SocialSection({
           </FormItem>
 
           <div className="flex gap-2">
-            <Button type="submit" disabled={upsert.isPending}>
-              {upsert.isPending ? <Spinner /> : t("common:btn.save")}
+            <Button type="submit" pending={upsert.isPending}>
+              {t("common:btn.save")}
             </Button>
             {deleteButton}
           </div>

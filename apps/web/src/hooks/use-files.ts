@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
+import { keysetPaging } from "../lib/keyset-paging";
 import { downloadOrToast } from "../lib/blob-download";
 import { invalidateOrgDetail, invalidatePaths, invalidateRunDetails } from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
@@ -71,8 +72,7 @@ export function useFilesPaged(filters: Pick<FileListFilters, "search" | "purpose
       if (!data) throw new Error("empty response");
       return data;
     },
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => (last.hasMore ? last.data[last.data.length - 1]?.id : undefined),
+    ...keysetPaging,
     enabled: can("files:read") && scope.enabled,
     // The previous result stays on screen while a new search or purpose loads.
     placeholderData: keepPreviousData,

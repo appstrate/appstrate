@@ -54,7 +54,7 @@ import { PersonalModelsModal, ProviderModelsModal } from "../../components/model
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { SettingsGroup } from "../../components/settings/setting-row";
-import type { MenuAction } from "../../components/menu-action";
+import type { MenuAction } from "../../lib/menu-action";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
 import {

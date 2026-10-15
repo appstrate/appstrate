@@ -47,7 +47,7 @@ import { DataTable } from "../../components/data-table";
 import { InvitationsTable } from "../../components/invitations-table";
 import { Modal } from "../../components/modal";
 import { FormModal } from "../../components/form-modal";
-import type { MenuAction } from "../../components/menu-action";
+import type { MenuAction } from "../../lib/menu-action";
 import { RoleCatalogState } from "../../components/role-catalog-state";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { Skeleton } from "@appstrate/ui/components/skeleton";

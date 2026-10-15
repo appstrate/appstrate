@@ -18,14 +18,13 @@ import { SettingsSkeleton } from "../components/loading-skeletons";
 import { useModalParam } from "../hooks/use-modal-param";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
 import { DataTable } from "../components/data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { ListToolbar } from "../components/list-toolbar";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
-import type { MenuAction } from "../components/menu-action";
+import type { MenuAction } from "../lib/menu-action";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { endUserLabel } from "../lib/members";
 import { useEndUserColumns } from "./end-user-columns";
@@ -104,7 +103,6 @@ function EndUsersPageContent() {
           onChange: setSearch,
           placeholder: t("spaces.searchEndUsers"),
         }}
-        filters={[]}
         columns={columnMenu(allColumns, visibility)}
       />
 
@@ -141,11 +139,11 @@ function EndUsersPageContent() {
       {hasNextPage && !isLoading && !error && (
         <Button
           variant="outline"
-          disabled={isFetchingNextPage}
+          pending={isFetchingNextPage}
           onClick={() => void fetchNextPage()}
           className="mt-3 w-full"
         >
-          {isFetchingNextPage ? <Spinner /> : t("spaces.loadMore")}
+          {t("spaces.loadMore")}
         </Button>
       )}
 

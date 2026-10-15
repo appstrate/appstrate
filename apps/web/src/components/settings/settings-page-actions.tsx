@@ -3,7 +3,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { PageActionsMenu } from "../page-actions-menu";
-import type { MenuAction } from "../menu-action";
+import type { MenuAction } from "../../lib/menu-action";
 
 const SettingsPageActionTargetContext = createContext<HTMLElement | null | undefined>(undefined);
 

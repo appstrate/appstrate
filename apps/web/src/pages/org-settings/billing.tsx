@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, CreditCard } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
 import {
@@ -16,7 +15,7 @@ import {
   type CheckoutPlanId,
 } from "../../hooks/use-billing";
 import { useOrgStorage } from "../../hooks/use-org-storage";
-import { UsageBar } from "../../components/usage-bar";
+import { UsageMeter } from "../../components/usage-bar";
 import { PlanGrid } from "../../components/plan-card";
 import { BillingManagersSection } from "../../components/billing-managers-section";
 import { BillingContactSection } from "../../components/billing-contact-section";
@@ -175,10 +174,12 @@ function BillingOverview() {
           ) : null}
         </div>
 
-        <div className="mb-2">
-          <div className="mb-1 flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">{t("billing.usage")}</span>
-            <span className="font-medium">
+        <UsageMeter
+          className="mb-2"
+          label={t("billing.usage")}
+          percent={billing.usage_percent}
+          summary={
+            <>
               {billing.usage_percent}%
               <span className="text-muted-foreground ml-2 text-xs font-normal">
                 (
@@ -188,41 +189,29 @@ function BillingOverview() {
                 })}
                 )
               </span>
-            </span>
-          </div>
-          <UsageBar percent={billing.usage_percent} label={t("billing.usage")} />
-        </div>
+            </>
+          }
+        />
 
-        {storageLoading && (
-          <div className="mt-4">
-            <div className="mb-1 flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">{t("billing.storageUsage")}</span>
-              <Skeleton className="h-4 w-32" />
-            </div>
-            <Skeleton className="h-2 w-full rounded-full" />
-          </div>
-        )}
-        {storage && (
-          <div className="mt-4">
-            <div className="mb-1 flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">{t("billing.storageUsage")}</span>
-              <span className="font-medium">
-                {storageLimit === null ? (
-                  usageLabel
-                ) : (
-                  <>
-                    {storagePercent}%
-                    <span className="text-muted-foreground ml-2 text-xs font-normal">
-                      ({usageLabel})
-                    </span>
-                  </>
-                )}
-              </span>
-            </div>
-            {storageLimit !== null && (
-              <UsageBar percent={storagePercent ?? 0} label={t("billing.storageUsage")} />
-            )}
-          </div>
+        {(storageLoading || storage) && (
+          <UsageMeter
+            className="mt-4"
+            label={t("billing.storageUsage")}
+            loading={storageLoading}
+            percent={storageLimit === null ? null : (storagePercent ?? 0)}
+            summary={
+              storageLimit === null ? (
+                usageLabel
+              ) : (
+                <>
+                  {storagePercent}%
+                  <span className="text-muted-foreground ml-2 text-xs font-normal">
+                    ({usageLabel})
+                  </span>
+                </>
+              )
+            }
+          />
         )}
       </div>
 

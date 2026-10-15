@@ -21,7 +21,8 @@ export function usePinColumns({
   pinnable: IntegrationConnection[];
   /** Undefined while loading: an unknown connection is then not yet "unavailable". */
   connections: IntegrationConnection[] | undefined;
-  isDeleting: boolean;
+  /** Only the row being deleted shows the spinner. */
+  isDeleting: (pin: IntegrationPin) => boolean;
   onDelete: (pin: IntegrationPin) => void;
 }): DataColumn<IntegrationPin>[] {
   const { t } = useTranslation(["settings", "agents"]);
@@ -45,24 +46,22 @@ export function usePinColumns({
         if (pin.connection_ids.length === 0) {
           return <CellText>{t("agents:detail.integrationMemberPicker.none")}</CellText>;
         }
+        // An unknown connection is not yet "unavailable" while they load.
+        const entries = pin.connection_ids.flatMap((id) => {
+          const connection = pinnable.find((c) => c.id === id);
+          if (connection) return [{ id, label: connectionOptionLabel(connection), missing: false }];
+          if (connections === undefined) return [];
+          return [{ id, label: t("integration.admin.unavailableConnection"), missing: true }];
+        });
         return (
-          <CellText>
-            {pin.connection_ids.map((id, i) => {
-              const connection = pinnable.find((c) => c.id === id);
-              return (
-                <span key={id}>
-                  {i > 0 && " · "}
-                  {connection ? (
-                    connectionOptionLabel(connection)
-                  ) : connections === undefined ? null : (
-                    // No longer shared or deleted: every run of this agent is refused.
-                    <span className="text-warning">
-                      {t("integration.admin.unavailableConnection")}
-                    </span>
-                  )}
-                </span>
-              );
-            })}
+          <CellText title={entries.map((e) => e.label).join(" · ")}>
+            {entries.map((entry, i) => (
+              <span key={entry.id}>
+                {i > 0 && " · "}
+                {/* No longer shared or deleted: every run of this agent is refused. */}
+                {entry.missing ? <span className="text-warning">{entry.label}</span> : entry.label}
+              </span>
+            ))}
           </CellText>
         );
       },
@@ -70,7 +69,7 @@ export function usePinColumns({
     rowActionsColumn((pin: IntegrationPin) => (
       <TableRowActions
         menuLabel={t("integration.admin.pinManagement.rowActions", { agent: agentName(pin) })}
-        isPending={isDeleting}
+        isPending={isDeleting(pin)}
         actions={[
           {
             id: "delete",

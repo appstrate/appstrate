@@ -20,7 +20,6 @@ import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../../api/errors";
 import { Modal } from "../modal";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { SpaceRoleSelect } from "../space-role-select";
 import { splitPackageRef } from "../../lib/package-paths";
 import { useOrgDetail } from "../../hooks/use-org";
@@ -276,10 +275,11 @@ export function SharePackageDialog({
             </Select>
             <Button
               type="button"
-              disabled={!selected || share.isPending}
+              pending={share.isPending}
+              disabled={!selected}
               onClick={() => selected && submit(selected)}
             >
-              {share.isPending ? <Spinner /> : t("packages.shareSubmit")}
+              {t("packages.shareSubmit")}
             </Button>
           </div>
           {/*
@@ -319,10 +319,11 @@ export function SharePackageDialog({
                 <Button
                   type="button"
                   size="sm"
-                  disabled={publish.isPending || share.isPending}
+                  pending={publish.isPending}
+                  disabled={share.isPending}
                   onClick={() => void publishAndShare()}
                 >
-                  {publish.isPending ? <Spinner /> : t("packages.sharePublishAndShare")}
+                  {t("packages.sharePublishAndShare")}
                 </Button>
               ) : (
                 <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
@@ -508,8 +509,8 @@ function CoeditTab({
           ariaLabel={t("packages.coeditRoleLabel")}
           onValueChange={setRole}
         />
-        <Button type="button" disabled={!member || addMember.isPending} onClick={submit}>
-          {addMember.isPending ? <Spinner /> : t("packages.coeditSubmit")}
+        <Button type="button" pending={addMember.isPending} disabled={!member} onClick={submit}>
+          {t("packages.coeditSubmit")}
         </Button>
       </div>
       <p className="text-muted-foreground text-sm">

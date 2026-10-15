@@ -5,11 +5,10 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
-import { Button } from "@appstrate/ui/components/button";
 import { Field, FieldGroup, FormItem } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
 import { OptionSelect, SelectItem } from "@appstrate/ui/components/select";
-import { Modal } from "./modal";
+import { FormModal } from "./form-modal";
 import { OrgRoleOptions } from "./org-role-options";
 import { RoleCatalogState } from "./role-catalog-state";
 import { fetchOrgsAs, useCurrentOrgId } from "../hooks/use-org";
@@ -154,24 +153,17 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   };
 
   return (
-    <Modal
-      open
+    <FormModal
       onClose={close}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit();
+      }}
       title={t("viewAs.title")}
-      actions={
-        <>
-          <Button variant="ghost" onClick={close}>
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-          <Button
-            data-testid="view-as-submit"
-            disabled={!ready || entering}
-            onClick={() => void submit()}
-          >
-            {t("viewAs.submit")}
-          </Button>
-        </>
-      }
+      submitLabel={t("viewAs.submit")}
+      isPending={entering}
+      submitDisabled={!ready}
+      submitTestId="view-as-submit"
     >
       <div className="flex flex-col gap-4">
         <p className="text-muted-foreground text-sm">{t("viewAs.explain")}</p>
@@ -223,6 +215,6 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
           )}
         </FieldGroup>
       </div>
-    </Modal>
+    </FormModal>
   );
 }

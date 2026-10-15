@@ -6,8 +6,6 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, Building, HardDrive, Smile, Trash2, Upload } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { Label } from "@appstrate/ui/components/label";
-import { Switch } from "@appstrate/ui/components/switch";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api } from "../../api/client";
@@ -17,13 +15,13 @@ import { useOrg, useOrgDetail } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useCanCreateOrg } from "../../hooks/use-auth";
 import { useOrgStorage } from "../../hooks/use-org-storage";
-import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { USAGE_WARN } from "../../lib/usage-severity";
 import { UsageBar } from "../../components/usage-bar";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { SaveFeedback } from "../../components/settings/save-feedback";
 import { fieldWriteState } from "../../lib/field-write-state";
+import { OrgSettingToggle } from "../../components/settings/org-setting-toggle";
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { EmptyState } from "../../components/page-states";
 import { orgKeys } from "../../lib/query-keys";
@@ -79,8 +77,6 @@ export function OrgSettingsGeneralPage() {
   const { currentOrg, orgs, forgetOrg } = useOrg();
   const { can, orgRole } = usePermissions();
   const canCreateOrg = useCanCreateOrg();
-  const { data: orgSettings, isLoading: orgSettingsLoading } = useOrgSettings();
-  const updateSettingsMutation = useUpdateOrgSettings();
   // Every member opens this page (leaving lives here); each change is drawn
   // only for whoever holds its permission.
   const canUpdateOrg = can("org:update");
@@ -332,36 +328,12 @@ export function OrgSettingsGeneralPage() {
       {canSettings && (
         <>
           <SettingsGroup title={t("orgSettings.distributionTitle")}>
-            <SettingRow
-              variant="toggle"
-              label={
-                <Label htmlFor="restrict-package-copy" className="cursor-pointer">
-                  {t("orgSettings.restrictCopyTitle")}
-                </Label>
-              }
+            <OrgSettingToggle
+              id="restrict-package-copy"
+              field="restrict_package_copy"
+              label={t("orgSettings.restrictCopyTitle")}
               description={t("orgSettings.restrictCopyDesc")}
-              status={
-                <SaveFeedback
-                  {...fieldWriteState(updateSettingsMutation, "restrict_package_copy")}
-                />
-              }
-            >
-              {!orgSettingsLoading ? (
-                <Switch
-                  id="restrict-package-copy"
-                  checked={orgSettings?.restrict_package_copy ?? false}
-                  disabled={updateSettingsMutation.isPending || !orgSettings}
-                  onCheckedChange={(checked) =>
-                    updateSettingsMutation.mutate({
-                      params: { path: { orgId: currentOrg.id } },
-                      body: { restrict_package_copy: checked === true },
-                    })
-                  }
-                />
-              ) : (
-                <Skeleton className="h-5 w-9 rounded-full" />
-              )}
-            </SettingRow>
+            />
           </SettingsGroup>
 
           <SettingsGroup title={t("models.tabTitle")}>

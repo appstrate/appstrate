@@ -36,7 +36,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@appstrate/ui/components/checkbox";
 import {
   Table,
   TableBody,
@@ -48,7 +48,6 @@ import {
 import { Input } from "@appstrate/ui/components/input";
 import { FormItem } from "@appstrate/ui/components/field";
 import { OptionSelect } from "@appstrate/ui/components/select";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "../page-actions-menu";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import type { JSONSchema7, JSONSchema7TypeName } from "@appstrate/core/form";
@@ -131,12 +130,11 @@ export function SchemaFieldList({
         </div>
         {/* The list's one "Actions" menu, white like every table's, as the
             skills and integrations sections have it. */}
-        <PageActionsMenu>
-          <DropdownMenuItem onSelect={() => adding.open()}>
-            <Plus />
-            {t("editor.fieldAdd")}
-          </DropdownMenuItem>
-        </PageActionsMenu>
+        <PageActionsMenu
+          actions={[
+            { id: "add", label: t("editor.fieldAdd"), icon: Plus, onSelect: () => adding.open() },
+          ]}
+        />
       </div>
 
       {fields.length === 0 ? (
@@ -302,6 +300,7 @@ function FieldModal({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const [draft, setDraft] = useState<SchemaField>(() => field ?? blankField());
+  const ids = useId();
   const [advanced, setAdvanced] = useState(false);
   const set = (patch: Partial<SchemaField>) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -386,13 +385,12 @@ function FieldModal({
             />
           )}
         </Row>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox
-            checked={draft.required}
-            onCheckedChange={(v) => set({ required: Boolean(v) })}
-          />
-          {t("editor.fieldRequired")}
-        </label>
+        <CheckboxField
+          id={`${ids}-required`}
+          label={t("editor.fieldRequired")}
+          checked={draft.required}
+          onCheckedChange={(v) => set({ required: Boolean(v) })}
+        />
 
         {mode === "input" && (
           <div className="border-border border-t pt-3">
@@ -427,15 +425,12 @@ function FieldModal({
                         />
                       )}
                     </Row>
-                    <label className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={kind === "multiple"}
-                        onCheckedChange={(v) =>
-                          setProp(setFileKind(prop, v ? "multiple" : "single"))
-                        }
-                      />
-                      {t("editor.fieldMultipleLabel")}
-                    </label>
+                    <CheckboxField
+                      id={`${ids}-multiple`}
+                      label={t("editor.fieldMultipleLabel")}
+                      checked={kind === "multiple"}
+                      onCheckedChange={(v) => setProp(setFileKind(prop, v ? "multiple" : "single"))}
+                    />
                     {kind === "multiple" && (
                       <Row label={t("editor.fieldMaxFilesLabel")}>
                         {(id) => (

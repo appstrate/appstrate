@@ -310,7 +310,7 @@ const SETS = {
   integrations: () => columnsFrom(() => useIntegrationListColumns()),
   memory: () =>
     columnsFrom(() =>
-      useMemoryColumns({ isDeleting: false, onCopy: () => {}, onDelete: () => {} }),
+      useMemoryColumns({ isDeleting: () => false, onCopy: () => {}, onDelete: () => {} }),
     ),
   packageFiles: () => columnsFrom(() => usePackageFileColumns("agent", {})),
   catalogueShared: () =>
@@ -328,7 +328,7 @@ const SETS = {
         agentName: (pin) => pin.agent_package_id,
         pinnable: [],
         connections: [],
-        isDeleting: false,
+        isDeleting: () => false,
         onDelete: () => {},
       }),
     ),

@@ -7,7 +7,6 @@
 
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import type { DiscoveryState } from "@/lib/model-discovery";
 import { DiscoveryResult } from "./discovery-result";
 
@@ -34,9 +33,9 @@ export function DiscoveryControls({
           type="button"
           variant={mode === "list" ? "default" : "outline"}
           onClick={onDiscover}
-          disabled={isPending}
+          pending={isPending}
         >
-          {isPending ? <Spinner /> : t("models.form.discoverButton")}
+          {t("models.form.discoverButton")}
         </Button>
         <Button
           type="button"

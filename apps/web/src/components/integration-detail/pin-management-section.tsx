@@ -30,7 +30,7 @@ import { connectionSetOption } from "../integration-connect/connection-set-optio
  */
 export function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings", "agents"]);
-  const { data: pins, isLoading: pinsLoading } = useIntegrationPins(packageId);
+  const { data: pins, isLoading: pinsLoading, error: pinsError } = useIntegrationPins(packageId);
   const { data: connections, isLoading: connectionsLoading } = useIntegrationConnections(packageId);
   const { data: consumingAgents, isLoading: agentsLoading } =
     useAgentsConsumingIntegration(packageId);
@@ -49,7 +49,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
     agentName: (pin) => agentDisplayName(pin.agent_package_id),
     pinnable: pinnableConnections,
     connections,
-    isDeleting: deletePin.isPending,
+    isDeleting: (pin) => deletePin.isPending && toDelete?.agent_package_id === pin.agent_package_id,
     onDelete: setToDelete,
   });
 
@@ -79,6 +79,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
           rows={pins ?? []}
           rowKey={(pin) => pin.agent_package_id}
           isLoading={pinsLoading || agentsLoading}
+          failure={pinsError}
           empty={
             <p className="text-muted-foreground px-3 py-3 text-xs italic">
               {t("integration.admin.pinManagement.empty")}

@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { OptionSelect } from "@appstrate/ui/components/select";
-import { Button } from "@appstrate/ui/components/button";
 import { CheckboxField } from "@appstrate/ui/components/checkbox";
 import { FormItem } from "@appstrate/ui/components/field";
 import type { PackageType } from "@appstrate/core/validation";
-import { Modal } from "../modal";
-import { Spinner } from "@appstrate/ui/components/spinner";
+import { FormModal } from "../form-modal";
 import { spaceLabel } from "../../lib/space-label";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useMovePackageHome } from "../../hooks/use-packages";
@@ -57,7 +55,8 @@ export function MoveHomeSpaceDialog({
     onClose();
   };
 
-  const submit = () => {
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
     const destination = writable.find((space) => space.id === target);
     if (!destination) return;
     move.mutate(
@@ -72,20 +71,13 @@ export function MoveHomeSpaceDialog({
   };
 
   return (
-    <Modal
-      open
+    <FormModal
       onClose={close}
+      onSubmit={submit}
       title={t("packages.moveHomeTitle")}
-      actions={
-        <>
-          <Button variant="outline" type="button" onClick={close}>
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-          <Button type="button" onClick={submit} disabled={!target || move.isPending}>
-            {move.isPending ? <Spinner /> : t("packages.moveHomeSubmit")}
-          </Button>
-        </>
-      }
+      isPending={move.isPending}
+      submitLabel={t("packages.moveHomeSubmit")}
+      submitDisabled={!target}
     >
       <FormItem
         id="move-home-space"
@@ -121,6 +113,6 @@ export function MoveHomeSpaceDialog({
           onCheckedChange={(checked) => setKeepInPreviousHome(checked === true)}
         />
       ) : null}
-    </Modal>
+    </FormModal>
   );
 }

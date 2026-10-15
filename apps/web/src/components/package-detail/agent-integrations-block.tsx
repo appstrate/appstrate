@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Loader2, Puzzle } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
+import { Puzzle } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -13,7 +12,7 @@ import {
   type IntegrationCandidate,
   type IntegrationDetailWire,
 } from "../../hooks/use-integrations";
-import { usePackageActivation } from "../../hooks/use-library";
+import { ActivateIntegrationButton } from "../activate-integration-button";
 import { ApiError } from "../../api/errors";
 import { errorMessage } from "../../lib/mutation-error";
 import type { ConnectionSet } from "../../lib/connection-set";
@@ -315,9 +314,7 @@ function ManagedIntegration({
 
 /** Switched off in this space: the reason and the activation button. Only a required one blocks. */
 function InactiveIntegration({ packageId, required }: { packageId: string; required: boolean }) {
-  const { t } = useTranslation(["agents", "common"]);
-  const { mayActivate, activate, pending } = usePackageActivation("integration", packageId);
-
+  const { t } = useTranslation(["agents"]);
   return (
     <span className="flex items-center justify-end gap-3">
       <span
@@ -333,16 +330,7 @@ function InactiveIntegration({ packageId, required }: { packageId: string; requi
           sits beside it. Somebody the route
           would refuse gets the button DEAD with the reason on it, rather
           than a click that ends in a toast. */}
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={pending || !mayActivate}
-        title={mayActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
-        onClick={() => activate()}
-        data-testid={`integration-activate-${packageId}`}
-      >
-        {pending ? <Loader2 className="size-3.5 animate-spin" /> : t("editor.activateIntegration")}
-      </Button>
+      <ActivateIntegrationButton packageId={packageId} />
     </span>
   );
 }

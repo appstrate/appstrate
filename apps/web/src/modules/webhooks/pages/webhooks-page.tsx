@@ -6,7 +6,7 @@ import { useWebhooks } from "../hooks/use-webhooks";
 import { EmptyState, EmptyStateAction } from "@/components/page-states";
 import { DataTable } from "@/components/data-table";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
-import type { MenuAction } from "@/components/menu-action";
+import type { MenuAction } from "@/lib/menu-action";
 import { useWebhookColumns } from "../components/webhook-columns";
 import { useModalParam } from "@/hooks/use-modal-param";
 import { NEW_WEBHOOK_PARAM, WebhookCreateModal } from "../components/webhook-create-modal";

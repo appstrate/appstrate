@@ -9,6 +9,7 @@ import { ActorBadge } from "./actor-badge";
 import { useMemoryColumns, type MemoryCollectionItem } from "./memory-columns";
 import { DataTable } from "../data-table";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
+import { useLocalListParams } from "../../lib/list-params";
 import { Modal } from "../modal";
 import { ConfirmModal } from "../confirm-modal";
 import { formatDateField } from "../../lib/format-date";
@@ -58,7 +59,7 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
   const deletePinned = useDeletePinnedSlot(packageId);
   const { can } = usePermissions();
   const canDelete = !isRunView && can("persistence:delete");
-  const [toDelete, setToDelete] = useState<{ kind: "pinned" | "memory"; id: number } | null>(null);
+  const [toDelete, setToDelete] = useState<{ kind: "pinned" | "archive"; id: number } | null>(null);
   const deletion = toDelete?.kind === "pinned" ? deletePinned : deleteMemory;
 
   const pinnedCount = pinned?.length ?? 0;
@@ -90,8 +91,10 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
         memoriesLoading={memoriesQ.isLoading}
         failure={pinnedQ.error ?? memoriesQ.error}
         onDeletePinned={canDelete ? (id) => setToDelete({ kind: "pinned", id }) : undefined}
-        onDeleteMemory={canDelete ? (id) => setToDelete({ kind: "memory", id }) : undefined}
-        isDeleting={deletePinned.isPending || deleteMemory.isPending}
+        onDeleteMemory={canDelete ? (id) => setToDelete({ kind: "archive", id }) : undefined}
+        isDeleting={(item) =>
+          deletion.isPending && toDelete?.kind === item.kind && toDelete.id === item.id
+        }
         embedded={isRunView}
         initialTypes={initialTypes}
       />
@@ -111,6 +114,8 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
 }
 
 const EMPTY_MEMORY_TYPES: Array<"pinned" | "archive"> = [];
+const MEMORY_TYPES = ["pinned", "archive"] as const;
+const MEMORY_SCOPES = ["shared", "mine"] as const;
 
 function AgentMemoryCollection({
   pinned,
@@ -146,15 +151,16 @@ function AgentMemoryCollection({
   failure: unknown;
   onDeletePinned?: (id: number) => void;
   onDeleteMemory?: (id: number) => void;
-  isDeleting: boolean;
+  isDeleting: (item: { kind: "pinned" | "archive"; id: number }) => boolean;
   /** Run results already own the section heading and outer content padding. */
   embedded: boolean;
   initialTypes?: Array<"pinned" | "archive">;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const [query, setQuery] = useState("");
-  const [scopes, setScopes] = useState<string[]>([]);
-  const [types, setTypes] = useState<string[]>(initialTypes);
+  const list = useLocalListParams({ type: initialTypes });
+  const query = list.search;
+  const types = list.values("type", MEMORY_TYPES);
+  const scopes = list.values("scope", MEMORY_SCOPES);
   const { copy } = useCopyToClipboard(1_500);
 
   const allItems = useMemo<MemoryCollectionItem[]>(
@@ -202,7 +208,7 @@ function AgentMemoryCollection({
         { value: "pinned", label: t("agents:detail.memoryTabPinned") },
         { value: "archive", label: t("agents:detail.memorySectionArchive") },
       ],
-      onChange: setTypes,
+      onChange: list.setValues("type"),
     },
     ...(!embedded
       ? [
@@ -214,7 +220,7 @@ function AgentMemoryCollection({
               { value: "shared", label: t("agents:detail.memoryScopeShared") },
               { value: "mine", label: t("agents:detail.memoryScopeMine") },
             ],
-            onChange: setScopes,
+            onChange: list.setValues("scope"),
           },
         ]
       : []),
@@ -230,11 +236,6 @@ function AgentMemoryCollection({
         }
       : undefined,
   });
-  const reset = () => {
-    setQuery("");
-    setTypes([]);
-    setScopes([]);
-  };
 
   const collection = (
     <section className={embedded ? "min-w-0" : "min-w-0 p-6"}>
@@ -242,11 +243,11 @@ function AgentMemoryCollection({
         placement="panel"
         search={{
           value: query,
-          onChange: setQuery,
+          onChange: list.setSearch,
           placeholder: t("agents:detail.memorySearch"),
         }}
         filters={filters}
-        onReset={reset}
+        onReset={list.reset}
       />
       {!embedded && (
         <p className="text-muted-foreground mb-2 text-xs">{t("agents:detail.memoryHelp")}</p>
@@ -261,7 +262,7 @@ function AgentMemoryCollection({
         rowLabel={(item) => item.key ?? memoryText(item.content)}
         isLoading={pinnedLoading || memoriesLoading}
         failure={failure}
-        empty={<NoMatchState message={t("agents:list.noMatch")} onReset={reset} />}
+        empty={<NoMatchState message={t("agents:list.noMatch")} onReset={list.reset} />}
       />
     </section>
   );

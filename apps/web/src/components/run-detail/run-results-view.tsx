@@ -8,7 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/al
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
-import { useFiles, type FileDto } from "../../hooks/use-files";
+import { useFile, useFiles, type FileDto } from "../../hooks/use-files";
 import { usePermissions } from "../../hooks/use-permissions";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { classifyRunResults } from "../../lib/run-results";
@@ -21,7 +21,7 @@ import { TextSkeleton } from "../loading-skeletons";
 import { MemoryPanel } from "../persistence/memory-panel";
 import { RailButton } from "../settings/rail-link";
 import { featuredRunFile, producedRunFiles } from "../../lib/files";
-import { RunDeliverableTab } from "../run-deliverable-tab";
+import { FileArtifact } from "../file-artifact";
 
 type ResultsSectionId = "production" | "structured" | "memory";
 
@@ -35,6 +35,23 @@ interface RunResultsProps {
   outputLoading: boolean;
   /** The run's memory rows are still being read. */
   memoryLoading: boolean;
+}
+
+function RunDeliverable({ fileId }: { fileId: string }) {
+  const { t } = useTranslation("agents");
+  const { data, isLoading, error } = useFile(fileId);
+
+  return (
+    <section aria-label={t("run.deliverableLabel")} className="min-w-0">
+      <FileArtifact
+        fileId={fileId}
+        file={data}
+        isLoading={isLoading}
+        error={error}
+        className="h-[max(28rem,calc(100vh-20rem))]"
+      />
+    </section>
+  );
 }
 
 /** Fetches the run's file container and hands it to the view. */
@@ -183,7 +200,7 @@ export function RunResultsContent({
       const featured = outputDocuments.length === 1 && !error ? outputDocuments[0] : undefined;
       return (
         <>
-          {featured && <RunDeliverableTab fileId={featured.id} />}
+          {featured && <RunDeliverable fileId={featured.id} />}
           <DocumentListPanel
             documents={outputDocuments}
             isLoading={isLoading}

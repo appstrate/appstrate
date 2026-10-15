@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Star } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Checkbox, CheckboxField } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { cn } from "@appstrate/ui/cn";
@@ -170,16 +170,12 @@ export function ModelPickList({
         onChange={(e) => onSearchChange(e.target.value)}
         placeholder={t("models.form.modelSearchPlaceholder")}
       />
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id="mdl-pick-all"
-          checked={allSelected}
-          onCheckedChange={(v) => onSelectionChange([...rows], Boolean(v))}
-        />
-        <Label htmlFor="mdl-pick-all" className="cursor-pointer font-normal">
-          {t("models.form.discoverSelectAll")}
-        </Label>
-      </div>
+      <CheckboxField
+        id="mdl-pick-all"
+        label={t("models.form.discoverSelectAll")}
+        checked={allSelected}
+        onCheckedChange={(v) => onSelectionChange([...rows], Boolean(v))}
+      />
       <div className="divide-y rounded-md border">
         <div className="max-h-64 divide-y overflow-y-auto">
           {isLoading ? (

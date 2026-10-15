@@ -33,7 +33,6 @@ import {
 import { ErrorState } from "./page-states";
 import { SettingsSkeleton } from "./loading-skeletons";
 import { SectionCard } from "./section-card";
-import { Spinner } from "@appstrate/ui/components/spinner";
 
 /**
  * Where invoices, receipts and dunning mail go instead of every owner's inbox.
@@ -233,10 +232,10 @@ export function BillingContactSection() {
         )}
         <Button
           size="sm"
-          disabled={!dirty || emailInvalid || update.isPending}
+          pending={update.isPending}
+          disabled={!dirty || emailInvalid}
           onClick={handleSave}
         >
-          {update.isPending && <Spinner />}
           {t("btn.save", { ns: "common" })}
         </Button>
       </div>

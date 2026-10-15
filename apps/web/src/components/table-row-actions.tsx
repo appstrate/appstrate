@@ -11,7 +11,8 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { Spinner } from "@appstrate/ui/components/spinner";
-import { MenuActionItem, splitMenuActions, type MenuAction } from "./menu-action";
+import { MenuActionItem } from "./menu-action";
+import { splitMenuActions, type MenuAction } from "../lib/menu-action";
 
 /**
  * The shared end of an actionable table row, and its ONLY way to act: one « … »

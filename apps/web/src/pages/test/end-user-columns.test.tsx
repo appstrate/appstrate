@@ -5,7 +5,7 @@ import { Children, isValidElement, type ReactElement, type ReactNode } from "rea
 import { QueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/client.ts";
 import type { DataColumn } from "../../components/data-table.tsx";
-import { splitMenuActions, type MenuAction } from "../../components/menu-action.tsx";
+import { splitMenuActions, type MenuAction } from "../../lib/menu-action.ts";
 import type { EndUserInfo } from "../../hooks/use-end-users.ts";
 import { orgStore } from "../../stores/org-store.ts";
 import { render } from "../../test/render.tsx";
