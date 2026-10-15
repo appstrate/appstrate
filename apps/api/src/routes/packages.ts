@@ -52,7 +52,7 @@ import {
   assertNoManifestViolations,
   type PackageTypeConfig,
 } from "../services/package-items/config.ts";
-import { validateManifest, type PackageType } from "@appstrate/core/validation";
+import { validateManifest, type ManifestIssue, type PackageType } from "@appstrate/core/validation";
 import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
 import { assertIfMatch, ifNoneMatchSatisfied, setEtag } from "../lib/conditional-request.ts";
@@ -165,12 +165,28 @@ import {
 import { parsePathMessages } from "../lib/field-errors.ts";
 import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 
-function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
-  return parsePathMessages(errors, {
-    code: "invalid_manifest",
+/**
+ * The 400 items of an invalid manifest: one per structured issue, carrying the rule's own code
+ * when it has one (`output_tool_required`), else `invalid_manifest`. A dispatcher-level failure
+ * comes as strings only.
+ */
+function manifestErrorsToFieldErrors(result: {
+  errors: string[];
+  issues?: ManifestIssue[];
+}): ValidationFieldError[] {
+  if (!result.issues) {
+    return parsePathMessages(result.errors, {
+      code: "invalid_manifest",
+      title: "Invalid Manifest",
+      fieldPrefix: "manifest.",
+    });
+  }
+  return result.issues.map((issue) => ({
+    field: issue.path ? `manifest.${issue.path}` : "manifest",
+    code: issue.code ?? "invalid_manifest",
     title: "Invalid Manifest",
-    fieldPrefix: "manifest.",
-  });
+    message: issue.message,
+  }));
 }
 
 /**
@@ -248,7 +264,7 @@ async function validateManifestForRoute(
     direction === "stored" ? { retiredRuntimeTools: "drop" } : undefined,
   );
   if (!result.valid) {
-    throw validationFailed(manifestErrorsToFieldErrors(result.errors));
+    throw validationFailed(manifestErrorsToFieldErrors(result));
   }
   // Every AFPS manifest schema requires `name` as a string, so the validated
   // shape always carries it — callers use it as the package id.

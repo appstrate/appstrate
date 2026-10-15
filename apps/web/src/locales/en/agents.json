@@ -409,7 +409,7 @@
   "run.infoProxy": "Proxy",
   "run.infoRunId": "Run ID",
   "run.cancelledByUser": "Canceled by the user",
-  "run.error.modelRefused": "The model provider rejected the API key. Check the key of the model the agent uses.",
+  "run.error.modelRefused": "The model provider refused the API key or the account (invalid key, revoked access, no credit left). Check the key of the model the agent uses.",
   "run.error.modelRateLimited": "The model provider is rate limiting requests. Run again in a moment.",
   "run.error.model": "The model provider answered with an error ({{status}}): {{message}}",
   "run.infoRunner": "Runner",

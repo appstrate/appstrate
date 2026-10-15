@@ -37,7 +37,7 @@ import { encrypt } from "@appstrate/connect";
 import { sign } from "@appstrate/afps-runtime/events";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
@@ -1389,6 +1389,54 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("failed");
     expect(row?.error).toMatch(/server_error/);
+  });
+
+  it("classifies a model-call failure once, at finalize, and serves it as model_error", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    const res = await postFinalize(runId, {
+      status: "failed",
+      error: {
+        code: "adapter_error",
+        message: '429 {"error":{"type":"rate_limit_error","message":"Too many requests"}}',
+      },
+      durationMs: 100,
+      usage: { input_tokens: 5, output_tokens: 1 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    // `error` keeps the provider's text verbatim; the reader branches on the classification.
+    expect(row?.error).toStartWith("429 {");
+    expect(row?.modelErrorCategory).toBe("rate_limited");
+    expect(row?.modelErrorStatus).toBe(429);
+    expect(row?.modelErrorMessage).toBe("Too many requests");
+
+    const read = await app.request(`/api/runs/${runId}`, { headers: authHeaders(ctx) });
+    expect(((await read.json()) as { model_error: unknown }).model_error).toEqual({
+      category: "rate_limited",
+      retryable: true,
+      status: 429,
+      message: "Too many requests",
+    });
+  });
+
+  it("classifies nothing on a failure that is not a model call", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // A provider-shaped text without the runner's `adapter_error` code is not read.
+    const res = await postFinalize(runId, {
+      status: "failed",
+      error: { code: "timeout", message: '429 {"error":{"message":"looks like a refusal"}}' },
+      durationMs: 100,
+      usage: { input_tokens: 5, output_tokens: 1 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.modelErrorCategory).toBeNull();
+    expect(row?.modelErrorStatus).toBeNull();
+    expect(row?.modelErrorMessage).toBeNull();
   });
 
   it("preserves success when output is null and no error is declared", async () => {

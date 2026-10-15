@@ -39,6 +39,9 @@ export interface ValidationFieldError {
    * machine code. Optional — Zod-originated entries don't carry one.
    */
   title?: string;
+  /** 1-based position in the offending file, when the validator knows one (a YAML syntax error). */
+  line?: number;
+  column?: number;
 }
 
 /**

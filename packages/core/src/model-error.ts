@@ -57,6 +57,15 @@ export type ModelErrorCategory =
  * rebuild paths, and because its keys are the category set — the one place
  * membership can be tested at runtime.
  */
+/** The category set as a runtime tuple — the persisted vocabulary (a run's `model_error_category`). */
+export const MODEL_ERROR_CATEGORIES = [
+  "credential_unavailable",
+  "rate_limited",
+  "upstream_unavailable",
+  "invalid_request",
+  "unknown",
+] as const satisfies readonly ModelErrorCategory[];
+
 export const MODEL_ERROR_RETRYABLE_BY_CATEGORY: Record<ModelErrorCategory, boolean> = {
   credential_unavailable: false,
   rate_limited: true,
@@ -179,4 +188,45 @@ export function classifyModelError(input: ModelErrorInput): ModelErrorClassifica
     retryable: MODEL_ERROR_RETRYABLE_BY_CATEGORY[category],
     ...(requestId ? { requestId } : {}),
   };
+}
+
+/**
+ * A failed model call as a run keeps it: its class, the provider's HTTP status and the
+ * provider's own sentence, each when the failure text carries one.
+ */
+export interface ModelFailure extends ModelErrorClassification {
+  status?: number;
+  providerMessage?: string;
+}
+
+/** The agent SDK's wording of a provider refusal: `<status> <JSON body>`. */
+const PROVIDER_REFUSAL = /^(\d{3}) (\{[\s\S]*\})$/;
+
+/**
+ * Read one failed model call's text ONCE, server-side, into what a reader branches on — so no
+ * client parses the SDK's English. The status comes from the `<status> <body>` envelope, else
+ * from the text; the provider's sentence from the body's `error.message` or `message`.
+ */
+export function describeModelFailure(message: string): ModelFailure {
+  const trimmed = message.trim();
+  const refusal = PROVIDER_REFUSAL.exec(trimmed);
+  const status = refusal ? Number(refusal[1]) : statusFromMessage(trimmed);
+  const providerMessage = refusal ? providerSentence(refusal[2]!) : undefined;
+  return {
+    ...classifyModelError({ message: trimmed, ...(status !== undefined ? { status } : {}) }),
+    ...(status !== undefined ? { status } : {}),
+    ...(providerMessage ? { providerMessage } : {}),
+  };
+}
+
+function providerSentence(body: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const { error, message } = parsed as { error?: { message?: unknown }; message?: unknown };
+    const found = error?.message ?? message;
+    return typeof found === "string" && found.trim() ? found.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }

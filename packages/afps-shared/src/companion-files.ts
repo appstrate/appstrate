@@ -46,6 +46,11 @@ export interface CompanionFileViolation {
   message: string;
   /** Path the violation refers to, when relevant. */
   path?: string;
+  /**
+   * Where in the file the violation sits, 1-based and counted in the file itself (the
+   * frontmatter's opening `---` is line 1), when the checker knows it — a YAML syntax error.
+   */
+  position?: { line: number; column: number };
 }
 
 /**
@@ -244,6 +249,8 @@ export interface SkillFrontmatter {
   /** Opens with `---` but never closes the block. */
   unterminated: boolean;
   error: string | null;
+  /** Where the YAML parser stopped, in SKILL.md's own lines (1-based), on a syntax error. */
+  position?: { line: number; column: number };
   name: string;
   description: string;
 }
@@ -263,10 +270,12 @@ export function parseSkillFrontmatter(content: string): SkillFrontmatter {
   try {
     parsed = parseYaml(block, { uniqueKeys: true, strict: true });
   } catch (err) {
+    const position = yamlErrorPosition(err);
     return {
       ...empty,
       found: true,
       error: `frontmatter is not valid YAML: ${firstLine(err)}`,
+      ...(position ? { position } : {}),
     };
   }
 
@@ -315,6 +324,17 @@ export function decodeSkillMarkdown(bytes: Uint8Array): string {
   return new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
 }
 
+/**
+ * The `yaml` parser's own position (`linePos`, 1-based within the parsed block), moved onto the
+ * file: the block starts on the line after the opening `---`.
+ */
+function yamlErrorPosition(err: unknown): { line: number; column: number } | undefined {
+  const linePos = (err as { linePos?: unknown }).linePos;
+  const start = Array.isArray(linePos) ? (linePos[0] as { line?: unknown; col?: unknown }) : null;
+  if (!start || typeof start.line !== "number" || typeof start.col !== "number") return undefined;
+  return { line: start.line + 1, column: start.col };
+}
+
 function firstLine(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   return message.split("\n")[0]!.trim();
@@ -341,7 +361,7 @@ export function checkSkillMarkdown(content: string): CompanionFileViolation | nu
     };
   }
 
-  const { unterminated, error, name, description } = parseSkillFrontmatter(content);
+  const { unterminated, error, position, name, description } = parseSkillFrontmatter(content);
 
   if (unterminated) {
     return {
@@ -355,6 +375,7 @@ export function checkSkillMarkdown(content: string): CompanionFileViolation | nu
       reason: "SKILL_INVALID_FRONTMATTER",
       message: `skill SKILL.md ${error}`,
       path: "SKILL.md",
+      ...(position ? { position } : {}),
     };
   }
   if (!name) {

@@ -18,6 +18,10 @@ Ships as `0.13.0`, before `@appstrate/core` 16.0.0, which requires `^0.13.0`.
 
 ### Added
 
+- **`CompanionFileViolation.position`** and **`SkillFrontmatter.position`**: on a
+  `SKILL_INVALID_FRONTMATTER` caused by a YAML syntax error, where the parser stopped —
+  `{ line, column }`, 1-based, in SKILL.md's own lines (the opening `---` is line 1).
+  Consumers no longer read the position out of the English message.
 - **`jsonText`** (`./json-text`): a string passes through, any other JSON
   value is `JSON.stringify`-ed — the one rule for rendering a JSON value as
   text. Its parameter is `NonNullable<unknown> | null`: `undefined` does not

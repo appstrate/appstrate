@@ -22,6 +22,7 @@
  * repo. Its transport half lives in `routes/runs-events.ts`.
  */
 
+import { describeModelFailure } from "@appstrate/core/model-error";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, type RunResultPayload } from "@appstrate/db/schema";
@@ -488,6 +489,13 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     }
   }
 
+  // A failure on a model call (the runner's `adapter_error`, which carries the provider's text
+  // verbatim) is read here once into what a reader branches on — never by a client.
+  const modelFailure =
+    status !== "success" && result.error?.code === "adapter_error" && errorMessage
+      ? describeModelFailure(errorMessage)
+      : null;
+
   // 4. Build the persisted result payload — structured output only. Anything
   //    the agent means for a human is a durable file (`outputs/` sweep or
   //    `publish_file`), never a field on this row.
@@ -601,6 +609,9 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
         status,
         result: resultToPersist,
         error: errorMessage,
+        modelErrorCategory: modelFailure?.category ?? null,
+        modelErrorStatus: modelFailure?.status ?? null,
+        modelErrorMessage: modelFailure?.providerMessage ?? null,
         completedAt: now,
         duration: resolvedDurationMs,
         cost: cost > 0 ? cost : null,

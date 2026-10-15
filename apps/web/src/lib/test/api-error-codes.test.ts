@@ -26,6 +26,7 @@ import type { FieldErrorCode } from "@appstrate/core/api-errors";
 import type { ModelGenerationErrorCode } from "@appstrate/core/model-generation";
 import type { PackageFileWriteErrorCode } from "@appstrate/core/package-file-operations";
 import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
+import { OUTPUT_TOOL_REQUIRED } from "@appstrate/core/validation";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { toApiError } from "../../api/client.ts";
 import { ApiError } from "../../api/errors.ts";
@@ -154,6 +155,8 @@ const EMITTED_OUT_OF_SIGHT = [
   "unrenderable_authorized_uri",
   // Thrown as `CREDENTIAL_CHANGE_REVOCATION_FAILED` (`@appstrate/db/auth`).
   "credential_change_revocation_failed",
+  // A manifest rule's own item code, carried by its Zod issue (`@appstrate/core/validation`).
+  OUTPUT_TOOL_REQUIRED,
 ];
 
 /** Codes that never reach a sentence in the dashboard, by reason. */
@@ -363,7 +366,7 @@ describe("errorMessage", () => {
     const err = await problem({
       code: "validation_failed",
       detail: `manifest.runtime_tools: ${message}`,
-      errors: [{ field: "manifest.runtime_tools", code: "invalid_manifest", message }],
+      errors: [{ field: "manifest.runtime_tools", code: "output_tool_required", message }],
     });
     expect(errorMessage(err)).toBe(agentsFr["error.outputToolRequired"]);
   });

@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  MODEL_ERROR_RETRYABLE_BY_CATEGORY,
+  type ModelErrorCategory,
+} from "@appstrate/core/model-error";
 import type { z } from "zod";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
@@ -77,6 +81,32 @@ import type { PricingStatus as _PricingStatus } from "@appstrate/db/pricing-stat
  * DB-convention names (`id`, `packageId`, `createdAt`, `runOrigin`, …) stay
  * camelCase — by their literal name, never by suffix.
  */
+/** A model-call failure as a run carries it on the wire. */
+export interface RunModelError {
+  category: ModelErrorCategory;
+  /** Whether a new attempt, unchanged, might succeed — derived from `category`. */
+  retryable: boolean;
+  /** The provider's HTTP status, when the failure carried one. */
+  status: number | null;
+  /** The provider's own sentence, when its response body carried one. */
+  message: string | null;
+}
+
+/** The one projection of the `model_error_*` columns onto {@link RunModelError}. */
+export function runModelErrorWire(columns: {
+  category: ModelErrorCategory | null;
+  status: number | null;
+  message: string | null;
+}): RunModelError | null {
+  if (!columns.category) return null;
+  return {
+    category: columns.category,
+    retryable: MODEL_ERROR_RETRYABLE_BY_CATEGORY[columns.category],
+    status: columns.status,
+    message: columns.message,
+  };
+}
+
 export interface RunWireDto {
   id: string;
   packageId: string | null;
@@ -100,6 +130,12 @@ export interface RunWireDto {
   artifacts: RunArtifactsSummary | null;
   checkpoint: unknown;
   error: string | null;
+  /**
+   * What a run that failed on a model call failed on, classified once at finalize
+   * ({@link RunModelError}); `null` on every other run, and on a run finalized before the
+   * platform recorded it. Read this, never `error`'s text, to say why.
+   */
+  model_error: RunModelError | null;
   metadata: unknown;
   started_at: string | null;
   completed_at: string | null;

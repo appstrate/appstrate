@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A run keeps whatever ended it verbatim; `runErrorText` says it in the
- * reader's language. Two stored forms are recognised: the platform's own
- * cancellation line, and a model provider's refusal stored as
- * `<status> <JSON body>`. Anything else is shown as written.
+ * A run keeps whatever ended it verbatim; `runErrorText` says it in the reader's language from
+ * what the server classified — the run's `status` and its `model_error` — and shows the stored
+ * text as written when nothing classified it. It never reads that text.
  */
 
 import { describe, expect, it } from "bun:test";
-import { join } from "node:path";
 import type { TFunction } from "i18next";
 import { runErrorText, runErrorTone } from "../run-error.ts";
 
@@ -16,41 +14,52 @@ import { runErrorText, runErrorTone } from "../run-error.ts";
 const t = ((key: string, values?: Record<string, unknown>) =>
   values ? `${key} ${JSON.stringify(values)}` : key) as unknown as TFunction;
 
-const failed = (error: string | null) => runErrorText({ status: "failed", error }, t);
+type Category =
+  | "credential_unavailable"
+  | "rate_limited"
+  | "upstream_unavailable"
+  | "invalid_request"
+  | "unknown";
+const modelError = (category: Category, status: number | null, message: string | null) => ({
+  category,
+  retryable: category !== "credential_unavailable" && category !== "invalid_request",
+  status,
+  message,
+});
+const failed = (error: string | null, model_error: ReturnType<typeof modelError> | null = null) =>
+  runErrorText({ status: "failed", error, model_error }, t);
 
 describe("runErrorText", () => {
-  it("words the cancellation the API writes, and only on a cancelled run", async () => {
-    // The same literal the cancel route stores (`routes/runs.ts`).
-    const route = await Bun.file(
-      join(import.meta.dir, "../../../../api/src/routes/runs.ts"),
-    ).text();
-    expect(route).toContain('error: { message: "Cancelled by user" }');
-
+  it("words a cancelled run as a member's cancellation, whatever its text", () => {
     expect(runErrorText({ status: "cancelled", error: "Cancelled by user" }, t)).toBe(
       "run.cancelledByUser",
     );
+    // The same text on a failed run is not a cancellation.
     expect(failed("Cancelled by user")).toBe("Cancelled by user");
   });
 
-  it("names an authentication or rate-limit refusal by its status", () => {
-    expect(failed('401 {"error":{"message":"invalid x-api-key"}}')).toBe("run.error.modelRefused");
-    expect(failed('403 {"error":{"message":"forbidden"}}')).toBe("run.error.modelRefused");
-    expect(failed('429 {"error":{"message":"slow down"}}')).toBe("run.error.modelRateLimited");
+  it("names a refused credential or a rate limit by its category", () => {
+    expect(failed("401 …", modelError("credential_unavailable", 401, "invalid x-api-key"))).toBe(
+      "run.error.modelRefused",
+    );
+    expect(failed("429 …", modelError("rate_limited", 429, "slow down"))).toBe(
+      "run.error.modelRateLimited",
+    );
   });
 
-  it("carries a provider's message, from either JSON shape, with its status", () => {
-    expect(failed('400 {"error":{"message":"  prompt is too long  "}}')).toBe(
+  it("carries the provider's own sentence with its status", () => {
+    expect(failed("400 …", modelError("invalid_request", 400, "prompt is too long"))).toBe(
       'run.error.model {"status":400,"message":"prompt is too long"}',
     );
-    expect(failed('500 {"message":"overloaded"}')).toBe(
-      'run.error.model {"status":500,"message":"overloaded"}',
-    );
   });
 
-  it("shows the stored text when the body names no message or is not JSON", () => {
-    expect(failed('400 {"error":{"code":"x"}}')).toBe('400 {"error":{"code":"x"}}');
-    expect(failed("400 {not json}")).toBe("400 {not json}");
-    expect(failed("Container exited with code 1")).toBe("Container exited with code 1");
+  it("shows the stored text when nothing classified it, or the provider said nothing", () => {
+    // Text shaped like a provider refusal is NOT parsed: with no `model_error`, it is shown.
+    expect(failed('429 {"error":{"message":"slow down"}}')).toBe(
+      '429 {"error":{"message":"slow down"}}',
+    );
+    expect(failed("400 {}", modelError("invalid_request", 400, null))).toBe("400 {}");
+    expect(failed("fetch failed", modelError("unknown", null, null))).toBe("fetch failed");
     expect(failed(null)).toBe("");
   });
 });

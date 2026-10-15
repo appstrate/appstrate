@@ -592,6 +592,9 @@ async function loadRunForStream(runId: string, scope: { orgId: string; spaceId: 
       spaceId: runs.spaceId,
       scheduleId: runs.scheduleId,
       error: runs.error,
+      modelErrorCategory: runs.modelErrorCategory,
+      modelErrorStatus: runs.modelErrorStatus,
+      modelErrorMessage: runs.modelErrorMessage,
       startedAt: runs.startedAt,
       completedAt: runs.completedAt,
       duration: runs.duration,
@@ -628,6 +631,13 @@ async function sendInitialRunSnapshot(
       spaceId: row.spaceId,
       scheduleId: row.scheduleId,
       error: row.error,
+      modelError: row.modelErrorCategory
+        ? {
+            category: row.modelErrorCategory,
+            status: row.modelErrorStatus,
+            message: row.modelErrorMessage,
+          }
+        : null,
       startedAt: row.startedAt?.toISOString() ?? null,
       completedAt: row.completedAt?.toISOString() ?? null,
       duration: row.duration,
