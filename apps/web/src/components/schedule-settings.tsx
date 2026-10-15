@@ -333,7 +333,7 @@ function GeneralSection({ schedule, draft, edit }: SectionProps) {
   const { t } = useTranslation(["agents"]);
   const stored = storedActor(schedule);
   return (
-    <>
+    <div className="flex flex-col gap-6">
       <SettingRow label={t("schedule.name")}>
         <Input
           value={draft.name ?? schedule.name ?? ""}
@@ -356,7 +356,7 @@ function GeneralSection({ schedule, draft, edit }: SectionProps) {
           onChange={(next) => edit({ actor: next ?? stored })}
         />
       </SettingRow>
-    </>
+    </div>
   );
 }
 
