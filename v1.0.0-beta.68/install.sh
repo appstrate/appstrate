@@ -1,0 +1,864 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Appstrate CLI bootstrap — thin downloader for `get.appstrate.dev`.
+#
+# Single responsibility: detect OS + arch, download the matching
+# `appstrate` CLI binary from the GitHub Release whose tag is pinned
+# by `publish-installer.yml` at publish time (or `latest` if this
+# script is being run from a raw source copy), VERIFY its integrity
+# + provenance against a minisign-signed SHA-256 manifest, drop it on
+# PATH, and exec `appstrate install` to hand control to the CLI itself.
+#
+# No install logic lives here — tier selection, secrets generation,
+# compose rendering, healthchecks, and upgrades are all owned by the
+# CLI binary. This script stays small on purpose.
+#
+# Trust chain:
+#   1. `scripts/verify.sh` (served at `get.appstrate.dev/verify.sh`)
+#      verifies the signature on THIS script before executing it. That
+#      is the opt-in wrapper for users who refuse trust-on-TLS at the
+#      `get.appstrate.dev | bash` step.
+#   2. THIS script then downloads + verifies the signature on the
+#      per-release `checksums.txt` against the baked-in public key,
+#      then verifies the SHA-256 of the downloaded binary matches.
+#      The CLI binary is never exec'd until both checks pass.
+#
+# Usage:
+#   curl -fsSL https://get.appstrate.dev | bash
+#   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 2
+#   # Firecracker execution backend (microVMs) on this KVM host:
+#   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3 \
+#     --run-adapter firecracker --host-ip 10.0.0.5
+#   # ...or paired with a remote runner daemon:
+#   #   --run-adapter firecracker --runner-url http://10.0.0.9:3100 --runner-token <token>
+#
+# All `appstrate install` flags (including --run-adapter / --runner-url /
+# --runner-token / --host-ip) pass straight through this wrapper.
+#
+# Env overrides:
+#   APPSTRATE_VERSION             Pin a release, `1.2.3` or `v1.2.3` (default:
+#                                 pinned or "latest").
+#   APPSTRATE_BIN_DIR             Install location (default: $HOME/.local/bin).
+#                                 Set to /usr/local/bin for a system-wide install
+#                                 (sudo will be requested).
+#   APPSTRATE_NO_MODIFY_PATH=1    Do not touch shell rc files to add BIN_DIR to
+#                                 PATH. Equivalent to uv's UV_NO_MODIFY_PATH.
+#   APPSTRATE_SKIP_VERIFY=1       Skip signature + checksum verification (CI
+#                                 debug only — do NOT set on user machines).
+#                                 Requires a pinned version: "latest" is only
+#                                 ever resolved through a verified signature.
+#   APPSTRATE_NO_INSTALL_MINISIGN=1
+#                                 Do not attempt to auto-install `minisign` via
+#                                 the host package manager when it's missing.
+#                                 The script falls back to the original
+#                                 instructions-then-exit behaviour.
+
+set -euo pipefail
+
+# Bounded curl options shared by every download below. Without connect/overall
+# timeouts a stalled TLS handshake or a hung mirror can wedge cloud-init / CI
+# forever; the bounded retry smooths transient blips. Word-split intentionally
+# at each call site (unquoted "$CURL_OPTS").
+CURL_OPTS="-fsSL --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 2"
+
+# The entire script body is wrapped in `_appstrate_bootstrap` and only
+# invoked at the very end of the file. `curl -fsSL … | bash` reads the
+# script over a streaming TCP connection; if the connection drops
+# mid-transfer, bash would otherwise execute whatever bytes arrived —
+# potentially the top half of a security-critical flow (download but
+# skip verification). Defining everything inside a function means the
+# shell must parse the whole file before reaching the invocation; a
+# truncated download produces a syntax error that exits non-zero
+# instead of a partial execution.
+_appstrate_bootstrap() {
+
+  OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64 | amd64) ARCH=x64 ;;
+    aarch64 | arm64) ARCH=arm64 ;;
+    *)
+      echo "Unsupported architecture: $ARCH" >&2
+      exit 1
+      ;;
+  esac
+
+  case "$OS" in
+    darwin | linux) ;;
+    *)
+      # Windows is deliberately not a v1 target — see ADR-006 § Deliverable.
+      # The recommended path on Windows is WSL2 (which reuses the linux-x64
+      # binary); `bunx appstrate install` is the Bun-native escape
+      # hatch for users who have Bun but no WSL2. We fail loud here instead
+      # of hinting at a flow this script doesn't handle.
+      echo "Unsupported OS: $OS." >&2
+      echo "On Windows, run this inside WSL2 (recommended), or install natively via: bunx appstrate install" >&2
+      exit 1
+      ;;
+  esac
+
+  # Default version pinned by `publish-installer.yml` at publish time —
+  # rewriting `v1.0.0-beta.68` so `curl get.appstrate.dev | bash`
+  # downloads the binary matching the release that published this script.
+  # Users can override via APPSTRATE_VERSION env var (e.g. to pin an older
+  # release). When the placeholder is still present (local dev / unrendered
+  # copy), fall back to `latest` so the script stays runnable out of tree.
+  _DEFAULT_VERSION="v1.0.0-beta.68"
+  if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
+  VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
+  # A release is `v1.2.3` as a git tag but `1.2.3` everywhere an operator
+  # reads it (image tags, `.env`, `appstrate --version`): accept both.
+  if [ "$VERSION" != "latest" ]; then VERSION="v${VERSION#v}"; fi
+  # Rootless default: install into $HOME/.local/bin (XDG user-space equivalent
+  # of /usr/local/bin). Matches uv, rustup, Bun, Deno, pipx — avoids a sudo
+  # prompt on the happy path, works in containers / CI without privileges, and
+  # contains blast radius if the binary is ever compromised (can't escape $HOME).
+  # Users who want a system-wide install can opt in via APPSTRATE_BIN_DIR.
+  BIN_DIR="${APPSTRATE_BIN_DIR:-$HOME/.local/bin}"
+  DEST="${BIN_DIR}/appstrate"
+  ASSET="appstrate-${OS}-${ARCH}"
+
+  # Appstrate minisign public key — baked into the distributed
+  # bootstrap.sh so a freshly-bootstrapped machine can verify without a
+  # second round-trip. Matches `scripts/appstrate.pub` in the repo; the
+  # release workflow signs `checksums.txt` with the matching private key.
+  # Rotation SOP: docs/adr/ADR-006-cli-device-flow-monorepo.md.
+  APPSTRATE_MINISIGN_PUBKEY="RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e"
+
+  # Signed channel manifest naming the current "latest" release tag, published
+  # by `publish-installer.yml` and signed with the key above (`.minisig` next
+  # to it). Only read when VERSION is "latest".
+  CHANNEL_URL="https://get.appstrate.dev/channels/latest.json"
+
+  # ─── Helpers ────────────────────────────────────────────────────────────────
+
+  TMPDIR=$(mktemp -d)
+  trap 'rm -rf "$TMPDIR"' EXIT
+
+  warn() { printf '\033[0;33m⚠\033[0m  %s\n' "$*" >&2; }
+  log() { printf '\033[0;36m→\033[0m  %s\n' "$*"; }
+  err() { printf '\033[0;31m✗\033[0m  %s\n' "$*" >&2; }
+
+  # "latest" = the tag in the signed channel manifest, not a GitHub API lookup:
+  # no rate limit, and the tag is authenticated by the checksums.txt key.
+  # Signature first, content second. No jq on the host: fields are grepped
+  # whitespace-tolerantly, then validated strictly.
+  resolve_latest_tag() {
+    local manifest="$TMPDIR/latest.json" json schema channel tag
+    local tag_re='^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$'
+    # shellcheck disable=SC2086 # CURL_OPTS is word-split on purpose (see its definition)
+    if ! curl $CURL_OPTS "$CHANNEL_URL" -o "$manifest" ||
+      ! curl $CURL_OPTS "$CHANNEL_URL.minisig" -o "$manifest.minisig"; then
+      err "Could not download the release channel manifest ($CHANNEL_URL)."
+      return 1
+    fi
+    if ! minisign -Vm "$manifest" -x "$manifest.minisig" -P "$APPSTRATE_MINISIGN_PUBKEY" >/dev/null; then
+      err "Channel manifest signature verification FAILED — it was NOT signed by the Appstrate key."
+      return 1
+    fi
+    # One line, then a field is read only if its key occurs exactly once and
+    # its value ends at `,` or `}` (rejects `1.5`, `\"` inside a tag, dupes).
+    json=$(tr '\r\n\t' '   ' <"$manifest")
+    field() {
+      [ "$(grep -o "\"$1\"" <<<"$json" | wc -l)" -eq 1 ] &&
+        grep -oE "\"$1\"[[:space:]]*:[[:space:]]*$2[[:space:]]*[,}]" <<<"$json" |
+        sed -E 's/^[^:]*:[[:space:]]*"?//; s/"?[[:space:]]*[,}]$//'
+    }
+    schema=$(field schema '[0-9]+')
+    channel=$(field channel '"[^"\\]*"')
+    tag=$(field tag '"[^"\\]*"')
+    if [ "$schema" != "1" ] || [ "$channel" != "latest" ] || ! [[ "$tag" =~ $tag_re ]]; then
+      err "Channel manifest is malformed (expected schema 1, channel \"latest\", one vX.Y.Z tag)."
+      return 1
+    fi
+    printf '%s\n' "$tag"
+  }
+
+  have_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
+  have_shasum() { command -v shasum >/dev/null 2>&1; }
+  have_minisign() { command -v minisign >/dev/null 2>&1; }
+
+  # ─── minisign auto-install ─────────────────────────────────────
+  #
+  # The one-liner one-step UX promise ("paste this, get a running Appstrate")
+  # breaks on every Debian-family box without minisign pre-installed: the
+  # verification gate is non-negotiable, so the script otherwise dies asking
+  # the user to apt-install a package and re-run. Detect the host package
+  # manager, install minisign ourselves, and proceed — same trust assumption
+  # as the `curl … | bash` step (user trusts get.appstrate.dev over TLS).
+  #
+  # Auto-install fires in three contexts without a prompt:
+  #   1. `--yes` arg present (advertised one-liner on the homepage)
+  #   2. CI=true|1|yes (any CI runner — non-interactive by definition)
+  #   3. No TTY available for a prompt (piped from another script, systemd…)
+  # In an interactive TTY without any of the above, a y/N prompt fires
+  # (defaults to Y — declining mirrors the legacy hint-and-exit behaviour).
+  #
+  # APPSTRATE_NO_INSTALL_MINISIGN=1 opts out entirely.
+
+  # Pick the first available package manager. We don't auto-install on
+  # distros we haven't validated (the install command differs and the wrong
+  # incantation against the wrong manager is worse than failing closed).
+  detect_minisign_installer() {
+    if [ "$OS" = "darwin" ]; then
+      if command -v brew >/dev/null 2>&1; then
+        printf 'brew'
+        return 0
+      fi
+    else
+      # `bin:name` pairs — bin we probe with `command -v`, name we emit.
+      # apt-get is the only case where the two differ (we surface it as
+      # "apt" because that's how the user knows it). Other distros: same.
+      for _mgr in apt-get:apt apk:apk dnf:dnf pacman:pacman zypper:zypper; do
+        _bin="${_mgr%:*}"
+        _name="${_mgr#*:}"
+        if command -v "$_bin" >/dev/null 2>&1; then
+          printf '%s' "$_name"
+          return 0
+        fi
+      done
+    fi
+    return 1
+  }
+
+  # Build the install command for `$1` (manager name). Prepends `sudo` only
+  # when not already root AND `sudo` is on PATH — keeps containerised installs
+  # (root, no sudo binary) working without a spurious "sudo: not found" trap.
+  minisign_install_cmd() {
+    _mgr="$1"
+    _sudo=""
+    if [ "$(id -u 2>/dev/null || echo 0)" != "0" ] && command -v sudo >/dev/null 2>&1; then
+      _sudo="sudo"
+    fi
+    case "$_mgr" in
+      brew) printf 'brew install minisign' ;;
+      apt) printf '%s DEBIAN_FRONTEND=noninteractive apt-get install -y minisign' "$_sudo" ;;
+      apk) printf '%s apk add --no-cache minisign' "$_sudo" ;;
+      dnf) printf '%s dnf install -y minisign' "$_sudo" ;;
+      pacman) printf '%s pacman -S --noconfirm minisign' "$_sudo" ;;
+      zypper) printf '%s zypper install -y minisign' "$_sudo" ;;
+      *) return 1 ;;
+    esac
+  }
+
+  # apt-get install fails on a stale package cache (very common on fresh
+  # Ubuntu images — `/var/lib/apt/lists` is empty). Refresh once before
+  # the install attempt; ignore failures (the install step will surface a
+  # real error if the index actually can't be fetched).
+  apt_refresh_if_needed() {
+    _sudo=""
+    if [ "$(id -u 2>/dev/null || echo 0)" != "0" ] && command -v sudo >/dev/null 2>&1; then
+      _sudo="sudo"
+    fi
+    # `-qq` keeps the refresh quiet; the bootstrap is the only voice the
+    # user should hear in the happy path.
+    $_sudo apt-get update -qq >/dev/null 2>&1 || true
+  }
+
+  # Returns 0 if minisign got installed, non-zero otherwise. Caller decides
+  # how to react — we don't `exit` from here so the surrounding flow keeps
+  # owning the error UX.
+  try_install_minisign() {
+    _mgr="$(detect_minisign_installer)" || return 1
+    _cmd="$(minisign_install_cmd "$_mgr")" || return 1
+    log "Installing minisign via $_mgr (required for signature verification)"
+    log "  \$ $_cmd"
+    # apt needs a fresh package index on stock cloud-init / Docker images.
+    if [ "$_mgr" = "apt" ]; then apt_refresh_if_needed; fi
+    # `sh -c` rather than direct exec so the sudo prefix expands correctly
+    # and we never have to special-case the leading-empty-string case.
+    if ! sh -c "$_cmd"; then
+      err "Failed to install minisign via $_mgr."
+      return 1
+    fi
+    # Homebrew edge case: `brew install` on an already-installed-but-
+    # unlinked keg exits 0 with a "not linked" warning on stderr, leaving the
+    # binary off PATH. The keg is already on disk — just re-create the
+    # symlinks. `brew link` (no flags) is the documented remediation;
+    # minisign isn't keg-only, so no --force, and we don't overwrite.
+    if [ "$_mgr" = "brew" ] && ! have_minisign; then
+      log "  \$ brew link minisign"
+      brew link minisign >/dev/null 2>&1 || true
+    fi
+    if ! have_minisign; then
+      err "minisign install reported success but the binary is still not on PATH."
+      return 1
+    fi
+    return 0
+  }
+
+  # ─── Dual-install pre-check ───────────────────────────
+  #
+  # If the user already has `appstrate` on PATH at a DIFFERENT location than
+  # the one we're about to write, the two binaries will silently shadow each
+  # other after the install — the order on $PATH decides which one runs, and
+  # `appstrate self-update` will only ever update one of them. uv, deno, bun,
+  # rustup all surface this case at runtime; nobody surfaces it at install
+  # time. We do, because we have $DEST in hand before we touch the disk.
+  #
+  # Behavior:
+  #   - Same path (re-install over self) → silent no-op, proceed.
+  #   - Different path + interactive TTY → prompt [y/N], abort by default.
+  #   - Different path + CI / non-TTY  → abort with a hint to set
+  #                                       APPSTRATE_FORCE_DUAL=1.
+  #   - APPSTRATE_FORCE_DUAL=1         → bypass the check entirely.
+  #
+  # We do this BEFORE downloading the binary so a user who chose the wrong
+  # install method doesn't burn bandwidth + minisign cycles on something
+  # they're going to abort 10 seconds later.
+  resolve_path() {
+    # POSIX-portable path resolver tolerant of non-existent leaf files.
+    #
+    # Why split dir + basename: BSD `realpath` (macOS default) and GNU
+    # `readlink -f` both fail on a non-existent path, but DEST = the file
+    # we're about to write doesn't exist yet on a fresh install. Resolving
+    # only the parent dir handles every scenario where one or both paths
+    # are missing while still canonicalising symlinks at the directory
+    # level (the common case — e.g. /usr/local/bin → /opt/homebrew/bin
+    # on macOS Homebrew). Symlinks AT the leaf are not resolved, but a
+    # symlink at the binary itself is uncommon and a false-positive
+    # warning on that edge case beats a false-negative dual-install miss.
+    _input="$1"
+    _dir="$(dirname -- "$_input")"
+    _base="$(basename -- "$_input")"
+    if command -v realpath >/dev/null 2>&1; then
+      _real_dir="$(realpath "$_dir" 2>/dev/null || printf '%s' "$_dir")"
+    elif command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
+      _real_dir="$(readlink -f "$_dir" 2>/dev/null || printf '%s' "$_dir")"
+    else
+      _real_dir="$_dir"
+    fi
+    printf '%s/%s' "$_real_dir" "$_base"
+  }
+
+  # Add BIN_DIR to PATH by appending `export PATH="$BIN_DIR:$PATH"` to the
+  # user's shell rc files. Same pattern as uv, rustup, Bun, Deno.
+  #
+  # Extracted into a function (rather than inlined at the call site) so the
+  # rc-file logic — the most platform-divergent and regression-prone part of
+  # the installer — is reachable by the unit harness under
+  # APPSTRATE_BOOTSTRAP_SOURCE_ONLY=1. Inlined below the source-only guard and
+  # behind the CI opt-out, it would have zero test coverage.
+  #
+  # Reads globals: BIN_DIR, SHELL, HOME, CI, APPSTRATE_NO_MODIFY_PATH, PATH.
+  #
+  # Skipped when:
+  #   - APPSTRATE_NO_MODIFY_PATH=1 (explicit opt-out, like UV_NO_MODIFY_PATH)
+  #   - CI is truthy: 1/true/yes (covers GHA, GitLab, CircleCI, Travis,
+  #     Jenkins and anything else that exports a boolean-ish CI flag —
+  #     CIs don't restart shells; they set PATH explicitly)
+  #   - BIN_DIR is already on PATH (common for /usr/local/bin — no-op needed)
+  #
+  # Idempotent: a marker comment (APPSTRATE_PATH_MARKER) is grep'd before
+  # appending, so re-running the installer doesn't duplicate lines.
+  _setup_path() {
+    APPSTRATE_PATH_MARKER="# added by appstrate installer"
+    # Newline-separated list of rc files we touched. Accumulated (not
+    # overwritten) so the final restart-your-shell hint reports every file,
+    # not just the last one — critical for the bash shotgun case where up
+    # to three files may be modified in a single run.
+    MODIFIED_PROFILES=""
+    _ci_flag="${CI:-}"
+    if [ "${APPSTRATE_NO_MODIFY_PATH:-0}" = "1" ] ||
+      [ "$_ci_flag" = "true" ] || [ "$_ci_flag" = "1" ] || [ "$_ci_flag" = "yes" ]; then
+      : # explicit opt-out
+    else
+      case ":${PATH}:" in
+        *":${BIN_DIR}:"*) : ;; # already on PATH, nothing to do
+        *)
+          _shell_name=$(basename "${SHELL:-}")
+          # The exact export line written to POSIX rc files. The `$PATH` ref
+          # is escaped (`\$PATH`) so it expands at shell-startup time, not
+          # now — the rc file stays portable if the user ever moves $HOME.
+          # (The fish branch below doesn't use this line; it writes a
+          # fish-native `fish_add_path` invocation instead, which resolves
+          # BIN_DIR eagerly — acceptable because fish re-evaluates conf.d
+          # on every shell start and $HOME rewrites are vanishingly rare.)
+          _path_line="export PATH=\"${BIN_DIR}:\$PATH\""
+
+          # Append `$marker` + `$line` to `$file` if the marker isn't already
+          # present. Touches the file if it doesn't exist (uv shotgun pattern).
+          _append_path() {
+            _file="$1"
+            _line="$2"
+            if [ -f "$_file" ] && grep -qF "$APPSTRATE_PATH_MARKER" "$_file" 2>/dev/null; then
+              return 0
+            fi
+            # `>> "$file"` creates the file if absent — matches uv's behavior
+            # of writing .profile/.zshrc even on fresh systems.
+            printf '\n%s\n%s\n' "$APPSTRATE_PATH_MARKER" "$_line" >>"$_file"
+            MODIFIED_PROFILES="${MODIFIED_PROFILES}${_file}
+"
+          }
+
+          case "$_shell_name" in
+            bash)
+              # bash's rc-file loading varies wildly (interactive vs login,
+              # macOS vs Linux). We always write .profile (the POSIX login
+              # fallback — sourced by macOS login bash, and by the default
+              # .profile shipped on Debian/Ubuntu which chains to .bashrc)
+              # and .bashrc (Linux non-login interactive shells).
+              #
+              # .bash_profile is touched ONLY if it already exists. At login,
+              # bash reads the FIRST existing of .bash_profile/.bash_login/
+              # .profile and does NOT fall through to .bashrc. So CREATING a
+              # .bash_profile that contains only our PATH line would shadow
+              # the user's entire existing .bashrc/.profile on every future
+              # login shell. This is the same exclusivity reason
+              # .zshenv is guarded below — except bash's .bash_profile and
+              # .bashrc are mutually exclusive at login, whereas zsh sources
+              # .zprofile AND .zshrc, which is why .zprofile is unconditional.
+              _append_path "$HOME/.profile" "$_path_line"
+              _append_path "$HOME/.bashrc" "$_path_line"
+              if [ -f "$HOME/.bash_profile" ]; then
+                _append_path "$HOME/.bash_profile" "$_path_line"
+              fi
+              ;;
+            zsh)
+              # zsh loads .zshrc (interactive), .zprofile (login), and
+              # .zshenv (all invocations). .zshrc + .zprofile are written
+              # unconditionally — between them they cover every interactive
+              # zsh session on macOS (default login shell) and Linux.
+              # .zshenv is only touched if already present, to avoid
+              # polluting non-interactive environments for users who
+              # haven't opted in.
+              _append_path "$HOME/.zshrc" "$_path_line"
+              _append_path "$HOME/.zprofile" "$_path_line"
+              if [ -f "$HOME/.zshenv" ]; then
+                _append_path "$HOME/.zshenv" "$_path_line"
+              fi
+              ;;
+            fish)
+              # fish has its own syntax and a dedicated drop-in directory for
+              # environment config — cleaner than touching config.fish
+              # directly, and removable by deleting a single file.
+              _fish_conf="$HOME/.config/fish/conf.d"
+              mkdir -p "$_fish_conf" 2>/dev/null || true
+              _append_path "$_fish_conf/appstrate.fish" "fish_add_path ${BIN_DIR}"
+              ;;
+            *)
+              # Unknown shell — fall back to .profile (sourced by sh/dash and
+              # some bash login configurations). Better than silently doing
+              # nothing: at least the next login shell will pick it up.
+              _append_path "$HOME/.profile" "$_path_line"
+              ;;
+          esac
+          ;;
+      esac
+    fi
+
+    if [ -n "$MODIFIED_PROFILES" ]; then
+      # Informational output (not a warning — the action succeeded). Uses
+      # `log` rather than `warn` so users don't mistake it for an error,
+      # and lists every touched file so the shotgun bash case doesn't hide
+      # the .profile / .bashrc writes behind the last one.
+      log "Added ${BIN_DIR} to PATH in:"
+      # Trim trailing newline so the loop doesn't emit a blank entry.
+      printf '%s' "$MODIFIED_PROFILES" | while IFS= read -r _profile; do
+        [ -n "$_profile" ] && log "  - ${_profile}"
+      done
+      log "Restart your shell to pick up the new PATH."
+    fi
+  }
+
+  # Test-only escape hatch: when set, return before any side-effecting work
+  # (network, install, dual-install probe). Bash nested-function bodies are
+  # only registered globally once the enclosing function runs at least
+  # once, so callers source this script with APPSTRATE_BOOTSTRAP_SOURCE_ONLY=1
+  # to make the helpers above (`try_install_minisign`, `have_minisign`, …)
+  # visible to a test harness without triggering the install flow.
+  if [ "${APPSTRATE_BOOTSTRAP_SOURCE_ONLY:-0}" = "1" ]; then
+    return 0
+  fi
+
+  EXISTING_APPSTRATE="$(command -v appstrate 2>/dev/null || true)"
+  if [ -n "$EXISTING_APPSTRATE" ] && [ "${APPSTRATE_FORCE_DUAL:-0}" != "1" ]; then
+    EXISTING_REAL="$(resolve_path "$EXISTING_APPSTRATE")"
+    DEST_REAL="$(resolve_path "$DEST")"
+    # Only act on a TRUE dual-install. Re-running the bootstrap on a machine
+    # that already has the curl-channel binary at $DEST is a normal re-install
+    # — we don't want to nag.
+    if [ "$EXISTING_REAL" != "$DEST_REAL" ]; then
+      # Wrap the probe in a 2s timeout: a wedged or interactive existing
+      # binary (e.g. one stuck on a TTY prompt because $stdin isn't a TTY
+      # under `curl | bash`) would otherwise hang the bootstrap forever.
+      # `timeout` is GNU; on macOS without coreutils we fall back to
+      # `gtimeout` if installed, else accept the (rare) hang risk and
+      # invoke the binary directly — same trade-off rustup makes.
+      _probe_cmd=""
+      if command -v timeout >/dev/null 2>&1; then
+        _probe_cmd="timeout 2"
+      elif command -v gtimeout >/dev/null 2>&1; then
+        _probe_cmd="gtimeout 2"
+      fi
+      EXISTING_VERSION="$($_probe_cmd "$EXISTING_APPSTRATE" --version 2>/dev/null | head -n 1 || echo "?")"
+      err "Another \`appstrate\` is already on PATH at:"
+      err "    $EXISTING_APPSTRATE  (version: $EXISTING_VERSION)"
+      err ""
+      err "Installing to:"
+      err "    $DEST"
+      err ""
+      err "Two binaries on PATH will silently shadow each other and \`appstrate"
+      err "self-update\` only manages the curl-channel one. Pick a single channel:"
+      err "  • Stay on the existing install: abort this bootstrap and run"
+      err "    its native upgrade command (\`bun update -g appstrate\`, etc)."
+      err "  • Switch to curl: remove the existing binary, then re-run."
+      err "  • Force-install both anyway: APPSTRATE_FORCE_DUAL=1 (not recommended)."
+      err ""
+      err "See https://github.com/appstrate/appstrate/issues/249"
+
+      # Determine interactive vs. non-interactive. `[ -t 0 ]` checks stdin;
+      # when piped from `curl | bash`, stdin is the pipe (NOT a TTY) so we
+      # also try to open /dev/tty for the prompt — same trick rustup uses.
+      _ci_flag="${CI:-}"
+      _is_ci=0
+      case "$_ci_flag" in true | 1 | yes) _is_ci=1 ;; esac
+
+      if [ "$_is_ci" = "1" ]; then
+        err ""
+        err "CI detected — refusing to prompt. Re-run with APPSTRATE_FORCE_DUAL=1"
+        err "if you really want both binaries on this runner."
+        exit 1
+      fi
+
+      _tty=""
+      if [ -t 0 ]; then
+        _tty="stdin"
+      elif [ -r /dev/tty ]; then
+        _tty="/dev/tty"
+      fi
+
+      if [ -z "$_tty" ]; then
+        err ""
+        err "Non-interactive shell detected — refusing to prompt."
+        err "Re-run with APPSTRATE_FORCE_DUAL=1 if intentional."
+        exit 1
+      fi
+
+      printf '\n'
+      printf 'Continue and install the curl-channel binary alongside the existing one? [y/N] '
+      ANSWER=""
+      if [ "$_tty" = "/dev/tty" ]; then
+        IFS= read -r ANSWER </dev/tty || ANSWER=""
+      else
+        IFS= read -r ANSWER || ANSWER=""
+      fi
+      case "$ANSWER" in
+        y | Y | yes | YES) : ;; # proceed
+        *)
+          err ""
+          err "Aborted — no files were written."
+          exit 1
+          ;;
+      esac
+      warn "Proceeding with dual-install at user request."
+    fi
+  elif [ "${APPSTRATE_FORCE_DUAL:-0}" = "1" ] && [ -n "$EXISTING_APPSTRATE" ]; then
+    # User explicitly opted in. Surface the warning so they don't forget.
+    warn "APPSTRATE_FORCE_DUAL=1 set — installing alongside existing $EXISTING_APPSTRATE"
+  fi
+
+  # ─── Download + verify ──────────────────────────────────────────────────────
+
+  # Verification prerequisites are settled BEFORE anything is downloaded:
+  # resolving "latest" already needs minisign (the channel manifest is signed).
+  if [ "${APPSTRATE_SKIP_VERIFY:-0}" = "1" ]; then
+    # Hard-gate the skip on CI=true. The flag exists ONLY for CI debug
+    # of the verification path itself; in any other context (interactive
+    # shell, social-engineered paste-bin) bypassing the signature +
+    # checksum gate is a security regression. Refuse loudly instead of
+    # warning — a warning on a user machine is exactly the failure mode
+    # this gate is designed to prevent.
+    if [ "${CI:-}" != "true" ]; then
+      err "APPSTRATE_SKIP_VERIFY=1 requires CI=true. Refusing to skip verification"
+      err "  on an interactive / user machine — this flag exists only for CI debug."
+      err "  If this is a CI run, export CI=true. Otherwise install minisign:"
+      err "    → macOS:   brew install minisign"
+      err "    → Debian:  sudo apt install minisign"
+      err "    → Alpine:  apk add minisign"
+      exit 1
+    fi
+    # The manifest's signature is the only thing that makes its tag
+    # trustworthy — skipping it would let an on-path attacker pick the
+    # version. Fail closed instead of reading an unverified manifest.
+    if [ "$VERSION" = "latest" ]; then
+      err "APPSTRATE_SKIP_VERIFY=1 cannot resolve \"latest\" (the channel manifest is trusted only"
+      err "  through its signature). Pin a release with APPSTRATE_VERSION=vX.Y.Z."
+      exit 1
+    fi
+    warn "APPSTRATE_SKIP_VERIFY=1 + CI=true — integrity + provenance checks skipped."
+    warn "Only use this in controlled CI debug runs. Do NOT set on user machines."
+    # Deliberate 5-second pause so a sysadmin auditing a paste-bin install
+    # script has a visible window to Ctrl-C before execution. A silent warn
+    # on stderr is trivially lost in terminal noise; `rustup-init` uses the
+    # same pattern. Non-interactive contexts (no TTY) still pause — the
+    # whole point is to slow down unattended piping into `| bash`.
+    warn "Proceeding in 5 seconds. Press Ctrl-C to abort."
+    sleep 5
+  else
+    # Verification is gated on minisign availability. Without it we can't
+    # cryptographically tie the binary to the Appstrate release key; just
+    # matching a checksum file downloaded over the same TLS channel as the
+    # binary is security theatre (an on-path attacker can rewrite both).
+    # Fail closed — the one-line install command the user just executed
+    # took < 5s; installing minisign via the OS package manager costs
+    # roughly the same.
+    if ! have_minisign; then
+      # Decide between auto-install vs. prompt vs. fail-with-hint. We treat
+      # the same three signals that drive the launch decision below as
+      # "unattended": --yes arg, CI=true|1|yes, and "no TTY on stdout".
+      # This keeps `curl … | bash -s -- --yes` truly one-step and prevents
+      # the prompt from firing in Dockerfile RUN, cron, or systemd contexts
+      # where there's nobody to answer.
+      _ms_wants_auto=0
+      case " $* " in *" --yes "*) _ms_wants_auto=1 ;; esac
+      case "${CI:-}" in true | 1 | yes) _ms_wants_auto=1 ;; esac
+      if [ ! -t 1 ]; then _ms_wants_auto=1; fi
+
+      if [ "${APPSTRATE_NO_INSTALL_MINISIGN:-0}" = "1" ]; then
+        _ms_installer=""
+      else
+        _ms_installer="$(detect_minisign_installer || true)"
+      fi
+
+      _ms_should_install=0
+      if [ -n "$_ms_installer" ]; then
+        if [ "$_ms_wants_auto" = "1" ]; then
+          _ms_should_install=1
+        else
+          # Interactive prompt — fall back to /dev/tty if stdin is the
+          # curl pipe (same trick as the dual-install gate above).
+          _ms_tty=""
+          if [ -t 0 ]; then
+            _ms_tty="stdin"
+          elif [ -r /dev/tty ]; then
+            _ms_tty="/dev/tty"
+          fi
+          if [ -n "$_ms_tty" ]; then
+            warn "minisign is required to verify the Appstrate CLI download."
+            printf '\nInstall it now via %s? [Y/n] ' "$_ms_installer"
+            _ms_answer=""
+            if [ "$_ms_tty" = "/dev/tty" ]; then
+              IFS= read -r _ms_answer </dev/tty || _ms_answer=""
+            else
+              IFS= read -r _ms_answer || _ms_answer=""
+            fi
+            case "$_ms_answer" in
+              "" | y | Y | yes | YES) _ms_should_install=1 ;;
+              *) _ms_should_install=0 ;;
+            esac
+          fi
+        fi
+      fi
+
+      if [ "$_ms_should_install" = "1" ]; then
+        if ! try_install_minisign; then
+          err ""
+          err "Could not auto-install minisign. Install it manually and re-run:"
+          err "  → macOS:   brew install minisign"
+          err "  → Debian:  sudo apt install minisign"
+          err "  → Alpine:  apk add minisign"
+          err "  → Other:   https://jedisct1.github.io/minisign/"
+          exit 1
+        fi
+      else
+        err "minisign is required to verify the Appstrate CLI download."
+        err "  → macOS:   brew install minisign"
+        err "  → Debian:  sudo apt install minisign"
+        err "  → Alpine:  apk add minisign"
+        err "  → Other:   https://jedisct1.github.io/minisign/"
+        err ""
+        err "To override (NOT recommended, only for CI debug), re-run with"
+        err "  APPSTRATE_SKIP_VERIFY=1 curl -fsSL https://get.appstrate.dev | bash"
+        exit 1
+      fi
+    fi
+  fi
+
+  # Resolved here, past the SOURCE_ONLY return above: a test harness that
+  # sources this script must define the helpers without a network call.
+  if [ "$VERSION" = "latest" ]; then
+    VERSION=$(resolve_latest_tag) || {
+      err "Could not resolve the latest release. Pin one with APPSTRATE_VERSION=vX.Y.Z."
+      exit 1
+    }
+    log "Resolved latest release: $VERSION"
+  fi
+  URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
+  URL="${URL_BASE}/${ASSET}"
+  CHECKSUMS_URL="${URL_BASE}/checksums.txt"
+  CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
+
+  log "Downloading Appstrate CLI ($OS/$ARCH, $VERSION)"
+  curl $CURL_OPTS "$URL" -o "$TMPDIR/$ASSET"
+
+  if [ "${APPSTRATE_SKIP_VERIFY:-0}" != "1" ]; then
+    log "Fetching release checksums + signature"
+    curl $CURL_OPTS "$CHECKSUMS_URL" -o "$TMPDIR/checksums.txt"
+    curl $CURL_OPTS "$CHECKSUMS_SIG_URL" -o "$TMPDIR/checksums.txt.minisig"
+
+    log "Verifying signature against Appstrate release key"
+    if ! minisign -Vm "$TMPDIR/checksums.txt" -P "$APPSTRATE_MINISIGN_PUBKEY" >/dev/null; then
+      err "Signature verification FAILED."
+      err "  → The checksums manifest was NOT signed by the Appstrate key."
+      err "  → Your download is possibly tampered — do NOT execute."
+      err "  → Report: https://github.com/appstrate/appstrate/issues"
+      exit 1
+    fi
+
+    log "Verifying binary integrity (SHA-256)"
+    # Prefer the GNU tool when available; fall back to BSD `shasum -c`
+    # (default on macOS without coreutils). Both speak the same `<hash>
+    # <filename>` line format so `checksums.txt` is compatible.
+    (
+      cd "$TMPDIR"
+      # Only the line for our asset matters — filtering keeps the tool
+      # from failing on missing sibling binaries we didn't download.
+      # The `|| true` lets us own the empty-result error path below
+      # instead of dying inside `grep` with a generic exit 1.
+      grep " ${ASSET}\$" checksums.txt >checksums.local.txt || true
+      # CRITICAL: `sha256sum -c` on an empty manifest exits 0 silently
+      # ("0 lines processed, 0 failures"), which would let an attacker
+      # bypass integrity by publishing a checksums.txt that's validly
+      # signed but missing our asset line (broken release matrix, asset-
+      # rename typo, or targeted tampering). Assert the line exists, and
+      # belt-and-braces assert it's the ONLY line for our asset (catches
+      # accidental duplicate entries that could mask a real mismatch).
+      if [ ! -s checksums.local.txt ]; then
+        err "Asset ${ASSET} is not listed in the signed checksums manifest."
+        err "  → This is either a broken release or tampering — do NOT execute."
+        err "  → Report: https://github.com/appstrate/appstrate/issues"
+        exit 1
+      fi
+      lines=$(wc -l <checksums.local.txt)
+      if [ "$lines" -ne 1 ]; then
+        err "Expected exactly one line for ${ASSET} in checksums.txt, got ${lines}."
+        err "  → Duplicate or malformed entries — do NOT execute."
+        exit 1
+      fi
+      # `--quiet` is GNU-only — BusyBox's sha256sum (Alpine) rejects it
+      # with "unrecognized option". Drop the flag and silence the "OK"
+      # confirmation line via `>/dev/null` instead, which is portable
+      # across GNU coreutils, BusyBox, and macOS BSD shasum. Exit code
+      # is what drives the gate; the suppressed line is just noise.
+      if have_sha256sum; then
+        sha256sum -c checksums.local.txt >/dev/null
+      elif have_shasum; then
+        shasum -a 256 -c checksums.local.txt >/dev/null
+      else
+        err "Neither sha256sum nor shasum is available on this system."
+        exit 1
+      fi
+    ) || {
+      err "SHA-256 mismatch — the downloaded binary does NOT match the signed manifest."
+      err "  → This strongly suggests tampering in transit. Do NOT execute."
+      err "  → Report: https://github.com/appstrate/appstrate/issues"
+      exit 1
+    }
+    log "Integrity + provenance verified"
+  fi
+
+  # ─── Install ────────────────────────────────────────────────────────────────
+
+  # Create BIN_DIR if it doesn't exist — ~/.local/bin isn't present by
+  # default on macOS vanilla. mkdir -p is a no-op if the dir already exists.
+  # We attempt this unconditionally under the current user; if BIN_DIR lives
+  # under a system path that requires root (explicit APPSTRATE_BIN_DIR
+  # override), the mkdir will silently fail and we'll catch it in the
+  # writability check below.
+  mkdir -p "$BIN_DIR" 2>/dev/null || true
+
+  # `sudo` only if the destination isn't user-writable — skips a pointless
+  # auth prompt on the rootless default ($HOME/.local/bin), and on
+  # /usr/local/bin setups where the dir is already user-owned (macOS Homebrew
+  # under /opt/homebrew + symlinked /usr/local/bin). Only the explicit
+  # APPSTRATE_BIN_DIR=/usr/local/bin override on a stock Linux/macOS system
+  # will trigger the sudo prompt.
+  SUDO=""
+  if [ ! -w "$BIN_DIR" ]; then
+    SUDO="sudo"
+  fi
+
+  log "Installing to $DEST"
+  $SUDO install -m 0755 "$TMPDIR/$ASSET" "$DEST"
+
+  # ─── PATH setup ─────────────────────────────────────────────────────────────
+  _setup_path
+
+  # ─── Launch decision ────────────────────────────────────────────────────────
+  #
+  # Two-step is the new default: drop the verified binary on PATH, print
+  # a copy-pasteable next step, exit 0. The user's interactive shell
+  # launches `appstrate install` from a real TTY where clack's
+  # `setRawMode` works — the Bun macOS keypress/kqueue regressions
+  # (oven-sh/bun #6862, #7033, #24615, #5240, #14483, #18239) are bypassed
+  # by construction because no prompt fires inside this shell-piped child
+  # process and no `</dev/tty` redirect chains a kqueue EINVAL into later
+  # subprocesses (`bun run dev`, `docker compose up`).
+  #
+  # Auto-install (all-in-one behaviour) fires on three signals,
+  # ordered cheapest → broadest:
+  #   1. user passed `--yes` (CI / scripted automation, explicit intent)
+  #   2. CI=true|1|yes (GHA, GitLab, CircleCI, Jenkins — any env that
+  #      sets the canonical CI flag is by definition non-interactive)
+  #   3. stdout is not a TTY (Dockerfile RUN, systemd unit, cron,
+  #      `bash /tmp/inst.sh > out.log`). The user wouldn't see the
+  #      next-step instruction anyway; running `--yes` is friendlier
+  #      than dropping the binary and silently exiting.
+  #
+  # On the auto path, the CLI's `resolveBootstrapEmail` ships a
+  # bootstrap token (closed-by-default) when no
+  # `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` is set — no more silently-public
+  # VPS. The operator claims ownership at `<URL>/claim`
+  # with the printed token.
+  #
+  # Escape hatch:
+  #   - APPSTRATE_NO_LAUNCH=1 → drop binary, no install at all (scripted
+  #     provisioning where install is owned by Ansible / cloud-init).
+  _wants_auto=0
+  case " $* " in *" --yes "*) _wants_auto=1 ;; esac
+  case "${CI:-}" in true | 1 | yes) _wants_auto=1 ;; esac
+  if [ ! -t 1 ]; then _wants_auto=1; fi
+
+  if [ "${APPSTRATE_NO_LAUNCH:-0}" = "1" ]; then
+    log "APPSTRATE_NO_LAUNCH=1: skipping install entirely. Binary at $DEST."
+    exit 0
+  fi
+
+  if [ "$_wants_auto" = "0" ]; then
+    # New default: drop & instruct.
+    printf '\n'
+    log "Appstrate CLI installed."
+    log ""
+    log "To complete setup, run:"
+    printf '\n    \033[1;36m%s install\033[0m\n\n' "$DEST"
+    log "Or in a new shell (PATH already updated):"
+    printf '\n    \033[1;36mappstrate install\033[0m\n\n'
+    log "For unattended/CI installs: re-run with \`-s -- --yes\`."
+    log "  Closed-by-default semantics ship a bootstrap token; see"
+    log "  https://github.com/appstrate/appstrate/issues/344"
+    exit 0
+  fi
+
+  log "Launching \`appstrate install --yes\` (unattended mode)"
+  # Exec by absolute path, NOT by `appstrate` on PATH. A different binary
+  # earlier in PATH (dev machine with `bun link`, stale /usr/local/bin
+  # shadowed by ~/.local/bin) would silently shadow the verified one —
+  # defeating the trust chain. `$DEST` is the exact file we wrote + chmod'd.
+  #
+  # APPSTRATE_VERSION means a release tag here (`v1.0.0`, `latest`) but a
+  # Docker image tag to `appstrate install` (`1.0.0`), which writes it to
+  # `.env` as is. The binary we just verified IS the pinned release, and
+  # lockstep derives the image tag from its own version, so the child must
+  # not inherit ours.
+  unset APPSTRATE_VERSION
+  exec "$DEST" install --yes "$@"
+
+}
+
+# Deliberate: guard against partial `curl | bash` execution by only
+# invoking the function after the full file has been parsed. A truncated
+# download dies with a shell syntax error on the unclosed function body
+# or the missing invocation line, never with a half-run install.
+_appstrate_bootstrap "$@"
