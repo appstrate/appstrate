@@ -9,11 +9,14 @@ import { PendingButton } from "@/components/app-ui/pending-button";
 export function SaveBar({
   message,
   pending,
+  saveDisabled,
   onDiscard,
   onSave,
 }: {
   message: ReactNode;
   pending: boolean;
+  /** Save is not offered yet (the facts a write is judged against are still loading). */
+  saveDisabled?: boolean;
   onDiscard: () => void;
   onSave: () => void;
 }) {
@@ -31,7 +34,13 @@ export function SaveBar({
         >
           {t("editor.discardChanges")}
         </Button>
-        <PendingButton type="button" pending={pending} onClick={onSave} className="max-lg:flex-1">
+        <PendingButton
+          type="button"
+          pending={pending}
+          disabled={saveDisabled}
+          onClick={onSave}
+          className="max-lg:flex-1"
+        >
           {t("btn.save", { ns: "common" })}
         </PendingButton>
       </div>

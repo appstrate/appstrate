@@ -168,9 +168,12 @@ export function onMutationError(err: Error) {
   toastError(err);
 }
 
-/** A schedule write's `409 missing_integration_connection` for a surface with no picker (the enable toggle); anything else is left to `onMutationError`. */
-export function toastScheduleConnectionChoice(err: Error) {
+/** A schedule write's `409 missing_integration_connection` (the enable toggle has no picker; the settings' Save leads to Connexions with `action`); anything else is left to `onMutationError`. */
+export function toastScheduleConnectionChoice(
+  err: Error,
+  action?: { label: string; onClick: () => void },
+) {
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
-    toast.error(i18n.t("schedule.connectionChoiceRequired", { ns: "agents" }));
+    toast.error(i18n.t("schedule.connectionChoiceRequired", { ns: "agents" }), { action });
   }
 }

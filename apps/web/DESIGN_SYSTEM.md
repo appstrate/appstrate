@@ -174,7 +174,10 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   beside the label) or `action` (button opposite its explanation). Groups:
   `SettingsGroup` (same file); headings: `SettingsHeading`
   (`components/settings/settings-heading.tsx`, `level` `page` or `group`).
-- **No Edit button, no edit mode, no Save button.** A control saves itself: a
+- **No Edit button, no edit mode, no Save button.** A control saves itself (a
+  schedule's Paramètres is the exception: its sections edit one draft that a
+  `SaveBar` sends as one write, since a move of the actor or the version is judged
+  with the connections of the state it moves to): a
   select, switch or toggle on change; a text on blur or Enter, Escape reverts
   (`InlineTextSetting`, `components/settings/inline-text-setting.tsx`); typing or
   a slider after a 650 ms pause. A rename in a table is `InlineEditableLabel`
@@ -655,8 +658,9 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
   field already shows the change.
 - An expected refusal that asks for a choice (a 409 naming candidates) is a
   form state with the choice, not « Erreur d'enregistrement » and not a fault: an
-  `info` alert per integration, said by `ScheduleConnectionRefusals` wherever the
-  write can be refused (Connexions and Identité of a schedule). It names whose
+  `info` alert per integration, said by `ScheduleConnectionRefusals`. A schedule's
+  Save refused that way is toasted with a link to its Connexions, where the answer
+  is (`ScheduleConnectionAnswer`). It names whose
   connection and which integration by its display name, and says why the server
   cannot decide (« Choisissez la connexion Telegram pour e2e-C Membre » / « e2e-C
   Membre a plusieurs connexions Telegram. Une planification se lance seule : elle ne peut pas

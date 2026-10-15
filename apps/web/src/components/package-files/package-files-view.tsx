@@ -44,7 +44,7 @@ import { FileActionsMenu } from "./file-actions";
 import { FileTree } from "./file-tree";
 import { PackageFileSource } from "./package-file-source";
 import { PackageFileTextEditor } from "./package-file-text-editor";
-import { SaveBar } from "./save-bar";
+import { SaveBar } from "../save-bar";
 import { usePackageFileIndex } from "./use-package-file-index";
 import { useDraftFileEdits } from "./use-draft-file-edits";
 

@@ -83,15 +83,3 @@ export type ScheduleSettingsSection = (typeof SCHEDULE_SETTINGS_SECTIONS)[number
 export function scheduleSettingsHref(scheduleId: string, section: ScheduleSettingsSection) {
   return sectionHref(scheduleDetailPath(scheduleId), "settings", "scheduleSettings", section);
 }
-
-/**
- * A write's state as one section says it: every section saves through one mutation,
- * so a section is quiet about writes made from another.
- */
-export function sectionWriteState<
-  T extends { isPending: boolean; isSuccess: boolean; isError: boolean },
->(write: T, writtenFrom: ScheduleSettingsSection | null, section: ScheduleSettingsSection): T {
-  return writtenFrom === section
-    ? write
-    : { ...write, isPending: false, isSuccess: false, isError: false };
-}

@@ -2,11 +2,7 @@
 
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { paths } from "../api/schema";
-import {
-  type ConnectionSet,
-  withConnectionOverride,
-  withDeclaredConnections,
-} from "./connection-set";
+import { withDeclaredConnections } from "./connection-set";
 
 /** An execution identity, the platform `actor` wire shape: exactly one field set (user XOR end-user). */
 export type ActorValue = { userId?: string; endUserId?: string };
@@ -79,63 +75,58 @@ export function scheduleCreatePayload(
   };
 }
 
+/** What the reader changed on a schedule's settings since it was stored; an absent key is untouched. */
+export interface ScheduleDraft {
+  name?: string;
+  cron?: string;
+  timezone?: string;
+  actor?: ActorValue;
+  /** `null` inherits the latest published version. */
+  versionOverride?: string | null;
+  /** The body of `input`: only what differs from the agent's values. */
+  input?: Record<string, unknown>;
+  overrides?: RunOverridesValue;
+  /** The connection picks, whole. */
+  picks?: Record<string, string[]>;
+}
+
 /**
- * A PATCH moving who the fires run as or which version. Connections are those of the
- * NEXT state (`declared` is that state's); an actor change drops stored picks (they
- * named the previous identity's connections). `connection_overrides` is always sent
- * (`null` when empty): an absent key on an actor change lets the server reset the picks
- * and refuse the write.
+ * The one PATCH a settings save sends: the changed keys only (an absent key is left as stored).
+ * Connections are those of the NEXT state (`declared` is its fired version's): a move of the actor
+ * or the version, or a pick, sends `connection_overrides` (`null` when empty), and an actor move
+ * drops the stored picks, which named the previous identity's connections.
  */
-export function scheduleMovePayload(
-  args: Omit<ScheduleOverridesState, "overrides"> & {
-    stored: {
-      actor: ActorValue;
-      versionOverride: string | null;
-      picks: Record<string, string[]> | null;
-    };
-    next: { actor?: ActorValue; versionOverride?: string | null };
-  },
-): ScheduleUpdateBody {
-  const { stored, next } = args;
-  const actorMoves = next.actor !== undefined && !sameActor(next.actor, stored.actor);
+export function scheduleUpdatePayload(args: {
+  stored: {
+    actor: ActorValue;
+    versionOverride: string | null;
+    picks: Record<string, string[]> | null;
+  };
+  draft: ScheduleDraft;
+  declared: readonly string[] | undefined;
+}): ScheduleUpdateBody {
+  const { stored, draft } = args;
+  const name = draft.name?.trim();
+  const actorMoves = draft.actor !== undefined && !sameActor(draft.actor, stored.actor);
   const versionMoves =
-    next.versionOverride !== undefined && next.versionOverride !== stored.versionOverride;
-  const picks = actorMoves ? undefined : (stored.picks ?? undefined);
+    draft.versionOverride !== undefined && draft.versionOverride !== stored.versionOverride;
+  const picks = draft.picks ?? (actorMoves ? undefined : (stored.picks ?? undefined));
   const { connection_overrides } = savedScheduleOverrides({
-    ...args,
+    declared: args.declared,
     overrides: picks ? { connection_overrides: picks } : {},
   });
   return {
-    ...(actorMoves ? { actor: next.actor } : {}),
-    ...(versionMoves ? { version_override: next.versionOverride } : {}),
-    connection_overrides: connection_overrides ?? null,
+    ...(name ? { name } : {}),
+    ...(draft.cron ? { cron_expression: draft.cron } : {}),
+    ...(draft.timezone ? { timezone: draft.timezone } : {}),
+    ...(actorMoves ? { actor: draft.actor } : {}),
+    ...(versionMoves ? { version_override: draft.versionOverride } : {}),
+    ...(draft.input ? { input: draft.input } : {}),
+    ...(draft.overrides ? scheduleExecutionPayload(draft.overrides) : {}),
+    ...(actorMoves || versionMoves || draft.picks
+      ? { connection_overrides: connection_overrides ?? null }
+      : {}),
   };
-}
-
-/** A move held (`null`) until the next state's facts settle: with no `declared` yet every pick would be kept. */
-export function dueScheduleMove(
-  args: Parameters<typeof scheduleMovePayload>[0] & { ready: boolean },
-): ScheduleUpdateBody | null {
-  return args.ready ? scheduleMovePayload(args) : null;
-}
-
-/** The PATCH of one connection pick: the stored picks with `integrationId`'s set replaced (`null` removes it). */
-export function scheduleConnectionPickPayload(
-  args: Omit<ScheduleOverridesState, "overrides"> & {
-    picks: Record<string, string[]> | null;
-    integrationId: string;
-    connectionIds: ConnectionSet;
-  },
-): Pick<ScheduleUpdateBody, "connection_overrides"> {
-  const { connection_overrides } = savedScheduleOverrides({
-    ...args,
-    overrides: withConnectionOverride(
-      args.picks ? { connection_overrides: args.picks } : {},
-      args.integrationId,
-      args.connectionIds,
-    ),
-  });
-  return { connection_overrides: connection_overrides ?? null };
 }
 
 export function scheduleExecutionPayload(
@@ -149,12 +140,4 @@ export function scheduleExecutionPayload(
     generation_config_override: overrides.generation_config_override ?? null,
     proxy_id_override: overrides.proxy_id_override ?? null,
   };
-}
-
-/** The answer to a write refused over connections: the same write again, the picks replacing its whole map. */
-export function scheduleRefusalAnswerPayload<T extends ScheduleUpdateBody>(
-  sent: T,
-  picks: Record<string, string[]>,
-): T {
-  return { ...sent, connection_overrides: Object.keys(picks).length > 0 ? picks : null };
 }

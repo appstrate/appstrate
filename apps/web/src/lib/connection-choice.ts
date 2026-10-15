@@ -7,12 +7,7 @@ import {
 import { ApiError } from "../api/errors";
 import type { components } from "../api/schema";
 import { withConnectionOverride, type ConnectionSet } from "./connection-set";
-import {
-  type ActorValue,
-  type RunOverridesValue,
-  type ScheduleUpdateBody,
-  sameActor,
-} from "./schedule-payload";
+import { type ActorValue, type RunOverridesValue, sameActor } from "./schedule-payload";
 import { sameSet } from "./strings";
 
 export function integrationIdOfField(field: string): string {
@@ -100,19 +95,6 @@ export function refusalForActor(
   runsAs: ActorValue | undefined,
 ): readonly ConnectionChoice[] {
   return submitted && sameActor(submitted.runsAs, runsAs) ? (choices ?? []) : [];
-}
-
-/** Picks judged = the sent map, else the stored one (an absent key keeps it). `null` for any other outcome. */
-export function refusedScheduleWrite(
-  error: unknown,
-  sent: ScheduleUpdateBody | undefined,
-  stored: { actor: ActorValue; picks: Record<string, string[]> | null },
-): (SubmittedPicks & { choices: ConnectionChoice[] }) | null {
-  const choices = scheduleConnectionChoices(error);
-  if (choices.length === 0 || !sent) return null;
-  const picks =
-    "connection_overrides" in sent ? sent.connection_overrides : (stored.picks ?? undefined);
-  return { choices, runsAs: sent.actor ?? stored.actor, picks: picks ?? {} };
 }
 
 /**
