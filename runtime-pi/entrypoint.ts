@@ -9,8 +9,8 @@
  *
  * Responsibilities (runtime-pi only):
  *   1. Initialise a git repo + extract the injected agent package.
- *   2. Install skills into `.pi/` for on-disk lookup (tool docs live on
- *      the MCP tool descriptors, not on disk).
+ *   2. Install skill and integration members into `.pi/` for on-disk
+ *      lookup (tool docs live on the MCP tool descriptors, not on disk).
  *   3. Collect tool extension factories (from agent package + built-ins).
  *   4. Build an {@link ExecutionContext} from env vars.
  *   5. Build an {@link HttpSink} against the platform's signed-event API.
@@ -37,7 +37,7 @@ import { writeSync } from "node:fs";
 import * as path from "node:path";
 import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
-  piSkillsDir,
+  bundleMemberDir,
   prepareBundleForPi,
   buildPublishFileExtension,
   emitRuntimeReady,
@@ -49,7 +49,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { canonicalizeRuntimeToolIds } from "@appstrate/core/runtime-tools-catalog";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
-import { readBundleFromFile, parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
+import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
@@ -414,32 +414,25 @@ const bundlePrepareStart = performance.now();
 try {
   await prepareBundleForPi(bundle, { workspaceDir: WORKSPACE });
 
-  // Fail-loud safety net: verify every skill the bundle
-  // carries actually landed under `.pi/skills/<id>`. Before agent
-  // self-provisioning, a dropped bundle degraded silently — the agent
-  // booted onto an empty workspace and only an easily-missed log line
-  // hinted at it. Now a skill that the bundle declares but that did not
-  // materialise surfaces as an `appstrate.error` breadcrumb, so the
-  // regression cannot hide again.
-  const missingSkills: string[] = [];
+  // Fail-loud safety net: every skill or integration member the bundle
+  // carries must have landed in the workspace. A dropped member otherwise
+  // degrades silently (the agent reads an empty directory), so surface it as
+  // an `appstrate.error` breadcrumb.
+  const missingMembers: string[] = [];
   for (const [identity, pkg] of bundle.packages) {
     if (identity === bundle.root) continue;
-    if ((pkg.manifest as { type?: unknown }).type !== "skill") continue;
-    const parsed = parsePackageIdentity(identity);
-    if (!parsed) continue;
-    if (!(await exists(path.join(piSkillsDir(WORKSPACE), parsed.packageId)))) {
-      missingSkills.push(parsed.packageId);
-    }
+    const destDir = bundleMemberDir(WORKSPACE, identity, pkg);
+    if (destDir && !(await exists(destDir))) missingMembers.push(identity);
   }
-  if (missingSkills.length > 0) {
+  if (missingMembers.length > 0) {
     await emitError(
-      `Skill(s) declared by the agent did not materialise: ${missingSkills.join(", ")}`,
-      { missingSkills },
+      `Package(s) declared by the agent did not materialise: ${missingMembers.join(", ")}`,
+      { missingMembers },
     );
   }
 
-  // Fire-and-forget cleanup of the original AFPS; no longer needed once the
-  // Pi SDK is up. (prepareBundleForPi is skills-only — no scratch dir.)
+  // Fire-and-forget cleanup of the original AFPS; the materialised members
+  // are all the run needs from it.
   void fs.unlink(packagePath).catch(() => {});
 } catch (err) {
   await emitError(`Failed to prepare agent package: ${getErrorMessage(err)}`);

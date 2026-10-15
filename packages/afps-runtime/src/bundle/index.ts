@@ -32,6 +32,7 @@ export {
 export { BundleError, type BundleErrorCode } from "./errors.ts";
 export { DEFAULT_BUNDLE_LIMITS, resolveBundleLimits, type BundleLimits } from "./limits.ts";
 export { canonicalJsonStringify } from "./canonical-json.ts";
+export { PI_SKILLS_DIR, PI_INTEGRATIONS_DIR } from "./workspace-layout.ts";
 
 // ─── Integrity primitives (RECORD + bundle.json merkle) ─────────────
 export {
