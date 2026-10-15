@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Send } from "lucide-react";
+import { relativeAge } from "@appstrate/core/format";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { ErrorState, EmptyState } from "@/components/page-states";
@@ -12,18 +13,21 @@ import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";
 import { errorMessage } from "../../../lib/mutation-error";
 
+const AGE_KEY = {
+  now: "webhooks.lessThanMinute",
+  minute: "webhooks.minutesAgo",
+  hour: "webhooks.hoursAgo",
+  day: "webhooks.daysAgo",
+  month: "webhooks.monthsAgo",
+  year: "webhooks.yearsAgo",
+} as const;
+
 function formatRelativeTime(
   dateStr: string,
   t: (key: string, opts?: Record<string, unknown>) => string,
 ): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return t("webhooks.lessThanMinute");
-  if (minutes < 60) return t("webhooks.minutesAgo", { count: minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t("webhooks.hoursAgo", { count: hours });
-  const days = Math.floor(hours / 24);
-  return t("webhooks.daysAgo", { count: days });
+  const age = relativeAge(dateStr, Date.now());
+  return age ? t(AGE_KEY[age.unit], { count: age.count }) : "";
 }
 
 function deliveryStatusVariant(d: WebhookDelivery): "success" | "failed" | "pending" {
@@ -98,7 +102,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
           <Button
             variant="outline"
             size="sm"
-            disabled={isFetchingNextPage}
+            pending={isFetchingNextPage}
             onClick={() => void fetchNextPage()}
           >
             {isFetchNextPageError

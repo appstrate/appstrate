@@ -2,7 +2,7 @@
 
 import { lazy, Suspense } from "react";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { LoadingState } from "../../components/page-states";
+import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { UnavailableState } from "../../components/route-gate";
 
 const OAuthClientsTab = lazy(() =>
@@ -17,7 +17,7 @@ export function WorkspaceSettingsOAuthPage() {
   if (!spaceId) return <UnavailableState />;
 
   return (
-    <Suspense fallback={<LoadingState />}>
+    <Suspense fallback={<SettingsSkeleton />}>
       <OAuthClientsTab level="space" />
     </Suspense>
   );

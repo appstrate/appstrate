@@ -17,9 +17,11 @@ const PROVIDERS: Record<SocialProvider, { icon: React.ComponentType; labelKey: s
 export function SocialSignInButton({
   provider,
   callbackURL: callbackURLProp,
+  disabled,
 }: {
   provider: SocialProvider;
   callbackURL?: string;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation("settings");
   const { signInWithSocial } = useAuth();
@@ -33,7 +35,7 @@ export function SocialSignInButton({
       variant="outline"
       className="text-foreground w-full"
       type="button"
-      disabled={loading}
+      disabled={loading || disabled}
       onClick={async () => {
         setLoading(true);
         try {

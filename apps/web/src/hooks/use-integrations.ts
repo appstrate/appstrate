@@ -27,6 +27,7 @@ import type {
   IntegrationPin,
 } from "@appstrate/shared-types";
 import { $api, client, type paths } from "../api/client";
+import { invalidatePaths } from "../lib/query-keys";
 import { splitPackageRef } from "../lib/package-paths";
 
 // Spec-pinned narrowing for the integration list and detail endpoints. It takes
@@ -412,9 +413,7 @@ function useClientMutationSuccess(messageKey?: string) {
   const qc = useQueryClient();
   return () => {
     if (messageKey) toast.success(t(messageKey));
-    for (const path of [SPACE_CLIENTS, ORG_CLIENTS, "/api/integrations/{packageId}"]) {
-      void qc.invalidateQueries({ queryKey: ["get", path] });
-    }
+    void invalidatePaths(qc, [SPACE_CLIENTS, ORG_CLIENTS, "/api/integrations/{packageId}"]);
   };
 }
 
@@ -613,7 +612,7 @@ export function useUpdateIntegrationSettings() {
     },
     onSuccess: () => {
       toast.success(t("integration.admin.blockUserConnections.updated"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+      void invalidatePaths(qc, ["/api/integrations/{packageId}"]);
     },
   });
 }

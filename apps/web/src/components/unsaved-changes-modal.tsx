@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import type { UnsavedBlocker } from "../hooks/use-unsaved-changes";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
 
 interface UnsavedChangesModalProps {
   blocker: UnsavedBlocker;
@@ -47,8 +46,8 @@ export function UnsavedChangesModal({ blocker, onSaveDraft }: UnsavedChangesModa
             {t("unsaved.discard")}
           </Button>
           {onSaveDraft && (
-            <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? <Spinner /> : t("unsaved.saveDraft")}
+            <Button onClick={handleSave} pending={isSaving}>
+              {t("unsaved.saveDraft")}
             </Button>
           )}
         </>

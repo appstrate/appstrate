@@ -187,7 +187,7 @@ interface BuildPlatformMcpToolsOptions {
  * the cache still hits.
  *
  * The note lands in `content`, which the UI parses too (nothing reads `details`),
- * so the payload stops being the only text part. `unwrapResult` on the UI side is
+ * so the payload stops being the only text part. `unwrapMcpResult` (`@appstrate/core/mcp-result`) on the UI side is
  * deliberately tolerant of trailing non-payload text — do not append here without
  * checking it still is.
  */

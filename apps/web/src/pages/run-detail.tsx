@@ -4,7 +4,6 @@ import { useCallback, useMemo, useEffect } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
 import { agentLaunchRefusal } from "../hooks/use-agent-readiness";
 import { useRun, useRunLogs } from "../hooks/use-runs";
@@ -18,17 +17,23 @@ import { RunModal } from "../components/run-modal";
 import { useModalParam } from "../hooks/use-modal-param";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ResourceErrorState } from "../components/page-states";
-import { invalidateOrgStorage } from "../hooks/use-files";
+import { ResourceErrorState } from "../components/page-states";
+import { RunDetailSkeleton } from "../components/loading-skeletons";
 import { useMarkReadByRun } from "../hooks/use-notifications";
-import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type AgentListItem, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/format-date";
 import { isPublishedFileLogEvent } from "../lib/files";
 import { searchOf } from "../lib/url-search";
 import { replayVersion } from "../lib/version-selector";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
-import { runKeys, invalidateRunLogs } from "../lib/query-keys";
+import {
+  agentsKeys,
+  runKeys,
+  invalidateOrgDetail,
+  invalidatePaths,
+  invalidateRunLogs,
+} from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { RunHeaderActions, RunHeaderSummary } from "../components/run-detail/run-header-summary";
@@ -37,7 +42,12 @@ import { RunResultsView } from "../components/run-detail/run-results-view";
 import { RunSnapshotInspector } from "../components/run-detail/run-snapshot-inspector";
 import { Button } from "@appstrate/ui/components/button";
 import { ArrowRight } from "lucide-react";
-import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
+import {
+  DetailTabs,
+  DetailTabBar,
+  DetailTabPanel,
+  type DetailTab,
+} from "../components/detail-tabs";
 import { Badge } from "../components/status-badge";
 import { RunProvenanceBadges } from "../components/run-cells";
 import type { JournalOverviewFilter } from "../components/log-viewer";
@@ -70,10 +80,7 @@ export function RunDetailPage() {
   // said before the click rather than collected as a 404 after it. The verdict
   // rides this very response (`AgentDetail.active`), resolved for the space the
   // page is read from; the Re-run control renders only once it has landed.
-  const { data: agent, isLoading: agentLoading } = usePackageDetail(
-    "agent",
-    isInlinePath ? undefined : packageId,
-  );
+  const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const runQuery = useRun(runId);
   const [tab, setTab] = useTabWithHash(RUN_DETAIL_TABS, "overview");
   const { data: run, error } = runQuery;
@@ -100,7 +107,8 @@ export function RunDetailPage() {
   const isRunning = !!status && (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
   const isTerminal = !!status && !isRunning;
 
-  const { data: logs } = useRunLogs(runId);
+  const logsQuery = useRunLogs(runId);
+  const { data: logs } = logsQuery;
 
   const qc = useQueryClient();
 
@@ -149,8 +157,9 @@ export function RunDetailPage() {
   const allLogs = historicalLogs;
   const modelFallback = useMemo(() => findModelFallback(logs), [logs]);
   // Run-level memory rows (only those touched during this run).
-  const { data: runMemories } = useRunMemories(packageId, runId);
-  const { data: runPinned } = useRunPinned(packageId, runId);
+  const { data: runMemories, isLoading: memoriesLoading } = useRunMemories(packageId, runId);
+  const { data: runPinned, isLoading: pinnedLoading } = useRunPinned(packageId, runId);
+  const memoryLoading = memoriesLoading || pinnedLoading;
   const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
   const hasRunMemory = runMemoryCount > 0;
   const hasDurableResults = hasOutput || (run?.file_counts.output ?? 0) > 0 || hasRunMemory;
@@ -190,9 +199,9 @@ export function RunDetailPage() {
         // channel. `isPublishedFileLogEvent` tests membership of the set the
         // sink's own tag is built from — it carries no legacy spelling.
         if (entry.type === "result" && isPublishedFileLogEvent(entry.event)) {
-          void qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
+          void invalidatePaths(qc, ["/api/files"]);
           void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, spaceId, runId) });
-          invalidateOrgStorage(qc);
+          void invalidateOrgDetail(qc);
         }
       },
       [qc, orgId, spaceId, runId],
@@ -226,12 +235,15 @@ export function RunDetailPage() {
     ),
   });
 
-  if (isQueryInFlight(runQuery)) return <LoadingState />;
+  if (isQueryInFlight(runQuery)) return <RunDetailSkeleton agentName={agent?.display_name} />;
 
   if (error || !run) return <ResourceErrorState error={error} />;
   const rerunRefusal = agent ? agentLaunchRefusal(agent) : null;
 
   const enrichedRun = run;
+  const knownAgentName = qc
+    .getQueryData<AgentListItem[]>(agentsKeys.list(orgId, spaceId))
+    ?.find((candidate) => candidate.id === packageId)?.display_name;
   const date = run.started_at ? formatDateField(run.started_at) : "";
   const isInline = enrichedRun.package_ephemeral;
   const canRerun = !isRunning && !isInline && !!agent && permissionsReady && can("agents:run");
@@ -248,9 +260,10 @@ export function RunDetailPage() {
         href: location.pathname,
       }
     : {
-        // The id is the fallback for an agent with no name, not a placeholder
-        // for one whose name is still on its way.
-        label: agent?.display_name || (agentLoading ? "…" : packageId),
+        // The name the agents list already holds stands in while the detail
+        // loads; the id is the fallback for an agent with no name, never a
+        // placeholder for one whose name is still on its way.
+        label: agent?.display_name || knownAgentName || packageId,
         href: `/agents/${packageId}`,
       };
 
@@ -262,11 +275,11 @@ export function RunDetailPage() {
     inlineName,
     numberedTitle: runCrumbLabel,
   });
-  const tabLabel: Record<RunDetailTab, string> = {
-    overview: t("run.tabOverview"),
-    journal: t("run.tabJournal"),
-    results: t("run.tabResults"),
-  };
+  const tabs: DetailTab<RunDetailTab>[] = [
+    { value: "overview", label: t("run.tabOverview") },
+    { value: "journal", label: t("run.tabJournal") },
+    { value: "results", label: t("run.tabResults") },
+  ];
 
   const breadcrumbs = [
     { label: t("detail.breadcrumb"), href: "/agents" },
@@ -277,7 +290,7 @@ export function RunDetailPage() {
           { label: t("detail.tabRuns"), href: `/agents/${packageId}#runs` },
           { label: runCrumbLabel, href: location.pathname },
         ]),
-    { label: tabLabel[tab] },
+    { label: tabs.find((item) => item.value === tab)?.label ?? tab },
   ];
 
   return (
@@ -343,37 +356,30 @@ export function RunDetailPage() {
         integrationEntries={agent?.dependencies.integrations}
       />
 
-      <Tabs value={tab} onValueChange={(value) => setTab(value as RunDetailTab)}>
+      <DetailTabs value={tab} onChange={setTab}>
         <div className="overflow-visible" data-run-detail-surface>
-          <DetailTabsList>
-            <DetailTabsTrigger value="overview">{t("run.tabOverview")}</DetailTabsTrigger>
-            <DetailTabsTrigger value="journal">{t("run.tabJournal")}</DetailTabsTrigger>
-            <DetailTabsTrigger value="results">{t("run.tabResults")}</DetailTabsTrigger>
-          </DetailTabsList>
+          <DetailTabBar tabs={tabs} />
 
-          <TabsContent
-            value="overview"
-            className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
-          >
+          <DetailTabPanel value="overview">
             <RunSnapshotInspector
               run={enrichedRun}
               turns={turnRows}
               logs={allLogs}
               structuredOutput={finalOutput}
               memoryChangeCount={runMemoryCount}
+              logsLoading={logsQuery.isLoading}
+              memoryLoading={memoryLoading}
               modelFallback={modelFallback}
               onOpenJournal={(filter) => openTab("#journal", filter)}
               onOpenResults={() => openTab("#results")}
             />
-          </TabsContent>
+          </DetailTabPanel>
 
-          <TabsContent
-            value="journal"
-            className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
-          >
+          <DetailTabPanel value="journal" flush>
             <RunExecutionView
               run={enrichedRun}
               logs={allLogs}
+              logsLoading={logsQuery.isLoading}
               initialFilter={journalFilter}
               headerActions={
                 run.status === "success" && hasDurableResults ? (
@@ -384,22 +390,21 @@ export function RunDetailPage() {
                 ) : undefined
               }
             />
-          </TabsContent>
+          </DetailTabPanel>
 
-          <TabsContent
-            value="results"
-            className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
-          >
+          <DetailTabPanel value="results" flush>
             <RunResultsView
               run={enrichedRun}
               packageId={packageId}
               output={finalOutput}
               hasRunMemory={hasRunMemory}
               isRunning={isRunning}
+              outputLoading={logsQuery.isLoading}
+              memoryLoading={memoryLoading}
             />
-          </TabsContent>
+          </DetailTabPanel>
         </div>
-      </Tabs>
+      </DetailTabs>
     </div>
   );
 }

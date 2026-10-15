@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import { isFileProducedByRun, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import { runDetailPath } from "./package-paths";
-import { hrefWithSearch } from "./url-search";
 
 /** Minimal shape the helpers read — a structural subset of the `FileDto`. */
 export interface FileLike {
@@ -149,21 +148,6 @@ export function mimeIconFor(mime: string): LucideIcon {
 export function fileRunHref(file: FileLike): string | undefined {
   if (!file.runId || !file.packageId) return undefined;
   return runDetailPath(file.packageId, file.runId);
-}
-
-/**
- * Addressable preview URL (`null` closes it). Existing filters, unrelated query
- * keys and the hash survive, so opening a file is one reversible location
- * change rather than local UI state.
- */
-export function filePreviewHref(
-  location: { pathname: string; search: string; hash: string },
-  id: string | null,
-): string {
-  const params = new URLSearchParams(location.search);
-  if (id) params.set("preview", id);
-  else params.delete("preview");
-  return hrefWithSearch(location, params);
 }
 
 /** Files inside this window (or already past) get the amber "expiring" state. */

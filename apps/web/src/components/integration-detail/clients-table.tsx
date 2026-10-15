@@ -438,7 +438,7 @@ export function ClientsTable({
         columns={columns}
         rows={rows}
         rowKey={(row) => row.client.client_ref}
-        isLoading={spaceClients.isLoading}
+        isLoading={spaceClients.isLoading || (canManageOrg && orgClients.isLoading)}
         failure={spaceClients.error}
         // On an auto-provisioned auth the reason the list is empty IS the state, so
         // it is the empty state's hint rather than a second sentence above a

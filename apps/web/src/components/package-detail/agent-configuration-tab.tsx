@@ -32,6 +32,7 @@ import {
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import { JsonView } from "../json-view";
+import { SettingsSkeleton } from "../loading-skeletons";
 import { SettingRow } from "../settings/setting-row";
 import { SaveFeedback } from "../settings/save-feedback";
 import { InputFieldRow } from "../settings/input-field-row";
@@ -201,8 +202,9 @@ function InputSettingRow({
 
 /** Exported so the visual map can mount the same picker in a dialog. */
 export function ModelSection({ packageId }: { packageId: string }) {
-  const { data: orgModels } = useModels();
-  const { data: agentModel } = useAgentModel(packageId);
+  const { data: orgModels, isLoading: modelsLoading } = useModels();
+  const { data: agentModel, isLoading: agentModelLoading } = useAgentModel(packageId);
+  if (modelsLoading || agentModelLoading) return <SettingsSkeleton rows={3} />;
   if (!orgModels || orgModels.length === 0 || !agentModel) return null;
 
   const generation = agentModel.generation ?? {};
@@ -337,9 +339,10 @@ function NoProxyState() {
 /** Shared with the visual map so both surfaces edit the same proxy setting. */
 export function ProxySection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { data: orgProxies } = useProxies();
-  const { data: agentProxy } = useAgentProxy(packageId);
+  const { data: orgProxies, isLoading: orgProxiesLoading } = useProxies();
+  const { data: agentProxy, isLoading: agentProxyLoading } = useAgentProxy(packageId);
   const setAgentProxy = useSetAgentProxy(packageId);
+  if (orgProxiesLoading || agentProxyLoading) return <SettingsSkeleton rows={1} />;
   if (!orgProxies) return null;
   if (orgProxies.length === 0) return <NoProxyState />;
 

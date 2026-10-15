@@ -45,7 +45,8 @@ import { Badge } from "@appstrate/ui/components/badge";
 
 import { useAgentMap } from "./use-agent-map";
 import { useAgentDiagnostics } from "../../hooks/use-agent-diagnostics";
-import { ErrorState, LoadingState } from "../../components/page-states";
+import { ErrorState } from "../../components/page-states";
+import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { MapEditDialog, type MapEditKind } from "./map-edit-dialog";
 import { MapPanelDialog, type MapPanelKind } from "./map-panel-dialog";
 import { useModalParam } from "../../hooks/use-modal-param";
@@ -582,7 +583,7 @@ export function AgentMapView({
     return [...genericEdges, ...(configEdge ? [projectedEdge(configEdge)] : [])];
   }, [activeRelation, t]);
 
-  if (isLoading || diagnostics.isLoading) return <LoadingState />;
+  if (isLoading || diagnostics.isLoading) return <SettingsSkeleton />;
   if (error || !data) return <ErrorState message={t("agent-map:loadError")} />;
 
   // A target that has no semantic node remains visible rather than vanishing.

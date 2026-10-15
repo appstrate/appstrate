@@ -49,6 +49,7 @@ import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types"
 import { Alert, AlertTitle } from "@appstrate/ui/components/alert";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Switch } from "@appstrate/ui/components/switch";
 import {
   Table,
@@ -65,6 +66,7 @@ import {
   type LibrarySpace,
 } from "../hooks/use-library";
 import { fetchPackageDetail } from "../hooks/use-packages";
+import { TextSkeleton } from "./loading-skeletons";
 import { useCurrentOrgId, useOrg } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { missingIntegrations } from "../lib/activation-closure";
@@ -184,7 +186,7 @@ export function CataloguePreview({
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
   const from = detailSpace(placement, spaces, currentSpaceId);
-  const { data: detail } = useQuery({
+  const { data: detail, isLoading: detailLoading } = useQuery({
     queryKey: packageKeys.detail(
       PACKAGE_TYPE_ROUTE_SEGMENT[type],
       orgId,
@@ -422,11 +424,24 @@ export function CataloguePreview({
               {t("catalogue.sheet.toolCount", { count: runtimeTools })}
             </PropertyRow>
           )}
+          {/* The rows only the detail answers, held at their height so the
+              groups below do not move when it lands. */}
+          {detailLoading &&
+            [0, 1].map((row) => (
+              <div key={row} className="flex h-10 items-center">
+                <Skeleton className="h-4 w-40" />
+              </div>
+            ))}
         </dl>
       </SettingsGroup>
 
       {/* The manifest's own word, and only what it covers: an integration or a
           skill the agent declares. */}
+      {detailLoading && type === "agent" && (
+        <SettingsGroup title={t("catalogue.sheet.dependencies")} className="mb-6">
+          <TextSkeleton lines={2} />
+        </SettingsGroup>
+      )}
       {agent && (
         <SettingsGroup title={t("catalogue.sheet.dependencies")} className="mb-6">
           <dl className="divide-border divide-y border-t">

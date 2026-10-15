@@ -2,12 +2,10 @@
 
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
-import { Modal } from "./modal";
+import { FormModal } from "./form-modal";
 import { useModalParam } from "../hooks/use-modal-param";
-import { Button } from "@appstrate/ui/components/button";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
-import { Spinner } from "./spinner";
 import { useCreateSpace } from "../hooks/use-spaces";
 import { errorMessage } from "../lib/mutation-error";
 
@@ -49,43 +47,29 @@ function SpaceCreateForm({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal
-      open
+    <FormModal
       onClose={onClose}
       title={t("spaces.createTitle")}
-      actions={
-        <>
-          <Button type="button" variant="outline" onClick={onClose}>
-            {t("btn.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            form="create-space-form"
-            data-testid="space-create-submit"
-            disabled={createMutation.isPending}
-          >
-            {createMutation.isPending ? <Spinner /> : t("btn.create")}
-          </Button>
-        </>
-      }
+      onSubmit={handleSubmit(onFormSubmit)}
+      isPending={createMutation.isPending}
+      submitLabel={t("btn.create")}
+      submitTestId="space-create-submit"
+      error={errors.root?.message}
     >
-      <form id="create-space-form" onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
-        <FormItem
-          id="space-create-name"
-          label={t("spaces.nameLabel")}
-          error={showError("name") ? errors.name?.message : undefined}
-        >
-          <Input
-            type="text"
-            placeholder={t("spaces.namePlaceholder")}
-            autoFocus
-            {...register("name", {
-              required: t("validation.required", { ns: "common" }),
-            })}
-          />
-        </FormItem>
-        <FieldError>{errors.root?.message}</FieldError>
-      </form>
-    </Modal>
+      <FormItem
+        id="space-create-name"
+        label={t("spaces.nameLabel")}
+        error={showError("name") ? errors.name?.message : undefined}
+      >
+        <Input
+          type="text"
+          placeholder={t("spaces.namePlaceholder")}
+          autoFocus
+          {...register("name", {
+            required: t("validation.required", { ns: "common" }),
+          })}
+        />
+      </FormItem>
+    </FormModal>
   );
 }

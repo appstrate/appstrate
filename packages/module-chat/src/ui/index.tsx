@@ -34,6 +34,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Thread } from "./thread.tsx";
 import {
   ChatHeadersProvider,
@@ -220,6 +221,8 @@ export function ChatPage({
     staleTime: MODELS_STALE_MS,
   });
   const models = modelsQuery.data ?? EMPTY_MODELS;
+  const modelsPending = modelsQuery.isPending;
+  const modelsFailed = modelsQuery.isError;
   // Model selection lives in an external store (localStorage-backed), not React
   // state: the transport's header builder reads it per request through a stable
   // function (see ConversationInner), so a switch applies to the very next send
@@ -325,11 +328,21 @@ export function ChatPage({
           onSelect={setSelectedModel}
           generation={generation}
           onGenerationChange={editGenerationSettings}
+          pending={modelsPending}
+          failed={modelsFailed}
         />
         {composerActions}
       </div>
     ),
-    [authorsAgents, models, selectedModel, generation, composerActions],
+    [
+      authorsAgents,
+      models,
+      selectedModel,
+      generation,
+      composerActions,
+      modelsPending,
+      modelsFailed,
+    ],
   );
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so
@@ -467,9 +480,10 @@ const Conversation = memo(function Conversation({
 
   if (persistedAtMount && history.isPending) {
     return (
-      <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-        {t("conversation.loading")}
-      </div>
+      <ConversationSkeleton
+        label={t("conversation.loading")}
+        placeholder={canWrite ? t("composer.placeholder") : null}
+      />
     );
   }
   // No composer on a 404: the server would create a session under that id.
@@ -747,5 +761,58 @@ function ConversationInner({
     <AssistantRuntimeProvider runtime={runtime}>
       <Thread composerSlot={composerSlot} initialComposerDraft={initialComposerDraft} />
     </AssistantRuntimeProvider>
+  );
+}
+
+/**
+ * A saved conversation while its history loads: the turns it will show, in
+ * place, above an inert composer frame of the live one's height. The runtime is
+ * not mounted, so the frame is static markup, not the real composer.
+ */
+function ConversationSkeleton({
+  label,
+  placeholder,
+}: {
+  label: string;
+  /** The composer's placeholder; null for a reader, who gets no composer. */
+  placeholder: string | null;
+}) {
+  return (
+    <div
+      role="status"
+      aria-busy="true"
+      aria-label={label}
+      className="flex h-full w-full flex-col overflow-hidden"
+    >
+      <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-6 px-4 pt-8">
+        <Skeleton aria-hidden className="ml-auto h-10 w-2/5 rounded-2xl" />
+        <div aria-hidden className="space-y-2.5">
+          <Skeleton className="h-3.5 w-full" />
+          <Skeleton className="h-3.5 w-11/12" />
+          <Skeleton className="h-3.5 w-3/5" />
+        </div>
+        <Skeleton aria-hidden className="ml-auto h-10 w-1/3 rounded-2xl" />
+        <div aria-hidden className="space-y-2.5">
+          <Skeleton className="h-3.5 w-full" />
+          <Skeleton className="h-3.5 w-2/5" />
+        </div>
+      </div>
+      {placeholder !== null && (
+        <div aria-hidden className="mx-auto w-full max-w-2xl px-4 pb-4">
+          <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
+            <div className="text-muted-foreground flex min-h-9 items-center py-1 text-sm">
+              {placeholder}
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1">
+                <Skeleton className="size-8 rounded-lg" />
+                <Skeleton className="h-7 w-32 rounded-md" />
+              </div>
+              <Skeleton className="size-8 rounded-lg" />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

@@ -8,7 +8,6 @@ import { Input } from "@appstrate/ui/components/input";
 import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { client } from "../api/client";
 import { orgStore } from "../stores/org-store";
-import { Spinner } from "../components/spinner";
 import { AuthLayout } from "../components/auth-layout";
 import { errorMessage } from "../lib/mutation-error";
 
@@ -75,8 +74,8 @@ export function WelcomePage() {
 
             <FieldError>{serverError}</FieldError>
 
-            <Button className="w-full" type="submit" disabled={loading}>
-              {loading ? <Spinner /> : t("welcome.save")}
+            <Button className="w-full" type="submit" pending={loading}>
+              {t("welcome.save")}
             </Button>
           </div>
         </form>

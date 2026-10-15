@@ -13,13 +13,18 @@
  * instead of replacing it. A layer remembers its writer, and a writer clears it
  * on unmount only while it still owns it.
  */
-import { useEffect, useId, type ReactNode } from "react";
+import { useEffect, useId } from "react";
 import { createStore } from "zustand/vanilla";
 
 export interface BreadcrumbEntry {
   label: string;
   href?: string;
-  node?: ReactNode;
+  /**
+   * The header draws an empty slot here instead of the label, and the page fills
+   * it through `ShellTrailContent` — a portal, so what it renders keeps the
+   * page's own context (the store holds data, never an element).
+   */
+  slot?: true;
 }
 
 /** `overlay` is the open overlay's own trail; `overlayPage` what a page inside it appends. */
@@ -44,7 +49,7 @@ function sameEntries(a: BreadcrumbEntry[], b: BreadcrumbEntry[]): boolean {
     a.length === b.length &&
     a.every((entry, i) => {
       const other = b[i]!;
-      return entry.label === other.label && entry.href === other.href && entry.node === other.node;
+      return entry.label === other.label && entry.href === other.href && entry.slot === other.slot;
     })
   );
 }
@@ -71,8 +76,8 @@ export function visibleTrail(layers: Layers, overlayOpen: boolean): BreadcrumbEn
 }
 
 /**
- * Publishes `entries` to `layer` on every render, so a changed label, link or
- * node shows at once; unchanged entries leave the store as it is. Callers
+ * Publishes `entries` to `layer` on every render, so a changed label or link
+ * shows at once; unchanged entries leave the store as it is. Callers
  * rebuild the array each render, which is why there is no dependency list.
  */
 export function useBreadcrumb(layer: BreadcrumbLayer, entries: BreadcrumbEntry[]) {

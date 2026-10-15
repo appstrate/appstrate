@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { iconNames, type IconName } from "lucide-react/dynamic";
+import {
+  LUCIDE_ICON_PREFIX,
+  parseManifestIcon,
+  type ManifestIcon,
+} from "@appstrate/core/manifest-icon";
 
 export const AGENT_ICON_NAMES = iconNames;
 export type AgentIconName = IconName;
@@ -19,8 +24,16 @@ export const AGENT_COLOR_CATALOG = {
 
 export type AgentColorKey = keyof typeof AGENT_COLOR_CATALOG;
 
-function isAgentIconName(value: string | null | undefined): value is AgentIconName {
-  return Boolean(value && AGENT_ICON_NAME_SET.has(value));
+/** The icon an agent without a drawable one shows. */
+const DEFAULT_AGENT_ICON: ManifestIcon = { kind: "lucide", name: "bot" };
+
+export function isLucideIconName(value: string): value is AgentIconName {
+  return AGENT_ICON_NAME_SET.has(value);
+}
+
+/** The manifest `icon` of a Lucide icon picked for an agent: `lucide:<name>`. */
+export function agentIconRef(name: AgentIconName): string {
+  return `${LUCIDE_ICON_PREFIX}${name}`;
 }
 
 export function isAgentColorKey(value: string | null | undefined): value is AgentColorKey {
@@ -31,8 +44,17 @@ function isAgentCustomColor(value: string | null | undefined): value is `#${stri
   return Boolean(value && /^#[0-9a-f]{6}$/i.test(value));
 }
 
+/**
+ * An agent's tile: its manifest `icon` when a surface can draw it (a Lucide
+ * name this bundle knows, another Iconify id, an image URL), `lucide:bot`
+ * otherwise; its colour key or `#rrggbb`, neutral otherwise.
+ */
 export function resolveAgentIdentity(icon?: string | null, color?: string | null) {
-  const resolvedIcon = isAgentIconName(icon) ? icon : "bot";
+  const parsed = parseManifestIcon(icon);
+  const resolvedIcon =
+    parsed && (parsed.kind !== "lucide" || isLucideIconName(parsed.name))
+      ? parsed
+      : DEFAULT_AGENT_ICON;
   const resolvedColor = isAgentColorKey(color)
     ? color
     : isAgentCustomColor(color)

@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { endUserLabel, memberLabel } from "../lib/members";
 import type { ActorValue } from "../lib/schedule-payload";
 import { useOrgDetail } from "./use-org";
 import { useEndUser, type EndUserInfo } from "./use-end-users";
-
-/** Primary line for an option — name, falling back to email then id. */
-export function primaryLabel(
-  name: string | null | undefined,
-  email: string | null,
-  id: string,
-): string {
-  return name || email || id;
-}
 
 /**
  * The name of the actor a value designates: a member from the organization's list, an end-user
@@ -31,13 +23,11 @@ export function useActorName(
   );
   if (value?.userId) {
     const m = orgData?.members?.find((mm) => mm.userId === value.userId);
-    return m ? primaryLabel(m.displayName, m.email ?? null, m.userId) : value.userId;
+    return m ? memberLabel(m) : value.userId;
   }
   if (value?.endUserId) {
     const endUser = listedEndUser ?? readEndUser;
-    return endUser
-      ? primaryLabel(endUser.name, endUser.email, endUser.externalId || endUser.id)
-      : value.endUserId;
+    return endUser ? endUserLabel(endUser, endUser.id) : value.endUserId;
   }
   return null;
 }

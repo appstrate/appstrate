@@ -9,6 +9,7 @@ import { DataTable } from "./data-table";
 import { ListToolbar } from "./list-toolbar";
 import { EmptyState, EmptyStateAction } from "./page-states";
 import { packageDetailPath } from "../lib/package-paths";
+import { useLocalListParams } from "../lib/list-params";
 import { matchesSearch } from "../lib/strings";
 import { TableRowActions } from "./table-row-actions";
 import { rowActionsColumn } from "./row-actions-column";
@@ -43,8 +44,9 @@ export function VersionHistory({
 }: VersionHistoryProps) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: versions, isLoading, error } = usePackageVersions(type, packageId);
-  const [search, setSearch] = useState("");
-  const [states, setStates] = useState<string[]>([]);
+  const list = useLocalListParams();
+  const { search } = list;
+  const states = list.values("status", ["published", "yanked"] as const);
   const restoreVersion = useRestoreVersion(type, packageId);
   const deleteVersion = useDeleteVersion(type, packageId);
   const [confirmState, setConfirmState] = useState<{
@@ -62,7 +64,7 @@ export function VersionHistory({
     <>
       <ListToolbar
         placement="panel"
-        search={{ value: search, onChange: setSearch, placeholder: t("version.search") }}
+        search={{ value: search, onChange: list.setSearch, placeholder: t("version.search") }}
         filters={[
           {
             id: "status",
@@ -72,13 +74,10 @@ export function VersionHistory({
               { value: "published", label: t("version.published") },
               { value: "yanked", label: t("version.yanked") },
             ],
-            onChange: setStates,
+            onChange: list.setValues("status"),
           },
         ]}
-        onReset={() => {
-          setSearch("");
-          setStates([]);
-        }}
+        onReset={list.reset}
       />
       <DataTable
         tableId="versions"
@@ -96,7 +95,9 @@ export function VersionHistory({
             compact
           >
             {onCreate && !search && !states.length && (
-              <EmptyStateAction label={t("version.createVersion")} onClick={onCreate} />
+              <EmptyStateAction
+                action={{ label: t("version.createVersion"), onSelect: onCreate }}
+              />
             )}
           </EmptyState>
         }

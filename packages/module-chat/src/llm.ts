@@ -16,7 +16,7 @@
 
 import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
-import { isModelLive } from "./model-liveness.ts";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
 import { logger } from "./logger.ts";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
@@ -81,7 +81,7 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
   // without it a gone-dead org default would be picked and fail deep inside
   // the provider with an opaque error. The picker (`ui/`) renders those rows
   // instead of hiding them — same predicate, different answer to give.
-  const pool = usable.filter(isModelLive);
+  const pool = usable.filter(isModelSelectable);
   const chosen = modelId
     ? pool.find((m) => m.id === modelId || m.modelId === modelId)
     : (pool.find((m) => m.is_default) ?? pool[0]);

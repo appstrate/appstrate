@@ -41,7 +41,7 @@ interface RunListProps {
   /** Custom empty state (replaces default) */
   emptyState?: React.ReactNode;
   /** Preview row shown above the first page (e.g. scheduled next-run) */
-  firstPageBanner?: React.ReactNode;
+  banner?: React.ReactNode;
   /** Filter runs by user -- "me" for current user only */
   user?: "me";
   /** Filter runs by kind -- "all" | "package" | "inline" */
@@ -79,7 +79,7 @@ export function RunList({
   paginated = true,
   hideAgentName = false,
   emptyState,
-  firstPageBanner,
+  banner,
   user,
   kind,
   status,
@@ -152,7 +152,7 @@ export function RunList({
           isError={failed}
           error={errorBody}
           empty={emptyBody}
-          banner={page === 0 ? firstPageBanner : undefined}
+          banner={page === 0 ? banner : undefined}
           columnMode={tableColumnMode}
           surface={tableSurface}
         />

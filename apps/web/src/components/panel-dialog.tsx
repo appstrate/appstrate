@@ -89,7 +89,7 @@ export function PanelDialog({ title, rail, contentHeader, children, onClose }: P
       </div>
       {/* Only a handle on the scrolling pane. */}
       <div ref={attach} aria-hidden className="-mt-12 h-px" />
-      <PhoneNavigation title={title} rail={rail} />
+      <PhoneNavigation title={title} rail={rail} className="md:hidden" />
       {/* A page that crashes takes only the pane down: the rail stays, and
           picking another entry clears the error. */}
       <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>

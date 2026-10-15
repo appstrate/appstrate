@@ -1,32 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useId, useState, type ReactNode } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
-import { $api } from "../../api/client";
-import { useOrgScope } from "../../hooks/use-org-scope";
-import { splitPackageRef } from "../../lib/package-paths";
 import { primaryDisplayFile } from "../../lib/package-files";
-import {
-  projectDraftFiles,
-  fileTextOperation,
-  type DraftFile,
-} from "../../lib/package-file-drafts";
+import { projectDraftFiles, fileTextOperation } from "../../lib/package-file-drafts";
 import {
   isPinnedEntry,
-  languageForPath,
   pickActiveEntry,
   previewBlockReason,
   type PackageFileEntry,
   type PackageFileWriteOperation,
 } from "../../lib/package-file-tree";
-import { ContentEditor } from "../package-editor/content-editor";
-import { LoadingState, ErrorState } from "../page-states";
+import { ErrorState } from "../page-states";
+import { TextSkeleton } from "../loading-skeletons";
 import { FileTree } from "./file-tree";
-import { FilePreview } from "./file-preview";
-import { usePackageFile } from "./use-package-file";
+import { PackageFileSource } from "./package-file-source";
+import { PackageFileTextEditor } from "./package-file-text-editor";
+import { usePackageFileIndex } from "./use-package-file-index";
 import { useStagedPackageFiles } from "./use-staged-package-files";
 
 interface Props {
@@ -52,15 +45,7 @@ export function PackageFilesEditor({
   onBusyChange,
 }: Props) {
   const { t } = useTranslation(["agents", "common"]);
-  const scope = useOrgScope();
-  const query = $api.useQuery(
-    "get",
-    "/api/packages/{scope}/{name}/files",
-    {
-      params: { path: splitPackageRef(packageId ?? ""), header: scope.header },
-    },
-    { enabled: scope.enabled && !!packageId, staleTime: 0, gcTime: 0, refetchOnMount: "always" },
-  );
+  const query = usePackageFileIndex(packageId, undefined, true);
   // Keep the tree this draft started from. Refetches cannot silently rebase it;
   // the parent's original ETag (sent as If-Match) rejects any intervening write.
   const [base, setBase] = useState<readonly PackageFileEntry[] | null>(() =>
@@ -94,7 +79,11 @@ export function PackageFilesEditor({
   });
   if (!active) return null;
   if (!base)
-    return query.isError ? <ErrorState message={t("files.errorLoad")} /> : <LoadingState />;
+    return query.isError ? (
+      <ErrorState message={t("files.errorLoad")} />
+    ) : (
+      <TextSkeleton lines={6} />
+    );
 
   const current = pickActiveEntry(entries, selected, primaryDisplayFile(type).name);
   const busy = files.busy;
@@ -126,27 +115,32 @@ export function PackageFilesEditor({
             onDelete: files.openDelete,
             isPinned: (path) => isPinnedEntry(type, path),
             isBusy: busy,
-            labels: {
-              newFile: t("files.newFile"),
-              upload: t("files.upload"),
-              rename: t("files.rename"),
-              delete: t("files.delete"),
-            },
           }}
         />
         {current &&
           (editable ? (
-            <DraftFilePane
+            <div
               key={`${current.path}:${files.imports}`}
               id={id}
-              packageId={packageId}
-              entry={current}
-              disabled={busy}
-              actions={replacementAction}
-              onChange={(text) => files.stage([fileTextOperation(current.path, text)])}
-            />
+              role="region"
+              aria-label={current.path}
+              className="min-w-0"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate font-mono text-sm">{current.path}</p>
+                {replacementAction}
+              </div>
+              <PackageFileTextEditor
+                packageId={packageId}
+                entry={current.sourcePath ? { ...current, path: current.sourcePath } : current}
+                path={current.path}
+                commit="live"
+                disabled={busy}
+                onCommit={(text) => files.stage([fileTextOperation(current.path, text)])}
+              />
+            </div>
           ) : (
-            <FilePreview
+            <PackageFileSource
               id={id}
               packageId={packageId}
               version={undefined}
@@ -157,53 +151,6 @@ export function PackageFilesEditor({
           ))}
       </div>
       {files.dialogs}
-    </div>
-  );
-}
-
-function DraftFilePane({
-  id,
-  packageId,
-  entry,
-  disabled,
-  actions,
-  onChange,
-}: {
-  id: string;
-  packageId: string | undefined;
-  entry: DraftFile;
-  disabled: boolean;
-  actions: ReactNode;
-  onChange: (text: string) => void;
-}) {
-  const { t } = useTranslation("agents");
-  const { text, isLoading, isError } = usePackageFile(
-    packageId,
-    undefined,
-    entry.sourcePath ? { ...entry, path: entry.sourcePath } : entry,
-    true,
-  );
-  return (
-    <div id={id} role="region" aria-label={entry.path} className="min-w-0">
-      <div className="flex items-center justify-between gap-2">
-        <p className="truncate font-mono text-sm">{entry.path}</p>
-        {actions}
-      </div>
-      {isError ? (
-        <ErrorState message={t("files.errorLoad")} />
-      ) : isLoading || text === undefined ? (
-        <LoadingState />
-      ) : (
-        <ContentEditor
-          value={text}
-          onChange={onChange}
-          language={languageForPath(entry.path)}
-          readOnly={disabled}
-          // The region label above stops being announced the moment Monaco
-          // takes focus; inside the textarea the open file has to name itself.
-          ariaLabel={entry.path}
-        />
-      )}
     </div>
   );
 }

@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, XCircle, Puzzle, Check, Loader2 } from "lucide-react";
+import { AlertTriangle, XCircle, Puzzle, Check } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { unboundLabel } from "./integration-connect/integration-run-readiness";
 import {
   blockingIntegrationIds,
   useAgentConnectionReadiness,
-  useIntegrationDetail,
   useIntegrationReadinessEntry,
 } from "../hooks/use-integrations";
+import { useIntegrationName } from "../hooks/use-integration-name";
 import { usePermissions } from "../hooks/use-permissions";
 import {
   integrationIdOfField,
@@ -72,8 +72,12 @@ export function MissingConnectionsModal({
       actions={
         <div className="flex items-center gap-2">
           {showRetry && (
-            <Button onClick={onRetry} disabled={!canRetry} data-testid="missing-connections-retry">
-              {retrying && <Spinner />}
+            <Button
+              onClick={onRetry}
+              pending={retrying}
+              disabled={!canRetry}
+              data-testid="missing-connections-retry"
+            >
               {t("missingConnections.retry")}
             </Button>
           )}
@@ -113,7 +117,6 @@ export function MissingRow({
 }) {
   const { t } = useTranslation(["agents"]);
   const packageId = integrationIdOfField(err.field);
-  const { data: detail } = useIntegrationDetail(packageId);
   const readsIntegrations = usePermissions().can("integrations:read");
   // Structural failures can't be fixed by connecting — an admin must activate
   // the integration, or the agent's dependency or configuration must change. No picker.
@@ -139,10 +142,10 @@ export function MissingRow({
   // `integrations:read`: without it neither lands, so the row names the
   // integration and waits for nothing.
   const pickable = !isStructural && readsIntegrations;
-  const canRenderPicker = pickable && !!detail && !!verdict;
+  const canRenderPicker = pickable && !!verdict;
   const loadingVerdict = pickable && !canRenderPicker;
 
-  const displayName = detail?.manifest.display_name ?? packageId;
+  const displayName = useIntegrationName(packageId);
   // An item code this build has no sentence for keeps the resolver's own message.
   const message = refusalMessage(err) ?? err.message;
   const Icon = resolved ? Check : isStructural ? XCircle : AlertTriangle;
@@ -159,27 +162,24 @@ export function MissingRow({
           <Puzzle className="text-muted-foreground size-4 shrink-0" />
           <div className="min-w-0">
             <div className="truncate text-sm font-medium">{displayName}</div>
-            <div className={`flex items-start gap-1.5 text-xs ${colorClass}`}>
-              <Icon className="mt-0.5 size-3 shrink-0" />
-              <span className="min-w-0 break-words">
-                {unbound ?? (resolved ? t("missingConnections.resolved") : message)}
-              </span>
-            </div>
+            {loadingVerdict ? (
+              <Skeleton className="mt-1 h-3 w-24" />
+            ) : (
+              <div className={`flex items-start gap-1.5 text-xs ${colorClass}`}>
+                <Icon className="mt-0.5 size-3 shrink-0" />
+                <span className="min-w-0 break-words">
+                  {unbound ?? (resolved ? t("missingConnections.resolved") : message)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
-        {loadingVerdict && (
-          <Loader2 className="text-muted-foreground size-4 shrink-0 animate-spin" />
-        )}
       </div>
       {canRenderPicker && (
         <div className="border-border/60 mt-1 border-t pt-2">
           <IntegrationConnectionPicker
-            integrationId={packageId}
+            integration={{ id: packageId, tools: entry?.tools, scopes: entry?.scopes }}
             agentPackageId={agentPackageId}
-            manifest={detail.manifest}
-            authStatuses={detail.auths}
-            agentTools={entry?.tools}
-            agentScopes={entry?.scopes}
             version={version}
           />
         </div>

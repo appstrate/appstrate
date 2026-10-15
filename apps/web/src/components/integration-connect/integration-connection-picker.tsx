@@ -6,7 +6,7 @@ import {
   type ConnectionPickerOptions,
   type ConnectionPickerPersistence,
 } from "./use-connection-picker";
-import { useIntegrationReadinessEntry } from "../../hooks/use-integrations";
+import { useIntegrationDetail, useIntegrationReadinessEntry } from "../../hooks/use-integrations";
 import { PickerMenu } from "./connection-picker-menu";
 import {
   BlockedPicker,
@@ -43,14 +43,45 @@ const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
  * differs.
  */
 export function IntegrationConnectionPicker({
-  persistence = DEFAULT_PERSISTENCE,
-  onLeave,
-  ...options
-}: Omit<ConnectionPickerOptions, "persistence"> & {
+  integration,
+  ...rest
+}: Omit<
+  LoadedPickerProps,
+  "integrationId" | "manifest" | "authStatuses" | "agentTools" | "agentScopes"
+> & {
+  /** The agent's dependency: its manifest and auths are read here (one deduped query). */
+  integration: { id: string; tools?: string[] | "*"; scopes?: string[] };
+}) {
+  const { data: detail, isError } = useIntegrationDetail(integration.id);
+  if (!detail)
+    return isError ? (
+      <FailedPicker integrationId={integration.id} />
+    ) : (
+      <LoadingPicker integrationId={integration.id} />
+    );
+  return (
+    <LoadedPicker
+      {...rest}
+      integrationId={integration.id}
+      manifest={detail.manifest}
+      authStatuses={detail.auths}
+      agentTools={integration.tools}
+      agentScopes={integration.scopes}
+    />
+  );
+}
+
+type LoadedPickerProps = Omit<ConnectionPickerOptions, "persistence"> & {
   persistence?: ConnectionPickerPersistence;
   /** Inside a URL-param modal: the way out to the integration page leaves it (`useModalParam.leave`). */
   onLeave?: (to: string) => void;
-}) {
+};
+
+function LoadedPicker({
+  persistence = DEFAULT_PERSISTENCE,
+  onLeave,
+  ...options
+}: LoadedPickerProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { integrationId, agentPackageId, version } = options;
   const picker = useConnectionPicker({ ...options, persistence });

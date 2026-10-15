@@ -79,14 +79,14 @@ export type DownloadFile = (id: string, name: string) => void;
 
 /**
  * The host's authenticated image-preview hook: a stored file id → an object
- * URL for an `<img src>`, or `null` while loading / on failure (callers fall
+ * URL for an `<img src>`, `undefined` while loading, `null` when there is none (callers fall
  * back to the chip). A HOOK is injected — not a fetcher — so the shell keeps
  * ownership of the request, its scoping headers and the object-URL lifecycle.
  *
  * Call it like any hook: unconditionally, at the top of a component (see
  * `FileImageThumbnail`, which exists precisely so the call site is stable).
  */
-export type UseFileImageSrc = (id: string) => string | null;
+export type UseFileImageSrc = (id: string) => string | null | undefined;
 
 /**
  * The host's staged upload (`POST /api/uploads` descriptor + PUT to the sink),

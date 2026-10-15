@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
-import { invalidateCredentialTestQueries } from "../use-model-provider-credentials.ts";
+import { invalidateCredentialsAndModels } from "../use-model-provider-credentials.ts";
 
 const MODELS_KEY = ["get", "/api/models", { params: { header: { "X-Org-Id": "org_1" } } }];
 const CREDENTIALS_KEY = [
@@ -22,7 +22,7 @@ describe("credential test cache invalidation", () => {
     qc.setQueryData(CREDENTIALS_KEY, []);
     qc.setQueryData(PROXIES_KEY, []);
 
-    await invalidateCredentialTestQueries(qc);
+    await invalidateCredentialsAndModels(qc);
 
     expect(isInvalidated(qc, MODELS_KEY)).toBe(true);
     expect(isInvalidated(qc, CREDENTIALS_KEY)).toBe(true);

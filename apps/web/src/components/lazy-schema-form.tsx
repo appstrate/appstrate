@@ -3,7 +3,7 @@
 import { lazy, Suspense, forwardRef } from "react";
 import type RjsfForm from "@rjsf/core";
 import type { SchemaFormProps } from "@appstrate/ui/schema-form";
-import { Spinner } from "./spinner";
+import { SettingsSkeleton } from "./loading-skeletons";
 
 /**
  * Lazy boundary around `@appstrate/ui/schema-form` so the RJSF + AJV stack
@@ -21,13 +21,7 @@ const SchemaFormInner = lazy(() =>
 export const LazySchemaForm = forwardRef<RjsfForm, SchemaFormProps>(
   function LazySchemaForm(props, ref) {
     return (
-      <Suspense
-        fallback={
-          <div className="flex items-center justify-center py-8">
-            <Spinner />
-          </div>
-        }
-      >
+      <Suspense fallback={<SettingsSkeleton rows={2} />}>
         <SchemaFormInner ref={ref} {...props} />
       </Suspense>
     );

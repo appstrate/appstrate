@@ -5,8 +5,6 @@ import { cn } from "@appstrate/ui/cn";
 import type { BreadcrumbEntry } from "@/stores/breadcrumb-store";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 
-export type { BreadcrumbEntry };
-
 interface PageHeaderProps {
   title: string;
   /** Level-one collection pages use a larger destination title. */

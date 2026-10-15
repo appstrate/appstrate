@@ -5,10 +5,12 @@ import { ShieldCheck } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import { packageDetailPath, packageListPath } from "../../lib/package-paths";
+import { packageDetailPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
 import { PageHeader } from "../page-header";
+import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 import { PackageIcon } from "../package-icon";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 interface SharedHeaderDetail {
   id: string;
@@ -38,6 +40,7 @@ export function SharedHeader({
   detail,
   isHistoricalVersion,
   hasUnarchivedChanges,
+  draftVerdictPending,
   latestPublishedVersion,
   activeSubpage,
   statusBadges,
@@ -47,6 +50,8 @@ export function SharedHeader({
   detail: SharedHeaderDetail;
   isHistoricalVersion: boolean;
   hasUnarchivedChanges?: boolean;
+  /** The draft-vs-published comparison is still being read: the badge holds its place. */
+  draftVerdictPending?: boolean;
   latestPublishedVersion?: string | null;
   activeSubpage?: { label: string };
   statusBadges?: React.ReactNode;
@@ -54,16 +59,9 @@ export function SharedHeader({
   actionsRight?: React.ReactNode;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
+  const listCrumb = usePackageListCrumb(detail.type);
 
-  const breadcrumbPath = packageListPath(detail.type);
-  const breadcrumbLabel =
-    detail.type === "agent"
-      ? t("detail.breadcrumb")
-      : t(`packages.type.${detail.type}s`, { ns: "settings" });
-
-  const iconNode = (
-    <PackageIcon type={detail.type} id={detail.id} icon={detail.icon} color={detail.color} />
-  );
+  const iconNode = <PackageIcon type={detail.type} icon={detail.icon} color={detail.color} />;
 
   return (
     <>
@@ -73,7 +71,7 @@ export function SharedHeader({
         icon={iconNode}
         wrapActions
         breadcrumbs={[
-          { label: breadcrumbLabel, href: breadcrumbPath },
+          listCrumb,
           {
             label: detail.displayName,
             href: activeSubpage ? packageDetailPath(detail.type, detail.id) : undefined,
@@ -133,7 +131,9 @@ export function SharedHeader({
               detail.source !== "system" &&
               !detail.readsPublished &&
               !isHistoricalVersion &&
-              (hasUnarchivedChanges || !detail.version ? (
+              (draftVerdictPending ? (
+                <Skeleton className="h-5 w-14" />
+              ) : hasUnarchivedChanges || !detail.version ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span tabIndex={0}>

@@ -13,11 +13,12 @@ import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { ModelFormSubmission, ModelFormSubmitOutcome } from "../lib/model-form-payload";
 import { submitModelForm } from "../lib/model-form-submit";
 import {
-  invalidateCredentialTestQueries,
+  invalidateCredentialsAndModels,
   useCreateModelProviderCredential,
 } from "./use-model-provider-credentials";
 import { agentModelKeys, packageKeys } from "../lib/query-keys";
 import { invalidateAgentDiagnostics } from "./use-agent-diagnostics";
+import { useInvalidatePaths } from "./use-invalidate-paths";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /** Wire shape from the OpenAPI spec (components.schemas.OrgModel). */
@@ -33,16 +34,8 @@ export function useModels(enabled = true) {
   );
 }
 
-/** openapi-react-query keys are [method, path, init] — invalidate the literal spec path. */
-function useInvalidateModels() {
-  const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
-  };
-}
-
 export function useCreateModel() {
-  const invalidate = useInvalidateModels();
+  const invalidate = useInvalidatePaths("/api/models");
   return $api.useMutation("post", "/api/models", {
     meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
@@ -50,7 +43,7 @@ export function useCreateModel() {
 }
 
 export function useUpdateModel() {
-  const invalidate = useInvalidateModels();
+  const invalidate = useInvalidatePaths("/api/models");
   return $api.useMutation("patch", "/api/models/{id}", {
     meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
@@ -58,12 +51,12 @@ export function useUpdateModel() {
 }
 
 export function useDeleteModel() {
-  const invalidate = useInvalidateModels();
+  const invalidate = useInvalidatePaths("/api/models");
   return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });
 }
 
 export function useSetDefaultModel(meta?: MutationMeta) {
-  const invalidate = useInvalidateModels();
+  const invalidate = useInvalidatePaths("/api/models");
   return $api.useMutation("put", "/api/models/default", { meta, onSuccess: invalidate });
 }
 
@@ -72,7 +65,7 @@ export function useTestModel() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/models/{id}/test", {
     meta: { errorHandledByCaller: true },
-    onSuccess: () => invalidateCredentialTestQueries(qc),
+    onSuccess: () => invalidateCredentialsAndModels(qc),
   });
 }
 

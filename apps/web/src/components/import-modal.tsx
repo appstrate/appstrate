@@ -3,9 +3,9 @@
 import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
-import { Modal } from "./modal";
+import { FormModal } from "./form-modal";
 import { cn } from "@appstrate/ui/cn";
-import { Button } from "@appstrate/ui/components/button";
+import { FieldError } from "@appstrate/ui/components/field";
 import { useImportPackage, useImportFromGithub } from "../hooks/use-mutations";
 import { ApiError } from "../api/errors";
 import { packageDetailPath } from "../lib/package-paths";
@@ -41,7 +41,7 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
   } | null>(null);
   const [confirmIntegrity, setConfirmIntegrity] = useState<{ version: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const importPackage = useImportPackage();
+  const importPackage = useImportPackage({ errorHandledByCaller: true });
   const importGithub = useImportFromGithub();
 
   const {
@@ -184,20 +184,18 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
   const rootError = errors.root?.message;
 
   return (
-    <Modal
-      open
+    <FormModal
       onClose={handleClose}
+      onSubmit={(e) => {
+        e.preventDefault();
+        // The modal may be opened from inside another form (React bubbles through portals).
+        e.stopPropagation();
+        handleFormSubmit();
+      }}
       title={t("import.title")}
-      actions={
-        <>
-          <Button variant="outline" onClick={handleClose} disabled={isPending}>
-            {t("btn.cancel")}
-          </Button>
-          <Button onClick={handleFormSubmit} disabled={!canSubmit}>
-            {submitLabel}
-          </Button>
-        </>
-      }
+      isPending={isPending}
+      submitLabel={submitLabel}
+      submitDisabled={!canSubmit}
     >
       {/* --- File upload --- */}
       <div
@@ -254,29 +252,23 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
           placeholder={t("import.urlPlaceholder")}
           className="border-input bg-background placeholder:text-muted-foreground focus:ring-ring mt-1.5 w-full rounded-md border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
           disabled={isPending}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleFormSubmit();
-            }
-          }}
         />
       </div>
 
       {/* --- Errors & confirmations --- */}
-      {rootError && <p className="text-destructive mt-3 text-sm">{rootError}</p>}
+      <FieldError className="mt-3">{rootError}</FieldError>
       {confirmOverwrite && (
-        <p className="text-destructive mt-3 text-sm">
+        <FieldError className="mt-3">
           {confirmOverwrite.activeVersion
             ? t("import.confirmOverwrite", { activeVersion: confirmOverwrite.activeVersion })
             : t("import.confirmOverwriteNoVersion")}
-        </p>
+        </FieldError>
       )}
       {confirmIntegrity && (
-        <p className="text-destructive mt-3 text-sm">
+        <FieldError className="mt-3">
           {t("import.confirmIntegrity", { version: confirmIntegrity.version })}
-        </p>
+        </FieldError>
       )}
-    </Modal>
+    </FormModal>
   );
 }

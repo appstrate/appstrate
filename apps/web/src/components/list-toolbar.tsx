@@ -313,9 +313,11 @@ function ListViewToggle({
   );
 }
 
+const NO_FILTERS: FilterSpec[] = [];
+
 export function ListToolbar({
   search,
-  filters,
+  filters = NO_FILTERS,
   onReset,
   columns,
   view,
@@ -331,7 +333,8 @@ export function ListToolbar({
    * (runs got a `q`), or the box would search the fifteen rows on screen.
    */
   search?: SearchSpec;
-  filters: FilterSpec[];
+  /** Absent on a list that only searches. */
+  filters?: FilterSpec[];
   /**
    * Clears every dimension in ONE go. Without it there is no reset button —
    * deliberately: a missing reset is visible and harmless, where a reset that

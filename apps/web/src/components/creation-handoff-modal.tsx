@@ -3,9 +3,9 @@
 import { useTranslation } from "react-i18next";
 import { MessageSquareText, PencilLine } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Button } from "@appstrate/ui/components/button";
 import { buildChatCreationDraft, type CreationResource } from "../lib/creation-handoff";
 import { useCanReach } from "../hooks/use-can-reach";
+import { ChoiceCard } from "./choice-card";
 import { Modal } from "./modal";
 
 interface CreationHandoffModalProps {
@@ -62,29 +62,13 @@ export function CreationHandoffModal({
   return (
     <Modal open onClose={onClose} title={t(TITLE_KEYS[resource])} className="sm:max-w-xl">
       <div className="space-y-2" data-creation-chooser={resource}>
-        {methods.map(({ id, icon: Icon, title, description, onClick, disabled }) => (
-          <Button
+        {methods.map(({ id, ...method }) => (
+          <ChoiceCard
             key={id}
-            type="button"
-            variant="outline"
-            className="h-auto min-h-16 w-full justify-start gap-3 p-3 text-left whitespace-normal"
-            onClick={onClick}
-            disabled={disabled}
+            {...method}
             data-creation-method={id}
-          >
-            <span className="bg-muted grid size-9 shrink-0 place-items-center rounded-md">
-              <Icon />
-            </span>
-            <span className="min-w-0">
-              <span className="flex items-center gap-2 text-sm font-semibold">
-                {title}
-                {id === "chat" && <Badge variant="secondary">Appstrate</Badge>}
-              </span>
-              <span className="text-muted-foreground mt-0.5 block text-xs leading-relaxed font-normal">
-                {description}
-              </span>
-            </span>
-          </Button>
+            adornment={id === "chat" ? <Badge variant="secondary">Appstrate</Badge> : undefined}
+          />
         ))}
       </div>
     </Modal>

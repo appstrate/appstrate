@@ -166,10 +166,10 @@ describe("ConnectionDeleteImpact", () => {
     ).not.toContain('data-testid="connection-delete-impact"');
   });
 
-  it("says it is checking until the impact arrives", () => {
+  it("holds its place until the impact arrives", () => {
     const html = render(<Harness />, { queryClient: new QueryClient() });
     expect(html).toContain('data-testid="connection-delete-impact-loading"');
-    expect(html).toContain(i18n.t("settings:connections.deleteImpact.loading"));
+    expect(html).toContain('role="status"');
   });
 
   it("punctuates each line as its language does", async () => {

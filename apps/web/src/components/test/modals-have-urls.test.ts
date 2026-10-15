@@ -101,13 +101,13 @@ const EXCEPTIONS: Exception[] = [
   },
 ];
 
-function walk(dir: string, out: string[] = []): string[] {
+function walk(dir: string, out: string[] = [], files = /\.tsx$/): string[] {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) {
       if (name === "test" || name === "lab" || name === "node_modules") continue;
-      walk(path, out);
-    } else if (path.endsWith(".tsx")) {
+      walk(path, out, files);
+    } else if (files.test(path)) {
       out.push(path);
     }
   }
@@ -270,6 +270,22 @@ describe("modals have URLs", () => {
         e.reason.trim() === "",
     ).map((e) => `${e.file}: <${e.tag}> filed as « ${e.case} »`);
     expect(misfiled).toEqual([]);
+  });
+
+  it("names every modal parameter in camelCase", () => {
+    // DESIGN_SYSTEM.md section 9: `?newWebhook=1`, `?editModel=<id>`.
+    const declared = /useModal(?:Param|Target)\(\s*"([^"]+)"|const [A-Z_]+_PARAM = "([^"]+)"/g;
+    const misnamed: string[] = [];
+    for (const root of SOURCE_ROOTS) {
+      for (const path of walk(root, [], /\.tsx?$/)) {
+        for (const m of readFileSync(path, "utf8").matchAll(declared)) {
+          const name = m[1] ?? m[2]!;
+          if (!/^[a-z][A-Za-z0-9]*$/.test(name))
+            misnamed.push(`${relative(REPO_ROOT, path)}: ${name}`);
+        }
+      }
+    }
+    expect(misnamed).toEqual([]);
   });
 
   it("sees a modal opened through state derived from a useState", () => {

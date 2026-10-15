@@ -13,6 +13,7 @@ import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
 import { SocialSignInButton } from "./social-sign-in-button";
 import { EmailField, PasswordField } from "./auth-fields";
+import { AuthLink } from "./auth-message";
 import { LegalFooter } from "./legal-footer";
 import { errorMessage } from "../lib/mutation-error";
 
@@ -93,10 +94,7 @@ export function RegisterForm({
       <div className="text-muted-foreground text-center text-sm">
         {switchAuthSlot ?? (
           <>
-            {t("login.hasAccount")}{" "}
-            <Link to="/login" className="hover:text-primary underline underline-offset-4">
-              {t("login.login")}
-            </Link>
+            {t("login.hasAccount")} <AuthLink to="/login">{t("login.login")}</AuthLink>
           </>
         )}
       </div>

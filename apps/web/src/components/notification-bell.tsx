@@ -11,6 +11,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Sheet, SheetContent, SheetTrigger } from "@appstrate/ui/components/sheet";
 import { Separator } from "@appstrate/ui/components/separator";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { ErrorState } from "./page-states";
 import {
   useUnreadCount,
   useMarkRead,
@@ -77,6 +79,9 @@ export function NotificationContent({
   onItemClick,
   onClose,
   markAllRead,
+  loading = false,
+  failed = false,
+  agentsPending = false,
 }: {
   unread: number;
   notifications: NotificationItem[];
@@ -85,6 +90,12 @@ export function NotificationContent({
   onItemClick: (notificationId: string) => void;
   onClose: () => void;
   markAllRead: () => void;
+  /** The list is still being read: the badge may already say N. */
+  loading?: boolean;
+  /** The list could not be read. */
+  failed?: boolean;
+  /** Agent names are still being read: a row shows a bar, not the raw package id. */
+  agentsPending?: boolean;
 }) {
   const { t } = useTranslation(["common", "agents"]);
 
@@ -115,7 +126,21 @@ export function NotificationContent({
       <Separator />
 
       {/* Notification list */}
-      {notifications.length === 0 ? (
+      {loading ? (
+        <div className="divide-y" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex gap-3 px-4 py-3">
+              <Skeleton className="mt-1.5 size-2 shrink-0 rounded-full" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : failed ? (
+        <ErrorState compact />
+      ) : notifications.length === 0 ? (
         <div className="flex flex-col items-center justify-center px-4 py-10">
           <Bell size={32} className="text-muted-foreground/30 mb-3" />
           <p className="text-muted-foreground text-sm">{t("notifications.empty")}</p>
@@ -144,7 +169,11 @@ export function NotificationContent({
                 <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="mb-0.5 flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium">{displayName}</span>
+                    {agentsPending && packageId && !shared ? (
+                      <Skeleton className="h-4 w-32" />
+                    ) : (
+                      <span className="truncate text-sm font-medium">{displayName}</span>
+                    )}
                     {status && <Badge status={status} />}
                   </div>
                   <p className="text-muted-foreground text-xs">
@@ -198,8 +227,12 @@ export function NotificationContent({
 export function NotificationBell() {
   const { t } = useTranslation(["common", "agents"]);
   const { data: count } = useUnreadCount();
-  const { data: agents } = useAgents();
-  const { data: notifications } = useNotifications({ unread: true, limit: 50 });
+  const { data: agents, isPending: agentsPending } = useAgents();
+  const {
+    data: notifications,
+    isPending: notificationsPending,
+    isError: notificationsFailed,
+  } = useNotifications({ unread: true, limit: 50 });
   const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
   const [open, setOpen] = useState(false);
@@ -247,6 +280,9 @@ export function NotificationBell() {
     onItemClick: handleClick,
     onClose: () => setOpen(false),
     markAllRead: () => markAllRead.mutate({}),
+    loading: notificationsPending,
+    failed: notificationsFailed && notifications === undefined,
+    agentsPending,
   };
 
   if (isMobile) {

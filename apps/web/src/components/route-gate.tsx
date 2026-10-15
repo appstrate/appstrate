@@ -9,7 +9,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
-import { EmptyState, LoadingState } from "./page-states";
+import { EmptyState } from "./page-states";
 
 /**
  * Route-level gate, read off the route's declaration in `lib/route-access.ts`:
@@ -19,7 +19,16 @@ import { EmptyState, LoadingState } from "./page-states";
  * space) says so, never a silent redirect. Asked of the page the URL lands on
  * too: a layout mounts before its child's gate.
  */
-export function RouteGate({ path, children }: { path: RoutePath; children: ReactNode }) {
+export function RouteGate({
+  path,
+  pending,
+  children,
+}: {
+  path: RoutePath;
+  /** Drawn while the permissions load: the page's own skeleton. */
+  pending: ReactNode;
+  children: ReactNode;
+}) {
   const { can, ready, inPersonalSpace } = usePermissions();
   const { features } = useAppConfig();
   const verdict = routeVerdict(path, can, features, inPersonalSpace);
@@ -36,7 +45,7 @@ export function RouteGate({ path, children }: { path: RoutePath; children: React
   }
   if (verdict === "granted") return <>{children}</>;
   // An unloaded permission set answers `false` for everything.
-  if (!ready) return <LoadingState />;
+  if (!ready) return <>{pending}</>;
   return <NoAccessState />;
 }
 

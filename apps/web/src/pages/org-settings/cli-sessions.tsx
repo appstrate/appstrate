@@ -5,17 +5,18 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
-import { LoadingState, EmptyState } from "../../components/page-states";
+import { EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { deriveLabel } from "../../lib/cli-sessions";
+import { invalidatePaths } from "../../lib/query-keys";
 import {
   cliSessionUserLabel,
   useCliSessionColumns,
-  type AdminCliSession,
-} from "./cli-session-columns";
+  type CliSessionRow,
+} from "../../components/cli-session-columns";
 
 export function OrgSettingsCliSessionsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -37,22 +38,15 @@ export function OrgSettingsCliSessionsPage() {
 
   const revoke = $api.useMutation("delete", "/api/orgs/{orgId}/cli-sessions/{familyId}", {
     onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ["get", "/api/orgs/{orgId}/cli-sessions"],
-      });
+      void invalidatePaths(queryClient, ["/api/orgs/{orgId}/cli-sessions"]);
     },
   });
 
-  const [pendingRevoke, setPendingRevoke] = useState<AdminCliSession | null>(null);
+  const [pendingRevoke, setPendingRevoke] = useState<CliSessionRow | null>(null);
   const columns = useCliSessionColumns({
     revokingFamilyId: revoke.isPending ? (revoke.variables?.params.path.familyId ?? null) : null,
     onRevoke: can("cli-sessions:delete") ? setPendingRevoke : undefined,
   });
-
-  // Not a request state: without an org id the query never runs, so `isLoading`
-  // is false and the body would call an empty list an ANSWER. This waits for
-  // context, which is what a spinner is for.
-  if (!orgId) return <LoadingState />;
 
   const sessions = data ?? [];
 
@@ -70,7 +64,8 @@ export function OrgSettingsCliSessionsPage() {
         rows={sessions}
         rowKey={(session) => session.familyId}
         label={t("orgCliSessions.tableLabel")}
-        isLoading={isLoading}
+        // Without an org id the query never runs: an empty list is not an answer yet.
+        isLoading={isLoading || !orgId}
         failure={error}
         empty={
           <EmptyState

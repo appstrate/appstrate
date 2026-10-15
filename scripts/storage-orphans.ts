@@ -24,6 +24,7 @@
  *   agent-packages   ← package_versions  (published version artifacts)
  *   library-packages ← packages          (library item artifacts, incl. _system/)
  *   run-workspace    ← runs.id           (bundle + manifest + input files)
+ *   orgs             ← organizations.logo (one logo image per org)
  *
  * The first line reconciles the `files/` object namespace against
  * `files.storage_key` values, which all begin with `files/`; the run-workspace

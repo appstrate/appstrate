@@ -19,18 +19,16 @@
 
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
-import { OptionSelect } from "@appstrate/ui/components/select";
 import type { components } from "../../api/schema";
 import type { DataColumn } from "../../components/data-table";
 import { roleI18nKey } from "../../hooks/use-permissions";
-import { memberLabel } from "../../lib/billing-managers";
+import { memberLabel } from "../../lib/members";
 import type { OrgRole } from "@appstrate/shared-types";
+import { OrgRoleSelect } from "../../components/org-role-select";
 import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
 import { CellDate, CellEmpty, CellList, CellText } from "../../components/table-cells";
-
-/** Widest reach first, the order every org-role list uses. Only an owner is offered `owner`. */
-const ORG_ROLE_DISPLAY_ORDER: readonly OrgRole[] = ["owner", "admin", "member", "guest"];
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 type OrgMember = components["schemas"]["OrgMember"];
 
@@ -42,6 +40,7 @@ export function useMemberColumns({
   onChangeRole,
   onRemove,
   spaces,
+  spacesLoading = false,
 }: {
   /** Which roles this actor may move that member to. Empty = not theirs to change. */
   assignableRoles: (member: OrgMember) => readonly OrgRole[];
@@ -52,6 +51,8 @@ export function useMemberColumns({
   onRemove: (member: OrgMember) => void;
   /** The spaces this person reaches, when the caller may see every one. */
   spaces?: (member: OrgMember) => string[];
+  /** The memberships are still being read: the column holds its place. */
+  spacesLoading?: boolean;
 }): DataColumn<OrgMember>[] {
   const { t } = useTranslation(["settings", "common"]);
 
@@ -92,16 +93,13 @@ export function useMemberColumns({
           // The row's stretched link paints over its cells: a control has to
           // raise itself to stay clickable.
           <span className="relative z-10 block">
-            <OptionSelect
+            <OrgRoleSelect
               value={member.role}
-              onValueChange={(v) => onChangeRole(member, v as OrgRole)}
+              roles={roles}
+              onValueChange={(role) => onChangeRole(member, role)}
               disabled={isChangingRole}
               className="h-7 w-full text-xs"
               aria-label={t("orgSettings.memberRoleAriaLabel", { name: memberLabel(member) })}
-              options={ORG_ROLE_DISPLAY_ORDER.filter((r) => roles.includes(r)).map((r) => ({
-                value: r,
-                label: t(roleI18nKey(r)),
-              }))}
             />
           </span>
         );
@@ -114,7 +112,12 @@ export function useMemberColumns({
             header: t("orgSettings.spacesColumn"),
             width: "minmax(100px,1.2fr)" as const,
             tier: 3 as const,
-            cell: (member: OrgMember) => <CellList items={spaces(member)} />,
+            cell: (member: OrgMember) =>
+              spacesLoading ? (
+                <Skeleton className="h-4 w-24" />
+              ) : (
+                <CellList items={spaces(member)} />
+              ),
           },
         ]
       : []),

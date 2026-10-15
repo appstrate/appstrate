@@ -77,15 +77,23 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     {
       id: "payload",
       header: t("settings:webhooks.payloadColumn"),
-      width: "72px",
+      width: "88px",
       tier: 2,
-      cell: (wh) => (
-        <CellText>
-          {wh.payloadMode === "full"
-            ? t("settings:webhooks.payloadModeFull")
-            : t("settings:webhooks.payloadModeSummary")}
-        </CellText>
-      ),
+      // The mode's short name; the sentence that says what it carries on hover.
+      cell: (wh) => {
+        const full = wh.payloadMode === "full";
+        return (
+          <CellText
+            title={t(
+              full ? "settings:webhooks.payloadModeFull" : "settings:webhooks.payloadModeSummary",
+            )}
+          >
+            {t(
+              full ? "settings:webhooks.payloadShortFull" : "settings:webhooks.payloadShortSummary",
+            )}
+          </CellText>
+        );
+      },
     },
   ];
 }

@@ -2,9 +2,7 @@
 
 /**
  * Settings pages open on the route's read permission and draw each deed behind
- * the permission its own API route checks. A page refused by its own guard says
- * so in place, never by a silent redirect, and its deeds go to the shell's
- * title slot.
+ * the permission its own API route checks. Its deeds go to the shell's title slot.
  */
 
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
@@ -27,9 +25,6 @@ const { EndUsersPage } = await import("../end-users-page.tsx");
 const { ApiKeysPage } = await import("../api-keys-page.tsx");
 const { OrgSettingsGeneralPage } = await import("../org-settings/general.tsx");
 const { OrgSettingsSpacesPage } = await import("../org-settings/spaces.tsx");
-const { OrgSettingsModelsPage } = await import("../org-settings/models.tsx");
-const { OrgSettingsProxiesPage } = await import("../org-settings/proxies.tsx");
-const { WorkspaceSettingsAuthPage } = await import("../workspace-settings/auth.tsx");
 const { SettingsPageActionTargetProvider } =
   await import("../../components/settings/settings-page-actions.tsx");
 
@@ -173,17 +168,7 @@ describe("the organization's general settings", () => {
   });
 });
 
-describe("a settings page its own guard refuses", () => {
-  const DENIED = "Vous n'avez pas accès à cette page.";
-
-  it("says « no access » in place to whoever lacks the page's read", () => {
-    expect(renderAs(<OrgSettingsModelsPage />, { permissions: [] })).toContain(DENIED);
-    expect(renderAs(<OrgSettingsProxiesPage />, { permissions: [] })).toContain(DENIED);
-    expect(renderAs(<OrgSettingsProxiesPage />, { permissions: ["proxies:read"] })).not.toContain(
-      DENIED,
-    );
-  });
-
+describe("a settings page whose module is off", () => {
   // The route gate answers « absent » for these before the page mounts.
   it("leaves a page whose module is off to its route's feature", () => {
     const all = () => true;
@@ -195,13 +180,6 @@ describe("a settings page its own guard refuses", () => {
     ] as const) {
       expect(routeVerdict(path, all, {}, false)).toBe("absent");
     }
-  });
-
-  it("says « no access » to a caller without the write", () => {
-    expect(renderAs(<WorkspaceSettingsAuthPage />, { permissions: [] })).toContain(DENIED);
-    expect(
-      renderAs(<WorkspaceSettingsAuthPage />, { permissions: ["space-settings:write"] }),
-    ).not.toContain(DENIED);
   });
 });
 

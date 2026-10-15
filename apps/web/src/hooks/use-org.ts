@@ -2,14 +2,20 @@
 
 import { useCallback } from "react";
 import { useStore } from "zustand";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { $api, client } from "../api/client";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs, serializeViewAs, type ViewAsPersona } from "../stores/view-as-store";
 import { useAutoSelect } from "./use-auto-select";
-import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
+import {
+  invalidateOrgDetail,
+  invalidatePaths,
+  orgKeys,
+  removeOrgScopedQueries,
+} from "../lib/query-keys";
+import { invalidateIntegrationQueries } from "./use-integrations";
 import { viewAsRefusalCode } from "../lib/view-as-refusal";
 
 // Reactive hook for query key usage — re-renders when org changes
@@ -26,6 +32,55 @@ export function useOrgDetail(options?: { enabled?: boolean }) {
     { params: { path: { orgId: orgId ?? "" } } },
     { enabled: (options?.enabled ?? true) && !!orgId },
   );
+}
+
+/** Invitations: the write refreshes the org detail that lists them. */
+export function useInviteMember() {
+  const qc = useQueryClient();
+  return $api.useMutation("post", "/api/orgs/{orgId}/members", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: () => void invalidateOrgDetail(qc),
+  });
+}
+
+export function useUpdateInvitation() {
+  const qc = useQueryClient();
+  return $api.useMutation("patch", "/api/orgs/{orgId}/invitations/{invitationId}", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: () => void invalidateOrgDetail(qc),
+  });
+}
+
+export function useCancelInvitation() {
+  const qc = useQueryClient();
+  return $api.useMutation("delete", "/api/orgs/{orgId}/invitations/{invitationId}", {
+    onSuccess: () => void invalidateOrgDetail(qc),
+  });
+}
+
+/**
+ * What an org-role change or a removal touches beyond the org: a promotion deletes the
+ * explicit space roles, a removal the space seats, and a drop that ends space access
+ * unshares the member's connections.
+ */
+export function invalidateMemberWrite(queryClient: QueryClient): void {
+  void invalidateOrgDetail(queryClient);
+  void invalidatePaths(queryClient, ["/api/spaces/{id}/members"]);
+  void invalidateIntegrationQueries(queryClient);
+}
+
+export function useRemoveMember() {
+  const qc = useQueryClient();
+  return $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
+    onSuccess: () => invalidateMemberWrite(qc),
+  });
+}
+
+export function useChangeMemberRole() {
+  const qc = useQueryClient();
+  return $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}", {
+    onSuccess: () => invalidateMemberWrite(qc),
+  });
 }
 
 async function requestOrgs(viewAs?: string) {

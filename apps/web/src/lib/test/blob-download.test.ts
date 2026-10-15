@@ -160,7 +160,7 @@ describe("triggerBlobDownload", () => {
   });
 
   it("lets a DOM failure propagate to the caller's own error handling", () => {
-    // Every call site wraps the request AND this call in one try/catch that
+    // `downloadOrToast` wraps the request AND this call in one try/catch that
     // toasts `error.downloadFailed`. The helper must not swallow anything, or
     // a failed download would report success.
     const g = globalThis as { document?: unknown };

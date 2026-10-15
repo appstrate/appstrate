@@ -35,19 +35,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAui } from "@assistant-ui/react";
-import { AlertTriangleIcon, CheckIcon, Loader2Icon } from "lucide-react";
+import { AlertTriangleIcon, CheckIcon } from "lucide-react";
 import { encodePackageIdPath } from "@appstrate/core/naming";
-import { VIEW_AS_QUERY } from "@appstrate/core/permissions";
+import { realtimeRunsUrl } from "@appstrate/core/realtime-url";
 // The correlation rule and the origin check in front of it come from core, not
 // from this module: every connect surface applies the same one, and a copy only
 // this module could import is what let the SPA's connect popup ship with no
 // correlation at all.
 import {
-  INTEGRATION_CONNECT_CHANNEL,
-  acceptsCompletionMessage,
-  completionMatches,
+  CONNECT_POPUP_FEATURES,
+  connectPopupName,
+  listenConnectCompletion,
 } from "@appstrate/core/connect-handshake";
 import { Button } from "@appstrate/ui/components/button";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { useChatHeaders, useChatHost } from "./runtime-context.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { orgSpaceFromHeaders } from "./run-events.ts";
@@ -80,21 +81,13 @@ function watchConnectionSse(
   let es: EventSource | null = null;
   try {
     es = new EventSource(
-      // `/api/realtime/runs` (the org-wide stream, which also carries
-      // `connection_update`) — NOT bare `/api/realtime`, which is not a route
-      // (it 404s and isn't auth-skipped), so this backstop never fired.
-      //
-      // `channels` is declared because this opens one org-wide stream PER
-      // rendered card, and the listener below reads `connection_update` only.
-      // Without it each card would also carry the org's whole run_log traffic.
-      // A role preview travels as `view_as`: the realtime routes REFUSE the
-      // header (`EventSource` cannot send one), and a card left header-less
-      // would watch under the authority the preview replaced. The effect that
+      // The org-wide stream (it also carries `connection_update`), declared to
+      // `connection_update` alone: one stream is opened PER rendered card and
+      // the listener below reads nothing else. A role preview travels as
+      // `view_as` — the realtime routes REFUSE the header — and the effect that
       // opens this depends on `getHeaders`, whose identity moves with the
       // persona, so entering or leaving reconnects.
-      `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=connection_update${
-        viewAs ? `&${VIEW_AS_QUERY}=${encodeURIComponent(viewAs)}` : ""
-      }`,
+      realtimeRunsUrl({ orgId, spaceId, channels: ["connection_update"], viewAs }),
       { withCredentials: true },
     );
     es.addEventListener("connection_update", (ev) => {
@@ -113,17 +106,6 @@ function watchConnectionSse(
     return () => {};
   }
   return () => es?.close();
-}
-
-/**
- * Browsing-context name for this card's popup — one per integration, because a
- * fixed name is a single popup: clicking a second card while the first popup is
- * open NAVIGATES it to the second URL, silently abandoning flow 1. Sanitized to
- * `[A-Za-z0-9_]`, a window name being a target token.
- */
-function popupName(packageId: string | undefined): string {
-  if (!packageId) return "appstrate_oauth";
-  return `appstrate_oauth_${packageId.replace(/[^A-Za-z0-9_]+/g, "_")}`;
 }
 
 export function OAuthConnectCard({
@@ -269,33 +251,12 @@ export function OAuthConnectCard({
     const onCompletion = (d: CompletionDetail) =>
       routeCompletion(d, waiter, (error) => complete(false, error));
 
-    // `acceptsCompletionMessage` validates `ev.origin` before the payload — a
-    // `message` listener that skips that check authenticates nothing.
-    const onMessage = (ev: MessageEvent) => {
-      if (acceptsCompletionMessage(ev, window.location.origin, card)) onCompletion(ev.data);
-    };
-    window.addEventListener("message", onMessage);
-
-    let bc: BroadcastChannel | null = null;
-    if (typeof BroadcastChannel !== "undefined") {
-      try {
-        // Same-origin by spec, so there is no origin to validate here.
-        bc = new BroadcastChannel(INTEGRATION_CONNECT_CHANNEL);
-        bc.onmessage = (ev) => {
-          // `completionMatches` is a type guard, so the raw `data` narrows here.
-          const d: unknown = ev.data;
-          if (completionMatches(d, card)) onCompletion(d);
-        };
-      } catch {
-        bc = null;
-      }
-    }
+    const stopListening = listenConnectCompletion(card, onCompletion, window);
 
     const closeSse = watchConnectionSse(getHeaders, packageId, () => waiter.connected());
 
     return () => {
-      window.removeEventListener("message", onMessage);
-      bc?.close();
+      stopListening();
       closeSse();
     };
   }, [phase, state, packageId, getHeaders, waiter, complete]);
@@ -318,7 +279,7 @@ export function OAuthConnectCard({
     setErrMsg(null);
     setPhase("pending");
     // Keep the opener (no `noopener`) so the callback can postMessage us back.
-    const popup = window.open(authUrl, popupName(packageId), "width=520,height=680");
+    const popup = window.open(authUrl, connectPopupName(packageId), CONNECT_POPUP_FEATURES);
     waiter.popupOpened(popup);
     if (!popup) {
       // Blocked. Never navigate THIS tab to the flow: the conversation that must
@@ -381,9 +342,7 @@ export function OAuthConnectCard({
                 disabled={preparing || phase === "pending"}
                 className="gap-2"
               >
-                {preparing || phase === "pending" ? (
-                  <Loader2Icon className="size-4 animate-spin" />
-                ) : null}
+                {preparing || phase === "pending" ? <Spinner /> : null}
                 {preparing
                   ? t("connect.preparing")
                   : phase === "pending"

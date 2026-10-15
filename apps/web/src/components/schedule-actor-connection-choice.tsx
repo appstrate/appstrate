@@ -52,7 +52,7 @@ export function ScheduleActorConnectionChoice({
         </p>
       )}
       {choices.map((choice) => (
-        <ChoiceCard
+        <IntegrationChoiceBox
           key={choice.integrationId}
           integrationId={choice.integrationId}
           testId={`schedule-actor-choice-${choice.integrationId}`}
@@ -68,7 +68,7 @@ export function ScheduleActorConnectionChoice({
           {choice.candidates.length === 0 && value[choice.integrationId] !== undefined && (
             <ClearChoiceButton onClick={() => onChange(choice.integrationId, null)} />
           )}
-        </ChoiceCard>
+        </IntegrationChoiceBox>
       ))}
       {others.map((integrationId) =>
         (value[integrationId]?.length ?? 0) > 0 ? (
@@ -79,7 +79,7 @@ export function ScheduleActorConnectionChoice({
             onClear={() => onChange(integrationId, null)}
           />
         ) : (
-          <ChoiceCard
+          <IntegrationChoiceBox
             key={integrationId}
             integrationId={integrationId}
             testId={`schedule-actor-none-${integrationId}`}
@@ -93,7 +93,7 @@ export function ScheduleActorConnectionChoice({
               allowNone
               inheritDescription={t("schedule.connectionOverrides.inheritActor")}
             />
-          </ChoiceCard>
+          </IntegrationChoiceBox>
         ),
       )}
     </div>
@@ -101,7 +101,7 @@ export function ScheduleActorConnectionChoice({
 }
 
 /** One integration of the section: its display name, then what answers for it. */
-function ChoiceCard({
+function IntegrationChoiceBox({
   integrationId,
   testId,
   children,
@@ -169,19 +169,17 @@ function StoredChoice({
   onClear: () => void;
 }) {
   const { t } = useTranslation(["agents"]);
-  const name = useIntegrationName(integrationId);
   const { data: visible } = useIntegrationConnections(integrationId);
   const labelOf = (id: string) =>
     visible?.find((c) => c.id === id && c.shared_here)?.label ??
     t("schedule.connectionOverrides.privateConnection");
   return (
-    <div
-      className="border-border bg-card space-y-1.5 rounded-md border p-3"
-      data-testid={`schedule-actor-stored-${integrationId}`}
+    <IntegrationChoiceBox
+      integrationId={integrationId}
+      testId={`schedule-actor-stored-${integrationId}`}
     >
-      <div className="text-sm font-medium">{name}</div>
       <p className="text-xs">{connectionIds.map(labelOf).join(" · ")}</p>
       <ClearChoiceButton onClick={onClear} />
-    </div>
+    </IntegrationChoiceBox>
   );
 }

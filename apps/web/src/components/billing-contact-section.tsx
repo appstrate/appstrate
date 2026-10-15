@@ -30,9 +30,9 @@ import {
   toBillingContactDraft,
   type BillingContactDraft,
 } from "../lib/billing-contact";
-import { LoadingState, ErrorState } from "./page-states";
+import { ErrorState } from "./page-states";
+import { SettingsSkeleton } from "./loading-skeletons";
 import { SectionCard } from "./section-card";
-import { Spinner } from "./spinner";
 
 /**
  * Where invoices, receipts and dunning mail go instead of every owner's inbox.
@@ -58,7 +58,7 @@ export function BillingContactSection() {
   const [ccInput, setCcInput] = useState("");
   const [ccError, setCcError] = useState<string | null>(null);
 
-  if (contactQuery.isLoading) return <LoadingState />;
+  if (contactQuery.isLoading) return <SettingsSkeleton rows={2} />;
   if (contactQuery.error) return <ErrorState error={contactQuery.error} />;
 
   const contact = contactQuery.data ?? { billing_email: null, billing_cc: [] };
@@ -232,10 +232,10 @@ export function BillingContactSection() {
         )}
         <Button
           size="sm"
-          disabled={!dirty || emailInvalid || update.isPending}
+          pending={update.isPending}
+          disabled={!dirty || emailInvalid}
           onClick={handleSave}
         >
-          {update.isPending && <Spinner />}
           {t("btn.save", { ns: "common" })}
         </Button>
       </div>

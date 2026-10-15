@@ -3,8 +3,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
-import { Spinner } from "./spinner";
-import { GoogleIcon, GitHubIcon } from "./icons";
+import { SocialSignInButton } from "./social-sign-in-button";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
@@ -12,16 +11,6 @@ import { Label } from "@appstrate/ui/components/label";
 import { useAuth } from "../hooks/use-auth";
 import type { ReauthMethod } from "../lib/reauth-methods";
 import { errorMessage } from "../lib/mutation-error";
-
-const PROVIDER_LABELS: Record<"google" | "github", string> = {
-  google: "Google",
-  github: "GitHub",
-};
-
-const PROVIDER_ICONS: Record<"google" | "github", typeof GoogleIcon> = {
-  google: GoogleIcon,
-  github: GitHubIcon,
-};
 
 interface ReauthModalProps {
   open: boolean;
@@ -33,7 +22,7 @@ interface ReauthModalProps {
 
 export function ReauthModal({ open, onClose, methods, onReauthenticated }: ReauthModalProps) {
   const { t } = useTranslation("settings");
-  const { user, login, signInWithSocial, logout } = useAuth();
+  const { user, login, logout } = useAuth();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -90,29 +79,20 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
                   />
                 </div>
                 <FieldError>{error}</FieldError>
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? <Spinner /> : t("preferences.reauthConfirm")}
+                <Button type="submit" pending={submitting}>
+                  {t("preferences.reauthConfirm")}
                 </Button>
               </form>
             )}
 
-            {socialMethods.map((method) => {
-              const Icon = PROVIDER_ICONS[method.provider];
-              return (
-                <Button
-                  key={method.provider}
-                  variant="outline"
-                  className="w-full"
-                  disabled={submitting}
-                  onClick={() => signInWithSocial(method.provider, "/preferences")}
-                >
-                  <Icon className="h-4 w-4" />
-                  {t("preferences.reauthContinueWith", {
-                    provider: PROVIDER_LABELS[method.provider],
-                  })}
-                </Button>
-              );
-            })}
+            {socialMethods.map((method) => (
+              <SocialSignInButton
+                key={method.provider}
+                provider={method.provider}
+                callbackURL="/preferences"
+                disabled={submitting}
+              />
+            ))}
           </div>
         )}
       </div>

@@ -17,6 +17,7 @@ import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
 import { DetailSectionCard } from "../detail-section-card";
 import { AgentHealthSection } from "./agent-health-section";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 export function AgentOverviewTab({
   packageId,
@@ -118,13 +119,17 @@ function OperationalSummary({
                   <span className="text-muted-foreground">{t("detail.overview.noRuns")}</span>
                 )
               }
-              to={detail.last_run ? runDetailPath(packageId, detail.last_run.id) : undefined}
+              target={
+                detail.last_run ? { to: runDetailPath(packageId, detail.last_run.id) } : undefined
+              }
             />
             <OperationalStat
               size="sm"
               label={t("schedule.paramNextRun")}
               value={
-                nextSchedule?.next_run_at ? (
+                schedulesLoading ? (
+                  <Skeleton className="h-5 w-32" />
+                ) : nextSchedule?.next_run_at ? (
                   formatDateField(nextSchedule.next_run_at, "datetime", nextSchedule.timezone)
                 ) : (
                   <span className="text-muted-foreground">
@@ -132,9 +137,9 @@ function OperationalSummary({
                   </span>
                 )
               }
-              to={
+              target={
                 nextSchedule?.next_run_at
-                  ? agentSettingsHref(location.pathname, "schedules")
+                  ? { to: agentSettingsHref(location.pathname, "schedules") }
                   : undefined
               }
             />
@@ -162,7 +167,7 @@ function OperationalSummary({
                     ? unknown
                     : String(activity.total)
               }
-              to={activity && activity.total > 0 ? destination("#runs") : undefined}
+              target={activity && activity.total > 0 ? { to: destination("#runs") } : undefined}
             />
             <OperationalStat
               className="xl:border-border xl:border-b"
@@ -197,9 +202,9 @@ function OperationalSummary({
                     ? unknown
                     : String(failedRunCount)
               }
-              to={
+              target={
                 failedRunCount && failedRunCount > 0
-                  ? destination("#runs", "agentRunStatus", "failed,timeout")
+                  ? { to: destination("#runs", "agentRunStatus", "failed,timeout") }
                   : undefined
               }
             />
@@ -207,9 +212,9 @@ function OperationalSummary({
               className="xl:border-border xl:border-b"
               label={t("detail.overview.runningRuns")}
               value={String(detail.running_runs)}
-              to={
+              target={
                 detail.running_runs > 0
-                  ? destination("#runs", "agentRunStatus", "running")
+                  ? { to: destination("#runs", "agentRunStatus", "running") }
                   : undefined
               }
             />
@@ -217,15 +222,17 @@ function OperationalSummary({
               className="xl:col-span-2"
               label={t("detail.overview.activeSchedules")}
               value={
-                schedulesLoading
-                  ? "…"
-                  : schedulesError || !schedulesSuccess
-                    ? unknown
-                    : String(activeScheduleCount)
+                schedulesLoading ? (
+                  <Skeleton className="h-6 w-10" />
+                ) : schedulesError || !schedulesSuccess ? (
+                  unknown
+                ) : (
+                  String(activeScheduleCount)
+                )
               }
-              to={
+              target={
                 activeScheduleCount && activeScheduleCount > 0
-                  ? agentSettingsHref(location.pathname, "schedules")
+                  ? { to: agentSettingsHref(location.pathname, "schedules") }
                   : undefined
               }
             />
@@ -243,34 +250,50 @@ function OperationalSummary({
           <dl className="grid h-full grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-1 lg:divide-x-0 lg:divide-y">
             <OperationalStat
               label={t("detail.overview.pinnedItems")}
-              value={pinnedLoading ? "…" : pinnedError ? unknown : String(pinned?.length ?? 0)}
-              to={
+              value={
+                pinnedLoading ? (
+                  <Skeleton className="h-6 w-10" />
+                ) : pinnedError ? (
+                  unknown
+                ) : (
+                  String(pinned?.length ?? 0)
+                )
+              }
+              target={
                 pinned && pinned.length > 0
-                  ? destination("#memory", "agentMemory", "pinned")
+                  ? { to: destination("#memory", "agentMemory", "pinned") }
                   : undefined
               }
             />
             <OperationalStat
               label={t("detail.overview.archivedItems")}
               value={
-                memoriesLoading ? "…" : memoriesError ? unknown : String(memories?.length ?? 0)
+                memoriesLoading ? (
+                  <Skeleton className="h-6 w-10" />
+                ) : memoriesError ? (
+                  unknown
+                ) : (
+                  String(memories?.length ?? 0)
+                )
               }
-              to={
+              target={
                 memories && memories.length > 0
-                  ? destination("#memory", "agentMemory", "archive")
+                  ? { to: destination("#memory", "agentMemory", "archive") }
                   : undefined
               }
             />
             <OperationalStat
               label={t("detail.overview.lastUpdated")}
               value={
-                pinnedLoading || memoriesLoading
-                  ? "…"
-                  : pinnedError || memoriesError
-                    ? unknown
-                    : latestMemory
-                      ? formatDateField(latestMemory, "datetime")
-                      : "—"
+                pinnedLoading || memoriesLoading ? (
+                  <Skeleton className="h-5 w-32" />
+                ) : pinnedError || memoriesError ? (
+                  unknown
+                ) : latestMemory ? (
+                  formatDateField(latestMemory, "datetime")
+                ) : (
+                  "—"
+                )
               }
             />
           </dl>

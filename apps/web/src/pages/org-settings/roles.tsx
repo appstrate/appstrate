@@ -8,10 +8,9 @@ import { Eye, Grid3x3, Plus, Rows3, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@appstrate/ui/components/field";
 import { ApiError } from "../../api/client";
 import {
   dependentsLabel,
@@ -19,7 +18,7 @@ import {
   withRequiredReads,
 } from "../../lib/role-permission-dependencies";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import {
   spaceRoleDescription,
   spaceRoleLabel,
@@ -33,18 +32,14 @@ import {
 import { ConfirmModal } from "../../components/confirm-modal";
 import { DataTable } from "../../components/data-table";
 import { Modal } from "../../components/modal";
-import { PageActionsMenu } from "../../components/page-actions-menu";
+import { FormModal } from "../../components/form-modal";
+import type { MenuAction } from "../../lib/menu-action";
 import { ScopeMultiSelect } from "../../components/scope-multi-select";
 import { SettingsGroup } from "../../components/settings/setting-row";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { ViewAsDialog } from "../../components/view-as-dialog";
-import {
-  LoadingState,
-  ErrorState,
-  EmptyState,
-  EmptyStateAction,
-} from "../../components/page-states";
-import { Spinner } from "../../components/spinner";
+import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
+import { TextSkeleton } from "../../components/loading-skeletons";
 import { useRoleColumns } from "./role-columns";
 import { RoleMatrix } from "./role-matrix";
 import { CollectionTabs } from "../../components/collection-tabs";
@@ -70,9 +65,9 @@ export function OrgSettingsRolesPage() {
   const canPreview = useCanPreviewRole();
   // Both modals have an address: `?role=<key>` (or `new`) and `?view-as`.
   // `?role=<key>` is only ever an existing role: `new` is a valid role key.
-  const roleParam = useModalParam("role");
+  const roleParam = useModalTarget("role", roles, (role) => role.key);
   const newRole = useModalParam("newRole");
-  const viewAsParam = useModalParam("view-as");
+  const viewAsParam = useModalParam("viewAs");
   // Tab and view are places too: `?tab=space&view=matrix` opens exactly that,
   // and Back undoes a switch. Each defaults to its first option, which is
   // then left out of the URL.
@@ -157,15 +152,25 @@ export function OrgSettingsRolesPage() {
   // The row opens the role: to edit it when it is yours to edit, to read it
   // otherwise. A preset's permissions are one click away, on the same gesture
   // as every row.
-  // Keeps the tab and view in the address, so closing the role lands back on them.
-  const roleHref = (role: RoleObject) => {
-    const params = new URLSearchParams(searchParams);
-    params.set("role", role.key);
-    return `?${params.toString()}`;
-  };
-  const requested = roleParam.value;
-  const target = requested ? roles?.find((role) => role.key === requested) : undefined;
+  const openRole = (role: RoleObject) => roleParam.open(role.key);
+  const target = roleParam.target;
   const editable = !!target && target.kind === "custom" && canWrite;
+  const create: MenuAction = {
+    id: "create",
+    icon: Plus,
+    testId: "create-role-button",
+    label: t("roles.create"),
+    onSelect: () => newRole.open(),
+    hidden: !deeds.includes("create"),
+  };
+  const viewAs: MenuAction = {
+    id: "view-as",
+    icon: Eye,
+    testId: "view-as-button",
+    label: t("viewAs.trigger"),
+    onSelect: () => viewAsParam.open(),
+    hidden: !deeds.includes("view-as"),
+  };
   const tableState = {
     isLoading,
     failure: error,
@@ -173,32 +178,7 @@ export function OrgSettingsRolesPage() {
 
   return (
     <>
-      {deeds.length > 0 && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            {deeds.includes("create") && (
-              <DropdownMenuItem
-                data-page-action="create"
-                data-testid="create-role-button"
-                onSelect={() => newRole.open()}
-              >
-                <Plus />
-                {t("roles.create")}
-              </DropdownMenuItem>
-            )}
-            {deeds.includes("view-as") && (
-              <DropdownMenuItem
-                data-page-action="view-as"
-                data-testid="view-as-button"
-                onSelect={() => viewAsParam.open()}
-              >
-                <Eye />
-                {t("viewAs.trigger")}
-              </DropdownMenuItem>
-            )}
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
+      <SettingsPageActions actions={[create, viewAs]} />
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <CollectionTabs
@@ -225,7 +205,7 @@ export function OrgSettingsRolesPage() {
         <>
           {view === "matrix" ? (
             isLoading ? (
-              <LoadingState />
+              <TextSkeleton lines={6} />
             ) : error ? (
               <ErrorState error={error} />
             ) : (
@@ -240,7 +220,7 @@ export function OrgSettingsRolesPage() {
                   columns={presetColumns}
                   rows={presets}
                   rowKey={(role) => role.key}
-                  rowHref={roleHref}
+                  rowAction={openRole}
                   rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
                   {...tableState}
                 />
@@ -253,7 +233,7 @@ export function OrgSettingsRolesPage() {
                   columns={customColumns}
                   rows={custom}
                   rowKey={(role) => role.id ?? role.key}
-                  rowHref={roleHref}
+                  rowAction={openRole}
                   rowLabel={(role) => role.name}
                   {...tableState}
                   empty={
@@ -263,12 +243,7 @@ export function OrgSettingsRolesPage() {
                       icon={ShieldCheck}
                       compact
                     >
-                      {deeds.includes("create") && (
-                        <EmptyStateAction
-                          label={t("roles.create")}
-                          onClick={() => newRole.open()}
-                        />
-                      )}
+                      <EmptyStateAction action={create} />
                     </EmptyState>
                   }
                 />
@@ -441,111 +416,92 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
   const unavailable = role?.unavailable_permissions ?? [];
 
   return (
-    <Modal
-      open
+    <FormModal
       onClose={onClose}
       title={role ? t("roles.editTitle") : t("roles.createTitle")}
       className="sm:max-w-lg"
-      actions={
-        <>
-          <Button type="button" variant="outline" onClick={onClose}>
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-          <Button
-            type="submit"
-            form="space-role-form"
-            disabled={isPending || isLoading || !!vocabularyError}
-          >
-            {isPending ? <Spinner /> : t("btn.save")}
-          </Button>
-        </>
-      }
+      onSubmit={handleSubmit(submit)}
+      isPending={isPending}
+      submitDisabled={isLoading || !!vocabularyError}
+      error={formError}
+      formProps={{ noValidate: true, onChange: () => setFormError(null) }}
     >
-      <form
-        id="space-role-form"
-        noValidate
-        onSubmit={handleSubmit(submit)}
-        onChange={() => setFormError(null)}
-        className="space-y-4"
+      <FormItem id="role-name" label={t("roles.nameLabel")} error={errors.name?.message}>
+        <Input
+          maxLength={100}
+          disabled={isPending}
+          autoFocus
+          {...register("name", {
+            required: t("common:validation.required"),
+            setValueAs: (value: string) => value.trim(),
+          })}
+        />
+      </FormItem>
+      <FormItem
+        id="role-key"
+        label={t("roles.keyLabel")}
+        hint={t("roles.keyHint")}
+        error={errors.key?.message}
       >
-        <FormItem id="role-name" label={t("roles.nameLabel")} error={errors.name?.message}>
-          <Input
-            maxLength={100}
+        <Input
+          maxLength={64}
+          disabled={isPending}
+          placeholder="support-lead"
+          {...register("key", {
+            required: t("common:validation.required"),
+            setValueAs: (value: string) => value.trim(),
+          })}
+        />
+      </FormItem>
+      <FormItem id="role-description" label={t("roles.descriptionLabel")}>
+        <Input maxLength={500} disabled={isPending} {...register("description")} />
+      </FormItem>
+      <div className="space-y-2">
+        <Label>{t("roles.permissionsLabel")}</Label>
+        {isLoading ? (
+          <TextSkeleton lines={5} />
+        ) : vocabularyError ? (
+          <div role="alert" className="space-y-2">
+            <ErrorState error={vocabularyError} compact />
+            <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
+              {t("common:btn.retry")}
+            </Button>
+          </div>
+        ) : (
+          <ScopeMultiSelect
+            available={available}
+            selected={[...selected]}
+            // The picker only knows the catalog; a permission it no longer
+            // lists stays selected until it is removed on purpose, below.
+            onChange={(next) => {
+              setSelected(
+                withRequiredReads(
+                  new Set([...next, ...[...selected].filter((p) => !availableSet.has(p))]),
+                  entries,
+                ),
+              );
+              setFormError(null);
+            }}
+            hint={requiredBy}
             disabled={isPending}
-            autoFocus
-            {...register("name", {
-              required: t("common:validation.required"),
-              setValueAs: (value: string) => value.trim(),
-            })}
+            // The exception, marked where it applies: most permissions an API
+            // key holding this role can use, these only a signed-in person.
+            tag={(permission) =>
+              sessionOnly.has(permission)
+                ? { label: t("roles.sessionOnly"), title: t("roles.sessionOnlyHelp") }
+                : null
+            }
+            labels={{
+              all: t("roles.allPermissions"),
+              none: t("roles.permissionsPlaceholder"),
+              count: (count) => t("roles.selectedPermissions", { count }),
+              search: t("roles.searchPermissions"),
+              empty: t("roles.noMatchingPermissions"),
+            }}
           />
-        </FormItem>
-        <FormItem
-          id="role-key"
-          label={t("roles.keyLabel")}
-          hint={t("roles.keyHint")}
-          error={errors.key?.message}
-        >
-          <Input
-            maxLength={64}
-            disabled={isPending}
-            placeholder="support-lead"
-            {...register("key", {
-              required: t("common:validation.required"),
-              setValueAs: (value: string) => value.trim(),
-            })}
-          />
-        </FormItem>
-        <FormItem id="role-description" label={t("roles.descriptionLabel")}>
-          <Input maxLength={500} disabled={isPending} {...register("description")} />
-        </FormItem>
-        <div className="space-y-2">
-          <Label>{t("roles.permissionsLabel")}</Label>
-          {isLoading ? (
-            <LoadingState />
-          ) : vocabularyError ? (
-            <div role="alert" className="space-y-2">
-              <ErrorState error={vocabularyError} compact />
-              <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
-                {t("common:btn.retry")}
-              </Button>
-            </div>
-          ) : (
-            <ScopeMultiSelect
-              available={available}
-              selected={[...selected]}
-              // The picker only knows the catalog; a permission it no longer
-              // lists stays selected until it is removed on purpose, below.
-              onChange={(next) => {
-                setSelected(
-                  withRequiredReads(
-                    new Set([...next, ...[...selected].filter((p) => !availableSet.has(p))]),
-                    entries,
-                  ),
-                );
-                setFormError(null);
-              }}
-              hint={requiredBy}
-              disabled={isPending}
-              // The exception, marked where it applies: most permissions an API
-              // key holding this role can use, these only a signed-in person.
-              tag={(permission) =>
-                sessionOnly.has(permission)
-                  ? { label: t("roles.sessionOnly"), title: t("roles.sessionOnlyHelp") }
-                  : null
-              }
-              labels={{
-                all: t("roles.allPermissions"),
-                none: t("roles.permissionsPlaceholder"),
-                count: (count) => t("roles.selectedPermissions", { count }),
-                search: t("roles.searchPermissions"),
-                empty: t("roles.noMatchingPermissions"),
-              }}
-            />
-          )}
-          <UnavailablePermissions permissions={unavailable} />
-        </div>
-        {formError && <FieldError>{formError}</FieldError>}
-      </form>
-    </Modal>
+        )}
+        <UnavailablePermissions permissions={unavailable} />
+      </div>
+    </FormModal>
   );
 }

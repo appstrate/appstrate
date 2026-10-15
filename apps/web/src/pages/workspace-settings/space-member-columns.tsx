@@ -19,20 +19,14 @@ import type { DataColumn } from "../../components/data-table";
 import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
 import { CellEmpty, CellText } from "../../components/table-cells";
-import { SpaceRoleSelect } from "../../components/space-role-select";
-import { roleI18nKey } from "../../hooks/use-permissions";
-import { spaceRoleLabel, type useSpaceRoleOptions } from "../../hooks/use-roles";
+import { useSpaceSeatColumns } from "../../components/space-seat-columns";
+import type { RoleObject, SpaceRoleOption } from "../../hooks/use-roles";
+import { memberLabel } from "../../lib/members";
 import type { SpaceMemberObject } from "../../hooks/use-space-members";
-
-type SpaceRoleOption = ReturnType<typeof useSpaceRoleOptions>["options"][number];
-
-export function spaceMemberLabel(member: SpaceMemberObject): string {
-  return member.name || member.email || member.userId;
-}
 
 export function useSpaceMemberColumns({
   editable,
-  roleValue,
+  roles,
   roleOptions,
   isChangingRole,
   onChangeRole,
@@ -43,7 +37,7 @@ export function useSpaceMemberColumns({
 }: {
   /** Whether this row's role is the caller's to change. */
   editable: (member: SpaceMemberObject) => boolean;
-  roleValue: (member: SpaceMemberObject) => string;
+  roles: RoleObject[] | undefined;
   roleOptions: SpaceRoleOption[];
   isChangingRole: boolean;
   onChangeRole: (member: SpaceMemberObject, value: string) => void;
@@ -54,12 +48,15 @@ export function useSpaceMemberColumns({
   onRemove: (member: SpaceMemberObject) => void;
 }): DataColumn<SpaceMemberObject>[] {
   const { t } = useTranslation(["settings", "common"]);
-
-  /** What a role the caller cannot change reads as. */
-  const fixedRole = (member: SpaceMemberObject) =>
-    member.source === "org_role"
-      ? t("spaceMembers.orgRoleOf", { role: t(roleI18nKey(member.org_role)) })
-      : (spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole"));
+  const seatColumns = useSpaceSeatColumns<SpaceMemberObject>({
+    seat: (member) => member,
+    seatName: memberLabel,
+    editable,
+    roles,
+    roleOptions,
+    isChangingRole,
+    onChangeRole,
+  });
 
   return [
     {
@@ -67,8 +64,8 @@ export function useSpaceMemberColumns({
       header: t("spaceMembers.colMember"),
       width: "minmax(100px,1.4fr)",
       cell: (member) => (
-        <CellText strong title={spaceMemberLabel(member)}>
-          {spaceMemberLabel(member)}
+        <CellText strong title={memberLabel(member)}>
+          {memberLabel(member)}
         </CellText>
       ),
     },
@@ -80,41 +77,13 @@ export function useSpaceMemberColumns({
       cell: (member) =>
         member.email ? <CellText title={member.email}>{member.email}</CellText> : <CellEmpty />,
     },
-    {
-      id: "source",
-      header: t("spaceMembers.colSource"),
-      width: "110px",
-      tier: 2,
-      cell: (member) => <CellText>{t(`spaceMembers.source.${member.source}`)}</CellText>,
-    },
-    {
-      id: "role",
-      header: t("spaceMembers.colRole"),
-      width: "minmax(110px,1fr)",
-      // A select: it scrolls into reach rather than waiting for room.
-      control: true,
-      cell: (member) =>
-        editable(member) ? (
-          <SpaceRoleSelect
-            value={roleValue(member)}
-            options={roleOptions}
-            fallbackLabel={spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
-            placeholder={t("spaceMembers.noRole")}
-            className="h-7 w-full text-xs"
-            ariaLabel={t("spaceMembers.roleAriaLabel", { name: spaceMemberLabel(member) })}
-            disabled={isChangingRole}
-            onValueChange={(value) => onChangeRole(member, value)}
-          />
-        ) : (
-          <CellText title={fixedRole(member)}>{fixedRole(member)}</CellText>
-        ),
-    },
+    ...seatColumns,
     rowActionsColumn((member: SpaceMemberObject) => {
       const kind = removal(member);
       if (!kind) return null;
       return (
         <TableRowActions
-          menuLabel={t("spaceMembers.moreActions", { name: spaceMemberLabel(member) })}
+          menuLabel={t("spaceMembers.moreActions", { name: memberLabel(member) })}
           isPending={isRemoving}
           actions={[
             {

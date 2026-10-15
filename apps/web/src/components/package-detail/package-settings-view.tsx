@@ -10,25 +10,15 @@
  * file, for whoever reads the package. The raw manifest is not a section (every
  * form writes into it) but a modal reached from under Identité.
  */
-import { lazy, Suspense, useCallback, type ComponentProps } from "react";
+import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation } from "react-router-dom";
 import { FileArchive, FolderTree, History, IdCard } from "lucide-react";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { Versioned } from "../../hooks/use-packages";
-import { EditorPlaceContext } from "../../hooks/use-unsaved-changes";
-import type { EditorPlace } from "../../lib/editor-place";
-import {
-  packageSettingsHref,
-  settingsEditorPlace,
-  type PackageSettingsSection,
-} from "../../lib/settings-section-href";
-import { AgentDetailSplit } from "../agent-detail/agent-detail-split";
-import { LoadingState } from "../page-states";
-import { PackageFilesSection } from "../package-files/package-files-section";
-import { PackageFilesView } from "../package-files/package-files-view";
-import { SectionRail, type SectionRailItem } from "../settings/section-rail";
-import { PackageVersionsSection } from "./package-versions-section";
+import type { PackageSettingsSection } from "../../lib/settings-section-href";
+import { SettingsSkeleton } from "../loading-skeletons";
+import { SettingsRailView } from "../settings/settings-rail-view";
+import { PackageCommonSection, type PackageVersionsProps } from "./package-common-section";
 
 const PackageDefinitionEditor = lazy(() =>
   import("../../pages/package-editor").then((module) => ({
@@ -43,7 +33,7 @@ export function PackageSettingsView({
   version,
   versions,
 }: {
-  versions: Omit<ComponentProps<typeof PackageVersionsSection>, "type" | "packageId">;
+  versions: PackageVersionsProps;
   type: "skill" | "mcp-server";
   packageId: string;
   detail: Versioned<OrgPackageItemDetail> | undefined;
@@ -51,94 +41,65 @@ export function PackageSettingsView({
   version?: string;
 }) {
   const { t } = useTranslation("agents");
-  const location = useLocation();
   // Write authority is the package's HOME space, never the space being browsed.
   const editable = !!detail?.home_writable && version === undefined;
   // A system package has no history of its own to browse (same rule as agents).
   const hasVersions = detail?.source !== "system";
 
-  const sectionOf = useCallback(
-    (search: URLSearchParams): PackageSettingsSection => {
-      const requested = search.get("packageSettings");
-      if (requested === "versions" && hasVersions) return "versions";
-      if (requested === "general" && editable) return "general";
-      // Contenu reads the bundle, so whoever reads the package reads it.
-      return requested === "bundle" ? "bundle" : "files";
-    },
-    [hasVersions, editable],
-  );
-  const params = new URLSearchParams(location.search);
-  const active = sectionOf(params);
-  const requestedFile = params.get("file") ?? undefined;
-  const editorPlace = useCallback<EditorPlace>(
-    (search) => settingsEditorPlace(sectionOf(search), search),
-    [sectionOf],
-  );
-  const filesHref = (path: string) =>
-    packageSettingsHref(location.pathname, "files", { file: path });
-
-  const item = (id: PackageSettingsSection, icon: SectionRailItem["icon"], label: string) => ({
-    id,
-    to: packageSettingsHref(location.pathname, id),
-    icon,
-    label,
-  });
+  const resolve = (requested: string | null): PackageSettingsSection => {
+    if (requested === "versions" && hasVersions) return "versions";
+    if (requested === "general" && editable) return "general";
+    // Contenu reads the bundle, so whoever reads the package reads it.
+    return requested === "bundle" ? "bundle" : "files";
+  };
   const groups = [
     {
       title: t("detail.settings.exploreGroup"),
       items: [
-        item("files", FolderTree, t("detail.overview.explorer")),
-        ...(hasVersions ? [item("versions", History, t("detail.settings.versions"))] : []),
+        { id: "files" as const, icon: FolderTree, label: t("detail.overview.explorer") },
+        ...(hasVersions
+          ? [{ id: "versions" as const, icon: History, label: t("detail.settings.versions") }]
+          : []),
       ],
     },
     {
       title: t("detail.settings.definitionGroup"),
       items: [
-        ...(editable ? [item("general", IdCard, t("editor.tabGeneral"))] : []),
-        item("bundle", FileArchive, t("editor.tabPackageFiles")),
+        ...(editable
+          ? [{ id: "general" as const, icon: IdCard, label: t("editor.tabGeneral") }]
+          : []),
+        { id: "bundle" as const, icon: FileArchive, label: t("editor.tabPackageFiles") },
       ],
     },
   ];
 
   return (
-    <EditorPlaceContext.Provider value={editorPlace}>
-      <AgentDetailSplit
-        data-package-settings
-        phoneMenu={t("detail.tabSettings")}
-        rail={<SectionRail label={t("detail.tabSettings")} groups={groups} active={active} />}
-      >
-        {active === "versions" ? (
-          <PackageVersionsSection type={type} packageId={packageId} {...versions} />
-        ) : active === "bundle" ? (
-          <PackageFilesSection
-            type={type}
-            packageId={packageId}
-            manifest={detail?.manifest ?? {}}
-            filesHref={filesHref}
-          />
-        ) : active === "general" && detail ? (
-          <Suspense fallback={<LoadingState />}>
+    <SettingsRailView
+      param="packageSettings"
+      tab="settings"
+      label={t("detail.tabSettings")}
+      groups={groups}
+      resolve={resolve}
+    >
+      {({ active, file, href }) =>
+        active === "general" && detail ? (
+          <Suspense fallback={<SettingsSkeleton />}>
             <PackageDefinitionEditor type={type} detail={detail} />
           </Suspense>
         ) : (
-          <PackageFilesView
-            key={requestedFile}
+          <PackageCommonSection
+            section={active === "general" ? "files" : active}
             type={type}
             packageId={packageId}
-            initialVersion={version}
-            initialPath={requestedFile}
-            editable={editable}
-            editHref={
-              editable
-                ? (path) =>
-                    path === "manifest.json"
-                      ? packageSettingsHref(location.pathname, "general", { editManifest: "1" })
-                      : undefined
-                : undefined
-            }
+            manifest={detail?.manifest ?? {}}
+            file={file}
+            href={href}
+            version={version}
+            manifestSection={editable ? "general" : undefined}
+            versions={versions}
           />
-        )}
-      </AgentDetailSplit>
-    </EditorPlaceContext.Provider>
+        )
+      }
+    </SettingsRailView>
   );
 }

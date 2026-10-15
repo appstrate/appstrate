@@ -27,6 +27,16 @@ function writeItem(key: string, value: string | null): void {
   }
 }
 
+/** Stored JSON narrowed by `parse`; `fallback` answers an absent, unparseable or rejected value. */
+function parseStored<T>(raw: string | null, parse: (value: unknown) => T, fallback: () => T): T {
+  if (raw === null) return fallback();
+  try {
+    return parse(JSON.parse(raw));
+  } catch {
+    return fallback();
+  }
+}
+
 /**
  * One stored scalar under `key`; `parse` turns whatever is there (or nothing)
  * into a value. Writing `null` removes it.
@@ -47,13 +57,7 @@ export function persistedValue<T extends string | boolean | null>(
  */
 export function persistedJson<T>(key: string, parse: (value: unknown) => T) {
   return {
-    read: (): T => {
-      try {
-        return parse(JSON.parse(readItem(key) ?? "null"));
-      } catch {
-        return parse(null);
-      }
-    },
+    read: (): T => parseStored(readItem(key), parse, () => parse(null)),
     write: (value: T | null): void => writeItem(key, value === null ? null : JSON.stringify(value)),
   };
 }
@@ -81,15 +85,7 @@ export function createKeyedLocalStore<T>(prefix: string, parse: (value: unknown)
 
   const read = (key: string): T => {
     if (snapshots.has(key)) return snapshots.get(key) as T;
-    let value = empty;
-    const raw = readItem(prefix + key);
-    if (raw !== null) {
-      try {
-        value = parse(JSON.parse(raw));
-      } catch {
-        value = empty;
-      }
-    }
+    const value = parseStored(readItem(prefix + key), parse, () => empty);
     snapshots.set(key, value);
     return value;
   };

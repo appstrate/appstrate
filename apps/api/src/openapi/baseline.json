@@ -13213,7 +13213,42 @@
                       "type": "string"
                     },
                     "logo": {
-                      "type": ["string", "null"]
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": ["kind", "emoji"],
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "emoji"
+                            },
+                            "emoji": {
+                              "type": "string",
+                              "description": "Exactly one emoji."
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": ["kind", "url"],
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "image"
+                            },
+                            "url": {
+                              "type": "string",
+                              "description": "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good."
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial."
                     },
                     "role": {
                       "type": "string",
@@ -13322,7 +13357,7 @@
         "operationId": "updateOrganization",
         "tags": ["Organizations"],
         "summary": "Update organization",
-        "description": "Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+        "description": "Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes `{ kind: \"emoji\", emoji }` or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.",
         "parameters": [
           {
             "name": "orgId",
@@ -13349,9 +13384,27 @@
                     "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
                   },
                   "logo": {
-                    "type": ["string", "null"],
-                    "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial.",
-                    "maxLength": 48000
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "required": ["kind", "emoji"],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "emoji"
+                          },
+                          "emoji": {
+                            "type": "string",
+                            "description": "Exactly one emoji."
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "`{ \"kind\": \"emoji\", \"emoji\": \"<one emoji>\" }`, or `null` to clear the logo."
                   }
                 },
                 "additionalProperties": false
@@ -13427,6 +13480,159 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/logo": {
+      "get": {
+        "operationId": "getOrganizationLogo",
+        "tags": ["Organizations"],
+        "summary": "Get organization logo image",
+        "description": "The organization's logo image, for any member. Its `ETag` is the image's version, the `v` of `logo.url`; a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The logo version the caller expects: the `v` of `logo.url`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The logo image.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The quoted logo version."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`private, max-age=31536000, immutable` when `v` names the current version, `private, no-cache` otherwise."
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string",
+                  "enum": ["nosniff"]
+                }
+              }
+            },
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Cached copy is still current (`If-None-Match` matched). No body.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The quoted logo version."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "As on the `200`."
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound",
+            "description": "The organization's logo is not an image."
+          }
+        }
+      },
+      "put": {
+        "operationId": "uploadOrganizationLogo",
+        "tags": ["Organizations"],
+        "summary": "Upload organization logo image",
+        "description": "Replace the organization logo with a WebP image sent as the raw request body (`Content-Type: image/webp`, at most 36000 bytes, a RIFF container of form type `WEBP`). Requires `org:update`. `logo` becomes `{ kind: \"image\", url }`.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "image/webp": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "maxLength": 36000
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated organization — same OrgDetail shape as GET /api/orgs/{orgId}",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -14331,8 +14537,42 @@
                             "type": "string"
                           },
                           "logo": {
-                            "type": ["string", "null"],
-                            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial."
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "required": ["kind", "emoji"],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "emoji"
+                                  },
+                                  "emoji": {
+                                    "type": "string",
+                                    "description": "Exactly one emoji."
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": ["kind", "url"],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "image"
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "description": "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good."
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial."
                           },
                           "role": {
                             "type": "string",
@@ -30522,11 +30762,16 @@
         "name": "status",
         "in": "query",
         "required": false,
-        "description": "Filter runs by lifecycle status: one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.",
+        "description": "Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.",
+        "style": "form",
+        "explode": false,
         "schema": {
-          "type": "string",
-          "pattern": "^(\\s*(pending|running|success|failed|timeout|cancelled)\\s*(,\\s*(pending|running|success|failed|timeout|cancelled)\\s*)*)?$",
-          "example": "failed,timeout"
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["pending", "running", "success", "failed", "timeout", "cancelled"]
+          },
+          "example": ["failed", "timeout"]
         }
       },
       "RunSearch": {
@@ -31551,8 +31796,42 @@
             "type": "string"
           },
           "logo": {
-            "type": ["string", "null"],
-            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial."
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["kind", "emoji"],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "emoji"
+                  },
+                  "emoji": {
+                    "type": "string",
+                    "description": "Exactly one emoji."
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": ["kind", "url"],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "image"
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good."
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial."
           },
           "role": {
             "type": "string",
@@ -31674,8 +31953,42 @@
             "type": "string"
           },
           "logo": {
-            "type": ["string", "null"],
-            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial."
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["kind", "emoji"],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "emoji"
+                  },
+                  "emoji": {
+                    "type": "string",
+                    "description": "Exactly one emoji."
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": ["kind", "url"],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "image"
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good."
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial."
           },
           "createdAt": {
             "type": "string",
@@ -31761,7 +32074,7 @@
           },
           "icon": {
             "type": "string",
-            "description": "AFPS manifest icon used for the Agent identity tile."
+            "description": "The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none."
           },
           "color": {
             "type": "string",
@@ -31878,7 +32191,7 @@
           },
           "icon": {
             "type": "string",
-            "description": "AFPS manifest icon used for the Agent identity tile."
+            "description": "The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none."
           },
           "color": {
             "type": "string",
@@ -33034,7 +33347,7 @@
           },
           "icon": {
             "type": ["string", "null"],
-            "description": "The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone."
+            "description": "The manifest's `icon`: an Iconify id (`<prefix>:<name>`, e.g. `logos:slack-icon`, `lucide:bot`) or an image URL, `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone."
           },
           "keywords": {
             "type": "array",
@@ -33132,7 +33445,7 @@
           },
           "icon": {
             "type": ["string", "null"],
-            "description": "The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone."
+            "description": "The manifest's `icon`: an Iconify id (`<prefix>:<name>`, e.g. `logos:slack-icon`, `lucide:bot`) or an image URL, `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone."
           },
           "keywords": {
             "type": "array",

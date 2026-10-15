@@ -26,11 +26,12 @@ installFakeStorage({
   open: () => popup,
   addEventListener: () => {},
   removeEventListener: () => {},
+  BroadcastChannel,
 });
 
 const { client } = await import("../../../api/client.ts");
 const { render } = await import("../../../test/render.tsx");
-const { useHostedConnectPopup } = await import("../use-integration-oauth-popup.ts");
+const { useHostedConnectPopup } = await import("../use-hosted-connect-popup.ts");
 const i18nModule = await import("../../../i18n.ts");
 
 await i18nModule.i18nReady;

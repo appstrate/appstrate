@@ -15,7 +15,6 @@ import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
-import { Spinner } from "./spinner";
 import { Label } from "@appstrate/ui/components/label";
 import { type OrgModelInfo } from "../hooks/use-models";
 import { DiscoveryControls } from "./model-form/discovery-controls";
@@ -31,7 +30,8 @@ import {
   useProvidersRegistry,
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
-import { ErrorState, LoadingState } from "./page-states";
+import { ErrorState } from "./page-states";
+import { SettingsSkeleton } from "./loading-skeletons";
 import { refusalMessage } from "../lib/mutation-error";
 import { getProviderById } from "@/lib/provider-registry-helpers";
 import { buildDiscoverBody, parsesAsUrl } from "@/lib/model-discovery";
@@ -55,7 +55,6 @@ import { selectableCredentials } from "@/lib/model-credential-filter";
 import { allowsMemberModels } from "@/lib/model-providers";
 
 interface ModelFormModalProps {
-  open: boolean;
   onClose: () => void;
   model: OrgModelInfo | null;
   isPending: boolean;
@@ -80,7 +79,7 @@ export function ModelFormBody(props: ModelFormBodyProps) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   if (registryQuery.error) return <ErrorState error={registryQuery.error} />;
-  if (!registryQuery.data) return <LoadingState />;
+  if (!registryQuery.data) return <SettingsSkeleton />;
   // A row whose provider left the registry has no endpoint to describe and no
   // credential to match: say so rather than render an empty form.
   if (props.model && !getProviderById(props.model.providerId ?? "", registryQuery.data)) {
@@ -494,7 +493,6 @@ function ModelForm({
               search={search.search}
               onSearchChange={search.setSearch}
               isLoading={source === "search" && search.isLoading}
-              loadingText={t("models.form.modelSearchLoading")}
               emptyText={t("models.form.modelSearchEmpty")}
               grouped={source === "catalog"}
             />
@@ -539,14 +537,14 @@ function ModelForm({
   );
 }
 
-/** Mounted only while open, so the footer's selection count starts empty on every open. */
-function ModelFormDialog({
+/** Mounted by the caller while open, so the footer's selection count starts empty on every open. */
+export function ModelFormModal({
   onClose,
   model,
   isPending,
   onSubmit,
   onDelete,
-}: Omit<ModelFormModalProps, "open">) {
+}: ModelFormModalProps) {
   const { t } = useTranslation(["settings", "common"]);
   const [selectionCount, setSelectionCount] = useState<number | null>(null);
 
@@ -554,30 +552,30 @@ function ModelFormDialog({
     <Modal
       open
       onClose={onClose}
+      preventClose={isPending}
       title={model ? t("models.form.editTitle") : t("models.form.title")}
       actions={
         <>
           {model && <SavedModelActions model={model} onDelete={onDelete} />}
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button type="submit" form="model-form" disabled={isPending || selectionCount === 0}>
-            {isPending ? (
-              <Spinner />
-            ) : selectionCount !== null ? (
-              t("models.form.addModels", { count: selectionCount })
-            ) : (
-              t("btn.save")
-            )}
+          <Button
+            type="submit"
+            form="model-form"
+            pending={isPending}
+            disabled={selectionCount === 0}
+          >
+            {selectionCount !== null
+              ? t("models.form.addModels", { count: selectionCount })
+              : t("btn.save")}
           </Button>
         </>
       }
     >
       {/* Keep the submitted endpoint stable until partial results have been applied. */}
       <fieldset disabled={isPending} className="min-w-0">
-        {/* Key forces remount when the target model changes, resetting all state */}
         <ModelFormBody
-          key={model?.id ?? "__create__"}
           model={model}
           onSubmit={onSubmit}
           onMultiSelectionChange={setSelectionCount}
@@ -585,9 +583,4 @@ function ModelFormDialog({
       </fieldset>
     </Modal>
   );
-}
-
-export function ModelFormModal({ open, ...props }: ModelFormModalProps) {
-  if (!open) return null;
-  return <ModelFormDialog {...props} />;
 }

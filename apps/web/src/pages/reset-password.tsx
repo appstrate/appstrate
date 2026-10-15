@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, CheckCircle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
-import { cn } from "@appstrate/ui/cn";
+import { FieldError } from "@appstrate/ui/components/field";
 import { AuthLayout } from "../components/auth-layout";
-import { AuthSuccessState } from "../components/auth-success-state";
-import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
+import { AuthLink, AuthMessage } from "../components/auth-message";
+import { NewPasswordFields, type NewPasswordValues } from "../components/auth-fields";
+import { useAppForm } from "../hooks/use-app-form";
 import { useAuth } from "../hooks/use-auth";
 import { ApiError } from "../api/errors";
 import { errorMessage } from "../lib/mutation-error";
@@ -21,61 +20,44 @@ export function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token");
 
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [state, setState] = useState<"form" | "submitting" | "success">("form");
+  const form = useAppForm<NewPasswordValues>({
+    defaultValues: { newPassword: "", confirmPassword: "" },
+  });
+  const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revocationFailed, setRevocationFailed] = useState(false);
 
   if (!token) {
     return (
       <AuthLayout>
-        <div className="flex flex-col items-center gap-6 text-center">
-          <div className="bg-destructive/10 flex h-16 w-16 items-center justify-center rounded-full">
-            <AlertCircle className="text-destructive h-8 w-8" />
-          </div>
-          <p className="text-muted-foreground text-sm">{t("resetPassword.invalidToken")}</p>
-          <Link
-            to="/forgot-password"
-            className="text-muted-foreground hover:text-primary text-sm underline underline-offset-4"
-          >
-            {t("resetPassword.requestNew")}
-          </Link>
-        </div>
+        <AuthMessage
+          icon={AlertCircle}
+          tone="destructive"
+          description={t("resetPassword.invalidToken")}
+          backTo="/forgot-password"
+          backLabel={t("resetPassword.requestNew")}
+        />
       </AuthLayout>
     );
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onSubmit = async ({ newPassword }: NewPasswordValues) => {
     setError(null);
-
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(t("validation.minLength", { ns: "common", min: MIN_PASSWORD_LENGTH }));
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError(t("resetPassword.mismatch"));
-      return;
-    }
-
-    setState("submitting");
     try {
-      await resetPassword(token, password);
-      setState("success");
+      await resetPassword(token, newPassword);
+      setSuccess(true);
     } catch (err) {
       // The password is written and the link spent: not an invalid link.
       const failed = err instanceof ApiError && err.code === "credential_change_revocation_failed";
       setRevocationFailed(failed);
       setError(failed ? errorMessage(err) : t("resetPassword.invalidToken"));
-      setState("form");
     }
   };
 
-  if (state === "success") {
+  if (success) {
     return (
       <AuthLayout>
-        <AuthSuccessState
+        <AuthMessage
           icon={CheckCircle}
           title={t("resetPassword.successTitle")}
           description={t("resetPassword.successDescription")}
@@ -95,49 +77,23 @@ export function ResetPasswordPage() {
             {t("resetPassword.description")}
           </p>
         </div>
-        <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-sm flex-col gap-4">
-          <FormItem id="password" label={t("resetPassword.newPassword")}>
-            <Input
-              type="password"
-              placeholder="••••••••"
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </FormItem>
-          <FormItem id="confirm-password" label={t("resetPassword.confirmPassword")}>
-            <Input
-              type="password"
-              placeholder="••••••••"
-              autoComplete="new-password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className={cn(
-                confirmPassword && password !== confirmPassword && "border-destructive",
-              )}
-              required
-            />
-          </FormItem>
+        <form
+          onSubmit={form.handleSubmit(onSubmit)}
+          noValidate
+          className="mx-auto flex w-full max-w-sm flex-col gap-4"
+        >
+          <NewPasswordFields form={form} />
           <FieldError>{error}</FieldError>
           {revocationFailed && (
-            <Link
-              to="/forgot-password"
-              className="text-muted-foreground hover:text-primary text-sm underline underline-offset-4"
-            >
-              {t("resetPassword.requestNew")}
-            </Link>
+            <AuthLink to="/forgot-password">{t("resetPassword.requestNew")}</AuthLink>
           )}
-          <Button type="submit" className="w-full" disabled={state === "submitting"}>
-            {state === "submitting" ? t("loading") : t("resetPassword.submit")}
+          <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+            {form.formState.isSubmitting ? t("loading") : t("resetPassword.submit")}
           </Button>
         </form>
-        <Link
-          to="/login"
-          className="text-muted-foreground hover:text-primary text-center text-sm underline underline-offset-4"
-        >
+        <AuthLink to="/login" className="text-center">
           {t("resetPassword.backToLogin")}
-        </Link>
+        </AuthLink>
       </div>
     </AuthLayout>
   );

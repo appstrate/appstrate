@@ -4,7 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { Fragment, isValidElement, type ReactElement, type ReactNode } from "react";
 import { DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../data-table.tsx";
-import { orderRowActions, type RowAction } from "../../lib/row-action-order.ts";
+import { splitMenuActions, type MenuAction } from "../../lib/menu-action.ts";
 import { useDocumentColumns } from "../document-columns.tsx";
 import type { FileDto } from "../../hooks/use-files.ts";
 import { documents } from "../../lab/fixtures.ts";
@@ -44,9 +44,9 @@ function menuEntries<T>(columns: DataColumn<T>[], row: T): string[] {
   let entries: string[] = [];
   function Probe() {
     const menu = (
-      cell.type as (props: object) => ReactElement<{ actions?: RowAction[]; children?: ReactNode }>
+      cell.type as (props: object) => ReactElement<{ actions?: MenuAction[]; children?: ReactNode }>
     )(cell.props);
-    const { plain, destructive } = orderRowActions(menu.props.actions ?? []);
+    const { plain, destructive } = splitMenuActions(menu.props.actions ?? []);
     const children = flatten(menu.props.children).map((item) =>
       item.type === DropdownMenuSeparator ? "—" : textsOf(item).join(""),
     );

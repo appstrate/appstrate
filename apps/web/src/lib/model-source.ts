@@ -12,6 +12,7 @@ import type {
   ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import type { OpenRouterModel, OrgModelInfo } from "../hooks/use-models";
+import { matchesSearch } from "./strings";
 import { catalogValues, type CatalogModelValues } from "./row-overrides-catalog";
 
 export type ModelSource = "catalog" | "discover" | "search";
@@ -146,9 +147,5 @@ export function existingRow(m: OrgModelInfo): ModelPickRow {
 
 /** Client-side search over a list. A remote search filters itself. */
 export function filterRows(rows: readonly ModelPickRow[], search: string): ModelPickRow[] {
-  const needle = search.trim().toLowerCase();
-  if (!needle) return [...rows];
-  return rows.filter(
-    (r) => r.id.toLowerCase().includes(needle) || !!r.label?.toLowerCase().includes(needle),
-  );
+  return rows.filter((r) => matchesSearch(search, [r.id, r.label]));
 }
