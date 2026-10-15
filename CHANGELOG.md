@@ -6,44 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Operators
-
-- **Runner daemon variables go in a systemd drop-in** (#1943). beta.67 said to
-  add `EGRESS_ALLOW_INTERNAL_HOSTS` to `/etc/appstrate-runner/env`, which
-  `appstrate runner install` re-renders: move that line, and any other one added
-  by hand, to `systemctl edit appstrate-runner` (`[Service]`, `Environment=`),
-  which survives a re-install. Install warns naming each key it drops and keeps
-  the previous file as `/etc/appstrate-runner/env.previous`
-  (`docs/architecture/FIRECRACKER.md` → Env vars).
-
 ### Changed
-
-- **BREAKING (CLI): the Claude Code plugin reaches every space, and its agent
-  commands come from every synced space** (#1972). `appstrate code sync` writes
-  the plugin's `.mcp.json` with the organization's URL, `/api/mcp/o/<org>`, not
-  the pinned space's `/s/<space>`: the plugin reaches every space you hold a
-  role in, as the claude.ai connector does. Claude Code keys an MCP login on
-  the URL, so the first sync after the upgrade asks for one more `/mcp` login.
-  A free-form request in Claude Code has no implicit space any more: the model
-  takes `space_id` from the request or asks. Agent commands come from the same
-  selection of spaces as skills (`--space` and `syncSpaces` narrow both): a
-  selected space supplies skills where your role holds `skills:read`, and
-  agents where it holds `agents:run`, `runs:read` and `mcp:invoke`, as the
-  `runner` role does without `skills:read`; one stderr line names the spaces
-  that supply no agent. Each command names its space in every
-  call. The same agent active in two spaces is two commands: the first keeps
-  `run-<name>`, the next is `run-<space name>-<name>`, and from the second sync
-  on, a command keeps its name when its agent is activated in another space or
-  when the space holding `run-<name>` leaves the selection.
-  `code sync` no longer reads the pinned space and no longer requires one. The
-  pin set by `appstrate space switch` is now only the default space of the
-  CLI's REST commands (`appstrate api`, `run --integrations=remote`,
-  `packages`) and changes nothing in Claude Code. The first sync after the
-  upgrade rewrites every installed agent command once. On that sync an
-  installed command does not yet hold its name: an agent active in several
-  synced spaces gets `run-<name>` in the first space in selection order, which
-  may not be the space it was pinned to, and an agent whose read fails loses
-  its command until the next sync. Both settle on the following sync.
 
 - **The dashboard is redesigned** (#1937): settings and preferences open as
   routed overlays, every real dialog has a URL, tables share one component, and
@@ -105,6 +68,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     without the `output` runtime tool now answers the `errors[]` item
     `output_tool_required` on `manifest.runtime_tools` instead of
     `invalid_manifest`, and items carry `line`/`column` on a YAML syntax error.
+
+## [1.0.0-beta.68] - 2026-10-15
+
+### Operators
+
+- **Runner daemon variables go in a systemd drop-in** (#1943). beta.67 said to
+  add `EGRESS_ALLOW_INTERNAL_HOSTS` to `/etc/appstrate-runner/env`, which
+  `appstrate runner install` re-renders: move that line, and any other one added
+  by hand, to `systemctl edit appstrate-runner` (`[Service]`, `Environment=`),
+  which survives a re-install. Install warns naming each key it drops and keeps
+  the previous file as `/etc/appstrate-runner/env.previous`
+  (`docs/architecture/FIRECRACKER.md` → Env vars).
+
+### Changed
+
+- **BREAKING (CLI): the Claude Code plugin reaches every space, and its agent
+  commands come from every synced space** (#1972). `appstrate code sync` writes
+  the plugin's `.mcp.json` with the organization's URL, `/api/mcp/o/<org>`, not
+  the pinned space's `/s/<space>`: the plugin reaches every space you hold a
+  role in, as the claude.ai connector does. Claude Code keys an MCP login on
+  the URL, so the first sync after the upgrade asks for one more `/mcp` login.
+  A free-form request in Claude Code has no implicit space any more: the model
+  takes `space_id` from the request or asks. Agent commands come from the same
+  selection of spaces as skills (`--space` and `syncSpaces` narrow both): a
+  selected space supplies skills where your role holds `skills:read`, and
+  agents where it holds `agents:run`, `runs:read` and `mcp:invoke`, as the
+  `runner` role does without `skills:read`; one stderr line names the spaces
+  that supply no agent. Each command names its space in every
+  call. The same agent active in two spaces is two commands: the first keeps
+  `run-<name>`, the next is `run-<space name>-<name>`, and from the second sync
+  on, a command keeps its name when its agent is activated in another space or
+  when the space holding `run-<name>` leaves the selection.
+  `code sync` no longer reads the pinned space and no longer requires one. The
+  pin set by `appstrate space switch` is now only the default space of the
+  CLI's REST commands (`appstrate api`, `run --integrations=remote`,
+  `packages`) and changes nothing in Claude Code. The first sync after the
+  upgrade rewrites every installed agent command once. On that sync an
+  installed command does not yet hold its name: an agent active in several
+  synced spaces gets `run-<name>` in the first space in selection order, which
+  may not be the space it was pinned to, and an agent whose read fails loses
+  its command until the next sync. Both settle on the following sync.
+
+### Added
+
+- **Vapi — an agent collects an answer through an outbound phone call
+  (#2002).** `@appstrate/vapi@1.0.0` calls Vapi's REST API through `api_call`
+  with one `api_key` auth (the Vapi private key, sent as
+  `Authorization: Bearer`). Not Vapi's MCP server: its `get_call` returns no
+  transcript and no extracted data, and its `create_call` takes no per-call
+  assistant. It is the first system package shipping an `INTEGRATION.md`,
+  inlined in the prompt of every run that uses it: pick the caller number
+  (`GET /phone-number`), place the call with a transient assistant and
+  transient `artifactPlan.structuredOutputs` (the JSON schema of the answer),
+  poll `GET /call/{id}` until the call ends and the extraction lands, then read
+  the answer by name. An agent using it needs a manifest `timeout` of at least
+  the call's `maxDurationSeconds` plus 120 s; the 300 s default is too short.
+  Calling French numbers needs a Twilio number imported into Vapi: free Vapi
+  numbers are US-only.
 
 ### Fixed
 
