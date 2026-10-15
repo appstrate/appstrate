@@ -99,7 +99,6 @@ export function ConnectionsTable({
   return (
     <div data-testid="integration-connections-table">
       <ListToolbar
-        placement="panel"
         search={{
           value: list.search,
           onChange: list.setSearch,

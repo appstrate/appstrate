@@ -492,7 +492,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   (no `menuLabel`), and a row whose only deed is the click (an integration that
   opens its page) has none either: no empty menu for one deed. A control that
   IS the setting (role select, switch, tick, share editor, default) stays in its
-  own column; it is not an action of the row. `row-actions-one-way.test.ts`
+  own column; it is not an action of the row. The `ROW_ACTION_BANS` lint rules (`eslint.config.mjs`)
   fails on a direct action beside the menu. A row is a link through the first
   cell (`rowHref`), a titled element inside it needs `relative z-10`. Whatever is raised and is not a
   control (a name, a held cell) hands its click to the row (`handOver` in

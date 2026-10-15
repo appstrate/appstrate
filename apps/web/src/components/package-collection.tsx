@@ -239,6 +239,7 @@ export function PackageCollection({
       />
       {view === "table" ? (
         <PackagesTable
+          label={entity}
           items={shown}
           rowAction={rowAction}
           columns={[...leadingColumns, ...shownColumns, ...trailingColumns]}

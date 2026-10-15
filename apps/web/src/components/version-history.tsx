@@ -65,7 +65,6 @@ export function VersionHistory({
   return (
     <>
       <ListToolbar
-        placement="panel"
         search={{ value: search, onChange: list.setSearch, placeholder: t("version.search") }}
         filters={[
           {

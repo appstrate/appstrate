@@ -117,7 +117,6 @@ export function PackageToolCatalog({
   return (
     <>
       <ListToolbar
-        placement="panel"
         actions={actions}
         search={{
           value: list.search,

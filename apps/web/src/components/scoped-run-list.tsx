@@ -47,7 +47,6 @@ export function ScopedRunList({
       tableSurface="integrated"
       toolbar={({ columns }) => (
         <ListToolbar
-          placement="panel"
           columns={columns}
           search={{
             value: list.search,

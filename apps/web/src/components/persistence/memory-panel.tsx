@@ -152,7 +152,6 @@ export function MemoryPanel({
       {/* Run results already own the section heading and outer content padding. */}
       <section className={isRunView ? "min-w-0" : "min-w-0 p-6"}>
         <ListToolbar
-          placement="panel"
           search={{
             value: list.search,
             onChange: list.setSearch,

@@ -421,7 +421,6 @@ export function LogViewer({
   return (
     <div className="bg-card overflow-hidden">
       <ListToolbar
-        placement="panel"
         search={{ value: query, onChange: setQuery, placeholder: t("log.search") }}
         filters={filters}
         onReset={clearJournalFilters}

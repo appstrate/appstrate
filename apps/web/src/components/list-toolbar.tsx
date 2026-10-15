@@ -231,7 +231,6 @@ export function ListToolbar({
   columns,
   actions,
   tabs,
-  placement = "page",
 }: {
   /**
    * The text filter — present only where the screen can answer it truthfully. A list held whole
@@ -252,8 +251,6 @@ export function ListToolbar({
   actions?: ReactNode;
   /** `CollectionTabs` splitting the list, drawn first on the bar's line. */
   tabs?: ReactNode;
-  /** A panel inside a detail page sits a little further from its table. */
-  placement?: "page" | "panel";
 }) {
   const { t } = useTranslation("common");
   const activeCount = filters.reduce((total, filter) => total + filter.values.length, 0);
@@ -263,9 +260,7 @@ export function ListToolbar({
   const [open, setOpen] = useState(() => activeCount > 0);
 
   return (
-    <div
-      className={cn("@container/bar flex flex-col gap-2", placement === "panel" ? "mb-4" : "mb-3")}
-    >
+    <div className="@container/bar mb-3 flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         {tabs}
         {search && (

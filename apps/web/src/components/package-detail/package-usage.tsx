@@ -23,7 +23,6 @@ export function PackageUsage({ agentIds }: { agentIds: string[] }) {
   return (
     <>
       <ListToolbar
-        placement="panel"
         search={{ value: search, onChange: setSearch, placeholder: t("packages.usageSearch") }}
       />
       <PackagesTable

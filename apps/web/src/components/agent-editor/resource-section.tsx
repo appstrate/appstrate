@@ -411,7 +411,6 @@ function ResourcePicker({
       }
     >
       <ListToolbar
-        placement="panel"
         search={{ value: search, onChange: setSearch, placeholder: t("editor.resourceSearch") }}
       />
       <div className="border-border max-h-[50dvh] divide-y overflow-y-auto rounded-lg border">
