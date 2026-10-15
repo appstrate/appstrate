@@ -7,7 +7,7 @@ import { usePackageActivation } from "../hooks/use-library";
 /** Switches a declared integration on in this space; dead, with the reason, for a caller the route would refuse. */
 export function ActivateIntegrationButton({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "common"]);
-  const { mayActivate, activate, pending } = usePackageActivation("integration", packageId);
+  const { mayActivate, activate, pending } = usePackageActivation(packageId);
   return (
     <PendingButton
       size="sm"

@@ -311,7 +311,7 @@ function IntegrationSettings({
 function ActivationHint({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings", "common"]);
   // The hint names no button the route would refuse.
-  const { mayActivate, activate, pending } = usePackageActivation("integration", packageId);
+  const { mayActivate, activate, pending } = usePackageActivation(packageId);
   return (
     <div
       className="border-border bg-muted/30 rounded-md border p-6 text-center"
@@ -341,7 +341,7 @@ export function IntegrationDetailPage() {
     "integration",
     packageId || undefined,
   );
-  const activation = usePackageActivation("integration", packageId);
+  const activation = usePackageActivation(packageId);
   const downloadPackage = usePackageDownload(scope, name);
   const { can } = usePermissions();
   // The package's own detail response is the authority on its home — both the

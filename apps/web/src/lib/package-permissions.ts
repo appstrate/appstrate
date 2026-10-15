@@ -11,9 +11,14 @@ export interface SpaceGrant {
 }
 
 /**
- * May this caller flip a package's activation in THIS space?
+ * May this caller flip an activation of this TYPE in THIS space — with no
+ * package in hand?
  *
- * ONE rule, in one place, because the server has one: the type's activation
+ * Only the chat access chip asks it ("could the assistant activate an
+ * integration here?"): that is a question about a capability, so there is no
+ * library row whose served `activation` verdict could answer it. Everything that
+ * holds a package row reads the verdict the server serves on it instead
+ * (`activationGate`, `usePackageActivation`). The rule mirrors the server's: the type's activation
  * grant in the TARGET space, or owning that space. The second half is the
  * personal-space exemption of RBAC spec §3.6 — `gateSpacePackageWrite` skips
  * the activate/deactivate grants when the space belongs to the caller, because

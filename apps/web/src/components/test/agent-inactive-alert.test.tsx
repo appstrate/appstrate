@@ -11,9 +11,9 @@
  * because the reader arrived from the space library or from a kept link, both
  * of which already say the package is off here. Two halves are worth pinning:
  * it states the blockage to everyone, and it offers the switch only to a caller
- * the activation route would actually accept (`maySetPackageActive`: the type's
- * grant in THIS space, or owning it — RBAC spec §3.6, where a guest holds
- * `operator` in their own space and `operator` carries no `agents:configure`).
+ * the activation route would actually accept (the verdict the server serves on the
+ * agent's library row — the type's grant in THIS space, or owning it, RBAC spec
+ * §3.6).
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -36,33 +36,30 @@ const i18n = i18nModule.default;
 const ORG_ID = "org_a";
 const SPACE_ID = "spc_a";
 
-/** One row of `GET /api/spaces`, in the shape the activation verdict reads. */
-function spaceRow(overrides: { permissions: string[]; personal?: boolean }) {
-  return {
-    object: "space",
-    id: SPACE_ID,
-    orgId: ORG_ID,
-    name: "Default",
-    isDefault: true,
-    settings: {},
-    visibility: "open",
-    default_role: "viewer",
-    personal: overrides.personal ?? false,
-    access: "member",
-    role: null,
-    permissions: overrides.permissions,
-    created_by: null,
-    createdAt: "2026-09-05T10:00:00Z",
-    updatedAt: "2026-09-05T10:00:00Z",
-  };
-}
+type Verdict = "allowed" | "not_shareable" | "forbidden";
 
-function renderAlert(space: ReturnType<typeof spaceRow>): string {
+function renderAlert(verdict: Verdict): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   queryClient.setQueryData(
-    $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": ORG_ID } } })
-      .queryKey,
-    { object: "list", data: [space], hasMore: false },
+    $api.queryOptions("get", "/api/spaces/{spaceId}/library", {
+      params: { path: { spaceId: SPACE_ID }, header: { "X-Org-Id": ORG_ID } },
+    }).queryKey,
+    {
+      object: "library",
+      spaces: [],
+      packages: {
+        agent: [
+          {
+            id: "@acme/worker",
+            placements: [],
+            activation: [{ spaceId: SPACE_ID, activate: verdict, deactivate: verdict }],
+          },
+        ],
+        skill: [],
+        "mcp-server": [],
+        integration: [],
+      },
+    },
   );
   const org = spyOn(orgStore, "getInitialState").mockReturnValue({
     ...orgStore.getInitialState(),
@@ -90,25 +87,16 @@ function hasActivateButton(html: string): boolean {
 }
 
 describe("the switched-off banner", () => {
-  it("states the blockage and offers the switch to a caller who may flip it", () => {
-    const html = renderAlert(spaceRow({ permissions: ["agents:configure"] }));
+  it("states the blockage and offers the switch when the server allows the act", () => {
+    const html = renderAlert("allowed");
     expect(html).toContain(i18n.t("detail.deactivatedHere", { ns: "agents" }));
     expect(hasActivateButton(html)).toBe(true);
   });
 
-  it("offers it in the caller's OWN space, where no grant says so", () => {
-    // §3.6: owning the space IS the authorization. A personal space is reached
-    // by its owner alone, so `personal && access: "member"` is "this one is
-    // mine" — the fact that stands in for an owner id the wire withholds.
-    const html = renderAlert(spaceRow({ permissions: [], personal: true }));
-    expect(hasActivateButton(html)).toBe(true);
-  });
-
-  it("CONTROL: states the blockage alone when the caller may not flip it", () => {
-    // Same banner, a team space where this caller holds the read and nothing
-    // else: the sentence stays, the cure goes — naming a remedy the route
-    // would refuse is worse than naming none.
-    const html = renderAlert(spaceRow({ permissions: ["agents:read"] }));
+  it("CONTROL: states the blockage alone when the server forbids it", () => {
+    // The sentence stays, the cure goes — naming a remedy the route would
+    // refuse is worse than naming none.
+    const html = renderAlert("forbidden");
     expect(html).toContain(i18n.t("detail.deactivatedHere", { ns: "agents" }));
     expect(hasActivateButton(html)).toBe(false);
   });

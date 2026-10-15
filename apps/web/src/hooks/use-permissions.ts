@@ -107,8 +107,8 @@ export function usePermissions() {
 }
 
 /**
- * The caller's standing in ONE named space, in the shape the activation verdict
- * reads (`maySetPackageActive`). Activating a package is judged in the TARGET
+ * The caller's standing in ONE named space, in the shape the chat access rows
+ * read (`maySetPackageActive`). Activating a package is judged in the TARGET
  * space and nowhere else, and owning that space is its own authorization —
  * neither fact survives the org∪space union `can` computes, so the row itself
  * travels.

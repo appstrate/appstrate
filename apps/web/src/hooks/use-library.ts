@@ -5,14 +5,12 @@ import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-q
 import { toast } from "sonner";
 import i18n from "../i18n";
 import { parseScopedName } from "@appstrate/core/naming";
-import type { PackageType } from "@appstrate/core/validation";
 import { $api, client, type paths } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
 import { agentsKeys, invalidatePaths, packageKeys } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
-import { useCurrentSpaceGrant } from "./use-permissions";
-import { maySetPackageActive } from "../lib/package-permissions";
+import { activationGate } from "../lib/catalogue-gates";
 
 /**
  * Wire shape from the OpenAPI spec (`GET /api/library`) — the organization
@@ -333,21 +331,34 @@ export function useSetPackageActive() {
 }
 
 /**
- * One package's switch in the current space: the caller's two verdicts
- * (`maySetPackageActive`, the tree's one activation rule) and the two acts.
+ * One package's switch in the current space: the server's two verdicts, served
+ * on the package's row of the space library (`activation`), and the two acts.
  * Every control that flips it asks this instead of wiring the mutation, the
  * space id and the grant by hand.
+ *
+ * A row the library does not carry (not read yet, or not readable by the
+ * caller) answers `false` both ways: the control stays dead and blames nobody.
  */
-export function usePackageActivation(type: PackageType, packageId: string) {
+export function usePackageActivation(packageId: string) {
   const setActive = useSetPackageActive();
   const spaceId = useCurrentSpaceId();
-  const grant = useCurrentSpaceGrant();
+  const { data: library } = useSpaceLibrary();
+  const row = useMemo(
+    () =>
+      library
+        ? Object.values(library.packages)
+            .flat()
+            .find((pkg) => pkg.id === packageId)
+        : undefined,
+    [library, packageId],
+  );
+  const may = (next: boolean) => !!spaceId && !!row && activationGate(row, spaceId, next).allowed;
   const set = (active: boolean, options?: { onSuccess?: () => void }) => {
     if (spaceId) setActive.mutate({ spaceId, packageId, active }, options);
   };
   return {
-    mayActivate: !!spaceId && maySetPackageActive(grant, type, true),
-    mayDeactivate: !!spaceId && maySetPackageActive(grant, type, false),
+    mayActivate: may(true),
+    mayDeactivate: may(false),
     activate: (options?: { onSuccess?: () => void }) => set(true, options),
     deactivate: (options?: { onSuccess?: () => void }) => set(false, options),
     pending: setActive.isPending,

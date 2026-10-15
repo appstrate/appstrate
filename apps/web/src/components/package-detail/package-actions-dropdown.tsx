@@ -134,7 +134,7 @@ export function PackageActionsDropdown({
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   const { can } = usePermissions();
-  const activation = usePackageActivation(type, packageId);
+  const activation = usePackageActivation(packageId);
   const deletePkg = useDeletePackage(type);
   const moveHome = useModalParam(MOVE_HOME_PARAM);
   const share = useModalParam(SHARE_PARAM);

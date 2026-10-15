@@ -58,7 +58,7 @@ import { useSpaces } from "../hooks/use-spaces";
 import { fetchPackageDetail, useAgents } from "../hooks/use-packages";
 import { packageKeys } from "../lib/query-keys";
 import { missingIntegrations, type MissingDependency } from "../lib/activation-closure";
-import { mayConfigurePackage, maySetPackageActive } from "../lib/package-permissions";
+import { mayConfigurePackage } from "../lib/package-permissions";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useRevokePackageShare } from "../hooks/use-package-shares";
 import { useIntegrationsById } from "../hooks/use-integrations";
@@ -507,7 +507,7 @@ export function OrgCatalogueModal({
       // it has a real switch, and a space that has not turned it on does not
       // run it (`resolveIntegrationActivations`). The verdict is the target
       // space's alone.
-      () => maySetPackageActive(grantById.get(targetSpaceId), "integration", true),
+      (row) => activationGate(row, targetSpaceId, true).allowed,
     );
     if (missing.length === 0) return setActive(item, targetSpaceId, next);
     setClosures((queue) => [...queue, { item, spaceId: targetSpaceId, missing }]);

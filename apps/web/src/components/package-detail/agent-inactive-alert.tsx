@@ -25,14 +25,14 @@ import { usePackageActivation } from "../../hooks/use-library";
  * The verdict itself is NOT read here: the page passes it from its own detail
  * response (`AgentDetail.active`), so one page asks one source.
  *
- * The button is live on the same predicate the server enforces
- * (`maySetPackageActive` — the type's activation grant in this space, or owning
- * the space, RBAC spec §3.6). Without it the banner would name a cure the
+ * The button is live on the verdict the server serves on the agent's library
+ * row (`activation` — the type's activation grant in this space, or owning the
+ * space, RBAC spec §3.6). Without it the banner would name a cure the
  * reader cannot apply, so it states the blockage alone.
  */
 export function AgentInactiveAlert({ packageId }: { packageId: string }) {
   const { t } = useTranslation("agents");
-  const { mayActivate, activate, pending } = usePackageActivation("agent", packageId);
+  const { mayActivate, activate, pending } = usePackageActivation(packageId);
 
   return (
     <Alert variant="destructive" className="mb-4">
