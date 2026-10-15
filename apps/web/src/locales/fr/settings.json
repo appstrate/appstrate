@@ -789,7 +789,7 @@
   "creation.title.integration": "Créer une nouvelle intégration",
   "creation.title.mcpServer": "Créer un nouveau serveur MCP",
   "creation.manual.title": "Créer manuellement",
-  "creation.manual.description": "Ouvrir l’éditeur existant et configurer vous-même la ressource.",
+  "creation.manual.description": "Renseigner l’essentiel dans un court formulaire, puis régler le reste dans ses paramètres.",
   "creation.manual.importTitle": "Importer un paquet",
   "creation.manual.importDescription": "Téléverser un paquet de serveur MCP existant avec le parcours d’import actuel.",
   "creation.chat.title": "Construire avec le Chat",

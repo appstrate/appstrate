@@ -21,8 +21,6 @@ export function useCreationHandoff(resource: CreationResource, canCreate: boolea
     isOpen: canCreate && param.value === resource,
     open,
     close: param.close,
-    /** Leaves the chooser for the manual creation page. */
-    leave: (to: string) => navigate(to, { replace: true }),
     openChat,
   };
 }

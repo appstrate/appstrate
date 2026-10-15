@@ -5,7 +5,7 @@
  * placed here but switched off, or merely offered, is in the space library.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { Boxes, LibraryBig, Plus } from "lucide-react";
@@ -18,6 +18,7 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
+import { CreatePackageModal } from "../components/create-package-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import {
   INTEGRATION_EXECUTIONS,
@@ -49,6 +50,7 @@ export function IntegrationsPage() {
   const canCreate = can("integrations:write");
   const canBrowse = can("integrations:install");
   const creation = useCreationHandoff("integration", canCreate);
+  const [creating, setCreating] = useState(false);
   const createAction: MenuAction = {
     id: "create",
     label: t("integrations.create"),
@@ -197,9 +199,15 @@ export function IntegrationsPage() {
         <CreationHandoffModal
           resource="integration"
           onClose={creation.close}
-          onManual={() => creation.leave("/integrations/new")}
+          onManual={() => {
+            creation.close();
+            setCreating(true);
+          }}
           onChat={creation.openChat}
         />
+      )}
+      {creating && canCreate && (
+        <CreatePackageModal type="integration" onClose={() => setCreating(false)} />
       )}
     </div>
   );

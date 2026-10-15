@@ -138,15 +138,6 @@ export function useUnsavedChanges(isDirty: boolean) {
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
 
-  /**
-   * Let through a navigation the editor itself is about to make (a submit's redirect). Re-arm
-   * with `allowNavigation(false)` when the save fails: the flag otherwise stays open until
-   * `isDirty` changes, which a failed save does not do.
-   */
-  const allowNavigation = useCallback((allowed = true) => {
-    skipRef.current = allowed;
-  }, []);
-
   const proceed = useCallback(() => {
     setBlocked(false);
     const target = pending.current;
@@ -171,5 +162,5 @@ export function useUnsavedChanges(isDirty: boolean) {
     reset,
   };
 
-  return { blocker, allowNavigation };
+  return { blocker };
 }

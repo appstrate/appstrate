@@ -13,7 +13,7 @@ import { ApiError } from "../api/errors";
 import { PACKAGE_PATH_ERROR_KEYS } from "./package-files";
 
 /** SKILL.md frontmatter refusals; each key is one rule, said in the reader's language. */
-export const SKILL_FRONTMATTER_ERROR_KEYS = {
+const SKILL_FRONTMATTER_ERROR_KEYS = {
   skill_invalid_frontmatter: "editor.errorSkillInvalidFrontmatter",
   skill_missing_frontmatter_name: "editor.errorSkillFrontmatterName",
   skill_invalid_frontmatter_name: "editor.errorSkillInvalidName",
@@ -22,7 +22,7 @@ export const SKILL_FRONTMATTER_ERROR_KEYS = {
 } as const satisfies Partial<Record<Lowercase<CompanionViolationReason>, string>>;
 
 /** Where the validator stopped, in the reader's language (« (ligne 3, colonne 14) » or ""), from the server's 1-based `line`/`column`. */
-export function filePosition(err: { line?: number; column?: number }): string {
+function filePosition(err: { line?: number; column?: number }): string {
   if (err.line === undefined || err.column === undefined) return "";
   return i18n.t("editor.errorSkillYamlPosition", {
     line: err.line,
@@ -72,7 +72,7 @@ export const REFUSAL_ERROR_KEYS = {
   ...SKILL_FRONTMATTER_ERROR_KEYS,
 } as const;
 
-export function sentenceKey(keys: Readonly<Record<string, string>>, code: string) {
+function sentenceKey(keys: Readonly<Record<string, string>>, code: string) {
   return Object.prototype.hasOwnProperty.call(keys, code) ? keys[code] : undefined;
 }
 

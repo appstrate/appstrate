@@ -113,7 +113,6 @@ function IntegrationSettings({
   versionGrants: { canRestore: boolean; canDelete: boolean };
 }) {
   const { t } = useTranslation(["settings", "agents"]);
-  const navigate = useNavigate();
   const resolve = (requested: string | null): IntegrationSettingsSection =>
     requested === "tools" ||
     requested === "functioning" ||
@@ -192,10 +191,6 @@ function IntegrationSettings({
             <IntegrationDefinitionEditor
               detail={definition}
               section={definitionSection}
-              onSection={(next) => {
-                const railId = DEFINITION_RAIL.find(([, section]) => section === next)?.[0];
-                if (railId) void navigate(href(railId));
-              }}
               toolCatalog={detail.tool_catalog ?? []}
             />
           </Suspense>

@@ -11,12 +11,10 @@ one request to the existing `PUT /api/packages/{type}/{scope}/{name}` with
 `manifest`, optional ordered `operations` and the original `lock_version`.
 The existing `content` request field remains supported for API clients.
 
-The agent, skill and integration creation forms use this same editor with an
-in-memory tree and no file-read requests. Create sends the final required content
-and optional ancillary operations in one POST to the existing per-type route.
-The complete tree is validated before the package is inserted and is included
-in its first version. A failed request retains the form; leaving without saving
-creates nothing. MCP servers are still created by archive import.
+An agent, a skill or an integration is created from a short dialog (name, identifier,
+description, plus an agent's prompt or an integration's server URL), in one POST to the
+existing per-type route; its files are authored on the saved package, in this editor. There
+is no file tree before creation. MCP servers are created by archive import.
 
 The draft owns its manifest and pending file operations. The file tree is a
 projection of its initial index plus those operations; it cannot acquire a
