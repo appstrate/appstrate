@@ -68,6 +68,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     without the `output` runtime tool now answers the `errors[]` item
     `output_tool_required` on `manifest.runtime_tools` instead of
     `invalid_manifest`, and items carry `line`/`column` on a YAML syntax error.
+- **An integration's `INTEGRATION.md` reaches the agent as a file, not inlined
+  in the prompt** (#2005). The run bundle carries each integration the run uses
+  at the version the run froze, written to `.pi/integrations/<id>/`; the
+  prompt lists them in an `<available_integrations>` catalog (name,
+  description, path of the doc) and the agent reads the doc before its first
+  call. The doc is no longer cut at 50 KB, and it is the one of the version the
+  run executes, not the integration's draft.
+  - **Agent export** (`GET /api/agents/{scope}/{name}/bundle`) carries the same
+    integration members, frozen as a run freezes them: an integration pin no
+    version satisfies answers `422 dependency_unresolved`, and an export of an
+    agent that declares integrations needs `integrations:read`. An API key
+    minted without that scope now gets a 403 on such an export.
+    Each integration member must also be readable by the caller in one of its
+    spaces: one confined to a space the caller cannot read fails the export
+    with `404 not_found`.
+  - **`AFPS_SIGNATURE_POLICY=required`** now checks the signature of an
+    organization's own published integration version when a run fetches it;
+    an unsigned one fails the run. System integrations stay exempt.
+  - **`appstrate run`** on an exported agent wires the integrations'
+    `{ns}__api_call` tools, since the bundle now carries their manifests, and
+    shows the same catalog for the integrations it wired.
 
 ## [1.0.0-beta.68] - 2026-10-15
 
