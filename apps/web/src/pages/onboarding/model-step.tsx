@@ -11,11 +11,14 @@ import {
   useOnboardingNav,
 } from "../../components/onboarding-layout";
 import { useModalParam } from "../../hooks/use-modal-param";
-import { ModelFormModal } from "../../components/model-form-modal";
+import { ProviderAddFlow } from "../../components/provider-add-flow";
 import { OnboardingQuickConnect } from "../../components/onboarding-quick-connect";
 import { quickConnectProviders } from "../../lib/provider-registry-helpers";
-import { useModels, useModelFormHandler } from "../../hooks/use-models";
-import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
+import { useModels } from "../../hooks/use-models";
+import {
+  useModelProviderCredentials,
+  useProvidersRegistry,
+} from "../../hooks/use-model-provider-credentials";
 import { getModelIcon } from "../../components/icons";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { TextSkeleton } from "../../components/loading-skeletons";
@@ -29,9 +32,7 @@ export function OnboardingModelStep() {
   const newModel = useModalParam("newModel");
   const { data: models } = useModels();
   const { data: registry } = useProvidersRegistry();
-  const { onSubmit, isPending } = useModelFormHandler({
-    onSuccess: newModel.close,
-  });
+  const { data: credentials } = useModelProviderCredentials();
 
   const goNext = () => nextRoute && navigate(nextRoute);
 
@@ -124,12 +125,7 @@ export function OnboardingModelStep() {
       </div>
 
       {newModel.value !== null && (
-        <ModelFormModal
-          onClose={newModel.close}
-          model={null}
-          isPending={isPending}
-          onSubmit={onSubmit}
-        />
+        <ProviderAddFlow credentials={credentials ?? []} onClose={newModel.close} />
       )}
     </OnboardingLayout>
   );

@@ -28,7 +28,6 @@ import { usePermissions } from "../../hooks/use-permissions";
 import {
   useDeleteModel,
   useModels,
-  useModelFormHandler,
   useSetDefaultModel,
   type OrgModelInfo,
 } from "../../hooks/use-models";
@@ -44,7 +43,7 @@ import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { DeleteKeyConfirm } from "../../components/delete-key-confirm";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { CollectionTabs } from "../../components/collection-tabs";
+import { CollectionTabs } from "../../components/detail-tabs";
 import { PreferencesModelsLink } from "../../components/preferences-models-link";
 import { EmptyStateAction } from "../../components/page-states";
 import { ProvidersTable } from "../../components/providers-table";
@@ -111,10 +110,6 @@ export function OrgSettingsModelsPage() {
   const updateCredential = useUpdateModelProviderCredential();
   const setDefault = useSetDefaultModel();
   const deleteModel = useDeleteModel();
-  const modelForm = useModelFormHandler({
-    editModel: editModel.target ?? null,
-    onSuccess: editModel.close,
-  });
 
   const { orgRows, personalRows } = useMemo(() => {
     const rows = providerRows(models ?? [], credentials ?? [], registry ?? [], userId);
@@ -306,8 +301,6 @@ export function OrgSettingsModelsPage() {
         <ModelFormModal
           onClose={editModel.close}
           model={editModel.target}
-          isPending={modelForm.isPending}
-          onSubmit={modelForm.onSubmit}
           onDelete={canDeleteModels ? () => setDeletingModel(editModel.target ?? null) : undefined}
         />
       )}

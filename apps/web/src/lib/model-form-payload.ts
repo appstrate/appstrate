@@ -1,22 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** What the model form submits (a typed model or checked rows, plus any inline credential to create first). Pure; the credential always names a registry `providerId`. */
+/** What the model form (an edit) and the model list (an id typed by hand) submit. Pure. */
 
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
-import type { paths } from "../api/client";
 import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
 import type { ModelPickRow } from "./model-source";
 import { catalogValues, type CatalogModelValues } from "./row-overrides-catalog";
 import { sameSet } from "./strings";
 
-/** The model form's controlled field values. */
-export interface ModelFormFields {
-  label: string;
-  apiShape: string;
-  baseUrl: string;
-  modelId: string;
-  credentialId: string;
-  inlineApiKey: string;
+interface CapabilityFields {
   /** Off, the four fields below are neither on screen nor on the wire. */
   capabilitiesExplicit: boolean;
   inputText: boolean;
@@ -24,6 +16,17 @@ export interface ModelFormFields {
   contextWindow: string;
   maxTokens: string;
   reasoning: boolean;
+}
+
+/** What the list asks of a model id typed by hand: its name and, if wanted, its own capabilities. */
+export interface ManualRowFields extends CapabilityFields {
+  label: string;
+  modelId: string;
+}
+
+/** The model form's controlled field values. */
+export interface ModelFormFields extends ManualRowFields {
+  credentialId: string;
 }
 
 /**
@@ -37,7 +40,7 @@ interface ModelCapabilityOverrides {
   reasoning?: boolean;
 }
 
-/** One `POST /api/models` body, minus the credential every entry shares. */
+/** One `add` entry of a model choice, minus the credential every entry shares. */
 export interface ModelFormModelEntry extends ModelCapabilityOverrides {
   /** Sent only when typed; the server derives and dedupes one otherwise. */
   label?: string;
@@ -45,187 +48,83 @@ export interface ModelFormModelEntry extends ModelCapabilityOverrides {
   cost?: ModelCost;
 }
 
-/** The `POST /api/model-provider-credentials` body minted for a typed key, sent verbatim. */
-export type NewCredentialBody = Omit<
-  paths["/api/model-provider-credentials"]["post"]["requestBody"]["content"]["application/json"],
-  "label"
->;
-
 /**
- * The credential the model(s) run on: an existing one, one to create first, or
- * none (`null`) when each member serves the model with their own credential.
+ * One `PATCH /api/models/{id}` body. `credentialId` is `null` when each member serves the model
+ * with their own credential (`providerId` then names the provider theirs match). Overrides widen
+ * to `null`: "drop the stored override".
  */
-interface ModelFormCredentialBinding {
+export interface ModelFormData {
+  /** Sent only when typed; `PATCH` reads an absent name as "keep it". */
+  label?: string;
+  modelId: string;
   credentialId: string | null;
-  newCredential?: NewCredentialBody;
-  /** Sent with `credentialId: null`: the registry provider the members' credentials match. */
   providerId?: string;
+  input?: ModelInputModality[] | null;
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+  reasoning?: boolean | null;
 }
 
-/** One model, ready to submit; overrides widen to `null` ("drop the stored override" on `PATCH`; `POST` refuses it, see {@link toCreateModelBody}). */
-export type ModelFormData = ModelFormCredentialBinding &
-  Omit<ModelFormModelEntry, keyof ModelCapabilityOverrides> & {
-    input?: ModelInputModality[] | null;
-    contextWindow?: number | null;
-    maxTokens?: number | null;
-    reasoning?: boolean | null;
-  };
-
-/** The `POST /api/models` body, bound to the credential an inline key just created, or to none. */
-export function toCreateModelBody(
-  data: ModelFormData,
-  credentialId: string | null,
-): ModelFormModelEntry & { credentialId: string | null; providerId?: string } {
-  const {
-    newCredential: _,
-    providerId,
-    input,
-    contextWindow,
-    maxTokens,
-    reasoning,
-    ...rest
-  } = data;
-  return {
-    ...rest,
-    credentialId,
-    ...(providerId !== undefined ? { providerId } : {}),
-    ...(input ? { input } : {}),
-    ...(contextWindow != null ? { contextWindow } : {}),
-    ...(maxTokens != null ? { maxTokens } : {}),
-    ...(reasoning != null ? { reasoning } : {}),
-  };
-}
-
-/** Several models against ONE credential — one `POST /api/models` per entry. */
-export interface ModelFormMultiData extends ModelFormCredentialBinding {
-  models: ModelFormModelEntry[];
-}
-
-export type ModelFormSubmission = ModelFormData | ModelFormMultiData;
-
-/** The ids a batch could not create, and the credential it created for a retry to bind to. */
-export interface ModelFormSubmitOutcome {
-  failedModelIds: string[];
-  /** The subset of `failedModelIds` refused as `model_already_added`: not a failure to retry, the model is there. */
-  duplicateModelIds: string[];
-  /** The server's code for the first refusal that is not a duplicate: the form names it when it can. */
-  refusalCode?: string;
-  /** Entries refused for a reason of their own (an `errors[]` item on `add.<i>`, not a duplicate); the others were not written either (atomic) but only these are reported. */
-  refusedModelIds?: string[];
-  credentialId?: string;
-}
-
-export type ModelFormSubmit = (data: ModelFormSubmission) => Promise<ModelFormSubmitOutcome>;
-
-export type ModelFormProvider = Pick<
-  ProviderRegistryEntry,
-  "providerId" | "authMode" | "baseUrlOverridable"
->;
+export type ModelFormProvider = Pick<ProviderRegistryEntry, "providerId" | "authMode">;
 
 export interface ModelFormPayloadInput {
   fields: ModelFormFields;
   /** RHF `dirtyFields` — the row's name ships only when the operator typed one. */
   dirtyFields: { [K in keyof ModelFormFields]?: boolean };
-  /** `explicit`: the operator's own values ship (an unticked box included; blank or still-catalog fields do not). `auto`: nothing on create, every field `null` on edit. */
+  /** `explicit`: the operator's own values ship (an unticked box included; blank or still-catalog fields do not). `auto`: every field `null`. */
   capabilities: "explicit" | "auto";
-  isEdit: boolean;
   /** The catalog's values for the id; a field still equal to them is not an answer (shipping it would freeze it as an override, cutting off catalog updates). */
   catalogEntry?: CatalogModelValues;
-  provider: ModelFormProvider | undefined;
-  /** The credential matching the picked provider, or `null`; `fields.credentialId` alone survives a provider switch. */
+  provider: ModelFormProvider;
+  /** The credential picked among those the model may bind, or `null`. */
   selectedCredentialId: string | null;
   /** Each member serves the model with their own credential: `credentialId` goes `null`. */
   unbound: boolean;
 }
 
-type CredentialFailure = { ok: false; field: "credentialId"; messageKey: string };
+type CredentialBinding = Pick<ModelFormData, "credentialId" | "providerId">;
 
-/** The credential half of any create: a selection, the inline key to create first, or none (`unbound`). A subscription (`oauth2`) is paired, never typed. */
-function resolveCredentialBinding(input: {
-  provider: ModelFormProvider | undefined;
-  selectedCredentialId: string | null;
-  inlineApiKey: string;
-  baseUrl: string;
-  unbound: boolean;
-}): { ok: true; binding: ModelFormCredentialBinding } | CredentialFailure {
-  const { provider, baseUrl } = input;
+/** The credential half of a save, or the i18n key of what is missing. A subscription (`oauth2`) is paired, never typed. */
+function resolveCredentialBinding(
+  input: Pick<ModelFormPayloadInput, "provider" | "selectedCredentialId" | "unbound">,
+): { ok: true; binding: CredentialBinding } | { ok: false; messageKey: string } {
+  const { provider, selectedCredentialId } = input;
   if (input.unbound) {
-    if (!provider) {
-      return { ok: false, field: "credentialId", messageKey: "models.form.apiKeyRequired" };
-    }
     return { ok: true, binding: { credentialId: null, providerId: provider.providerId } };
   }
-  const credentialId = input.selectedCredentialId ?? "";
-  if (provider?.authMode === "oauth2") {
-    if (!credentialId) {
-      return { ok: false, field: "credentialId", messageKey: "models.form.subscriptionRequired" };
-    }
-    return { ok: true, binding: { credentialId } };
-  }
-  const inlineApiKey = input.inlineApiKey.trim();
-  const newCredentialProvider = !credentialId && inlineApiKey ? provider : undefined;
-
-  if (!newCredentialProvider) {
-    if (!credentialId) {
-      return { ok: false, field: "credentialId", messageKey: "models.form.apiKeyRequired" };
-    }
-    return { ok: true, binding: { credentialId } };
-  }
+  if (selectedCredentialId) return { ok: true, binding: { credentialId: selectedCredentialId } };
   return {
-    ok: true,
-    binding: {
-      credentialId: "",
-      newCredential: {
-        api_key: inlineApiKey,
-        providerId: newCredentialProvider.providerId,
-        ...(newCredentialProvider.baseUrlOverridable && baseUrl.trim()
-          ? { base_url_override: baseUrl.trim() }
-          : {}),
-      },
-    },
+    ok: false,
+    messageKey:
+      provider.authMode === "oauth2"
+        ? "models.form.subscriptionRequired"
+        : "models.form.apiKeyRequired",
   };
 }
 
 /** What refuses a save before anything is sent: one namespaced i18n key per field. */
-export function modelFormRefusals(input: {
-  modelId: string;
-  /** The id is being typed, not picked from a list. */
-  manual: boolean;
-  provider: ModelFormProvider | undefined;
-  selectedCredentialId: string | null;
-  inlineApiKey: string;
-  /** The ids a catalog provider binds (the server refuses any other); `null` = free-form. */
-  offeredIds: readonly string[] | null;
-  unbound: boolean;
-}): { credentialId: string | null; modelId: string | null } {
-  const credential = input.provider
-    ? resolveCredentialBinding({ ...input, baseUrl: "" })
-    : { ok: true as const };
+export function modelFormRefusals(
+  input: Pick<ModelFormPayloadInput, "provider" | "selectedCredentialId" | "unbound"> & {
+    modelId: string;
+    /** The ids a catalog provider binds (the server refuses any other); `null` = free-form. */
+    offeredIds: readonly string[] | null;
+  },
+): { credentialId: string | null; modelId: string | null } {
+  const credential = resolveCredentialBinding(input);
   const credentialId = credential.ok ? null : `settings:${credential.messageKey}`;
   const id = input.modelId.trim();
-  if (!id) {
-    if (input.manual) return { credentialId, modelId: "common:validation.required" };
-    // The key row already names the missing step.
-    return {
-      credentialId,
-      modelId: credentialId ? null : "settings:models.form.modelStepRequired",
-    };
-  }
+  if (!id) return { credentialId, modelId: "common:validation.required" };
   const outsideOffer = input.offeredIds !== null && !input.offeredIds.includes(id);
   return { credentialId, modelId: outsideOffer ? "settings:models.form.modelNotOffered" : null };
 }
 
-/** The fields {@link capabilityOverrides} reads. */
-type CapabilityFields = Pick<
-  ModelFormFields,
-  "inputText" | "inputImage" | "contextWindow" | "maxTokens" | "reasoning"
->;
-
-function capabilityOverrides(
-  input: Pick<ModelFormPayloadInput, "capabilities" | "isEdit" | "catalogEntry"> & {
-    fields: CapabilityFields;
-  },
-): Pick<ModelFormData, "input" | "contextWindow" | "maxTokens" | "reasoning"> {
+function capabilityOverrides(input: {
+  fields: CapabilityFields;
+  capabilities: "explicit" | "auto";
+  /** An edit clears what the operator no longer answers (`null`); a create just omits it. */
+  isEdit: boolean;
+  catalogEntry?: CatalogModelValues;
+}): Pick<ModelFormData, "input" | "contextWindow" | "maxTokens" | "reasoning"> {
   const { fields } = input;
   if (input.capabilities === "auto") {
     if (!input.isEdit) return {};
@@ -258,20 +157,14 @@ function capabilityOverrides(
 /** `null` without a credential to bind — {@link modelFormRefusals} is what says so to the user. */
 export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormData | null {
   const { fields, dirtyFields } = input;
-  const credential = resolveCredentialBinding({
-    provider: input.provider,
-    selectedCredentialId: input.selectedCredentialId,
-    inlineApiKey: fields.inlineApiKey,
-    baseUrl: fields.baseUrl,
-    unbound: input.unbound,
-  });
+  const credential = resolveCredentialBinding(input);
   if (!credential.ok) return null;
 
   return {
     ...(dirtyFields.label === true && fields.label.trim() ? { label: fields.label.trim() } : {}),
     modelId: fields.modelId.trim(),
     ...credential.binding,
-    ...capabilityOverrides(input),
+    ...capabilityOverrides({ ...input, isEdit: true }),
   };
 }
 
@@ -286,10 +179,6 @@ function describedCapabilities(
     ...(row.reasoning != null ? { reasoning: row.reasoning } : {}),
   };
 }
-
-/** What the list asks of a model id typed by hand: its name and, if wanted, its own capabilities. */
-export type ManualRowFields = Pick<ModelFormFields, "label" | "modelId" | "capabilitiesExplicit"> &
-  CapabilityFields;
 
 /** An id typed by hand, as a row of the pick list; the capabilities are the operator's own answers. */
 export function manualRow(fields: ManualRowFields): ModelPickRow {
@@ -330,22 +219,4 @@ export function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
     modelId: row.id,
     ...(row.origin === "discover" ? describedCapabilities(row.endpointCapabilities) : {}),
   };
-}
-
-export function buildModelsBatchPayload(input: {
-  rows: readonly ModelPickRow[];
-  provider: ModelFormProvider | undefined;
-  selectedCredentialId: string | null;
-  inlineApiKey: string;
-  baseUrl: string;
-  unbound: boolean;
-}):
-  | { ok: true; data: ModelFormMultiData }
-  | { ok: false; field: "credentialId" | "modelId"; messageKey: string } {
-  if (input.rows.length === 0) {
-    return { ok: false, field: "modelId", messageKey: "models.form.selectionRequired" };
-  }
-  const credential = resolveCredentialBinding(input);
-  if (!credential.ok) return credential;
-  return { ok: true, data: { ...credential.binding, models: input.rows.map(rowToEntry) } };
 }
