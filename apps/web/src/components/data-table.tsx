@@ -613,7 +613,11 @@ export function DataTable<T>({
                         col.align === "end" && "justify-end",
                       )}
                     >
-                      <span className="block min-w-0 truncate">{col.headerNode ?? col.header}</span>
+                      {/* The inset sits on the text, not the head: the handle is anchored
+                        to the head's edge, and the text must clear it. */}
+                      <span className={cn("block min-w-0 truncate", col.align === "end" && "pr-2")}>
+                        {col.headerNode ?? col.header}
+                      </span>
                       {isResizable(col) && (
                         <ResizeHandle
                           name={col.header}
@@ -727,7 +731,8 @@ export function DataTable<T>({
                             style={stick && stickStyle(stick)}
                             className={cn(
                               "flex min-w-0 items-center gap-1.5",
-                              col.align === "end" && "justify-end",
+                              // The same inset as the head, so a number stays under its title.
+                              col.align === "end" && "justify-end pr-2",
                               columnMode === "tiered" && tierClass(col, "flex"),
                               heldClass(stick, true, interactive),
                             )}
