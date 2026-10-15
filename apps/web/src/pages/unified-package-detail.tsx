@@ -369,6 +369,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       <DetailTabs value={tab} onChange={setTab}>
         {type === "agent" ? (
           <AgentDetailBar
+            title={unifiedForHeader.displayName}
             detail={unifiedForHeader}
             isHistoricalVersion={isHistoricalVersion}
             draftVerdictPending={draftVerdictPending}

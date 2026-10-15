@@ -12,7 +12,6 @@ import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 
 interface AgentDetailBarDetail {
   id: string;
-  displayName: string;
   source: string;
   version?: string | null;
   /**
@@ -31,6 +30,7 @@ interface AgentDetailBarDetail {
  * version it shows and what can be done to it.
  */
 export function AgentDetailBar<T extends string>({
+  title,
   detail,
   isHistoricalVersion,
   hasUnarchivedChanges,
@@ -39,6 +39,7 @@ export function AgentDetailBar<T extends string>({
   tabs,
   actions,
 }: {
+  title: string;
   detail: AgentDetailBarDetail;
   isHistoricalVersion: boolean;
   hasUnarchivedChanges: boolean;
@@ -53,7 +54,7 @@ export function AgentDetailBar<T extends string>({
   return (
     <DetailBar
       icon={<PackageIcon type="agent" icon={detail.icon} color={detail.color} />}
-      title={detail.displayName}
+      title={title}
       badge={
         <VersionPill
           detail={detail}
