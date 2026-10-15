@@ -69,7 +69,7 @@ function DocumentsCollection({
   const { t } = useTranslation(["files", "common"]);
   const canReach = useCanReach();
   const [view, setView] = useListView("documents");
-  const searchPlaceholder = useSearchPlaceholder(t("page.title"));
+  const searchPlaceholder = useSearchPlaceholder(t("common:nav.files"));
   const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
   const query = useDebouncedValue(search);
 
@@ -95,9 +95,9 @@ function DocumentsCollection({
   return (
     <div>
       <PageHeader
-        title={t("page.title")}
+        title={t("common:nav.files")}
         variant="collection"
-        breadcrumbs={[{ label: t("page.title") }]}
+        breadcrumbs={[{ label: t("common:nav.files") }]}
       />
 
       {overLimit && (

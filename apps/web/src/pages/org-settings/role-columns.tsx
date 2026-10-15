@@ -65,7 +65,7 @@ export function useRoleColumns({
     rowActionsColumn((role: RoleObject) =>
       onPreview || canDelete(role) ? (
         <TableRowActions
-          menuLabel={t("roles.moreActions", { name: spaceRoleLabel(role, t) ?? role.name })}
+          menuLabel={t("providers.moreActions", { name: spaceRoleLabel(role, t) ?? role.name })}
           isPending={isDeleting}
           actions={[
             {

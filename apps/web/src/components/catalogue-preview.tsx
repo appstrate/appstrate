@@ -329,7 +329,7 @@ export function CataloguePreview({
 
       {item.description && <p className="mt-4 text-sm">{item.description}</p>}
       {/* "À propos" comes FIRST, in the same order for every type; what varies by type follows. */}
-      <SettingsGroup title={t("catalogue.sheet.about")} className="mt-6 mb-6">
+      <SettingsGroup title={t("orgSettings.tabGeneral")} className="mt-6 mb-6">
         <dl className="divide-border divide-y border-t">
           {protocol && (
             <PropertyRow icon={Plug} label={t("catalogue.column.protocol")}>
@@ -388,7 +388,7 @@ export function CataloguePreview({
           <dl className="divide-border divide-y border-t">
             <PropertyRow
               icon={Boxes}
-              label={t("catalogue.sheet.integrations")}
+              label={t("common:nav.integrations")}
               hint={
                 agent.dependencies.integrations.length > 0
                   ? t("catalogue.sheet.integrationsHint")
@@ -404,7 +404,7 @@ export function CataloguePreview({
             {agentSkills.length > 0 && (
               <PropertyRow
                 icon={Wrench}
-                label={t("catalogue.sheet.skills")}
+                label={t("common:nav.skills")}
                 hint={t("catalogue.sheet.skillsHint")}
               >
                 {agentSkills.map((skill) => skill.name ?? skill.id).join(", ")}
@@ -414,7 +414,7 @@ export function CataloguePreview({
         </SettingsGroup>
       )}
 
-      <SettingsGroup title={t("catalogue.sheet.spaces")} className="mt-8 mb-0">
+      <SettingsGroup title={t("orgSettings.inviteSpacesLabel")} className="mt-8 mb-0">
         {mode === "readonly" && (
           <p className="text-sm">
             {placement.activeIn.length > 0
@@ -467,8 +467,8 @@ export function CataloguePreview({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t("catalogue.filter.space")}</TableHead>
-                  <TableHead>{t("catalogue.filter.state")}</TableHead>
+                  <TableHead>{t("source.space")}</TableHead>
+                  <TableHead>{t("providers.col.state")}</TableHead>
                   {missingAnywhere && <TableHead>{t("catalogue.sheet.missingColumn")}</TableHead>}
                   <TableHead className="w-px text-right whitespace-nowrap">
                     {t("catalogue.filter.active")}

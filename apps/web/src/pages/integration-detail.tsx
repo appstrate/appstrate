@@ -166,7 +166,7 @@ function IntegrationSettings({
                 t("integrationEditor.tabAuthMethods", { ns: "agents" }),
               ),
             ]
-          : [item("functioning", Plug, t("integration.structure.functioning"))]),
+          : [item("functioning", Plug, t("orgSettings.tabGeneral"))]),
         item("tools", Wrench, t("integrationEditor.tabTools", { ns: "agents" })),
         item("bundle", FileArchive, t("editor.tabPackageFiles", { ns: "agents" })),
       ],
@@ -210,7 +210,7 @@ function IntegrationSettings({
           />
         ) : active === "functioning" ? (
           <div className="p-6">
-            <SettingsHeading title={t("integration.structure.functioning")} description={null} />
+            <SettingsHeading title={t("orgSettings.tabGeneral")} description={null} />
             <IntegrationGeneral detail={detail} />
           </div>
         ) : active === "tools" ? (

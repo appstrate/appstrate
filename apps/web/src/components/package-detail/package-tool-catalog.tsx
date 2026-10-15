@@ -56,7 +56,7 @@ export function PackageToolCatalog({
   const columns: DataColumn<PackageTool>[] = [
     {
       id: "name",
-      header: t("packageTools.name"),
+      header: t("log.tool"),
       width: "minmax(160px,1fr)",
       cell: (tool) => (
         <div className="flex items-start gap-2">
@@ -74,7 +74,7 @@ export function PackageToolCatalog({
     },
     {
       id: "description",
-      header: t("packageTools.description"),
+      header: t("editor.fieldDescLabel"),
       width: "minmax(220px,2fr)",
       cell: (tool) =>
         tool.description ? (

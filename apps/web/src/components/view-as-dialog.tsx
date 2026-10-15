@@ -140,8 +140,8 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
         e.preventDefault();
         void submit();
       }}
-      title={t("viewAs.title")}
-      submitLabel={t("viewAs.submit")}
+      title={t("viewAs.trigger")}
+      submitLabel={t("viewAs.rowAction")}
       // Not `isPending`: Cancel must stay live while the preview loads, to abandon it.
       submitDisabled={!ready || entering}
       submitTestId="view-as-submit"
@@ -158,7 +158,7 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
         />
 
         <FieldGroup>
-          <FormItem id="view-as-space" label={t("viewAs.spaceLabel")}>
+          <FormItem id="view-as-space" label={t("source.space")}>
             <OptionSelect
               value={selectedSpaceId}
               onValueChange={(value) => {

@@ -1,5 +1,4 @@
 {
-  "page.title": "Fichiers",
   "page.empty": "Aucun fichier",
   "page.emptyHint": "Les fichiers importés dans le chat et produits par vos agents apparaîtront ici.",
   "page.noMatch": "Aucun document ne correspond à ce filtre.",
@@ -29,10 +28,8 @@
   "filter.user_upload": "Importés",
   "purpose.agent_output": "Sortie d'agent",
   "purpose.user_upload": "Importé",
-  "row.download": "Télécharger",
   "row.preview": "Aperçu",
   "row.keep": "Conserver",
-  "row.delete": "Supprimer",
   "row.moreActions": "Plus d'actions pour {{name}}",
   "expiry.expired": "Expiré",
   "expiry.inDays": "Expire dans {{count}} j",

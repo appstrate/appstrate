@@ -555,7 +555,7 @@ export function ModelFormModal({
     <Modal
       onClose={onClose}
       preventClose={isPending}
-      title={model ? t("models.form.editTitle") : t("models.form.title")}
+      title={model ? t("models.form.editTitle") : t("models.add")}
       actions={
         <>
           {model && <SavedModelActions model={model} onDelete={onDelete} />}

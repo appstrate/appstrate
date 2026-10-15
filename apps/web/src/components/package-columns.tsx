@@ -79,7 +79,7 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
     origin,
     {
       id: "keywords",
-      header: t("list.column.keywords"),
+      header: t("manifest.keywords"),
       width: "minmax(140px,1fr)",
       tier: 3,
       cell: (item) => {

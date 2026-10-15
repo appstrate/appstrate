@@ -116,7 +116,7 @@ export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDe
     return (
       <FormModal
         onClose={stopEditing}
-        title={t("spaces.editEndUser")}
+        title={t("common:btn.edit")}
         onSubmit={handleSave}
         isPending={updateMutation.isPending}
         error={updateMutation.error ? errorMessage(updateMutation.error) : null}
@@ -151,8 +151,8 @@ export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDe
       >
         <div className="flex flex-col gap-4">
           <CopyableField label="ID" value={endUser.id} />
-          <ReadOnlyField label={t("spaces.endUserName")} value={endUser.name} />
-          <ReadOnlyField label={t("spaces.endUserEmail")} value={endUser.email} />
+          <ReadOnlyField label={t("spaces.nameLabel")} value={endUser.name} />
+          <ReadOnlyField label={t("login.email")} value={endUser.email} />
           <ReadOnlyField label={t("spaces.endUserExternalId")} value={endUser.externalId} />
           <ReadOnlyField
             label={t("spaces.createdAtLabel")}

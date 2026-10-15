@@ -88,7 +88,7 @@ function CredentialPicker({
           </SelectItem>
         ))}
         {eachMember && (
-          <SelectItem value={EACH_MEMBER_ITEM}>{t("models.form.eachMember")}</SelectItem>
+          <SelectItem value={EACH_MEMBER_ITEM}>{t("providers.type.personalKey")}</SelectItem>
         )}
       </SelectContent>
     </Select>
@@ -285,7 +285,7 @@ export function EndpointFields({
         </Label>
         {eachMember?.selected ? (
           <CredentialChip
-            label={t("models.form.eachMember")}
+            label={t("providers.type.personalKey")}
             icon={<Users className="text-muted-foreground size-3.5 shrink-0" />}
             onClear={eachMember.onClear}
           />

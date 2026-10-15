@@ -133,7 +133,7 @@ export function OAuthClientActions({
   return (
     <>
       <TableRowActions
-        menuLabel={t("oauthClients.moreActions", { name: rowName })}
+        menuLabel={t("providers.moreActions", { name: rowName })}
         isPending={isPending}
         actions={actions}
       />
@@ -151,7 +151,7 @@ export function OAuthClientActions({
       {rotatedSecret && (
         <SecretRevealModal
           onClose={() => setRotatedSecret(null)}
-          title={t("oauthClients.newSecret")}
+          title={t("webhooks.newSecret")}
           secret={rotatedSecret}
           warning={t("oauthClients.secretWarning")}
         />

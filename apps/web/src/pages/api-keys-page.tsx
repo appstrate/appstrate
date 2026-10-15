@@ -58,7 +58,7 @@ export function ApiKeysPage() {
           {
             id: "api-docs",
             icon: ExternalLink,
-            label: t("settings:apiKeys.swaggerLink"),
+            label: t("common:userMenu.apiDocs"),
             href: "/api/docs",
           },
         ]}
@@ -90,7 +90,7 @@ export function ApiKeysPage() {
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
         title={t("settings:apiKeys.revokeTitle")}
-        confirmLabel={t("settings:apiKeys.revoke")}
+        confirmLabel={t("settings:devices.revoke")}
         description={t("settings:apiKeys.revokeConfirm", { name: confirmState?.label })}
         isPending={revokeApiKeyMutation.isPending}
         onConfirm={() => {

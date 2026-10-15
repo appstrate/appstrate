@@ -18,7 +18,7 @@ export function useOAuthClientColumns({
   return [
     {
       id: "client",
-      header: t("oauthClients.nameLabel"),
+      header: t("spaces.nameLabel"),
       width: "minmax(72px,1.3fr)",
       cell: (client) => <CellText strong>{client.name ?? client.clientId}</CellText>,
     },
@@ -35,7 +35,7 @@ export function useOAuthClientColumns({
     },
     {
       id: "type",
-      header: t("oauthClients.typeColumn"),
+      header: t("proxies.col.type"),
       width: "60px",
       tier: 2,
       cell: (client) => (
@@ -48,12 +48,12 @@ export function useOAuthClientColumns({
     },
     {
       id: "status",
-      header: t("oauthClients.statusColumn"),
+      header: t("proxies.col.status"),
       width: "56px",
       tier: 2,
       cell: (client) => (
         <Badge variant={client.disabled ? "secondary" : "success"}>
-          {client.disabled ? t("oauthClients.disabledBadge") : t("oauthClients.activeBadge")}
+          {client.disabled ? t("oauthClients.disabledBadge") : t("catalogue.filter.active")}
         </Badge>
       ),
     },

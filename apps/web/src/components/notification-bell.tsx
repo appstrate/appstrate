@@ -102,7 +102,7 @@ export function NotificationContent({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
-          <h4 className="text-sm font-semibold">{t("notifications.title")}</h4>
+          <h4 className="text-sm font-semibold">{t("notifications.ariaLabel")}</h4>
           {unread > 0 && (
             <span className="bg-spark text-spark-foreground flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium">
               {unread}

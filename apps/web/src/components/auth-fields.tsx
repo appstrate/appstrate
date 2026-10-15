@@ -158,7 +158,7 @@ export function NewPasswordFields({
     <>
       <FormItem
         id="new-password"
-        label={t("preferences.newPassword")}
+        label={t("resetPassword.title")}
         error={showError("newPassword") ? errors.newPassword?.message : undefined}
       >
         <Input

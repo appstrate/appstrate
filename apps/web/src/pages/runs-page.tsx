@@ -32,7 +32,7 @@ export function RunsPage() {
   const { data: unreadCount } = useUnreadCount();
   const markAllRead = useMarkAllRead();
   const list = useListParams(FILTER_PARAMS);
-  const searchPlaceholder = useSearchPlaceholder(t("runs.entity"));
+  const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
   const { can } = usePermissions();
   // Without `runs:read-all` the list is already "mine": no scope filter.
   const canSeeEveryRun = can("runs:read-all");
@@ -60,8 +60,8 @@ export function RunsPage() {
       label: t("runs.filterKind"),
       values: kinds,
       options: [
-        { value: "package", label: t("runs.filterKindPackage") },
-        { value: "inline", label: t("runs.filterKindInline") },
+        { value: "package", label: t("common:nav.agents") },
+        { value: "inline", label: t("runs.inlineBadge") },
       ],
       onChange: list.setValues("kind"),
     },
@@ -84,7 +84,7 @@ export function RunsPage() {
             actions={[
               {
                 id: "mark-all-read",
-                label: t("runs.markAllRead"),
+                label: t("common:notifications.markAllRead"),
                 icon: CheckCheck,
                 onSelect: () => markAllRead.mutate({}),
                 disabled: markAllRead.isPending || !unreadCount,

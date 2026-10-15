@@ -113,7 +113,7 @@ export function LocalServerField({
       <div className="flex flex-col gap-2">
         <FormItem
           id="int-source-server-version"
-          label={t("integrationEditor.source.serverVersion")}
+          label={t("run.infoVersion")}
           hint={
             known && versions.isSuccess
               ? published.length > 0

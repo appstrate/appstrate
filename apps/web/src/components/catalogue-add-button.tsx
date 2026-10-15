@@ -77,7 +77,7 @@ export function CatalogueAddButton({
       <DropdownMenuTrigger asChild>
         <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" disabled={busy}>
           <Plus aria-hidden />
-          {t("catalogue.addToSpace")}
+          {t("common:btn.add")}
           <ChevronDown aria-hidden />
         </Button>
       </DropdownMenuTrigger>

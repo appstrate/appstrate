@@ -55,7 +55,7 @@ export function OnboardingDoneStep() {
       nextLabel={t("onboarding.goToDashboard")}
     >
       <div className="flex flex-col gap-4">
-        <SummaryCard title={t("onboarding.summaryOrg")} value={currentOrg?.name} done />
+        <SummaryCard title={t("source.org")} value={currentOrg?.name} done />
 
         {features.billing && billing && (
           <SummaryCard title={t("onboarding.summaryPlan")} value={billing.plan.name} done />

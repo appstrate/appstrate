@@ -36,7 +36,7 @@ export function useCatalogueSharedColumns({
     },
     {
       id: "type",
-      header: t("catalogue.shared.type"),
+      header: t("proxies.col.type"),
       width: "minmax(80px,0.7fr)",
       tier: 2,
       cell: (share) => <CellText>{t(CATALOGUE_TYPE_LABEL_KEY[share.pkg.type])}</CellText>,

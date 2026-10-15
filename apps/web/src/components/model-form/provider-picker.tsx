@@ -57,7 +57,7 @@ export function ProviderPicker({
 
   return (
     <div className="space-y-2">
-      <Label htmlFor={id}>{t("models.form.provider")}</Label>
+      <Label htmlFor={id}>{t("providers.col.provider")}</Label>
       <Select
         value={overridable ? CUSTOM_ENDPOINT_ID : providerId}
         disabled={disabled}
@@ -69,7 +69,7 @@ export function ProviderPicker({
         <SelectContent>
           <ProviderPickerGroups
             items={buildProviderPickerRows(registry)}
-            featuredLabel={t("models.form.providerGroupFeatured")}
+            featuredLabel={t("models.form.modelGroupFeatured")}
             otherLabel={t("models.form.providerGroupOther")}
             renderItem={(row) => {
               if (row.kind === "customEndpoint") {

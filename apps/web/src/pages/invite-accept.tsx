@@ -155,9 +155,9 @@ export function InviteAcceptPage() {
         </p>
       </div>
       <div className="bg-muted/50 rounded-lg border p-4">
-        <div className="text-muted-foreground text-xs">{t("invite.emailLabel")}</div>
+        <div className="text-muted-foreground text-xs">{t("login.email")}</div>
         <div className="text-sm font-medium">{info.email}</div>
-        <div className="text-muted-foreground mt-2 text-xs">{t("invite.roleLabel")}</div>
+        <div className="text-muted-foreground mt-2 text-xs">{t("roles.colRole")}</div>
         <div className="text-sm font-medium">{t(roleI18nKey(info.role))}</div>
       </div>
     </div>
@@ -257,7 +257,7 @@ export function InviteAcceptPage() {
 
   const switchToRegister = (
     <span className="text-muted-foreground text-center text-sm">
-      {t("invite.noAccount")}{" "}
+      {t("login.noAccount")}{" "}
       <AuthLink
         onClick={() => {
           setServerError(null);

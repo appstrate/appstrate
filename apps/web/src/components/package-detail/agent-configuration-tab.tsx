@@ -362,7 +362,7 @@ function ProxySection({ packageId }: { packageId: string }) {
               <SelectItem value="__inherit__">
                 {orgDefaultProxy
                   ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
-                  : t("proxies.agent.inheritNoDefault", { ns: "settings" })}
+                  : t("models.default", { ns: "settings" })}
               </SelectItem>
               <SelectItem value="none">{t("proxies.agent.none", { ns: "settings" })}</SelectItem>
             </>

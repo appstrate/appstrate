@@ -74,7 +74,7 @@ function LinkedAccountsSection({
             icon: GitHubIcon,
             account: githubAccount,
             link: linkGithub,
-            linkingKey: "preferences.linkingGithub" as const,
+            linkingKey: "preferences.linkingGoogle" as const,
             linkKey: "preferences.linkGithub" as const,
           },
         ]

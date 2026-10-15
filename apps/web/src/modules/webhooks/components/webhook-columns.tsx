@@ -35,7 +35,7 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
           </span>
           {wh.level === "org" && (
             <Badge variant="outline" className="shrink-0">
-              {t("settings:webhooks.levelBadge.org")}
+              {t("settings:source.org")}
             </Badge>
           )}
         </span>
@@ -43,11 +43,11 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     },
     {
       id: "state",
-      header: t("settings:webhooks.stateColumn"),
+      header: t("settings:providers.col.state"),
       width: "72px",
       cell: (wh) => (
         <Badge variant={wh.enabled ? "success" : "secondary"}>
-          {wh.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
+          {wh.enabled ? t("settings:catalogue.filter.active") : t("settings:webhooks.inactive")}
         </Badge>
       ),
     },
@@ -69,7 +69,7 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     },
     {
       id: "agent",
-      header: t("settings:webhooks.agentColumn"),
+      header: t("settings:integration.admin.pinManagement.colAgent"),
       width: "minmax(80px,1fr)",
       tier: 2,
       cell: (wh) => <CellText>{wh.packageId || t("settings:webhooks.allAgents")}</CellText>,

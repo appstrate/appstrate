@@ -169,7 +169,7 @@ export function ScheduleActionsMenu({
             className="text-destructive focus:text-destructive"
           >
             <Trash2 />
-            {t("schedule.delete")}
+            {t("common:btn.delete")}
           </DropdownMenuItem>
         </>
       )}
@@ -307,7 +307,7 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
     <SettingsRailView
       param="scheduleSettings"
       tab="settings"
-      label={t("schedule.tabSettings")}
+      label={t("common:nav.settings")}
       groups={[
         {
           title: t("detail.settings.configurationGroup"),

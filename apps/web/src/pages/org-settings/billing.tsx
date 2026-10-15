@@ -197,7 +197,7 @@ function BillingOverview() {
         {(storageLoading || storage) && (
           <UsageMeter
             className="mt-4"
-            label={t("billing.storageUsage")}
+            label={t("orgStorage.section")}
             loading={storageLoading}
             percent={storageLimit === null ? null : (storagePercent ?? 0)}
             summary={

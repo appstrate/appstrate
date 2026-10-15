@@ -246,7 +246,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
           <div className="p-2.5">
             <ColumnHeader
               label={t("switcher.orgsColumn")}
-              addLabel={t("switcher.add")}
+              addLabel={t("btn.add")}
               // Whether this user may create one is the server's rule, not a flag.
               onAdd={canCreateOrg ? "/onboarding/create" : undefined}
               // Without it the create step forwards a user who already has an org.
@@ -317,7 +317,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                 `spaces:write`. */}
             <ColumnHeader
               label={t("switcher.workspacesColumn")}
-              addLabel={t("switcher.add")}
+              addLabel={t("btn.add")}
               onAdd={
                 isExploringElsewhere || !can("spaces:write")
                   ? undefined
@@ -344,7 +344,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                 // sorts first.
                 const heading =
                   index === 0 && space.personal
-                    ? t("spaces.personal.switcherGroup", { ns: "settings" })
+                    ? t("spaces.personal.badge", { ns: "settings" })
                     : !space.personal && (index === 0 || shownSpaces[index - 1]?.personal)
                       ? t("spaces.personal.teamGroup", { ns: "settings" })
                       : null;

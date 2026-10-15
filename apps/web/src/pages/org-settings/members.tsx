@@ -188,10 +188,10 @@ export function OrgSettingsMembersPage() {
         onClose={() => setRoleChange(null)}
         title={t(
           roleChange?.role === "owner"
-            ? "orgSettings.promoteOwnerTitle"
+            ? "orgSettings.promoteOwner"
             : roleChange?.from === "owner"
               ? "orgSettings.demoteOwnerTitle"
-              : "orgSettings.demoteTitle",
+              : "orgSettings.demote",
         )}
         description={
           !roleChange

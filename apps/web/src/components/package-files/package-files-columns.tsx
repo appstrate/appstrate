@@ -9,9 +9,9 @@ import type { DataColumn } from "../data-table";
 import { CellText } from "../table-cells";
 
 const ROLE_LABEL: Record<BundleFileRole, string> = {
-  manifest: "editor.fileRole.manifest",
+  manifest: "run.tabManifest",
   main: "editor.fileRole.main",
-  documentation: "editor.fileRole.documentation",
+  documentation: "common:userMenu.documentation",
   "entry-point": "editor.fileRole.entryPoint",
   reference: "editor.fileRole.reference",
   script: "editor.fileRole.script",
@@ -37,7 +37,7 @@ export function usePackageFileColumns(
     },
     {
       id: "type",
-      header: t("editor.bundleTypeColumn"),
+      header: t("log.filterType"),
       width: "minmax(100px,1fr)",
       tier: 2,
       cell: (entry) => (

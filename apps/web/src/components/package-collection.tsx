@@ -163,7 +163,7 @@ export function PackageCollection({
       values: origins,
       options: [
         { value: "local", label: originLabels?.local ?? t("list.filter.local") },
-        { value: "system", label: originLabels?.system ?? t("list.filter.system") },
+        { value: "system", label: originLabels?.system ?? t("list.badgeBuiltIn") },
       ],
       onChange: list.setValues("origin"),
     },
@@ -171,7 +171,7 @@ export function PackageCollection({
       ? [
           {
             id: "activity",
-            label: t(holds === "agent" ? "list.filter.execution" : "list.filter.usage"),
+            label: t(holds === "agent" ? "run.infoExecution" : "run.infoUsage"),
             values: activities,
             options:
               holds === "agent"

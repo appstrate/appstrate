@@ -106,7 +106,7 @@ export function useIntegrationClientColumns({
   return [
     {
       id: "client",
-      header: t("integration.clients.col.clientId"),
+      header: t("oauthClients.clientIdColumn"),
       width: "minmax(200px,2fr)",
       cell: ({ client }) => (
         <CellText title={client.client_id} className="text-sm">
@@ -141,7 +141,7 @@ export function useIntegrationClientColumns({
       const useForOrg = canChooseOrgDefault && row.inOrgList && !row.orgDefault;
       return (
         <TableRowActions
-          menuLabel={t("integration.oauthClient.moreActions", { name: client.client_id })}
+          menuLabel={t("providers.moreActions", { name: client.client_id })}
           isPending={pendingClientRef === client.client_ref}
           actions={[
             {
@@ -238,7 +238,7 @@ export function useConnectionColumns({
   return [
     {
       id: "account",
-      header: t("integration.connection.col.account"),
+      header: t("preferences.sectionAccount"),
       width: "minmax(100px,1.5fr)",
       cell: (c) => (
         <AccountCell
@@ -259,7 +259,7 @@ export function useConnectionColumns({
     },
     {
       id: "status",
-      header: t("integration.connection.col.status"),
+      header: t("proxies.col.status"),
       width: "minmax(104px,1fr)",
       tier: 2,
       cell: (c) => <StatusCell connection={c} />,
@@ -276,7 +276,7 @@ export function useConnectionColumns({
     },
     {
       id: "scopes",
-      header: t("integration.connection.col.scopes"),
+      header: t("roles.permissionsLabel"),
       width: "minmax(80px,1.5fr)",
       tier: 3,
       cell: (c) =>
@@ -293,7 +293,7 @@ export function useConnectionColumns({
     },
     {
       id: "expires",
-      header: t("integration.connection.col.expires"),
+      header: t("apiKeys.expirationColumn"),
       width: "84px",
       tier: 3,
       align: "end",

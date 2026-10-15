@@ -16,6 +16,7 @@ installFakeStorage({
 const { LogViewer } = await import("../log-viewer.tsx");
 const { render } = await import("../../test/render.tsx");
 const agentsFr = (await import("../../locales/fr/agents.json")).default;
+const commonFr = (await import("../../locales/fr/common.json")).default;
 const i18nModule = await import("../../i18n.ts");
 
 await i18nModule.i18nReady;
@@ -34,7 +35,7 @@ describe("LogViewer — an empty journal", () => {
     const html = render(<LogViewer entries={[]} onSelectEntry={() => {}} />);
     expect(html).toContain(agentsFr["log.empty"]);
     expect(html).not.toContain(agentsFr["log.noMatches"]);
-    expect(html).not.toContain(agentsFr["log.clearAll"]);
+    expect(html).not.toContain(commonFr["toolbar.clearAll"]);
   });
 
   it("says no event matches when the filters hide every one", () => {
@@ -42,7 +43,7 @@ describe("LogViewer — an empty journal", () => {
       <LogViewer entries={[message]} onSelectEntry={() => {}} initialFocus="errors" />,
     );
     expect(html).toContain(agentsFr["log.noMatches"]);
-    expect(html).toContain(agentsFr["log.clearAll"]);
+    expect(html).toContain(commonFr["toolbar.clearAll"]);
     expect(html).not.toContain(agentsFr["log.empty"]);
   });
 });

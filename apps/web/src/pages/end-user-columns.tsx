@@ -31,7 +31,7 @@ export function useEndUserColumns({
   const columns: DataColumn<EndUserInfo>[] = [
     {
       id: "name",
-      header: t("spaces.endUserName"),
+      header: t("spaces.nameLabel"),
       width: "minmax(100px,1.2fr)",
       cell: (user) => (
         <div className="flex min-w-0 items-center gap-2">
@@ -44,7 +44,7 @@ export function useEndUserColumns({
     },
     {
       id: "email",
-      header: t("spaces.endUserEmail"),
+      header: t("login.email"),
       width: "minmax(100px,1.2fr)",
       tier: 2,
       cell: (user) => <CellText>{user.email ?? ""}</CellText>,
@@ -70,7 +70,7 @@ export function useEndUserColumns({
     ...columns,
     rowActionsColumn((user) => (
       <TableRowActions
-        menuLabel={t("spaces.moreEndUserActions", {
+        menuLabel={t("providers.moreActions", {
           name: endUserLabel(user, t("spaces.anonymousUser")),
         })}
         isPending={deletingUserId === user.id}

@@ -139,13 +139,13 @@ export function OnboardingCreateStep() {
       onNext={handleSubmit(onSubmit)}
       nextDisabled={!nameValue.trim() || !slugValue.trim()}
       nextPending={createMutation.isPending}
-      nextLabel={t("onboarding.createAction")}
+      nextLabel={t("common:btn.create")}
     >
       <form onSubmit={handleSubmit(onSubmit)}>
         <div className="flex flex-col gap-4">
           <FormItem
             id="org-name"
-            label={t("createOrg.name")}
+            label={t("spaces.nameLabel")}
             error={showError("name") ? errors.name?.message : undefined}
           >
             <Input
@@ -207,7 +207,7 @@ export function OnboardingCreateStep() {
                   className="h-auto p-0"
                   onClick={() => setSlugOpen(true)}
                 >
-                  {t("createOrg.slugEdit")}
+                  {t("common:btn.edit")}
                 </Button>
               </div>
             )}

@@ -417,7 +417,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
   return (
     <FormModal
       onClose={onClose}
-      title={role ? t("roles.editTitle") : t("roles.createTitle")}
+      title={role ? t("roles.editTitle") : t("roles.create")}
       className="sm:max-w-lg"
       onSubmit={handleSubmit(submit)}
       isPending={isPending}
@@ -425,7 +425,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       error={formError}
       formProps={{ noValidate: true, onChange: () => setFormError(null) }}
     >
-      <FormItem id="role-name" label={t("roles.nameLabel")} error={errors.name?.message}>
+      <FormItem id="role-name" label={t("spaces.nameLabel")} error={errors.name?.message}>
         <Input
           maxLength={100}
           disabled={isPending}

@@ -83,7 +83,7 @@ export function useSpaceMemberColumns({
       if (!kind) return null;
       return (
         <TableRowActions
-          menuLabel={t("spaceMembers.moreActions", { name: memberLabel(member) })}
+          menuLabel={t("providers.moreActions", { name: memberLabel(member) })}
           isPending={isRemoving}
           actions={[
             {

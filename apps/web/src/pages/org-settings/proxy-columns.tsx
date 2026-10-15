@@ -39,7 +39,7 @@ export function useProxyColumns({
   return [
     {
       id: "proxy",
-      header: t("proxies.col.name"),
+      header: t("spaces.nameLabel"),
       width: "minmax(80px,1.3fr)",
       cell: (p) => (
         <div className="min-w-0">
@@ -48,8 +48,8 @@ export function useProxyColumns({
             <div className="@xl/table:hidden">
               <TestResultSpan
                 result={testResults[p.id]!}
-                successKey="proxies.testSuccess"
-                failedKey="proxies.testFailed"
+                successKey="credentials.testSuccess"
+                failedKey="credentials.testFailed"
               />
             </div>
           )}
@@ -85,12 +85,12 @@ export function useProxyColumns({
         testResults[p.id] ? (
           <TestResultSpan
             result={testResults[p.id]!}
-            successKey="proxies.testSuccess"
-            failedKey="proxies.testFailed"
+            successKey="credentials.testSuccess"
+            failedKey="credentials.testFailed"
           />
         ) : (
           <Badge variant={p.enabled ? "success" : "secondary"}>
-            {p.enabled ? t("proxies.active") : t("proxies.disabled")}
+            {p.enabled ? t("catalogue.filter.active") : t("proxies.disabled")}
           </Badge>
         ),
     },
@@ -100,7 +100,7 @@ export function useProxyColumns({
       width: "96px",
       tier: 2,
       cell: (p) =>
-        p.is_default ? <Badge variant="success">{t("proxies.default")}</Badge> : <CellEmpty />,
+        p.is_default ? <Badge variant="success">{t("models.default")}</Badge> : <CellEmpty />,
     },
     rowActionsColumn((p: OrgProxyInfo) => {
       const isTesting = testingIds.has(p.id);
@@ -109,19 +109,19 @@ export function useProxyColumns({
       return (
         <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
           <TableRowActions
-            menuLabel={t("proxies.moreActions", { name: p.label })}
+            menuLabel={t("providers.moreActions", { name: p.label })}
             isPending={isTesting || isSettingDefault}
             actions={[
               {
                 id: "edit",
-                label: t("proxies.edit"),
+                label: t("common:btn.edit"),
                 icon: Pencil,
                 onSelect: () => onEdit?.(p),
                 hidden: !isCustom || !onEdit,
               },
               {
                 id: "test",
-                label: t("proxies.test"),
+                label: t("models.test"),
                 icon: FlaskConical,
                 onSelect: () => onTest(p.id),
                 disabled: isTesting,
@@ -137,7 +137,7 @@ export function useProxyColumns({
               },
               {
                 id: "delete",
-                label: t("proxies.delete"),
+                label: t("common:btn.delete"),
                 icon: Trash2,
                 onSelect: () => onDelete?.(p),
                 destructive: true,

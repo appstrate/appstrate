@@ -18,7 +18,7 @@ export function ActivateIntegrationButton({ packageId }: { packageId: string }) 
       onClick={() => activate()}
       data-testid={`integration-activate-${packageId}`}
     >
-      {t("editor.activateIntegration")}
+      {t("detail.activate")}
     </PendingButton>
   );
 }

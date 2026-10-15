@@ -410,7 +410,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
                 disabled={allSelected}
                 data-testid={`integ-tools-select-all-${packageId}`}
               >
-                {t("agentEditor.integrations.tools.selectAll")}
+                {t("models.form.discoverSelectAll")}
               </Button>
               <Button
                 type="button"
@@ -420,7 +420,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
                 disabled={noneSelected}
                 data-testid={`integ-tools-select-none-${packageId}`}
               >
-                {t("agentEditor.integrations.tools.selectNone")}
+                {t("apiKeys.deselectAll")}
               </Button>
             </div>
           </div>

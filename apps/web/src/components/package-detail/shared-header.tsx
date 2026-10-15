@@ -81,7 +81,7 @@ export function SharedHeader({
             {detail.type !== "agent" && detail.source === "system" && (
               <Badge variant="secondary" className="gap-1.5">
                 <ShieldCheck className="size-3" aria-hidden />
-                {t("packages.sourceBuiltIn", { ns: "settings" })}
+                {t("providers.type.system", { ns: "settings" })}
               </Badge>
             )}
             {/* Where the package LIVES, which is where it may be edited. A

@@ -105,11 +105,11 @@ export function DashboardHeader({
             : t("dashboard.greetingAnonymous")
         }
         titleClassName="text-3xl font-bold tracking-tight"
-        breadcrumbs={[{ label: t("dashboard.breadcrumb") }]}
+        breadcrumbs={[{ label: t("common:nav.dashboard") }]}
         actions={
           <Button type="button" variant="outline" onClick={() => assist.open()}>
             <Sparkles />
-            {t("dashboard.askAi.action")}
+            {t("dashboard.askAi.title")}
           </Button>
         }
       >
@@ -356,7 +356,7 @@ function dashboardMetrics(
     // A card whose read is closed to the caller is dropped, not shown as 0.
     cards: [
       sections.recentRuns && {
-        label: t("dashboard.metric.runs"),
+        label: t("common:nav.runs"),
         value: data.runTotal,
         detail: t("dashboard.metric.runsDetail", { count: running }),
       },
@@ -467,7 +467,7 @@ export function DashboardContent(data: DashboardData) {
             <SectionHeading
               title={t("dashboard.upcomingSchedules")}
               href="/schedules"
-              action={t("dashboard.schedules")}
+              action={t("common:nav.schedules")}
             />
             <UpcomingSchedules schedules={metrics.upcomingSchedules} agentById={agentById} />
           </section>

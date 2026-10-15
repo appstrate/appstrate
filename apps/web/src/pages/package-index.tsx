@@ -42,7 +42,7 @@ type IndexType = Extract<PackageType, "agent" | "skill" | "mcp-server">;
 function presentation(type: IndexType, t: TFunction) {
   if (type === "agent") {
     return {
-      title: t("list.tabAgents", { ns: "agents" }),
+      title: t("common:nav.agents"),
       empty: t("list.empty", { ns: "agents" }),
       create: t("list.create", { ns: "agents" }),
     };

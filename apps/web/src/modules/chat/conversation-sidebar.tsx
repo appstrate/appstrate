@@ -40,8 +40,8 @@ function useConversationTabs(selected: ConversationSidebarTab) {
   };
   const tabs = (
     [
-      { id: "runs", Icon: ActivityIcon, label: t("context.tabs.runs") },
-      { id: "files", Icon: FilesIcon, label: t("context.tabs.files") },
+      { id: "runs", Icon: ActivityIcon, label: t("common:nav.runs") },
+      { id: "files", Icon: FilesIcon, label: t("common:nav.files") },
       { id: "info", Icon: InfoIcon, label: t("context.tabs.info") },
     ] as const satisfies readonly {
       id: ConversationSidebarTab;

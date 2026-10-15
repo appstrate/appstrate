@@ -14,7 +14,10 @@ they start with `packages/` or `e2e/`.
 - **Primitives are shadcn**, in `packages/ui/src/components/` (`button`, `input`,
   `select`, `popover`, `command`, `dialog`, `sheet`, `tabs`, `toggle-group`,
   `switch`, `checkbox`, `radio-group`, `field`, `alert`, `badge`, `table`,
-  `tooltip`, `dropdown-menu`, `collapsible`, `skeleton`, `sidebar`…). Native
+  `tooltip`, `dropdown-menu`, `collapsible`, `skeleton`, `sidebar`, `card`, `empty`,
+  `progress`, `alert-dialog`…) plus one local `combobox` (Popover + Command; the
+  registry has none for this style). `shadcn add` overwrites `button.tsx` for this
+  style: write a new primitive from `shadcn view` instead, in the local conventions. Native
   before custom: compose these, and read the shadcn source or block before
   drawing a filter, a table or a toolbar of your own.
 - **Tokens** are CSS variables in `styles.css` (`@theme`). No hard-coded colour,
@@ -50,8 +53,7 @@ they start with `packages/` or `e2e/`.
 ## 2. The shell
 
 - **`ShellSidebar` and `ShellHeader`** (`components/shell-frame.tsx`) are the one
-  frame of both products (Studio: `components/app-sidebar.tsx`, chat:
-  `modules/chat/chat-shell.tsx`). A product passes only its own navigation;
+  frame of both products (`components/app-sidebar.tsx` renders it for Studio and the chat). A product passes only its own navigation;
   never copy the frame.
 - The sidebar head is the organisation and workspace switcher
   (`components/org-switcher.tsx`: organisations left, the workspaces of the one
@@ -504,12 +506,14 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 
 ## 8. Cards, badges, atoms
 
-- **Status badge**: `Badge` from `components/status-badge.tsx` maps a run status
+- **Status badge**: `RunStatusBadge` from `components/status-badge.tsx` maps a run status
   (success, failed, running, pending, timeout, cancelled) to the `packages/ui`
   `Badge` variant, icon and translated label; `compact` is a bare icon on a phone,
   `unread` adds the dot. Other statuses have their own small component, same
   `packages/ui` `Badge`: `ScheduleStatusBadge`, `ModelUnavailableBadge`,
-  `HealthIssueBadge`. `MetaBadge` (same file) is the outline badge that says WHAT
+  `HealthIssueBadge`. The status tones (`success`, `warning`, `running`, `pending`, `failed`…) are variants
+  of the `packages/ui` `Badge`, and `info` / `warning` / `success` of `Alert`: no wrapper.
+  `MetaBadge` (same file) is the outline badge that says WHAT
   a row is (Inline, Supprimé), not how it ended. A version is a `secondary` badge
   with `font-mono`; an agent whose working copy differs from its last published
   version (or has none) wears « Brouillon » in its place, and only then; a
@@ -529,8 +533,10 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 
 ## 9. Dialogs and creation
 
-- Always `<Modal>` (`components/modal.tsx`), never `Dialog` directly; the
-  two-pane overlay is `PanelDialog`. A popover that needs the whole width on a
+- Always `<Modal>` (`components/modal.tsx`, open while mounted: render it
+  conditionally; give it a `description` when the title is not enough), never
+  `Dialog` directly; a confirmation is `ConfirmModal`, an `AlertDialog` (an outside
+  click does not dismiss it); the two-pane overlay is `PanelDialog`. A popover that needs the whole width on a
   phone becomes a bottom `Sheet` there (`notification-bell.tsx`).
 - **A real modal has a URL; only the confirmations, the secrets shown once and
   the chat have none** (`useModalParam`, `hooks/use-modal-param.ts`). A

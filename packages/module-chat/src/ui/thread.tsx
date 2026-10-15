@@ -540,7 +540,7 @@ export function MessageError() {
           >
             <Button type="button" variant="outline" size="sm" className="shrink-0">
               <RotateCcwIcon />
-              {t("turn.retry")}
+              {t("common:btn.retry")}
             </Button>
           </ThreadPrimitive.Suggestion>
         </ThreadPrimitive.If>
@@ -577,7 +577,7 @@ function AssistantMessage() {
             snapshot), which is the seamless behavior we want. */}
         <ActionBarPrimitive.Root className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <ActionBarPrimitive.Copy asChild>
-            <IconButton label={t("action.copy")}>
+            <IconButton label={t("common:btn.copy")}>
               <MessagePrimitive.If copied>
                 <CheckIcon />
               </MessagePrimitive.If>

@@ -206,7 +206,7 @@ export function RunOverridesPanel({
           label={
             layout === "settings"
               ? t("detail.configuration.modelChoice", { ns: "agents" })
-              : t("models.tabTitle", { ns: "settings" })
+              : t("providers.col.models", { ns: "settings" })
           }
           description={t("schedule.settings.modelHint", { ns: "agents" })}
         >

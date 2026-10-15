@@ -119,7 +119,7 @@ describe("the trigger column", () => {
 describe("what a surface subtracts", () => {
   it("drops the agent column inside an agent, head and cells together", () => {
     const html = table([makeRun()], { hideAgentName: true });
-    expect(html).not.toContain(agentsFr["runs.column.agent"]);
+    expect(html).not.toContain(agentsFr["schedule.agent"]);
     expect(html).not.toContain(">Rapport trimestriel<");
     // The row's accessible NAME keeps it, though: a link has to say which run
     // it leads to even when the column that showed it is gone.

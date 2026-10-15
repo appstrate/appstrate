@@ -270,7 +270,7 @@ export function PersonalModelsModal({
       onClose={onClose}
       onAdvanced={onAdvanced}
       header={
-        <FormItem id="personal-models-service" label={t("models.form.provider")}>
+        <FormItem id="personal-models-service" label={t("providers.col.provider")}>
           <OptionSelect
             value={provider.providerId}
             onValueChange={onChangeService}

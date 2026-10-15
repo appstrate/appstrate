@@ -179,7 +179,7 @@ function ApiKeyCreateForm({
       error={errors.root?.message}
     >
       {/* Name */}
-      <FormItem id="api-key-name" label={t("apiKeys.nameLabel")}>
+      <FormItem id="api-key-name" label={t("spaces.nameLabel")}>
         <Input
           type="text"
           {...register("name", { required: true })}
@@ -213,7 +213,7 @@ function ApiKeyCreateForm({
 
       {/* Permissions */}
       <div className="space-y-2">
-        <Label>{t("apiKeys.permissionSummary")}</Label>
+        <Label>{t("roles.permissionsLabel")}</Label>
         {availableScopes ? (
           <ScopeMultiSelect
             available={availableScopes}

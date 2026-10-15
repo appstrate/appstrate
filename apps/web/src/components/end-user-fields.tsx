@@ -25,7 +25,7 @@ export function EndUserFields({
 
   return (
     <>
-      <FormItem id="eu-name" label={t("spaces.endUserName")}>
+      <FormItem id="eu-name" label={t("spaces.nameLabel")}>
         <Input
           type="text"
           value={values.name}
@@ -34,7 +34,7 @@ export function EndUserFields({
           autoFocus
         />
       </FormItem>
-      <FormItem id="eu-email" label={t("spaces.endUserEmail")}>
+      <FormItem id="eu-email" label={t("login.email")}>
         <Input
           type="email"
           value={values.email}

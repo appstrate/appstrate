@@ -173,7 +173,7 @@ export function PreferencesModelsPage() {
       <ConfirmModal
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
-        title={t("modelCredentials.deleteTitle")}
+        title={t("credentials.deleteTitle")}
         confirmLabel={t("btn.delete", { ns: "common" })}
         description={
           confirmDelete ? t("modelCredentials.deleteConfirm", { label: confirmDelete.label }) : ""

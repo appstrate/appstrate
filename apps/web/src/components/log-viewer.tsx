@@ -431,7 +431,7 @@ export function LogViewer({
             <PageActionsMenu>
               <DropdownMenuItem onSelect={handleCopy}>
                 {copied ? <Check /> : <Copy />}
-                {copied ? t("log.copied") : t("log.copyLogs")}
+                {copied ? t("common:btn.copied") : t("log.copyLogs")}
               </DropdownMenuItem>
               <DropdownMenuCheckboxItem
                 checked={autoScroll}
@@ -460,7 +460,7 @@ export function LogViewer({
             {showTimestamps && <span>{t("log.timestamp")}</span>}
             <span>{t("log.filterType")}</span>
             <span>{t("log.columnEvent")}</span>
-            <span>{t("log.columnDuration")}</span>
+            <span>{t("run.infoDuration")}</span>
           </div>
 
           <div className="h-[400px] overflow-y-auto" ref={scrollRef}>
@@ -486,7 +486,7 @@ export function LogViewer({
                 >
                   {hasActiveQueryOrFilters && (
                     <Button variant="ghost" size="sm" onClick={clearJournalFilters}>
-                      {t("log.clearAll")}
+                      {t("common:toolbar.clearAll")}
                     </Button>
                   )}
                 </EmptyState>

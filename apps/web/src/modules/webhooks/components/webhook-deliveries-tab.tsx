@@ -105,9 +105,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
             pending={isFetchingNextPage}
             onClick={() => void fetchNextPage()}
           >
-            {isFetchNextPageError
-              ? t("common:btn.retry")
-              : t("settings:webhooks.loadMoreDeliveries")}
+            {isFetchNextPageError ? t("common:btn.retry") : t("settings:spaces.loadMore")}
           </PendingButton>
         )}
       </ListFooter>

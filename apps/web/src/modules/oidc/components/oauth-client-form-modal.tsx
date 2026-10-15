@@ -239,7 +239,9 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
     <FormModal
       onClose={onClose}
       title={
-        isEditing ? t("settings:oauthClients.editTitle") : t("settings:oauthClients.createTitle")
+        isEditing
+          ? t("settings:integration.oauthClient.btnEdit")
+          : t("settings:oauthClients.createTitle")
       }
       className="flex max-h-[85dvh] flex-col overflow-hidden"
       onSubmit={handleSubmit(onSubmit)}
@@ -249,7 +251,7 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
     >
       <FormItem
         id="oauth-client-name"
-        label={t("settings:oauthClients.nameLabel")}
+        label={t("settings:spaces.nameLabel")}
         hint={isEditing ? t("settings:oauthClients.nameReadonlyHint") : undefined}
         error={showError("name") ? t("common:validation.required") : undefined}
       >
@@ -303,7 +305,7 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
       />
 
       <div className="space-y-2">
-        <Label>{t("settings:oauthClients.scopesLabel")}</Label>
+        <Label>{t("settings:apiKeys.scopes")}</Label>
         <p className="text-muted-foreground text-xs">{t("settings:oauthClients.scopesHint")}</p>
         <div className="flex flex-col gap-1.5">
           {(availableScopes ?? Array.from(REQUIRED_SCOPES)).map((scope) => {

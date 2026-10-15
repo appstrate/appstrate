@@ -106,7 +106,7 @@ export function ConnectionShareEditor({
           <Command>
             <CommandInput placeholder={t("integration.connection.share.search")} />
             <CommandList>
-              <CommandEmpty>{t("integration.connection.share.noSpace")}</CommandEmpty>
+              <CommandEmpty>{t("viewAs.noSpace")}</CommandEmpty>
               <CommandGroup heading={t("integration.connection.share.help")}>
                 {targets.map((space) => {
                   const selected = sharedSpaceIds.includes(space.id);

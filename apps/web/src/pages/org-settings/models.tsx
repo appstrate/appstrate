@@ -188,7 +188,7 @@ export function OrgSettingsModelsPage() {
       {tab === "org" && (
         <div className="mb-8">
           <ProvidersTable
-            label={t("providers.tableLabel")}
+            label={t("providers.tabOrg")}
             tableId="org-providers"
             rows={orgRows}
             isLoading={modelsLoading || (canReadCredentials && pkLoading)}

@@ -36,7 +36,7 @@ export function SchedulesListPage() {
   const agentsQuery = useAgents();
   const { data: agents } = agentsQuery;
   const agentsPending = isQueryInFlight(agentsQuery);
-  const placeholder = useSearchPlaceholder(t("schedules.title"));
+  const placeholder = useSearchPlaceholder(t("common:nav.schedules"));
   const [view, setView] = useListView("schedules");
 
   const createAction: MenuAction = {
@@ -99,9 +99,9 @@ export function SchedulesListPage() {
   return (
     <div>
       <PageHeader
-        title={t("schedules.title")}
+        title={t("common:nav.schedules")}
         variant="collection"
-        breadcrumbs={[{ label: t("schedules.title") }]}
+        breadcrumbs={[{ label: t("common:nav.schedules") }]}
         actions={can("schedules:write") ? <PageActionsMenu actions={[createAction]} /> : undefined}
       />
 
@@ -110,7 +110,7 @@ export function SchedulesListPage() {
         filters={[
           {
             id: "state",
-            label: t("schedules.column.state"),
+            label: t("providers.col.state"),
             values: states,
             onChange: list.setValues("state"),
             options: [

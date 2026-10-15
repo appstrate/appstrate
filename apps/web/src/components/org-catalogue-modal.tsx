@@ -260,12 +260,12 @@ export function OrgCatalogueModal({
   });
   const stateFilter: FilterSpec = {
     id: "state",
-    label: t("catalogue.filter.state"),
+    label: t("providers.col.state"),
     values: states,
     options: [
       { value: "active", label: t("catalogue.filter.active") },
       { value: "inactive", label: t("catalogue.filter.inactive") },
-      { value: "offered", label: t("catalogue.filter.offered") },
+      { value: "offered", label: t("catalogue.offeredHere") },
     ],
     onChange: list.setValues("state"),
   };
@@ -447,7 +447,7 @@ export function OrgCatalogueModal({
   const readingSwitcher = (
     <div
       role="tablist"
-      aria-label={t("catalogue.readingSelector")}
+      aria-label={t("webhooks.levelLabel")}
       className="bg-sidebar-accent/40 flex h-8 shrink-0 gap-0.5 rounded-lg p-0.5"
     >
       {readings.map((option) => (
@@ -494,7 +494,7 @@ export function OrgCatalogueModal({
 
   const rail = (
     <div className="flex h-full flex-col">
-      <RailHeader icon={LibraryBig} title={t("catalogue.title")} />
+      <RailHeader icon={LibraryBig} title={t("common:nav.catalogue")} />
       <div className="flex-1">
         {sharedRow && <div className="px-3 py-3">{sharedRow}</div>}
         <RailGroup title={t("catalogue.kinds")} separated={Boolean(sharedRow)}>
@@ -508,7 +508,7 @@ export function OrgCatalogueModal({
 
   return (
     <PanelDialog
-      title={t("catalogue.title")}
+      title={t("common:nav.catalogue")}
       rail={rail}
       contentHeader={(stuck) =>
         previewed ? (
@@ -656,7 +656,7 @@ export function OrgCatalogueModal({
           // The library says where a package is placed, not what uses it: an activity filter would match nothing.
           activityFilter={false}
           originLabels={{
-            title: t("catalogue.filter.origin"),
+            title: t("catalogue.origin"),
             local: t("catalogue.sourceOrg", { name: orgName }),
             system: t("catalogue.sourceSystem"),
           }}

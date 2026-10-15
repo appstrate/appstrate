@@ -98,7 +98,7 @@ export function MetadataSection({
       />
       <FormField
         id="meta-scope"
-        label={t("editor.metaScope")}
+        label={t("runs.filterScope")}
         value={value.scope}
         onChange={() => {}}
         description={t("editor.metaScopeDesc")}
@@ -111,7 +111,7 @@ export function MetadataSection({
   const versionField = (
     <FormField
       id="meta-version"
-      label={t("editor.metaVersion")}
+      label={t("run.infoVersion")}
       required
       value={value.version}
       onChange={(v) => update({ version: v })}
@@ -123,7 +123,7 @@ export function MetadataSection({
   const publicationDetails = (
     <>
       <div className="space-y-2">
-        <Label htmlFor="meta-description">{t("editor.metaDescription")}</Label>
+        <Label htmlFor="meta-description">{t("editor.fieldDescLabel")}</Label>
         <Textarea
           id="meta-description"
           value={value.description}
@@ -132,7 +132,7 @@ export function MetadataSection({
         />
       </div>
       <div className="space-y-2">
-        <Label>{t("editor.metaKeywords")}</Label>
+        <Label>{t("manifest.keywords")}</Label>
         <div className="mb-2 flex flex-wrap gap-1.5">
           {value.keywords.map((keyword) => (
             <span
@@ -183,7 +183,7 @@ export function MetadataSection({
         <SettingsFieldGroup title={t("editor.identity")}>{identityFields}</SettingsFieldGroup>
         <SettingsFieldGroup title={t("editor.publication")}>{publicationFields}</SettingsFieldGroup>
         {children && (
-          <SettingsFieldGroup title={t("editor.execution")}>{children}</SettingsFieldGroup>
+          <SettingsFieldGroup title={t("run.infoExecution")}>{children}</SettingsFieldGroup>
         )}
       </div>
     );

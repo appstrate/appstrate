@@ -114,7 +114,7 @@ export function useSpaceColumns({
       const orphaned = Boolean(space.orphaned_at);
       return (
         <TableRowActions
-          menuLabel={t("spaces.rowActions", { name: spaceLabel(space, t) })}
+          menuLabel={t("providers.moreActions", { name: spaceLabel(space, t) })}
           actions={[
             {
               id: "convert",

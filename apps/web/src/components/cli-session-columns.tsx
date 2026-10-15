@@ -36,7 +36,7 @@ export function useCliSessionColumns({
 
   const memberColumn: DataColumn<CliSessionRow> = {
     id: "member",
-    header: t("orgCliSessions.memberColumn"),
+    header: t("spaceMembers.colMember"),
     width: "minmax(60px,1fr)",
     tier: 2,
     cell: (session) => (

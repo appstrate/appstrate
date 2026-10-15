@@ -45,7 +45,7 @@ export function DocumentRowActions({
         },
         {
           id: "download",
-          label: t("row.download"),
+          label: t("common:btn.download"),
           icon: Download,
           onSelect: () => onDownload(doc),
           hidden: !doc.capabilities.download,
@@ -66,7 +66,7 @@ export function DocumentRowActions({
         },
         {
           id: "delete",
-          label: t("row.delete"),
+          label: t("common:btn.delete"),
           icon: Trash2,
           onSelect: () => onDelete(doc),
           destructive: true,

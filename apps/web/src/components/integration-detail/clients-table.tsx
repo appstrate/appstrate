@@ -150,7 +150,7 @@ function OAuthClientModal({
       title={
         mode === "create"
           ? t("integration.oauthClient.modalCreateTitle")
-          : t("integration.oauthClient.modalEditTitle")
+          : t("integration.oauthClient.btnEdit")
       }
     >
       <form
@@ -160,7 +160,7 @@ function OAuthClientModal({
       >
         <div className="space-y-1">
           <Label htmlFor={`cid-${authKey}`} className="text-xs">
-            {t("integration.oauthClient.clientId")}
+            {t("oauthClients.clientIdColumn")}
           </Label>
           <Input
             id={`cid-${authKey}`}
@@ -234,7 +234,7 @@ function OAuthClientModal({
         </label>
         <div className="flex items-center justify-end gap-2 sm:col-span-2">
           <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
-            {t("integration.connect.btn.cancel")}
+            {t("common:btn.cancel")}
           </Button>
           <Button
             type="submit"

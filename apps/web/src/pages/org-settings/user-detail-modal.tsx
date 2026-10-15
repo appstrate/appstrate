@@ -111,10 +111,10 @@ export function UserDetailModal({
 
         {showSpaces && (
           <section>
-            <h3 className="mb-3 text-base font-semibold">{t("userDetail.spacesSection")}</h3>
+            <h3 className="mb-3 text-base font-semibold">{t("orgSettings.inviteSpacesLabel")}</h3>
             <DataTable
               tableId="user-spaces"
-              label={t("userDetail.spacesSection")}
+              label={t("orgSettings.inviteSpacesLabel")}
               columns={columns}
               rows={member.spaces}
               rowKey={(space) => space.id}

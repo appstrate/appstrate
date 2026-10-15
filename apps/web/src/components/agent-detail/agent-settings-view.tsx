@@ -74,9 +74,9 @@ const SETTINGS_GROUPS = [
     items: [
       { id: "general", icon: IdCard, labelKey: "editor.tabGeneral" },
       { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
-      { id: "skills", icon: Sparkles, labelKey: "editor.tabSkills" },
-      { id: "integrations", icon: Boxes, labelKey: "editor.tabIntegrations" },
-      { id: "tools", icon: Wrench, labelKey: "editor.tabTools" },
+      { id: "skills", icon: Sparkles, labelKey: "common:nav.skills" },
+      { id: "integrations", icon: Boxes, labelKey: "common:nav.integrations" },
+      { id: "tools", icon: Wrench, labelKey: "integrationEditor.tabTools" },
       { id: "bundle", icon: FileArchive, labelKey: "editor.tabPackageFiles" },
     ],
   },

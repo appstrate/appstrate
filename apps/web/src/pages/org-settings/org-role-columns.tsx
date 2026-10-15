@@ -62,7 +62,7 @@ export function useOrgRoleColumns({
     rowActionsColumn((role: OrgRole) =>
       onPreview && isPreviewable(role) ? (
         <TableRowActions
-          menuLabel={t("roles.moreActions", { name: t(roleI18nKey(role)) })}
+          menuLabel={t("providers.moreActions", { name: t(roleI18nKey(role)) })}
           actions={[
             {
               id: "preview",

@@ -70,7 +70,7 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
             {passwordMethod && (
               <form onSubmit={onPasswordSubmit} className="space-y-3">
                 <div className="space-y-2">
-                  <Label>{t("preferences.reauthPassword")}</Label>
+                  <Label>{t("common:claim.passwordLabel")}</Label>
                   <Input
                     type="password"
                     value={password}
@@ -81,7 +81,7 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
                 </div>
                 <FieldError>{error}</FieldError>
                 <PendingButton type="submit" pending={submitting}>
-                  {t("preferences.reauthConfirm")}
+                  {t("common:btn.confirm")}
                 </PendingButton>
               </form>
             )}

@@ -141,7 +141,7 @@ function GeneralForm({
 
   return (
     <>
-      <SettingsGroup title={t("spaces.settingsTitle")}>
+      <SettingsGroup title={t("workspaceSettings.sectionGeneral")}>
         <SettingRow
           variant="field"
           label={t("spaces.nameLabel")}

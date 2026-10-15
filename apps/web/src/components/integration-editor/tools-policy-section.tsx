@@ -68,7 +68,7 @@ export function ToolsPolicySection({
       headerRight={
         <Button type="button" size="sm" variant="outline" onClick={addPolicy}>
           <Plus />
-          {t("integrationEditor.toolsPolicy.add")}
+          {t("common:btn.add")}
         </Button>
       }
     >

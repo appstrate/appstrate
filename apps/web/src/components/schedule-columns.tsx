@@ -88,7 +88,7 @@ export function useScheduleColumns({
     },
     {
       id: "state",
-      header: t("schedules.column.state"),
+      header: t("providers.col.state"),
       width: "116px",
       cell: (schedule) => (
         <>

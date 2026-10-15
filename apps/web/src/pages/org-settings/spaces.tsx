@@ -67,7 +67,7 @@ export function OrgSettingsSpacesPage() {
   };
 
   const columns = useSpaceColumns({
-    defaultLabel: t("spaces.default"),
+    defaultLabel: t("models.default"),
     // Only an orphaned space offers them, each to the permission its route checks.
     onConvert: can("spaces:write") ? (id) => setPending({ id, action: "convert" }) : undefined,
     onSweep: can("spaces:delete") ? (id) => setPending({ id, action: "sweep" }) : undefined,
@@ -90,7 +90,7 @@ export function OrgSettingsSpacesPage() {
 
       <DataTable
         tableId="spaces"
-        label={t("spaces.pageTitle")}
+        label={t("common:switcher.workspacesColumn")}
         columns={columns}
         rows={spaces ?? []}
         rowKey={(space) => space.id}

@@ -81,7 +81,7 @@ export function PackageOverview({
           </DetailSectionCard>
         )}
         <DetailSectionCard
-          title={t("packageOverview.usage")}
+          title={t("run.infoUsage")}
           icon={Layers}
           headerAction={
             agentCount > 0

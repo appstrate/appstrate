@@ -156,7 +156,7 @@ describe("EndpointFields", () => {
       providers: [],
       eachMember: { selected: true, onSelect: () => {}, onClear: () => {} },
     });
-    expect(html).toContain(settingsFr["models.form.eachMember"]);
+    expect(html).toContain(settingsFr["providers.type.personalKey"]);
     expect(html).toContain(settingsFr["models.form.eachMemberHint"]);
     expect(html).not.toContain('placeholder="sk-..."');
   });

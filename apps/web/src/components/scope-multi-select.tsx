@@ -131,7 +131,7 @@ export function ScopeMultiSelect({
               <CommandGroup>
                 <CommandItem onSelect={toggleAll}>
                   <Check className={cn("mr-2", allSelected ? "opacity-100" : "opacity-0")} />
-                  {allSelected ? t("apiKeys.deselectAll") : t("apiKeys.selectAll")}
+                  {allSelected ? t("apiKeys.deselectAll") : t("models.form.discoverSelectAll")}
                 </CommandItem>
               </CommandGroup>
               <CommandSeparator />

@@ -83,7 +83,7 @@ export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
       {/* Tier 1: the raw endpoint works in any spec-compliant client. */}
       <div>
         <p className="text-muted-foreground mb-1 text-xs font-medium">
-          {t("orgSettings.mcpEndpointLabel")}
+          {t("integration.structure.url")}
         </p>
         <CopyBlock value={cfg.url} multiline />
         <p className="text-muted-foreground mt-1 text-xs">{t("orgSettings.mcpEndpointHint")}</p>

@@ -263,7 +263,7 @@ export function CredentialFormModal({
       <SelectContent>
         <ProviderPickerGroups
           items={pickerRows}
-          featuredLabel={t("models.form.providerGroupFeatured")}
+          featuredLabel={t("models.form.modelGroupFeatured")}
           otherLabel={t("models.form.providerGroupOther")}
           renderItem={(row) =>
             row.kind === "customEndpoint" ? (

@@ -152,8 +152,8 @@ export function SchemaFieldList({
                 <TableRow>
                   <TableHead className="w-8" />
                   <TableHead className="w-[26%]">{t("editor.fieldKeyLabel")}</TableHead>
-                  <TableHead className="w-[16%]">{t("editor.fieldTypeLabel")}</TableHead>
-                  <TableHead className="w-[12%]">{t("editor.fieldRequired")}</TableHead>
+                  <TableHead className="w-[16%]">{t("log.filterType")}</TableHead>
+                  <TableHead className="w-[12%]">{t("manifest.required")}</TableHead>
                   <TableHead>{t("editor.fieldDescLabel")}</TableHead>
                   <TableHead className="w-12" />
                 </TableRow>
@@ -262,7 +262,7 @@ function FieldRow({
       </TableCell>
       <TableCell className="text-right">
         <TableRowActions
-          menuLabel={t("editor.fieldActions", { name: field.key })}
+          menuLabel={t("editor.rowActions", { name: field.key })}
           actions={[
             {
               id: "edit",
@@ -350,7 +350,7 @@ function FieldModal({
               />
             )}
           </Row>
-          <Row label={t("editor.fieldTypeLabel")}>
+          <Row label={t("log.filterType")}>
             {(id) => (
               <OptionSelect
                 id={id}
@@ -386,7 +386,7 @@ function FieldModal({
         </Row>
         <CheckboxField
           id={`${ids}-required`}
-          label={t("editor.fieldRequired")}
+          label={t("manifest.required")}
           checked={draft.required}
           onCheckedChange={(v) => set({ required: Boolean(v) })}
         />

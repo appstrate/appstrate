@@ -180,7 +180,7 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
       ? t("import.forceSubmit")
       : confirmIntegrity
         ? t("import.forceIntegrity")
-        : t("import.submit");
+        : t("common:nav.import");
 
   const rootError = errors.root?.message;
 

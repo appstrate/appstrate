@@ -18,7 +18,7 @@ await i18n.changeLanguage("fr");
 describe("ModelBillingHint", () => {
   it("names the caller's own credential when it pays for the model", () => {
     expect(render(<ModelBillingHint billedTo="user" />)).toContain(
-      settingsFr["modelPicker.kind.personalKey"],
+      settingsFr["providers.type.personalKey"],
     );
   });
 

@@ -62,7 +62,7 @@ function useTypeText() {
   const { t } = useTranslation("settings");
   return (kind: ProviderKind) =>
     ({
-      "org-key": t("providers.type.orgKey"),
+      "org-key": t("modelPicker.kind.org"),
       "personal-key": t("providers.type.personalKey"),
       subscription: t("providers.type.subscription"),
       system: t("providers.type.system"),
@@ -120,7 +120,7 @@ export function useProviderColumns({
   const columns: DataColumn<ProviderRow>[] = [
     {
       id: "provider",
-      header: t("providers.col.name"),
+      header: t("spaces.nameLabel"),
       width: "minmax(110px,1.7fr)",
       cell: (row) => {
         const pk = row.credential;
@@ -134,7 +134,7 @@ export function useProviderColumns({
               );
         const result = testResults[row.id];
         const label =
-          row.kind === "system" ? t("providers.type.system") : row.label || t("providers.col.name");
+          row.kind === "system" ? t("providers.type.system") : row.label || t("spaces.nameLabel");
         return (
           <div className="flex min-w-0 items-center gap-2">
             {Icon ? (
@@ -338,7 +338,7 @@ export function useProviderColumns({
             },
             {
               id: "choose-models",
-              label: t("providers.chooseModels"),
+              label: t("models.choice.title"),
               icon: ListChecks,
               onSelect: () => onChooseModels?.(pk),
               hidden: !canChoose,

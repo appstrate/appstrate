@@ -56,9 +56,7 @@ export function DiffTab({ type, latestVersion, currentManifest, currentContent }
         className="mb-4"
       >
         <TabsList>
-          {hasManifestChanges && (
-            <TabsTrigger value="manifest">{t("version.diffManifest")}</TabsTrigger>
-          )}
+          {hasManifestChanges && <TabsTrigger value="manifest">{t("run.tabManifest")}</TabsTrigger>}
           {hasContentChanges && <TabsTrigger value="content">{contentLabel}</TabsTrigger>}
         </TabsList>
       </Tabs>

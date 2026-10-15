@@ -78,7 +78,7 @@ export function FileTile({
     : caps.download
       ? () => onDownload(file)
       : undefined;
-  const activateLabel = canPreview ? t("row.preview") : t("row.download");
+  const activateLabel = canPreview ? t("row.preview") : t("common:btn.download");
 
   // Gate the image fetch on download — an un-downloadable file (another member's
   // upload) would 403, so fall straight to the mime placeholder.

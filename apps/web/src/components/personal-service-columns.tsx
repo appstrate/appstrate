@@ -93,7 +93,7 @@ export function usePersonalServiceColumns({
         actions={[
           {
             id: "choose-models",
-            label: t("providers.chooseModels"),
+            label: t("models.choice.title"),
             icon: ListChecks,
             onSelect: () => onChooseModels(row),
             hidden: !canWriteModels,

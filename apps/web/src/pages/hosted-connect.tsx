@@ -264,9 +264,7 @@ export function HostedConnectPage() {
                 </Alert>
               )}
               <Button type="submit" className="w-full" disabled={phase === "submitting"}>
-                {isOAuth
-                  ? t("integration.connect.variables.continue")
-                  : t("integration.connect.btn.save")}
+                {isOAuth ? t("onboarding.next") : t("common:btn.save")}
               </Button>
             </form>
           </>

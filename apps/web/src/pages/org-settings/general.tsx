@@ -172,7 +172,7 @@ export function OrgSettingsGeneralPage() {
 
   return (
     <>
-      <SettingsGroup title={t("orgSettings.orgTitle")}>
+      <SettingsGroup title={t("source.org")}>
         <SettingRow
           variant="field"
           label={t("orgSettings.logoLabel")}
@@ -252,7 +252,7 @@ export function OrgSettingsGeneralPage() {
                     onClick={() => patchLogo(null)}
                   >
                     <Trash2 />
-                    {t("orgSettings.logoRemove")}
+                    {t("common:btn.remove")}
                   </Button>
                 )}
               </div>
@@ -261,7 +261,7 @@ export function OrgSettingsGeneralPage() {
         </SettingRow>
         <SettingRow
           variant="field"
-          label={t("orgSettings.nameLabel")}
+          label={t("spaces.nameLabel")}
           description={currentOrg.slug}
           status={<SaveFeedback {...nameWrite} />}
         >
@@ -269,7 +269,7 @@ export function OrgSettingsGeneralPage() {
             <InlineTextSetting
               value={currentOrg.name}
               disabled={nameWrite.pending}
-              aria-label={t("orgSettings.nameLabel")}
+              aria-label={t("spaces.nameLabel")}
               onCommit={(name) => {
                 if (!orgId) return;
                 updateNameMutation.mutate({ params: { path: { orgId } }, body: { name } });
@@ -337,7 +337,7 @@ export function OrgSettingsGeneralPage() {
             />
           </SettingsGroup>
 
-          <SettingsGroup title={t("models.tabTitle")}>
+          <SettingsGroup title={t("providers.col.models")}>
             <PersonalCredentialsSetting />
           </SettingsGroup>
         </>
@@ -347,7 +347,7 @@ export function OrgSettingsGeneralPage() {
           a button that opens a confirm. Leaving is offered to every member —
           disabled, with the reason as its description, when the server would
           refuse it (the last owner) or when the role on screen is a preview. */}
-      <SettingsGroup title={t("orgSettings.dangerZone")}>
+      <SettingsGroup title={t("spaces.dangerZone")}>
         <SettingRow
           variant="action"
           label={t("orgSettings.leaveOrg")}
@@ -381,7 +381,7 @@ export function OrgSettingsGeneralPage() {
               disabled={deleteOrgMutation.isPending}
               onClick={() => setConfirmDelete(true)}
             >
-              {deleteOrgMutation.isPending ? t("orgSettings.deleting") : t("btn.delete")}
+              {deleteOrgMutation.isPending ? t("spaces.deleting") : t("btn.delete")}
             </Button>
           </SettingRow>
         )}

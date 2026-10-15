@@ -120,13 +120,13 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
         id="webhook-active"
         checked={active}
         onCheckedChange={(checked) => setActive(checked === true)}
-        label={t("settings:webhooks.active")}
+        label={t("settings:catalogue.filter.active")}
       />
 
       {/* Save */}
       {canWrite && (
         <PendingButton onClick={handleSave} pending={updateMutation.isPending}>
-          {t("settings:webhooks.saveSettings")}
+          {t("common:btn.save")}
         </PendingButton>
       )}
 
@@ -150,7 +150,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       <ConfirmModal
         open={rotateOpen}
         onClose={() => setRotateOpen(false)}
-        title={t("settings:webhooks.rotateConfirmTitle")}
+        title={t("settings:webhooks.rotateSecret")}
         description={t("settings:webhooks.rotateConfirm")}
         confirmLabel={t("settings:webhooks.rotateSecret")}
         variant="default"
@@ -186,7 +186,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       {canDelete && (
         <div className="border-border space-y-3 border-t pt-4">
           <h3 className="text-destructive text-sm font-semibold">
-            {t("settings:webhooks.dangerZone")}
+            {t("settings:spaces.dangerZone")}
           </h3>
           <PendingButton
             variant="destructive"

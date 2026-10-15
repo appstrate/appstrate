@@ -71,7 +71,7 @@ export function ForkPackageModal({ onClose, onLeave, packageId, defaultName, typ
       title={t("fork.title")}
       onSubmit={onSubmit}
       isPending={forkMutation.isPending}
-      submitLabel={t("fork.submit")}
+      submitLabel={t("fork.button")}
       submitDisabled={!isValid}
       error={errors.root?.message}
     >

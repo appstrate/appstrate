@@ -56,7 +56,7 @@ export function useCatalogueSelectColumn({
       <Checkbox
         checked={allSelected}
         onCheckedChange={onToggleAll}
-        aria-label={t("catalogue.selectAll")}
+        aria-label={t("models.form.discoverSelectAll")}
       />
     ),
     width: "36px",
@@ -100,7 +100,7 @@ export function useCatalogueOriginColumn<
           {home && (
             <span
               className="text-muted-foreground/70 truncate text-[0.68rem]"
-              title={t("catalogue.homeSpaceHint", { space: home })}
+              title={t("packages.homeSpace", { space: home })}
             >
               {home}
             </span>

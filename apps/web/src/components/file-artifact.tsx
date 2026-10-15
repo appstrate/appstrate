@@ -110,7 +110,7 @@ export function FileArtifact({
           {canDownload && (
             <ArtifactAction
               icon={DownloadIcon}
-              label={t("row.download")}
+              label={t("common:btn.download")}
               onClick={() => void download(fileId, name)}
             />
           )}

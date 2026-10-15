@@ -401,7 +401,7 @@ describe("ModelFormBody — editing a subscription row the org left to each memb
 
   it("shows each member's own credential as the identifier", () => {
     expect(html).toContain(settingsFr["models.form.identityLabel"]);
-    expect(html).toContain(settingsFr["models.form.eachMember"]);
+    expect(html).toContain(settingsFr["providers.type.personalKey"]);
     expect(html).toContain(settingsFr["models.form.eachMemberHint"]);
   });
 
@@ -434,7 +434,7 @@ describe("ModelFormBody — editing a row bound to an organization subscription"
   it("shows the organization subscription as the bound identifier, not each member", () => {
     expect(html).toContain(settingsFr["models.form.identityLabel"]);
     expect(html).toContain(ORG_CONNECTION.label);
-    expect(html).not.toContain(settingsFr["models.form.eachMember"]);
+    expect(html).not.toContain(settingsFr["providers.type.personalKey"]);
     expect(html).not.toContain(settingsFr["models.form.eachMemberHint"]);
   });
 
@@ -455,7 +455,7 @@ describe("ModelFormBody — catalogued row left to each member", () => {
   const html = form(catalogued({ credentialId: null }), [ANTHROPIC_KEY]);
 
   it("shows the each-member choice as the identifier, and the model as an editable id", () => {
-    expect(html).toContain(settingsFr["models.form.eachMember"]);
+    expect(html).toContain(settingsFr["providers.type.personalKey"]);
     expect(html).toContain('id="mdl-modelId"');
     expect(html).not.toContain('placeholder="sk-..."');
   });
@@ -467,7 +467,7 @@ describe("ModelFormBody — custom endpoint is never left to each member", () =>
 
   it("asks for the endpoint's key, and offers no each-member choice", () => {
     expect(html).toContain('placeholder="sk-..."');
-    expect(html).not.toContain(settingsFr["models.form.eachMember"]);
+    expect(html).not.toContain(settingsFr["providers.type.personalKey"]);
   });
 });
 

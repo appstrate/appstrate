@@ -38,7 +38,7 @@ const createPages: Record<
   CreatablePackageType,
   { title: string; list: { key: string; ns?: string } }
 > = {
-  agent: { title: "editor.breadcrumbNew", list: { key: "detail.breadcrumb" } },
+  agent: { title: "list.create", list: { key: "detail.breadcrumb" } },
   skill: {
     title: "editor.breadcrumbNewSkill",
     list: { key: "packages.type.skills", ns: "settings" },

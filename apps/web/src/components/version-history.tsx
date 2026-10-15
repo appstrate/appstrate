@@ -104,7 +104,7 @@ export function VersionHistory({
         columns={[
           {
             id: "version",
-            header: t("version.version"),
+            header: t("run.infoVersion"),
             width: "minmax(80px,1fr)",
             cell: (version) =>
               type === "integration" ? (

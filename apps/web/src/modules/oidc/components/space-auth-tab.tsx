@@ -153,7 +153,7 @@ function SmtpSection({ personal }: { personal: boolean }) {
               </FormItem>
               <FormItem
                 id="smtp-pass"
-                label={requiredLabel(t("settings:spaceAuth.smtpPass"))}
+                label={requiredLabel(t("common:claim.passwordLabel"))}
                 hint={initial ? t("settings:spaceAuth.smtpPassReuploadHint") : undefined}
               >
                 <Input

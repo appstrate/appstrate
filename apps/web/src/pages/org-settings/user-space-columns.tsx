@@ -53,7 +53,7 @@ export function useUserSpaceColumns({
   return [
     {
       id: "space",
-      header: t("userDetail.colSpace"),
+      header: t("source.space"),
       width: "minmax(120px,1.4fr)",
       cell: (space) => (
         <CellText strong title={space.name}>

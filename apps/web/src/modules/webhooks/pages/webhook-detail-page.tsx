@@ -29,11 +29,11 @@ export function WebhookDetailPage() {
     <div>
       {webhook && (
         <SettingsPageActions>
-          {webhook.level === "org" && (
-            <Badge variant="outline">{t("settings:webhooks.levelBadge.org")}</Badge>
-          )}
+          {webhook.level === "org" && <Badge variant="outline">{t("settings:source.org")}</Badge>}
           <Badge variant={webhook.enabled ? "success" : "secondary"}>
-            {webhook.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
+            {webhook.enabled
+              ? t("settings:catalogue.filter.active")
+              : t("settings:webhooks.inactive")}
           </Badge>
         </SettingsPageActions>
       )}

@@ -13,10 +13,7 @@ export function ConnectionScopeBadge({
   testId?: string;
 }) {
   const { t } = useTranslation("settings");
-  const label =
-    scope === "org"
-      ? t("integration.connection.scope.org")
-      : t("integration.connection.scope.space");
+  const label = scope === "org" ? t("integration.connection.scope.org") : t("webhooks.level.space");
   const help =
     scope === "org"
       ? t("integration.connection.scope.orgHelp")

@@ -55,7 +55,7 @@ export function useMemberColumns({
   return [
     {
       id: "member",
-      header: t("orgSettings.memberColumn"),
+      header: t("spaceMembers.colMember"),
       width: "minmax(130px,1.4fr)",
       cell: (member) => {
         const name = memberLabel(member);
@@ -105,7 +105,7 @@ export function useMemberColumns({
       ? [
           {
             id: "spaces",
-            header: t("orgSettings.spacesColumn"),
+            header: t("orgSettings.inviteSpacesLabel"),
             width: "minmax(100px,1.2fr)" as const,
             tier: 3 as const,
             cell: (member: OrgMember) => <CellList items={spaces(member)} />,
@@ -123,7 +123,7 @@ export function useMemberColumns({
     rowActionsColumn((member: OrgMember) =>
       canRemove(member) ? (
         <TableRowActions
-          menuLabel={t("orgSettings.moreMemberActions", {
+          menuLabel={t("providers.moreActions", {
             name: memberLabel(member),
           })}
           isPending={isRemoving}

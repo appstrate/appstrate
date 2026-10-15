@@ -213,7 +213,7 @@ export function SharePackageDialog({
                 )}
                 {destinations.length > 0 && (
                   <SelectGroup>
-                    <SelectLabel>{t("packages.shareGroupSpaces")}</SelectLabel>
+                    <SelectLabel>{t("orgSettings.inviteSpacesLabel")}</SelectLabel>
                     {destinations.map((candidate) => (
                       <SelectItem
                         key={candidate.id}

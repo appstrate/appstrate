@@ -203,7 +203,7 @@ export function DocumentListPanel({
         onConfirm={confirmDelete}
         title={t("delete.title")}
         description={t("delete.description", { name: pendingDelete?.name ?? "" })}
-        confirmLabel={t("row.delete")}
+        confirmLabel={t("common:btn.delete")}
         isPending={deleteDoc.isPending}
       />
 

@@ -215,9 +215,7 @@ export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
 export function ScheduleDetailSkeleton() {
   const { t } = useTranslation("agents");
   return (
-    <DetailPageSkeleton
-      breadcrumbs={[{ label: t("schedule.breadcrumbList"), href: "/schedules" }]}
-    />
+    <DetailPageSkeleton breadcrumbs={[{ label: t("common:nav.schedules"), href: "/schedules" }]} />
   );
 }
 
@@ -315,7 +313,7 @@ export function DashboardBodySkeleton() {
 /** The whole dashboard, greeting included: the route's fallback. */
 export function DashboardSkeleton() {
   const { t } = useTranslation("agents");
-  usePageBreadcrumb([{ label: t("dashboard.breadcrumb") }]);
+  usePageBreadcrumb([{ label: t("common:nav.dashboard") }]);
   return (
     <div className="mx-auto w-full max-w-[1300px] space-y-8">
       <div className="mb-4 flex min-h-9 items-start justify-between gap-4">

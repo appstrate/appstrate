@@ -117,7 +117,7 @@ export function RegisterForm({
         <div className="flex flex-col gap-4">
           <FormItem
             id="displayName"
-            label={t("login.name")}
+            label={t("spaces.nameLabel")}
             error={showError("displayName") ? errors.displayName?.message : undefined}
           >
             <Input
@@ -140,7 +140,7 @@ export function RegisterForm({
           <PasswordField
             register={register}
             name="password"
-            label={t("login.password")}
+            label={t("common:claim.passwordLabel")}
             invalid={showError("password")}
             error={errors.password?.message}
             autoComplete="new-password"

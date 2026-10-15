@@ -140,11 +140,11 @@ describe("document row capabilities", () => {
 
     expect(html).toContain(`aria-label="Plus d'actions pour ${editable.name}"`);
     expect(menuEntries(columns, editable)).toEqual([
-      t("row.download"),
+      t("common:btn.download"),
       t("row.openRun"),
       t("row.keep"),
       "—",
-      t("row.delete"),
+      t("common:btn.delete"),
     ]);
   });
 

@@ -545,7 +545,7 @@ function SelectedResources({
           actions={[
             {
               id: "add",
-              label: t("editor.resourceAdd"),
+              label: t("common:btn.add"),
               icon: Plus,
               onSelect: () => picker.open(),
               disabled: !canReadCatalog,
@@ -573,7 +573,7 @@ function SelectedResources({
         >
           {canReadCatalog && (
             <EmptyStateAction
-              action={{ label: t("editor.resourceAdd"), onSelect: () => picker.open() }}
+              action={{ label: t("common:btn.add"), onSelect: () => picker.open() }}
             />
           )}
         </EmptyState>
@@ -587,8 +587,8 @@ function SelectedResources({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t("editor.resourceName")}</TableHead>
-                <TableHead className="w-32">{t("editor.resourceVersionHead")}</TableHead>
+                <TableHead>{t("list.column.name")}</TableHead>
+                <TableHead className="w-32">{t("run.infoVersion")}</TableHead>
                 {isIntegration && <TableHead>{t("editor.resourceTools")}</TableHead>}
                 <TableHead className="w-12" />
               </TableRow>
@@ -651,7 +651,7 @@ function SelectedResources({
                     )}
                     <TableCell className="text-right">
                       <TableRowActions
-                        menuLabel={t("editor.resourceActions", { name })}
+                        menuLabel={t("editor.rowActions", { name })}
                         actions={[
                           {
                             id: "tools",
@@ -662,7 +662,7 @@ function SelectedResources({
                           },
                           {
                             id: "remove",
-                            label: t("editor.resourceRemove"),
+                            label: t("common:btn.remove"),
                             icon: Trash2,
                             onSelect: () => onToggle(entry.id),
                             destructive: true,

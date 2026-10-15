@@ -12,7 +12,7 @@ export function buildModelPickerLabels(
   t: (key: string, options?: Record<string, string>) => string,
 ): ModelPickerLabels {
   const reasons: Record<PickerReasonKind, string> = {
-    disabled: t("modelPicker.reason.disabled"),
+    disabled: t("providers.state.disabled"),
     orgUnavailable: t("modelPicker.reason.orgUnavailable"),
     personalRequired: t("modelPicker.reason.personalRequired"),
     personalReconnect: t("modelPicker.reason.personalReconnect"),
@@ -22,12 +22,12 @@ export function buildModelPickerLabels(
   return {
     kinds: {
       org: t("modelPicker.kind.org"),
-      personalKey: t("modelPicker.kind.personalKey"),
-      personalSubscription: t("modelPicker.kind.personalSubscription"),
-      system: t("modelPicker.kind.system"),
+      personalKey: t("providers.type.personalKey"),
+      personalSubscription: t("providers.type.subscription"),
+      system: t("providers.type.system"),
     },
     reasons,
-    isDefault: t("modelPicker.default"),
+    isDefault: t("models.default"),
     search: t("modelPicker.search"),
     empty: t("modelPicker.empty"),
     placeholder: t("modelPicker.placeholder"),

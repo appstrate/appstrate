@@ -46,20 +46,20 @@ export function useApiKeyColumns({
   return [
     {
       id: "name",
-      header: t("apiKeys.nameLabel"),
+      header: t("spaces.nameLabel"),
       width: "minmax(104px,1.3fr)",
       cell: (key) => <CellText strong>{key.name}</CellText>,
     },
     {
       id: "prefix",
-      header: t("apiKeys.keyColumn"),
+      header: t("spaces.metadataKey"),
       width: "88px",
       tier: 2,
       cell: (key) => <CellText mono>{key.keyPrefix}…</CellText>,
     },
     {
       id: "status",
-      header: t("apiKeys.statusColumn"),
+      header: t("proxies.col.status"),
       width: "80px",
       tier: 2,
       cell: (key) =>
@@ -82,7 +82,7 @@ export function useApiKeyColumns({
     },
     {
       id: "scopes",
-      header: t("apiKeys.permissionSummary"),
+      header: t("roles.permissionsLabel"),
       width: "minmax(112px,1.1fr)",
       tier: 3,
       cell: (key) => {
@@ -113,12 +113,12 @@ export function useApiKeyColumns({
     },
     rowActionsColumn((key) => (
       <TableRowActions
-        menuLabel={t("apiKeys.moreActions", { name: key.name })}
+        menuLabel={t("providers.moreActions", { name: key.name })}
         isPending={revokingKeyId === key.id}
         actions={[
           {
             id: "revoke",
-            label: t("apiKeys.revoke"),
+            label: t("devices.revoke"),
             icon: Trash2,
             onSelect: () => onRevoke?.(key),
             destructive: true,

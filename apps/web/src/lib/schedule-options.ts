@@ -42,7 +42,7 @@ export const SCHEDULE_SETTINGS_SECTIONS = [
   {
     id: "general",
     icon: IdCard,
-    labelKey: "schedule.settings.general",
+    labelKey: "editor.tabGeneral",
     descriptionKey: "schedule.settings.generalDescription",
   },
   {
@@ -54,25 +54,25 @@ export const SCHEDULE_SETTINGS_SECTIONS = [
   {
     id: "identity",
     icon: UserRound,
-    labelKey: "schedule.settings.identity",
+    labelKey: "editor.identity",
     descriptionKey: "schedule.settings.identityDescription",
   },
   {
     id: "inputs",
     icon: SlidersHorizontal,
-    labelKey: "schedule.settings.inputs",
+    labelKey: "detail.configuration.inputsShort",
     descriptionKey: "schedule.settings.inputsDescription",
   },
   {
     id: "execution",
     icon: BrainCircuit,
-    labelKey: "schedule.settings.execution",
+    labelKey: "run.infoExecution",
     descriptionKey: "schedule.settings.executionDescription",
   },
   {
     id: "connections",
     icon: Plug,
-    labelKey: "schedule.settings.connections",
+    labelKey: "detail.configuration.connections",
     descriptionKey: "schedule.settings.connectionsDescription",
   },
 ] as const;

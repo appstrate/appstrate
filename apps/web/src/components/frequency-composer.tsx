@@ -36,7 +36,7 @@ const KIND_LABELS: Record<FrequencyKind, string> = {
   daily: "schedule.frequency.kind.daily",
   weekly: "schedule.frequency.kind.weekly",
   monthly: "schedule.frequency.kind.monthly",
-  custom: "schedule.frequency.kind.custom",
+  custom: "schedule.cronLabel",
 };
 const UNIT_LABELS = {
   minutes: "schedule.frequency.unit.minutes",

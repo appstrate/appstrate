@@ -29,9 +29,9 @@ export function isCatalogueKind(value: string): value is PackageType {
 
 /** Spelled out so the locale test sees every key. */
 export const CATALOGUE_TYPE_LABEL_KEY: Record<PackageType, string> = {
-  agent: "catalogue.sheet.type.agent",
+  agent: "integration.admin.pinManagement.colAgent",
   skill: "catalogue.sheet.type.skill",
-  integration: "catalogue.sheet.type.integration",
+  integration: "connections.kindIntegration",
   "mcp-server": "catalogue.sheet.type.mcp-server",
 };
 

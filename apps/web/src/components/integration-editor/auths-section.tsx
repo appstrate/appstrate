@@ -70,7 +70,7 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
       headerRight={
         <Button type="button" size="sm" variant="outline" onClick={addAuth}>
           <Plus />
-          {t("integrationEditor.auths.add")}
+          {t("common:btn.add")}
         </Button>
       }
     >
@@ -81,11 +81,7 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
       {rows.map((auth, idx) => (
         <div key={idx} className="border-border flex flex-col gap-3 rounded-md border p-3">
           <div className="flex items-center gap-2">
-            <FormItem
-              id={`auth-key-${idx}`}
-              label={t("integrationEditor.auths.key")}
-              className="flex-1"
-            >
+            <FormItem id={`auth-key-${idx}`} label={t("editor.fieldKeyLabel")} className="flex-1">
               <Input
                 value={auth.key}
                 onChange={(e) => updateAuth(idx, { key: e.target.value })}
@@ -107,7 +103,7 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
 
           <FormField
             id={`auth-type-${idx}`}
-            label={t("integrationEditor.auths.type")}
+            label={t("log.filterType")}
             value={auth.type}
             onChange={(v) =>
               updateAuth(idx, {

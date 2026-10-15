@@ -246,7 +246,7 @@ export function ConnectionActionsCell({
   return (
     <>
       <TableRowActions
-        menuLabel={t("integration.connection.moreActions", { name: connection.label })}
+        menuLabel={t("providers.moreActions", { name: connection.label })}
         isPending={reconnecting}
         renaming={renaming}
         actions={[

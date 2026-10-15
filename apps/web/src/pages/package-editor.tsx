@@ -149,17 +149,17 @@ function AgentEditorInner({
     ? [
         { id: "general", label: t("editor.tabGeneral") },
         { id: "schema", label: t("editor.tabSchema") },
-        { id: "skills", label: t("editor.tabSkills") },
-        { id: "integrations", label: t("editor.tabIntegrations") },
+        { id: "skills", label: t("common:nav.skills") },
+        { id: "integrations", label: t("common:nav.integrations") },
         // The manifest's `runtime_tools`, not integration packages.
-        { id: "tools", label: t("editor.tabTools") },
+        { id: "tools", label: t("integrationEditor.tabTools") },
       ]
     : [
         { id: "general", label: t("editor.tabGeneral") },
         { id: "files", label: t("files.tabLabel") },
         { id: "schema", label: t("editor.tabSchema") },
-        { id: "skills", label: t("editor.tabSkills") },
-        { id: "integrations", label: t("editor.tabIntegrations") },
+        { id: "skills", label: t("common:nav.skills") },
+        { id: "integrations", label: t("common:nav.integrations") },
         { id: "json", label: t("editor.tabJson") },
       ];
 
@@ -241,7 +241,7 @@ function AgentEditorInner({
       {activeTab === "skills" && (
         <ResourceSection
           type="skill"
-          title={t("editor.tabSkills")}
+          title={t("common:nav.skills")}
           emptyLabel={t("editor.skillsEmpty")}
           selectedEntries={getResourceEntries(state.manifest, "skills")}
           onChange={(updater) => {
@@ -259,7 +259,7 @@ function AgentEditorInner({
       {activeTab === "integrations" && (
         <ResourceSection
           type="integration"
-          title={t("editor.tabIntegrations")}
+          title={t("common:nav.integrations")}
           emptyLabel={t("editor.integrationsEmpty")}
           selectedEntries={getResourceEntries(state.manifest, "integrations")}
           onChange={(updater) => {

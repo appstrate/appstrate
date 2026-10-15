@@ -70,14 +70,14 @@ export function OrgSettingsCliSessionsPage() {
         empty={
           <EmptyState
             icon={Laptop}
-            message={t("orgCliSessions.emptyTitle")}
+            message={t("devices.emptyTitle")}
             hint={t("orgCliSessions.emptyDescription")}
           />
         }
       />
       <ConfirmModal
         open={pendingRevoke !== null}
-        title={t("orgCliSessions.confirmRevokeTitle")}
+        title={t("devices.confirmRevokeTitle")}
         description={
           pendingRevoke
             ? t("orgCliSessions.confirmRevokeDescription", {
