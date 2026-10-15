@@ -161,8 +161,8 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
       }}
       title={t("viewAs.title")}
       submitLabel={t("viewAs.submit")}
-      isPending={entering}
-      submitDisabled={!ready}
+      // Not `isPending`: Cancel must stay live while the preview loads, to abandon it.
+      submitDisabled={!ready || entering}
       submitTestId="view-as-submit"
     >
       <div className="flex flex-col gap-4">
