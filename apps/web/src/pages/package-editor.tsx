@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect } from "react";
+import { Fragment, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Versioned } from "../hooks/use-packages";
 import type {
@@ -14,7 +14,7 @@ import type { AgentDefinitionSection } from "../lib/settings-section-href";
 import { primaryDisplayFile } from "../lib/package-files";
 import { newPackageContent } from "../lib/package-file-drafts";
 import { skillFrontmatterError } from "../lib/skill-frontmatter";
-import type { EditorState } from "../hooks/use-editor-state";
+import { EditorDirtyReportContext, type EditorState } from "../hooks/use-editor-state";
 import { FormField } from "../components/form-field";
 import {
   usePackageEditor,
@@ -311,9 +311,42 @@ function AgentEditorInner({
 }
 
 /**
+ * Mounts a definition editor on one draft version and remounts it clean when
+ * the draft's ETag moves (its own save, a file saved in Explorer, another tab)
+ * — but never over unsaved edits: those stay, and saving them meets the moved
+ * draft as a 412 instead of being dropped.
+ */
+function DraftEditorMount({
+  id,
+  etag,
+  children,
+}: {
+  id: string;
+  etag: string | null | undefined;
+  children: ReactNode;
+}) {
+  const report = useContext(EditorDirtyReportContext);
+  const [dirty, setDirty] = useState(false);
+  const [mountedEtag, setMountedEtag] = useState(etag);
+  if (mountedEtag !== etag && !dirty) setMountedEtag(etag);
+  const forward = useCallback(
+    (next: boolean) => {
+      setDirty(next);
+      report(next);
+    },
+    [report],
+  );
+  return (
+    <EditorDirtyReportContext.Provider value={forward}>
+      <Fragment key={`${id}:${mountedEtag}`}>{children}</Fragment>
+    </EditorDirtyReportContext.Provider>
+  );
+}
+
+/**
  * An agent's definition, edited where it is read: inside its settings, one
  * rail section at a time, over ONE draft — moving from Schémas to Skills keeps
- * what was typed. Keyed on the draft's ETag, so a save remounts it clean.
+ * what was typed. Remounted clean on a new draft ETag (`DraftEditorMount`).
  */
 export function AgentDefinitionEditor({
   detail,
@@ -325,19 +358,20 @@ export function AgentDefinitionEditor({
   onSection: (section: AgentDefinitionSection) => void;
 }) {
   return (
-    <AgentEditorInner
-      key={`${detail.id}:${detail.etag}`}
-      initialState={{
-        manifest: withNormalizedManifest(detail.manifest ?? {}),
-        etag: detail.etag,
-      }}
-      resolvedDeps={detail.dependencies ?? null}
-      packageId={detail.id}
-      effectiveTimeoutSeconds={detail.effective_timeout_seconds}
-      presentation="embedded"
-      tab={section}
-      onTabRequest={(next) => onSection(next as AgentDefinitionSection)}
-    />
+    <DraftEditorMount id={detail.id} etag={detail.etag}>
+      <AgentEditorInner
+        initialState={{
+          manifest: withNormalizedManifest(detail.manifest ?? {}),
+          etag: detail.etag,
+        }}
+        resolvedDeps={detail.dependencies ?? null}
+        packageId={detail.id}
+        effectiveTimeoutSeconds={detail.effective_timeout_seconds}
+        presentation="embedded"
+        tab={section}
+        onTabRequest={(next) => onSection(next as AgentDefinitionSection)}
+      />
+    </DraftEditorMount>
   );
 }
 
@@ -529,15 +563,16 @@ export function IntegrationDefinitionEditor({
   toolCatalog: IntegrationToolCatalogEntry[];
 }) {
   return (
-    <IntegrationEditorInner
-      key={`${detail.id}:${detail.etag}`}
-      initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
-      packageId={detail.id}
-      presentation="embedded"
-      tab={section}
-      onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
-      toolCatalog={toolCatalog}
-    />
+    <DraftEditorMount id={detail.id} etag={detail.etag}>
+      <IntegrationEditorInner
+        initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
+        packageId={detail.id}
+        presentation="embedded"
+        tab={section}
+        onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
+        toolCatalog={toolCatalog}
+      />
+    </DraftEditorMount>
   );
 }
 
@@ -556,13 +591,14 @@ export function PackageDefinitionEditor({
   detail: Versioned<OrgPackageItemDetail>;
 }) {
   return (
-    <PackageEditorInner
-      key={`${detail.id}:${detail.etag}`}
-      type={type}
-      initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
-      packageId={detail.id}
-      presentation="embedded"
-    />
+    <DraftEditorMount id={detail.id} etag={detail.etag}>
+      <PackageEditorInner
+        type={type}
+        initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
+        packageId={detail.id}
+        presentation="embedded"
+      />
+    </DraftEditorMount>
   );
 }
 
