@@ -332,7 +332,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   a name has a floor that fits a usual one. Every column is drawn and the table
   scrolls sideways, unless the table is `tiered` (a narrow panel, a modal, a detail
   tab): then a READ column waits for room by its `tier`.
-- **Two rules for every table** (both live in `DataTable`, no caller opts in):
+- **Three rules for every table** (both live in `DataTable`, no caller opts in):
   1. **A column that can be acted on never disappears.** A column declares what it
      is in its definition: a READ column (text, badge, date) may carry a `tier`
      and wait for room in a `tiered` table (tier `2` for a 36rem table, `3` for a
@@ -348,6 +348,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
      that is the setting (role, share, default) stays in its own column.
   2. **A row is a link.** The cover link stretches over the row; the named link
      lives in the first read cell.
+  3. **Columns resize.** Drag the right edge of a head; a double-click gives the
+     column back its declared width. The width is kept per table (its `label`) in
+     `localStorage`, never goes under the declared one, and the table works without
+     it (`stores/column-widths-store.ts`). Fixed-size ticks and the row's end have
+     no handle.
 - **List state lives in the URL** (`lib/list-params.ts`: `useListParams` on a
   page, `useLocalListParams` in a panel that floats over a page): filters are
   pushed, the search is replaced, a reset is one update. Runs, schedules, files

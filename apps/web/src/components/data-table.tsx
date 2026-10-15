@@ -18,11 +18,15 @@
  *   a button, an action link) has no tier and is never dropped: a person who
  *   cannot see the control cannot act. Without `tiered` every column is drawn and
  *   the table scrolls sideways.
+ * - **Columns resize.** Drag the edge of a head, double-click to give the column back its
+ *   declared width. The width is the reader's, kept per table (its `label`) and never goes
+ *   below the column's declared width. Fixed-size controls and the row's end have no handle.
  * - **The row's name and its « … » stay in place when the table scrolls**
  *   (`sticky`), so a row is always named and its actions in reach.
  */
 
-import { type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -37,6 +41,7 @@ import {
 import { collectionVerdict, type CollectionState } from "./collection";
 import { ErrorState } from "./page-states";
 import { isIdentityColumn } from "../lib/column-visibility";
+import { useColumnWidths } from "../stores/column-widths-store";
 
 interface DataColumnBase<T> {
   /** Stable handle, independent of the label — a column set is a list of these. */
@@ -162,8 +167,65 @@ function handOver(e: MouseEvent<HTMLElement>, open: () => void) {
   open();
 }
 
+const MAX_COLUMN_WIDTH = 720;
+
+/** What a reader can drag: a column with a head, bar the fixed-size ticks and buttons. */
+function isResizable<T>(column: DataColumn<T>): boolean {
+  return Boolean(column.header || column.headerNode) && !(column.control && !column.elastic);
+}
+
+/** The drag handle on a head's right edge; its parent is the head, whose width is the column's. */
+function ResizeHandle({
+  name,
+  floor,
+  onResize,
+  onCommit,
+  onReset,
+}: {
+  name: string;
+  floor: number;
+  /** While the pointer is down. */
+  onResize: (width: number) => void;
+  onCommit: (width: number) => void;
+  onReset: () => void;
+}) {
+  const { t } = useTranslation("common");
+  const drag = useRef<{ x: number; width: number; last: number } | null>(null);
+  const end = () => {
+    const start = drag.current;
+    drag.current = null;
+    if (start && start.last !== start.width) onCommit(start.last);
+  };
+  return (
+    <span
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t("table.resizeColumn", { column: name })}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const width = e.currentTarget.parentElement!.getBoundingClientRect().width;
+        drag.current = { x: e.clientX, width, last: width };
+      }}
+      onPointerMove={(e) => {
+        const start = drag.current;
+        if (!start) return;
+        start.last = Math.min(
+          MAX_COLUMN_WIDTH,
+          Math.max(floor, Math.round(start.width + e.clientX - start.x)),
+        );
+        onResize(start.last);
+      }}
+      onPointerUp={end}
+      onPointerCancel={end}
+      onDoubleClick={onReset}
+      className="after:bg-border hover:after:bg-primary absolute inset-y-0 right-0 z-30 w-2 cursor-col-resize touch-none select-none after:absolute after:inset-y-2 after:right-0 after:w-px"
+    />
+  );
+}
+
 export function DataTable<T>({
-  columns,
+  columns: declared,
   rows,
   rowKey,
   rowHref,
@@ -179,6 +241,14 @@ export function DataTable<T>({
 }: DataTableProps<T>) {
   const verdict = collectionVerdict(state, rows.length);
   const navigate = useNavigate();
+  // The width the reader chose, and the one being dragged until it is let go. A column given a
+  // width stops sharing the room: it is exactly that wide.
+  const stored = useColumnWidths(label);
+  const [dragged, setDragged] = useState<{ id: string; width: number } | null>(null);
+  const columns = declared.map((column) => {
+    const width = dragged?.id === column.id ? dragged.width : stored.widths[column.id];
+    return width ? { ...column, width: Math.max(width, column.width), elastic: false } : column;
+  });
   const open = (row: T, href: string | undefined) => {
     if (href) navigate(href, { state: rowState?.(row) });
     else if (rowAction && (rowActionable?.(row) ?? true)) rowAction(row);
@@ -252,12 +322,25 @@ export function DataTable<T>({
                   }}
                   className={cn(
                     cellClass(column),
+                    !hold && "relative",
                     "text-muted-foreground h-10 truncate text-[0.68rem] font-semibold tracking-[0.05em] uppercase",
                     column.align === "end" ? "text-right" : "text-left",
                     heldClass(hold, false),
                   )}
                 >
                   {column.headerNode ?? column.header}
+                  {isResizable(column) && (
+                    <ResizeHandle
+                      name={column.header}
+                      floor={declared.find((c) => c.id === column.id)!.width}
+                      onResize={(width) => setDragged({ id: column.id, width })}
+                      onCommit={(width) => {
+                        stored.set(column.id, width);
+                        setDragged(null);
+                      }}
+                      onReset={() => stored.set(column.id, null)}
+                    />
+                  )}
                 </TableHead>
               );
             })}

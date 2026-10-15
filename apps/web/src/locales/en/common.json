@@ -321,6 +321,7 @@
   "status.pending": "pending",
   "status.timeout": "timeout",
   "status.cancelled": "cancelled",
+  "table.resizeColumn": "Resize column {{column}}",
   "toolbar.clearAll": "Clear all",
   "toolbar.filters": "Filters",
   "toolbar.viewCards": "Card view",
