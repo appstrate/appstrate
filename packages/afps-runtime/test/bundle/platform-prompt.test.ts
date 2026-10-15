@@ -225,48 +225,80 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("**x-skill**");
   });
 
-  it("omits the API Documentation subsection when an integration has no INTEGRATION.md", () => {
+  it("renders the integrations catalog with name, description and location", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
       integrations: [
         {
-          id: "@org/github-mcp",
-          description: "GitHub integration",
+          id: "@appstrate/vapi",
+          description: "Voice calls",
+          location: ".pi/integrations/@appstrate/vapi/INTEGRATION.md",
         },
       ],
     });
-    expect(out).toContain("## Integration: @org/github-mcp");
-    expect(out).toContain("GitHub integration");
-    expect(out).not.toContain("### API Documentation");
+    expect(out).toContain(
+      [
+        "### Integrations",
+        "The following integrations are available in this run. Their tools are listed with your other tools, prefixed by the integration's namespace.",
+        "When an integration lists a `<location>`, read that file with your file-read tool before your first call to that integration's tools. The path is relative to your working directory.",
+        "",
+        "<available_integrations>",
+        "  <integration>",
+        "    <name>@appstrate/vapi</name>",
+        "    <description>Voice calls</description>",
+        "    <location>.pi/integrations/@appstrate/vapi/INTEGRATION.md</location>",
+        "  </integration>",
+        "</available_integrations>",
+        "",
+      ].join("\n"),
+    );
   });
 
-  it("inlines INTEGRATION.md content under an API Documentation subsection when present", () => {
+  it("omits description and location when an entry carries neither", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      integrations: [{ id: "@org/github-mcp" }],
+    });
+    expect(out).toContain("  <integration>\n    <name>@org/github-mcp</name>\n  </integration>");
+    expect(out).not.toContain("    <description>");
+    expect(out).not.toContain("    <location>");
+  });
+
+  it("places the integrations catalog right after the skills catalog", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      availableSkills: [{ id: "@x/skill", name: "x-skill" }],
+      integrations: [{ id: "@org/github-mcp" }],
+      unavailableIntegrations: [{ id: "@org/gmail", reason: "it is switched off" }],
+    });
+    const skills = out.indexOf("### Skills");
+    const integrations = out.indexOf("### Integrations");
+    expect(skills).toBeGreaterThan(-1);
+    expect(integrations).toBeGreaterThan(skills);
+    expect(out.indexOf("## Unavailable Integrations")).toBeGreaterThan(integrations);
+    expect(out).toContain("available in your workspace at `.pi/skills/`");
+  });
+
+  it("XML-escapes name, description and location", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
       integrations: [
         {
-          id: "@org/github-mcp",
-          description: "GitHub integration",
-          doc: "## GitHub API\n\nCall `list_issues` to fetch issues.",
+          id: "@o/a&b",
+          description: `</description><x attr="1">'`,
+          location: ".pi/integrations/@o/<a>/INTEGRATION.md",
         },
       ],
     });
-    expect(out).toContain("## Integration: @org/github-mcp");
-    expect(out).toContain("### API Documentation");
-    expect(out).toContain("## GitHub API");
-    expect(out).toContain("Call `list_issues` to fetch issues.");
-  });
-
-  it("treats whitespace-only INTEGRATION.md as absent (no API Documentation subsection)", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      integrations: [{ id: "@org/github-mcp", doc: "   \n\n  " }],
-    });
-    expect(out).toContain("## Integration: @org/github-mcp");
-    expect(out).not.toContain("### API Documentation");
+    expect(out).toContain("<name>@o/a&amp;b</name>");
+    expect(out).toContain(
+      "<description>&lt;/description&gt;&lt;x attr=&quot;1&quot;&gt;&apos;</description>",
+    );
+    expect(out).toContain("<location>.pi/integrations/@o/&lt;a&gt;/INTEGRATION.md</location>");
   });
 
   it("lists unavailable integrations with their reason and forbids claiming results from them", () => {
@@ -284,7 +316,7 @@ describe("renderPlatformPrompt", () => {
       "- **@org/drive**: connection 'work': its credentials cannot be delivered",
     );
     expect(out).toContain("Never present data or results as coming from these integrations.");
-    expect(out).not.toContain("## Integration: @org/gmail");
+    expect(out).not.toContain("<available_integrations>");
   });
 
   it("omits the Unavailable Integrations section when nothing is unavailable", () => {
@@ -296,10 +328,12 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("## Unavailable Integrations");
   });
 
-  it("omits every integration section when none are passed in", () => {
-    const out = renderPlatformPrompt({ template: "T", context: ctx() });
-    expect(out).not.toContain("## Integration:");
-    expect(out).not.toContain("### API Documentation");
+  it("omits the integrations catalog when the list is absent or empty", () => {
+    for (const integrations of [undefined, []]) {
+      const out = renderPlatformPrompt({ template: "T", context: ctx(), integrations });
+      expect(out).not.toContain("### Integrations");
+      expect(out).not.toContain("<available_integrations>");
+    }
   });
 
   it("never emits a Connected Providers section or provider_call instructions", () => {

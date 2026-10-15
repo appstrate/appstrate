@@ -3,7 +3,7 @@
 /**
  * Integration draft content holds either INTEGRATION.md or the manifest when
  * that optional file is absent. Manifest-shaped PUT.content values and restores
- * must preserve real documentation in both the file explorer and agent prompts.
+ * must preserve real documentation in both `draft_content` and the file explorer.
  */
 
 import { etagVersion, ifMatch } from "../../helpers/etag.ts";
@@ -26,7 +26,6 @@ import {
   downloadPackageFiles,
 } from "../../../src/services/package-items/storage.ts";
 import { uploadPackageZip } from "../../../src/services/package-storage.ts";
-import { fetchIntegrationPromptDocs } from "../../../src/services/integration-service.ts";
 
 const app = getTestApp();
 const encoder = new TextEncoder();
@@ -175,16 +174,6 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       expect(doc!.inline!.trimStart().startsWith("{")).toBe(false);
     });
 
-    it("keeps feeding the platform prompt its agent-facing docs after a save", async () => {
-      expect((await saveManifestContent(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(
-        200,
-      );
-
-      const [entry] = await fetchIntegrationPromptDocs([id]);
-      expect(entry).toBeDefined();
-      expect(entry!.doc).toBe(DOC);
-    });
-
     it("still writes the editor's manifest to the stored manifest.json", async () => {
       // The DB column is guarded; the storage sink is NOT. `manifest.json` is
       // where an integration editor's `content` legitimately belongs, and
@@ -282,16 +271,6 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
         version: "4.3.0",
       });
     });
-
-    it("reports no prompt doc — a manifest copy is not documentation", async () => {
-      expect((await saveManifestContent(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(
-        200,
-      );
-
-      const [entry] = await fetchIntegrationPromptDocs([id]);
-      expect(entry!.doc).toBeUndefined();
-      expect(entry!.description).toBe("A remote HTTP MCP integration");
-    });
   });
 
   // ─── The second door: version restore ─────────────────────────────────────
@@ -341,8 +320,6 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       expect(res.status).toBe(200);
 
       expect(await draftContentOf(id)).toBe(VERSIONED_DOC);
-      const [entry] = await fetchIntegrationPromptDocs([id]);
-      expect(entry!.doc).toBe(VERSIONED_DOC);
       expect((await listFiles(ctx, id)).find((e) => e.path === "INTEGRATION.md")!.inline).toBe(
         VERSIONED_DOC,
       );

@@ -2,7 +2,10 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import { buildPlatformPromptInputs } from "../../src/bundle/platform-prompt-inputs.ts";
+import {
+  buildPlatformPromptInputs,
+  integrationsFromBundle,
+} from "../../src/bundle/platform-prompt-inputs.ts";
 import { renderPlatformPrompt } from "../../src/bundle/platform-prompt.ts";
 import type { Bundle, BundlePackage, PackageIdentity } from "../../src/bundle/types.ts";
 import type { ExecutionContext } from "../../src/types/execution-context.ts";
@@ -148,6 +151,7 @@ describe("buildPlatformPromptInputs", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
     expect(inputs.availableSkills).toEqual([]);
+    expect(inputs.integrations).toEqual([]);
     expect(inputs.inputSchema).toBeUndefined();
     expect(inputs.outputSchema).toBeUndefined();
   });
@@ -157,5 +161,108 @@ describe("buildPlatformPromptInputs", () => {
     const myCtx = ctx({ checkpoint: { a: 1 } });
     const inputs = buildPlatformPromptInputs(bundleOf(root), myCtx);
     expect(inputs.context).toBe(myCtx);
+  });
+});
+
+function agentDeclaring(...ids: string[]): BundlePackage {
+  return pkg(
+    "@acme/agent@1.0.0",
+    {
+      type: "agent",
+      dependencies: { integrations: Object.fromEntries(ids.map((id) => [id, "^1.0.0"])) },
+    },
+    { "prompt.md": "T" },
+  );
+}
+
+describe("integrationsFromBundle", () => {
+  it("lists the root's declared integrations in declaration order, with description and location", () => {
+    const bundle = bundleOf(
+      agentDeclaring("@appstrate/vapi", "@appstrate/gmail"),
+      pkg("@appstrate/gmail@1.2.0", { type: "integration" }, { "INTEGRATION.md": "# Gmail" }),
+      pkg(
+        "@appstrate/vapi@1.0.0",
+        { type: "integration", description: "Voice calls" },
+        { "INTEGRATION.md": "# Vapi" },
+      ),
+    );
+    expect(integrationsFromBundle(bundle)).toEqual([
+      {
+        id: "@appstrate/vapi",
+        description: "Voice calls",
+        location: ".pi/integrations/@appstrate/vapi/INTEGRATION.md",
+      },
+      { id: "@appstrate/gmail", location: ".pi/integrations/@appstrate/gmail/INTEGRATION.md" },
+    ]);
+  });
+
+  it("sets location only when the member ships INTEGRATION.md", () => {
+    const bundle = bundleOf(
+      agentDeclaring("@appstrate/vapi"),
+      pkg("@appstrate/vapi@1.0.0", { type: "integration" }),
+    );
+    expect(integrationsFromBundle(bundle)).toEqual([{ id: "@appstrate/vapi" }]);
+  });
+
+  it("ignores integration members the root does not declare and members of other types", () => {
+    const bundle = bundleOf(
+      agentDeclaring("@appstrate/vapi", "@acme/helper"),
+      pkg("@appstrate/vapi@1.0.0", { type: "integration" }),
+      // Pulled in by a skill, not declared by the agent.
+      pkg("@appstrate/drive@1.0.0", { type: "integration" }, { "INTEGRATION.md": "# Drive" }),
+      // Declared id, but not an integration.
+      pkg("@acme/helper@1.0.0", { type: "skill" }, { "SKILL.md": "x" }),
+    );
+    expect(integrationsFromBundle(bundle)).toEqual([{ id: "@appstrate/vapi" }]);
+  });
+
+  it("returns nothing when the root declares no integrations", () => {
+    const bundle = bundleOf(
+      pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "T" }),
+      pkg("@appstrate/vapi@1.0.0", { type: "integration" }),
+    );
+    expect(integrationsFromBundle(bundle)).toEqual([]);
+  });
+});
+
+describe("buildPlatformPromptInputs integrations", () => {
+  const bundle = bundleOf(
+    agentDeclaring("@appstrate/vapi", "@appstrate/gmail"),
+    pkg("@appstrate/vapi@1.0.0", { type: "integration" }, { "INTEGRATION.md": "# Vapi" }),
+    pkg("@appstrate/gmail@1.0.0", { type: "integration" }),
+  );
+
+  it("defaults to the bundle's integrations minus the unavailable ones", () => {
+    const inputs = buildPlatformPromptInputs(bundle, ctx(), {
+      unavailableIntegrations: [{ id: "@appstrate/gmail", reason: "it is switched off" }],
+    });
+    expect(inputs.integrations).toEqual([
+      { id: "@appstrate/vapi", location: ".pi/integrations/@appstrate/vapi/INTEGRATION.md" },
+    ]);
+    const prompt = renderPlatformPrompt(inputs);
+    expect(prompt).toContain("<name>@appstrate/vapi</name>");
+    expect(prompt).not.toContain("<name>@appstrate/gmail</name>");
+    expect(prompt).toContain("- **@appstrate/gmail**: it is switched off");
+  });
+
+  it("lets an explicit integrations override win", () => {
+    const inputs = buildPlatformPromptInputs(bundle, ctx(), { integrations: [] });
+    expect(inputs.integrations).toEqual([]);
+    expect(renderPlatformPrompt(inputs)).not.toContain("### Integrations");
+  });
+
+  it("never inlines INTEGRATION.md, however large, only its location", () => {
+    const marker = "LARGE_DOC_MARKER";
+    const doc = `# Big\n${marker}\n${"x".repeat(60 * 1024)}`;
+    const big = bundleOf(
+      agentDeclaring("@appstrate/vapi"),
+      pkg("@appstrate/vapi@1.0.0", { type: "integration" }, { "INTEGRATION.md": doc }),
+    );
+    const prompt = renderPlatformPrompt(buildPlatformPromptInputs(big, ctx()));
+    expect(prompt).not.toContain(marker);
+    expect(prompt).toContain(
+      "<location>.pi/integrations/@appstrate/vapi/INTEGRATION.md</location>",
+    );
+    expect(prompt.length).toBeLessThan(20 * 1024);
   });
 });

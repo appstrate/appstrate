@@ -8,7 +8,7 @@
  * This is NOT an AFPS contract — callers choose whether to prepend it.
  * External runners happy with the raw template alone (`renderPrompt`)
  * can skip this helper. The sections it builds (System / Environment /
- * Tools / Skills / User Input / Files / Checkpoint / Memory /
+ * Tools / Skills / Integrations / User Input / Files / Checkpoint / Memory /
  * Run History) represent one reasonable convention for an
  * AFPS-style agent; platforms and CLIs may compose it as-is or override
  * specific option fields.
@@ -18,6 +18,7 @@ import type { ExecutionContext } from "../types/execution-context.ts";
 import { isFileField } from "@appstrate/afps-shared/file-field";
 import type { PromptViewUpload } from "./prompt-renderer.ts";
 import { jsonText } from "@appstrate/afps-shared/json-text";
+import { PI_SKILLS_DIR } from "./workspace-layout.ts";
 
 /**
  * CommonMark inline code span: the fence is one backtick longer than the
@@ -29,6 +30,18 @@ function inlineCode(text: string): string {
   const fence = "`".repeat(longestRun + 1);
   const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
   return `${fence}${pad}${text}${pad}${fence}`;
+}
+
+const XML_ENTITIES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&apos;",
+};
+
+function escapeXml(text: string): string {
+  return text.replace(/[&<>"']/g, (ch) => XML_ENTITIES[ch]!);
 }
 
 function formatFileSize(bytes: number): string {
@@ -44,22 +57,15 @@ export interface PlatformPromptTool {
 }
 
 /**
- * Per-integration prompt entry. The integration is identified by its
- * package id; the optional human-readable description comes from the
- * integration manifest, and `doc` carries the raw `INTEGRATION.md`
- * content (AFPS §3.5) — when present, the runtime SHOULD surface it
- * to the agent. We inline it directly into the platform prompt so the
- * LLM can read it without an extra workspace lookup.
+ * Per-integration catalog entry. The prompt discloses where the
+ * integration's `INTEGRATION.md` (AFPS §3.5) sits; the agent reads it on
+ * demand (progressive disclosure), so the doc never inflates the prompt.
  */
 export interface PlatformPromptIntegration {
   id: string;
   description?: string;
-  /**
-   * Raw `INTEGRATION.md` content (markdown). When non-empty, renders a
-   * `### API Documentation` subsection under the integration's section.
-   * Caller-side truncation is applied before passing this in.
-   */
-  doc?: string;
+  /** Workspace-relative path of the member's `INTEGRATION.md`, when it ships one. */
+  location?: string;
 }
 
 export interface PlatformPromptSchema {
@@ -127,12 +133,9 @@ export interface PlatformPromptOptions {
   availableSkills?: ReadonlyArray<PlatformPromptTool>;
 
   /**
-   * Integrations resolved for this run — one entry per declared,
-   * installed, and connected integration. Each entry surfaces the
-   * integration's description (from its manifest) and, when present,
-   * its `INTEGRATION.md` content inlined into the prompt so the agent
-   * can read the integration's API documentation alongside the
-   * `{ns}__*` tools advertised via MCP `tools/list`. AFPS §3.5.
+   * Integrations available in this run, rendered as a catalog next to the
+   * skills. Their tools come through MCP `tools/list`; each entry only
+   * points at its `INTEGRATION.md`, which the agent reads on demand.
    */
   integrations?: ReadonlyArray<PlatformPromptIntegration>;
 
@@ -322,7 +325,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   if (opts.availableSkills && opts.availableSkills.length > 0) {
     sections.push("### Skills");
     sections.push(
-      "The following skill references are available in your workspace at `.pi/skills/`:\n",
+      `The following skill references are available in your workspace at \`${PI_SKILLS_DIR}/\`:\n`,
     );
     for (const skill of opts.availableSkills) {
       const desc = skill.description ? `: ${skill.description}` : "";
@@ -332,24 +335,30 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   }
 
   // --- Integrations ---
-  // One section per integration resolved for this run. The integration's
-  // tools are advertised via MCP `tools/list` under the `{ns}__*` prefix —
-  // we deliberately do NOT list them here. The `### API Documentation`
-  // subsection surfaces the integration's `INTEGRATION.md` (AFPS §3.5)
-  // verbatim so the LLM can read its API contract without a workspace
-  // lookup. Subsection omitted when `doc` is absent / empty.
+  // Sibling catalog of the skills: tools are advertised via MCP
+  // `tools/list` under `{ns}__*`, and `<location>` discloses the
+  // integration's `INTEGRATION.md` for the agent to read on demand.
   if (opts.integrations && opts.integrations.length > 0) {
+    sections.push("### Integrations");
+    sections.push(
+      "The following integrations are available in this run. Their tools are listed with your other tools, prefixed by the integration's namespace.",
+    );
+    sections.push(
+      "When an integration lists a `<location>`, read that file with your file-read tool before your first call to that integration's tools. The path is relative to your working directory.\n",
+    );
+    sections.push("<available_integrations>");
     for (const integ of opts.integrations) {
-      sections.push(`## Integration: ${integ.id}\n`);
+      sections.push("  <integration>");
+      sections.push(`    <name>${escapeXml(integ.id)}</name>`);
       if (integ.description) {
-        sections.push(`${integ.description}\n`);
+        sections.push(`    <description>${escapeXml(integ.description)}</description>`);
       }
-      if (integ.doc && integ.doc.trim().length > 0) {
-        sections.push("### API Documentation\n");
-        sections.push(integ.doc);
-        sections.push("");
+      if (integ.location) {
+        sections.push(`    <location>${escapeXml(integ.location)}</location>`);
       }
+      sections.push("  </integration>");
     }
+    sections.push("</available_integrations>\n");
   }
   if (opts.unavailableIntegrations && opts.unavailableIntegrations.length > 0) {
     sections.push("## Unavailable Integrations\n");

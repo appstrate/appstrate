@@ -92,6 +92,7 @@ export {
 } from "./platform-prompt.ts";
 export {
   buildPlatformPromptInputs,
+  integrationsFromBundle,
   type BuildPlatformPromptInputsOverrides,
 } from "./platform-prompt-inputs.ts";
 

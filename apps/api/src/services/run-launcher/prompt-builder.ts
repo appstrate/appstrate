@@ -16,9 +16,13 @@
  *   - `agentResources`: the effective allocation and semantics already
  *     resolved onto the run plan
  *
+ *   - `integrations`: the bundle's integration catalog narrowed to the
+ *     integrations actually spawned for this run
+ *
  * Every other field flows straight from the bundle — the same code
  * path used by the `appstrate run` CLI. Outbound API access is surfaced
- * via integration MCP tools (`{ns}__api_call`), not the prompt.
+ * via integration MCP tools (`{ns}__api_call`); the prompt only lists
+ * each integration and where its INTEGRATION.md sits in the workspace.
  *
  * Run history is NOT rendered in the prompt: the runtime wires a
  * typed `run_history` tool (see runtime-pi/entrypoint.ts Phase D) whose
@@ -30,13 +34,12 @@ import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   buildPlatformPromptInputs,
+  integrationsFromBundle,
   renderPlatformPrompt,
   UNAVAILABLE_INTEGRATION_REASONS,
-  type PlatformPromptIntegration,
 } from "@appstrate/afps-runtime/bundle";
 import { getEnv } from "@appstrate/env";
 import { getExecutionMode, type ExecutionMode } from "../../infra/mode.ts";
-import { fetchIntegrationPromptDocs } from "../integration-service.ts";
 import type { DroppedIntegration } from "../integration-spawn-resolver.ts";
 import { orchestratorAppliesWorkspaceTmpfsCap } from "../orchestrator/index.ts";
 
@@ -57,10 +60,10 @@ function promptWorkspaceTmpfsSizeMb(executionMode: ExecutionMode): number {
   return orchestratorAppliesWorkspaceTmpfsCap(executionMode) ? getEnv().WORKSPACE_TMPFS_SIZE_MB : 0;
 }
 
-export async function buildPlatformSystemPrompt(
+export function buildPlatformSystemPrompt(
   context: ExecutionContext,
   plan: AppstrateRunPlan,
-): Promise<string> {
+): string {
   const executionMode = getExecutionMode();
   // `./files/` — the ONE directory `runtime-pi/provision.ts` streams the run's
   // input files into. This announcement and that layout must stay
@@ -77,26 +80,12 @@ export async function buildPlatformSystemPrompt(
     ...(f.type ? { type: f.type } : {}),
   }));
 
-  // Inline each resolved integration's manifest description +
-  // INTEGRATION.md (AFPS §3.5) so the LLM can read the integration's
-  // API contract alongside the `{ns}__*` tools advertised via MCP
-  // `tools/list`. Docs are pulled from `packages.draftContent` (captured
-  // at import time by `core/zip.ts`) — never re-fetched from storage.
-  // One section per integration: a multi-connection integration spawns one spec per connection.
-  let integrations: PlatformPromptIntegration[] | undefined;
-  const integrationIds = [...new Set(plan.integrations?.map((spec) => spec.integrationId))];
-  if (integrationIds.length > 0) {
-    const docs = await fetchIntegrationPromptDocs(integrationIds);
-    const docsById = new Map(docs.map((d) => [d.packageId, d]));
-    integrations = integrationIds.map((id) => {
-      const found = docsById.get(id);
-      return {
-        id,
-        ...(found?.description ? { description: found.description } : {}),
-        ...(found?.doc ? { doc: found.doc } : {}),
-      };
-    });
-  }
+  // Only the integrations spawned for this run: a declared one that is
+  // inactive or unbound is not spawned, and a dropped one is listed under
+  // `unavailableIntegrations` instead. The bundle yields one entry per id,
+  // however many connections it binds.
+  const spawnedIds = new Set(plan.integrations?.map((spec) => spec.integrationId));
+  const integrations = integrationsFromBundle(plan.bundle).filter((i) => spawnedIds.has(i.id));
   const unavailableIntegrations = unavailableIntegrationsOf(plan.droppedIntegrations ?? []);
 
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
@@ -120,7 +109,7 @@ export async function buildPlatformSystemPrompt(
     // (see renderPlatformPrompt) so the raw user prompt stays strictly last.
     deliverables: true,
     ...(uploads ? { uploads } : {}),
-    ...(integrations ? { integrations } : {}),
+    integrations,
     ...(unavailableIntegrations.length > 0 ? { unavailableIntegrations } : {}),
   });
 

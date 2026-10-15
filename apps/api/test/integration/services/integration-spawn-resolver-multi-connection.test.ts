@@ -173,7 +173,7 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
     expect(byLabel.get("db")!.spawnEnv.SSH_PRIVATE_KEY).toBe("key-for-db.example.com");
   });
 
-  it("renders ONE prompt section for the integration, however many connections it spawns", async () => {
+  it("lists the integration ONCE in the prompt, however many connections it spawns", async () => {
     await seedConnection({ label: "web-1", host: "web-1.example.com" });
     await seedConnection({ label: "db", host: "db.example.com" });
     const { specs } = await resolve(await bindAllConnections(INTEG));
@@ -188,6 +188,13 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
       files,
       integrity: "sha256-stub",
     });
+    const memberIdentity = `${INTEG}@0.1.0` as AppstrateRunPlan["bundle"]["root"];
+    packages.set(memberIdentity, {
+      identity: memberIdentity,
+      manifest: { name: INTEG, version: "0.1.0", type: "integration" },
+      files: new Map([["INTEGRATION.md", new TextEncoder().encode("# SSH")]]),
+      integrity: "sha256-stub",
+    });
     // The prompt builder reads only the bundle, timeout, resources and integrations.
     const plan = {
       bundle: { bundleFormatVersion: "1.0", root: identity, packages, integrity: "sha256-stub" },
@@ -196,8 +203,8 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
       integrations: specs,
     } as Partial<AppstrateRunPlan> as AppstrateRunPlan;
 
-    const prompt = await buildPlatformSystemPrompt({ runId: "run_test", input: {} }, plan);
-    expect(prompt.split(`## Integration: ${INTEG}\n`)).toHaveLength(2);
+    const prompt = buildPlatformSystemPrompt({ runId: "run_test", input: {} }, plan);
+    expect(prompt.split(`<name>${INTEG}</name>`)).toHaveLength(2);
     expect(prompt).not.toContain("## Unavailable Integrations");
   });
 

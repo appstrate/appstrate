@@ -26,11 +26,13 @@
 import type { Bundle, BundlePackage } from "./types.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
 import type {
+  PlatformPromptIntegration,
   PlatformPromptOptions,
   PlatformPromptSchema,
   PlatformPromptTool,
 } from "./platform-prompt.ts";
 import { parsePackageIdentity } from "./types.ts";
+import { PI_INTEGRATIONS_DIR } from "./workspace-layout.ts";
 
 /** Plain-object narrowing used throughout the helper. */
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -122,6 +124,43 @@ function walkDependencies(bundle: Bundle): { skills: PlatformPromptTool[] } {
   return { skills };
 }
 
+/**
+ * Catalog entries for the integrations the ROOT manifest declares, in
+ * declaration order. A member pulled in by a skill is not the agent's, so
+ * it is not listed. `location` points at the member's `INTEGRATION.md` as
+ * the runner materialises it under {@link PI_INTEGRATIONS_DIR}.
+ */
+export function integrationsFromBundle(bundle: Bundle): PlatformPromptIntegration[] {
+  const rootManifest = bundle.packages.get(bundle.root)?.manifest as
+    Record<string, unknown> | undefined;
+  const deps = rootManifest?.["dependencies"];
+  const declared = isPlainObject(deps) ? deps["integrations"] : undefined;
+  if (!isPlainObject(declared)) return [];
+
+  const members = new Map<string, BundlePackage>();
+  for (const [identity, pkg] of bundle.packages) {
+    if (identity === bundle.root) continue;
+    if ((pkg.manifest as Record<string, unknown>)["type"] !== "integration") continue;
+    const parsed = parsePackageIdentity(pkg.identity);
+    const id = parsed ? parsed.packageId : pkg.identity;
+    if (!members.has(id)) members.set(id, pkg);
+  }
+
+  const out: PlatformPromptIntegration[] = [];
+  for (const id of Object.keys(declared)) {
+    const pkg = members.get(id);
+    if (!pkg) continue;
+    const entry: PlatformPromptIntegration = { id };
+    const description = (pkg.manifest as Record<string, unknown>)["description"];
+    if (typeof description === "string") entry.description = description;
+    if (pkg.files.has("INTEGRATION.md")) {
+      entry.location = `${PI_INTEGRATIONS_DIR}/${id}/INTEGRATION.md`;
+    }
+    out.push(entry);
+  }
+  return out;
+}
+
 export type BuildPlatformPromptInputsOverrides = Partial<Omit<PlatformPromptOptions, "context">>;
 
 /**
@@ -134,6 +173,8 @@ export type BuildPlatformPromptInputsOverrides = Partial<Omit<PlatformPromptOpti
  *   - Bundle-derived fields are overridden **verbatim** when present in
  *     `overrides`.
  *   - `context` is always the caller's; the bundle never overrides it.
+ *   - `integrations` defaults to {@link integrationsFromBundle} minus the
+ *     ids in `overrides.unavailableIntegrations`.
  *   - Absent overrides leave bundle-derived defaults in place.
  */
 export function buildPlatformPromptInputs(
@@ -145,6 +186,7 @@ export function buildPlatformPromptInputs(
   const rootManifest = root?.manifest as Record<string, unknown> | undefined;
 
   const { skills } = walkDependencies(bundle);
+  const unavailable = new Set((overrides.unavailableIntegrations ?? []).map((u) => u.id));
 
   const inputSchema = asPromptSchema(readSchemaSection(rootManifest, "input"));
   const outputSchema = readSchemaSection(rootManifest, "output");
@@ -156,6 +198,7 @@ export function buildPlatformPromptInputs(
       ? { timeoutSeconds: readTimeoutSeconds(bundle)! }
       : {}),
     availableSkills: skills,
+    integrations: integrationsFromBundle(bundle).filter((integ) => !unavailable.has(integ.id)),
     ...(inputSchema ? { inputSchema } : {}),
     ...(outputSchema ? { outputSchema } : {}),
   };

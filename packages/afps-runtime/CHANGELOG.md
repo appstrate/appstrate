@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `resolve` returns `null` for is reported through `onWarn` and left out of the
   bundle instead of failing with `DEPENDENCY_UNRESOLVED`. A `fetch` failure
   stays fatal.
+- `integrationsFromBundle(bundle)` (`./bundle`): one catalog entry per
+  integration member the root manifest declares in `dependencies.integrations`,
+  in declaration order, with `location` set to
+  `.pi/integrations/<packageId>/INTEGRATION.md` when the member ships that
+  file. `buildPlatformPromptInputs` derives `integrations` from it, minus the
+  ids of `unavailableIntegrations`; an explicit `integrations` override wins.
+
+### Changed — integrations disclosed as a catalog, not inlined (#2005, BREAKING)
+
+- `renderPlatformPrompt` renders the integrations as a `### Integrations`
+  catalog (`<available_integrations>`, one `<integration>` with `<name>`,
+  optional `<description>` and `<location>`) right after `### Skills`, instead
+  of one `## Integration: <id>` section with the `INTEGRATION.md` text inlined
+  under `### API Documentation`. The agent reads the file on demand (AFPS §3.5).
+- `PlatformPromptIntegration.doc` is removed; pass `location` (the
+  workspace-relative path of `INTEGRATION.md`) instead.
 
 ### Changed — `api_call` values encoded for their place (#1915, BREAKING)
 

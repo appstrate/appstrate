@@ -19,7 +19,10 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { buildPlatformPromptInputs } from "../../src/bundle/platform-prompt-inputs.ts";
+import {
+  buildPlatformPromptInputs,
+  integrationsFromBundle,
+} from "../../src/bundle/platform-prompt-inputs.ts";
 import { renderPlatformPrompt } from "../../src/bundle/platform-prompt.ts";
 import type { Bundle, BundlePackage, PackageIdentity } from "../../src/bundle/types.ts";
 import type { ExecutionContext } from "../../src/types/execution-context.ts";
@@ -46,6 +49,7 @@ function makeFixtureBundle(): Bundle {
       type: "agent",
       schema_version: "0.1",
       timeout: 120,
+      dependencies: { integrations: { "@fixture/crm": "^1.0.0" } },
       input: {
         schema: {
           properties: {
@@ -86,8 +90,14 @@ function makeFixtureBundle(): Bundle {
     description: "Write clear prose",
   });
 
+  const integration = pkg(
+    "@fixture/crm@1.0.0",
+    { name: "@fixture/crm", type: "integration", description: "Customer records" },
+    { "INTEGRATION.md": "# CRM API" },
+  );
+
   const packages = new Map<PackageIdentity, BundlePackage>();
-  for (const p of [root, mcp, skill]) packages.set(p.identity, p);
+  for (const p of [root, mcp, skill, integration]) packages.set(p.identity, p);
   return {
     bundleFormatVersion: "1.0",
     root: root.identity,
@@ -134,6 +144,8 @@ describe("cross-path prompt parity", () => {
   const platformPrompt = renderPlatformPrompt(
     buildPlatformPromptInputs(bundle, context, {
       platformName: "Appstrate",
+      // The platform passes its own filtered list; the CLI paths derive it.
+      integrations: integrationsFromBundle(bundle),
       // Platform-specific: DB-backed uploads. Run history used to be
       // rendered as a `## Run History` section here; it is now surfaced
       // via the runtime-wired `run_history` tool instead so the prompt
@@ -161,6 +173,9 @@ describe("cross-path prompt parity", () => {
       expect(prompt).not.toContain("**search**: Search the web");
       expect(prompt).toContain("### Skills");
       expect(prompt).toContain("**writing**: Write clear prose");
+      expect(prompt).toContain("<name>@fixture/crm</name>");
+      expect(prompt).toContain("<location>.pi/integrations/@fixture/crm/INTEGRATION.md</location>");
+      expect(prompt).not.toContain("# CRM API");
       expect(prompt).toContain("## User Input");
       expect(prompt).toContain("**query**");
       expect(prompt).toContain("**verbose**");
