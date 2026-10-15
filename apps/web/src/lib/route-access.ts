@@ -76,7 +76,7 @@ export const ROUTE_ACCESS = {
   },
 
   "/catalogue": CATALOGUE,
-  "/catalogue/:reading/:type": CATALOGUE,
+  "/catalogue/:type": CATALOGUE,
 
   "/preferences": OWN_ACCOUNT,
   "/preferences/general": OWN_ACCOUNT,

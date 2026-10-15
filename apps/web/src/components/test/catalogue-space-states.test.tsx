@@ -3,7 +3,7 @@
 /**
  * What the catalogue says of a package in each space: a placed-but-off switch is told apart from
  * a package never placed there, an offered switch says what switching it on consents to, and the
- * sheet's offer says what the package will run with there.
+ * sheet says who offered it.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -99,8 +99,8 @@ describe("a package's cell in each space", () => {
   });
 });
 
-describe("the sheet's offer", () => {
-  it("says the package will run there with that space's credentials", () => {
+describe("the sheet's spaces", () => {
+  it("marks the offered space, and says its switch consents to the space's credentials", () => {
     const html = render(
       <CataloguePreview
         item={PACKAGE}
@@ -115,7 +115,7 @@ describe("the sheet's offer", () => {
         onSetActive={() => {}}
       />,
     );
-    expect(html).toContain(settingsFr["catalogue.sheet.offer"].replace("{{space}}", "Proposé"));
-    expect(html).toContain(settingsFr["catalogue.sheet.offerCredentials"]);
+    expect(html).toContain(settingsFr["catalogue.offeredHere"]);
+    expect(html).toContain("Proposé");
   });
 });

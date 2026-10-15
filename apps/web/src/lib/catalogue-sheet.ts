@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Per-space rows graded by what the reader may do: readonly (switch nowhere), single (one line
-// with its switch), table (one row per space). Pure: the sheet renders through a portal.
+// The sheet's per-space rows, graded by what the reader may do. Pure: the sheet renders through a portal.
 
 import type { PackageType } from "@appstrate/core/validation";
 import { placementIn, type CataloguePlacement, type PlacementState } from "./catalogue-placement";
@@ -17,8 +16,6 @@ export interface SheetSpaceRow {
   mayToggle: boolean;
   refusal: ActivationRefusal | null;
 }
-
-export type SheetSpaceMode = "readonly" | "single" | "table";
 
 export function sheetSpaceRows(
   placement: CataloguePlacement,
@@ -48,15 +45,6 @@ export function sheetSpaceRows(
   });
 }
 
-export function sheetSpaceMode(rows: readonly SheetSpaceRow[]): SheetSpaceMode {
-  if (!rows.some((row) => row.mayToggle)) return "readonly";
-  return rows.length === 1 ? "single" : "table";
-}
-
-export function sheetOffers(rows: readonly SheetSpaceRow[]): SheetSpaceRow[] {
-  return rows.filter((row) => row.state === "offered");
-}
-
 export type ChatEnforceRefusal = "configure" | "publishFirst";
 
 export interface SheetChatEnforce {
@@ -84,23 +72,4 @@ export function sheetChatEnforce(
       ? "publishFirst"
       : null;
   return { checked: facts.enforced, disabled: refusal !== null, refusal };
-}
-
-/**
- * What the sheet says about a version the address pinned: `missing` when the
- * server has no such version (deleted since the link was made), `behind` when
- * the spaces run a newer one — a placement selects no version, outside its
- * home a package runs its latest published one — and `current` otherwise.
- * An unpinned sheet has no state.
- */
-export type PinnedVersionState = "missing" | "behind" | "current";
-
-export function pinnedVersionState(facts: {
-  pinned: string | undefined;
-  missing: boolean;
-  latestPublished: string | null | undefined;
-}): PinnedVersionState | null {
-  if (!facts.pinned) return null;
-  if (facts.missing) return "missing";
-  return facts.latestPublished && facts.latestPublished !== facts.pinned ? "behind" : "current";
 }

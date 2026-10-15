@@ -38,19 +38,16 @@ export function activationGate(
 }
 
 export interface CatalogueDeeds {
-  /** `home_writable`: moving is the same authority as editing. */
-  moveHome: boolean;
   /** `home_shareable`: a verb of its own (RBAC spec §6.10). */
   share: boolean;
   revokeFrom: string[];
 }
 
 export function catalogueDeeds(
-  pkg: Pick<LibraryPackageItem, "home_writable" | "home_shareable" | "placements">,
+  pkg: Pick<LibraryPackageItem, "home_shareable" | "placements">,
 ): CatalogueDeeds {
   const share = pkg.home_shareable === true;
   return {
-    moveHome: pkg.home_writable === true,
     share,
     revokeFrom: share
       ? pkg.placements

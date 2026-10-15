@@ -278,7 +278,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/mcp-servers/:scope/:name": <UnifiedPackageDetailPage type="mcp-server" />,
   "/mcp-servers/:scope/:name/:version": <UnifiedPackageDetailPage type="mcp-server" />,
   "/catalogue": <CatalogueIndexRedirect />,
-  "/catalogue/:reading/:type": <CataloguePage />,
+  "/catalogue/:type": <CataloguePage />,
   "/preferences": <Outlet />,
   "/preferences/general": <PreferencesGeneralPage />,
   "/preferences/appearance": <PreferencesAppearancePage />,

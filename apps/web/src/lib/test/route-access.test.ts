@@ -66,7 +66,7 @@ describe("route declarations", () => {
       "/agents",
       "/agents/:scope/:name/runs/:runId",
       "/catalogue",
-      "/catalogue/:reading/:type",
+      "/catalogue/:type",
       "/chat",
       "/files",
       "/integrations",
@@ -170,8 +170,9 @@ describe("overlay paths", () => {
   const matched = (url: string) => matchRoutes(routes, url)?.[0]?.route.path;
 
   it("answer an unknown address under every overlay inside that overlay", () => {
+    // Two segments deep: `/catalogue/<one segment>` is a kind, answered by the catalogue page itself.
     for (const prefix of OVERLAY_PREFIXES) {
-      expect(matched(`${prefix}/no-such-page`)).toBe(`${prefix}/*`);
+      expect(matched(`${prefix}/no-such-page/deeper`)).toBe(`${prefix}/*`);
     }
     // Below a declared page too: no prefix of it stands in.
     expect(matched("/org-settings/general/no-such-page")).toBe("/org-settings/*");
@@ -182,7 +183,7 @@ describe("overlay paths", () => {
   it("leave every declared overlay page ahead of the not-found catch-all", () => {
     expect(matched("/org-settings/general")).toBe("/org-settings/general");
     expect(matched("/workspace-settings/webhooks/wh_1")).toBe("/workspace-settings/webhooks/:id");
-    expect(matched("/catalogue/discover/agent")).toBe("/catalogue/:reading/:type");
+    expect(matched("/catalogue/agent")).toBe("/catalogue/:type");
     expect(matched("/preferences/x")).toBe("/preferences/*");
   });
 });

@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The organization catalogue's « Par espace » view as a MAP of placements,
- * driven from the browser (RBAC spec §6.8).
+ * The organization catalogue as a MAP of placements, driven from the browser
+ * (RBAC spec §6.8).
  *
- * `/catalogue/placed/agent` renders the three axes the model has — home, share,
- * activation — and every one of them is actionable from the row: a Provenance
- * column for the home, one activation switch per space, and the row's « … » menu
- * for moving, sharing and withdrawing a share. A single cell meaning "a
- * `space_packages` row exists here" can say none of it: it tells a home from a
- * share not at all, has nowhere to show a share, and gives one act two buttons.
- * So the four acts below have to work, on one screen:
+ * `/catalogue/agent` renders the three axes the model has — home, share,
+ * activation: a Provenance column for the home, one activation switch per
+ * space, and the package sheet's Actions menu for sharing and withdrawing a
+ * share. A single cell meaning "a `space_packages` row exists here" can say
+ * none of it: it tells a home from a share not at all, has nowhere to show a
+ * share, and gives one act two buttons. So the acts below have to work:
  *
  *   - switching a package ON in a space it never reached shares it there and
  *     activates it in one click, and the chip under "Partagé avec" appears;
@@ -22,13 +21,14 @@
  *   - moving the home moves the Home column and leaves the source space
  *     reading a package it no longer homes.
  *
- * What a route test cannot show is that these four sit on one screen and that
- * the caches they invalidate agree afterwards.
+ * What a route test cannot show is that these sit on one screen and that the
+ * caches they invalidate agree afterwards.
  */
 
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createAgent, createSpace } from "../../helpers/seed.ts";
+import { openRow } from "../../helpers/table.ts";
 
 /** The catalogue row for one package, whatever its provenance. */
 function rowFor(page: Page, displayName: string) {
@@ -36,8 +36,11 @@ function rowFor(page: Page, displayName: string) {
 }
 
 /** The activation switch of one space on a row (« Activer <package> dans <espace> »). */
-function spaceSwitch(row: Locator, displayName: string, spaceName: string) {
-  return row.getByRole("switch", { name: `Activer ${displayName} dans ${spaceName}`, exact: true });
+function spaceSwitch(scope: Locator | Page, displayName: string, spaceName: string) {
+  return scope.getByRole("switch", {
+    name: `Activer ${displayName} dans ${spaceName}`,
+    exact: true,
+  });
 }
 
 test("an admin places, revokes, deactivates and moves a package from the catalog", async ({
@@ -69,11 +72,11 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
     }>;
   };
 
-  await page.goto("/catalogue/placed/agent");
-  const row = rowFor(page, displayName);
-  await expect(row).toBeVisible();
-  const targetSwitch = spaceSwitch(row, displayName, target.name);
-  const homeSwitch = spaceSwitch(row, displayName, homeSpaceName);
+  await page.goto("/catalogue/agent");
+  await expect(rowFor(page, displayName)).toBeVisible();
+  // The same switch (same name) is in the table row and in the package sheet.
+  const targetSwitch = spaceSwitch(page, displayName, target.name);
+  const homeSwitch = spaceSwitch(page, displayName, homeSpaceName);
 
   // ── One click places it in a space it never reached ──
   const activated = page.waitForResponse(
@@ -85,7 +88,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
   expect((await activated).status()).toBe(201);
   await expect(targetSwitch).toBeChecked();
   // The share it minted is a fact on the wire, not only a switch: the row's menu
-  // now offers to withdraw it from the destination.
+  // now offers to withdraw it from the destination (sheet › Actions).
   const shares = await apiClient.get(`/packages/${scope}/${name}/shares`);
   expect(shares.status()).toBe(200);
   expect(
@@ -100,10 +103,12 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
     (response) =>
       response.request().method() === "DELETE" && response.url().includes(`/shares/${target.id}`),
   );
-  await row.getByRole("button", { name: `Actions pour ${displayName}`, exact: true }).click();
+  await openRow(page, displayName);
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
   await page.getByRole("menuitem", { name: `Retirer de ${target.name}`, exact: true }).click();
   expect((await revoked).status()).toBe(204);
   await expect(targetSwitch).not.toBeChecked();
+  await page.getByRole("button", { name: "Retour au catalogue", exact: true }).click();
   expect((await packagesIn(target.id)).map((p) => p.packageId)).not.toContain(`${scope}/${name}`);
 
   // ── Deactivating at home keeps the row and its settings ──
@@ -195,7 +200,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
  * Deactivating is reversible and ordinary, so it has to be legible in exactly
  * one place. The INDEX answers "what can I run here", so a switched-off agent
  * leaves it entirely: no greyed card, no badge, nothing to misread. The
- * catalogue's « Par espace » view answers "what is placed here, and in what
+ * catalogue answers "what is placed here, and in what
  * state", so the same agent is still a row there, its switch off (RBAC spec
  * §6.8/§6.9).
  *
@@ -241,7 +246,7 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
   // Two questions, two pages. The catalogue is the placement map, so the row is
   // there, with its switch off; the index is the ACTIVE set, so the row is gone
   // — not greyed, gone.
-  await page.goto("/catalogue/placed/agent");
+  await page.goto("/catalogue/agent");
   const libraryRow = rowFor(page, `Test Agent ${name}`);
   await expect(libraryRow).toBeVisible();
   await expect(spaceSwitch(libraryRow, `Test Agent ${name}`, "Default")).not.toBeChecked();

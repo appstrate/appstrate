@@ -20,16 +20,10 @@ export interface CardItem {
   unreadCount?: number;
   actions?: ReactNode;
   autoInstalled?: boolean;
-  /** A tile drawn left of the title, instead of the one the type and identity give. */
-  icon?: ReactNode;
   /** An agent's chosen icon and colour. */
   identity?: { icon?: string | null; color?: string | null };
   /** An integration's logo (its manifest `icon`). */
   logo?: string;
-  /** The card's state, top right. */
-  status?: ReactNode;
-  /** One muted line under the description. */
-  meta?: ReactNode;
 }
 
 export function agentCardItem(agent: AgentListItem, unreadCount?: number): CardItem {

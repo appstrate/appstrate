@@ -21,12 +21,7 @@ import { useMemberColumns } from "../../pages/org-settings/member-columns.tsx";
 import { useRoleColumns } from "../../pages/org-settings/role-columns.tsx";
 import { useSpaceMemberColumns } from "../../pages/workspace-settings/space-member-columns.tsx";
 import { useInvitationColumns } from "../invitation-columns.tsx";
-import {
-  useCatalogueActionsColumn,
-  useCatalogueOriginColumn,
-  useCatalogueSelectColumn,
-  useCatalogueSpaceColumns,
-} from "../catalogue-columns.tsx";
+import { useCatalogueOriginColumn, useCatalogueSpaceColumns } from "../catalogue-columns.tsx";
 import { useUserSpaceColumns } from "../../pages/org-settings/user-space-columns.tsx";
 import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
 import { useProviderColumns } from "../provider-columns.tsx";
@@ -39,7 +34,6 @@ import { useDocumentColumns } from "../document-columns.tsx";
 import { useIntegrationListColumns } from "../../pages/integration-list-columns.tsx";
 import { useApiKeyColumns } from "../../pages/api-key-columns.tsx";
 import { useMemoryColumns } from "../persistence/memory-columns.tsx";
-import { useCatalogueSharedColumns } from "../catalogue-shared-columns.tsx";
 import { usePinColumns } from "../integration-detail/pin-columns.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
@@ -61,18 +55,10 @@ function columnsFrom<T>(useColumns: () => DataColumn<T>[]): Track[] {
 }
 
 const SETS = {
-  // Composed exactly as `OrgCatalogueModal` composes it: the tick, the list's
-  // own set minus what a catalogue cannot answer, then provenance, one column
-  // per space, and the one deed.
+  // Composed exactly as `OrgCatalogueModal` composes it: the list's own set
+  // minus what a catalogue cannot answer, then provenance and one column per space.
   packageCatalogue: () => {
     return columnsFrom(() => [
-      useCatalogueSelectColumn({
-        selected: new Set<string>(),
-        allSelected: false,
-        selectable: () => true,
-        onToggle: () => {},
-        onToggleAll: () => {},
-      }),
       ...usePackageColumns("agent").filter(
         (c) => !["state", "actions", "origin", "keywords"].includes(c.id),
       ),
@@ -93,15 +79,6 @@ const SETS = {
         gateOf: () => ({ allowed: true, refusal: null }),
         busy: false,
         onSetActive: () => {},
-      }),
-      useCatalogueActionsColumn({
-        isPending: false,
-        deedsOf: () => ({ moveHome: true, share: true, revokeFrom: [] }),
-        spaceNameOf: (id) => id,
-        onOpen: () => {},
-        onMoveHome: () => {},
-        onShare: () => {},
-        onRevoke: () => {},
       }),
     ]);
   },
@@ -279,15 +256,6 @@ const SETS = {
   memory: () =>
     columnsFrom(() =>
       useMemoryColumns({ isDeleting: () => false, onCopy: () => {}, onDelete: () => {} }),
-    ),
-  catalogueShared: () =>
-    columnsFrom(() =>
-      useCatalogueSharedColumns({
-        spaceNameOf: (id) => id,
-        mayActivateIn: () => true,
-        busy: false,
-        onActivate: () => {},
-      }),
     ),
   integrationPins: () =>
     columnsFrom(() =>
