@@ -264,7 +264,7 @@ function ScheduleParams({
               value:
                 describeFrequency(parseCron(schedule.cron_expression)) ?? schedule.cron_expression,
             },
-            { labelKey: "schedule.paramTimezone", value: schedule.timezone },
+            { labelKey: "schedule.timezone", value: schedule.timezone },
             {
               labelKey: "schedule.paramNextRun",
               value: nextRunAt

@@ -189,7 +189,7 @@ export function UnifiedSettingsLayout() {
 
   return (
     <PanelLayout
-      title={label("unifiedSettings.title")}
+      title={settingsBreadcrumbLabel}
       rail={rail}
       // The same band as the catalogue: invisible at rest, the section's name
       // once the page has scrolled past its own heading — and an opaque surface

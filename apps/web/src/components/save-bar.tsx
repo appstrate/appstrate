@@ -24,13 +24,13 @@ export function SaveBar({
   return (
     <div className="bg-background border-border sticky bottom-0 z-10 flex min-h-16 flex-wrap items-center gap-3 border-t px-6 py-3 max-lg:flex-col max-lg:items-stretch">
       <span className="text-muted-foreground text-sm">{message}</span>
-      <div className="ml-auto flex items-center gap-2 max-lg:ml-0 max-lg:w-full">
+      <div className="ml-auto flex flex-wrap items-center gap-2 max-lg:ml-0 max-lg:w-full">
         <Button
           variant="outline"
           type="button"
           disabled={pending}
           onClick={onDiscard}
-          className="max-lg:flex-1"
+          className="max-lg:flex-auto"
         >
           {t("editor.discardChanges")}
         </Button>
@@ -39,7 +39,7 @@ export function SaveBar({
           pending={pending}
           disabled={saveDisabled}
           onClick={onSave}
-          className="max-lg:flex-1"
+          className="max-lg:flex-auto"
         >
           {t("btn.save", { ns: "common" })}
         </PendingButton>
