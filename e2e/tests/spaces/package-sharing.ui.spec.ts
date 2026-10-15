@@ -142,7 +142,8 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
     await createAuthedContext(browser, guest, orgId, guestSpaceId)
   ).newPage();
   try {
-    expect((await guestClient.get("/library")).status()).toBe(403);
+    // The organization library answers every member, graded by what they read.
+    expect((await guestClient.get("/library")).status()).toBe(200);
 
     // The index lists what RUNS here, and an offer nobody took up runs nowhere
     // — so it is not on it. The absence is read after the list response lands,

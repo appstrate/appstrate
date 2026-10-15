@@ -60,7 +60,7 @@ const ANTHROPIC_MODEL = "claude-x";
 
 /**
  * A second OpenAI-shaped path, serving one model the platform accepts and one
- * it must refuse: `POST /api/models` rejects `maxTokens >= contextWindow`
+ * it must refuse: `POST /api/models/apply` rejects `maxTokens >= contextWindow`
  * (createModelSchema's canonical budget invariant), and both numbers come
  * straight from what the endpoint published. Nothing else about a discovered
  * model is refusable — two identical models are NOT a conflict (`org_models`
@@ -186,11 +186,8 @@ async function submitPartlyRefusedBatch(page: Page): Promise<Locator> {
   await detect(dialog, 2);
   const pendingRequest = Promise.withResolvers<void>();
   const releaseRequest = Promise.withResolvers<void>();
-  await page.route("**/api/models", async (route) => {
-    if (
-      route.request().method() === "POST" &&
-      route.request().postDataJSON().modelId === REFUSED_MODEL
-    ) {
+  await page.route("**/api/models/apply", async (route) => {
+    if (route.request().method() === "POST") {
       pendingRequest.resolve();
       await releaseRequest.promise;
     }
@@ -206,6 +203,7 @@ async function submitPartlyRefusedBatch(page: Page): Promise<Locator> {
     releaseRequest.resolve();
   }
   await expect(dialog.getByText(`Impossible de terminer pour : ${REFUSED_MODEL}`)).toBeVisible();
+  await page.unroute("**/api/models/apply");
   return dialog;
 }
 
@@ -263,19 +261,47 @@ test.describe("Custom endpoint model — UI", () => {
     await expect(page.getByText(SERVED_MODEL).first()).toBeVisible();
   });
 
-  test("keeps the dialog open on a partly refused batch and names what was refused", async ({
+  test("keeps the dialog open on a refused batch, names the refused model and writes nothing", async ({
     authedPage: page,
     apiClient,
   }) => {
     const dialog = await submitPartlyRefusedBatch(page);
 
-    // One `POST /api/models` per checked row, each refusal collected rather
-    // than aborting the rest: the accepted model is saved, the refused one is
-    // named and stays checked.
-    await expect(dialog.getByText(`Impossible de terminer pour : ${REFUSED_MODEL}`)).toBeVisible();
+    // The batch is one `POST /api/models/apply`, atomic: the refusal names the
+    // model at fault, and since nothing was written every row stays checked.
     await expect(discoveredRow(dialog, REFUSED_MODEL)).toBeChecked();
+    await expect(discoveredRow(dialog, ADDABLE_MODEL)).toBeChecked();
 
-    // The key was minted once and the accepted model saved once.
+    const credentials = await apiClient.get("/model-provider-credentials");
+    const keys = ((await credentials.json()).data as Array<{ id: string; source: string }>).filter(
+      (k) => k.source === "custom",
+    );
+    expect(keys).toHaveLength(0);
+    const models = await listModels(apiClient);
+    expect(models.find((m) => m.modelId === ADDABLE_MODEL)).toBeUndefined();
+    expect(models.find((m) => m.modelId === REFUSED_MODEL)).toBeUndefined();
+  });
+
+  // Unchecking the refused model and submitting again saves the rest, under one key.
+  test("saves the rest of a refused batch once the refused model is unchecked", async ({
+    authedPage: page,
+    apiClient,
+  }) => {
+    const dialog = await submitPartlyRefusedBatch(page);
+
+    const applied: Array<{ add: Array<{ modelId: string }> }> = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/models/apply") && request.method() === "POST") {
+        applied.push(request.postDataJSON());
+      }
+    });
+    await discoveredRow(dialog, REFUSED_MODEL).uncheck();
+    await submitAddKey(dialog).click();
+    await expect(dialog).toBeHidden();
+
+    expect(applied.map((body) => body.add.map((entry) => entry.modelId))).toEqual([
+      [ADDABLE_MODEL],
+    ]);
     const credentials = await apiClient.get("/model-provider-credentials");
     const keys = ((await credentials.json()).data as Array<{ id: string; source: string }>).filter(
       (k) => k.source === "custom",
@@ -284,34 +310,6 @@ test.describe("Custom endpoint model — UI", () => {
     const models = await listModels(apiClient);
     expect(models.filter((m) => m.modelId === ADDABLE_MODEL)).toHaveLength(1);
     expect(models.find((m) => m.modelId === REFUSED_MODEL)).toBeUndefined();
-  });
-
-  // The retry asks only for what failed: the model the first attempt saved is not posted again
-  // (the server would answer 409 `model_already_added`) and is not reported as failed.
-  test("re-offers only what failed after a partly refused batch", async ({
-    authedPage: page,
-    apiClient,
-  }) => {
-    const dialog = await submitPartlyRefusedBatch(page);
-
-    const retried: Array<{ modelId: string; credentialId: string }> = [];
-    page.on("request", (request) => {
-      if (request.url().endsWith("/api/models") && request.method() === "POST") {
-        retried.push(request.postDataJSON());
-      }
-    });
-    await submitAddKey(dialog).click();
-    await expect(dialog.getByText(`Impossible de terminer pour : ${REFUSED_MODEL}`)).toBeVisible();
-
-    expect(retried.map((body) => body.modelId)).toEqual([REFUSED_MODEL]);
-    // The retry reuses the key the first attempt created rather than minting a second one.
-    // The org's own keys only: a built-in (system) key may be listed alongside.
-    const credentials = await apiClient.get("/model-provider-credentials");
-    const keys = ((await credentials.json()).data as Array<{ id: string; source: string }>).filter(
-      (k) => k.source === "custom",
-    );
-    expect(keys).toHaveLength(1);
-    expect(retried[0]!.credentialId).toBe(keys[0]!.id);
   });
 
   test("detects through a key the org already saved", async ({ authedPage: page, apiClient }) => {

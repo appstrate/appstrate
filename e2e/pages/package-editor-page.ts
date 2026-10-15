@@ -113,28 +113,43 @@ export class PackageEditorPage {
   async editFile(path: string, text: string) {
     await this.fileAction(path, "Modifier");
     const modal = this.page.getByRole("dialog", { name: `Modifier ${path}` });
-    const lines = modal.locator(".monaco-editor .view-lines");
-    await expect(lines).toBeVisible();
-    await lines.click();
-    await this.page.keyboard.press("ControlOrMeta+A");
-    await this.page.keyboard.type(text);
+    await this.replaceEditorText(modal, text);
     await modal.getByRole("button", { name: "Appliquer", exact: true }).click();
     await expect(modal).toHaveCount(0);
   }
 
   /**
-   * Creation page: type into the Monaco pane showing `path`.
-   *
-   * Monaco owns its own hidden textarea, so text reaches it through real key
-   * events rather than a `fill`. The pane is a labelled region, which is how
-   * this waits for the editor to have switched files before typing into it.
+   * Creation page: replace the text of the Monaco pane showing `path`. The pane is a
+   * labelled region, which is how this waits for the editor to have switched
+   * files before typing into it.
    */
   async typeIntoEditor(path: string, text: string) {
     const pane = this.page.getByRole("region", { name: path });
     await expect(pane).toBeVisible();
-    const lines = pane.locator(".monaco-editor .view-lines");
+    await this.replaceEditorText(pane, text);
+  }
+
+  /**
+   * Replace the text of the Monaco editor inside `scope` with `text`, and wait
+   * until it shows it.
+   *
+   * Monaco owns its own input surface, so text reaches it through the focused
+   * editor rather than a `fill`: one `insertText` once it holds focus, since
+   * per-key `type` events are dropped by Monaco in Chromium on macOS. An editor
+   * that has just mounted can still swallow the insertion, so it is retried
+   * until the text is shown — over a selection of everything, so a retry never
+   * doubles what an earlier attempt inserted.
+   */
+  private async replaceEditorText(scope: Locator, text: string) {
+    const lines = scope.locator(".monaco-editor .view-lines");
     await expect(lines).toBeVisible();
-    await lines.click();
-    await this.page.keyboard.type(text);
+    const firstLine = text.split("\n")[0]!;
+    await expect(async () => {
+      await lines.click();
+      await expect(scope.locator(".monaco-editor.focused")).toBeVisible();
+      await this.page.keyboard.press("ControlOrMeta+A");
+      await this.page.keyboard.insertText(text);
+      await expect(lines).toContainText(firstLine, { timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
   }
 }

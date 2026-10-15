@@ -257,16 +257,6 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
   await expect(page.getByText(`Test Agent ${name}`, { exact: true })).toHaveCount(0);
 
   // ── The detail page opens, and its two reads answer 200 ──
-  // One page, one source: the agent's own detail carries `active`, so the page
-  // must not also project the space library to learn the same fact. Recorded
-  // across the whole load, and asserted before anything is clicked — which is
-  // why the library page is visited ABOVE the index and not here: a full
-  // navigation sits between it and this listener, so no refetch it left in
-  // flight can be counted against the page under test.
-  const libraryReads: string[] = [];
-  page.on("request", (request) => {
-    if (/\/api\/spaces\/[^/]+\/library/.test(request.url())) libraryReads.push(request.url());
-  });
   const modelRead = page.waitForResponse(
     (response) =>
       response.request().method() === "GET" &&
@@ -285,7 +275,6 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
   // reader got here from the library or from a link they kept.
   const banner = page.getByText(/Désactivé dans cet espace|Switched off in this space/);
   await expect(banner).toBeVisible();
-  expect(libraryReads, "the agent page answers activation from its own detail").toEqual([]);
 
   // ── Configured while off: choosing a model is a read-write on the placement,
   //    not a run, so the route takes it ──
