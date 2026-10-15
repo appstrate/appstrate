@@ -67,6 +67,8 @@ export interface BuildBundleOptions {
    * `onWarn` message instead of failing the build. An `INTEGRITY_MISMATCH`
    * from `fetch` stays fatal: stored bytes that no longer match their
    * published hash are tampering or corruption, not an absent member.
+   * An optional member contributes only itself: its own `dependencies.*`
+   * are not walked.
    */
   optionalDepTypes?: DependencySection[];
 }
@@ -96,7 +98,7 @@ export async function buildBundleFromCatalog(
   const visiting = new Set<PackageIdentity>();
   const missing: Array<{ from: PackageIdentity; name: string; versionSpec: string }> = [];
 
-  async function walk(pkg: BundlePackage): Promise<void> {
+  async function walk(pkg: BundlePackage, leaf = false): Promise<void> {
     if (packages.has(pkg.identity)) {
       onWarn(`cycle detected at ${pkg.identity}`);
       return;
@@ -118,7 +120,7 @@ export async function buildBundleFromCatalog(
       );
     }
 
-    const deps = extractDependencies(pkg.manifest, depTypes);
+    const deps = leaf ? [] : extractDependencies(pkg.manifest, depTypes);
 
     // Resolve every direct dep in parallel — resolution is a read-only
     // catalog lookup with no inter-dep ordering requirement. Results are
@@ -183,12 +185,12 @@ export async function buildBundleFromCatalog(
     );
 
     const failures: Array<{ identity: PackageIdentity; reason: unknown }> = [];
-    const fetched: BundlePackage[] = [];
+    const fetched: Array<{ depPkg: BundlePackage; leaf: boolean }> = [];
     for (let i = 0; i < settled.length; i++) {
       const outcome = settled[i]!;
       const { resolved, section } = toFetch[i]!;
       if (outcome.status === "fulfilled") {
-        fetched.push(outcome.value);
+        fetched.push({ depPkg: outcome.value, leaf: optionalDepTypes.has(section) });
       } else if (optionalDepTypes.has(section) && !isIntegrityMismatch(outcome.reason)) {
         const reason =
           outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
@@ -216,14 +218,14 @@ export async function buildBundleFromCatalog(
     // they must not interleave. A deeper walk may have loaded a sibling's
     // identity by the time we reach it; skip it silently (diamond), warning
     // only when it is a structural cycle (still on the walk stack).
-    for (const depPkg of fetched) {
+    for (const { depPkg, leaf: depLeaf } of fetched) {
       if (packages.has(depPkg.identity)) {
         if (visiting.has(depPkg.identity)) {
           onWarn(`cycle detected: ${pkg.identity} -> ${depPkg.identity}`);
         }
         continue;
       }
-      await walk(depPkg);
+      await walk(depPkg, depLeaf);
     }
 
     visiting.delete(pkg.identity);

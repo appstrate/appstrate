@@ -7,6 +7,7 @@ import {
   buildBundleFromAfps,
   buildBundleFromCatalog,
   extractRootFromAfps,
+  type BuildBundleOptions,
 } from "../../src/bundle/build.ts";
 import { InMemoryPackageCatalog, emptyPackageCatalog } from "../../src/bundle/catalog.ts";
 import {
@@ -393,6 +394,44 @@ describe("buildBundleFromCatalog", () => {
     expect((err as BundleError).code).toBe("DEPENDENCY_UNRESOLVED");
     const { missing } = (err as BundleError).details as { missing: Array<{ name: string }> };
     expect(missing.map((m) => m.name)).toEqual(["@me/skill-a"]);
+  });
+
+  describe("optionalDepTypes: an optional member is a leaf", () => {
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      { ...ROOT, dependencies: { integrations: { "@me/integ-y": "^1.0.0" } } },
+      { "prompt.md": enc("p") },
+    );
+    const integ = makePkg("@me/integ-y@1.0.0" as PackageIdentity, {
+      name: "@me/integ-y",
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "0.1",
+      dependencies: { skills: { "@me/skill-a": "^1.0.0" } },
+    });
+    const skill = makePkg(
+      "@me/skill-a@1.3.0" as PackageIdentity,
+      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "0.1" },
+      { "SKILL.md": enc("s") },
+    );
+    const opts: BuildBundleOptions = {
+      depTypes: ["skills", "integrations"],
+      optionalDepTypes: ["integrations"],
+    };
+
+    it("does not fail on an unresolvable dependency of the optional member", async () => {
+      const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([integ]), opts);
+      expect([...bundle.packages.keys()].sort()).toEqual(["@me/integ-y@1.0.0", "@me/root@1.0.0"]);
+    });
+
+    it("does not bundle a resolvable dependency of the optional member", async () => {
+      const bundle = await buildBundleFromCatalog(
+        root,
+        new InMemoryPackageCatalog([integ, skill]),
+        opts,
+      );
+      expect([...bundle.packages.keys()].sort()).toEqual(["@me/integ-y@1.0.0", "@me/root@1.0.0"]);
+    });
   });
 
   describe("optionalDepTypes: fetch failures", () => {

@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `onWarn` and left out of the bundle instead of failing the build. An
   `INTEGRITY_MISMATCH` from `fetch` is the exception: it fails the build as it
   does for any other section, aggregated with the others into one error.
+  A member of such a section is a leaf: it is bundled alone, and its own
+  `dependencies.*` are neither resolved nor fetched.
 
 ### Changed — integrations disclosed as a catalog, not inlined (#2005, BREAKING)
 
