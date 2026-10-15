@@ -21,7 +21,6 @@ import { useAgents, usePackageList } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useListParams } from "../lib/list-params";
 import { catalogueHref } from "../lib/catalogue-link";
-import { packageNewPath } from "../lib/package-paths";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 import { agentCardItem, packageCardItem, type CardItem } from "../lib/package-card-item";
 import { PageHeader } from "../components/page-header";
@@ -32,7 +31,7 @@ import type { MenuAction } from "../lib/menu-action";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePermissions } from "../hooks/use-permissions";
-import { CreateAgentModal } from "../components/create-agent-modal";
+import { CreatePackageModal } from "../components/create-package-modal";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 
@@ -60,7 +59,7 @@ export function PackageIndexPage({
   manualCreation = "editor",
 }: {
   type: IndexType;
-  /** Where « create manually » goes: the editor, or the import (MCP servers). */
+  /** Where « create manually » goes: the creation dialog, or the import (MCP servers). */
   manualCreation?: "editor" | "import";
 }) {
   return type === "agent" ? (
@@ -123,7 +122,7 @@ function PackageIndexBody({
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
   const [importing, setImporting] = useState(false);
-  const [creatingAgent, setCreatingAgent] = useState(false);
+  const [creating, setCreating] = useState(false);
   const list = useListParams(["origin", "activity"]);
   // Creating is a write on the package type, as its route is.
   const canCreate = can(packagePermission(type, "write"));
@@ -185,8 +184,8 @@ function PackageIndexBody({
         list={list}
       />
       {importing && canImport && <ImportModal onClose={() => setImporting(false)} />}
-      {creatingAgent && canCreate && type === "agent" && (
-        <CreateAgentModal onClose={() => setCreatingAgent(false)} />
+      {creating && canCreate && type !== "mcp-server" && (
+        <CreatePackageModal type={type} onClose={() => setCreating(false)} />
       )}
       {creation.isOpen && (
         <CreationHandoffModal
@@ -198,11 +197,8 @@ function PackageIndexBody({
               setImporting(true);
               return;
             }
-            // The chooser hands over to the agent dialog; other types have a page of their own.
-            if (type === "agent") {
-              creation.close();
-              setCreatingAgent(true);
-            } else creation.leave(packageNewPath(type));
+            creation.close();
+            setCreating(true);
           }}
           onChat={creation.openChat}
         />

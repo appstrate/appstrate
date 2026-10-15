@@ -221,16 +221,6 @@ export function SettingsSkeleton({ rows = 3, className }: { rows?: number; class
   );
 }
 
-/** A form page with its header and tabs in the shell header (the package editor). */
-export function FormPageSkeleton() {
-  return (
-    <Waiting>
-      <DetailBarSkeleton tabCount={3} />
-      <SettingsSkeleton rows={4} />
-    </Waiting>
-  );
-}
-
 /** The dashboard below its greeting: the figures, recent agents, the two lists. */
 export function DashboardBodySkeleton() {
   return (

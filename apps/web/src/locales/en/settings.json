@@ -788,7 +788,7 @@
   "creation.title.integration": "Create a new integration",
   "creation.title.mcpServer": "Create a new MCP server",
   "creation.manual.title": "Create manually",
-  "creation.manual.description": "Open the existing editor and configure the resource yourself.",
+  "creation.manual.description": "Fill in the essentials in a short form, then set the rest in its settings.",
   "creation.manual.importTitle": "Import a package",
   "creation.manual.importDescription": "Upload an existing MCP server package through the current import flow.",
   "creation.chat.title": "Build with Chat",

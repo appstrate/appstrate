@@ -3,7 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   caretRange,
-  defaultEditorState,
+  defaultAgentManifest,
   defaultIntegrationManifest,
   defaultSkillManifest,
   getManifestName,
@@ -267,18 +267,17 @@ describe("getResourceEntries / setResourceEntries", () => {
   });
 });
 
-// ─── defaultEditorState ─────────────────────────────────────
+// ─── default manifests ──────────────────────────────────────
 
-describe("defaultEditorState", () => {
+describe("defaultAgentManifest", () => {
   it("returns valid manifest structure", () => {
-    const state = defaultEditorState("my-org", "user@test.com");
-    expect(state.manifest.name).toBe("@my-org/");
-    expect(state.manifest.author).toBe("user@test.com");
-    expect(state.manifest.type).toBe("agent");
-    expect(state.manifest.version).toBe("1.0.0");
-    expect(state.manifest.schema_version).toBe(AFPS_SCHEMA_VERSION);
-    expect(state.manifest.schemaVersion).toBeUndefined();
-    expect(state.operations).toEqual([{ op: "write", path: "prompt.md", text: "" }]);
+    const manifest = defaultAgentManifest("my-org", "user@test.com");
+    expect(manifest.name).toBe("@my-org/");
+    expect(manifest.author).toBe("user@test.com");
+    expect(manifest.type).toBe("agent");
+    expect(manifest.version).toBe("1.0.0");
+    expect(manifest.schema_version).toBe(AFPS_SCHEMA_VERSION);
+    expect(manifest.schemaVersion).toBeUndefined();
   });
 
   it("skill and integration defaults declare the same schema_version", () => {
@@ -287,8 +286,7 @@ describe("defaultEditorState", () => {
   });
 
   it("handles missing org slug", () => {
-    const state = defaultEditorState();
-    expect(state.manifest.name).toBe("");
+    expect(defaultAgentManifest().name).toBe("");
   });
 });
 

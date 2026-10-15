@@ -10,43 +10,25 @@ import { TextSkeleton } from "../loading-skeletons";
 import { usePackageFile } from "./use-package-file";
 
 /**
- * A text file of a package draft in Monaco. `commit` is when an edit leaves the
- * editor: `"live"` reports every keystroke (the create page, whose parent form
- * saves), `"apply"` holds the text until the Appliquer button (the modal over a
- * detail page, whose save bar saves).
+ * A text file of a package draft in Monaco. An edit leaves the editor only through the Appliquer
+ * button (the modal over a detail page, whose save bar saves).
  */
 export function PackageFileTextEditor({
   packageId,
   entry,
   path,
-  commit,
   onCommit,
-  disabled,
 }: {
   packageId: string | undefined;
   entry: PackageFileEntry;
   path: string;
-  commit: "live" | "apply";
   onCommit: (text: string) => void;
-  disabled?: boolean;
 }) {
   const { t } = useTranslation("agents");
   const { text, isLoading, isError } = usePackageFile(packageId, undefined, entry, true);
   if (isError) return <ErrorState message={t("files.errorLoad")} />;
   if (isLoading || text === undefined) return <TextSkeleton lines={8} />;
-  return commit === "live" ? (
-    <ContentEditor
-      value={text}
-      onChange={onCommit}
-      language={languageForPath(path)}
-      readOnly={disabled}
-      // The region label around the editor stops being announced the moment
-      // Monaco takes focus; inside the textarea the open file has to name itself.
-      ariaLabel={path}
-    />
-  ) : (
-    <ApplyEditor initial={text} path={path} onApply={onCommit} />
-  );
+  return <ApplyEditor initial={text} path={path} onApply={onCommit} />;
 }
 
 function ApplyEditor({

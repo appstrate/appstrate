@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
@@ -23,7 +22,6 @@ export interface MetadataState {
 interface MetadataSectionProps {
   value: MetadataState;
   onChange: (value: MetadataState) => void;
-  isEdit: boolean;
   /**
    * Editor-specific fields (e.g. the agent editor's `timeout`), rendered in
    * their own group after the common ones. Each editor binds them to its
@@ -37,13 +35,11 @@ interface MetadataSectionProps {
 export function MetadataSection({
   value,
   onChange,
-  isEdit,
   children,
   identityChildren,
 }: MetadataSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const update = (patch: Partial<MetadataState>) => onChange({ ...value, ...patch });
-  const [nameEdited, setNameEdited] = useState(isEdit);
 
   const handleKeywordInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" || e.key === ",") {
@@ -61,14 +57,6 @@ export function MetadataSection({
     update({ keywords: value.keywords.filter((k) => k !== keyword) });
   };
 
-  const handleDisplayNameChange = (v: string) => {
-    if (nameEdited) {
-      update({ displayName: v }); // canonical-casing-exempt: MetadataState TS-internal (carve-out)
-    } else {
-      update({ displayName: v, id: toSlug(v) }); // canonical-casing-exempt: MetadataState TS-internal (carve-out)
-    }
-  };
-
   return (
     <div className="flex flex-col gap-8">
       <SettingsFieldGroup title={t("editor.identity")}>
@@ -77,7 +65,7 @@ export function MetadataSection({
           label={t("editor.metaDisplayName")}
           required
           value={value.displayName}
-          onChange={handleDisplayNameChange}
+          onChange={(v) => update({ displayName: v })} // canonical-casing-exempt: MetadataState TS-internal (carve-out)
           placeholder={t("editor.metaDisplayNamePlaceholder")}
         />
         <FormField
@@ -85,13 +73,10 @@ export function MetadataSection({
           label={t("editor.metaName")}
           required
           value={value.id}
-          onChange={(v) => {
-            setNameEdited(true);
-            update({ id: toLiveSlug(v) });
-          }}
+          onChange={(v) => update({ id: toLiveSlug(v) })}
           onBlur={() => update({ id: toSlug(value.id) })}
           placeholder={t("editor.metaNamePlaceholder")}
-          description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
+          description={t("editor.metaNameEditDesc")}
         />
         <FormField
           id="meta-scope"
