@@ -11,20 +11,13 @@ import { useListParams } from "../lib/list-params";
 import { RunList } from "../components/run-list";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
-import { useListView } from "../stores/list-view-store";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 
 /**
- * The filters live in the URL, so a filtered list is a link. They also come
- * back as one closed set rather than tab strips: three dimensions drawn as
- * tabs is three rows of chrome above five rows of data.
- *
- * Each dimension takes SEVERAL values. It matters for one of them: "everything
- * that broke" is `failed` or `timeout`, one question the endpoint answers
- * in one request. The other two are narrower on the wire, and squaring that
- * with the checkboxes is THIS file's job, not the toolbar's — a tick has to
- * mean a tick on every menu.
+ * Filters live in the URL (a filtered list is a link) and each takes SEVERAL
+ * values. Kind and scope are narrower on the wire: squaring that with the
+ * checkboxes is this file's job, so a tick means a tick on every menu.
  */
 const KINDS = ["package", "inline"] as const;
 const SCOPES = ["me"] as const;
@@ -38,17 +31,15 @@ export function RunsPage() {
   const { data: unreadCount } = useUnreadCount();
   const markAllRead = useMarkAllRead();
   const list = useListParams(FILTER_PARAMS);
-  const searchPlaceholder = useSearchPlaceholder(t("runs.entity"));
+  const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
   const { can } = usePermissions();
-  // Without `runs:read-all` the list is already "mine": the scope filter would
-  // answer the same set, so it is not offered.
+  // Without `runs:read-all` the list is already "mine": no scope filter.
   const canSeeEveryRun = can("runs:read-all");
 
   const scopes = list.values("user", SCOPES);
   const kinds = list.values("kind", KINDS);
   const { statuses, filter: statusFilter } = useRunStatusFilter(list);
   const search = list.search;
-  const [view, setView] = useListView("runs");
 
   const filters: FilterSpec[] = [
     ...(canSeeEveryRun
@@ -67,18 +58,16 @@ export function RunsPage() {
       label: t("runs.filterKind"),
       values: kinds,
       options: [
-        { value: "package", label: t("runs.filterKindPackage") },
-        { value: "inline", label: t("runs.filterKindInline") },
+        { value: "package", label: t("common:nav.agents") },
+        { value: "inline", label: t("runs.inlineBadge") },
       ],
       onChange: list.setValues("kind"),
     },
     statusFilter,
   ];
 
-  // The endpoint takes ONE kind, so "both ticked" is spelled "no kind
-  // parameter" — the same rows, asked for in the only way the wire has. Same
-  // for scope, whose single box is on or off. Neither collapses the ticks
-  // themselves: what you ticked stays ticked and stays chipped.
+  // The endpoint takes ONE kind, so "both ticked" is "no kind parameter" (same
+  // for scope); the ticks themselves stay as ticked.
   const kind: RunKindFilter | undefined = kinds.length === 1 ? kinds[0] : undefined;
   const user = canSeeEveryRun && scopes.includes("me") ? "me" : undefined;
 
@@ -93,7 +82,7 @@ export function RunsPage() {
             actions={[
               {
                 id: "mark-all-read",
-                label: t("runs.markAllRead"),
+                label: t("common:notifications.markAllRead"),
                 icon: CheckCheck,
                 onSelect: () => markAllRead.mutate({}),
                 disabled: markAllRead.isPending || !unreadCount,
@@ -109,8 +98,6 @@ export function RunsPage() {
         kind={kind}
         status={statuses}
         search={search}
-        view={view}
-        tableColumnMode="scroll"
         countLabel={(total) => t("runs.count", { count: total })}
         toolbar={({ columns }) => (
           <ListToolbar
@@ -121,13 +108,10 @@ export function RunsPage() {
             }}
             filters={filters}
             onReset={list.reset}
-            columns={view === "table" ? columns : undefined}
-            view={view}
-            onViewChange={setView}
+            columns={columns}
           />
         )}
-        // A filtered list that finds nothing has NOT run out of runs — it has
-        // run out of matches, and the way out is the filter, not the agent.
+        // A filtered list that finds nothing ran out of matches: the way out is the filter.
         emptyState={
           search || filters.some((f) => f.values.length > 0) ? (
             <NoMatchState message={t("runs.emptyFiltered")} onReset={list.reset} />

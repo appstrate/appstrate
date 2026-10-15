@@ -140,8 +140,7 @@ function providersTable(
 ): string {
   return render(
     <ProvidersTable
-      label={settingsFr["providers.tableLabel"]}
-      tableId="org-providers"
+      label={settingsFr["providers.tabOrg"]}
       rows={providerRows(models, credentials, SERVICES, "usr_me")}
       showType={over.showType}
       isLoading={false}
@@ -187,7 +186,7 @@ describe("the providers table", () => {
 
   it("heads the columns Provider, Service, Models, State, and no Type nor owner", () => {
     for (const key of [
-      "providers.col.name",
+      "spaces.nameLabel",
       "providers.col.provider",
       "providers.col.models",
       "providers.col.state",

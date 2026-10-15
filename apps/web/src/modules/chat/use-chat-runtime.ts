@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * What the chat module is handed by the host, computed the same way for both
- * places that mount its UI: the conversation list in the shell's sidebar and
- * the thread in the page. Kept free of `@appstrate/module-chat/ui` so the
- * shell can call it without pulling the chat's UI into the entry chunk.
- */
+/** Host-provided chat inputs, shared by the sidebar list and the page thread. Must not import `@appstrate/module-chat/ui` (entry chunk). */
 
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
@@ -14,14 +9,9 @@ import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 
 /**
- * Scoping headers + the active UI language, so the assistant replies in the
- * language the user actually reads (the server defaults to fr without it).
- * Reads `i18n.language` at call time — the transport invokes this per request,
- * so a language switch applies to the next send.
- *
- * Persona and space are threaded through so this callback's identity moves
- * with either: the module's streams read their URL once, and would otherwise
- * keep tailing under the replaced authority or miss a space resolved late.
+ * Scoping headers + the UI language (server defaults to fr without it), read at
+ * call time. Persona and space are deps so the callback's identity moves with
+ * them: the module's streams read their URL once and would keep the old authority.
  */
 export function useChatGetHeaders() {
   const { i18n } = useTranslation("chat");

@@ -9,5 +9,5 @@ import type { DataColumn } from "./data-table";
  * lack of room, never the row's link.
  */
 export function rowActionsColumn<T>(cell: (row: T) => ReactNode): DataColumn<T> {
-  return { id: "actions", header: "", width: "48px", align: "end", control: true, cell };
+  return { id: "actions", header: "", width: 48, align: "end", control: true, cell };
 }

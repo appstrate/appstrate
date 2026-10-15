@@ -62,7 +62,7 @@ function useTypeText() {
   const { t } = useTranslation("settings");
   return (kind: ProviderKind) =>
     ({
-      "org-key": t("providers.type.orgKey"),
+      "org-key": t("modelPicker.kind.org"),
       "personal-key": t("providers.type.personalKey"),
       subscription: t("providers.type.subscription"),
       system: t("providers.type.system"),
@@ -120,8 +120,9 @@ export function useProviderColumns({
   const columns: DataColumn<ProviderRow>[] = [
     {
       id: "provider",
-      header: t("providers.col.name"),
-      width: "minmax(110px,1.7fr)",
+      header: t("spaces.nameLabel"),
+      width: 110,
+      elastic: true,
       cell: (row) => {
         const pk = row.credential;
         const Icon =
@@ -134,7 +135,7 @@ export function useProviderColumns({
               );
         const result = testResults[row.id];
         const label =
-          row.kind === "system" ? t("providers.type.system") : row.label || t("providers.col.name");
+          row.kind === "system" ? t("providers.type.system") : row.label || t("spaces.nameLabel");
         return (
           <div className="flex min-w-0 items-center gap-2">
             {Icon ? (
@@ -192,7 +193,8 @@ export function useProviderColumns({
     {
       id: "service",
       header: t("providers.col.provider"),
-      width: "minmax(90px,0.9fr)",
+      width: 90,
+      elastic: true,
       tier: 2,
       cell: (row) => {
         // The instance spans several services: its row says where its models come from.
@@ -207,7 +209,8 @@ export function useProviderColumns({
     {
       id: "models",
       header: t("providers.col.models"),
-      width: "minmax(100px,1.8fr)",
+      width: 100,
+      elastic: true,
       cell: (row) => (
         <ModelsCell
           models={row.models}
@@ -220,7 +223,8 @@ export function useProviderColumns({
       id: "state",
       header: t("providers.col.state"),
       // A badge or two: the room it does not need goes to the name and models.
-      width: "minmax(100px,0.6fr)",
+      width: 100,
+      elastic: true,
       tier: 2,
       cell: (row) => (
         <RowStateCell
@@ -338,7 +342,7 @@ export function useProviderColumns({
             },
             {
               id: "choose-models",
-              label: t("providers.chooseModels"),
+              label: t("models.choice.title"),
               icon: ListChecks,
               onSelect: () => onChooseModels?.(pk),
               hidden: !canChoose,

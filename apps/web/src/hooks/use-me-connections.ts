@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * R1 — user-scope connection mutations.
- *
- * The unified `/preferences/connections` page (backed by `useMyConnections()`)
- * lists a user's connections across every org/space they belong to. Its writes
- * go through the owner-only `/api/me/connections/{connectionId}` routes, which
- * need no org/space context.
- */
+/** User-scope connection reads and writes: owner-only `/api/me/connections/*` routes, which need no org/space context. */
 
 import { useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -18,12 +11,7 @@ import { invalidateIntegrationQueries } from "./use-integrations";
 import { useCurrentOrgId } from "./use-org";
 import { invalidateSchedules } from "./use-schedules";
 
-/**
- * Unified user-scope connection list (integration connections), grouped by
- * source package. Backs the `/preferences/connections` page. Crosses
- * orgs/spaces: no header context required (the `/api/me/*` routes are
- * deliberately org-context-free).
- */
+/** The caller's connections across every org/space, grouped by source package (no header context). */
 export function useMyConnections() {
   return $api.useQuery("get", "/api/me/connections", {}, { select: (e) => e.data });
 }
@@ -48,19 +36,12 @@ export function useConnectionDeleteImpact(connectionId: string | undefined) {
     "get",
     "/api/me/connections/{connectionId}/delete-impact",
     { params: { path: { connectionId: connectionId ?? "" } } },
-    // Never answered from cache: the user confirms on what this says, and a
-    // pick made since the last open would be missing from it.
+    // Never from cache: the user confirms on what this says.
     { gcTime: 0, enabled: !!connectionId },
   );
 }
 
-/**
- * Destructive delete of an integration connection from the user-scope page.
- *
- * `DELETE /api/me/connections/:id` is the only endpoint that deletes a
- * connection (row + cascades). It lives under `/me/*` so the action is never
- * surfaced from an agent context.
- */
+/** Destructive delete (row + cascades): the only deleting endpoint, under `/me/*` so it is never surfaced from an agent context. */
 export function useDisconnectIntegrationConnection() {
   const qc = useQueryClient();
   return useMutation({

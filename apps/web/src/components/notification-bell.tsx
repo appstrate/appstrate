@@ -5,14 +5,14 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
-import { Badge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
 import { CountBadge } from "./count-badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Sheet, SheetContent, SheetTrigger } from "@appstrate/ui/components/sheet";
 import { Separator } from "@appstrate/ui/components/separator";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { ErrorState } from "./page-states";
+import { EmptyState, ErrorState } from "./page-states";
 import {
   useUnreadCount,
   useMarkRead,
@@ -31,9 +31,6 @@ import type { paths } from "../api/client";
 type NotificationItem =
   paths["/api/notifications"]["get"]["responses"]["200"]["content"]["application/json"]["data"][number];
 
-const ITEM_CLASS =
-  "hover:bg-muted/50 group flex w-full gap-3 px-4 py-3 text-left transition-colors";
-
 /**
  * Where a notification leads, or `null` when that page is closed to the caller:
  * notifications follow the session's ceiling, not the space's run reads.
@@ -44,9 +41,7 @@ function notificationTarget(
   canReach: (path: RoutePath) => boolean,
 ): string | null {
   if (notification.type === "package_shared") {
-    // One share, one decision: open THAT package's sheet, where the alert
-    // names the space it was shared with and activates it there — not a list
-    // the reader has to search.
+    // One share, one decision: open THAT package's sheet, not a list to search.
     const share = notification.payload;
     return share && canReach("/catalogue/:reading/:type")
       ? catalogueHref(share.package_type, { packageId: share.packageId })
@@ -104,12 +99,8 @@ export function NotificationContent({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
-          <h4 className="text-sm font-semibold">{t("notifications.title")}</h4>
-          {unread > 0 && (
-            <span className="bg-spark text-spark-foreground flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium">
-              {unread}
-            </span>
-          )}
+          <h4 className="text-sm font-semibold">{t("notifications.ariaLabel")}</h4>
+          <CountBadge count={unread} label={t("notifications.ariaLabel")} tone="spark" />
         </div>
         {unread > 0 && (
           <Button
@@ -118,7 +109,7 @@ export function NotificationContent({
             className="text-muted-foreground hover:text-foreground h-auto px-2 py-1 text-xs"
             onClick={markAllRead}
           >
-            <CheckCheck size={14} className="mr-1.5" />
+            <CheckCheck className="mr-1.5" />
             {t("notifications.markAllRead")}
           </Button>
         )}
@@ -131,7 +122,7 @@ export function NotificationContent({
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex gap-3 px-4 py-3">
               <Skeleton className="mt-1.5 size-2 shrink-0 rounded-full" />
-              <div className="flex-1 space-y-2">
+              <div className="flex flex-1 flex-col gap-2">
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="h-3 w-24" />
               </div>
@@ -141,18 +132,12 @@ export function NotificationContent({
       ) : failed ? (
         <ErrorState compact />
       ) : notifications.length === 0 ? (
-        <div className="flex flex-col items-center justify-center px-4 py-10">
-          <Bell size={32} className="text-muted-foreground/30 mb-3" />
-          <p className="text-muted-foreground text-sm">{t("notifications.empty")}</p>
-        </div>
+        <EmptyState compact icon={Bell} message={t("notifications.empty")} />
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
             const packageId = payloadString(notification.payload, "packageId");
-            // A SHARE names the sharer and the package and has no run behind
-            // it, so it carries no status to badge — reading every row as a
-            // finished run titled it "Agent supprimé", the fallback for a run
-            // whose agent is gone.
+            // A SHARE has no run behind it, so no status: read as a run it was titled "Agent supprimé".
             const shared = notification.type === "package_shared";
             const status = shared ? null : payloadString(notification.payload, "status");
             const displayName = shared
@@ -174,7 +159,7 @@ export function NotificationContent({
                     ) : (
                       <span className="truncate text-sm font-medium">{displayName}</span>
                     )}
-                    {status && <Badge status={status} />}
+                    {status && <RunStatusBadge status={status} />}
                   </div>
                   <p className="text-muted-foreground text-xs">
                     {formatDateField(notification.createdAt)}
@@ -182,25 +167,17 @@ export function NotificationContent({
                 </div>
               </>
             );
+            const row = {
+              onClick: () => onItemClick(notification.id),
+              className:
+                "hover:bg-muted/50 flex w-full gap-3 px-4 py-3 text-left transition-colors",
+              children: body,
+            };
             // Nowhere to go: clicking still marks it read.
             return target ? (
-              <Link
-                key={notification.id}
-                to={target}
-                onClick={() => onItemClick(notification.id)}
-                className={ITEM_CLASS}
-              >
-                {body}
-              </Link>
+              <Link key={notification.id} to={target} {...row} />
             ) : (
-              <button
-                key={notification.id}
-                type="button"
-                onClick={() => onItemClick(notification.id)}
-                className={ITEM_CLASS}
-              >
-                {body}
-              </button>
+              <button key={notification.id} type="button" {...row} />
             );
           })}
         </div>

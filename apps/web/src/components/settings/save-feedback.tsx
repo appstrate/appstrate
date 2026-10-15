@@ -5,13 +5,7 @@ import { Check } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "@appstrate/ui/components/spinner";
 
-/**
- * What a self-saving setting says about its write: Enregistrement… / Enregistré /
- * Erreur d'enregistrement. The one return of a write in the product: the control
- * is the setting, this line sits with it (a `SettingRow`'s `status`, or the foot
- * of a section whose controls share one write). A failure is toasted too, the
- * field keeps what was typed. The line keeps its height so the page never jumps.
- */
+/** Saving / saved / error line of a self-saving setting. Keeps its height so the page never jumps. */
 export function SaveFeedback({
   pending,
   success,

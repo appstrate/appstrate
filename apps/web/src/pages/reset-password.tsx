@@ -62,7 +62,7 @@ export function ResetPasswordPage() {
           title={t("resetPassword.successTitle")}
           description={t("resetPassword.successDescription")}
           backTo="/login"
-          backLabel={t("resetPassword.backToLogin")}
+          backLabel={t("magicLink.backToLogin")}
         />
       </AuthLayout>
     );
@@ -92,7 +92,7 @@ export function ResetPasswordPage() {
           </Button>
         </form>
         <AuthLink to="/login" className="text-center">
-          {t("resetPassword.backToLogin")}
+          {t("magicLink.backToLogin")}
         </AuthLink>
       </div>
     </AuthLayout>

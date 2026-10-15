@@ -7,11 +7,11 @@ import { columnMenu, isIdentityColumn, visibleColumns } from "../column-visibili
 type Row = { id: string };
 const cell = () => null;
 const columns: DataColumn<Row>[] = [
-  { id: "select", header: "", width: "40px", control: true, cell },
-  { id: "name", header: "Nom", width: "minmax(120px,1fr)", cell },
-  { id: "status", header: "Statut", width: "96px", tier: 2, cell },
-  { id: "role", header: "Rôle", width: "120px", control: true, cell },
-  { id: "actions", header: "", width: "80px", align: "end", cell },
+  { id: "select", header: "", width: 40, control: true, cell },
+  { id: "name", header: "Nom", width: 120, elastic: true, cell },
+  { id: "status", header: "Statut", width: 96, tier: 2, cell },
+  { id: "role", header: "Rôle", width: 120, control: true, cell },
+  { id: "actions", header: "", width: 80, align: "end", cell },
 ];
 const ids = (list: DataColumn<Row>[]) => list.map((column) => column.id);
 

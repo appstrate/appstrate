@@ -1,21 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The settings row, in the three shapes the control itself calls for.
- *
- * One shape for every setting in the product, so the answer to "how do I change
- * this" never has to be learned twice. The rule it encodes: **the control IS
- * the setting**. A field you can type in, a dropdown you can open, a toggle you
- * can flip — never a value with an Edit button beside it, which puts two clicks
- * and a mode change between the user and a one-word change.
- *
- * Fields follow their explanation and take a readable line of their own.
- * Toggles sit beside their label. Actions stay opposite their explanation.
- *
- * A setting whose explanation is documentation rather than a decision keeps a
- * one-line description and folds the rest behind "Voir les détails" (`details`):
- * the row reads like every other one, and the depth is one click away. What
- * must be seen to act (a reason the control is disabled) stays in `description`.
+ * The settings row, in three shapes (field / toggle / action). The control IS the setting:
+ * never a value with an Edit button beside it.
+ * Documentation-like explanation goes in `details` (folded); what must be seen to act
+ * (e.g. why the control is disabled) stays in `description`.
  */
 import { useId, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -33,9 +22,7 @@ export function SettingValue({ label, children }: { label: ReactNode; children: 
   return (
     <div className="pb-8 last:pb-0">
       <dt className="text-sm font-medium">{label}</dt>
-      <dd className="text-muted-foreground mt-1 space-y-2 text-sm leading-relaxed break-words">
-        {children}
-      </dd>
+      <dd className="text-muted-foreground mt-1 text-sm leading-relaxed break-words">{children}</dd>
     </div>
   );
 }
@@ -71,10 +58,7 @@ export function SettingRow({
   description?: ReactNode;
   /** The long explanation, folded under the description behind "Voir les détails". */
   details?: ReactNode;
-  /**
-   * The control. Its kind decides the row's shape. A function receives the label's id,
-   * for a control the label does not name by itself (`aria-labelledby` on a select).
-   */
+  /** A function receives the label's id, for controls the label does not name (select `aria-labelledby`). */
   children: ReactNode | ((labelId: string) => ReactNode);
   /** What the write says about itself: a `SaveFeedback`, under a field, beside a toggle or an action. */
   status?: ReactNode;

@@ -119,7 +119,7 @@ export function LoginForm({
           <PasswordField
             register={register}
             name="password"
-            label={t("login.password")}
+            label={t("common:claim.passwordLabel")}
             invalid={showError("password")}
             error={errors.password?.message}
             autoComplete="current-password"
@@ -160,7 +160,7 @@ export function LoginForm({
                   type="button"
                   onClick={() => navigate("/magic-link", { state: { email: getValues("email") } })}
                 >
-                  <Mail className="h-4 w-4" />
+                  <Mail />
                   {t("login.magicLink")}
                 </Button>
               )}

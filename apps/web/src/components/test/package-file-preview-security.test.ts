@@ -99,7 +99,7 @@ const callerSources = await Promise.all(CALLERS.map(async (c) => code(await read
 
 describe("package file preview security", () => {
   it("renders author-controlled bytes as Monaco source", () => {
-    expect(previewSource).toContain("<MonacoEditor");
+    expect(previewSource).toContain("<CodeEditor");
     for (const sink of [
       "dangerouslySetInnerHTML",
       "<iframe",

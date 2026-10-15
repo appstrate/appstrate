@@ -49,20 +49,23 @@ export function useInvitationColumns({
     {
       id: "email",
       header: t("orgSettings.emailColumn"),
-      width: "minmax(120px,1.4fr)",
+      width: 120,
+      elastic: true,
       cell: (invitation) => <CellText strong>{invitation.email}</CellText>,
     },
     {
       id: "role",
       header: t("orgSettings.roleColumn"),
-      width: "minmax(100px,1fr)",
+      width: 100,
+      elastic: true,
       tier: 2,
       cell: (invitation) => <CellText>{t(roleI18nKey(invitation.role))}</CellText>,
     },
     {
       id: "spaces",
       header: t("orgSettings.inviteSpacesLabel"),
-      width: "minmax(80px,1.3fr)",
+      width: 80,
+      elastic: true,
       tier: 2,
       cell: (invitation) =>
         assignmentsLoading ? (
@@ -74,7 +77,7 @@ export function useInvitationColumns({
     {
       id: "expires",
       header: t("orgSettings.expiresColumn"),
-      width: "92px",
+      width: 92,
       align: "end",
       tier: 2,
       cell: (invitation) => <CellDate value={invitation.expiresAt} granularity="date" />,

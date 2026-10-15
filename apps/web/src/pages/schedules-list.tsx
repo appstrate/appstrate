@@ -11,15 +11,11 @@ import { PageHeader } from "../components/page-header";
 import { EmptyState, EmptyStateAction, ErrorState, NoMatchState } from "../components/page-states";
 import { SchedulesTable } from "../components/schedules-table";
 import { useScheduleColumns } from "../components/schedule-columns";
-import { ScheduleCard } from "../components/schedule-card";
-import { CardGrid } from "../components/card-grid";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
 import { matchesSearch } from "../lib/strings";
-import { useListView } from "../stores/list-view-store";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
 import { useModalParam } from "../hooks/use-modal-param";
@@ -36,8 +32,7 @@ export function SchedulesListPage() {
   const agentsQuery = useAgents();
   const { data: agents } = agentsQuery;
   const agentsPending = isQueryInFlight(agentsQuery);
-  const placeholder = useSearchPlaceholder(t("schedules.title"));
-  const [view, setView] = useListView("schedules");
+  const placeholder = useSearchPlaceholder(t("common:nav.schedules"));
 
   const createAction: MenuAction = {
     id: "create",
@@ -60,8 +55,7 @@ export function SchedulesListPage() {
     agentName: (schedule) => agentName(schedule.packageId),
     agentPending: agentsPending,
   });
-  const visibility = useColumnVisibility("schedules");
-  const columns = visibleColumns(allColumns, visibility.hidden);
+  const { columns, menu } = useColumnVisibility("schedules", allColumns);
 
   // Client-side, and honestly so: `GET /api/schedules` returns the list whole,
   // with no paging and no query parameters, so the box searches every schedule
@@ -99,9 +93,9 @@ export function SchedulesListPage() {
   return (
     <div>
       <PageHeader
-        title={t("schedules.title")}
+        title={t("common:nav.schedules")}
         variant="collection"
-        breadcrumbs={[{ label: t("schedules.title") }]}
+        breadcrumbs={[{ label: t("common:nav.schedules") }]}
         actions={can("schedules:write") ? <PageActionsMenu actions={[createAction]} /> : undefined}
       />
 
@@ -110,7 +104,7 @@ export function SchedulesListPage() {
         filters={[
           {
             id: "state",
-            label: t("schedules.column.state"),
+            label: t("providers.col.state"),
             values: states,
             onChange: list.setValues("state"),
             options: [
@@ -120,39 +114,19 @@ export function SchedulesListPage() {
           },
         ]}
         onReset={list.reset}
-        columns={view === "table" ? columnMenu(allColumns, visibility) : undefined}
-        view={view}
-        onViewChange={setView}
+        columns={menu}
       />
 
-      {view === "table" ? (
-        <SchedulesTable
-          schedules={shown}
-          columns={columns}
-          isLoading={isLoading}
-          isError={isError}
-          error={<ErrorState error={error} compact />}
-          // A list nobody filtered and a filter that matched nothing are two
-          // different sentences. The bar stays in either case.
-          empty={emptyBody}
-        />
-      ) : (
-        <CardGrid
-          items={shown}
-          itemKey={(schedule) => schedule.id}
-          renderCard={(schedule) => (
-            <ScheduleCard
-              schedule={schedule}
-              agentName={agentName(schedule.packageId)}
-              agentPending={agentsPending}
-            />
-          )}
-          isLoading={isLoading}
-          isError={isError}
-          error={<ErrorState error={error} compact />}
-          empty={emptyBody}
-        />
-      )}
+      <SchedulesTable
+        schedules={shown}
+        columns={columns}
+        isLoading={isLoading}
+        isError={isError}
+        error={<ErrorState error={error} compact />}
+        // A list nobody filtered and a filter that matched nothing are two
+        // different sentences. The bar stays in either case.
+        empty={emptyBody}
+      />
       <ListFooter
         count={isLoading || isError ? undefined : t("schedules.count", { count: shown.length })}
       />

@@ -24,7 +24,9 @@ export function OverlayFrame() {
   const close = useCloseOverlay();
   const content = useRef<HTMLDivElement>(null);
   // Announced by assistive technology from the first frame, skeleton included.
-  const title = isUnder(pathname, "/catalogue") ? t("catalogue.title") : t("unifiedSettings.title");
+  const title = isUnder(pathname, "/catalogue")
+    ? t("common:nav.catalogue")
+    : t("common:nav.settings");
 
   return (
     <Dialog open onOpenChange={(open) => !open && close()}>

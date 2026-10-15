@@ -1,17 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A modal's open state, kept in the URL.
- *
- * A modal has an address: support can say "open this", a reload lands on it,
- * and Back closes it. Opening pushes an entry and closing goes back over it, so
- * Back after a close does not reopen it; a modal the address opened (a pasted
- * link, a reload) has no entry of its own to go back over, so its close
- * replaces. The hash rides along: it holds the tab the modal was opened from.
- *
- * Going back is a popstate, which lands after every navigation made in the
- * same tick: a modal whose act takes the user elsewhere (the copy a fork made)
- * leaves for it (`leave`) instead of closing and then navigating.
+ * A modal's open state, kept in the URL. Opening pushes an entry and closing goes back over it,
+ * so Back after a close does not reopen it; a modal the address opened (pasted link, reload) has
+ * no entry to go back over, so its close replaces. The hash rides along (it holds the tab).
+ * Going back is a popstate landing after every same-tick navigation: a modal whose act takes the
+ * user elsewhere uses `leave` instead of closing and then navigating.
  */
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -41,11 +35,7 @@ function withOpener(state: unknown, name: string | undefined): unknown {
   return name === undefined ? rest : { ...rest, [OPENED_BY]: name };
 }
 
-/**
- * The state of an entry that opens modal `name` on another address: pushed
- * with it, the modal's close goes back over it, the way Back does, instead of
- * replacing it with the address underneath.
- */
+/** The state of an entry that opens modal `name` on another address: the modal's close goes back over it instead of replacing it. */
 export function modalOpeningState(state: unknown, name: string): unknown {
   return withOpener(state, name);
 }
@@ -90,12 +80,9 @@ export function modalParamStep(
 }
 
 /**
- * Lets each history entry issue one close. Going back is a popstate that lands
- * after the render that asked for it, so that render still reads the entry the
- * modal was open on: a second close from it (an Apply that renames its target,
- * then the unknown-target drop of the old name) would go back one entry too far.
- * `release` runs once the location moves, so an entry reached again (Forward)
- * closes again.
+ * Lets each history entry issue one close. Going back is a popstate landing after the asking
+ * render, which still reads the open entry: a second close from it would go back one entry too
+ * far. `release` runs once the location moves, so a re-reached entry (Forward) closes again.
  */
 export function closeOncePerEntry(): {
   take: (entryKey: string) => boolean;
@@ -128,12 +115,9 @@ interface ModalNavigation {
 }
 
 /**
- * The navigations that leave modal `name` for `to`, carrying `state`. The
- * destination takes the modal's entry, so Back from it lands on the page under
- * the modal, closed. A modal the address opened has no such page behind it:
- * its entry is closed in place and the destination pushed over it. When the
- * modal is not open, the destination replaces the current entry. The
- * destination never carries the modal's parameter.
+ * The navigations that leave modal `name` for `to`. The destination takes the modal's entry, so
+ * Back lands on the page under it, closed; a modal the address opened has no such page, so its
+ * entry is closed in place and the destination pushed. The destination never carries the modal's parameter.
  */
 export function modalLeaveSteps(
   current: { pathname: string; search: string; hash: string; state: unknown },
@@ -165,10 +149,7 @@ export function useModalParam(name: string, companions: readonly string[] = NO_C
   const [params] = useSearchParams();
   const [closeGuard] = useState(closeOncePerEntry);
   useEffect(() => closeGuard.release(), [closeGuard, location.key]);
-  // `setSearchParams` drops the hash, and a detail page's tab lives in it
-  // (`#settings`): a modal opened from a tab would close the tab under it.
-  // The callbacks change only with the location, so they can ride in memoized
-  // props.
+  // `setSearchParams` drops the hash, where a detail page's tab lives: navigate explicitly instead.
   const set = useCallback(
     (next: string | null, closing?: string) => {
       if (next === null && !closeGuard.take(location.key)) return;

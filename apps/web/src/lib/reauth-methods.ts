@@ -3,16 +3,9 @@
 export type ReauthMethod = { kind: "social"; provider: "google" | "github" } | { kind: "password" };
 
 /**
- * Decide which re-authentication methods to offer for a step-up re-login,
- * given the accounts linked to the user and which social providers the
- * instance has enabled.
- *
- * - `credential` linked → password (always offered first: no redirect, retry
- *   can happen inline).
- * - `google`/`github` linked **and** the matching feature flag on → social.
- * - `undefined`/empty accounts → `[]` (defensive; the modal then shows the
- *   generic "log back in" fallback).
- * - unknown providers are ignored.
+ * Which re-authentication methods to offer for a step-up re-login. Password
+ * (`credential`) comes first: no redirect, retry inline. Social needs the provider
+ * linked AND its feature flag on. No accounts → `[]` (the modal shows its generic fallback).
  */
 export function availableReauthMethods(
   accounts: Array<{ providerId: string }> | undefined,

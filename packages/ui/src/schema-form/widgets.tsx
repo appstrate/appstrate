@@ -1,14 +1,15 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-// Custom RJSF widgets — framework-agnostic (no shadcn/radix deps).
-// Single- and multi-selects both use react-select so we get a rich,
+// Custom RJSF widgets. Single- and multi-selects both use react-select so we get a rich,
 // consistent dropdown in every Appstrate surface.
 
 import { deepEquals, type WidgetProps } from "@rjsf/utils";
 import Select, { type StylesConfig } from "react-select";
 import { cn } from "../cn.ts";
-import { LABEL_CLASS } from "./primitives.tsx";
+import { Checkbox } from "../components/checkbox.tsx";
+import { Label } from "../components/label.tsx";
+import { Textarea } from "../components/textarea.tsx";
 import type { SchemaFormContext } from "./context.ts";
 export { FileWidget } from "./file-widget.tsx";
 
@@ -44,7 +45,7 @@ const selectStyles: StylesConfig<EnumOption> = {
 export function TextareaWidget(props: WidgetProps) {
   const { id, value, onChange, required, readonly, disabled, placeholder, rawErrors } = props;
   return (
-    <textarea
+    <Textarea
       id={id}
       value={(value as string | undefined) ?? ""}
       required={required}
@@ -52,10 +53,7 @@ export function TextareaWidget(props: WidgetProps) {
       disabled={disabled}
       placeholder={placeholder}
       rows={5}
-      className={cn(
-        "border-input placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-[60px] w-full rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
-        rawErrors && rawErrors.length > 0 && "border-destructive",
-      )}
+      className={cn(rawErrors && rawErrors.length > 0 && "border-destructive")}
       onChange={(e) => onChange(e.target.value === "" ? undefined : e.target.value)}
     />
   );
@@ -65,19 +63,17 @@ export function CheckboxWidget(props: WidgetProps) {
   const { id, value, onChange, required, disabled, label } = props;
   return (
     <div className="flex items-center gap-2">
-      <input
-        type="checkbox"
+      <Checkbox
         id={id}
         checked={Boolean(value)}
         disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-        className="border-primary text-primary focus-visible:ring-ring h-4 w-4 shrink-0 rounded-sm border shadow focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        onCheckedChange={(checked) => onChange(checked === true)}
       />
       {label && (
-        <label htmlFor={id} className={cn(LABEL_CLASS, "cursor-pointer font-normal")}>
+        <Label htmlFor={id} className="cursor-pointer font-normal">
           {label}
           {required && " *"}
-        </label>
+        </Label>
       )}
     </div>
   );

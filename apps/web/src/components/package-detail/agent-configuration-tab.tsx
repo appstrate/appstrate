@@ -80,15 +80,9 @@ function InputSettingsSection({
   const upload = useUploadClient();
   const [values, setValues] = useState<Record<string, unknown>>(initialValues);
   const [locked, setLocked] = useState<string[]>(initialLocked);
-  const [hasEdited, setHasEdited] = useState(false);
 
   const settings = useMemo(() => ({ values, locked_fields: locked }), [values, locked]);
-  useSaveAfterPause(
-    settings,
-    hasEdited && !isHistorical,
-    (next) => mutation.mutate(next),
-    () => setHasEdited(false),
-  );
+  const markEdited = useSaveAfterPause(settings, (next) => mutation.mutate(next), !isHistorical);
 
   const defaults = authorDefaults(wrapper.schema);
   const keys = getOrderedKeys(wrapper.schema, wrapper.property_order);
@@ -100,20 +94,20 @@ function InputSettingsSection({
       else out[key] = next;
       return out;
     });
-    setHasEdited(true);
+    markEdited();
   };
 
   const toggleLock = (key: string, on: boolean) => {
     setLocked((prev) => (on ? [...prev, key] : prev.filter((k) => k !== key)));
-    setHasEdited(true);
+    markEdited();
   };
 
   return (
-    <div className="space-y-3 py-4">
+    <div className="flex flex-col gap-3 py-4">
       {showDescription && (
         <p className="text-muted-foreground text-sm">{t("detail.inputSettings.hint")}</p>
       )}
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         {keys.map((key) => (
           <InputSettingRow
             key={key}
@@ -362,7 +356,7 @@ function ProxySection({ packageId }: { packageId: string }) {
               <SelectItem value="__inherit__">
                 {orgDefaultProxy
                   ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
-                  : t("proxies.agent.inheritNoDefault", { ns: "settings" })}
+                  : t("models.default", { ns: "settings" })}
               </SelectItem>
               <SelectItem value="none">{t("proxies.agent.none", { ns: "settings" })}</SelectItem>
             </>
@@ -409,7 +403,7 @@ export function AgentConfigurationTab({
   // settings belong to the installation, not to the frozen bundle.
   if (isHistorical) {
     return (
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         <p className="text-muted-foreground text-sm">
           {t("detail.configuration.historicalDefaultsUnavailable")}
         </p>

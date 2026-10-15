@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Puzzle } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -17,8 +17,6 @@ import { ActivateIntegrationButton } from "../activate-integration-button";
 import { ApiError } from "../../api/errors";
 import { errorMessage } from "../../lib/mutation-error";
 import type { ConnectionSet } from "../../lib/connection-set";
-import { useLocalListParams } from "../../lib/list-params";
-import { matchesSearch } from "../../lib/strings";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import {
   describeResolution,
@@ -27,8 +25,6 @@ import {
   UNBOUND_LABEL_KEYS,
 } from "../integration-connect/integration-run-readiness";
 import { AMBER_TEXT } from "../integration-connect/connection-picker-states";
-import { DataTable, type DataColumn } from "../data-table";
-import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 interface AgentIntegrationsBlockProps {
@@ -36,13 +32,7 @@ interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
   /** The agent whose resolution each row reads and whose member pin its picker writes. */
   agentPackageId: string;
-  /**
-   * The table for a schedule rather than the agent: "Compte utilisé" picks the
-   * connections frozen on the schedule (`connection_overrides`, the launch
-   * layer of every fire) instead of the member's pin, against the version the
-   * schedule fires. The agent's readiness column says nothing of a schedule,
-   * so it goes.
-   */
+  /** The rows for a schedule: "Compte utilisé" picks the connections frozen on it (`connection_overrides`) instead of the member's pin, and the readiness column goes. */
   scheduleOverrides?: ScheduleOverrides;
 }
 
@@ -63,24 +53,26 @@ interface DetailState {
 /** 404: the integration is not placed in this space, which is what activating it fixes. */
 const isNotPlaced = (error: unknown) => error instanceof ApiError && error.status === 404;
 
+const TRACKS = "md:grid-cols-[minmax(160px,1.2fr)_minmax(120px,0.8fr)_minmax(200px,1.4fr)]";
+const TRACKS_WITH_STATUS =
+  "md:grid-cols-[minmax(160px,1.2fr)_minmax(120px,0.8fr)_minmax(200px,1.4fr)_130px]";
+
+/** A row's cell: its column name heads it on a phone, and is read out beside it everywhere else. */
+function Cell({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <span className="text-muted-foreground mb-1 block text-xs md:sr-only">{label}</span>
+      {children}
+    </div>
+  );
+}
+
 /**
- * Connection-status table for every integration declared in the agent
- * manifest. An active integration's row renders the per-integration
- * connection picker — list, pick, disambiguate, connect, reconnect,
- * add-another — driven by the server-authoritative
- * `IntegrationAgentResolution`, selected from the bulk
- * `GET /api/agents/:scope/:name/connection-readiness` query — the same verdict
- * the launch-button readiness badge and the run-kickoff 409 consume, so the
- * three can never disagree.
- *
- * The picker renders for EVERY declared integration, independent of whether the
- * agent selected tools/scopes: connection management applies even to an inert
- * integration. Whether an integration BLOCKS the run (run semantics) is the
- * server's `run_blocking` flag on the same bulk query, not a client predicate.
- *
- * Whether an integration is active comes from its own detail, never from the
- * paginated list. A dependency binds 0..N connections and only a `required`
- * one refuses the run: an unbound optional one says why the run starts without it.
+ * Connection status for every declared integration, driven by the server's
+ * `IntegrationAgentResolution` from the bulk `connection-readiness` query (the same verdict as the
+ * launch badge and the run-kickoff 409). The picker shows for every integration, even inert ones;
+ * whether one BLOCKS the run is the server's `run_blocking` flag. Activity comes from the
+ * integration's own detail, never the paginated list.
  */
 export function AgentIntegrationsBlock({
   entries,
@@ -88,120 +80,64 @@ export function AgentIntegrationsBlock({
   scheduleOverrides,
 }: AgentIntegrationsBlockProps) {
   const { t } = useTranslation(["agents", "settings"]);
-  const list = useLocalListParams();
-  const states = list.values("activation", ["active", "inactive"] as const);
   const details = useIntegrationDetails(entries.map((entry) => entry.id));
-
-  const rows = entries
-    .map((entry, index) => {
-      const query = details[index]!;
-      const state: DetailState = {
-        detail: query.data,
-        isLoading: query.isLoading,
-        error: query.error,
-      };
-      return {
-        entry,
-        state,
-        displayName: state.detail?.manifest.display_name ?? entry.id,
-        // Optimistic while the detail loads so the table does not flash an inactive state.
-        spaceActive: state.detail ? state.detail.active : !isNotPlaced(state.error),
-      };
-    })
-    .filter((row) => {
-      const state = row.spaceActive ? "active" : "inactive";
-      const matchesState = states.length === 0 || states.includes(state);
-      return matchesState && matchesSearch(list.search, [row.entry.id, row.displayName]);
-    });
-  type Row = (typeof rows)[number];
-  const columns: DataColumn<Row>[] = [
-    {
-      id: "integration",
-      header: t("detail.connectionsTable.integration"),
-      width: "minmax(160px,1.2fr)",
-      cell: ({ entry, displayName }) => (
-        <IntegrationIdentityCell
-          packageId={entry.id}
-          displayName={displayName}
-          required={entry.required === true}
-        />
-      ),
-    },
-    {
-      id: "access",
-      header: t("detail.connectionsTable.access"),
-      width: "minmax(120px,0.8fr)",
-      cell: ({ state }) => <IntegrationAccessCell state={state} />,
-    },
-    {
-      id: "account",
-      header: t("detail.connectionsTable.account"),
-      width: "minmax(200px,1.4fr)",
-      // The connection picker.
-      control: true,
-      cell: ({ entry, state }) => (
-        <IntegrationConnectionCell
-          entry={entry}
-          state={state}
-          agentPackageId={agentPackageId}
-          {...(scheduleOverrides ? { scheduleOverrides } : {})}
-        />
-      ),
-    },
-  ];
-  if (!scheduleOverrides)
-    columns.push({
-      id: "status",
-      header: t("detail.connectionsTable.status"),
-      width: "130px",
-      cell: ({ entry, spaceActive }) => (
-        <IntegrationStatusCell
-          packageId={entry.id}
-          spaceActive={spaceActive}
-          agentPackageId={agentPackageId}
-        />
-      ),
-    });
-  const filters: FilterSpec[] = [
-    {
-      id: "activation",
-      label: t("detail.connectionsTable.filterActivation"),
-      values: states,
-      options: [
-        { value: "active", label: t("detail.connectionsTable.active") },
-        { value: "inactive", label: t("detail.connectionsTable.inactive") },
-      ],
-      onChange: list.setValues("activation"),
-    },
-  ];
+  const tracks = scheduleOverrides ? TRACKS : TRACKS_WITH_STATUS;
+  const rowClass = cn("flex flex-col gap-3 px-3 py-3 md:grid md:items-center md:gap-4", tracks);
 
   return (
-    <>
-      <ListToolbar
-        placement="panel"
-        search={{
-          value: list.search,
-          onChange: list.setSearch,
-          placeholder: t("detail.connectionsTable.search"),
-        }}
-        filters={filters}
-        onReset={list.reset}
-      />
-      <DataTable
-        tableId="agent-connections"
-        label={t("detail.connectionsTable.label")}
-        columns={columns}
-        columnMode="scroll"
-        surface="integrated"
-        rows={rows}
-        rowKey={({ entry }) => entry.id}
-        empty={
-          <p className="text-muted-foreground px-3 py-6 text-sm">
-            {t("detail.connectionsTable.noMatch")}
-          </p>
-        }
-      />
-    </>
+    <ul aria-label={t("detail.connectionsTable.label")} className="divide-y rounded-lg border">
+      <li
+        aria-hidden
+        className={cn(
+          "text-muted-foreground hidden gap-4 px-3 py-2 text-xs font-medium md:grid",
+          tracks,
+        )}
+      >
+        <span>{t("detail.connectionsTable.integration")}</span>
+        <span>{t("detail.connectionsTable.access")}</span>
+        <span>{t("detail.connectionsTable.account")}</span>
+        {!scheduleOverrides && <span>{t("detail.connectionsTable.status")}</span>}
+      </li>
+      {entries.map((entry, index) => {
+        const query = details[index]!;
+        const state: DetailState = {
+          detail: query.data,
+          isLoading: query.isLoading,
+          error: query.error,
+        };
+        // Optimistic while the detail loads so the status does not flash inactive.
+        const spaceActive = state.detail ? state.detail.active : !isNotPlaced(state.error);
+        return (
+          <li key={entry.id} className={rowClass}>
+            <IntegrationIdentityCell
+              packageId={entry.id}
+              displayName={state.detail?.manifest.display_name ?? entry.id}
+              required={entry.required === true}
+            />
+            <Cell label={t("detail.connectionsTable.access")}>
+              <IntegrationAccessCell state={state} />
+            </Cell>
+            <Cell label={t("detail.connectionsTable.account")}>
+              <IntegrationConnectionCell
+                entry={entry}
+                state={state}
+                agentPackageId={agentPackageId}
+                scheduleOverrides={scheduleOverrides}
+              />
+            </Cell>
+            {!scheduleOverrides && (
+              <Cell label={t("detail.connectionsTable.status")}>
+                <IntegrationStatusCell
+                  packageId={entry.id}
+                  spaceActive={spaceActive}
+                  agentPackageId={agentPackageId}
+                />
+              </Cell>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -234,9 +170,7 @@ function IntegrationConnectionCell({
     );
   }
 
-  // Not active in this space (the integration's own detail says so) → no
-  // connection is possible. Show a disabled, explanatory control rather than a
-  // picker the run-time gate would reject with `integration_not_active`.
+  // Not active here: a disabled, explanatory control rather than a picker the run gate would reject.
   if (!detail.active) return <InactiveIntegration packageId={packageId} required={required} />;
 
   if (scheduleOverrides) {
@@ -257,11 +191,7 @@ function IntegrationConnectionCell({
   return <ManagedIntegration entry={entry} agentPackageId={agentPackageId} />;
 }
 
-/**
- * Connection-management surface for an active integration on the agent. Split
- * from the parent so its reads (resolution + consuming agents) run only once
- * the parent's loading / not-active guards have passed — when the picker renders.
- */
+/** Split from the parent so its reads run only once the loading / not-active guards have passed. */
 function ManagedIntegration({
   entry: integration,
   agentPackageId,
@@ -281,9 +211,7 @@ function ManagedIntegration({
     return <InactiveIntegration packageId={packageId} required={false} />;
   }
 
-  // Reuse hint: the resolved connections serve every agent of the space that
-  // consumes this integration — one connection, not one per agent. Only when
-  // resolved: a blocking state is the picker's warning, not a reassuring line.
+  // Reuse hint, only when resolved: a blocking state is the picker's warning, not a reassuring line.
   const resolvedConnections =
     resolution?.resolved_connection_ids
       .map((id) => resolution.candidates.find((c) => c.id === id))
@@ -327,10 +255,6 @@ function InactiveIntegration({ packageId, required }: { packageId: string; requi
       >
         {t(required ? "detail.integrationInactive" : UNBOUND_LABEL_KEYS.integration_not_active)}
       </span>
-      {/* The sentence asks for an activation, so the button performing it
-          sits beside it. Somebody the route
-          would refuse gets the button DEAD with the reason on it, rather
-          than a click that ends in a toast. */}
       <ActivateIntegrationButton packageId={packageId} />
     </span>
   );
@@ -341,8 +265,6 @@ function buildReuseInfo(
   agentCount: number,
   t: (k: string, opts?: Record<string, unknown>) => string,
 ): string {
-  // `label` is the connection's display name (identity or "Connexion N"),
-  // always set at creation.
   const account = connections.map((c) => c.label).join(" · ");
   if (agentCount <= 1) {
     return t("detail.integrationReuseSingle", { account, count: connections.length });
@@ -418,16 +340,16 @@ function IntegrationStatusCell({
   const { t } = useTranslation("agents");
   const { data: entry, isPending } = useIntegrationReadinessEntry(packageId, agentPackageId);
   if (!spaceActive) {
-    return <ToneBadge variant="pending">{t("detail.connectionsTable.inactive")}</ToneBadge>;
+    return <Badge variant="pending">{t("detail.connectionsTable.inactive")}</Badge>;
   }
   if (isPending || !entry) {
-    return <ToneBadge variant="pending">{t("detail.connectionsTable.checking")}</ToneBadge>;
+    return <Badge variant="pending">{t("detail.connectionsTable.checking")}</Badge>;
   }
   if (describeResolution(entry.resolution).resolved) {
-    return <ToneBadge variant="success">{t("detail.connectionsTable.ready")}</ToneBadge>;
+    return <Badge variant="success">{t("detail.connectionsTable.ready")}</Badge>;
   }
   return entry.run_blocking ? (
-    <ToneBadge variant="warning">{t("detail.connectionsTable.required")}</ToneBadge>
+    <Badge variant="warning">{t("detail.connectionsTable.required")}</Badge>
   ) : (
     <Badge variant="secondary">{t("detail.connectionsTable.unbound")}</Badge>
   );

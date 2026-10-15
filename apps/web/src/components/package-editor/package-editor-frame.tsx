@@ -23,7 +23,7 @@ import { UnsavedChangesModal } from "../unsaved-changes-modal";
 import { packageListPath } from "../../lib/package-paths";
 import type { PackageEditor, PackageEditorTab } from "./use-package-editor";
 
-/** Every type is edited embedded, in its Package AFPS; these three are also created on a page. */
+/** Every type is edited in its Package AFPS; these three are also created on a page. */
 export type EditablePackageType = "agent" | "skill" | "integration" | "mcp-server";
 type CreatablePackageType = Exclude<EditablePackageType, "mcp-server">;
 
@@ -38,7 +38,7 @@ const createPages: Record<
   CreatablePackageType,
   { title: string; list: { key: string; ns?: string } }
 > = {
-  agent: { title: "editor.breadcrumbNew", list: { key: "detail.breadcrumb" } },
+  agent: { title: "list.create", list: { key: "detail.breadcrumb" } },
   skill: {
     title: "editor.breadcrumbNewSkill",
     list: { key: "packages.type.skills", ns: "settings" },
@@ -49,13 +49,7 @@ const createPages: Record<
   },
 };
 
-/**
- * What every package editor draws around its own sections: the page (header,
- * tabs, Create bar) to create or, embedded in a package's Définition, only the
- * open section and the save bar (the settings rail already lists the sections);
- * the raw manifest (opened from `manifest.json` embedded, a tab on the page),
- * the files tab of the page, and the unsaved-changes guard.
- */
+/** What every package editor draws around its sections: page chrome to create, or when editing only the open section and save bar; plus the raw manifest, files tab and unsaved-changes guard. */
 export function PackageEditorFrame({
   editor,
   tabs,
@@ -63,20 +57,26 @@ export function PackageEditorFrame({
   children,
 }: {
   editor: PackageEditor;
-  tabs: Array<{ id: PackageEditorTab; label: string }>;
-  /** Embedded: the line under the open section's heading. */
+  /** `createOnly` tabs show on the creation page only; editing is the settings rail's. */
+  tabs: Array<{ id: PackageEditorTab; label: string; createOnly?: boolean }>;
+  /** Editing: the line under the open section's heading. */
   descriptions?: Partial<Record<PackageEditorTab, string>>;
   children: ReactNode;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const navigate = useNavigate();
-  const { type, packageId, embedded, state, setState, activeTab, setActiveTab, isPending } = editor;
+  const { type, packageId, isEdit, state, setState, activeTab, setActiveTab, isPending } = editor;
+  const visibleTabs = tabs.filter((tab) => !tab.createOnly || !isEdit);
   const schema = { uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type] };
 
   const body = (
-    <div inert={isPending} aria-busy={isPending} className={embedded ? "space-y-4" : undefined}>
+    <div
+      inert={isPending}
+      aria-busy={isPending}
+      className={isEdit ? "flex flex-col gap-4" : undefined}
+    >
       {children}
-      {embedded ? (
+      {isEdit ? (
         <ManifestEditEntry
           value={state.manifest}
           schema={schema}
@@ -110,14 +110,13 @@ export function PackageEditorFrame({
 
       <UnsavedChangesModal
         blocker={editor.blocker}
-        onSaveDraft={embedded ? editor.saveDraft : undefined}
+        onSaveDraft={isEdit ? editor.saveDraft : undefined}
       />
     </div>
   );
 
-  if (embedded) {
-    // Only when there is something to save, as the files explorer's bar is: a
-    // permanent bar saying "nothing to save", with two dead buttons, is furniture.
+  if (isEdit) {
+    // Only when there is something to save, as the files explorer's bar is.
     const footer = (editor.isDirty || isPending) && (
       <div className="bg-background border-border sticky bottom-0 z-10 flex min-h-16 items-center gap-3 border-t px-6 py-3 max-lg:flex-col max-lg:items-stretch">
         <span className="text-muted-foreground text-sm">
@@ -146,10 +145,11 @@ export function PackageEditorFrame({
     );
     return (
       <div className="flex min-h-full flex-col">
-        <div className="flex-1 space-y-4 p-6">
+        <div className="flex flex-1 flex-col gap-4 p-6">
           <SettingsHeading
-            title={tabs.find((tab) => tab.id === activeTab)?.label}
+            title={visibleTabs.find((tab) => tab.id === activeTab)?.label}
             description={descriptions?.[activeTab]}
+            className="mb-2"
           />
           {editor.error && (
             <Alert variant="destructive">
@@ -180,12 +180,12 @@ export function PackageEditorFrame({
       <DetailBar
         title={t(page.title)}
         parent={{ label: t(page.list.key, { ns: page.list.ns }), href: listPath }}
-        tabs={tabs.map(({ id, label }) => ({ value: id, label }))}
+        tabs={visibleTabs.map(({ id, label }) => ({ value: id, label }))}
       />
 
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         {editor.error && (
-          <Alert variant="destructive" className="mb-4">
+          <Alert variant="destructive">
             <AlertDescription>{editor.error}</AlertDescription>
           </Alert>
         )}
@@ -193,7 +193,7 @@ export function PackageEditorFrame({
         {body}
 
         {activeTab !== "json" && (
-          <div className="border-border mt-6 flex justify-end gap-2 border-t pt-4">
+          <div className="border-border mt-2 flex justify-end gap-2 border-t pt-4">
             <Button variant="outline" type="button" onClick={() => navigate(listPath)}>
               {t("btn.cancel")}
             </Button>

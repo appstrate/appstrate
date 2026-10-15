@@ -6,11 +6,9 @@ export interface TemperatureOption {
 }
 
 /**
- * The temperature presets, plus the stored value when it falls between them
- * (set through the API or the launch slider): one more option at its place in
- * the scale, so the control shows the value that applies instead of an empty
- * trigger. `presets` are numeric values in ascending order; an option whose
- * value is not a number (the "inherit" entry) keeps its position.
+ * The presets plus the stored value when it falls between them, so the control
+ * never shows an empty trigger. `presets` ascend numerically; a non-numeric
+ * option (the "inherit" entry) keeps its position.
  */
 export function withStoredTemperature(
   presets: readonly TemperatureOption[],

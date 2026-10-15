@@ -14,7 +14,6 @@
  * because a row here carries one menu and no loose buttons.
  */
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { FolderInput, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -57,7 +56,8 @@ export function useSpaceColumns({
     {
       id: "workspace",
       header: t("spaces.nameLabel"),
-      width: "minmax(160px,1.6fr)",
+      width: 160,
+      elastic: true,
       cell: (space) => (
         <CellText
           strong
@@ -73,27 +73,28 @@ export function useSpaceColumns({
     {
       id: "kind",
       header: t("spaces.visibilityLabel"),
-      width: "minmax(150px,0.9fr)",
+      width: 150,
+      elastic: true,
       tier: 2,
       cell: (space) =>
         space.orphaned_at ? (
           // The one state that asks the reader for a decision, so it is said
           // in words a hover does not hide: since when it has been orphaned is
           // in the created column's neighbour, not in a tooltip.
-          <ToneBadge variant="warning">{t("spaces.personal.orphanedBadge")}</ToneBadge>
+          <Badge variant="warning">{t("spaces.personal.orphanedBadge")}</Badge>
         ) : space.personal ? (
           <Badge variant="secondary">{t("spaces.personal.badge")}</Badge>
         ) : (
           <span className="flex flex-wrap gap-1">
             <Badge variant="secondary">{t(`spaces.visibility.${space.visibility}`)}</Badge>
-            {space.isDefault && <ToneBadge variant="running">{defaultLabel}</ToneBadge>}
+            {space.isDefault && <Badge variant="running">{defaultLabel}</Badge>}
           </span>
         ),
     },
     {
       id: "created",
       header: t("spaces.createdAtLabel"),
-      width: "132px",
+      width: 132,
       align: "end",
       // Tier 2, not 3: the settings dialog tops out around 800px and never
       // crosses the 56rem threshold, so tier 3 there means never drawn.
@@ -115,7 +116,7 @@ export function useSpaceColumns({
       const orphaned = Boolean(space.orphaned_at);
       return (
         <TableRowActions
-          menuLabel={t("spaces.rowActions", { name: spaceLabel(space, t) })}
+          menuLabel={t("providers.moreActions", { name: spaceLabel(space, t) })}
           actions={[
             {
               id: "convert",

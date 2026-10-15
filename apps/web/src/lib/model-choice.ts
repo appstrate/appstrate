@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * « Choose the models » of a provider, as a plan: what ticking and unticking amounts to.
- *
- * The list speaks of ACCESS, not of deleting models: a model exists at its provider, and the
- * organization gives or withdraws its access. Ticked is access, unticked is none. A model with
- * no `org_models` row yet gets one (`add`); a row switched off and ticked again is switched back
- * on with its settings intact (`grant`); a row left unticked is switched off, never deleted
- * (`withdraw`). The starred model becomes the organization's default. The plan is the diff; the
- * hook that applies it makes the writes.
+ * « Choose the models » of a provider, as a plan (the diff; the hook applies it).
+ * The list speaks of ACCESS: a row switched off and ticked again is switched back
+ * on with its settings intact (`grant`), an unticked one is switched off, never
+ * deleted (`withdraw`).
  */
 
 import type { OrgModelInfo } from "../hooks/use-models";
@@ -17,11 +13,11 @@ import type { ModelPickRow } from "./model-source";
 export interface ModelChoicePlan {
   /** Ticked rows the organization has no model for yet. */
   add: ModelPickRow[];
-  /** Models the organization has switched off, now ticked: access comes back, settings intact. */
+  /** Switched off, now ticked: access comes back, settings intact. */
   grant: OrgModelInfo[];
-  /** Models the organization can use, now unticked: access is withdrawn, settings are kept. */
+  /** Usable, now unticked: access withdrawn, settings kept. */
   withdraw: OrgModelInfo[];
-  /** The upstream id to make the organization's default; `null` leaves the default as it is. */
+  /** The upstream id to make the default; `null` leaves it as is. */
   defaultModelId: string | null;
 }
 
@@ -30,7 +26,6 @@ export function planModelChoice(input: {
   picked: ReadonlyMap<string, ModelPickRow>;
   /** The models this provider already has a row for, accessible or not. */
   existing: readonly OrgModelInfo[];
-  /** The upstream id starred as default, if any. */
   starred: string | null;
 }): ModelChoicePlan {
   const { picked, existing, starred } = input;

@@ -62,14 +62,14 @@ function ConnectionRow({
   // Identity (account email / profile name)
   if (conn.identity) {
     rows.push({
-      label: t("connections.account"),
+      label: t("preferences.sectionAccount"),
       value: conn.identity,
     });
   }
 
   // Org, and the one space a space-scoped row lives in
   rows.push({
-    label: t("connections.orgLabel"),
+    label: t("source.org"),
     value: (
       <>
         <span>{conn.org.name}</span>
@@ -87,7 +87,7 @@ function ConnectionRow({
     value:
       conn.shared_spaces.length > 0
         ? conn.shared_spaces.map((s) => s.name).join(", ")
-        : t("connections.sharedSpacesNone"),
+        : t("viewAs.noSpace"),
   });
 
   // Reuse hint — the agents of its spaces that declare the integration, killing the
@@ -111,7 +111,7 @@ function ConnectionRow({
   // Scopes
   if (conn.scopes_granted.length > 0) {
     rows.push({
-      label: t("connections.scopesLabel"),
+      label: t("roles.permissionsLabel"),
       value: conn.scopes_granted.join(", "),
     });
   }
@@ -169,7 +169,7 @@ function ConnectionRow({
       </div>
 
       <TableRowActions
-        menuLabel={t("integration.connection.moreActions", { name: conn.label })}
+        menuLabel={t("providers.moreActions", { name: conn.label })}
         renaming={renaming}
         actions={[
           {

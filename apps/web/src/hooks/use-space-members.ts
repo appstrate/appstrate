@@ -12,11 +12,7 @@ export type SpaceMemberObject = components["schemas"]["SpaceMemberObject"];
 /** What a seat control reads of a person in a space: who, how they reach it, and as what. */
 export type SpaceSeat = Pick<SpaceMemberObject, "userId" | "org_role" | "source" | "role">;
 
-/**
- * Everyone who actually reaches the space: explicit rows, org owners/admins
- * (`source: "org_role"`) and, in an `open` space, every org member
- * (`source: "open_space"`).
- */
+/** Everyone who reaches the space: explicit rows, org owners/admins (`org_role`) and, in an `open` space, every org member (`open_space`). */
 export function useSpaceMembers(spaceId: string, enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
@@ -41,12 +37,7 @@ function useUpdateSpaceMember() {
   return $api.useMutation("patch", "/api/spaces/{id}/members/{userId}", { onSuccess: invalidate });
 }
 
-/**
- * Gives a person a role in a space from one control, two routes: an explicit
- * seat is PATCHed, an implicit member (open space) has no row yet, so picking
- * a role CREATES one — `PATCH` 404s without a row, so the branch is the API's.
- * Toasts the result under `name`, the space's or the person's.
- */
+/** One control, two routes: an explicit seat is PATCHed; an implicit member (open space) has no row, and `PATCH` 404s without one, so picking a role CREATES it. */
 export function useAssignSpaceRole(roleOptions: SpaceRoleOption[]) {
   const { t } = useTranslation("settings");
   const addMember = useAddSpaceMember();

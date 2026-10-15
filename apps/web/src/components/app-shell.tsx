@@ -1,30 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The two pieces every product's shell is built from: the sidebar frame and the
- * header.
- *
- * Studio and the chat are different products with different navigations, and
- * they still have to read as one app — so what surrounds the navigation is
- * written ONCE, here, and each product passes only what is its own. When the
- * brand cell, the meta block or the header's right end changes, it changes in
- * both without anyone remembering to.
- */
-
-import { useEffect, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { LibraryBig, Menu, PanelLeft, Settings } from "lucide-react";
+import { LibraryBig, Menu, PanelLeft, Plus, Settings, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { NavOrg } from "@/components/nav-org";
 import { NavUser } from "@/components/nav-user";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { NotificationBell } from "@/components/notification-bell";
 import { CountBadge } from "@/components/count-badge";
-import { useUnreadCount } from "@/hooks/use-notifications";
 import { ProductTabs } from "@/components/product-tabs";
 import { HeaderSlotOutlet } from "@/components/shell-header-slots";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
+import { SidebarCredits } from "@/components/sidebar-credits";
+import { useUnreadCount } from "@/hooks/use-notifications";
 import { useOverlayPath } from "@/lib/modal-route";
-import { useCanReach } from "@/hooks/use-can-reach";
+import { useCanReach, useReachReady } from "@/hooks/use-can-reach";
 import { usePendingShares } from "@/hooks/use-pending-offers";
 import { catalogueHref } from "@/lib/catalogue-link";
 import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
@@ -34,11 +25,14 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSkeleton,
   SidebarTrigger,
   useSidebar,
 } from "@appstrate/ui/components/sidebar";
@@ -46,27 +40,97 @@ import {
 /** Where the sidebar's settings entry lands: the organization scope's index. */
 const SETTINGS_ENTRY = SETTINGS_INDEX.organization;
 
-export function ShellSidebar({
+// The chat's list ships with the chat module's UI, out of the entry chunk; it
+// loads INSIDE the frame, so the frame never blanks while it does.
+const ChatSidebar = lazy(() =>
+  import("../modules/chat/chat-sidebar").then((m) => ({ default: m.ChatSidebar })),
+);
+
+/**
+ * The conversation list's shape, drawn while its permissions and chunk load:
+ * the "new conversation" row (the chat's primary action, so it is real, not
+ * grey) above a group of row skeletons — what `ChatConversationList` draws.
+ */
+function ChatSidebarSkeleton() {
+  const { t } = useTranslation("chat");
+  return (
+    <>
+      <SidebarGroup className="pb-0">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton disabled tooltip={t("threads.new")}>
+              <Plus />
+              <span>{t("threads.new")}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+      <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
+        <SidebarGroupLabel>{t("threads.title")}</SidebarGroupLabel>
+        <SidebarMenu>
+          {Array.from({ length: 5 }, (_, i) => (
+            <SidebarMenuItem key={i}>
+              <SidebarMenuSkeleton />
+            </SidebarMenuItem>
+          ))}
+        </SidebarMenu>
+      </SidebarGroup>
+    </>
+  );
+}
+
+/** A footer entry opening an overlay; on screen already, it is a plain current-page marker. */
+function OverlayEntry({
+  to,
+  active,
+  icon: Icon,
+  label,
   children,
-  contentClassName,
 }: {
-  /** The product's navigation — the ONLY part that differs between products. */
-  children: ReactNode;
-  contentClassName?: string;
+  to: string;
+  active: boolean;
+  icon: LucideIcon;
+  label: string;
+  children?: ReactNode;
 }) {
+  const content = (
+    <>
+      <Icon />
+      <span>{label}</span>
+    </>
+  );
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild isActive={active}>
+        {active ? (
+          <span aria-current="page">{content}</span>
+        ) : (
+          <Link to={to} {...overlayIntent(to)}>
+            {content}
+          </Link>
+        )}
+      </SidebarMenuButton>
+      {children}
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * The shell's sidebar: one frame, filled with the navigation of the product on screen. The
+ * frame stays mounted across a product switch; only its content changes.
+ */
+export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   const { t } = useTranslation();
-  // Two organization-wide destinations: settings, which always hold the
-  // caller's own account, and the catalogue, drawn when its route admits the
-  // caller (`ROUTE_ACCESS`).
+  // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`).
   const canReach = useCanReach();
+  const ready = useReachReady();
   const pendingShares = usePendingShares();
   const overlayPath = useOverlayPath() ?? "";
   const settingsActive = isSettingsPath(overlayPath);
   const catalogueActive = isUnder(overlayPath, "/catalogue");
   const catalogueReachable = canReach("/catalogue");
   const catalogueTo = pendingShares.href ?? catalogueHref("agent");
-  // The two entries below are always on screen, so their overlays' code is
-  // fetched ahead of any click (`lib/overlay-chunks.ts`).
+  // Always on screen, so their overlays' code is fetched ahead of any click (`lib/overlay-chunks.ts`).
   useEffect(
     () =>
       preloadOverlaysWhenIdle(
@@ -77,13 +141,8 @@ export function ShellSidebar({
 
   return (
     <Sidebar>
-      {/* Head: the brand cell, at the header's height and closed by the
-          header's own rule — the two lines meet across the shell instead of
-          nearly meeting. Beside it, the collapse: where the header's burger
-          brings the sidebar back, so both gestures happen in one corner. It
-          shows while the pointer is anywhere on the sidebar, or on focus
-          (Notion's way; `group` is the sidebar's own root), so at rest the
-          head is the workspace's name alone. */}
+      {/* The brand cell sits at the header's height so the two rules meet across the shell. The
+          collapse shows while the pointer is on the sidebar or on focus (`group` is its root). */}
       <SidebarHeader className="border-sidebar-border h-header flex-row items-center gap-1 border-b px-2 py-0">
         <div className="min-w-0 flex-1">
           <OrgSwitcher variant="brand" />
@@ -92,44 +151,38 @@ export function ShellSidebar({
           <PanelLeft className="size-4" />
         </SidebarTrigger>
       </SidebarHeader>
-      {/* Below the header's rule, the products. No second rule: the tabs are
-          their own enclosure, and a line under them would cut the column into
-          more pieces than it has ideas. More air above than below, so the tabs
-          read as the head of the navigation rather than as a tail of the rule
-          they sit under. */}
       <div className="px-2 pt-4 pb-1">
         <ProductTabs />
       </div>
-      <SidebarContent className={cn("gap-0", contentClassName)}>{children}</SidebarContent>
-      {/* Settings is a permanent global destination, not only an action hidden
-          inside the context switcher. It sits above the user boundary and
-          represents the settings overlay as the active destination. */}
+      <SidebarContent className={cn("gap-0", product === "chat" && "overflow-hidden")}>
+        {product === "chat" ? (
+          // A refused chat route says so in the page; the list would only fetch what the caller cannot read.
+          !ready ? (
+            <ChatSidebarSkeleton />
+          ) : (
+            canReach("/chat") && (
+              <Suspense fallback={<ChatSidebarSkeleton />}>
+                <ChatSidebar />
+              </Suspense>
+            )
+          )
+        ) : (
+          <>
+            <NavOrg />
+            <SidebarCredits />
+          </>
+        )}
+      </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
         <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild isActive={catalogueActive}>
-              {/* Where you are is not a control: nothing to click. */}
-              {catalogueActive ? (
-                <span aria-current="page">
-                  <LibraryBig />
-                  <span>{t("nav.catalogue")}</span>
-                </span>
-              ) : (
-                <Link
-                  // With shares waiting, the entry opens ON them: the count is a
-                  // promise, and the first click keeps it.
-                  to={catalogueTo}
-                  {...overlayIntent(catalogueTo)}
-                >
-                  <LibraryBig />
-                  <span>{t("nav.catalogue")}</span>
-                </Link>
-              )}
-            </SidebarMenuButton>
-            {/* Packages offered to a space this caller reaches and switched on
-                by nobody. The share route notifies a PERSON and says nothing
-                when the target is a team space, so without this an offer to the
-                team is visible only to whoever thinks to go and look. */}
+          {/* With shares waiting, the entry opens ON them. */}
+          <OverlayEntry
+            to={catalogueTo}
+            active={catalogueActive}
+            icon={LibraryBig}
+            label={t("nav.catalogue")}
+          >
+            {/* The share route notifies a PERSON, not a team space: without this badge an offer to a team goes unseen. */}
             {pendingShares.count > 0 && (
               <SidebarMenuBadge>
                 <CountBadge
@@ -139,26 +192,16 @@ export function ShellSidebar({
                 />
               </SidebarMenuBadge>
             )}
-          </SidebarMenuItem>
+          </OverlayEntry>
         </SidebarMenu>
         <SidebarMenu className="px-2 pb-2">
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild isActive={settingsActive}>
-              {settingsActive ? (
-                <span aria-current="page">
-                  <Settings />
-                  <span>{t("nav.settings")}</span>
-                </span>
-              ) : (
-                <Link to={SETTINGS_ENTRY} {...overlayIntent(SETTINGS_ENTRY)}>
-                  <Settings />
-                  <span>{t("nav.settings")}</span>
-                </Link>
-              )}
-            </SidebarMenuButton>
-          </SidebarMenuItem>
+          <OverlayEntry
+            to={SETTINGS_ENTRY}
+            active={settingsActive}
+            icon={Settings}
+            label={t("nav.settings")}
+          />
         </SidebarMenu>
-        {/* Who you are, and nothing else: the collapse control is in the head. */}
         <div className="border-sidebar-border border-t p-2">
           <NavUser variant="row" />
         </div>

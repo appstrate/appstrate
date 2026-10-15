@@ -26,7 +26,6 @@ type ProviderDeeds = Omit<
 
 export function ProvidersTable({
   label,
-  tableId,
   rows,
   isLoading,
   error,
@@ -35,8 +34,6 @@ export function ProvidersTable({
 }: ProviderDeeds & {
   /** What the table holds, for its accessible name: the org's keys, the members', the caller's. */
   label: string;
-  /** Each caller's table has its own column set, so each keeps its own widths. */
-  tableId: string;
   rows: ProviderRow[];
   isLoading: boolean;
   error: unknown;
@@ -64,7 +61,6 @@ export function ProvidersTable({
   return (
     <DataTable
       label={label}
-      tableId={tableId}
       columns={columns}
       rows={rows}
       rowKey={(row) => row.id}

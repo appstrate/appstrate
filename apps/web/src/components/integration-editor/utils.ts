@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Read/write helpers for the structured integration-editor sections. Each
- * operates on the raw AFPS manifest record (snake_case wire shape) and returns
- * a NEW manifest. Writers MERGE form-owned fields onto the existing raw
- * sub-objects so fields the forms don't surface (`connect`, `identity_claims`,
- * `_meta`, `delivery.env`/`files`, `scope_catalog.implies`, …) survive an edit
- * of an imported manifest — only the JSON tab can touch those, but a structured
- * edit must never silently drop them. Returning fresh objects keeps React
- * Query's dirty detection (JSON.stringify) correct.
+ * Read/write helpers for the structured editor sections, over the raw AFPS manifest (wire shape).
+ * Writers MERGE form-owned fields onto the existing raw sub-objects so fields the forms don't
+ * surface (`connect`, `identity_claims`, `_meta`, `delivery.env`/`files`, …) survive an edit, and
+ * return NEW objects so dirty detection (JSON.stringify) stays correct.
  */
 
 import { API_META_KEY } from "@appstrate/core/integration";
@@ -29,19 +25,9 @@ function asStringArray(v: unknown): string[] {
 export type SourceKind = "remote" | "local" | "none";
 
 /**
- * AFPS §7.1's transport enum, as the editor's form state.
- *
- * Typed as the union rather than `string` so the select and the manifest
- * writer cannot drift apart: `setSource` writes this value straight into
- * `source.remote.transport`, which the manifest schema requires to be one of
- * these two. Reading it used to accept any string and pass it through, so a
- * value the schema rejects could round-trip the editor unchanged.
- *
- * An absent or unrecognised value resolves to `"streamable-http"` — the
- * initial selection for an integration being authored, not a tolerance for a
- * stored one. A stored manifest cannot carry anything else: every read path
- * re-parses it against `integrationManifestSchema` and a bad transport fails
- * the whole parse, so the editor never receives one.
+ * AFPS §7.1's transport enum. A union (not `string`) because `setSource` writes it straight into
+ * `source.remote.transport`. Absent resolves to `"streamable-http"`, the initial selection when
+ * authoring; a stored manifest cannot carry another value (re-parsed against the schema).
  */
 type RemoteTransport = "streamable-http" | "sse";
 
@@ -90,9 +76,7 @@ function sourceHostAllowlist(url: string): string[] {
 }
 
 export function setSource(manifest: Rec, s: SourceState): Rec {
-  // Merge onto the existing source so changing kind doesn't discard sibling
-  // keys (`_meta`, headers, …) the forms don't surface. On a kind switch we
-  // drop the now-irrelevant variant block but keep everything else.
+  // Merge so a kind switch keeps sibling keys (`_meta`, headers, …); only the stale variant block goes.
   const base = asRec(manifest.source);
   const source: Rec = { ...base, kind: s.kind };
   if (s.kind === "remote") {
@@ -137,27 +121,23 @@ export interface AuthState {
   type: AuthType;
   authorizedUris: string[];
   allowAllUris: boolean;
-  // delivery.http (in=header)
   deliveryHeaderName: string;
   deliveryHeaderPrefix: string;
   deliveryHeaderValue: string;
-  // oauth2
   authorizationEndpoint: string;
   tokenEndpoint: string;
   defaultScopes: string[];
   scopeCatalog: ScopeCatalogEntry[];
-  // api_key / basic / custom — credential field names (→ required string props)
+  /** api_key / basic / custom: credential field names (required string props). */
   credentialFields: string[];
-  // `_meta["dev.appstrate/api"].auths[key]` present → expose the api_call tool
-  // (credential-injecting HTTP proxy) for this auth. Orthogonal to source.kind.
+  /** `_meta["dev.appstrate/api"].auths[key]` present: exposes the api_call tool. Orthogonal to source.kind. */
   apiCallEnabled: boolean;
 }
 
 /** Every AFPS §7.2 auth type. A type missing here is read back as `api_key` and rewritten as one. */
 export const AUTH_TYPES = ["api_key", "oauth2", "basic", "custom", "mtls"] as const;
 
-/** Keys present under `_meta["dev.appstrate/api"].auths` — each opts that auth
- * into the api_call tool. */
+/** Keys under `_meta["dev.appstrate/api"].auths`: each opts that auth into api_call. */
 function getApiMetaAuthKeys(manifest: Rec): Set<string> {
   const api = asRec(asRec(manifest._meta)[API_META_KEY]);
   return new Set(Object.keys(asRec(api.auths)));
@@ -202,8 +182,7 @@ export function getAuths(manifest: Rec): AuthState[] {
   return Object.entries(auths).map(([key, raw]) => readAuth(key, asRec(raw), apiKeys.has(key)));
 }
 
-/** Preserve `scope_catalog[].implies` (+ any other per-entry fields) by merging
- * each form entry onto the matching base entry by `value`. */
+/** Merges onto the base entry by `value` to keep `implies` and other per-entry fields. */
 function mergeScopeCatalog(baseRaw: unknown, entries: ScopeCatalogEntry[]): Rec[] {
   const baseArr = Array.isArray(baseRaw) ? baseRaw : [];
   const byValue = new Map<string, Rec>();
@@ -221,8 +200,7 @@ function mergeScopeCatalog(baseRaw: unknown, entries: ScopeCatalogEntry[]): Rec[
   });
 }
 
-/** Rebuild credentials.schema from the form's field-name list while preserving
- * each surviving property's existing definition (description, format, …). */
+/** Rebuilds credentials.schema from the field names, keeping surviving property definitions. */
 function mergeCredentials(baseRaw: unknown, fields: string[]): Rec {
   const base = asRec(baseRaw);
   const baseSchema = asRec(base.schema);
@@ -232,17 +210,11 @@ function mergeCredentials(baseRaw: unknown, fields: string[]): Rec {
   return { ...base, schema: { ...baseSchema, type: "object", required: fields, properties } };
 }
 
-/**
- * Patch the form-owned fields onto the EXISTING raw auth so fields the editor
- * doesn't surface (`connect`, `identity_claims`, `resource`, `userinfo_endpoint`,
- * `token_endpoint_auth_method`, `_meta`, `delivery.env`/`delivery.files`, …)
- * survive an auths-tab edit. Without this merge, editing one field would clobber
- * the rest of an imported manifest's auth block.
- */
+/** Patches form-owned fields onto the EXISTING raw auth: unsurfaced ones (`connect`, `identity_claims`, `resource`, …) must survive. */
 function patchAuth(base: Rec, a: AuthState): Rec {
   const out: Rec = { ...base, type: a.type };
 
-  // authorized_uris / allow_all_uris are mutually exclusive.
+  // Mutually exclusive.
   if (a.allowAllUris) {
     out.allow_all_uris = true;
     delete out.authorized_uris;
@@ -251,7 +223,7 @@ function patchAuth(base: Rec, a: AuthState): Rec {
     delete out.allow_all_uris;
   }
 
-  // delivery.http — preserve sibling delivery.env / delivery.files.
+  // Preserve sibling delivery.env / delivery.files.
   const delivery = asRec(base.delivery);
   if (a.deliveryHeaderName.trim()) {
     const http: Rec = { ...asRec(delivery.http), in: "header", name: a.deliveryHeaderName };
@@ -291,11 +263,9 @@ function patchAuth(base: Rec, a: AuthState): Rec {
 }
 
 /**
- * Reconcile `_meta["dev.appstrate/api"].auths` against the form's per-auth
- * `apiCallEnabled` flags. Keys are re-derived from the current auth list, so
- * renaming/removing an auth auto-prunes dangling meta entries. Existing
- * per-auth entries (carrying `upload_protocols`, set only via the JSON tab) are
- * preserved. Empties the block / drops `_meta` entirely when nothing opts in.
+ * Reconciles `_meta["dev.appstrate/api"].auths` with the `apiCallEnabled` flags (renames/removals
+ * prune dangling entries; existing entries with JSON-tab-only `upload_protocols` are kept).
+ * Drops `_meta` when nothing opts in.
  */
 function setApiMeta(manifest: Rec, list: AuthState[]): Rec {
   const meta = asRec(manifest._meta);
@@ -388,19 +358,12 @@ export function setToolsPolicy(manifest: Rec, list: ToolPolicyState[]): Rec {
   return next;
 }
 
-/**
- * AFPS §7.8 — read the top-level `allow_undeclared_tools` opt-in flag.
- * Returns `false` when absent or malformed.
- */
+/** AFPS §7.8 top-level `allow_undeclared_tools`; `false` when absent or malformed. */
 export function getAllowUndeclaredTools(manifest: Rec): boolean {
   return manifest.allow_undeclared_tools === true;
 }
 
-/**
- * AFPS §7.8 — write the top-level `allow_undeclared_tools` flag. Omits the
- * field when `false` so the manifest stays at the default (the AFPS default
- * is `false`; an explicit `false` would be noise on the wire).
- */
+/** Omits the field when `false` (the AFPS default). */
 export function setAllowUndeclaredTools(manifest: Rec, value: boolean): Rec {
   const next = { ...manifest };
   if (value) {

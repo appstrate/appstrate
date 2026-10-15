@@ -1,17 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The selector at the head of a rail group: which organization, which
- * workspace, which catalogue. One control, so a panel that switches context
- * always switches it the same way.
- */
 import { OptionSelect } from "@/components/app-ui/option-select";
 
-/**
- * Transparent until it is a dialog's own surface, where the trigger has to
- * paint its own field: the settings overlay reads as one sheet, and a bordered
- * box inside the rail read as a second one.
- */
+/** Transparent in the rail so the settings overlay reads as one sheet; bordered from `md`. */
 const TRIGGER = [
   "relative h-11 border-transparent bg-transparent py-0 shadow-none",
   "before:pointer-events-none before:absolute before:inset-x-0 before:inset-y-0.5",

@@ -87,7 +87,7 @@ section.
   `"/org-settings/billing"` entry of the `PAGES` table.
 - `apps/web/src/lib/route-access.ts` — drop the `/org-settings/billing` entry
   (`PAGES` is keyed by `RoutePath`, so the two go together or `tsc` fails).
-- `apps/web/src/components/app-sidebar.tsx` — drop the `SidebarCredits` import
+- `apps/web/src/components/app-shell.tsx` — drop the `SidebarCredits` import
   and its usage.
 - `apps/web/src/pages/settings/navigation.ts` — drop the `/org-settings/billing`
   entry of the organization section AND the `CreditCard` lucide import it is the

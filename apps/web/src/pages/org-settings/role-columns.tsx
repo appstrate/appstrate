@@ -38,7 +38,8 @@ export function useRoleColumns({
     {
       id: "role",
       header: t("roles.colRole"),
-      width: "minmax(160px,2fr)",
+      width: 160,
+      elastic: true,
       cell: (role) => (
         <span className="block min-w-0">
           <CellText strong title={spaceRoleLabel(role, t) ?? role.name}>
@@ -53,7 +54,7 @@ export function useRoleColumns({
     {
       id: "permissions",
       header: t("roles.permissionsLabel"),
-      width: "120px",
+      width: 120,
       align: "end",
       tier: 2,
       cell: (role) => (
@@ -65,7 +66,7 @@ export function useRoleColumns({
     rowActionsColumn((role: RoleObject) =>
       onPreview || canDelete(role) ? (
         <TableRowActions
-          menuLabel={t("roles.moreActions", { name: spaceRoleLabel(role, t) ?? role.name })}
+          menuLabel={t("providers.moreActions", { name: spaceRoleLabel(role, t) ?? role.name })}
           isPending={isDeleting}
           actions={[
             {

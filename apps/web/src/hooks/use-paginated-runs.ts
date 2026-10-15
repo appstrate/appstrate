@@ -18,12 +18,7 @@ interface UsePaginatedRunsOptions {
   scheduleId?: string;
   user?: "me";
   kind?: RunKindFilter;
-  /**
-   * `RunStatus`, not `string`: `GET /api/runs` rejects a value outside the enum
-   * with a 400 instead of quietly returning every status, so a typo here has to
-   * be a compile error rather than a runtime surprise. Several statuses travel
-   * as one comma-separated value — "everything that broke" is one question.
-   */
+  /** `RunStatus`, not `string`: `GET /api/runs` answers 400 on a value outside the enum. Several travel as one comma-separated value. */
   status?: RunStatus[];
   /** Free text, matched server-side against the agent, the error and the run number. */
   search?: string;
@@ -32,11 +27,9 @@ interface UsePaginatedRunsOptions {
 }
 
 /**
- * Whether the rows of the previous page stay on screen while the next one
- * loads: yes while PAGING and while SEARCHING (no skeleton per keystroke), no
- * when a filter changed, so rows read under other filters never sit under the
- * chips just ticked. The key ends with `search, limit, offset`
- * (`paginatedRunsKeys.list`); the segments around them are the filters.
+ * Whether the previous page's rows stay on screen while the next loads: yes while PAGING and
+ * SEARCHING, no when a filter changed. The key ends with `search, limit, offset`
+ * (`paginatedRunsKeys.list`); the segments before them are the filters.
  */
 export function keepsRunRows(previousKey: readonly unknown[], currentKey: readonly unknown[]) {
   const filters = (key: readonly unknown[]) => [...key.slice(0, -3), key[key.length - 2]];
@@ -63,9 +56,7 @@ export function usePaginatedRuns({
   // Every door guards on `requireRunsRead`; a schedule's runs also on `schedules:read`.
   const canRead = canReadRuns(can) && (!scheduleId || can("schedules:read"));
 
-  // Key segment only — the typed call below selects the matching spec path.
-  // One value on the wire, so one value in the key: an array would key on its
-  // identity, and a fresh `["failed"]` each render is a fresh cache entry.
+  // One value in the key: an array keys on identity, so a fresh `["failed"]` each render is a new entry.
   const statusKey = status && status.length > 0 ? status.join(",") : undefined;
   const statusQuery = status && status.length > 0 ? status : undefined;
 
@@ -75,8 +66,7 @@ export function usePaginatedRuns({
       ? `/agents/${packageId}/runs`
       : `/runs`;
 
-  // use-global-run-sync and the run mutations invalidate by the
-  // ["paginated-runs"] prefix.
+  // use-global-run-sync and the run mutations invalidate by the key prefix.
   const currentKey = paginatedRunsKeys.list(
     orgId,
     spaceId,

@@ -13,9 +13,7 @@ import { DashboardContent, DashboardHeader } from "./dashboard-content";
 
 export function DashboardPage() {
   const { profile, user } = useAuth();
-  // Every query below gates itself on its guard; `DashboardContent` draws a
-  // section only when the read that feeds it is open to the caller and holds
-  // something.
+  // Every query gates itself on its guard; `DashboardContent` draws a section only when its read is open and non-empty.
   const { ready } = usePermissions();
   const {
     data: runsData,
@@ -28,9 +26,7 @@ export function DashboardPage() {
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents();
   const agentName = useRunAgentName();
   const { data: unreadCounts } = useUnreadCountsByAgent();
-  // The schedules feed one section and one figure; their failure is not the
-  // dashboard's, but the body waits for them so neither is drawn as « none »
-  // first and then reflowed.
+  // Their failure is not the dashboard's, but the body waits so nothing reflows from « none ».
   const { data: schedules, isLoading: schedulesLoading } = useAllSchedules();
   const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0] ?? "";
 
@@ -41,7 +37,7 @@ export function DashboardPage() {
   // The greeting is known before any read: only the body waits.
   if (isLoading)
     return (
-      <div className="mx-auto w-full max-w-[1300px] space-y-8">
+      <div>
         <DashboardHeader firstName={firstName} />
         <DashboardBodySkeleton />
       </div>
@@ -77,18 +73,16 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1300px]">
-      <DashboardContent
-        {...{
-          firstName,
-          agents: orderedAgents,
-          runs,
-          runTotal: runsData?.total ?? runs.length,
-          schedules: schedules ?? [],
-          agentName,
-          unreadCounts,
-        }}
-      />
-    </div>
+    <DashboardContent
+      {...{
+        firstName,
+        agents: orderedAgents,
+        runs,
+        runTotal: runsData?.total ?? runs.length,
+        schedules: schedules ?? [],
+        agentName,
+        unreadCounts,
+      }}
+    />
   );
 }

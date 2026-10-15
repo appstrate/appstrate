@@ -1,28 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A Monaco pane the author types into.
- *
- * **The editor owns its text from the moment it mounts.** `value` seeds it and
- * is never pushed again, because `@monaco-editor/react` implements a controlled
- * `value` as an effect that runs after the commit — `if (value !== undefined &&
- * value !== editor.getValue()) editor.executeEdits(…, fullModelRange, value)` —
- * and React batches. Two keys pressed inside one batch reach Monaco before the
- * render carrying the first one lands, so that effect rewrites the model back
- * to the older string and the second character is gone; the rewrite is made
- * with `onChange` suppressed, so nothing upstream ever learns of it. Fast
- * typing on a loaded machine therefore drops characters, silently.
- *
- * `onChange` still fires on every keystroke, so the caller's copy stays exact.
- * What the caller loses is the ability to push text back in mid-edit — which is
- * the point: text the author did not type arrives as a REMOUNT, keyed by the
- * caller on whatever made it change.
+ * A Monaco pane the author types into. The editor owns its text from mount: `value` only seeds it,
+ * because `@monaco-editor/react` applies a controlled `value` in a post-commit effect that, under
+ * React batching, rewrites the model to an older string with `onChange` suppressed — fast typing
+ * silently drops characters. Text the author did not type must arrive as a REMOUNT (`key`).
  */
 
 import { useCallback } from "react";
 import type { OnMount } from "@monaco-editor/react";
-import { MonacoEditor as Editor } from "../monaco";
-import { useTheme } from "../../stores/theme-store";
+import { CodeEditor } from "../monaco";
 
 interface ContentEditorProps {
   /** The text the editor mounts with. Remount it (`key`) to show another. */
@@ -32,13 +19,7 @@ interface ContentEditorProps {
   language: string;
   height?: string;
   readOnly?: boolean;
-  /**
-   * What the editor announces itself as. Monaco's default is the generic
-   * "Editor content; press Alt+F1 for options", and `onMount` focuses the
-   * textarea straight away — so the region label the caller wrote around this
-   * pane is announced before the focus lands and never again. Whatever names
-   * the pane (a file path, a manifest's filename) belongs here too.
-   */
+  /** The pane's accessible name: focus lands on mount, so a label around the pane is announced too early; Monaco's default is generic. */
   ariaLabel?: string;
 }
 
@@ -50,29 +31,23 @@ export function ContentEditor({
   readOnly = false,
   ariaLabel,
 }: ContentEditorProps) {
-  const { resolvedTheme } = useTheme();
   const handleMount: OnMount = useCallback((editor) => {
     editor.focus();
   }, []);
 
   return (
     <div className="border-border my-4 overflow-hidden rounded-lg border">
-      <Editor
+      <CodeEditor
         height={height}
         language={language}
-        theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
         defaultValue={value}
         onChange={(v) => onChange(v ?? "")}
         onMount={handleMount}
         options={{
           readOnly,
           ariaLabel,
-          minimap: { enabled: false },
           wordWrap: language === "markdown" ? "on" : "off",
-          fontSize: 13,
-          fontFamily: "'SF Mono', 'Fira Code', monospace",
           lineNumbers: "on",
-          scrollBeyondLastLine: false,
           padding: { top: 12, bottom: 12 },
           renderWhitespace: "none",
           tabSize: 2,

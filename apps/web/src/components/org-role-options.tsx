@@ -2,8 +2,14 @@
 
 import { useTranslation } from "react-i18next";
 import type { OrgRole } from "@appstrate/shared-types";
-import { Field } from "@appstrate/ui/components/field";
-import { Label } from "@appstrate/ui/components/label";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@appstrate/ui/components/field";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { roleI18nKey } from "../hooks/use-permissions";
 
@@ -30,8 +36,10 @@ export function OrgRoleOptions({
   const label = t("orgSettings.inviteRoleAriaLabel");
 
   return (
-    <fieldset className="flex flex-col gap-3" disabled={disabled}>
-      <legend className="mb-2 text-sm font-medium">{label}</legend>
+    <FieldSet className="gap-3" disabled={disabled}>
+      <FieldLegend variant="label" className="mb-0">
+        {label}
+      </FieldLegend>
       <RadioGroup
         value={value}
         disabled={disabled}
@@ -45,18 +53,15 @@ export function OrgRoleOptions({
               id={`${idPrefix}-role-${option}`}
               className="mt-1 shrink-0"
             />
-            <Label
-              htmlFor={`${idPrefix}-role-${option}`}
-              className="flex min-w-0 flex-col items-start gap-1"
-            >
-              <span className="text-foreground">{t(roleI18nKey(option))}</span>
-              <span className="text-muted-foreground text-sm leading-relaxed font-normal">
-                {t(`orgSettings.roleHint.${option}`)}
-              </span>
-            </Label>
+            <FieldContent>
+              <FieldLabel htmlFor={`${idPrefix}-role-${option}`} className="text-foreground">
+                {t(roleI18nKey(option))}
+              </FieldLabel>
+              <FieldDescription>{t(`orgSettings.roleHint.${option}`)}</FieldDescription>
+            </FieldContent>
           </Field>
         ))}
       </RadioGroup>
-    </fieldset>
+    </FieldSet>
   );
 }

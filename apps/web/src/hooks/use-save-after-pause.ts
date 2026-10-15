@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const SAVE_PAUSE_MS = 650;
 
-/**
- * The timer behind `useSaveAfterPause`, apart from React so its rules can be
- * driven directly: only a new `value` (or `edited` turning on) re-arms it, the
- * callbacks are read when it fires, and `flush` sends a pending save at once.
- */
+/** The timer behind `useSaveAfterPause`, apart from React so it can be tested: only a new `value` (or `edited` turning on) re-arms it; `flush` sends a pending save at once. */
 export function createPauseSaver<T>(delayMs = SAVE_PAUSE_MS) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let armed: { value: T } | null = null;
@@ -44,22 +40,16 @@ export function createPauseSaver<T>(delayMs = SAVE_PAUSE_MS) {
 }
 
 /**
- * Debounced save of a value edited continuously (typing, a slider): `save`
- * runs a pause after the last change of `value`, after `done` clears the
- * caller's edited flag. A save still pending when the component unmounts or
- * the page is hidden is sent right away, so leaving never drops the last edit.
- *
- * `value` must keep its identity between renders that did not change it
- * (state, or a memo of state): it is what re-arms the timer.
+ * Debounced save of a continuously edited value: the returned `markEdited` arms it, `save` runs a
+ * pause after the last change and clears the edited flag. A pending save is sent at unmount /
+ * pagehide. `value` must keep its identity between renders that did not change it: it re-arms the
+ * timer. While `enabled` is false an edit stays marked but nothing is saved.
  */
-export function useSaveAfterPause<T>(
-  value: T,
-  edited: boolean,
-  save: (value: T) => void,
-  done: () => void,
-) {
+export function useSaveAfterPause<T>(value: T, save: (value: T) => void, enabled = true) {
   const [saver] = useState(() => createPauseSaver<T>());
-  useEffect(() => saver.sync(value, edited, save, done));
+  const [edited, setEdited] = useState(false);
+  const markEdited = useCallback(() => setEdited(true), []);
+  useEffect(() => saver.sync(value, edited && enabled, save, () => setEdited(false)));
   useEffect(() => {
     window.addEventListener("pagehide", saver.flush);
     return () => {
@@ -67,4 +57,5 @@ export function useSaveAfterPause<T>(
       saver.flush();
     };
   }, [saver]);
+  return markEdited;
 }

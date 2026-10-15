@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The hosted connect form's submission (`POST /api/integrations/connect/submit`). An oauth2 auth
- * reaches the form only to enter connection variables; it is sent on to the authorization server.
- */
+// `POST /api/integrations/connect/submit`. An oauth2 auth reaches the form only for connection variables.
 
 import type { paths } from "../api/client";
 import type { HandoffStep } from "../components/integration-connect/handoff-steps";
@@ -16,7 +13,6 @@ type ConnectSubmitResponse = SubmitPath["responses"][200]["content"]["applicatio
 interface HostedConnectInput {
   authType: string;
   credentials: Record<string, string>;
-  /** The declared variable names, `null` when the integration declares none. */
   variableNames: string[] | null;
   variableValues: Record<string, string>;
 }
@@ -59,10 +55,7 @@ export async function submitHostedConnect(
   return { kind: "stored", handoffSteps: data?.handoff_steps ?? [] };
 }
 
-/**
- * Each `variables.<name>` refusal item as a sentence beside its input (first per variable);
- * `complete` when every item landed beside one, so the form needs no message of its own.
- */
+/** First refusal per `variables.<name>`; `complete` when every item landed beside an input, so the form needs no message of its own. */
 export function variableFieldErrors(
   err: unknown,
   labels: Readonly<Record<string, string>>,

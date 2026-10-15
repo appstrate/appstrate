@@ -29,7 +29,7 @@ export function ScheduleConnectionAnswer({
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
 }) {
   return (
-    <div className="space-y-4" data-testid="schedule-connection-answer">
+    <div className="flex flex-col gap-4" data-testid="schedule-connection-answer">
       <ScheduleConnectionRefusals
         choices={pendingConnectionChoices(choices, submitted, value)}
         actorName={actorName}

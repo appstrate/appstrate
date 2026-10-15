@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * While a save is in flight the form takes no input, embedded or not: a
+ * While a save is in flight the form takes no input: a
  * keystroke made then would land after the state the save sends.
  */
 
@@ -33,12 +33,11 @@ const { PackageEditorFrame } = await import("../package-editor/package-editor-fr
 await i18nReady;
 
 function frame(isPending: boolean) {
-  // Only what the embedded frame reads; the rest of the editor is the hook's.
+  // Only what the editing frame reads; the rest of the editor is the hook's.
   const editor = {
     type: "agent",
     packageId: "@scope/agent",
-    embedded: true,
-    presentation: "embedded",
+    isEdit: true,
     state: { manifest: {} },
     activeTab: "general",
     error: null,
@@ -53,7 +52,7 @@ function frame(isPending: boolean) {
   );
 }
 
-describe("PackageEditorFrame embedded", () => {
+describe("PackageEditorFrame editing", () => {
   it("makes the form inert while saving", () => {
     expect(frame(true)).toMatch(/<div[^>]*inert=""[^>]*aria-busy="true"[^>]*><input/);
   });

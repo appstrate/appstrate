@@ -49,7 +49,7 @@ function SpaceCreateForm({ onClose }: { onClose: () => void }) {
   return (
     <FormModal
       onClose={onClose}
-      title={t("spaces.createTitle")}
+      title={t("spaces.create")}
       onSubmit={handleSubmit(onFormSubmit)}
       isPending={createMutation.isPending}
       submitLabel={t("btn.create")}

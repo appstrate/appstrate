@@ -7,7 +7,7 @@
  * files, end-users see only their own.
  */
 
-import { ToneAlert } from "@/components/app-ui/status-variants";
+import { Alert } from "@appstrate/ui/components/alert";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -21,7 +21,6 @@ import { DocumentListPanel } from "../components/document-list-panel";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
-import { useListView } from "../stores/list-view-store";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
 
@@ -68,8 +67,7 @@ function DocumentsCollection({
 }) {
   const { t } = useTranslation(["files", "common"]);
   const canReach = useCanReach();
-  const [view, setView] = useListView("documents");
-  const searchPlaceholder = useSearchPlaceholder(t("page.title"));
+  const searchPlaceholder = useSearchPlaceholder(t("common:nav.files"));
   const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
   const query = useDebouncedValue(search);
 
@@ -95,25 +93,23 @@ function DocumentsCollection({
   return (
     <div>
       <PageHeader
-        title={t("page.title")}
+        title={t("common:nav.files")}
         variant="collection"
-        breadcrumbs={[{ label: t("page.title") }]}
+        breadcrumbs={[{ label: t("common:nav.files") }]}
       />
 
       {overLimit && (
-        <ToneAlert variant="warning" className="mb-4">
+        <Alert variant="warning" className="mb-4">
           <AlertTriangle size={16} />
           <AlertDescription>{t("storage.limitReached")}</AlertDescription>
-        </ToneAlert>
+        </Alert>
       )}
 
       <DocumentListPanel
         documents={files}
         isLoading={isLoading}
         error={error}
-        display={view}
         tableLabel={t("tableLabel")}
-        tableColumnMode="scroll"
         toolbar={({ columns }) => (
           <ListToolbar
             search={{
@@ -134,9 +130,7 @@ function DocumentsCollection({
               },
             ]}
             onReset={onReset}
-            columns={view === "table" ? columns : undefined}
-            view={view}
-            onViewChange={setView}
+            columns={columns}
           />
         )}
         empty={

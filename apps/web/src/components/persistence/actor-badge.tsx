@@ -3,12 +3,7 @@
 import { useTranslation } from "react-i18next";
 import type { PersistenceActorType } from "@appstrate/shared-types";
 
-/**
- * Tiny capsule that shows whether a persistence row is `shared` (app-wide)
- * or scoped to the caller's actor. The Agent-level Checkpoints tab also
- * passes `actor_id` so admins can disambiguate between actors of the same
- * type.
- */
+/** Capsule showing whether a persistence row is `shared` or actor-scoped; `actor_id` disambiguates actors of one type. */
 export function ActorBadge({
   actor_type,
   actor_id,

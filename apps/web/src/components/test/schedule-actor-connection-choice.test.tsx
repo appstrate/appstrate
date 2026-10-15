@@ -199,8 +199,8 @@ describe("ScheduleActorConnectionChoice", () => {
   it("shows a stored 'no connection' as the chosen mode", () => {
     const none = (value: Record<string, string[]>) =>
       itemsOf(value, [{ id: SLACK }]).get(`sched-choice-pick-none-${SLACK}`);
-    expect(none({ [SLACK]: [] })).toMatchObject({ "aria-checked": true });
-    expect(none({})).toMatchObject({ "aria-checked": false });
+    expect(none({ [SLACK]: [] })).toMatchObject({ checked: true });
+    expect(none({})).toMatchObject({ checked: false });
   });
 
   it("lets a stored 'no connection' on a required integration be cleared", () => {

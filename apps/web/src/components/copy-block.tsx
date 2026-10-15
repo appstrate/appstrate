@@ -45,7 +45,7 @@ export function CopyBlock({
       </code>
       <CopyButton
         value={value}
-        className={cn("absolute", dense ? "top-0.5 right-0.5 h-6 w-6" : "top-1 right-1")}
+        className={cn("absolute", dense ? "top-0.5 right-0.5 size-6" : "top-1 right-1")}
       />
     </div>
   );

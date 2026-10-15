@@ -7,10 +7,7 @@
 
 import type { PackageType } from "@appstrate/core/validation";
 
-/**
- * The route's `:reading` segment: `discover` browses every package, `placed` manages
- * what the reader's spaces hold, `shared` lists the shares waiting.
- */
+/** The route's `:reading` segment. */
 const CATALOGUE_READINGS = ["placed", "discover", "shared"] as const;
 export type CatalogueReading = (typeof CATALOGUE_READINGS)[number];
 
@@ -30,11 +27,11 @@ export function isCatalogueKind(value: string): value is PackageType {
   return (CATALOGUE_KINDS as readonly string[]).includes(value);
 }
 
-/** A kind's name in one word (`settings` namespace), spelled out so the locale test sees every key. */
+/** Spelled out so the locale test sees every key. */
 export const CATALOGUE_TYPE_LABEL_KEY: Record<PackageType, string> = {
-  agent: "catalogue.sheet.type.agent",
+  agent: "integration.admin.pinManagement.colAgent",
   skill: "catalogue.sheet.type.skill",
-  integration: "catalogue.sheet.type.integration",
+  integration: "connections.kindIntegration",
   "mcp-server": "catalogue.sheet.type.mcp-server",
 };
 
@@ -73,5 +70,4 @@ export function catalogueVersionFor(page: {
   return page.version || undefined;
 }
 
-/** "Partages en attente": every share waiting, across kinds. */
 export const CATALOGUE_SHARED_HREF = `/catalogue/shared/${CATALOGUE_KINDS[0]}`;

@@ -6,14 +6,15 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Lock, Plus, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { cn } from "@appstrate/ui/cn";
 import { unavailableConnectionIds } from "../../lib/connection-set";
 import { ConfirmModal } from "../confirm-modal";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { ClearChoiceButton } from "./clear-choice-button";
-import { NoConnectionLabel } from "./no-connection-label";
 import type { IntegrationCandidate } from "../../hooks/use-integrations";
 import type { ConnectionPicker } from "./use-connection-picker";
 
@@ -22,13 +23,14 @@ export const AMBER_TEXT = "text-warning";
 
 export function PickerWarning({ testId, children }: { testId: string; children: ReactNode }) {
   return (
-    <div
-      className="border-warning/40 bg-warning/10 text-warning mt-1.5 flex items-center gap-1.5 rounded-md border p-2 text-[0.7rem]"
+    <Alert
+      variant="warning"
+      className="bg-warning/10 mt-1.5 rounded-md p-2 text-[0.7rem] [&>svg]:top-[0.65rem] [&>svg]:left-2 [&>svg+div]:translate-y-0 [&>svg~*]:pl-5"
       data-testid={testId}
     >
-      <AlertTriangle className="size-3 shrink-0" />
-      <span>{children}</span>
-    </div>
+      <AlertTriangle className="size-3" />
+      <AlertDescription className="text-[0.7rem]">{children}</AlertDescription>
+    </Alert>
   );
 }
 
@@ -40,23 +42,58 @@ export function LoadingPicker({ integrationId }: { integrationId: string }) {
   );
 }
 
+/** A picker that offers no menu: a disabled button saying why, with what sits beside it. */
+function StatusPicker({
+  integrationId,
+  testId,
+  icon,
+  label,
+  tone,
+  reason,
+  badge,
+  children,
+}: {
+  integrationId: string;
+  testId: string;
+  icon: ReactNode;
+  label: ReactNode;
+  tone?: string;
+  /** Said in a tooltip on the dead button. */
+  reason?: string;
+  badge?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div data-testid={`member-picker-${integrationId}`}>
+      <DisabledReasonTooltip reason={reason}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled
+          className={cn("h-7 justify-start gap-1.5 text-xs", tone)}
+          data-testid={testId}
+        >
+          {icon}
+          <span className="truncate">{label}</span>
+          {badge}
+        </Button>
+      </DisabledReasonTooltip>
+      {children}
+    </div>
+  );
+}
+
 /** The verdict could not be read: a disabled button that says so, never a spinner. */
 export function FailedPicker({ integrationId }: { integrationId: string }) {
   const { t } = useTranslation(["agents", "settings"]);
   return (
-    <div data-testid={`member-picker-${integrationId}`}>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled
-        className="h-7 justify-start gap-1.5 text-xs"
-        title={t("detail.integrationMemberPicker.resolutionFailedHint")}
-        data-testid={`member-pick-failed-${integrationId}`}
-      >
-        <AlertTriangle className="text-destructive size-3" />
-        <span className="truncate">{t("detail.integrationMemberPicker.resolutionFailed")}</span>
-      </Button>
-    </div>
+    <StatusPicker
+      integrationId={integrationId}
+      testId={`member-pick-failed-${integrationId}`}
+      icon={<AlertTriangle className="text-destructive" />}
+      label={t("detail.integrationMemberPicker.resolutionFailed")}
+      reason={t("detail.integrationMemberPicker.resolutionFailedHint")}
+    />
   );
 }
 
@@ -64,20 +101,14 @@ export function FailedPicker({ integrationId }: { integrationId: string }) {
 export function ReconfigurePicker({ integrationId }: { integrationId: string }) {
   const { t } = useTranslation(["agents", "settings"]);
   return (
-    <div data-testid={`member-picker-${integrationId}`}>
-      <DisabledReasonTooltip reason={t("error.authKeyServesNoSelectedTool")}>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled
-          className="text-warning h-7 justify-start gap-1.5 text-xs"
-          data-testid={`member-pick-reconfigure-${integrationId}`}
-        >
-          <AlertTriangle className="size-3" />
-          <span className="truncate">{t("detail.integrationMemberPicker.reconfigureLabel")}</span>
-        </Button>
-      </DisabledReasonTooltip>
-    </div>
+    <StatusPicker
+      integrationId={integrationId}
+      testId={`member-pick-reconfigure-${integrationId}`}
+      icon={<AlertTriangle />}
+      tone={AMBER_TEXT}
+      label={t("detail.integrationMemberPicker.reconfigureLabel")}
+      reason={t("error.authKeyServesNoSelectedTool")}
+    />
   );
 }
 
@@ -115,20 +146,17 @@ export function LockedPicker({
   const offersNone =
     overrideMode && !required && lockedConnectionIds.length > 0 && storedOverride?.length !== 0;
   return (
-    <div data-testid={`member-picker-${integrationId}`}>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled
-        className={`h-7 justify-start gap-1.5 text-xs ${warn ? AMBER_TEXT : ""}`}
-        data-testid={`member-pick-locked-${integrationId}`}
-      >
-        {warn ? <AlertTriangle className="size-3" /> : <Lock className="size-3" />}
-        <span className="truncate">
-          {bindingIds.length === 0
-            ? t("detail.integrationMemberPicker.none")
-            : setLabel(bindingIds, lockedUnavailableIds)}
-        </span>
+    <StatusPicker
+      integrationId={integrationId}
+      testId={`member-pick-locked-${integrationId}`}
+      icon={warn ? <AlertTriangle /> : <Lock />}
+      tone={warn ? AMBER_TEXT : undefined}
+      label={
+        bindingIds.length === 0
+          ? t("detail.integrationMemberPicker.none")
+          : setLabel(bindingIds, lockedUnavailableIds)
+      }
+      badge={
         <Badge variant="secondary" className="ml-1 text-[0.6rem]">
           {t(
             lockedBy === "org_default"
@@ -137,7 +165,8 @@ export function LockedPicker({
             { count: bindingIds.length },
           )}
         </Badge>
-      </Button>
+      }
+    >
       {offersNone && (
         <Button
           type="button"
@@ -147,7 +176,12 @@ export function LockedPicker({
           onClick={() => void persist([])}
           data-testid={`member-pick-none-${integrationId}`}
         >
-          <NoConnectionLabel />
+          <span className="flex min-w-0 flex-col">
+            <span>{t("detail.integrationMemberPicker.none")}</span>
+            <span className="text-muted-foreground text-[0.65rem]">
+              {t("detail.integrationMemberPicker.noneHint")}
+            </span>
+          </span>
         </Button>
       )}
       {clearable && (
@@ -168,7 +202,7 @@ export function LockedPicker({
           })}
         </PickerWarning>
       )}
-    </div>
+    </StatusPicker>
   );
 }
 
@@ -182,24 +216,16 @@ export function BlockedPicker({
 }) {
   const { t } = useTranslation(["agents", "settings"]);
   return (
-    <div data-testid={`member-picker-${integrationId}`}>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled
-        className="h-7 justify-start gap-1.5 text-xs"
-        data-testid={`member-pick-blocked-${integrationId}`}
-      >
-        <Lock className="size-3" />
-        <span className="truncate">
-          {t(
-            canConnect
-              ? "detail.integrationMemberPicker.blockedByAdmin"
-              : "detail.integrationMemberPicker.blockedByRole",
-          )}
-        </span>
-      </Button>
-    </div>
+    <StatusPicker
+      integrationId={integrationId}
+      testId={`member-pick-blocked-${integrationId}`}
+      icon={<Lock />}
+      label={t(
+        canConnect
+          ? "detail.integrationMemberPicker.blockedByAdmin"
+          : "detail.integrationMemberPicker.blockedByRole",
+      )}
+    />
   );
 }
 
@@ -295,7 +321,7 @@ export function UnderScopedWarning({
               onClick={() => void triggerConnect(conn.auth_key, { replacing: conn.id })}
               data-testid={`member-pick-new-for-agent-${conn.id}`}
             >
-              <Plus className="mr-1 size-3" />
+              <Plus className="mr-1" />
               {t("detail.integrationMemberPicker.newWithAgentScopes")}
             </Button>
           )}
@@ -307,7 +333,7 @@ export function UnderScopedWarning({
               onClick={() => setUpgradeTargetId(conn.id)}
               data-testid={`member-pick-upgrade-${conn.id}`}
             >
-              <RefreshCw className="mr-1 size-3" />
+              <RefreshCw className="mr-1" />
               {t("detail.integrationMemberPicker.upgradeButton")}
             </Button>
           )}

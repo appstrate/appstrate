@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneAlert } from "@/components/app-ui/status-variants";
+import { Alert } from "@appstrate/ui/components/alert";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
@@ -84,9 +84,9 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   );
 
   return (
-    <div className="space-y-4" data-testid="org-default-section">
+    <div className="flex flex-col gap-4" data-testid="org-default-section">
       {unavailableIds.length > 0 && (
-        <ToneAlert variant="warning" data-testid="org-default-unavailable-warning">
+        <Alert variant="warning" data-testid="org-default-unavailable-warning">
           <AlertTriangle className="size-4" />
           <AlertDescription className="flex flex-wrap items-start justify-between gap-3">
             <span>
@@ -107,7 +107,7 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
               })}
             </Button>
           </AlertDescription>
-        </ToneAlert>
+        </Alert>
       )}
       {isLoading || connectionsLoading ? (
         <SettingsSkeleton rows={2} />

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import type { DataColumn } from "./data-table";
@@ -36,8 +36,9 @@ export function useCliSessionColumns({
 
   const memberColumn: DataColumn<CliSessionRow> = {
     id: "member",
-    header: t("orgCliSessions.memberColumn"),
-    width: "minmax(60px,1fr)",
+    header: t("spaceMembers.colMember"),
+    width: 60,
+    elastic: true,
     tier: 2,
     cell: (session) => (
       <CellText title={cliSessionUserLabel(session)}>{cliSessionUserLabel(session)}</CellText>
@@ -48,7 +49,8 @@ export function useCliSessionColumns({
     {
       id: "device",
       header: t("orgCliSessions.deviceColumn"),
-      width: "minmax(80px,1.3fr)",
+      width: 80,
+      elastic: true,
       cell: (session) => (
         <div className="flex min-w-0 items-center gap-2">
           <CliSessionIcon userAgent={session.userAgent} />
@@ -58,9 +60,7 @@ export function useCliSessionColumns({
           >
             {deriveLabel(session, t)}
           </span>
-          {session.current && (
-            <ToneBadge variant="running">{t("orgCliSessions.current")}</ToneBadge>
-          )}
+          {session.current && <Badge variant="running">{t("orgCliSessions.current")}</Badge>}
         </div>
       ),
     },
@@ -68,7 +68,8 @@ export function useCliSessionColumns({
     {
       id: "userAgent",
       header: t("devices.userAgentLabel"),
-      width: "minmax(96px,1fr)",
+      width: 96,
+      elastic: true,
       tier: 2,
       cell: (session) =>
         session.userAgent ? (
@@ -82,7 +83,7 @@ export function useCliSessionColumns({
     {
       id: "ip",
       header: t("devices.createdIpLabel"),
-      width: "110px",
+      width: 110,
       tier: 3,
       cell: (session) => {
         const ip = displayIp(session.createdIp);
@@ -92,7 +93,7 @@ export function useCliSessionColumns({
     {
       id: "created",
       header: t("devices.createdAtLabel"),
-      width: "150px",
+      width: 150,
       align: "end",
       tier: 3,
       cell: (session) => <CellDate value={session.createdAt} />,
@@ -100,7 +101,7 @@ export function useCliSessionColumns({
     {
       id: "lastUsed",
       header: t("devices.lastUsedLabel"),
-      width: "150px",
+      width: 150,
       align: "end",
       tier: 2,
       cell: (session) =>

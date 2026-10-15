@@ -7,7 +7,6 @@ import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Textarea } from "@appstrate/ui/components/textarea";
 import { FormField } from "../form-field";
-import { SectionCard } from "../section-card";
 import { SettingsHeading } from "../settings/settings-heading";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 
@@ -26,15 +25,13 @@ interface MetadataSectionProps {
   onChange: (value: MetadataState) => void;
   isEdit: boolean;
   /**
-   * Editor-specific metadata fields (e.g. the agent editor's `timeout`),
-   * rendered between the common version and description fields. Each editor
-   * binds its own fields to its manifest state — MetadataSection only owns
-   * the fields every package type shares.
+   * Editor-specific fields (e.g. the agent editor's `timeout`), rendered in
+   * their own group after the common ones. Each editor binds them to its
+   * manifest state — MetadataSection only owns the fields every package type shares.
    */
   children?: React.ReactNode;
   /** Package-specific identity controls, such as Agent icon and colour. */
   identityChildren?: React.ReactNode;
-  surface?: "card" | "settings";
 }
 
 export function MetadataSection({
@@ -43,7 +40,6 @@ export function MetadataSection({
   isEdit,
   children,
   identityChildren,
-  surface = "card",
 }: MetadataSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const update = (patch: Partial<MetadataState>) => onChange({ ...value, ...patch });
@@ -73,130 +69,103 @@ export function MetadataSection({
     }
   };
 
-  const identityFields = (
-    <>
-      <FormField
-        id="meta-displayName"
-        label={t("editor.metaDisplayName")}
-        required
-        value={value.displayName}
-        onChange={handleDisplayNameChange}
-        placeholder={t("editor.metaDisplayNamePlaceholder")}
-      />
-      <FormField
-        id="meta-name"
-        label={t("editor.metaName")}
-        required
-        value={value.id}
-        onChange={(v) => {
-          setNameEdited(true);
-          update({ id: toLiveSlug(v) });
-        }}
-        onBlur={() => update({ id: toSlug(value.id) })}
-        placeholder={t("editor.metaNamePlaceholder")}
-        description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
-      />
-      <FormField
-        id="meta-scope"
-        label={t("editor.metaScope")}
-        value={value.scope}
-        onChange={() => {}}
-        description={t("editor.metaScopeDesc")}
-        disabled
-      />
-      {identityChildren}
-    </>
-  );
-
-  const versionField = (
-    <FormField
-      id="meta-version"
-      label={t("editor.metaVersion")}
-      required
-      value={value.version}
-      onChange={(v) => update({ version: v })}
-      placeholder="1.0.0"
-      description={t("editor.metaVersionDesc")}
-    />
-  );
-
-  const publicationDetails = (
-    <>
-      <div className="space-y-2">
-        <Label htmlFor="meta-description">{t("editor.metaDescription")}</Label>
-        <Textarea
-          id="meta-description"
-          value={value.description}
-          onChange={(e) => update({ description: e.target.value })}
-          placeholder={t("editor.metaDescPlaceholder")}
+  return (
+    <div className="flex flex-col gap-8">
+      <SettingsFieldGroup title={t("editor.identity")}>
+        <FormField
+          id="meta-displayName"
+          label={t("editor.metaDisplayName")}
+          required
+          value={value.displayName}
+          onChange={handleDisplayNameChange}
+          placeholder={t("editor.metaDisplayNamePlaceholder")}
         />
-      </div>
-      <div className="space-y-2">
-        <Label>{t("editor.metaKeywords")}</Label>
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {value.keywords.map((keyword) => (
-            <span
-              key={keyword}
-              className="border-border bg-background text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs"
-            >
-              {keyword}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-destructive h-auto w-auto p-0 text-sm leading-none"
-                onClick={() => removeKeyword(keyword)}
-              >
-                &times;
-              </Button>
-            </span>
-          ))}
+        <FormField
+          id="meta-name"
+          label={t("editor.metaName")}
+          required
+          value={value.id}
+          onChange={(v) => {
+            setNameEdited(true);
+            update({ id: toLiveSlug(v) });
+          }}
+          onBlur={() => update({ id: toSlug(value.id) })}
+          placeholder={t("editor.metaNamePlaceholder")}
+          description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
+        />
+        <FormField
+          id="meta-scope"
+          label={t("runs.filterScope")}
+          value={value.scope}
+          onChange={() => {}}
+          description={t("editor.metaScopeDesc")}
+          disabled
+        />
+        {identityChildren}
+      </SettingsFieldGroup>
+      <SettingsFieldGroup title={t("editor.publication")}>
+        <FormField
+          id="meta-version"
+          label={t("run.infoVersion")}
+          required
+          value={value.version}
+          onChange={(v) => update({ version: v })}
+          placeholder="1.0.0"
+          description={t("editor.metaVersionDesc")}
+        />
+        <div className="flex flex-col gap-2">
+          <Label className="mb-0" htmlFor="meta-description">
+            {t("editor.fieldDescLabel")}
+          </Label>
+          <Textarea
+            id="meta-description"
+            value={value.description}
+            onChange={(e) => update({ description: e.target.value })}
+            placeholder={t("editor.metaDescPlaceholder")}
+          />
         </div>
-        <Input
-          type="text"
-          placeholder={t("editor.metaKeywordPlaceholder")}
-          onKeyDown={handleKeywordInput}
-        />
-      </div>
-    </>
+        <div className="flex flex-col gap-2">
+          <Label className="mb-0">{t("manifest.keywords")}</Label>
+          {value.keywords.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {value.keywords.map((keyword) => (
+                <span
+                  key={keyword}
+                  className="border-border bg-background text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs"
+                >
+                  {keyword}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-destructive size-auto p-0 text-sm leading-none"
+                    onClick={() => removeKeyword(keyword)}
+                  >
+                    &times;
+                  </Button>
+                </span>
+              ))}
+            </div>
+          )}
+          <Input
+            type="text"
+            placeholder={t("editor.metaKeywordPlaceholder")}
+            onKeyDown={handleKeywordInput}
+          />
+        </div>
+      </SettingsFieldGroup>
+      {children && (
+        <SettingsFieldGroup title={t("run.infoExecution")}>{children}</SettingsFieldGroup>
+      )}
+    </div>
   );
-
-  const publicationFields = (
-    <>
-      {versionField}
-      {publicationDetails}
-    </>
-  );
-
-  const fields = (
-    <>
-      {identityFields}
-      {versionField}
-      {children}
-      {publicationDetails}
-    </>
-  );
-
-  if (surface === "settings") {
-    return (
-      <div className="space-y-8">
-        <SettingsFieldGroup title={t("editor.identity")}>{identityFields}</SettingsFieldGroup>
-        <SettingsFieldGroup title={t("editor.publication")}>{publicationFields}</SettingsFieldGroup>
-        {children && (
-          <SettingsFieldGroup title={t("editor.execution")}>{children}</SettingsFieldGroup>
-        )}
-      </div>
-    );
-  }
-
-  return <SectionCard title={t("editor.metadata")}>{fields}</SectionCard>;
 }
 
 function SettingsFieldGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section>
       <SettingsHeading level="group" title={title} />
-      <div className="max-w-2xl space-y-5">{children}</div>
+      <div className="flex max-w-2xl flex-col gap-5">{children}</div>
     </section>
   );
 }

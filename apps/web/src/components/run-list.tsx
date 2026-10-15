@@ -3,9 +3,8 @@
 /**
  * A page of runs: the query, the paging, and the table underneath.
  *
- * Agent names resolve in `use-run-agent-name.ts`; the table and the card grid
- * draw the rows. What is left here is fetching, and the one empty state both
- * views show.
+ * Agent names resolve in `use-run-agent-name.ts`; the table draws the rows.
+ * What is left here is fetching.
  */
 
 import { useState } from "react";
@@ -16,15 +15,11 @@ import { useRunAgentName } from "../hooks/use-run-agent-name";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
 import { RunsTable } from "./runs-table";
 import { useRunColumns } from "./run-columns";
-import { RunCard } from "./run-card";
-import { CardGrid } from "./card-grid";
 import { EmptyState, ErrorState } from "./page-states";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
 import { ListFooter, type ColumnMenuSpec } from "./list-toolbar";
-import type { ListView } from "../stores/list-view-store";
 import { PlayCircle } from "lucide-react";
 
 interface RunListProps {
@@ -64,10 +59,8 @@ interface RunListProps {
    * second time to count them would send a duplicate `GET /api/runs`.
    */
   countLabel?: (total: number) => React.ReactNode;
-  /** Level-one Runs offers both representations; embedded run lists stay tables. */
-  view?: ListView;
-  /** Level-one tables preserve every selected column behind horizontal overflow. */
-  tableColumnMode?: "tiered" | "scroll";
+  /** Read columns wait for room by their tier (a narrow panel); see `DataTable`. */
+  tiered?: boolean;
   tableSurface?: "framed" | "integrated";
 }
 
@@ -86,8 +79,7 @@ export function RunList({
   search,
   toolbar,
   countLabel,
-  view = "table",
-  tableColumnMode = "tiered",
+  tiered,
   tableSurface = "framed",
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
@@ -95,8 +87,7 @@ export function RunList({
   const allColumns = useRunColumns({ agentName, hideAgentName });
   // Per TABLE, not per screen: the run list keeps its columns wherever it is
   // shown — the runs page, an agent's tab, a schedule's history.
-  const visibility = useColumnVisibility("runs");
-  const columns = visibleColumns(allColumns, visibility.hidden);
+  const { columns, menu } = useColumnVisibility("runs", allColumns);
 
   // Paging resets when the filters change — WITHOUT remounting this component.
   // A `key` at the call site is the idiomatic way to reset state, but the
@@ -141,32 +132,20 @@ export function RunList({
 
   return (
     <div>
-      {toolbar?.({ columns: columnMenu(allColumns, visibility) })}
+      {toolbar?.({ columns: menu })}
 
-      {view === "table" ? (
-        <RunsTable
-          runs={runs}
-          columns={columns}
-          agentName={agentName}
-          isLoading={showLoading}
-          isError={failed}
-          error={errorBody}
-          empty={emptyBody}
-          banner={page === 0 ? banner : undefined}
-          columnMode={tableColumnMode}
-          surface={tableSurface}
-        />
-      ) : (
-        <CardGrid
-          items={runs}
-          itemKey={(run) => run.id}
-          renderCard={(run) => <RunCard run={run} agentName={agentName(run)} />}
-          isLoading={showLoading}
-          isError={failed}
-          error={errorBody}
-          empty={emptyBody}
-        />
-      )}
+      <RunsTable
+        runs={runs}
+        columns={columns}
+        agentName={agentName}
+        isLoading={showLoading}
+        isError={failed}
+        error={errorBody}
+        empty={emptyBody}
+        banner={page === 0 ? banner : undefined}
+        tiered={tiered}
+        surface={tableSurface}
+      />
 
       {/* The count speaks only for an answer we actually have: it read "0 run"
           while the first page was still loading and, worse, on a 500 — the same

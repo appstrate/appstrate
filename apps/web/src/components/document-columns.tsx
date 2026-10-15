@@ -29,7 +29,8 @@ export function useDocumentColumns({
     {
       id: "name",
       header: t("column.name"),
-      width: "minmax(132px,1.4fr)",
+      width: 132,
+      elastic: true,
       cell: (doc) => (
         <span className="relative z-10 truncate font-medium" title={doc.name}>
           {doc.name}
@@ -39,21 +40,21 @@ export function useDocumentColumns({
     {
       id: "purpose",
       header: t("column.purpose"),
-      width: "104px",
+      width: 104,
       tier: 2,
       cell: (doc) => <CellText>{t(`purpose.${doc.purpose}`)}</CellText>,
     },
     {
       id: "type",
       header: t("column.type"),
-      width: "92px",
+      width: 92,
       tier: 2,
       cell: (doc) => <CellText title={doc.mime}>{t(`type.${mimeKind(doc.mime)}`)}</CellText>,
     },
     {
       id: "size",
       header: t("column.size"),
-      width: "72px",
+      width: 72,
       tier: 3,
       align: "end",
       cell: (doc) => (
@@ -63,7 +64,7 @@ export function useDocumentColumns({
     {
       id: "created",
       header: t("column.created"),
-      width: "120px",
+      width: 120,
       tier: 3,
       align: "end",
       cell: (doc) => <CellDate value={doc.createdAt} granularity="datetime" />,
@@ -71,7 +72,7 @@ export function useDocumentColumns({
     {
       id: "retention",
       header: t("column.retention"),
-      width: "112px",
+      width: 112,
       tier: 3,
       cell: (doc) => (
         <span className="text-xs">

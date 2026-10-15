@@ -94,7 +94,6 @@ export function InvitationsTable({
     <SettingsGroup title={t("orgSettings.pendingInvitations")} className="mt-8">
       <DataTable
         label={t("orgSettings.pendingInvitations")}
-        tableId="invitations"
         columns={columns}
         rows={visible}
         rowKey={(invitation) => invitation.id}
@@ -102,13 +101,12 @@ export function InvitationsTable({
         rowLabel={(invitation) => t("orgSettings.editInvitationOf", { email: invitation.email })}
         isLoading={false}
       />
-      <Modal
-        open={!!editing}
-        onClose={editParam.close}
-        title={t("orgSettings.editInvitation")}
-        className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
-      >
-        {editing && (
+      {editing && (
+        <Modal
+          onClose={editParam.close}
+          title={t("orgSettings.editInvitation")}
+          className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
+        >
           <OrgInvitationForm
             key={`${orgId}:${editing.id}`}
             orgId={orgId}
@@ -116,8 +114,8 @@ export function InvitationsTable({
             onSuccess={editParam.close}
             onCancel={editParam.close}
           />
-        )}
-      </Modal>
+        </Modal>
+      )}
       <ConfirmModal
         open={!!canceling}
         onClose={() => {

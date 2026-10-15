@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The endpoint fields both forms share.
- *
- * The model form and the credential form describe the same thing — an endpoint
- * the operator supplies — so they render one component, under their own id
- * prefix. What is asserted here is what neither host can assert for the other:
- * that the arrangement is the same one, and that the base URL is presented as
- * belonging to the key whenever a key already carries it.
+ * The credential form's endpoint fields: API type and base URL where the provider lets the
+ * operator describe its endpoint, then the key to type. What is asserted here is the arrangement
+ * itself, and that the base URL is presented as pinned once a saved key carries it.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -16,10 +12,7 @@ import i18n, { i18nReady } from "../../../i18n.ts";
 import settingsFr from "../../../locales/fr/settings.json";
 import { render } from "../../../test/render.tsx";
 import { EndpointFields } from "../endpoint-fields.tsx";
-import type {
-  ModelProviderCredentialInfo,
-  ProviderRegistryEntry,
-} from "../../../hooks/use-model-provider-credentials.ts";
+import type { ProviderRegistryEntry } from "../../../hooks/use-model-provider-credentials.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -47,25 +40,7 @@ const OPENAI_COMPATIBLE: ProviderRegistryEntry = {
   personal_allowed: false,
 };
 
-const LOCAL_KEY: ModelProviderCredentialInfo = {
-  id: "cred_1",
-  label: "Ollama local",
-  apiShape: "openai-completions",
-  base_url: "http://localhost:11434/v1",
-  source: "custom",
-  authMode: "api_key",
-  owner_type: "org",
-  owner_id: null,
-  owner_name: null,
-  created_by: null,
-  allowed_actions: [],
-  bindable: true,
-  serves_model_ids: [],
-  createdAt: "2026-07-01T10:00:00.000Z",
-  updatedAt: "2026-07-01T10:00:00.000Z",
-};
-
-/** A provider that pins its own endpoint, so "each member" is offered for it. */
+/** A provider that pins its own endpoint. */
 const DIRECT_PROVIDER: ProviderRegistryEntry = {
   ...OPENAI_COMPATIBLE,
   providerId: "openai",
@@ -73,23 +48,6 @@ const DIRECT_PROVIDER: ProviderRegistryEntry = {
   defaultBaseUrl: "https://api.openai.com/v1",
   baseUrlOverridable: false,
   personal_allowed: true,
-};
-
-/** A subscription: picked among the organization's, or left to each member. */
-const SUBSCRIPTION_PROVIDER: ProviderRegistryEntry = {
-  ...DIRECT_PROVIDER,
-  providerId: "claude-code",
-  displayName: "Claude Code",
-  authMode: "oauth2",
-};
-
-/** A subscription the organization connected: a model may bind it. */
-const ORG_SUBSCRIPTION: ModelProviderCredentialInfo = {
-  ...LOCAL_KEY,
-  id: "cred_org_sub",
-  label: "Abonnement de l'équipe",
-  providerId: "claude-code",
-  authMode: "oauth2",
 };
 
 function fields(overrides: Partial<Parameters<typeof EndpointFields>[0]> = {}): string {
@@ -124,109 +82,22 @@ describe("EndpointFields", () => {
     expect(fields()).toContain(`placeholder="${OPENAI_COMPATIBLE.defaultBaseUrl}"`);
   });
 
-  it("renames its fields for the other host", () => {
-    const html = fields({ idPrefix: "mdl" });
-    expect(html).toContain('id="mdl-apiType"');
-    expect(html).toContain('id="mdl-baseUrl"');
-    expect(html).toContain('id="mdl-apiKey"');
-  });
-
-  it("pins the URL to the key that carries it, and offers to unpick that key", () => {
-    const html = fields({
-      idPrefix: "mdl",
-      baseUrlLocked: true,
-      existingKeys: {
-        items: [LOCAL_KEY],
-        selected: LOCAL_KEY,
-        onSelect: () => {},
-        onClear: () => {},
-      },
-    });
-    const at = html.indexOf('id="mdl-baseUrl"');
+  it("pins the URL once the key carries it", () => {
+    const html = fields({ baseUrlLocked: true });
+    const at = html.indexOf('id="pk-baseUrl"');
     expect(html.slice(html.lastIndexOf("<input", at), html.indexOf(">", at))).toContain("disabled");
     expect(html).toContain(settingsFr["models.form.baseUrlPinnedHint"]);
-    expect(html).toContain(LOCAL_KEY.label);
-    // The key is selected, so there is nothing to type into.
-    expect(html).not.toContain('placeholder="sk-..."');
   });
 
-  it("shows the each-member choice as the bound identifier, with no key to type", () => {
-    const html = fields({
-      provider: DIRECT_PROVIDER,
-      providers: [],
-      eachMember: { selected: true, onSelect: () => {}, onClear: () => {} },
-    });
-    expect(html).toContain(settingsFr["models.form.eachMember"]);
-    expect(html).toContain(settingsFr["models.form.eachMemberHint"]);
-    expect(html).not.toContain('placeholder="sk-..."');
+  it("asks only for the key where the provider pins its own endpoint", () => {
+    const html = fields({ provider: DIRECT_PROVIDER, providers: [] });
+    expect(html).not.toContain('id="pk-apiType"');
+    expect(html).not.toContain('id="pk-baseUrl"');
+    expect(html).toContain('id="pk-apiKey"');
   });
 
-  it("offers each member beside the typed key, while none is selected", () => {
-    const html = fields({
-      provider: DIRECT_PROVIDER,
-      providers: [],
-      eachMember: { selected: false, onSelect: () => {}, onClear: () => {} },
-    });
-    expect(html).toContain('placeholder="sk-..."');
-    expect(html).toContain(settingsFr["models.form.chooseIdentity"]);
-    expect(html).not.toContain(settingsFr["models.form.eachMemberHint"]);
-  });
-
-  it("offers each member for a subscription with none connected, under the identifier label", () => {
-    const html = fields({
-      provider: SUBSCRIPTION_PROVIDER,
-      providers: [],
-      existingKeys: { items: [], selected: null, onSelect: () => {}, onClear: () => {} },
-      eachMember: { selected: false, onSelect: () => {}, onClear: () => {} },
-    });
-    expect(html).toContain(settingsFr["models.form.identityLabel"]);
-    expect(html).toContain('role="combobox"');
-    expect(html).toContain(settingsFr["models.form.chooseIdentity"]);
-    expect(html).not.toContain('placeholder="sk-..."');
-  });
-
-  it("offers the organization's subscriptions to pick, with no key to type", () => {
-    const html = fields({
-      provider: SUBSCRIPTION_PROVIDER,
-      providers: [],
-      existingKeys: {
-        items: [ORG_SUBSCRIPTION],
-        selected: null,
-        onSelect: () => {},
-        onClear: () => {},
-      },
-    });
-    expect(html).toContain('role="combobox"');
-    expect(html).toContain(settingsFr["models.form.chooseIdentity"]);
-    expect(html).not.toContain('placeholder="sk-..."');
-  });
-
-  it("shows the picked organization subscription as the bound identifier", () => {
-    const html = fields({
-      provider: SUBSCRIPTION_PROVIDER,
-      providers: [],
-      existingKeys: {
-        items: [ORG_SUBSCRIPTION],
-        selected: ORG_SUBSCRIPTION,
-        onSelect: () => {},
-        onClear: () => {},
-      },
-      eachMember: { selected: false, onSelect: () => {}, onClear: () => {} },
-    });
-    expect(html).toContain(ORG_SUBSCRIPTION.label);
-    expect(html).not.toContain('role="combobox"');
-    expect(html).not.toContain(settingsFr["models.form.eachMemberHint"]);
-    expect(html).not.toContain('placeholder="sk-..."');
-  });
-
-  it("offers nothing to pick for a subscription with none connected and each member not offered", () => {
-    const html = fields({
-      provider: SUBSCRIPTION_PROVIDER,
-      providers: [],
-      existingKeys: { items: [], selected: null, onSelect: () => {}, onClear: () => {} },
-    });
-    expect(html).not.toContain('role="combobox"');
-    expect(html).not.toContain('placeholder="sk-..."');
+  it("renders nothing until a provider is picked", () => {
+    expect(fields({ provider: undefined })).toBe("");
   });
 
   it("reports the errors its host resolved", () => {

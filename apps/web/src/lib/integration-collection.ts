@@ -5,14 +5,9 @@ import { matchesSearch } from "./strings";
 
 export const INTEGRATION_ORIGINS = ["system", "custom"] as const;
 /**
- * Two attributes of how an integration reaches its service, read off its
- * `source.kind` — not a choice anyone makes while adding one.
- *
- * - **Execution**: nothing runs on our side (`remote`), or a local MCP server
- *   package runs in the sandbox (`local`).
- * - **Protocol**, which only varies when remote: the platform calls the
- *   service's API itself (`api`, `source.kind: "none"`), or a hosted MCP server
- *   answers at a URL (`mcp`, `"remote"`). A local integration is always MCP.
+ * Read off `source.kind`, not a choice anyone makes. Execution: `remote` (nothing runs on our
+ * side) or `local` (MCP server package in the sandbox). Protocol, varying only when remote:
+ * `api` (`source.kind: "none"`, the platform calls the API itself) or `mcp` (a hosted server).
  */
 export const INTEGRATION_EXECUTIONS = ["remote", "local"] as const;
 export const INTEGRATION_PROTOCOLS = ["api", "mcp"] as const;

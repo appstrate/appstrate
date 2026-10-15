@@ -11,7 +11,7 @@ export function OverlayUnavailable() {
   const { t } = useTranslation("common");
   const close = useCloseOverlay();
   return (
-    <Modal open onClose={close} title={t("access.unavailable")}>
+    <Modal onClose={close} title={t("access.unavailable")}>
       <p className="text-muted-foreground text-sm">{t("access.unavailableHint")}</p>
     </Modal>
   );

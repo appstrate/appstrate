@@ -41,7 +41,7 @@ export function ManualModelFields({
       <FormItem id={`${idPrefix}-modelId`} label={t("models.form.modelId")} error={modelIdError}>
         <Input type="text" {...modelIdProps} placeholder={t("models.form.modelIdPlaceholder")} />
       </FormItem>
-      <FormItem id={`${idPrefix}-label`} label={t("models.form.label")} error={labelError}>
+      <FormItem id={`${idPrefix}-label`} label={t("spaces.nameLabel")} error={labelError}>
         <Input type="text" {...labelProps} placeholder={labelPlaceholder} />
       </FormItem>
       <CapabilitiesSection

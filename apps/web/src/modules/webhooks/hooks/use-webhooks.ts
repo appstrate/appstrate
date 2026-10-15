@@ -31,21 +31,14 @@ const WEBHOOK_EVENT_SET: Record<WebhookEvent, true> = {
 };
 export const WEBHOOK_EVENTS = Object.keys(WEBHOOK_EVENT_SET) as WebhookEvent[];
 
-/**
- * Org/space context for queries. The spec-declared `X-Org-Id` header is passed
- * explicitly so it is part of the React Query key — switching org refetches
- * instead of serving another org's cached page.
- */
+/** `X-Org-Id` is passed explicitly so it is part of the query key (org switch refetches). */
 function useWebhookScope() {
   const org = useOrgOnlyScope();
   const spaceId = useCurrentSpaceId();
   return { enabled: org.enabled && !!spaceId, header: org.header, spaceId };
 }
 
-/**
- * List webhooks for the current space — org-level webhooks plus those
- * pinned to the current space, via the spec-declared `spaceId` filter.
- */
+/** Org-level webhooks plus those pinned to the current space (`spaceId` filter). */
 export function useWebhooks() {
   const scope = useWebhookScope();
   // The `spaceId` filter asks for space `webhooks:read` on top of the list's
@@ -137,11 +130,7 @@ export function useRotateWebhookSecret() {
   return $api.useMutation("post", "/api/webhooks/{id}/rotate", { onSuccess: invalidate });
 }
 
-/**
- * A webhook's delivery history, keyset-paged (`startingAfter` = last id seen).
- * The key keeps the `[method, path, init]` prefix so `useInvalidateWebhooks`
- * reaches it; a refetch re-reads every loaded page, keeping them on screen.
- */
+/** Delivery history, keyset-paged. The key keeps the `[method, path, init]` prefix so `useInvalidateWebhooks` reaches it. */
 export function useWebhookDeliveries(webhookId: string) {
   const scope = useWebhookScope();
   const params = { path: { id: webhookId }, header: scope.header };

@@ -15,10 +15,7 @@ export function toggleCapped(ids: string[], id: string): string[] {
 /** A cascade layer's stored set: `null` defers to the next layer, `[]` wins and binds none. */
 export type ConnectionSet = string[] | null;
 
-/**
- * `overrides` with one integration's set replaced; `null` removes its key, and an emptied map
- * drops `connection_overrides`.
- */
+/** `null` removes the key; an emptied map drops `connection_overrides`. */
 export function withConnectionOverride(
   overrides: RunOverridesValue,
   integrationId: string,
@@ -31,10 +28,7 @@ export function withConnectionOverride(
   return Object.keys(next).length > 0 ? { ...rest, connection_overrides: next } : rest;
 }
 
-/**
- * `overrides` with `connection_overrides` narrowed to the integrations the definition declares:
- * the server refuses any other key (400). `declared` unknown (not loaded) keeps every key.
- */
+/** Narrowed to declared integrations: the server 400s on any other key. `declared` unloaded keeps every key. */
 export function withDeclaredConnections(
   overrides: RunOverridesValue,
   declared: readonly string[] | undefined,
@@ -49,10 +43,7 @@ export function keepAvailable(ids: string[], availableIds: string[]): string[] {
   return ids.filter((id) => availableIds.includes(id));
 }
 
-/**
- * "Valider" writes a non-empty set that differs from the stored pick. Untouched, that is
- * only a stored pick naming an id that is not a candidate — never the set an unset pick shows.
- */
+/** "Valider" writes a non-empty set differing from the stored pick; never the set an unset pick shows. */
 export function canApplyConnectionSet(
   checked: readonly { id: string }[],
   explicitIds: ConnectionSet,
@@ -67,9 +58,8 @@ export function canApplyConnectionSet(
 }
 
 /**
- * The pick a picker shows: the explicit one, else the stored set of the layer an unset pick
- * falls to — the member's pin (under an override), then a soft space default — else the set the
- * fallback binds. `[]`: a layer chose no connection. `null`: no layer chose and nothing binds.
+ * Explicit pick, else the member's pin, then a soft space default, else what the fallback binds.
+ * `[]`: a layer chose no connection. `null`: no layer chose and nothing binds.
  */
 export function shownConnectionPick(input: {
   explicitIds: ConnectionSet;
@@ -83,10 +73,7 @@ export function shownConnectionPick(input: {
   return bound.length > 0 ? bound : null;
 }
 
-/**
- * The ticked set "Valider" writes: what is CHOSEN, never what the cascade would bind (while
- * nothing is chosen "Hériter" is the ticked row, not the connection it resolves to).
- */
+/** What is CHOSEN, never what the cascade would bind ("Hériter" is the ticked row while nothing is chosen). */
 export function checkedConnectionIds(input: {
   draft: string[] | null;
   explicitIds: ConnectionSet;
@@ -96,19 +83,12 @@ export function checkedConnectionIds(input: {
   return keepAvailable(base, input.candidateIds);
 }
 
-/**
- * Stored members that are no candidate for this agent. The resolver refuses such a set rather
- * than bind what is left, so the picker names them and "Valider" visibly drops them.
- */
+/** The resolver refuses such a set rather than bind what is left, so the picker names them. */
 export function unavailableConnectionIds(storedIds: string[], candidateIds: string[]): string[] {
   return storedIds.filter((id) => !candidateIds.includes(id));
 }
 
-/**
- * The set a picker persists once a connection was created from it: `boundIds` (the pick the
- * picker shows, kept to the candidates) plus `createdId`. A connection created to replace a
- * member (`replacing`) takes its place 1-for-1. At the cap `boundIds` comes back unchanged.
- */
+/** `boundIds` plus `createdId`; `replacing` is swapped 1-for-1. At the cap `boundIds` comes back unchanged. */
 export function placeCreatedConnection(input: {
   boundIds: string[];
   createdId: string;
@@ -121,14 +101,7 @@ export function placeCreatedConnection(input: {
   return boundIds.length >= MAX_CONNECTIONS_PER_INTEGRATION ? boundIds : [...boundIds, createdId];
 }
 
-/**
- * Option label for the two admin pickers (org default, pins). Those lists
- * are org-wide — since the connections endpoint returns shared connections
- * owned by other members, an admin choosing a cross-agent default is picking
- * between rows whose labels can collide ("Connexion 1" for two members), so
- * the owner is part of the identity here. The per-row table carries the same
- * information as a badge instead, where a suffix would fight the rename UI.
- */
+/** Admin pickers list org-wide shared connections whose labels can collide across members, so the owner is part of the identity. */
 export function connectionOptionLabel(c: IntegrationConnection): string {
   return c.owner_name ? `${c.label} — ${c.owner_name}` : c.label;
 }

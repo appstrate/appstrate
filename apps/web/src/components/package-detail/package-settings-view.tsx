@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Paramètres for the packages with nothing set per space — skills and local
- * MCP servers — in the shape an agent's and an integration's have.
- *
- * Two groups, not three: Explorer (the tree, where files are changed, and the
- * versions) and Package AFPS (what the archive holds): Identité, the
- * manifest's form, for whoever may write it, and Contenu, the table of every
- * file, for whoever reads the package. The raw manifest is not a section (every
- * form writes into it) but a modal reached from under Identité.
+ * Paramètres for packages with nothing set per space (skills, local MCP servers): Explorer (tree,
+ * versions) and, for writers, Identité. The raw manifest is a modal reached from Identité, not a
+ * section.
  */
 import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import { FileArchive, FolderTree, History, IdCard } from "lucide-react";
+import { FolderTree, History, IdCard } from "lucide-react";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { Versioned } from "../../hooks/use-packages";
 import type { PackageSettingsSection } from "../../lib/settings-section-href";
@@ -49,8 +44,7 @@ export function PackageSettingsView({
   const resolve = (requested: string | null): PackageSettingsSection => {
     if (requested === "versions" && hasVersions) return "versions";
     if (requested === "general" && editable) return "general";
-    // Contenu reads the bundle, so whoever reads the package reads it.
-    return requested === "bundle" ? "bundle" : "files";
+    return "files";
   };
   const groups = [
     {
@@ -62,15 +56,14 @@ export function PackageSettingsView({
           : []),
       ],
     },
-    {
-      title: t("detail.settings.definitionGroup"),
-      items: [
-        ...(editable
-          ? [{ id: "general" as const, icon: IdCard, label: t("editor.tabGeneral") }]
-          : []),
-        { id: "bundle" as const, icon: FileArchive, label: t("editor.tabPackageFiles") },
-      ],
-    },
+    ...(editable
+      ? [
+          {
+            title: t("detail.settings.definitionGroup"),
+            items: [{ id: "general" as const, icon: IdCard, label: t("editor.tabGeneral") }],
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -91,7 +84,6 @@ export function PackageSettingsView({
             section={active === "general" ? "files" : active}
             type={type}
             packageId={packageId}
-            manifest={detail?.manifest ?? {}}
             file={file}
             href={href}
             version={version}

@@ -40,11 +40,7 @@ export function useEndUsers(params?: EndUserListParams) {
   );
 }
 
-/**
- * The end-users, keyset-paged (`startingAfter` = last id seen) and searched server-side. The key
- * keeps the `[method, path]` prefix so the write invalidations reach it, and the extra segment
- * keeps it apart from `useEndUsers`'s plain pages; a refetch re-reads every loaded page.
- */
+/** The end-users, keyset-paged and searched server-side. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useEndUsers`. */
 export function useEndUsersPaged({ search }: { search?: string } = {}) {
   const scope = useEndUsersReadScope();
   const query = { limit: 25, search: search?.trim() || undefined };
@@ -74,11 +70,7 @@ export function useEndUser(endUserId: string) {
   );
 }
 
-/**
- * openapi-react-query keys are [method, path, init] with the literal spec
- * path — list and detail live under different path strings, so both need
- * invalidating after a write.
- */
+/** List and detail are different path strings: invalidate both after a write. */
 function useInvalidateEndUsers() {
   const qc = useQueryClient();
   return () => invalidatePaths(qc, ["/api/end-users", "/api/end-users/{id}"]);

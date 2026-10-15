@@ -38,7 +38,7 @@ export function RunLaunchRecovery({
     // dialog appears immediately and only its body swaps.
     <Suspense
       fallback={
-        <Modal open onClose={launcher.dismiss} title={t("missingConnections.title")}>
+        <Modal onClose={launcher.dismiss} title={t("missingConnections.title")}>
           <TextSkeleton className="py-2" />
         </Modal>
       }

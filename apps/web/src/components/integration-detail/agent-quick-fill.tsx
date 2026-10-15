@@ -88,7 +88,7 @@ export function AgentQuickFillMenu({
   const id = `connect-scopes-agent-${authKey}`;
 
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       <p id={`${id}-heading`} className="text-xs font-medium">
         {t("integration.auth.scopeChoice.forAgent")}
       </p>
@@ -105,12 +105,13 @@ export function AgentQuickFillMenu({
               type="button"
               variant="outline"
               size="sm"
+              className="self-start"
               disabled={state === "picking"}
               aria-describedby={`${id}-heading`}
               data-testid={id}
             >
               {t("integration.auth.scopeChoice.forAgentPlaceholder")}
-              <ChevronDown className="ml-1 size-3" />
+              <ChevronDown className="ml-1" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">

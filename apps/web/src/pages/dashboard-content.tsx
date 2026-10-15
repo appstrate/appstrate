@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -10,14 +9,6 @@ import type { AgentListItem, EnrichedRun, EnrichedSchedule } from "@appstrate/sh
 import { ArrowRight, Bot, MessageSquareText, Copy, LayoutDashboard, Sparkles } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-  type CarouselApi,
-} from "@appstrate/ui/components/carousel";
 import { PackageIcon } from "../components/package-icon";
 import { EmptyState } from "../components/page-states";
 import { ChoiceCard } from "../components/choice-card";
@@ -105,11 +96,11 @@ export function DashboardHeader({
             : t("dashboard.greetingAnonymous")
         }
         titleClassName="text-3xl font-bold tracking-tight"
-        breadcrumbs={[{ label: t("dashboard.breadcrumb") }]}
+        breadcrumbs={[{ label: t("common:nav.dashboard") }]}
         actions={
           <Button type="button" variant="outline" onClick={() => assist.open()}>
             <Sparkles />
-            {t("dashboard.askAi.action")}
+            {t("dashboard.askAi.title")}
           </Button>
         }
       >
@@ -123,14 +114,9 @@ export function DashboardHeader({
       </PageHeader>
 
       {assist.value !== null && (
-        <Modal
-          open
-          onClose={assist.close}
-          title={t("dashboard.askAi.title")}
-          className="sm:max-w-xl"
-        >
+        <Modal onClose={assist.close} title={t("dashboard.askAi.title")} className="sm:max-w-xl">
           <p className="text-muted-foreground text-sm">{t("dashboard.askAi.description")}</p>
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             {/* Offered where `/chat` opens: the module loaded AND the caller's grants. */}
             {canChat && (
               <ChoiceCard
@@ -185,66 +171,18 @@ function MetricCard({
 function RecentAgents({
   agents,
   unreadCounts,
-  className,
 }: {
   agents: AgentListItem[];
   unreadCounts: Record<string, number> | undefined;
-  className?: string;
 }) {
-  const { t } = useTranslation("agents");
-  const [api, setApi] = useState<CarouselApi>();
-  const [canScrollNext, setCanScrollNext] = useState(false);
-  useEffect(() => {
-    if (!api) return;
-    const read = () => setCanScrollNext(api.canScrollNext());
-    read();
-    api.on("select", read).on("reInit", read);
-    return () => {
-      api.off("select", read).off("reInit", read);
-    };
-  }, [api]);
-
   return (
-    <Carousel
-      setApi={setApi}
-      opts={{ align: "start", dragFree: true, slidesToScroll: "auto" }}
-      className={className}
-      aria-label={t("dashboard.recentAgents")}
-      data-dashboard-agent-carousel
-    >
-      <CarouselContent className="-ml-3 pb-1">
-        {agents.map((agent) => (
-          <CarouselItem key={agent.id} className="basis-auto pl-3">
-            <div className="h-full w-[19rem]">
-              <PackageCard {...agentCardItem(agent, unreadCounts?.[agent.id])} headingLevel={3} />
-            </div>
-          </CarouselItem>
-        ))}
-      </CarouselContent>
-      <CarouselPrevious
-        className="left-2 z-20 disabled:hidden"
-        aria-label={t("dashboard.previousAgents")}
-      />
-      <RecentAgentsEndFade visible={canScrollNext} />
-      <CarouselNext
-        className="right-2 z-20 disabled:hidden"
-        aria-label={t("dashboard.moreAgents")}
-      />
-    </Carousel>
-  );
-}
-
-/** Fades the last visible card while more agents sit past the edge. */
-function RecentAgentsEndFade({ visible }: { visible: boolean }) {
-  return (
-    <div
-      className={cn(
-        "from-canvas pointer-events-none absolute inset-y-0 right-0 z-10 w-24 bg-gradient-to-l to-transparent transition-opacity",
-        visible ? "opacity-100" : "opacity-0",
-      )}
-      aria-hidden="true"
-      data-carousel-end-fade
-    />
+    <div className="flex gap-3 overflow-x-auto pb-1">
+      {agents.map((agent) => (
+        <div key={agent.id} className="w-[19rem] shrink-0">
+          <PackageCard {...agentCardItem(agent, unreadCounts?.[agent.id])} headingLevel={3} />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -361,7 +299,7 @@ function dashboardMetrics(
     // A card whose read is closed to the caller is dropped, not shown as 0.
     cards: [
       sections.recentRuns && {
-        label: t("dashboard.metric.runs"),
+        label: t("common:nav.runs"),
         value: data.runTotal,
         detail: t("dashboard.metric.runsDetail", { count: running }),
       },
@@ -412,7 +350,7 @@ export function DashboardContent(data: DashboardData) {
 
   if (!shown.recentAgents && !shown.recentRuns && !shown.schedules) {
     return (
-      <div className="space-y-8">
+      <div>
         <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
         <EmptyState
           message={t("dashboard.empty")}
@@ -424,60 +362,61 @@ export function DashboardContent(data: DashboardData) {
   }
 
   return (
-    <div className="space-y-8">
+    <>
       <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
+      <div className="flex flex-col gap-8">
+        {metrics.cards.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {metrics.cards.map((metric) => (
+              <MetricCard key={metric.label} {...metric} />
+            ))}
+          </div>
+        )}
 
-      {metrics.cards.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {metrics.cards.map((metric) => (
-            <MetricCard key={metric.label} {...metric} />
-          ))}
-        </div>
-      )}
+        {shown.recentAgents && (
+          <section>
+            <SectionHeading
+              title={t("dashboard.recentAgents")}
+              href="/agents"
+              action={t("dashboard.allAgents")}
+            />
+            <RecentAgents agents={data.agents} unreadCounts={data.unreadCounts} />
+          </section>
+        )}
 
-      {shown.recentAgents && (
-        <section>
-          <SectionHeading
-            title={t("dashboard.recentAgents")}
-            href="/agents"
-            action={t("dashboard.allAgents")}
-          />
-          <RecentAgents agents={data.agents} unreadCounts={data.unreadCounts} />
-        </section>
-      )}
-
-      {/* The schedules column follows the same permission as its nav entry, so
+        {/* The schedules column follows the same permission as its nav entry, so
           its link never 403s. When one column is absent the other takes the
           full width rather than leaving a hole. */}
-      <div
-        className={cn(
-          "grid grid-cols-1 gap-6",
-          shown.schedules &&
-            shown.recentRuns &&
-            "lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]",
-        )}
-      >
-        {shown.recentRuns && (
-          <section className="min-w-0">
-            <SectionHeading
-              title={t("dashboard.recentRuns")}
-              href="/runs"
-              action={t("dashboard.seeAll")}
-            />
-            <RecentRuns runs={data.runs} agentName={data.agentName} agentById={agentById} />
-          </section>
-        )}
-        {shown.schedules && (
-          <section className="min-w-0">
-            <SectionHeading
-              title={t("dashboard.upcomingSchedules")}
-              href="/schedules"
-              action={t("dashboard.schedules")}
-            />
-            <UpcomingSchedules schedules={metrics.upcomingSchedules} agentById={agentById} />
-          </section>
-        )}
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-6",
+            shown.schedules &&
+              shown.recentRuns &&
+              "lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]",
+          )}
+        >
+          {shown.recentRuns && (
+            <section className="min-w-0">
+              <SectionHeading
+                title={t("dashboard.recentRuns")}
+                href="/runs"
+                action={t("dashboard.seeAll")}
+              />
+              <RecentRuns runs={data.runs} agentName={data.agentName} agentById={agentById} />
+            </section>
+          )}
+          {shown.schedules && (
+            <section className="min-w-0">
+              <SectionHeading
+                title={t("dashboard.upcomingSchedules")}
+                href="/schedules"
+                action={t("common:nav.schedules")}
+              />
+              <UpcomingSchedules schedules={metrics.upcomingSchedules} agentById={agentById} />
+            </section>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

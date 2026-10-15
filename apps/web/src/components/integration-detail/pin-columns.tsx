@@ -31,7 +31,8 @@ export function usePinColumns({
     {
       id: "agent",
       header: t("integration.admin.pinManagement.colAgent"),
-      width: "minmax(120px,1fr)",
+      width: 120,
+      elastic: true,
       cell: (pin) => (
         <CellText strong title={agentName(pin)}>
           {agentName(pin)}
@@ -41,7 +42,8 @@ export function usePinColumns({
     {
       id: "connections",
       header: t("integration.admin.pinManagement.colConnections"),
-      width: "minmax(140px,2fr)",
+      width: 140,
+      elastic: true,
       cell: (pin) => {
         if (pin.connection_ids.length === 0) {
           return <CellText>{t("agents:detail.integrationMemberPicker.none")}</CellText>;

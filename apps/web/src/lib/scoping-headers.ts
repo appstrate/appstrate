@@ -6,10 +6,8 @@ import { getCurrentSpaceId } from "../stores/space-store";
 import { getViewAsHeader } from "../stores/view-as-store";
 
 /**
- * The org/space/persona scoping headers, for the hand-rolled fetches that
- * bypass the typed client (uploads, module shells' `getHeaders` prop). Shared
- * with the client middleware in `api/client.ts` so the names cannot drift.
- * A hook caller passes the persona and space it read reactively, so a
+ * The org/space/persona headers for hand-rolled fetches that bypass the typed
+ * client. A hook caller passes the persona and space it read reactively, so a
  * callback built on them changes identity when either does.
  */
 export function buildScopingHeaders(

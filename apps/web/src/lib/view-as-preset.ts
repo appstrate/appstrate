@@ -3,11 +3,7 @@
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
 import { memberRoleValue, type RoleObject } from "../hooks/use-roles";
 
-/**
- * What a role's own row asks the preview dialog to start from, carried in the
- * address (`?viewAs=org:member`, `?viewAs=space:viewer`) so the dialog opened
- * from a row keeps a URL that reopens it pre-filled.
- */
+/** What a role's row asks the preview dialog to start from, kept in the URL (`?viewAs=org:member`) so it reopens pre-filled. */
 export type ViewAsPreset = { kind: "org"; role: ViewAsOrgRole } | { kind: "space"; key: string };
 
 export function viewAsPresetParam(preset: ViewAsPreset): string {
@@ -36,12 +32,11 @@ interface ViewAsSpace {
 }
 
 /**
- * The space the preview dialog shows, and the space role its preset asks for there. A space role
- * is judged in the home space (the one the page is about). A Member reaches the open spaces
- * unasked, with the role each gives its members: the home space when open, with its default role.
- * A Guest reaches nothing unasked, hence no space. A picked space (`pickedSpaceId` not `null`),
- * even "no space", is the user's own and carries no preset role. A home space the dialog does not
- * offer (someone's personal space) is no space at all.
+ * The space the preview dialog shows, and the space role its preset asks for there,
+ * judged in the home space. A Member reaches the home space when open, with its default
+ * role; a Guest reaches nothing unasked. A picked space (even "no space") is the user's
+ * own and carries no preset role. A home space the dialog does not offer (a personal
+ * space) is no space.
  */
 export function viewAsSpace(input: {
   preset: ViewAsPreset | null | undefined;
@@ -73,7 +68,6 @@ export function viewAsSpace(input: {
   };
 }
 
-/** The role select's value: the user's pick (`null` until one), else the preset's, else none. */
 export function viewAsRoleValue(
   presetRoleKey: string | undefined,
   pickedRole: string | null,

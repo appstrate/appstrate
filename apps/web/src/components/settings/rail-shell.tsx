@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The two pieces every panel rail is made of: its header, and a titled group
- * of rows.
- *
- * The settings overlay and the catalogue are the same surface with different
- * contents, and a rail that is
- * "nearly the settings rail" reads as a bug — a heading one pixel taller, a
- * separator missing, and the two stop being the same object.
- */
+/** Header and titled group shared by the settings and catalogue rails: they must stay pixel-identical. */
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
@@ -36,9 +28,7 @@ export function RailGroup({
   return (
     <section className={cn("px-3 py-3", separated && "border-t-sidebar-border border-t")} {...rest}>
       <div
-        // The main navigation's group label (shadcn `SidebarGroupLabel`:
-        // sentence case, `text-xs font-medium`, muted) rather than a spaced
-        // uppercase of the rails' own: one way of titling a group of rows.
+        // Same as the main navigation's group label (shadcn `SidebarGroupLabel`).
         className="text-sidebar-foreground/70 mb-0.5 flex h-8 items-center px-2 text-xs font-medium"
       >
         {title}

@@ -42,8 +42,8 @@ import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useRoleColumns } from "./role-columns";
 import { RoleMatrix } from "./role-matrix";
-import { CollectionTabs } from "../../components/collection-tabs";
-import { ViewToggle } from "../../components/view-toggle";
+import { CollectionTabs } from "../../components/detail-tabs";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { OrgRolesList, OrgRolesMatrix } from "./org-roles";
 import {
   groupPermissionsByResource,
@@ -190,14 +190,16 @@ export function OrgSettingsRolesPage() {
             { value: "space", label: t("roles.tabSpace") },
           ]}
         />
-        <ViewToggle
-          value={view}
-          onChange={(next) => setParam("view", next, "list")}
-          options={[
-            { id: "list", icon: Rows3, label: t("roles.viewList") },
-            { id: "matrix", icon: Grid3x3, label: t("roles.viewMatrix") },
-          ]}
-        />
+        <Tabs value={view} onValueChange={(next) => setParam("view", next, "list")}>
+          <TabsList className="h-9">
+            <TabsTrigger value="list" aria-label={t("roles.viewList")}>
+              <Rows3 className="size-4" />
+            </TabsTrigger>
+            <TabsTrigger value="matrix" aria-label={t("roles.viewMatrix")}>
+              <Grid3x3 className="size-4" />
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
       {tab === "org" &&
         (view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList onPreview={previewOrgRole} />)}
@@ -215,7 +217,6 @@ export function OrgSettingsRolesPage() {
             <>
               <SettingsGroup title={t("roles.presetsSection")}>
                 <DataTable
-                  tableId="preset-roles"
                   label={t("roles.presetsSection")}
                   columns={presetColumns}
                   rows={presets}
@@ -228,7 +229,6 @@ export function OrgSettingsRolesPage() {
 
               <SettingsGroup title={t("roles.customSection")}>
                 <DataTable
-                  tableId="custom-roles"
                   label={t("roles.customSection")}
                   columns={customColumns}
                   rows={custom}
@@ -289,7 +289,6 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={spaceRoleLabel(role, t) ?? role.name}
       className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-lg"
@@ -309,7 +308,7 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
                 >
                   <dt className="text-sm font-medium">{permissionResourceLabel(resource, t)}</dt>
                   <dd>
-                    <ul className="text-muted-foreground space-y-0.5 text-sm">
+                    <ul className="text-muted-foreground flex flex-col gap-0.5 text-sm">
                       {permissions.map((permission) => (
                         <li key={permission} title={permission}>
                           {permissionLabel(permission, t)}
@@ -418,7 +417,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
   return (
     <FormModal
       onClose={onClose}
-      title={role ? t("roles.editTitle") : t("roles.createTitle")}
+      title={role ? t("roles.editTitle") : t("roles.create")}
       className="sm:max-w-lg"
       onSubmit={handleSubmit(submit)}
       isPending={isPending}
@@ -426,7 +425,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       error={formError}
       formProps={{ noValidate: true, onChange: () => setFormError(null) }}
     >
-      <FormItem id="role-name" label={t("roles.nameLabel")} error={errors.name?.message}>
+      <FormItem id="role-name" label={t("spaces.nameLabel")} error={errors.name?.message}>
         <Input
           maxLength={100}
           disabled={isPending}
@@ -456,14 +455,20 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       <FormItem id="role-description" label={t("roles.descriptionLabel")}>
         <Input maxLength={500} disabled={isPending} {...register("description")} />
       </FormItem>
-      <div className="space-y-2">
-        <Label>{t("roles.permissionsLabel")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("roles.permissionsLabel")}</Label>
         {isLoading ? (
           <TextSkeleton lines={5} />
         ) : vocabularyError ? (
-          <div role="alert" className="space-y-2">
+          <div role="alert" className="flex flex-col gap-2">
             <ErrorState error={vocabularyError} compact />
-            <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={() => void refetch()}
+            >
               {t("common:btn.retry")}
             </Button>
           </div>

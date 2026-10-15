@@ -24,7 +24,7 @@ import { useTranslation } from "react-i18next";
 import { Shield } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import type { DataColumn } from "./data-table";
-import { Badge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { RunDuration } from "./run-duration";
 import { DocumentCounts, RunProvenanceBadges, RunResult } from "./run-cells";
@@ -57,7 +57,7 @@ export function useRunColumns({
     {
       id: "num",
       header: t("runs.column.num"),
-      width: "56px",
+      width: 56,
       tier: 2,
       cell: (run) =>
         run.runNumber == null ? null : (
@@ -67,7 +67,8 @@ export function useRunColumns({
     {
       id: "agent",
       header: t("runs.column.agent"),
-      width: "minmax(112px,1.3fr)",
+      width: 112,
+      elastic: true,
       cell: (run) => (
         <>
           <span className="truncate font-medium">{agentName(run)}</span>
@@ -78,13 +79,14 @@ export function useRunColumns({
     {
       id: "status",
       header: t("runs.column.status"),
-      width: "104px",
-      cell: (run) => <Badge status={run.status} compact unread={run.unread} />,
+      width: 104,
+      cell: (run) => <RunStatusBadge status={run.status} compact unread={run.unread} />,
     },
     {
       id: "trigger",
       header: t("runs.column.trigger"),
-      width: "minmax(80px,0.8fr)",
+      width: 80,
+      elastic: true,
       tier: 3,
       cell: (run) => (
         <>
@@ -108,21 +110,22 @@ export function useRunColumns({
     {
       id: "result",
       header: t("runs.column.result"),
-      width: "minmax(120px,1.5fr)",
+      width: 120,
+      elastic: true,
       tier: 3,
       cell: (run) => <RunResult run={run} />,
     },
     {
       id: "docs",
       header: t("runs.column.docs"),
-      width: "60px",
+      width: 60,
       tier: 3,
       cell: (run) => <DocumentCounts run={run} />,
     },
     {
       id: "duration",
       header: t("runs.column.duration"),
-      width: "76px",
+      width: 76,
       align: "end",
       cell: (run) => (
         <RunDuration status={run.status} startedAt={run.started_at} duration={run.duration} />
@@ -131,7 +134,7 @@ export function useRunColumns({
     {
       id: "date",
       header: t("runs.column.date"),
-      width: "132px",
+      width: 132,
       align: "end",
       tier: 2,
       cell: (run) => <CellDate value={run.started_at} />,

@@ -239,7 +239,9 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
     <FormModal
       onClose={onClose}
       title={
-        isEditing ? t("settings:oauthClients.editTitle") : t("settings:oauthClients.createTitle")
+        isEditing
+          ? t("settings:integration.oauthClient.btnEdit")
+          : t("settings:oauthClients.createTitle")
       }
       className="flex max-h-[85dvh] flex-col overflow-hidden"
       onSubmit={handleSubmit(onSubmit)}
@@ -249,7 +251,7 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
     >
       <FormItem
         id="oauth-client-name"
-        label={t("settings:oauthClients.nameLabel")}
+        label={t("settings:spaces.nameLabel")}
         hint={isEditing ? t("settings:oauthClients.nameReadonlyHint") : undefined}
         error={showError("name") ? t("common:validation.required") : undefined}
       >
@@ -302,8 +304,8 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
         )}
       />
 
-      <div className="space-y-2">
-        <Label>{t("settings:oauthClients.scopesLabel")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("settings:apiKeys.scopes")}</Label>
         <p className="text-muted-foreground text-xs">{t("settings:oauthClients.scopesHint")}</p>
         <div className="flex flex-col gap-1.5">
           {(availableScopes ?? Array.from(REQUIRED_SCOPES)).map((scope) => {
@@ -340,7 +342,7 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
       </div>
 
       {can("oauth-clients:write") && (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <CheckboxField
             id="oauth-client-first-party"
             checked={isFirstParty}
@@ -416,7 +418,7 @@ export function SignupPolicyFields({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   return (
-    <div className="space-y-3 rounded-md border p-3">
+    <div className="flex flex-col gap-3 rounded-md border p-3">
       <CheckboxField
         id="oauth-client-allow-signup"
         checked={allowSignup}

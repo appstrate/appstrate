@@ -1,181 +1,58 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The files of a package, for every type: what its AFPS bundle holds, then the
- * packages it depends on.
+ * The files of a package, for every type: what its AFPS bundle holds.
  *
  * One explorer, because a skill, an integration and a local MCP server are
- * AFPS bundles exactly as an agent is. The tree says so: its bundle folder is the
- * archive itself (manifest.json, the type's main file, references/, scripts/),
- * its dependencies folder what runs beside it (an agent's skills, the local server an
- * integration launches), shown only when there is something to show.
+ * AFPS bundles exactly as an agent is: the tree is the archive itself
+ * (manifest.json, the type's main file, references/, scripts/).
  *
  * It is also the ONE place a package's files are changed. For whoever may
  * write the package, on its draft, the tree carries the file gestures of the
  * shared package draft (`lib/package-file-drafts`): new file, import, rename,
  * delete, and a file's own Actions add Modifier (in a modal) and Remplacer.
- * Every gesture stays local until the save bar sends them all, with the stored
- * manifest and its lock version, in one package PUT. Dependencies and
- * published versions stay read-only.
+ * Every gesture stays local until the save bar sends them all
+ * (`use-draft-file-edits`). Published versions stay read-only.
  */
-import { useMemo, useState } from "react";
-import { useQueries, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Check,
-  ChevronDown,
-  FilePlus,
-  Download,
-  FolderOpen,
-  GitCompareArrows,
-  Link2,
-  Pencil,
-  RefreshCw,
-  Search,
-  TextCursorInput,
-  Trash2,
-  Upload,
-  type LucideIcon,
-} from "lucide-react";
-import { Link } from "react-router-dom";
-import { Badge } from "@appstrate/ui/components/badge";
+import { FilePlus, GitCompareArrows, Search, Upload } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import type { PackageType } from "@appstrate/core/validation";
-import { asRecord, isPlainObject } from "@appstrate/core/safe-json";
-import { formatBytes } from "../../lib/format-bytes";
-import { matchesSearch } from "../../lib/strings";
-import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
-import { $api, ApiError } from "../../api/client";
+import { OptionSelect } from "@/components/app-ui/option-select";
+import { ApiError } from "../../api/client";
 import { useModalParam } from "../../hooks/use-modal-param";
-import { useUpdatePackage } from "../../hooks/use-mutations";
-import { useOrgScope } from "../../hooks/use-org-scope";
-import { usePackageDetail, usePackageVersions, useVersionDetail } from "../../hooks/use-packages";
-import { useUnsavedChanges } from "../../hooks/use-unsaved-changes";
-import { useReportEditorDirty } from "../../hooks/use-editor-state";
-import {
-  isPinnedEntry,
-  previewBlockReason,
-  type PackageFileEntry,
-  type PackageFileWriteOperation,
-  type TreeNode,
-} from "../../lib/package-file-tree";
-import {
-  fileTextOperation,
-  packageUpdateBody,
-  projectDraftFiles,
-  type DraftFile,
-} from "../../lib/package-file-drafts";
-import { errorMessage } from "../../lib/mutation-error";
-import { invalidatePaths } from "../../lib/query-keys";
-import { packageFilesErrorKey, primaryDisplayFile } from "../../lib/package-files";
-import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
+import { usePackageVersions } from "../../hooks/use-packages";
+import { matchesSearch } from "../../lib/strings";
+import { isPinnedEntry, previewBlockReason } from "../../lib/package-file-tree";
+import { fileTextOperation, type DraftFile } from "../../lib/package-file-drafts";
+import { primaryDisplayFile } from "../../lib/package-files";
 import { CompareWithDraftModal } from "../package-detail/compare-with-draft-modal";
+import { AgentDetailPaneHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
 import { Modal } from "../modal";
 import { ErrorState } from "../page-states";
 import { TextSkeleton } from "../loading-skeletons";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { UnsavedChangesModal } from "../unsaved-changes-modal";
+import { FileActionsMenu } from "./file-actions";
+import { FileTree } from "./file-tree";
 import { PackageFileSource } from "./package-file-source";
 import { PackageFileTextEditor } from "./package-file-text-editor";
-import { usePackageFileIndex, usePackageFileIndexes } from "./use-package-file-index";
-import { FileTree } from "./file-tree";
-import { usePackageFileDownload } from "./use-package-file";
-import { useStagedPackageFiles } from "./use-staged-package-files";
-import { getSource } from "../integration-editor/utils";
-import { AgentDetailPaneHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
+import { SaveBar } from "../save-bar";
+import { usePackageFileIndex } from "./use-package-file-index";
+import { useDraftFileEdits } from "./use-draft-file-edits";
 
-interface PackageReference {
-  id: string;
-  version: string | null;
-  type: "skill" | "mcp-server";
-}
+const PREVIEW_ID = "agent-file-preview";
 
-interface VirtualFile {
-  treeEntry: PackageFileEntry;
-  /** What a read fetches: a renamed draft file is still read at its stored path. */
-  sourceEntry: PackageFileEntry;
-  /** A bundle file's path in the draft, which the file gestures address. */
-  bundlePath?: string;
-  packageId: string;
-  source: "bundle" | "dependency";
-  dependency?: PackageReference;
-}
-
-// Stable tree keys; `useTreeFolderLabels` names them in the UI language.
-const TREE_BUNDLE = "bundle";
-const TREE_DEPENDENCIES = "dependencies";
-const TREE_SKILLS = "dependencies/skills";
-const TREE_MCP_SERVERS = "dependencies/mcp-servers";
-const BUNDLE_ROOT = `${TREE_BUNDLE}/`;
-
-function useTreeFolderLabels(): Readonly<Record<string, string>> {
-  const { t } = useTranslation("agents");
-  return useMemo(
-    () => ({
-      [TREE_BUNDLE]: t("files.treeBundle"),
-      [TREE_DEPENDENCIES]: t("files.treeDependencies"),
-      [TREE_SKILLS]: t("files.treeSkills"),
-      [TREE_MCP_SERVERS]: t("files.treeMcpServers"),
-    }),
-    [t],
-  );
-}
-
-/** A tree path as the user reads it: each keyed folder replaced by its label. */
-function displayTreePath(path: string, labels: Readonly<Record<string, string>>): string {
-  const parts = path.split("/");
-  return parts.map((part, i) => labels[parts.slice(0, i + 1).join("/")] ?? part).join("/");
-}
-
-/** The file gestures a bundle file offers, when its draft is being edited. */
-interface FileGestures {
-  canEdit: boolean;
-  onEdit: () => void;
-  onReplace: () => void;
-  onRename?: () => void;
-  onDelete?: () => void;
-  busy: boolean;
-}
-
-type SelectedItem =
-  | { kind: "file"; file: VirtualFile }
-  | { kind: "folder"; path: string; dependency?: PackageReference };
-
-function dependencyReferences(
-  manifest: Record<string, unknown> | undefined,
-  key: "skills" | "mcp_servers",
-  type: PackageReference["type"],
-): PackageReference[] {
-  return Object.entries(asRecord(asRecord(manifest?.dependencies)[key])).map(([id, version]) => ({
-    id,
-    version: typeof version === "string" ? version : null,
-    type,
-  }));
-}
-
-/** The local MCP server an integration launches: its one runtime dependency. */
-function localServerReference(manifest: Record<string, unknown> | undefined): PackageReference[] {
-  const source = getSource(manifest ?? {});
-  return source.kind === "local" && source.serverName
-    ? [{ id: source.serverName, version: source.serverVersion || null, type: "mcp-server" }]
-    : [];
-}
-
-function packageFolderName(packageId: string): string {
-  return packageId.slice(packageId.lastIndexOf("/") + 1);
+/** What a read fetches: a renamed draft file is still read at its stored path. */
+function sourceEntryOf(file: DraftFile): DraftFile {
+  return file.sourcePath && !file.inline ? { ...file, path: file.sourcePath } : file;
 }
 
 export function PackageFilesView({
@@ -190,236 +67,106 @@ export function PackageFilesView({
   packageId: string;
   initialVersion?: string | undefined;
   /**
-   * Where "Modifier" sends a bundle file the definition can edit (the prompt,
-   * the manifest): its Définition section, modal open. Undefined for a file
-   * nothing edits, or a reader who may not.
+   * Where "Modifier" sends a file the definition can edit (the manifest): its
+   * Définition section, modal open. Undefined for a file nothing edits, or a
+   * reader who may not.
    */
   editHref?: (path: string) => string | undefined;
-  /** A bundle file to open on, when a link sent the reader to it; else the main file. */
+  /** A file to open on, when a link sent the reader to it; else the main file. */
   initialPath?: string;
   /** The reader may write this package: its draft's files can be changed here. */
   editable?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const folderLabels = useTreeFolderLabels();
-  const scope = useOrgScope();
-  const queryClient = useQueryClient();
   const [selectedVersion, setSelectedVersion] = useState(initialVersion ?? "draft");
   const compareParam = useModalParam("compareFiles");
+  const editingFile = useModalParam("editFile");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [selected, setSelected] = useState<SelectedItem | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
   const { data: versions } = usePackageVersions(type, packageId);
-  const { data: storedDraft } = usePackageDetail(
-    type,
-    selectedVersion === "draft" ? packageId : undefined,
-  );
-  const { data: selectedVersionDetail } = useVersionDetail(
-    type,
-    packageId,
-    selectedVersion === "draft" ? undefined : selectedVersion,
-  );
-  const { data: bundleIndex, error: bundleError } = usePackageFileIndex(
-    packageId,
-    selectedVersion === "draft" ? undefined : selectedVersion,
-  );
+  const fileVersion = selectedVersion === "draft" ? undefined : selectedVersion;
+  const { data: bundleIndex, error: bundleError } = usePackageFileIndex(packageId, fileVersion);
 
-  // ── The draft's file edits ──
   const editing = editable && selectedVersion === "draft";
-  const { data: writableDraft } = usePackageDetail(type, editing ? packageId : undefined);
-  const updatePackage = useUpdatePackage(type, packageId);
-  const [operations, setOperations] = useState<PackageFileWriteOperation[]>([]);
-  // The draft the first edit started from. A refetch cannot rebase staged edits;
-  // its ETag (sent as If-Match) rejects the save if the package moved meanwhile.
-  const [base, setBase] = useState<{
-    entries: readonly PackageFileEntry[];
-    etag: string;
-    manifest: Record<string, unknown>;
-  } | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const editingFile = useModalParam("editFile");
-  const dirty = operations.length > 0;
-  const { blocker } = useUnsavedChanges(dirty);
-  useReportEditorDirty(dirty);
-  const bundleBase = base?.entries ?? bundleIndex?.data;
-  const bundleEntries: readonly DraftFile[] | undefined =
-    editing && bundleBase ? projectDraftFiles(bundleBase, operations, type) : bundleIndex?.data;
-  const staged = useStagedPackageFiles({
+  const edits = useDraftFileEdits({
     type,
-    base: bundleBase,
-    entries: bundleEntries ?? [],
-    operations,
-    onChange: (next) => {
-      if (base === null && bundleBase && writableDraft) {
-        setBase({
-          entries: bundleBase,
-          etag: writableDraft.etag ?? "",
-          manifest: writableDraft.manifest ?? {},
-        });
-      }
-      setOperations(next);
-      setSaveError(null);
-    },
-    onSelect: (path) => setSelected({ kind: "file", file: emptyBundleFile(packageId, path) }),
-    disabled: saving || !writableDraft,
+    packageId,
+    index: bundleIndex?.data,
+    editing,
+    onSelect: setSelectedPath,
   });
+  const { entries, staged, dirty } = edits;
   const busy = staged.busy;
+  const isPinned = (path: string) => path === "manifest.json" || isPinnedEntry(type, path);
 
-  const discardEdits = () => {
-    setOperations([]);
-    setBase(null);
-    setSaveError(null);
-  };
-  const saveEdits = async () => {
-    if (!base || !dirty) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await updatePackage.mutateAsync({
-        etag: base.etag,
-        body: packageUpdateBody({ manifest: base.manifest, operations }),
-      });
-      // Start again from what the server now holds, not from the staged tree.
-      await invalidatePaths(queryClient, ["/api/packages/{scope}/{name}/files"], "all");
-      discardEdits();
-      toast.success(t("files.saved"));
-    } catch (error) {
-      const key = packageFilesErrorKey(error);
-      setSaveError(
-        key ? t(key, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) }) : errorMessage(error),
-      );
-      throw error;
-    } finally {
-      setSaving(false);
-    }
-  };
-  const isPinned = (bundlePath: string) =>
-    bundlePath === "manifest.json" || isPinnedEntry(type, bundlePath);
-
-  const manifest =
-    selectedVersion === "draft" ? storedDraft?.manifest : selectedVersionDetail?.manifest;
-  const skills = useMemo(() => dependencyReferences(manifest, "skills", "skill"), [manifest]);
-  const mcpServers = useMemo(
-    () => [
-      ...dependencyReferences(manifest, "mcp_servers", "mcp-server"),
-      ...localServerReference(manifest),
-    ],
-    [manifest],
-  );
-  const skillIndexes = usePackageFileIndexes(skills.map((skill) => skill.id));
-  const mcpDetails = useQueries({
-    queries: mcpServers.map((server) => ({
-      ...$api.queryOptions("get", "/api/packages/mcp-servers/{scope}/{name}", {
-        params: { path: splitPackageRef(server.id), header: scope.header },
-      }),
-      enabled: scope.enabled,
-    })),
-  });
-  // Only a server whose manifest names an entry point has files to index.
-  const mcpIndexes = usePackageFileIndexes(
-    mcpServers.map((server, index) =>
-      hasEntryPoint(mcpDetails[index]?.data) ? server.id : undefined,
-    ),
-  );
-
-  const files = useMemo<VirtualFile[]>(() => {
-    const bundle =
-      bundleEntries?.map((entry: DraftFile) => ({
-        source: "bundle" as const,
-        packageId,
-        bundlePath: entry.path,
-        sourceEntry:
-          entry.sourcePath && !entry.inline ? { ...entry, path: entry.sourcePath } : entry,
-        treeEntry: { ...entry, path: `${BUNDLE_ROOT}${entry.path}` },
-      })) ?? [];
-    const runtimeSkills = skills.flatMap((skill, index) => {
-      const entries = skillIndexes[index]?.data?.data ?? [];
-      return entries
-        .filter((entry) => entry.path !== "manifest.json")
-        .map((entry) => ({
-          source: "dependency" as const,
-          packageId: skill.id,
-          dependency: skill,
-          sourceEntry: entry,
-          treeEntry: {
-            ...entry,
-            path: `${TREE_SKILLS}/${packageFolderName(skill.id)}/${entry.path}`,
-          },
-        }));
-    });
-    const localServers = mcpServers.flatMap((server, index) => {
-      const entries = localServerFiles(mcpDetails[index]?.data, mcpIndexes[index]?.data?.data);
-      return entries.map((entry) => ({
-        source: "dependency" as const,
-        packageId: server.id,
-        dependency: server,
-        sourceEntry: entry,
-        treeEntry: {
-          ...entry,
-          path: `${TREE_MCP_SERVERS}/${packageFolderName(server.id)}/${entry.path}`,
-        },
-      }));
-    });
-    return [...bundle, ...runtimeSkills, ...localServers];
-  }, [bundleEntries, mcpDetails, mcpIndexes, mcpServers, packageId, skillIndexes, skills]);
-
-  const visibleFiles = useMemo(
-    () =>
-      files.filter((file) =>
-        matchesSearch(query, [displayTreePath(file.treeEntry.path, folderLabels)]),
-      ),
-    [files, folderLabels, query],
-  );
-  const fileByPath = useMemo(
-    () => new Map(visibleFiles.map((file) => [file.treeEntry.path, file])),
-    [visibleFiles],
-  );
+  const visibleFiles = (entries ?? []).filter((file) => matchesSearch(query, [file.path]));
+  const mainFile = initialPath ?? primaryDisplayFile(type).name;
+  const activeFile =
+    visibleFiles.find((file) => file.path === selectedPath) ??
+    visibleFiles.find((file) => file.path === mainFile) ??
+    visibleFiles[0];
   const editedFile = editingFile.value
-    ? files.find((file) => file.bundlePath === editingFile.value)
+    ? entries?.find((file) => file.path === editingFile.value)
     : undefined;
-  const mainFile = `${BUNDLE_ROOT}${initialPath ?? primaryDisplayFile(type).name}`;
-  const defaultFile =
-    visibleFiles.find((file) => file.treeEntry.path === mainFile) ?? visibleFiles[0];
-  // A selected file is re-read from the current tree: an edit replaces its entry.
-  const reselected =
-    selected?.kind === "file"
-      ? fileByPath.get(selected.file.treeEntry.path)
-        ? { kind: "file" as const, file: fileByPath.get(selected.file.treeEntry.path)! }
-        : null
-      : selected;
-  const activeSelection =
-    reselected ?? (defaultFile ? { kind: "file" as const, file: defaultFile } : null);
-  const selectedDependency =
-    activeSelection?.kind === "file"
-      ? activeSelection.file.dependency
-      : activeSelection?.dependency;
-  const { data: selectedDependencyDetail } = usePackageDetail(
-    selectedDependency?.type ?? "skill",
-    selectedDependency?.id,
-  );
-  const publishedVersions = versions?.filter((version) => !version.yanked) ?? [];
-  const dependenciesLoading =
-    skillIndexes.some((result) => result.isLoading) ||
-    mcpIndexes.some((result) => result.isLoading) ||
-    mcpDetails.some((result) => result.isLoading);
-  const selectedVersionLabel =
-    selectedVersion === "draft" ? t("agents:detail.files.currentDraft") : `v${selectedVersion}`;
 
-  const selectPath = (path: string, node: TreeNode) => {
-    if (node.kind === "file") {
-      const file = fileByPath.get(path);
-      if (file) setSelected({ kind: "file", file });
-      return;
-    }
-    const dependency = [...skills, ...mcpServers].find((candidate) => {
-      const group = candidate.type === "skill" ? TREE_SKILLS : TREE_MCP_SERVERS;
-      const root = `${group}/${packageFolderName(candidate.id)}`;
-      return path === root || path.startsWith(`${root}/`);
-    });
-    setSelected({ kind: "folder", path, ...(dependency ? { dependency } : {}) });
-  };
+  const publishedVersions = versions?.filter((version) => !version.yanked) ?? [];
+  const versionOptions = [
+    { value: "draft", label: t("agents:detail.files.currentDraft") },
+    ...publishedVersions.map((version) => ({
+      value: version.version,
+      label: `v${version.version}`,
+    })),
+  ];
+  if (!versionOptions.some((option) => option.value === selectedVersion)) {
+    versionOptions.push({ value: selectedVersion, label: `v${selectedVersion}` });
+  }
+
+  const barActions = [
+    {
+      icon: Search,
+      label: t("common:switcher.searchPlaceholder"),
+      pressed: searchOpen,
+      disabled: false,
+      onClick: () => {
+        if (searchOpen) setQuery("");
+        setSearchOpen(!searchOpen);
+      },
+    },
+    ...(editing
+      ? [
+          {
+            icon: FilePlus,
+            label: t("files.newFile"),
+            disabled: busy,
+            onClick: staged.openNewFile,
+          },
+          {
+            icon: Upload,
+            label: t("files.upload"),
+            disabled: busy,
+            onClick: () => staged.pickUpload(null),
+          },
+        ]
+      : []),
+  ];
+
+  const activePath = activeFile?.path;
+  const gestures =
+    editing && activeFile && activePath
+      ? {
+          busy,
+          onEdit:
+            activePath !== "manifest.json" && previewBlockReason(sourceEntryOf(activeFile)) === null
+              ? () => editingFile.open(activePath)
+              : undefined,
+          onReplace:
+            activePath !== "manifest.json" ? () => staged.pickUpload(activePath) : undefined,
+          onRename: isPinned(activePath) ? undefined : () => staged.openRename(activePath),
+          onDelete: isPinned(activePath) ? undefined : () => staged.openDelete(activePath),
+        }
+      : undefined;
 
   return (
     <div className="bg-card overflow-hidden" data-package-files>
@@ -430,100 +177,66 @@ export function PackageFilesView({
             {/* The version comes first: only the draft is edited, so it decides
                 what every control below can do. */}
             <AgentDetailPaneHeader>
+              <OptionSelect
+                aria-label={t("agents:detail.files.version")}
+                value={selectedVersion}
+                options={versionOptions}
+                onValueChange={(version) => {
+                  setSelectedVersion(version);
+                  setSelectedPath(null);
+                }}
+                // Staged edits belong to the draft: finish them before reading a version.
+                disabled={dirty}
+              />
+            </AgentDetailPaneHeader>
+            <div className="border-border flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
+              {barActions.map(({ icon: Icon, label, pressed, disabled, onClick }) => (
+                <Button
+                  key={label}
+                  type="button"
+                  variant={pressed ? "secondary" : "ghost"}
+                  size="icon"
+                  className="size-8"
+                  aria-label={label}
+                  aria-pressed={pressed}
+                  title={label}
+                  disabled={disabled}
+                  onClick={onClick}
+                >
+                  <Icon />
+                </Button>
+              ))}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-between"
-                    aria-label={t("agents:detail.files.version")}
-                    title={t("agents:detail.files.version")}
-                    // Staged edits belong to the draft: finish them before reading a version.
-                    disabled={dirty}
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    aria-label={t("agents:detail.files.compareWith")}
+                    title={t("agents:detail.files.compareWith")}
                   >
-                    <span className="truncate">{selectedVersionLabel}</span>
-                    <ChevronDown className="shrink-0" />
+                    <GitCompareArrows />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-52">
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      setSelectedVersion("draft");
-                      setSelected(null);
-                    }}
-                  >
-                    <Check className={selectedVersion === "draft" ? "opacity-100" : "opacity-0"} />
-                    {t("agents:detail.files.currentDraft")}
-                  </DropdownMenuItem>
-                  {publishedVersions.map((version) => (
-                    <DropdownMenuItem
-                      key={version.version}
-                      onSelect={() => {
-                        setSelectedVersion(version.version);
-                        setSelected(null);
-                      }}
-                    >
-                      <Check
-                        className={
-                          selectedVersion === version.version ? "opacity-100" : "opacity-0"
-                        }
-                      />
-                      v{version.version}
+                <DropdownMenuContent align="start">
+                  {publishedVersions.length > 0 ? (
+                    publishedVersions.map((version) => (
+                      <DropdownMenuItem
+                        key={version.version}
+                        disabled={version.version === selectedVersion}
+                        onSelect={() => compareParam.open(version.version)}
+                      >
+                        v{version.version}
+                      </DropdownMenuItem>
+                    ))
+                  ) : (
+                    <DropdownMenuItem disabled>
+                      {t("agents:detail.files.noPublishedVersions")}
                     </DropdownMenuItem>
-                  ))}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <GitCompareArrows />
-                      {t("agents:detail.files.compareWith")}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent>
-                      {publishedVersions.length > 0 ? (
-                        publishedVersions.map((version) => (
-                          <DropdownMenuItem
-                            key={version.version}
-                            disabled={version.version === selectedVersion}
-                            onSelect={() => compareParam.open(version.version)}
-                          >
-                            v{version.version}
-                          </DropdownMenuItem>
-                        ))
-                      ) : (
-                        <DropdownMenuItem disabled>
-                          {t("agents:detail.files.noPublishedVersions")}
-                        </DropdownMenuItem>
-                      )}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
-            </AgentDetailPaneHeader>
-            <div className="border-border flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
-              <IconAction
-                icon={Search}
-                label={t("common:switcher.searchPlaceholder")}
-                pressed={searchOpen}
-                onClick={() => {
-                  if (searchOpen) setQuery("");
-                  setSearchOpen(!searchOpen);
-                }}
-              />
-              {editing && (
-                <>
-                  <IconAction
-                    icon={FilePlus}
-                    label={t("files.newFile")}
-                    disabled={busy}
-                    onClick={staged.openNewFile}
-                  />
-                  <IconAction
-                    icon={Upload}
-                    label={t("files.upload")}
-                    disabled={busy}
-                    onClick={() => staged.pickUpload(null)}
-                  />
-                </>
-              )}
             </div>
             {searchOpen && (
               <div className="border-border shrink-0 border-b p-2">
@@ -537,7 +250,7 @@ export function PackageFilesView({
                     value={query}
                     onChange={(event) => {
                       setQuery(event.target.value);
-                      setSelected(null);
+                      setSelectedPath(null);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
@@ -567,118 +280,57 @@ export function PackageFilesView({
               ) : !bundleIndex ? (
                 <TextSkeleton lines={6} />
               ) : (
-                // The bundle is drawn as soon as its index is in; only the
-                // dependencies folder waits for the indexes it lists.
-                <div className="flex h-full flex-col">
-                  <FileTree
-                    entries={visibleFiles.map((file) => file.treeEntry)}
-                    directories={[
-                      TREE_BUNDLE,
-                      ...(skills.length > 0 ? [TREE_DEPENDENCIES, TREE_SKILLS] : []),
-                      ...(mcpServers.length > 0 ? [TREE_DEPENDENCIES, TREE_MCP_SERVERS] : []),
-                    ]}
-                    initialCollapsedPaths={[TREE_SKILLS, TREE_MCP_SERVERS]}
-                    directoryLabels={folderLabels}
-                    selectedPath={
-                      activeSelection?.kind === "file"
-                        ? activeSelection.file.treeEntry.path
-                        : (activeSelection?.path ?? null)
-                    }
-                    onSelect={(path) => {
-                      const file = fileByPath.get(path);
-                      if (file) setSelected({ kind: "file", file });
-                    }}
-                    onSelectNode={(node) => {
-                      if (node.kind === "dir") selectPath(node.path, node);
-                    }}
-                    label={t("agents:files.treeLabel")}
-                    controlsId="agent-file-preview"
-                    className="min-h-0 w-full flex-1 p-1 text-left"
-                    // Its new-file and import buttons live in the bar above.
-                    showToolbar={false}
-                    actions={
-                      editing
-                        ? {
-                            onCreate: staged.openNewFile,
-                            onUpload: () => staged.pickUpload(null),
-                            onRename: (path) =>
-                              path.startsWith(BUNDLE_ROOT) &&
-                              staged.openRename(path.slice(BUNDLE_ROOT.length)),
-                            onDelete: (path) =>
-                              path.startsWith(BUNDLE_ROOT) &&
-                              staged.openDelete(path.slice(BUNDLE_ROOT.length)),
-                            // Dependencies are other packages: never renamed or deleted here.
-                            isPinned: (path) =>
-                              !path.startsWith(BUNDLE_ROOT) ||
-                              isPinned(path.slice(BUNDLE_ROOT.length)),
-                            isBusy: busy,
-                          }
-                        : undefined
-                    }
-                  />
-                  {dependenciesLoading && <TextSkeleton lines={2} className="shrink-0 px-3 pb-3" />}
-                </div>
+                <FileTree
+                  entries={visibleFiles}
+                  selectedPath={activePath ?? null}
+                  onSelect={setSelectedPath}
+                  label={t("agents:files.treeLabel")}
+                  controlsId={PREVIEW_ID}
+                  className="h-full min-h-0 w-full p-1 text-left"
+                  // Its new-file and import buttons live in the bar above.
+                  showToolbar={false}
+                  actions={
+                    editing
+                      ? {
+                          onCreate: staged.openNewFile,
+                          onUpload: () => staged.pickUpload(null),
+                          onRename: staged.openRename,
+                          onDelete: staged.openDelete,
+                          isPinned,
+                          isBusy: busy,
+                        }
+                      : undefined
+                  }
+                />
               )}
             </div>
           </>
         }
       >
         <div className="bg-background/30 min-w-0">
-          {activeSelection?.kind === "file" ? (
+          {activeFile ? (
             <div className="flex h-full min-w-0 flex-col">
-              <SelectionHeader
-                selection={activeSelection}
-                resolvedVersion={selectedDependencyDetail?.version ?? null}
-                // Only the draft is edited; a published version is read as it was.
-                editHref={selectedVersion === "draft" ? editHref : undefined}
-                gestures={
-                  editing && activeSelection.file.bundlePath
-                    ? {
-                        canEdit:
-                          activeSelection.file.bundlePath !== "manifest.json" &&
-                          previewBlockReason(activeSelection.file.sourceEntry) === null,
-                        onEdit: () => editingFile.open(activeSelection.file.bundlePath),
-                        onReplace: () => staged.pickUpload(activeSelection.file.bundlePath!),
-                        onRename: isPinned(activeSelection.file.bundlePath)
-                          ? undefined
-                          : () => staged.openRename(activeSelection.file.bundlePath!),
-                        onDelete: isPinned(activeSelection.file.bundlePath)
-                          ? undefined
-                          : () => staged.openDelete(activeSelection.file.bundlePath!),
-                        busy,
-                      }
-                    : undefined
-                }
-                fileVersion={
-                  activeSelection.file.source === "bundle"
-                    ? selectedVersion === "draft"
-                      ? undefined
-                      : selectedVersion
-                    : (selectedDependencyDetail?.version ?? undefined)
-                }
-              />
+              <AgentDetailPaneHeader className="flex-wrap gap-3 text-left max-xl:h-auto max-xl:py-2">
+                <FilePath path={activeFile.path} />
+                <div className="ml-auto shrink-0">
+                  <FileActionsMenu
+                    packageId={packageId}
+                    version={fileVersion}
+                    downloadPath={sourceEntryOf(activeFile).path}
+                    // Only the draft is edited; a published version is read as it was.
+                    editHref={selectedVersion === "draft" ? editHref?.(activeFile.path) : undefined}
+                    gestures={gestures}
+                  />
+                </div>
+              </AgentDetailPaneHeader>
               <PackageFileSource
-                id="agent-file-preview"
-                packageId={activeSelection.file.packageId}
-                version={
-                  activeSelection.file.source === "bundle"
-                    ? selectedVersion === "draft"
-                      ? undefined
-                      : selectedVersion
-                    : (selectedDependencyDetail?.version ?? undefined)
-                }
-                entry={activeSelection.file.sourceEntry}
+                id={PREVIEW_ID}
+                packageId={packageId}
+                version={fileVersion}
+                entry={sourceEntryOf(activeFile)}
                 className="h-full flex-1 rounded-none border-0"
                 hideHeader
               />
-            </div>
-          ) : activeSelection?.kind === "folder" ? (
-            <div className="flex h-full min-w-0 flex-col">
-              <SelectionHeader
-                selection={activeSelection}
-                resolvedVersion={selectedDependencyDetail?.version ?? null}
-              />
-              <FolderPreview path={activeSelection.path} dependency={activeSelection.dependency} />
             </div>
           ) : (
             <div className="text-muted-foreground grid h-full place-items-center text-sm">
@@ -689,25 +341,16 @@ export function PackageFilesView({
       </AgentDetailSplit>
 
       {editing && dirty && (
-        <div className="bg-background border-border sticky bottom-0 z-10 flex min-h-16 flex-wrap items-center gap-3 border-t px-6 py-3">
-          <span className="text-muted-foreground text-sm">
-            {saveError ?? t("files.pendingCount", { count: operations.length })}
-          </span>
-          <div className="ml-auto flex items-center gap-2">
-            <Button variant="outline" type="button" disabled={busy} onClick={discardEdits}>
-              {t("editor.discardChanges")}
-            </Button>
-            <Button type="button" disabled={busy} onClick={() => void saveEdits().catch(() => {})}>
-              {busy && <Spinner />}
-              {t("btn.save", { ns: "common" })}
-            </Button>
-          </div>
-        </div>
+        <SaveBar
+          message={edits.saveError ?? t("files.pendingCount", { count: edits.operations.length })}
+          pending={busy}
+          onDiscard={edits.discard}
+          onSave={() => void edits.save?.().catch(() => {})}
+        />
       )}
       {staged.dialogs}
       {editing && editingFile.value !== null && (
         <Modal
-          open
           onClose={editingFile.close}
           title={t("editor.editFile", { name: editingFile.value })}
           className="sm:max-w-5xl"
@@ -719,7 +362,7 @@ export function PackageFilesView({
           {editedFile ? (
             <PackageFileTextEditor
               packageId={packageId}
-              entry={editedFile.sourceEntry}
+              entry={sourceEntryOf(editedFile)}
               path={editingFile.value}
               commit="apply"
               onCommit={(text) => {
@@ -727,346 +370,29 @@ export function PackageFilesView({
                   editingFile.close();
               }}
             />
-          ) : bundleEntries ? (
+          ) : entries ? (
             <ErrorState message={t("agents:files.errorLoad")} />
           ) : (
             <TextSkeleton lines={8} />
           )}
         </Modal>
       )}
-      <UnsavedChangesModal blocker={blocker} onSaveDraft={base ? saveEdits : undefined} />
+      <UnsavedChangesModal blocker={edits.blocker} onSaveDraft={edits.save} />
 
       <CompareWithDraftModal type={type} packageId={packageId} compare={compareParam} />
     </div>
   );
 }
-function SelectionHeader({
-  selection,
-  resolvedVersion,
-  fileVersion,
-  editHref,
-  gestures,
-}: {
-  selection: SelectedItem;
-  resolvedVersion: string | null;
-  fileVersion?: string;
-  editHref?: (path: string) => string | undefined;
-  gestures?: FileGestures;
-}) {
-  const folderLabels = useTreeFolderLabels();
-  const path = displayTreePath(
-    selection.kind === "file" ? selection.file.treeEntry.path : selection.path,
-    folderLabels,
-  );
-  const dependency = selection.kind === "file" ? selection.file.dependency : selection.dependency;
-  const pathParts = path.split("/");
 
+/** One truncating line: the folders read as context, the file as the subject. */
+function FilePath({ path }: { path: string }) {
+  const parts = path.split("/");
   return (
-    <AgentDetailPaneHeader className="flex-wrap gap-3 text-left max-xl:h-auto max-xl:py-2">
-      <div className="min-w-0 flex-1">
-        {/* One truncating line: the folders read as context, the file as the subject. */}
-        <p className="truncate font-mono text-xs" title={path}>
-          {pathParts.length > 1 && (
-            <span className="text-muted-foreground">{pathParts.slice(0, -1).join(" / ")} / </span>
-          )}
-          <span className="font-semibold">{pathParts[pathParts.length - 1]}</span>
-        </p>
-      </div>
-      <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5 max-lg:w-full">
-        {dependency && (
-          <DependencyStatusCluster
-            requestedVersion={dependency.version}
-            resolvedVersion={resolvedVersion}
-          />
-        )}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          {dependency && (
-            <DependencyVersion
-              requestedVersion={dependency.version}
-              resolvedVersion={resolvedVersion}
-            />
-          )}
-          {selection.kind === "file" ? (
-            <FileSelectionActions
-              file={selection.file}
-              version={fileVersion}
-              gestures={gestures}
-              editHref={
-                selection.file.bundlePath ? editHref?.(selection.file.bundlePath) : undefined
-              }
-            />
-          ) : dependency ? (
-            <DependencySelectionActions dependency={dependency} />
-          ) : null}
-        </div>
-      </div>
-    </AgentDetailPaneHeader>
-  );
-}
-
-function DependencyStatusCluster({
-  requestedVersion,
-  resolvedVersion,
-}: {
-  requestedVersion: string | null;
-  resolvedVersion: string | null;
-}) {
-  const { t } = useTranslation("agents");
-  const isResolved = Boolean(resolvedVersion ?? requestedVersion);
-
-  return (
-    <div className="flex items-center gap-1.5">
-      {isResolved && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button type="button" className="cursor-help rounded-full focus-visible:outline-2">
-              <Badge variant="secondary">{t("detail.files.status.resolved")}</Badge>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="max-w-xs">
-            {t("detail.files.tooltip.resolved")}
-          </TooltipContent>
-        </Tooltip>
+    <p className="min-w-0 flex-1 truncate font-mono text-xs" title={path}>
+      {parts.length > 1 && (
+        <span className="text-muted-foreground">{parts.slice(0, -1).join(" / ")} / </span>
       )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button type="button" className="cursor-help rounded-full focus-visible:outline-2">
-            <Badge variant="outline">{t("detail.files.readOnly")}</Badge>
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="max-w-xs">
-          {t("detail.files.tooltip.readOnly")}
-        </TooltipContent>
-      </Tooltip>
-    </div>
-  );
-}
-
-function DependencyVersion({
-  requestedVersion,
-  resolvedVersion,
-}: {
-  requestedVersion: string | null;
-  resolvedVersion: string | null;
-}) {
-  const { t } = useTranslation("agents");
-  const requested = requestedVersion ?? resolvedVersion;
-  const resolved = resolvedVersion ?? requestedVersion;
-  const differs = Boolean(requested && resolved && requested !== resolved);
-  const label = differs
-    ? `${requested} → ${resolved}`
-    : resolved
-      ? resolved.startsWith("v")
-        ? resolved
-        : `v${resolved}`
-      : "—";
-  const tooltip = differs
-    ? t("detail.files.tooltip.versionDifferent", { requested, resolved })
-    : t("detail.files.tooltip.versionSame", { version: resolved ?? requested ?? "—" });
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          className="text-muted-foreground cursor-help rounded-sm font-mono text-xs whitespace-nowrap focus-visible:outline-2"
-        >
-          {label}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="max-w-xs">
-        {tooltip}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function FileSelectionActions({
-  file,
-  version,
-  editHref,
-  gestures,
-}: {
-  file: VirtualFile;
-  version?: string;
-  editHref?: string;
-  gestures?: FileGestures;
-}) {
-  const { t } = useTranslation("agents");
-  const download = usePackageFileDownload(file.packageId, version);
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm">
-          {t("detail.files.actions")}
-          <ChevronDown />
-        </Button>
-      </DropdownMenuTrigger>
-      {/* Closing must not hand focus back to the trigger: these items open a
-          modal whose editor takes the focus, and Monaco loses its keyboard
-          input when it is focused on mount and blurred right after. */}
-      <DropdownMenuContent align="end" onCloseAutoFocus={(event) => event.preventDefault()}>
-        {gestures?.canEdit ? (
-          <DropdownMenuItem disabled={gestures.busy} onSelect={gestures.onEdit}>
-            <Pencil />
-            {t("btn.edit", { ns: "common" })}
-          </DropdownMenuItem>
-        ) : (
-          editHref && (
-            <DropdownMenuItem asChild>
-              <Link to={editHref}>
-                <Pencil />
-                {t("btn.edit", { ns: "common" })}
-              </Link>
-            </DropdownMenuItem>
-          )
-        )}
-        {gestures && file.bundlePath !== "manifest.json" && (
-          <DropdownMenuItem disabled={gestures.busy} onSelect={gestures.onReplace}>
-            <RefreshCw />
-            {t("files.replace")}
-          </DropdownMenuItem>
-        )}
-        {gestures?.onRename && (
-          <DropdownMenuItem disabled={gestures.busy} onSelect={gestures.onRename}>
-            <TextCursorInput />
-            {t("files.rename")}
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuItem onSelect={() => void download(file.sourceEntry.path)}>
-          <Download />
-          {t("files.downloadFile")}
-        </DropdownMenuItem>
-        {gestures?.onDelete && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              disabled={gestures.busy}
-              onSelect={gestures.onDelete}
-              className="text-destructive focus:text-destructive"
-            >
-              <Trash2 />
-              {t("files.delete")}
-            </DropdownMenuItem>
-          </>
-        )}
-        {file.dependency && (
-          <DropdownMenuItem asChild>
-            <Link to={packageDetailPath(file.dependency.type, file.dependency.id)}>
-              <Link2 />
-              {t("detail.files.openDependency")}
-            </Link>
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function DependencySelectionActions({ dependency }: { dependency: PackageReference }) {
-  const { t } = useTranslation("agents");
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm">
-          {t("detail.files.actions")}
-          <ChevronDown />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem asChild>
-          <Link to={packageDetailPath(dependency.type, dependency.id)}>
-            <Link2 />
-            {t("detail.files.openDependency")}
-          </Link>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function FolderPreview({ path, dependency }: { path: string; dependency?: PackageReference }) {
-  const { t } = useTranslation("agents");
-  const folderLabels = useTreeFolderLabels();
-  return (
-    <div className="h-full p-6 text-left">
-      <div className="flex items-center gap-3">
-        <FolderOpen className="text-muted-foreground size-5" aria-hidden />
-        <h3 className="font-mono text-sm font-semibold">{displayTreePath(path, folderLabels)}</h3>
-      </div>
-      {dependency && (
-        <p className="text-muted-foreground mt-3 max-w-lg text-sm">
-          {t("detail.files.selectItem")}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/**
- * A local MCP server's files, once its manifest names an entry point the
- * bundle holds; nothing otherwise (a remote server has no files to show).
- */
-function localServerFiles(
-  detail: { manifest?: unknown } | undefined,
-  files: readonly PackageFileEntry[] | undefined,
-): readonly PackageFileEntry[] {
-  const entryPoint = entryPointOf(detail);
-  if (!files || entryPoint === undefined) return [];
-  const paths = new Set(files.map((entry) => entry.path));
-  return paths.has("manifest.json") && paths.has(entryPoint) ? files : [];
-}
-
-function entryPointOf(detail: { manifest?: unknown } | undefined): string | undefined {
-  const server = asRecord(detail?.manifest).server;
-  return isPlainObject(server) && typeof server.entry_point === "string"
-    ? server.entry_point
-    : undefined;
-}
-
-function hasEntryPoint(detail: { manifest?: unknown } | undefined): boolean {
-  return entryPointOf(detail) !== undefined;
-}
-
-/** A file just created in the draft, before the tree hands back its entry. */
-function emptyBundleFile(packageId: string, path: string): VirtualFile {
-  const entry: PackageFileEntry = { path, size: 0, media_kind: "text", inline: "" };
-  return {
-    source: "bundle",
-    packageId,
-    bundlePath: path,
-    sourceEntry: entry,
-    treeEntry: { ...entry, path: `${BUNDLE_ROOT}${path}` },
-  };
-}
-
-/** One of the tree bar's icon buttons: named for a screen reader, titled for a pointer. */
-function IconAction({
-  icon: Icon,
-  label,
-  onClick,
-  disabled = false,
-  pressed,
-}: {
-  icon: LucideIcon;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  pressed?: boolean;
-}) {
-  return (
-    <Button
-      type="button"
-      variant={pressed ? "secondary" : "ghost"}
-      size="icon"
-      className="size-8"
-      aria-label={label}
-      aria-pressed={pressed}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      <Icon className="size-4" />
-    </Button>
+      <span className="font-semibold">{parts[parts.length - 1]}</span>
+    </p>
   );
 }

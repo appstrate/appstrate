@@ -31,11 +31,9 @@ export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
 };
 
 /**
- * State behind the chat's one context surface. A file is always shown in the
- * Files tab, over its list. Opened from the thread (a click on a run's file, or
- * the single file a run just produced), closing it closes the panel; opened from
- * the list, closing it goes back to the list. Choosing a tab shows that tab's
- * own content, so the Files tab shows its list again.
+ * State behind the chat's context panel. A file shows in the Files tab over its
+ * list: closing it closes the panel when opened from the thread, goes back to
+ * the list when opened from the list. Choosing a tab shows that tab's own content.
  */
 export function conversationSidebarReducer(
   state: ConversationSidebarState,

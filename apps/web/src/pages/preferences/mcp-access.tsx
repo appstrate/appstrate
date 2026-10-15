@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Connecting one's own MCP client, which is a personal setting, beside the CLI
- * sessions in the profile. Nothing here is administration: the URL is public
- * to the org's members, the shortcuts configure a client on this person's
- * machine, and what that client may then do is decided by their own
- * permissions, server-side.
- */
+/** Personal MCP client connection (not administration): what the client may do is decided by the user's own permissions, server-side. */
 
 import { useTranslation } from "react-i18next";
 import { Building } from "lucide-react";

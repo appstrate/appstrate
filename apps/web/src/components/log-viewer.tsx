@@ -35,9 +35,10 @@ import {
   type ToolExecutionStatus,
 } from "./log-utils";
 import { ItemList } from "./item-list";
+import { Waiting } from "./loading-skeletons";
 import { EmptyState } from "./page-states";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
-import { Badge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
 import { formatDateField } from "../lib/format-date";
 import { historyRuns, recalledMemories } from "../lib/runtime-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
@@ -131,6 +132,23 @@ function formatStructuredValue(value: unknown): string {
   }
 }
 
+function JsonBlock({ value }: { value: unknown }) {
+  return (
+    <pre className="bg-muted text-foreground/80 overflow-x-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap select-text">
+      {formatStructuredValue(value)}
+    </pre>
+  );
+}
+
+function InspectorSection({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-sm font-medium">{label}</h3>
+      {children}
+    </section>
+  );
+}
+
 /**
  * A tool's result. The two first-party memory tools read as the items they
  * returned (a memory's text, a past run's status and date); anything else, and
@@ -141,11 +159,7 @@ function ToolResult({ tool, result }: { tool: string; result: unknown }) {
   const [showJson, setShowJson] = useState(false);
   const memories = tool === "recall_memory" ? recalledMemories(result) : null;
   const runs = tool === "run_history" ? historyRuns(result) : null;
-  const raw = (
-    <pre className="bg-muted text-foreground/80 overflow-x-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap select-text">
-      {formatStructuredValue(result)}
-    </pre>
-  );
+  const raw = <JsonBlock value={result} />;
   if (!memories && !runs) return raw;
   let items = raw;
   if (!showJson && memories) {
@@ -174,7 +188,7 @@ function ToolResult({ tool, result }: { tool: string; result: unknown }) {
         empty={<EmptyState compact icon={Info} message={t("log.historyNone")} />}
         renderItem={(run) => (
           <div className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
-            {run.status && <Badge status={run.status} />}
+            {run.status && <RunStatusBadge status={run.status} />}
             <span className="font-mono text-xs">{run.id}</span>
             <span className="text-muted-foreground ml-auto text-xs tabular-nums">
               {[
@@ -190,9 +204,14 @@ function ToolResult({ tool, result }: { tool: string; result: unknown }) {
     );
   }
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       {items}
-      <Button variant="outline" size="sm" onClick={() => setShowJson((v) => !v)}>
+      <Button
+        variant="outline"
+        size="sm"
+        className="self-start"
+        onClick={() => setShowJson((v) => !v)}
+      >
         <Braces />
         {showJson ? t("run.outputShowFields") : t("run.outputShowJson")}
       </Button>
@@ -223,14 +242,27 @@ function journalType(entry: ExecutionEntry): JournalTypeFilter {
   return "diagnostic";
 }
 
-function focusLevelFilters(focus: JournalOverviewFilter | undefined): JournalLevelFilter[] {
-  if (focus === "warnings") return ["warn"];
-  if (focus === "errors") return ["error"];
-  return [];
-}
+const FOCUS_FILTERS: Record<
+  JournalOverviewFilter,
+  { levels: JournalLevelFilter[]; types: JournalTypeFilter[] }
+> = {
+  tools: { levels: [], types: ["tool_call", "tool_result"] },
+  warnings: { levels: ["warn"], types: [] },
+  errors: { levels: ["error"], types: [] },
+};
 
-function focusTypeFilters(focus: JournalOverviewFilter | undefined): JournalTypeFilter[] {
-  return focus === "tools" ? ["tool_call", "tool_result"] : [];
+/** A filter in force stays on screen, so it can be cleared. */
+function facet(
+  id: string,
+  label: string,
+  values: string[],
+  available: readonly string[],
+  optionLabel: (value: string) => string,
+  onChange: (values: string[]) => void,
+): FilterSpec[] {
+  if (available.length < 2 && values.length === 0) return [];
+  const options = available.map((value) => ({ value, label: optionLabel(value) }));
+  return [{ id, label, values, options, onChange }];
 }
 
 function journalSearchText(entry: ExecutionEntry): string {
@@ -257,15 +289,13 @@ export function LogViewer({
 
   const [autoScroll, setAutoScroll] = useState(true);
   const { copied, copy } = useCopyToClipboard();
-  const [showTimestamps, setShowTimestamps] = useState(false);
-  const [showTools, setShowTools] = useState(true);
+  const [display, setDisplay] = useState<string[]>([]);
+  const showTimestamps = display.includes("timestamps");
+  const showTools = !display.includes("hide_tools");
   const [query, setQuery] = useState("");
-  const [levelFilters, setLevelFilters] = useState(() => focusLevelFilters(initialFocus));
-  const [typeFilters, setTypeFilters] = useState(() => focusTypeFilters(initialFocus));
-  const displayFilters = [
-    ...(showTimestamps ? ["timestamps"] : []),
-    ...(!showTools ? ["hide_tools"] : []),
-  ];
+  const focus = initialFocus ? FOCUS_FILTERS[initialFocus] : undefined;
+  const [levelFilters, setLevelFilters] = useState<string[]>(focus?.levels ?? []);
+  const [typeFilters, setTypeFilters] = useState<string[]>(focus?.types ?? []);
 
   const normalizedQuery = query.trim().toLocaleLowerCase(i18n.language);
   const visibleEntries = useMemo(() => {
@@ -288,50 +318,34 @@ export function LogViewer({
   const availableTypes = (["message", "tool_call", "tool_result", "diagnostic"] as const).filter(
     (value) => entries.some((entry) => journalType(entry) === value),
   );
-  const activeFilterCount = levelFilters.length + typeFilters.length + displayFilters.length;
+  const activeFilterCount = levelFilters.length + typeFilters.length + display.length;
   const hasActiveQueryOrFilters = normalizedQuery !== "" || activeFilterCount > 0;
   const filters: FilterSpec[] = [
-    // A filter in force stays on screen, so it can be cleared.
-    ...(availableLevels.length > 1 || levelFilters.length > 0
-      ? [
-          {
-            id: "level",
-            label: t("log.filterLevel"),
-            values: levelFilters,
-            options: availableLevels.map((value) => ({
-              value,
-              label: t(`log.level.${value}`),
-            })),
-            onChange: (values: string[]) => setLevelFilters(values as JournalLevelFilter[]),
-          },
-        ]
-      : []),
-    ...(availableTypes.length > 1 || typeFilters.length > 0
-      ? [
-          {
-            id: "type",
-            label: t("log.filterType"),
-            values: typeFilters,
-            options: availableTypes.map((value) => ({
-              value,
-              label: t(`log.type.${value}`),
-            })),
-            onChange: (values: string[]) => setTypeFilters(values as JournalTypeFilter[]),
-          },
-        ]
-      : []),
+    ...facet(
+      "level",
+      t("log.filterLevel"),
+      levelFilters,
+      availableLevels,
+      (value) => t(`log.level.${value}`),
+      setLevelFilters,
+    ),
+    ...facet(
+      "type",
+      t("log.filterType"),
+      typeFilters,
+      availableTypes,
+      (value) => t(`log.type.${value}`),
+      setTypeFilters,
+    ),
     {
       id: "display",
       label: t("log.filterDisplay"),
-      values: displayFilters,
+      values: display,
       options: [
         { value: "timestamps", label: t("log.toggleTimestamps") },
         { value: "hide_tools", label: t("log.hideTools") },
       ],
-      onChange: (values: string[]) => {
-        setShowTimestamps(values.includes("timestamps"));
-        setShowTools(!values.includes("hide_tools"));
-      },
+      onChange: setDisplay,
     },
   ];
 
@@ -410,8 +424,7 @@ export function LogViewer({
     setQuery("");
     setLevelFilters([]);
     setTypeFilters([]);
-    setShowTimestamps(false);
-    setShowTools(true);
+    setDisplay([]);
   };
 
   const journalGrid = showTimestamps
@@ -421,7 +434,6 @@ export function LogViewer({
   return (
     <div className="bg-card overflow-hidden">
       <ListToolbar
-        placement="panel"
         search={{ value: query, onChange: setQuery, placeholder: t("log.search") }}
         filters={filters}
         onReset={clearJournalFilters}
@@ -431,7 +443,7 @@ export function LogViewer({
             <PageActionsMenu>
               <DropdownMenuItem onSelect={handleCopy}>
                 {copied ? <Check /> : <Copy />}
-                {copied ? t("log.copied") : t("log.copyLogs")}
+                {copied ? t("common:btn.copied") : t("log.copyLogs")}
               </DropdownMenuItem>
               <DropdownMenuCheckboxItem
                 checked={autoScroll}
@@ -460,36 +472,36 @@ export function LogViewer({
             {showTimestamps && <span>{t("log.timestamp")}</span>}
             <span>{t("log.filterType")}</span>
             <span>{t("log.columnEvent")}</span>
-            <span>{t("log.columnDuration")}</span>
+            <span>{t("run.infoDuration")}</span>
           </div>
 
           <div className="h-[400px] overflow-y-auto" ref={scrollRef}>
             {isLoading && entries.length === 0 ? (
-              <div role="status" aria-busy="true" aria-label={t("loading", { ns: "common" })}>
-                <div aria-hidden className="space-y-2 p-4">
+              <Waiting>
+                <div className="flex flex-col gap-2 p-4">
                   {Array.from({ length: 8 }, (_, i) => (
                     <Skeleton key={i} className="h-8 w-full" />
                   ))}
                 </div>
-              </div>
-            ) : entries.length === 0 ? (
-              <div className="flex h-full items-center justify-center">
-                <EmptyState compact icon={ScrollText} message={t("log.empty")} />
-              </div>
+              </Waiting>
             ) : visibleEntries.length === 0 ? (
               <div className="flex h-full items-center justify-center">
-                <EmptyState
-                  compact
-                  icon={SearchX}
-                  message={t("log.noMatches")}
-                  hint={t("log.noMatchesHint")}
-                >
-                  {hasActiveQueryOrFilters && (
-                    <Button variant="ghost" size="sm" onClick={clearJournalFilters}>
-                      {t("log.clearAll")}
-                    </Button>
-                  )}
-                </EmptyState>
+                {entries.length === 0 ? (
+                  <EmptyState compact icon={ScrollText} message={t("log.empty")} />
+                ) : (
+                  <EmptyState
+                    compact
+                    icon={SearchX}
+                    message={t("log.noMatches")}
+                    hint={t("log.noMatchesHint")}
+                  >
+                    {hasActiveQueryOrFilters && (
+                      <Button variant="ghost" size="sm" onClick={clearJournalFilters}>
+                        {t("common:toolbar.clearAll")}
+                      </Button>
+                    )}
+                  </EmptyState>
+                )}
               </div>
             ) : (
               <div
@@ -604,7 +616,7 @@ export function LogEntryInspector({
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-5 p-4">
+        <div className="flex flex-col gap-5 p-4">
           <FactGrid columns={1}>
             <Fact label={t("log.filterType")}>{t(`log.type.${type}`)}</Fact>
             {entry.createdAt && (
@@ -629,20 +641,25 @@ export function LogEntryInspector({
           {entry.kind === "tool" ? (
             <>
               {entry.args !== undefined && (
-                <InspectorCode label={t("log.arguments")} value={entry.args} />
+                <InspectorSection label={t("log.arguments")}>
+                  <JsonBlock value={entry.args} />
+                </InspectorSection>
               )}
               {entry.result !== undefined && (
-                <section className="space-y-2">
-                  <h3 className="text-sm font-medium">{t("log.result")}</h3>
+                <InspectorSection label={t("log.result")}>
                   <ToolResult key={entry.id} tool={entry.tool} result={entry.result} />
-                </section>
+                </InspectorSection>
               )}
               {entry.detail && entry.args === undefined && (
-                <InspectorText label={t("log.details")} value={entry.detail} />
+                <InspectorSection label={t("log.details")}>
+                  <InspectorProse>{entry.detail}</InspectorProse>
+                </InspectorSection>
               )}
             </>
           ) : (
-            <InspectorText label={t("log.message")} value={entry.message} />
+            <InspectorSection label={t("log.message")}>
+              <InspectorProse>{entry.message}</InspectorProse>
+            </InspectorSection>
           )}
         </div>
       </ScrollArea>
@@ -650,22 +667,6 @@ export function LogEntryInspector({
   );
 }
 
-function InspectorText({ label, value }: { label: string; value: string }) {
-  return (
-    <section className="space-y-2">
-      <h3 className="text-sm font-medium">{label}</h3>
-      <p className="text-foreground/80 text-sm break-words whitespace-pre-wrap">{value}</p>
-    </section>
-  );
-}
-
-function InspectorCode({ label, value }: { label: string; value: unknown }) {
-  return (
-    <section className="space-y-2">
-      <h3 className="text-sm font-medium">{label}</h3>
-      <pre className="bg-muted text-foreground/80 overflow-x-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap select-text">
-        {formatStructuredValue(value)}
-      </pre>
-    </section>
-  );
+function InspectorProse({ children }: { children: string }) {
+  return <p className="text-foreground/80 text-sm break-words whitespace-pre-wrap">{children}</p>;
 }

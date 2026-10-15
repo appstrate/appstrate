@@ -250,11 +250,6 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
     keys: ["displayName", "iconUrl"],
     reason: MODULE_DESCRIPTOR,
   },
-  {
-    path: "apps/web/src/components/credential-form-modal.tsx",
-    keys: ["iconUrl"],
-    reason: MODULE_DESCRIPTOR,
-  },
   { path: "apps/web/src/components/icons.tsx", keys: ["iconUrl"], reason: MODULE_DESCRIPTOR },
 
   // ── Group 3: wire DTOs and view models ──

@@ -27,11 +27,7 @@ function originalHistory() {
   return originals;
 }
 
-/**
- * A Back/Forward has already moved the address to `href`. When that leaves the
- * editor, push the entry it left back — with its history state — and answer
- * the path the user asked for; otherwise `null`.
- */
+/** A Back/Forward already moved the address to `href`. When that leaves the editor, push the left entry back (with its state) and answer the requested path; otherwise `null`. */
 export function undoLeavingPop(
   entry: { path: string; state: unknown },
   href: string,
@@ -45,15 +41,10 @@ export function undoLeavingPop(
 }
 
 /**
- * Blocks in-app navigation (Link, navigate(), pushState, popstate, tab close)
- * that would unmount the editor while `isDirty` is true: a new pathname, tab
- * (hash) or `EditorPlaceContext` place. Works with BrowserRouter — no data
- * router needed.
- *
- * Monkey-patches `history.pushState` and `replaceState` while active so that
- * every SPA navigation is intercepted regardless of source (Link, navigate(),
- * sidebar, logo, modals…). The patch is removed on cleanup or when `isDirty`
- * becomes false.
+ * Blocks navigation that would unmount the editor while `isDirty` (new pathname, tab hash or
+ * `EditorPlaceContext` place). Works with BrowserRouter (no data router). Monkey-patches
+ * `history.pushState`/`replaceState` so every SPA navigation is intercepted; removed on cleanup
+ * or when `isDirty` turns false.
  */
 export function useUnsavedChanges(isDirty: boolean) {
   const navigate = useNavigate();
@@ -70,12 +61,10 @@ export function useUnsavedChanges(isDirty: boolean) {
     entryState.current = history.state;
   }, [current]);
 
-  // Keep isDirty and the place in refs so the patched pushState reads the
-  // latest values without needing to re-patch on every change.
+  // Refs, so the patched pushState reads the latest values without re-patching.
   const dirtyRef = useRef(isDirty);
   const placeRef = useRef(place);
 
-  // Reset the skip flag and sync dirtyRef whenever dirty state changes.
   useEffect(() => {
     dirtyRef.current = isDirty;
     skipRef.current = false;
@@ -84,9 +73,7 @@ export function useUnsavedChanges(isDirty: boolean) {
     placeRef.current = place;
   }, [place]);
 
-  // ── Monkey-patch history.push/replaceState ─────────────────────────
-  // Both are patched: `navigate(path, { replace: true })`, the router's
-  // redirect flows and a tab switch go through replaceState.
+  // Both are patched: `navigate(..., { replace: true })`, redirects and tab switches use replaceState.
   useEffect(() => {
     if (!isDirty) return;
 
@@ -120,7 +107,6 @@ export function useUnsavedChanges(isDirty: boolean) {
     };
   }, [isDirty]);
 
-  // ── Intercept browser back/forward ─────────────────────────────────
   useEffect(() => {
     if (!isDirty) return;
 
@@ -141,14 +127,11 @@ export function useUnsavedChanges(isDirty: boolean) {
     return () => window.removeEventListener("popstate", handler);
   }, [isDirty, current]);
 
-  // ── Warn on browser tab close / refresh ────────────────────────────
   useEffect(() => {
     if (!isDirty) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
-      // Legacy browsers (and some Chromium versions) only raise the native
-      // "leave site?" prompt when `returnValue` is set, so preventDefault
-      // alone is not enough to guarantee the confirmation dialog.
+      // Legacy browsers and some Chromium versions need `returnValue` set to show the prompt.
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
@@ -156,12 +139,9 @@ export function useUnsavedChanges(isDirty: boolean) {
   }, [isDirty]);
 
   /**
-   * Open the blocker for a navigation the editor itself is about to make (the
-   * redirect a successful submit ends on), and close it again when that
-   * navigation does not happen. A save that fails leaves the edits in the page,
-   * so the blocker has to be armed again: `allowNavigation(false)` is that,
-   * because the flag otherwise stays open until `isDirty` changes — which a
-   * failed save does not do.
+   * Let through a navigation the editor itself is about to make (a submit's redirect). Re-arm
+   * with `allowNavigation(false)` when the save fails: the flag otherwise stays open until
+   * `isDirty` changes, which a failed save does not do.
    */
   const allowNavigation = useCallback((allowed = true) => {
     skipRef.current = allowed;

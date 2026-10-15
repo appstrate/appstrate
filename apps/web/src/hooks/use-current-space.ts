@@ -61,10 +61,7 @@ function selectSpace(queryClient: QueryClient, spaceId: string | null): void {
   });
 }
 
-/**
- * Hook that returns a `switchSpace` function.
- * Switches the current space and invalidates space-scoped caches.
- */
+/** Returns a `switchSpace` function that also drops space-scoped caches. */
 export function useSpaceSwitcher() {
   const queryClient = useQueryClient();
 
@@ -105,11 +102,7 @@ export function enterableSpaceId(
   return pick?.id ?? null;
 }
 
-/**
- * The only path from the remembered space to a scope: requests carry no space
- * until `GET /api/spaces` proves one enterable, and lose it the moment the
- * listing stops listing it. Render inside MainLayout.
- */
+/** The only path from the remembered space to a scope: none until `GET /api/spaces` proves one enterable, dropped when it stops listing it. Render inside MainLayout. */
 export function useSpaceResolver(): void {
   const queryClient = useQueryClient();
   const current = useStore(spaceStore, (s) => s.id);

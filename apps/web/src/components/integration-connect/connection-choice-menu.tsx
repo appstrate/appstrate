@@ -4,12 +4,14 @@ import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Ban, Check, ChevronDown, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
@@ -45,20 +47,6 @@ function ChoiceLabel({ label, description }: { label: string; description: React
       <span className="truncate font-medium">{label}</span>
       <span className="text-muted-foreground text-[0.65rem] break-words">{description}</span>
     </div>
-  );
-}
-
-/** The radio of a mode: a menu item stands for it, the circle is a glyph. */
-function RadioDot({ checked }: { checked: boolean }) {
-  return (
-    <span
-      aria-hidden
-      className={`flex size-4 shrink-0 items-center justify-center rounded-full border ${
-        checked ? "border-foreground" : "border-muted-foreground/50"
-      }`}
-    >
-      {checked && <span className="bg-foreground size-2 rounded-full" />}
-    </span>
   );
 }
 
@@ -150,10 +138,6 @@ export function ConnectionChoiceMenu({
   // Ticking a connection is choosing: the mode follows the boxes.
   const shown: ChoiceMode | null = ticking || choosing ? "choose" : storedMode;
   const atCap = checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION;
-  const modeRow = (checked: boolean) => ({
-    role: "menuitemradio" as const,
-    "aria-checked": checked,
-  });
   const TriggerIcon = trigger.icon;
 
   return (
@@ -169,9 +153,9 @@ export function ConnectionChoiceMenu({
           }
           data-testid={`${testPrefix}-${testKey}`}
         >
-          <TriggerIcon className={compact ? "size-3" : "size-4"} />
+          <TriggerIcon />
           <span className="max-w-[14rem] min-w-0 truncate">{trigger.label}</span>
-          <ChevronDown className={`${compact ? "size-3" : "size-4"} ml-auto opacity-60`} />
+          <ChevronDown className="ml-auto opacity-60" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -181,131 +165,118 @@ export function ConnectionChoiceMenu({
         {title && <DropdownMenuLabel className="text-[0.7rem]">{title}</DropdownMenuLabel>}
         {/* The cascade's turn comes first: the default, then what is chosen over it, then none.
             Going back to one of them is picking it. */}
-        {showModes && inherit && (
-          <DropdownMenuItem
-            {...modeRow(shown === "inherit")}
-            disabled={busy}
-            onSelect={() => {
-              if (storedMode !== "inherit") onInherit();
-            }}
-            data-testid={`${testPrefix}-reset-${testKey}`}
-          >
-            <RadioDot checked={shown === "inherit"} />
-            <ChoiceLabel
-              label={t("detail.integrationMemberPicker.inherit")}
-              description={inherit.description}
-            />
-          </DropdownMenuItem>
-        )}
-        {showModes && hasList && (
-          <DropdownMenuItem
-            {...modeRow(shown === "choose")}
-            onSelect={(e) => {
-              // It only opens the boxes below: the menu stays for the ticks.
-              e.preventDefault();
-              setChoosing(true);
-            }}
-            data-testid={`${testPrefix}-choose-${testKey}`}
-          >
-            <RadioDot checked={shown === "choose"} />
-            <ChoiceLabel
-              label={t("detail.integrationMemberPicker.modeChoose")}
-              description={t("detail.integrationMemberPicker.modeChooseHint")}
-            />
-          </DropdownMenuItem>
-        )}
-        {hasList && (
-          <div
-            role="group"
-            className={showModes ? "border-border mb-1 ml-4 border-l pl-1" : undefined}
-          >
-            {rows.map((row) => {
-              const isChecked = checkedIds.includes(row.id);
-              return (
-                <DropdownMenuItem
-                  key={row.id}
-                  // The row is the checkbox a screen reader sees; the box is a glyph.
-                  role="menuitemcheckbox"
-                  aria-checked={isChecked}
-                  disabled={busy || (!isChecked && (atCap || row.disabled === true))}
-                  // Toggling must not close the menu: a set is ticked box by box.
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    onToggle(row.id);
-                  }}
-                  data-testid={`${testPrefix}-option-${row.id}`}
-                >
-                  <Checkbox
+        <DropdownMenuRadioGroup value={shown ?? ""}>
+          {showModes && inherit && (
+            <DropdownMenuRadioItem
+              value="inherit"
+              disabled={busy}
+              onSelect={() => {
+                if (storedMode !== "inherit") onInherit();
+              }}
+              data-testid={`${testPrefix}-reset-${testKey}`}
+            >
+              <ChoiceLabel
+                label={t("detail.integrationMemberPicker.inherit")}
+                description={inherit.description}
+              />
+            </DropdownMenuRadioItem>
+          )}
+          {showModes && hasList && (
+            <DropdownMenuRadioItem
+              value="choose"
+              onSelect={(e) => {
+                // It only opens the boxes below: the menu stays for the ticks.
+                e.preventDefault();
+                setChoosing(true);
+              }}
+              data-testid={`${testPrefix}-choose-${testKey}`}
+            >
+              <ChoiceLabel
+                label={t("detail.integrationMemberPicker.modeChoose")}
+                description={t("detail.integrationMemberPicker.modeChooseHint")}
+              />
+            </DropdownMenuRadioItem>
+          )}
+          {hasList && (
+            <div
+              role="group"
+              className={showModes ? "border-border mb-1 ml-4 border-l" : undefined}
+            >
+              {rows.map((row) => {
+                const isChecked = checkedIds.includes(row.id);
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={row.id}
                     checked={isChecked}
-                    aria-hidden
-                    tabIndex={-1}
-                    className="pointer-events-none"
-                  />
+                    disabled={busy || (!isChecked && (atCap || row.disabled === true))}
+                    // Toggling must not close the menu: a set is ticked box by box.
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      onToggle(row.id);
+                    }}
+                    className="gap-2"
+                    data-testid={`${testPrefix}-option-${row.id}`}
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      {/* An incompatible row is muted on its name; its reason stays legible. */}
+                      <span className={`truncate font-medium ${row.muted ? "opacity-60" : ""}`}>
+                        {row.name}
+                      </span>
+                      {row.description && (
+                        <span className="text-muted-foreground text-[0.65rem] break-words">
+                          {row.description}
+                        </span>
+                      )}
+                      {row.extra}
+                    </div>
+                    {row.trailing}
+                  </DropdownMenuCheckboxItem>
+                );
+              })}
+              {unavailableIds.map((id) => (
+                <DropdownMenuCheckboxItem
+                  key={id}
+                  checked={false}
+                  disabled
+                  data-testid={`${testPrefix}-unavailable-${id}`}
+                >
                   <div className="flex min-w-0 flex-1 flex-col">
-                    {/* An incompatible row is muted on its name; its reason stays legible. */}
-                    <span className={`truncate font-medium ${row.muted ? "opacity-60" : ""}`}>
-                      {row.name}
+                    <span className="truncate font-medium line-through">
+                      {unavailableRow.label}
                     </span>
-                    {row.description && (
-                      <span className="text-muted-foreground text-[0.65rem] break-words">
-                        {row.description}
+                    {unavailableRow.hint && (
+                      <span className="text-muted-foreground truncate text-[0.65rem]">
+                        {unavailableRow.hint}
                       </span>
                     )}
-                    {row.extra}
                   </div>
-                  {row.trailing}
-                </DropdownMenuItem>
-              );
-            })}
-            {unavailableIds.map((id) => (
-              <DropdownMenuItem
-                key={id}
-                disabled
-                role="menuitemcheckbox"
-                aria-checked={false}
-                data-testid={`${testPrefix}-unavailable-${id}`}
-              >
-                <Checkbox
-                  checked={false}
-                  aria-hidden
-                  tabIndex={-1}
-                  className="pointer-events-none"
-                />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate font-medium line-through">{unavailableRow.label}</span>
-                  {unavailableRow.hint && (
-                    <span className="text-muted-foreground truncate text-[0.65rem]">
-                      {unavailableRow.hint}
-                    </span>
-                  )}
-                </div>
-              </DropdownMenuItem>
-            ))}
-            {atCap && rows.length > 0 && (
-              <DropdownMenuLabel className="text-muted-foreground text-[0.65rem] font-normal">
-                {t("detail.integrationMemberPicker.maxReached", {
-                  max: MAX_CONNECTIONS_PER_INTEGRATION,
-                })}
-              </DropdownMenuLabel>
-            )}
-          </div>
-        )}
-        {showModes && none && (
-          <DropdownMenuItem
-            {...modeRow(shown === "none")}
-            disabled={busy}
-            onSelect={() => {
-              if (storedMode !== "none") onNone();
-            }}
-            data-testid={`${testPrefix}-none-${testKey}`}
-          >
-            <RadioDot checked={shown === "none"} />
-            <ChoiceLabel
-              label={t("detail.integrationMemberPicker.none")}
-              description={none.description}
-            />
-          </DropdownMenuItem>
-        )}
+                </DropdownMenuCheckboxItem>
+              ))}
+              {atCap && rows.length > 0 && (
+                <DropdownMenuLabel className="text-muted-foreground text-[0.65rem] font-normal">
+                  {t("detail.integrationMemberPicker.maxReached", {
+                    max: MAX_CONNECTIONS_PER_INTEGRATION,
+                  })}
+                </DropdownMenuLabel>
+              )}
+            </div>
+          )}
+          {showModes && none && (
+            <DropdownMenuRadioItem
+              value="none"
+              disabled={busy}
+              onSelect={() => {
+                if (storedMode !== "none") onNone();
+              }}
+              data-testid={`${testPrefix}-none-${testKey}`}
+            >
+              <ChoiceLabel
+                label={t("detail.integrationMemberPicker.none")}
+                description={none.description}
+              />
+            </DropdownMenuRadioItem>
+          )}
+        </DropdownMenuRadioGroup>
         {/* Nothing ticked, nothing to write: « Hériter » and « Aucune connexion » write on their own. */}
         {apply && ticking && (
           <>
@@ -319,7 +290,7 @@ export function ConnectionChoiceMenu({
               }}
               data-testid={`${testPrefix}-apply-${testKey}`}
             >
-              <Check className="size-3.5" />
+              <Check />
               <span className="font-medium">
                 {t("detail.integrationMemberPicker.apply", { count: checkedIds.length })}
               </span>

@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * A package's versions, as a section of Paramètres › Explorer — for every type.
- *
- * Browsing the history is exploring the package, the way its map and its files
- * are, so it sits beside them rather than in a top-level tab of its own.
- *
- * The section is the history. A draft holding changes that are in no version
- * yet says so in one line above the list, with the comparison one click away,
- * and any row can be compared to the draft from its own menu: the diff is a
- * gesture on the list, not a block that pushes it off the screen.
- */
+/** A package's version history (Paramètres › Explorer, every type); a draft ahead of the latest version adds a compare line. */
 import { useTranslation } from "react-i18next";
 import { GitCompareArrows } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
@@ -45,7 +35,7 @@ export function PackageVersionsSection({
   );
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="flex flex-col gap-4 p-6">
       {hasUnarchivedChanges && latestVersion && (
         <div className="border-border flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3">
           <p className="text-muted-foreground min-w-0 flex-1 text-sm">{t("version.draftAhead")}</p>
@@ -60,14 +50,16 @@ export function PackageVersionsSection({
           </Button>
         </div>
       )}
-      <VersionHistory
-        packageId={packageId}
-        type={type}
-        canRestore={canRestore}
-        canDelete={canDelete}
-        onCreate={onCreate}
-        onCompare={(version) => compare.open(version)}
-      />
+      <div>
+        <VersionHistory
+          packageId={packageId}
+          type={type}
+          canRestore={canRestore}
+          canDelete={canDelete}
+          onCreate={onCreate}
+          onCompare={(version) => compare.open(version)}
+        />
+      </div>
       <CompareWithDraftModal
         type={type}
         packageId={packageId}

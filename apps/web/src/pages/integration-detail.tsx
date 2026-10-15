@@ -9,7 +9,6 @@
  * ownership gates. The sections live in `components/integration-detail/`.
  */
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
 import { lazy, Suspense } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
@@ -28,7 +27,6 @@ import {
   FolderTree,
   Wrench,
   History,
-  FileArchive,
   IdCard,
   LayoutGrid,
   Server,
@@ -119,7 +117,6 @@ function IntegrationSettings({
     requested === "tools" ||
     requested === "functioning" ||
     (requested === "versions" && isOwned) ||
-    requested === "bundle" ||
     (definition && requested && DEFINITION_SECTIONS.includes(requested))
       ? (requested as IntegrationSettingsSection)
       : requested === "files" || !canConfigure
@@ -171,9 +168,8 @@ function IntegrationSettings({
                 t("integrationEditor.tabAuthMethods", { ns: "agents" }),
               ),
             ]
-          : [item("functioning", Plug, t("integration.structure.functioning"))]),
+          : [item("functioning", Plug, t("orgSettings.tabGeneral"))]),
         item("tools", Wrench, t("integrationEditor.tabTools", { ns: "agents" })),
-        item("bundle", FileArchive, t("editor.tabPackageFiles", { ns: "agents" })),
       ],
     },
   ];
@@ -207,7 +203,6 @@ function IntegrationSettings({
             section={active}
             type="integration"
             packageId={packageId}
-            manifest={detail.manifest}
             file={file}
             href={href}
             manifestSection={definition ? "identity" : undefined}
@@ -215,7 +210,7 @@ function IntegrationSettings({
           />
         ) : active === "functioning" ? (
           <div className="p-6">
-            <SettingsHeading title={t("integration.structure.functioning")} description={null} />
+            <SettingsHeading title={t("orgSettings.tabGeneral")} description={null} />
             <IntegrationGeneral detail={detail} />
           </div>
         ) : active === "tools" ? (
@@ -248,12 +243,12 @@ function IntegrationSettings({
               )}
             />
             {active === "authentication" && (
-              <div className="space-y-6">
+              <div className="flex flex-col gap-4">
                 <SetupGuideSteps steps={steps} />
                 {detail.auths.length === 0 && (
                   <p className="text-sm">{t("integration.auth.none")}</p>
                 )}
-                <div className="space-y-8">
+                <div className="flex flex-col gap-8">
                   {detail.auths.map((status) => {
                     const authDecl = detail.manifest.auths?.[status.auth_key];
                     if (!authDecl) return null;
@@ -419,9 +414,9 @@ export function IntegrationDetailPage() {
         status={
           <>
             {pkgLoading && <Skeleton className="h-5 w-16" />}
-            <ToneBadge variant={active ? "success" : "warning"}>
+            <Badge variant={active ? "success" : "warning"}>
               {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
-            </ToneBadge>
+            </Badge>
           </>
         }
         actions={

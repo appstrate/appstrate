@@ -105,6 +105,39 @@ const ALL_TS = ["**/*.{ts,tsx}"];
 // linting, which is the only half a gate cares about.
 const ALL_JS = ["**/*.{js,jsx,mjs,cjs}"];
 
+// A table row is acted on in ONE way (apps/web/DESIGN_SYSTEM.md, « A row's end »): the « … » menu
+// (`TableRowActions`) holds every action of the row, with no pencil, download or reconnect button
+// beside it. A control that IS the setting (a role select, a switch) lives in its own column.
+// shadcn spacing rule: a stack is `flex flex-col gap-*`, never `space-y-*` / `space-x-*` (the latter
+// leaves a child's own margin overriding the spacing, and misses inline children).
+const SPACING_UTILITY_BANS = [
+  {
+    selector: "Literal[value=/(^|\\s)space-[xy]-/]",
+    message: "Use `flex flex-col gap-*` (or `flex gap-*`) instead of `space-x-*` / `space-y-*`.",
+  },
+  {
+    selector: "TemplateElement[value.raw=/(^|\\s)space-[xy]-/]",
+    message: "Use `flex flex-col gap-*` (or `flex gap-*`) instead of `space-x-*` / `space-y-*`.",
+  },
+];
+
+const ROW_ACTION_BANS = [
+  {
+    selector:
+      "JSXOpeningElement[name.name='TableRowActions'] > JSXAttribute:not([name.name=/^(menuLabel|isPending|renaming|actions)$/])",
+    message: "TableRowActions takes the menu's own props only: put the action in the menu.",
+  },
+  {
+    selector: "JSXOpeningElement[name.name='TableRowActions'] > JSXSpreadAttribute",
+    message: "TableRowActions takes the menu's own props only: put the action in the menu.",
+  },
+  {
+    selector:
+      "JSXElement:has(JSXOpeningElement[name.name='TableRowActions']) > JSXElement > JSXOpeningElement[name.name=/^(Button|\\w*ConnectButton)$/]",
+    message: "No button beside the row's « … » menu: put the action in the menu.",
+  },
+];
+
 // Zod 4 string-format bans (single source of truth). Declared here because the
 // CLI and test blocks below re-declare `no-restricted-syntax` for subsets of
 // the same files — flat config replaces (not merges) a rule's options across
@@ -677,6 +710,20 @@ export default tseslint.config(
       "no-restricted-imports": [
         "error",
         { patterns: [API_BARREL_BAN, AUTH_CLIENT_BAN, RAW_ERROR_MESSAGE_BAN] },
+      ],
+    },
+  },
+  {
+    // Row actions live in the « … » menu alone (`ROW_ACTION_BANS`). Re-spreads the Zod bans: this
+    // block replaces `no-restricted-syntax` for the files it covers; tests keep their own block.
+    files: ["apps/web/src/**/*.tsx"],
+    ignores: ["**/test/**", "apps/web/src/components/table-row-actions.tsx"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...ZOD4_STRING_FORMAT_BANS,
+        ...ROW_ACTION_BANS,
+        ...SPACING_UTILITY_BANS,
       ],
     },
   },

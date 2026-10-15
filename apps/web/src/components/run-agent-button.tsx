@@ -161,9 +161,7 @@ export function RunAgentButton({
           aria-label={showLabel ? undefined : t("detail.run")}
         >
           {!isPending && (
-            <Play
-              className={cn("size-3.5", showLabel && variant === "outline" && "text-primary")}
-            />
+            <Play className={cn(showLabel && variant === "outline" && "text-primary")} />
           )}
           {showLabel && t("detail.run")}
           {warningDot}

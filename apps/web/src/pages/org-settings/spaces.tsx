@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The organization's spaces, as one table.
- *
- * Beside team spaces it lists two kinds of row: a member's PERSONAL space, and
- * a personal space that has been ORPHANED — its owner left the organization, a
- * 30-day window is running, and an owner or admin decides between converting
- * it to a team space and sweeping it (RBAC spec §3.6).
- *
- * They are rows like the others: the state is a column, and the two acts an
- * orphan offers join the row's own Actions menu, because a list on this
- * surface is a table and a row carries one menu. Neither act is reversible, so
- * both go through a confirmation.
+ * The organization's spaces as one table. Personal and ORPHANED personal spaces
+ * (owner left, 30-day window, convert or sweep: RBAC spec §3.6) are ordinary
+ * rows whose acts join the row's Actions menu; both are irreversible, hence confirmed.
  */
 
 import { useState } from "react";
@@ -75,7 +67,7 @@ export function OrgSettingsSpacesPage() {
   };
 
   const columns = useSpaceColumns({
-    defaultLabel: t("spaces.default"),
+    defaultLabel: t("models.default"),
     // Only an orphaned space offers them, each to the permission its route checks.
     onConvert: can("spaces:write") ? (id) => setPending({ id, action: "convert" }) : undefined,
     onSweep: can("spaces:delete") ? (id) => setPending({ id, action: "sweep" }) : undefined,
@@ -97,8 +89,7 @@ export function OrgSettingsSpacesPage() {
       <SettingsPageActions actions={[create]} />
 
       <DataTable
-        tableId="spaces"
-        label={t("spaces.pageTitle")}
+        label={t("common:switcher.workspacesColumn")}
         columns={columns}
         rows={spaces ?? []}
         rowKey={(space) => space.id}

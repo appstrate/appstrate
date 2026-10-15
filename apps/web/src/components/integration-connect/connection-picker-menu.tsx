@@ -1,15 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import {
-  AlertTriangle,
-  Ban,
-  Users,
-  Plus,
-  RefreshCw,
-  Settings,
-  type LucideIcon,
-} from "lucide-react";
+import { AlertTriangle, Ban, Users, Plus, RefreshCw, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
@@ -19,30 +11,6 @@ import { AMBER_TEXT } from "./connection-picker-states";
 import { ConnectionChoiceMenu, type ChoiceRow } from "./connection-choice-menu";
 import { ScopeSummaryText } from "./scope-summary-text";
 import type { ConnectionPicker } from "./use-connection-picker";
-
-/** What the closed trigger shows, first match wins. */
-type TriggerKind = "unavailable" | "none" | "one" | "many" | "inherit" | "choose" | "connect";
-
-function triggerKind(p: ConnectionPicker): TriggerKind {
-  if (p.unavailableIds.length > 0) return "unavailable";
-  if (p.pickedNone) return "none";
-  if (p.displayConns.length === 1 && p.explicitIds !== null) return "one";
-  if (p.displayConns.length > 1 && p.explicitIds !== null) return "many";
-  // Nothing chosen: the trigger reads "Hériter", unless the picker is what asks for an act.
-  if (p.overrideMode || p.inheritedConns.length > 0) return "inherit";
-  return p.emptyPickerPrompt === "choose" ? "choose" : "connect";
-}
-
-// A "+" says "add": only the entry that connects carries it.
-const TRIGGER_ICONS: Record<TriggerKind, LucideIcon> = {
-  unavailable: Users,
-  none: Ban,
-  one: Users,
-  many: Users,
-  inherit: Users,
-  choose: Users,
-  connect: Plus,
-};
 
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
@@ -70,6 +38,7 @@ export function PickerMenu({
     auths,
     authKeys,
     hasCandidates,
+    emptyPickerPrompt,
     overrideMode,
     explicitIds,
     pickedNone,
@@ -160,19 +129,34 @@ export function PickerMenu({
       ? (inheritedUnbound ?? t("detail.integrationMemberPicker.inheritNone"))
       : t("detail.integrationMemberPicker.inheritGeneric");
   })();
-  const trigger = triggerKind(picker);
-  const triggerLabel = {
-    unavailable: () => setLabel(shownIds, unavailableIds),
-    none: () => t("detail.integrationMemberPicker.none"),
-    one: () => displayConns[0]!.label,
-    many: () => t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length }),
-    inherit: () =>
-      inheritedNames
-        ? t("detail.integrationMemberPicker.inheritTrigger", { name: inheritedNames })
-        : t("detail.integrationMemberPicker.inherit"),
-    choose: () => t("detail.integrationMemberPicker.chooseLabel"),
-    connect: () => t("detail.integrationMemberPicker.connectLabel"),
-  }[trigger]();
+  // The first match wins. A "+" says "add": only the entry that connects carries it.
+  const trigger = (() => {
+    if (unavailableIds.length > 0) {
+      return { icon: Users, label: setLabel(shownIds, unavailableIds) };
+    }
+    if (pickedNone) return { icon: Ban, label: t("detail.integrationMemberPicker.none") };
+    if (displayConns.length > 0 && explicitIds !== null) {
+      return {
+        icon: Users,
+        label:
+          displayConns.length === 1
+            ? displayConns[0]!.label
+            : t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length }),
+      };
+    }
+    // Nothing chosen: the trigger reads "Hériter", unless the picker is what asks for an act.
+    if (overrideMode || inheritedConns.length > 0) {
+      return {
+        icon: Users,
+        label: inheritedNames
+          ? t("detail.integrationMemberPicker.inheritTrigger", { name: inheritedNames })
+          : t("detail.integrationMemberPicker.inherit"),
+      };
+    }
+    return emptyPickerPrompt === "choose"
+      ? { icon: Users, label: t("detail.integrationMemberPicker.chooseLabel") }
+      : { icon: Plus, label: t("detail.integrationMemberPicker.connectLabel") };
+  })();
   const rows: ChoiceRow[] = candidates.map((c) => {
     const fit = c.scope_fit;
     const missing = missingScopeLabels(c).join(", ");
@@ -227,7 +211,7 @@ export function PickerMenu({
           data-testid={`member-pick-renew-${c.id}`}
           aria-label={t("detail.integrationMemberPicker.renew")}
         >
-          <RefreshCw className="size-3" />
+          <RefreshCw />
           {t("detail.integrationMemberPicker.renew")}
         </Button>
       ) : undefined,
@@ -241,8 +225,8 @@ export function PickerMenu({
       title={t("detail.integrationMemberPicker.title")}
       compact
       trigger={{
-        label: triggerLabel,
-        icon: gatesRun ? AlertTriangle : TRIGGER_ICONS[trigger],
+        label: trigger.label,
+        icon: gatesRun ? AlertTriangle : trigger.icon,
         warn: gatesRun,
       }}
       storedMode={explicitIds === null ? "inherit" : pickedNone ? "none" : "choose"}
@@ -292,7 +276,7 @@ export function PickerMenu({
                 onSelect={() => void triggerConnect(k)}
                 data-testid={`member-pick-add-${integrationId}-${k}`}
               >
-                <Plus className="size-3.5" />
+                <Plus />
                 <span>{addLabel(k)}</span>
               </DropdownMenuItem>
             ))}
@@ -305,7 +289,7 @@ export function PickerMenu({
                 onSelect={() => (onLeave ? onLeave(integrationPath) : navigate(integrationPath))}
                 data-testid={`member-pick-manage-${integrationId}`}
               >
-                <Settings className="size-3.5" />
+                <Settings />
                 <span>{t("detail.integrationMemberPicker.manageConnections")}</span>
               </DropdownMenuItem>
             </>

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -30,12 +29,12 @@ export function WebhookDetailPage() {
     <div>
       {webhook && (
         <SettingsPageActions>
-          {webhook.level === "org" && (
-            <Badge variant="outline">{t("settings:webhooks.levelBadge.org")}</Badge>
-          )}
-          <ToneBadge variant={webhook.enabled ? "success" : "secondary"}>
-            {webhook.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
-          </ToneBadge>
+          {webhook.level === "org" && <Badge variant="outline">{t("settings:source.org")}</Badge>}
+          <Badge variant={webhook.enabled ? "success" : "secondary"}>
+            {webhook.enabled
+              ? t("settings:catalogue.filter.active")
+              : t("settings:webhooks.inactive")}
+          </Badge>
         </SettingsPageActions>
       )}
 

@@ -29,9 +29,10 @@ export function ConnectScopesModal({
   const { openPopup } = useHostedConnectPopup();
   const formId = `connect-scopes-${target.authKey}`;
 
+  if (modal.value !== target.authKey) return null;
+
   return (
     <Modal
-      open={modal.value === target.authKey}
       onClose={modal.close}
       title={t("integration.auth.scopeChoice.title")}
       actions={
@@ -71,7 +72,7 @@ export function ConnectScopesForm({
   return (
     <form
       id={formId}
-      className="space-y-4"
+      className="flex flex-col gap-4"
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit(ticked);
@@ -92,7 +93,7 @@ export function ConnectScopesForm({
           })}
         </p>
       )}
-      <fieldset className="min-w-0 space-y-2">
+      <fieldset className="flex min-w-0 flex-col gap-2">
         <legend className="mb-2 text-xs font-medium">
           {t("integration.auth.scopeChoice.extra")}
         </legend>

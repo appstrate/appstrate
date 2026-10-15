@@ -22,7 +22,6 @@
  */
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, Plus } from "lucide-react";
-import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
@@ -67,7 +66,7 @@ export function CatalogueAddButton({
         disabled={busy}
         onClick={() => onAdd(only.id)}
       >
-        <Plus className="size-3.5 shrink-0" aria-hidden />
+        <Plus aria-hidden />
         <span className="truncate">{t("catalogue.addTo", { space: only.name })}</span>
       </Button>
     );
@@ -77,9 +76,9 @@ export function CatalogueAddButton({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" disabled={busy}>
-          <Plus className="size-3.5" aria-hidden />
-          {t("catalogue.addToSpace")}
-          <ChevronDown className="size-3.5" aria-hidden />
+          <Plus aria-hidden />
+          {t("common:btn.add")}
+          <ChevronDown aria-hidden />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-56">
@@ -90,10 +89,7 @@ export function CatalogueAddButton({
           // Where it already runs stays in the menu, ticked and inert: the
           // picture is whole, and a space does not vanish after a click.
           <DropdownMenuItem key={space.id} disabled={space.active} onSelect={() => onAdd(space.id)}>
-            <Check
-              className={cn("size-3.5 shrink-0", space.active ? "text-success" : "invisible")}
-              aria-hidden
-            />
+            <Check className={space.active ? "text-success" : "invisible"} aria-hidden />
             <span className="flex min-w-0 flex-1 items-center gap-1.5">
               <span className="truncate">{space.name}</span>
               {space.id === currentSpaceId && (

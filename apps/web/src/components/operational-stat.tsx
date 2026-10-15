@@ -4,7 +4,7 @@ import { cn } from "@appstrate/ui/cn";
 import { TargetArrow, TargetLink, type ActionTarget } from "./action-target";
 
 const TARGET_CLASS =
-  "group hover:bg-muted/20 focus-visible:ring-ring relative flex h-full min-h-20 w-full flex-col justify-center px-4 py-4 pr-10 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset";
+  "group hover:bg-muted/20 focus-visible:ring-ring relative flex size-full min-h-20 flex-col justify-center px-4 py-4 pr-10 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset";
 
 /**
  * One figure of a summary strip: a label over its value, inside a `<dl>`.

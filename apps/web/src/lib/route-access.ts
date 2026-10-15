@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Who reaches each route of the signed-in app — the main layout's pages, the
- * chat's own shell and the overlay surfaces (catalogue, settings, preferences).
- * One declaration, read by `RouteGate` and the shell's links; `anyOf` is pinned
- * to the named operations' guards by `apps/api/test/unit/spa-route-access.test.ts`.
- * Pure data: that API test imports it, so nothing here may reach React.
+ * Who reaches each route of the signed-in app, read by `RouteGate` and the shell's
+ * links; `anyOf` is pinned to the operations' guards by
+ * `apps/api/test/unit/spa-route-access.test.ts`. Pure data: that API test imports it,
+ * so nothing here may reach React.
  */
 
 import {
@@ -35,11 +34,7 @@ type RouteAccess = {
 );
 
 const OWN_ACCOUNT: RouteAccess = { open: "the caller's own account; no org or space permission" };
-/**
- * One screen graded inside by what the caller may do. It reads the
- * organization-wide `/api/library`, which the server grades to the spaces where
- * the caller holds `spaces:read` — the floor here.
- */
+// Graded inside: `/api/library` is organization-wide and the server grades it to the spaces where the caller holds `spaces:read` (the floor).
 const CATALOGUE: RouteAccess = { anyOf: ["spaces:read"], operations: ["getLibrary"] };
 const WEBHOOKS_READ = ["webhooks:read", "org-webhooks:read"] as const;
 const AGENT_SIGHT = packageSightPermissions("agent");
@@ -48,7 +43,6 @@ export const ROUTE_ACCESS = {
   "/": { open: "the fallback route: renders for any principal, its sections gate themselves" },
 
   "/agents": { anyOf: AGENT_SIGHT, operations: ["listAgents"] },
-  "/agents/new": { anyOf: ["agents:write"], operations: ["createAgent"] },
   "/agents/:scope/:name": { anyOf: AGENT_SIGHT, operations: ["getAgentPackage"] },
   // A version is the full manifest; `agents:run` reads only the summary (RBAC spec §3.4).
   "/agents/:scope/:name/:version": {
@@ -180,10 +174,8 @@ export type RoutePath = keyof typeof ROUTE_ACCESS;
 export const isUnder = (path: string, prefix: string) =>
   path === prefix || path.startsWith(`${prefix}/`);
 
-/** What a settings page configures, and the API scope its requests carry. */
 export type SettingsScope = "organization" | "workspace" | "account";
 
-/** Each settings scope's index, the prefix of its pages. */
 export const SETTINGS_INDEX = {
   organization: "/org-settings",
   workspace: "/workspace-settings",
@@ -201,16 +193,10 @@ export const OVERLAY_PREFIXES = [...SETTINGS_PREFIXES, "/catalogue"];
 export const isOverlayPath = (path: string) =>
   OVERLAY_PREFIXES.some((prefix) => isUnder(path, prefix));
 
-/**
- * The overlay tree's not-found routes, one per prefix: an address under an overlay that
- * none of its pages matches is answered there, not by the dashboard standing in.
- */
+/** The overlay tree's not-found routes: an unmatched address under an overlay is answered there, not by the dashboard. */
 export const OVERLAY_NOT_FOUND_PATHS = OVERLAY_PREFIXES.map((prefix) => `${prefix}/*`);
 
-/**
- * The agent page's Connexions (the Paramètres section `?agentSettings=connections`, and the
- * launch toast's « Connecter » link to it): its integration reads are not implied by the route.
- */
+/** The agent page's Connexions section: its integration reads are not implied by the route. */
 export function agentConnectionsTabVisible(can: (permission: Permission) => boolean): boolean {
   return can("integrations:read");
 }

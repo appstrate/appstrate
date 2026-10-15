@@ -46,7 +46,7 @@ import { useSettingsSections } from "./use-settings-sections";
 
 /** The rail's groups, as they stand before the caller's permissions say which entries exist. */
 const RAIL_PLACEHOLDER: { scope: SettingsScope; labelKey: string; rows: number }[] = [
-  { scope: "organization", labelKey: "orgSettings.sectionOrganization", rows: 6 },
+  { scope: "organization", labelKey: "source.org", rows: 6 },
   { scope: "workspace", labelKey: "workspaceSettings.sectionGeneral", rows: 5 },
   { scope: "account", labelKey: "preferences.sectionAccount", rows: 5 },
 ];
@@ -101,7 +101,7 @@ export function UnifiedSettingsLayout() {
   const activeSection = sections.find((section) => section.scope === activeScope);
   const contentKey = settingsContentKey(location.pathname, currentOrg?.id ?? null, spaceId);
   const label = (key: string) => t(key, { ns: "settings" });
-  const settingsBreadcrumbLabel = label("unifiedSettings.title");
+  const settingsBreadcrumbLabel = label("common:nav.settings");
   const activeSectionLabel = activeSection ? label(activeSection.labelKey) : null;
   const activeSectionHref = activeSection?.items[0]?.to ?? activeItem?.to;
 
@@ -152,7 +152,7 @@ export function UnifiedSettingsLayout() {
   };
   const rail = (
     <div className="flex h-full flex-col">
-      <RailHeader icon={Settings} title={label("unifiedSettings.title")} />
+      <RailHeader icon={Settings} title={label("common:nav.settings")} />
       <div className="flex-1">
         {ready
           ? sections.map((section, index) => (
@@ -189,7 +189,7 @@ export function UnifiedSettingsLayout() {
 
   return (
     <PanelLayout
-      title={label("unifiedSettings.title")}
+      title={settingsBreadcrumbLabel}
       rail={rail}
       // The same band as the catalogue: invisible at rest, the section's name
       // once the page has scrolled past its own heading — and an opaque surface
@@ -221,7 +221,6 @@ export function UnifiedSettingsLayout() {
         key={contentKey}
         data-settings-table-surface="integrated"
         data-settings-content-scope={activeScope}
-        className="[&_[data-data-table-row]]:[grid-template-columns:var(--dt-cols-3)] [&_[data-data-table-scroll]_table]:min-w-(--dt-full-floor) [&_td[data-data-table-tier]]:flex [&_th[data-data-table-tier]]:block"
       >
         <SettingsPageActionTargetProvider target={actionTarget}>
           <Outlet />

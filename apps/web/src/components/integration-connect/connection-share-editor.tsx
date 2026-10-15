@@ -99,14 +99,14 @@ export function ConnectionShareEditor({
                 ? t("integration.connection.share.none")
                 : t("integration.connection.share.count", { count: sharedSpaceIds.length })}
             </span>
-            <ChevronsUpDown className="size-3 shrink-0 opacity-50" />
+            <ChevronsUpDown className="shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-72 p-0" align="start">
           <Command>
             <CommandInput placeholder={t("integration.connection.share.search")} />
             <CommandList>
-              <CommandEmpty>{t("integration.connection.share.noSpace")}</CommandEmpty>
+              <CommandEmpty>{t("viewAs.noSpace")}</CommandEmpty>
               <CommandGroup heading={t("integration.connection.share.help")}>
                 {targets.map((space) => {
                   const selected = sharedSpaceIds.includes(space.id);
@@ -118,7 +118,7 @@ export function ConnectionShareEditor({
                       onSelect={() => (selected ? onUnshare(space.id) : onShare(space.id))}
                       data-testid={`share-target-${connectionId}-${space.id}`}
                     >
-                      <Check className={cn("size-4", selected ? "opacity-100" : "opacity-0")} />
+                      <Check className={cn(selected ? "opacity-100" : "opacity-0")} />
                       <span className="truncate">{space.name}</span>
                     </CommandItem>
                   );

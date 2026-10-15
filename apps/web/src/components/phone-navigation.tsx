@@ -37,7 +37,7 @@ export function PhoneNavigation({
           className={cn("mb-6 h-11 w-full justify-between bg-transparent px-3", className)}
         >
           <span className="truncate">{t("panelDialog.menu")}</span>
-          <ChevronDown className="size-4 shrink-0" />
+          <ChevronDown className="shrink-0" />
         </Button>
       </SheetTrigger>
       <SheetContent

@@ -58,14 +58,13 @@ export function ApiKeysPage() {
           {
             id: "api-docs",
             icon: ExternalLink,
-            label: t("settings:apiKeys.swaggerLink"),
+            label: t("common:userMenu.apiDocs"),
             href: "/api/docs",
           },
         ]}
       />
 
       <DataTable
-        tableId="api-keys"
         label={t("settings:orgSettings.tabApiKeys")}
         columns={columns}
         rows={apiKeys ?? []}
@@ -90,7 +89,7 @@ export function ApiKeysPage() {
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
         title={t("settings:apiKeys.revokeTitle")}
-        confirmLabel={t("settings:apiKeys.revoke")}
+        confirmLabel={t("settings:devices.revoke")}
         description={t("settings:apiKeys.revokeConfirm", { name: confirmState?.label })}
         isPending={revokeApiKeyMutation.isPending}
         onConfirm={() => {

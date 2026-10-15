@@ -40,8 +40,8 @@ function useConversationTabs(selected: ConversationSidebarTab) {
   };
   const tabs = (
     [
-      { id: "runs", Icon: ActivityIcon, label: t("context.tabs.runs") },
-      { id: "files", Icon: FilesIcon, label: t("context.tabs.files") },
+      { id: "runs", Icon: ActivityIcon, label: t("common:nav.runs") },
+      { id: "files", Icon: FilesIcon, label: t("common:nav.files") },
       { id: "info", Icon: InfoIcon, label: t("context.tabs.info") },
     ] as const satisfies readonly {
       id: ConversationSidebarTab;
@@ -332,7 +332,7 @@ export function ConversationSidebar({
                   aria-label={t("context.collapse")}
                   onClick={collapse}
                 >
-                  <XIcon className="size-4" />
+                  <XIcon />
                 </Button>
               </div>
               <div className="min-h-0 flex-1 overflow-auto">

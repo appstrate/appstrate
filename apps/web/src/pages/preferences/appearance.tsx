@@ -14,16 +14,16 @@ export function PreferencesAppearancePage() {
 
   return (
     <SettingsGroup title={t("preferences.interface")}>
-      <SettingRow variant="field" label={t("preferences.theme")}>
+      <SettingRow variant="field" label={t("common:userMenu.theme")}>
         {(labelId) => (
           <OptionSelect
             value={theme}
             onValueChange={(v) => setTheme(v as "light" | "dark" | "system")}
             aria-labelledby={labelId}
             options={[
-              { value: "light", label: t("preferences.themeLight") },
-              { value: "dark", label: t("preferences.themeDark") },
-              { value: "system", label: t("preferences.themeSystem") },
+              { value: "light", label: t("common:userMenu.themeLight") },
+              { value: "dark", label: t("common:userMenu.themeDark") },
+              { value: "system", label: t("common:userMenu.themeSystem") },
             ]}
           />
         )}

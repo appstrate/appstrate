@@ -141,7 +141,7 @@ function GeneralForm({
 
   return (
     <>
-      <SettingsGroup title={t("spaces.settingsTitle")}>
+      <SettingsGroup title={t("workspaceSettings.sectionGeneral")}>
         <SettingRow
           variant="field"
           label={t("spaces.nameLabel")}
@@ -196,7 +196,7 @@ function GeneralForm({
                       aria-label={t("spaces.removeDomain")}
                       onClick={() => commitDomains(activeDomains.filter((_, i) => i !== index))}
                     >
-                      <X size={16} />
+                      <X />
                     </Button>
                   </div>
                 ))}
@@ -209,7 +209,7 @@ function GeneralForm({
                   className="self-start"
                   onClick={() => setEditedDomains([...(activeDomains ?? []), ""])}
                 >
-                  <Plus size={14} className="mr-1.5" />
+                  <Plus className="mr-1.5" />
                   {t("spaces.addDomain")}
                 </Button>
               </div>

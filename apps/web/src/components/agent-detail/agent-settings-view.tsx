@@ -8,7 +8,6 @@ import {
   Braces,
   BrainCircuit,
   CalendarClock,
-  FileArchive,
   FolderTree,
   Globe,
   History,
@@ -74,10 +73,9 @@ const SETTINGS_GROUPS = [
     items: [
       { id: "general", icon: IdCard, labelKey: "editor.tabGeneral" },
       { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
-      { id: "skills", icon: Sparkles, labelKey: "editor.tabSkills" },
-      { id: "integrations", icon: Boxes, labelKey: "editor.tabIntegrations" },
-      { id: "tools", icon: Wrench, labelKey: "editor.tabTools" },
-      { id: "bundle", icon: FileArchive, labelKey: "editor.tabPackageFiles" },
+      { id: "skills", icon: Sparkles, labelKey: "common:nav.skills" },
+      { id: "integrations", icon: Boxes, labelKey: "common:nav.integrations" },
+      { id: "tools", icon: Wrench, labelKey: "integrationEditor.tabTools" },
     ],
   },
 ] satisfies Array<{
@@ -129,9 +127,7 @@ export function AgentSettingsView({
     }
     if (section === "schedules") return can("schedules:read");
     if (section === "connections") return agentConnectionsTabVisible(can);
-    if (section === "files" || section === "bundle") {
-      return can("agents:read");
-    }
+    if (section === "files") return can("agents:read");
     // A system agent has no history of its own to browse.
     if (section === "versions") return can("agents:read") && detail.source !== "system";
     // The definition is edited where it is read, by whoever may write it, on
@@ -186,7 +182,6 @@ export function AgentSettingsView({
             section={active}
             type="agent"
             packageId={packageId}
-            manifest={detail.manifest ?? {}}
             file={file}
             href={href}
             version={version}

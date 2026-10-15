@@ -6,18 +6,13 @@ import {
   type CorePermission,
 } from "@appstrate/core/permissions";
 
-/** Which dashboard sections the caller can read — each one is its own read. */
 interface DashboardSections {
   schedules: boolean;
   recentAgents: boolean;
   recentRuns: boolean;
 }
 
-/**
- * The dashboard is the fallback route: it renders for ANY principal, so each
- * section answers to the guard of the query that feeds it. Pure: the
- * API's preset pin (`apps/api/test/unit/spa-dashboard-sections.test.ts`) imports it.
- */
+/** The dashboard renders for ANY principal, so each section answers to the guard of its own query. Pure: an API test imports it. */
 export function dashboardSections(can: (permission: CorePermission) => boolean): DashboardSections {
   const runs = canReadRuns(can);
   return {

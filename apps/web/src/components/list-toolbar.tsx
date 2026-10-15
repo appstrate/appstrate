@@ -1,80 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The bar above a list.
+ * The bar above a list. The controls are shadcn's, ported from the Tasks example
+ * (`apps/v4/app/(app)/examples/tasks/components/` in `shadcn-ui/ui`): the faceted filter with
+ * its dashed trigger and `Command` menu, the column menu, the reset.
  *
- * The controls are shadcn's, ported from the Tasks example
- * (`apps/v4/app/(app)/examples/tasks/components/` in `shadcn-ui/ui`, live at
- * <https://ui.shadcn.com/examples/tasks>): the faceted filter with its dashed
- * trigger and its `Command` menu, the column menu, the reset. What differs is
- * where the filters LIVE.
+ * Where they differ: the filters live behind ONE button and open a row of their own under the
+ * bar. Ours sit right of a 256px sidebar, a screen can have three, and their width depends on how
+ * many values are picked, so an inline bar would have to wrap, shed through breakpoints or
+ * measure itself. A disclosure row wraps on purpose and needs no measuring.
  *
- * shadcn keeps them inline in the bar. That works for their example, which is
- * a full-width page with two of them. Ours sit to the right of a 256px sidebar,
- * a screen can have three, and their width depends on how many values are
- * picked and how long the translations run — so an inline bar has to either
- * wrap (flexbox sends the LAST child down, which is the end that must not
- * move), shed through a ladder of breakpoints, or measure itself with a ghost
- * row and a `ResizeObserver` to decide when to fold.
- *
- * None of that here. **The filters live behind one button, and open a row of
- * their own** under the bar, where wrapping is not an accident but the point.
- * One layout at every width, nothing to measure.
- *
- * What that costs, and what pays it back:
- *
- * - **A row you asked for is not a row that appeared.** The filters get a
- *   dedicated line that pushes the table down, and they may take two of them.
- * - **The row opens ITSELF when something is filtered.** A list you did not
- *   filter yourself — a link someone sent you — has to say why it is short. An
- *   icon with a badge says "three filters"; the open row says which three.
- * - **The search never moves.** It is the one thing you type into, it stays at
- *   the left of the bar at every width, and never travels into the disclosure
- *   row with the filters.
- * - **The right end sheds words before icons** as the bar narrows: the count
- *   goes first, then the labels on the filter and column buttons, then the
- *   label on the page's own action — which the CALLER writes with `@…/bar`, the
- *   container this bar names, so the whole row degrades together. No overflow
- *   menu: shadcn hides its View button and keeps "Add task" whole, and the
- *   control a screen exists to offer is the last thing that should need a
- *   second click to find.
- *
- * Two rules inside the filter menus:
- *
- * - **A tick adds, an untick removes, and nothing else happens**
- *   (`lib/toggle-value.ts`).
- * - **The reset is the CALLER's**, not a loop over the filters here. These
- *   filters live in the URL, and three `setSearchParams` in one tick each
- *   compute from the same committed location: the last wins and the others
- *   survive, so a loop would clear one filter and leave the rest.
- *
- * And what the pattern deliberately does NOT do: write the operators. Values of
- * one dimension are alternatives, dimensions narrow each other — `(statut =
- * échoué OU timeout) ET (type = agent)` — and no faceted filter anywhere spells
- * that out.
- *
- * No per-value counts in the menu: shadcn reads them off the rows it holds
- * (`column.getFacetedUniqueValues()`); ours are paginated server-side, so a
- * count would describe the page rather than the list.
+ * - **The row opens ITSELF when something is filtered.** A list you did not filter yourself (a
+ *   link someone sent you) has to say why it is short; the badge says "3", the row says which.
+ * - **A tick adds, an untick removes, and nothing else happens** (`lib/toggle-value.ts`).
+ * - **The reset is the CALLER's.** These filters live in the URL, and several `setSearchParams`
+ *   in one tick each compute from the same committed location: the last wins, so a loop here
+ *   would clear one filter and leave the rest.
+ * - **One layout at every width.** The bar wraps; the buttons shed their words before their
+ *   icons as the `@container/bar` narrows, and the callers' own action labels follow it.
+ * - **No per-value counts in the menu.** Ours are paginated server-side, so a count would
+ *   describe the page rather than the list.
  */
 
-import { Fragment, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Check,
-  Filter,
-  LayoutGrid,
-  PlusCircle,
-  Rows3,
-  Search,
-  SlidersHorizontal,
-  X,
-} from "lucide-react";
+import { Check, Filter, PlusCircle, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
-import type { ListView } from "@/stores/list-view-store";
 import { toggleValue } from "../lib/toggle-value";
 import { TOOLBAR_UTILITY } from "../lib/toolbar-button";
-import { ViewToggle } from "./view-toggle";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
@@ -141,14 +94,11 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
           variant="outline"
           size="sm"
           className={cn(
-            // `px-2.5 gap-1.5` is what shadcn's own `size="sm"` resolves to for
-            // a button carrying an icon (`has-[>svg]:px-2.5`); ours is a flat
-            // `px-3 gap-2`, which would put extra width inside every filter.
+            // shadcn's own `size="sm"` resolves to `px-2.5 gap-1.5` for a button carrying an
+            // icon; ours is a flat `px-3 gap-2`, which would add width inside every filter.
             "h-8 gap-1.5 bg-transparent px-2.5 shadow-none",
-            // Dashed AND `+` mean "an empty slot you can fill". A filled
-            // button is a statement, not an invitation, so both go: the border
-            // closes and the plus leaves with it. It also happens to save the width exactly where width is
-            // scarce, since a filter with values is the wide one.
+            // Dashed and `+` both mean "an empty slot you can fill"; a filled button is a
+            // statement, so the border closes and the plus leaves with it.
             selected.length === 0 && "border-dashed",
           )}
         >
@@ -157,9 +107,6 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
           {selected.length > 0 && (
             <>
               <Separator orientation="vertical" className="mx-1.5 h-4" />
-              {/* Named while there are few, counted beyond — shadcn's rule, and
-                  no breakpoint: in a row of their own these buttons
-                  may wrap, so they never have to shorten for want of space. */}
               {selected.length > NAMED_VALUES ? (
                 <Badge variant="secondary" className="rounded-sm px-1 font-normal">
                   {t("toolbar.selected", { count: selected.length })}
@@ -228,24 +175,11 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
 }
 
 /**
- * Which columns the reader wants to see, shadcn's `DataTableViewOptions`.
- *
- * A table has more columns than any one person needs at once, and which ones
- * they need is not something the designer can know: the same run list is read
- * for "what broke" (result), for "who ran what" (trigger) and for "how long
- * does this take" (duration). Hiding is per TABLE and remembered, so the choice
- * survives the next visit.
- *
- * The last visible column cannot be hidden — a table with no columns is not a
- * state worth being able to reach.
+ * Which columns the reader wants to see (shadcn's `DataTableViewOptions`), per TABLE and
+ * remembered. The last visible column cannot be hidden: a table with no columns is not a state
+ * worth being able to reach.
  */
-function ColumnsMenu({
-  columns,
-  iconOnly = false,
-}: {
-  columns: ColumnMenuSpec;
-  iconOnly?: boolean;
-}) {
+function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
   const { t } = useTranslation("common");
   const label = t("toolbar.columns");
   const hidden = new Set(columns.hidden);
@@ -257,12 +191,12 @@ function ColumnsMenu({
         <Button
           variant="outline"
           size="sm"
-          className={cn(TOOLBAR_UTILITY, iconOnly && "size-8 px-0")}
+          className={TOOLBAR_UTILITY}
           title={label}
           aria-label={label}
         >
           <SlidersHorizontal />
-          {!iconOnly && <span className="hidden @xl/bar:inline">{label}</span>}
+          <span className="hidden @xl/bar:inline">{label}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
@@ -288,31 +222,6 @@ function ColumnsMenu({
   );
 }
 
-/**
- * Table or cards, for every level-one collection (`view-toggle`). shadcn's
- * slot at this end of the row holds column visibility; ours holds the same
- * kind of thing — how the list is drawn, not what it contains.
- */
-function ListViewToggle({
-  view,
-  onChange,
-}: {
-  view: ListView;
-  onChange: (view: ListView) => void;
-}) {
-  const { t } = useTranslation("common");
-  return (
-    <ViewToggle
-      value={view}
-      onChange={onChange}
-      options={[
-        { id: "table", icon: Rows3, label: t("toolbar.viewTable") },
-        { id: "cards", icon: LayoutGrid, label: t("toolbar.viewCards") },
-      ]}
-    />
-  );
-}
-
 const NO_FILTERS: FilterSpec[] = [];
 
 export function ListToolbar({
@@ -320,212 +229,75 @@ export function ListToolbar({
   filters = NO_FILTERS,
   onReset,
   columns,
-  view,
-  onViewChange,
   actions,
   tabs,
-  placement = "page",
 }: {
   /**
-   * The text filter that opens shadcn's own toolbar — present only where the
-   * screen can answer it truthfully. A list held whole in the browser can
-   * (packages); a list paginated server-side needs an endpoint that searches
-   * (runs got a `q`), or the box would search the fifteen rows on screen.
+   * The text filter — present only where the screen can answer it truthfully. A list held whole
+   * in the browser can; a list paginated server-side needs an endpoint that searches, or the
+   * box would search the fifteen rows on screen.
    */
   search?: SearchSpec;
   /** Absent on a list that only searches. */
   filters?: FilterSpec[];
   /**
-   * Clears every dimension in ONE go. Without it there is no reset button —
-   * deliberately: a missing reset is visible and harmless, where a reset that
-   * loops over the filters looks right and clears only the last one.
+   * Clears every dimension in ONE go. Without it there is no reset button — deliberately: a
+   * missing reset is visible and harmless, where a looping one clears only the last filter.
    */
   onReset?: () => void;
   /** Present on a table whose columns the reader may hide. */
   columns?: ColumnMenuSpec;
-  /** Present on every level-one collection, whose two representations are real. */
-  view?: ListView;
-  onViewChange?: (view: ListView) => void;
-  /** Actions for an embedded collection that has no page header of its own. */
+  /** The page's own action, at the right end of the bar. */
   actions?: ReactNode;
-  /**
-   * `CollectionTabs` splitting the list, drawn FIRST on the bar's line — the
-   * part you are in, then how to search it. On a phone the line has no room
-   * for both, so the tabs take a line of their own above it.
-   */
+  /** `CollectionTabs` splitting the list, drawn first on the bar's line. */
   tabs?: ReactNode;
-  /**
-   * A panel keeps its compact, always-visible search instead of page-level
-   * responsive chrome, with the filter trigger beside it and the actions on the
-   * right.
-   */
-  placement?: "page" | "panel";
 }) {
   const { t } = useTranslation("common");
   const activeCount = filters.reduce((total, filter) => total + filter.values.length, 0);
 
-  // Open when something is already filtering: a list you did not filter
-  // yourself has to say why it is short, and a badge saying "3" does not. Only
-  // the FIRST render decides — closing the row afterwards is the reader's call
-  // and is not undone by the next keystroke.
+  // Only the FIRST render decides: closing the row afterwards is the reader's call and is not
+  // undone by the next keystroke.
   const [open, setOpen] = useState(() => activeCount > 0);
-  const [searchOpen, setSearchOpen] = useState(false);
-
-  if (placement === "panel") {
-    return (
-      <div className="@container/bar mb-4 space-y-2">
-        <div className="flex items-center gap-2">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            {tabs}
-            {search && (
-              <Input
-                value={search.value}
-                onChange={(event) => search.onChange(event.target.value)}
-                placeholder={search.placeholder}
-                className="[[data-slot=dialog-content]_&]:bg-background h-8 w-full max-w-[250px]"
-              />
-            )}
-            {filters.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                aria-expanded={open}
-                title={t("toolbar.filters")}
-                className={cn(TOOLBAR_UTILITY, "aria-expanded:bg-accent")}
-                onClick={() => setOpen((wasOpen) => !wasOpen)}
-              >
-                <Filter />
-                <span className="hidden @xl/bar:inline">{t("toolbar.filters")}</span>
-                {activeCount > 0 && (
-                  <Badge variant="secondary" className="rounded-sm px-1 font-normal">
-                    {activeCount}
-                  </Badge>
-                )}
-              </Button>
-            )}
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            {columns && <ColumnsMenu columns={columns} />}
-            {actions}
-            {view && onViewChange && <ListViewToggle view={view} onChange={onViewChange} />}
-          </div>
-        </div>
-
-        {open && filters.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2">
-            {filters.map((filter) => (
-              <Fragment key={filter.id}>
-                <FacetedFilter filter={filter} />
-              </Fragment>
-            ))}
-            {activeCount > 0 && onReset && (
-              <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5" onClick={onReset}>
-                <X />
-                {t("toolbar.reset")}
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
-    <div className="@container/bar mb-3 space-y-2">
-      {tabs && <div className="sm:hidden">{tabs}</div>}
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex sm:items-center">
-        {tabs && <div className="hidden sm:block">{tabs}</div>}
+    <div className="@container/bar mb-3 flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {tabs}
         {search && (
           <Input
             value={search.value}
             onChange={(event) => search.onChange(event.target.value)}
             placeholder={search.placeholder}
-            className="[[data-slot=dialog-content]_&]:bg-background hidden h-8 w-full sm:block sm:max-w-[280px]"
+            className="[[data-slot=dialog-content]_&]:bg-background h-8 min-w-40 flex-1 sm:max-w-[280px]"
           />
         )}
-
-        <div className="flex items-center gap-2 sm:flex-1">
-          {search && (
-            <Button
-              variant="outline"
-              size="sm"
-              aria-expanded={searchOpen}
-              aria-label={search.placeholder}
-              title={search.placeholder}
-              className={cn(
-                TOOLBAR_UTILITY,
-                "size-8 px-0 sm:hidden",
-                (searchOpen || search.value.trim() !== "") && "bg-accent",
-              )}
-              onClick={() => setSearchOpen((wasOpen) => !wasOpen)}
-            >
-              <Search />
-            </Button>
-          )}
-
-          {filters.length > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              aria-expanded={open}
-              aria-label={t("toolbar.filters")}
-              title={t("toolbar.filters")}
-              className={cn(TOOLBAR_UTILITY, "aria-expanded:bg-accent relative size-8 px-0")}
-              onClick={() => setOpen((wasOpen) => !wasOpen)}
-            >
-              <Filter />
-              {activeCount > 0 && (
-                <span className="bg-foreground text-background absolute -top-1 -right-1 grid size-4 place-items-center rounded-full text-[0.6rem] font-semibold">
-                  {activeCount}
-                </span>
-              )}
-            </Button>
-          )}
-
-          {columns && <ColumnsMenu columns={columns} iconOnly />}
-        </div>
-
-        {(actions || (view && onViewChange)) && (
-          <div className="flex items-center gap-2 justify-self-end sm:ml-auto">
-            {actions}
-            {view && onViewChange && <ListViewToggle view={view} onChange={onViewChange} />}
-          </div>
-        )}
-      </div>
-
-      {search && searchOpen && (
-        <div className="relative sm:hidden">
-          <Input
-            autoFocus
-            value={search.value}
-            onChange={(event) => search.onChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") setSearchOpen(false);
-            }}
-            placeholder={search.placeholder}
-            className="[[data-slot=dialog-content]_&]:bg-background h-8 w-full pr-9"
-          />
+        {filters.length > 0 && (
           <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={t("btn.close")}
-            title={t("btn.close")}
-            className="absolute top-0 right-0 size-8"
-            onClick={() => setSearchOpen(false)}
+            variant="outline"
+            size="sm"
+            aria-expanded={open}
+            aria-label={t("toolbar.filters")}
+            title={t("toolbar.filters")}
+            className={cn(TOOLBAR_UTILITY, "aria-expanded:bg-accent")}
+            onClick={() => setOpen((wasOpen) => !wasOpen)}
           >
-            <X />
+            <Filter />
+            <span className="hidden @xl/bar:inline">{t("toolbar.filters")}</span>
+            {activeCount > 0 && (
+              <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                {activeCount}
+              </Badge>
+            )}
           </Button>
-        </div>
-      )}
+        )}
+        {columns && <ColumnsMenu columns={columns} />}
+        {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}
+      </div>
 
       {open && filters.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           {filters.map((filter) => (
-            <Fragment key={filter.id}>
-              <FacetedFilter filter={filter} />
-            </Fragment>
+            <FacetedFilter key={filter.id} filter={filter} />
           ))}
           {activeCount > 0 && onReset && (
             <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5" onClick={onReset}>
@@ -540,16 +312,9 @@ export function ListToolbar({
 }
 
 /**
- * Under the table: what it amounts to, and how to move through it.
- *
- * The count sits here rather than at the right end of the toolbar, which is
- * also where shadcn keeps it (`data-table-pagination.tsx`, "N row(s)
- * selected" on the left of the page controls): a toolbar is what you act WITH,
- * a footer is what the table came to. It frees the bar's right end for controls
- * as well, which is the end that runs out of room first.
- *
- * Rendered even with one page — the count is the point, the arrows are the
- * option.
+ * Under the table: what it amounts to, and how to move through it. A toolbar is what you act
+ * WITH, a footer is what the table came to (shadcn's pagination row keeps the count on the left
+ * too). Rendered even with one page — the count is the point, the arrows are the option.
  */
 export function ListFooter({ count, children }: { count?: ReactNode; children?: ReactNode }) {
   if (count === undefined && !children) return null;

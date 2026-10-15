@@ -12,14 +12,7 @@ interface StringListInputProps {
   description?: string;
 }
 
-/**
- * Enter/comma-to-add chip list (authorized URIs, scopes, URL patterns, …).
- *
- * Pending typed text that the user hasn't yet confirmed with Enter/comma is
- * auto-committed on blur (focus loss) — leaving the section, switching tabs,
- * or clicking outside the field saves the in-progress chip rather than
- * silently discarding it.
- */
+/** Enter/comma-to-add chip list. Pending text is committed on blur rather than silently discarded. */
 export function StringListInput({
   label,
   values,
@@ -41,7 +34,7 @@ export function StringListInput({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       {label && <Label>{label}</Label>}
       {values.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
@@ -55,7 +48,7 @@ export function StringListInput({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="text-muted-foreground hover:text-destructive h-auto w-auto p-0 text-sm leading-none"
+                className="text-muted-foreground hover:text-destructive size-auto p-0 text-sm leading-none"
                 onClick={() => onChange(values.filter((x) => x !== v))}
               >
                 &times;

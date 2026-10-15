@@ -19,7 +19,6 @@ import { FormField } from "../components/form-field";
 import {
   usePackageEditor,
   type PackageEditorTab,
-  type Presentation,
 } from "../components/package-editor/use-package-editor";
 import { PackageEditorFrame } from "../components/package-editor/package-editor-frame";
 
@@ -32,11 +31,9 @@ import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-grou
 import { SourceSection } from "../components/integration-editor/source-section";
 import { getSource, isRemoteSourceUrl } from "../components/integration-editor/utils";
 import { AuthsSection } from "../components/integration-editor/auths-section";
-import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 
 import {
-  defaultEditorState,
   defaultSkillManifest,
   defaultIntegrationManifest,
   DEFAULT_SKILL_CONTENT,
@@ -50,7 +47,9 @@ import {
   withOutputTool,
   fieldsToSchema,
 } from "../components/agent-editor/utils";
-import type { SchemaField } from "../components/agent-editor/types";
+import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
+
+const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
 
 // ─── Agent Editor Inner Form ────────────────────────────────────────
 
@@ -58,25 +57,22 @@ function AgentEditorInner({
   initialState,
   packageId,
   effectiveTimeoutSeconds,
-  presentation = "page",
   tab,
   onTabRequest,
 }: {
   initialState: EditorState;
-  packageId: string | undefined;
+  packageId: string;
   /**
    * Timeout this deployment will actually enforce (server-computed: declared
    * value clamped to `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`). Read off
-   * the agent detail the page already loaded — undefined when creating.
+   * the agent detail the page already loaded.
    */
   effectiveTimeoutSeconds?: number;
-  presentation?: Presentation;
-  /** Embedded: the section is the settings rail's, not the editor's. */
-  tab?: PackageEditorTab;
-  onTabRequest?: (tab: PackageEditorTab) => void;
+  /** The section is the settings rail's, not the editor's. */
+  tab: PackageEditorTab;
+  onTabRequest: (tab: PackageEditorTab) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const embedded = presentation === "embedded";
 
   // Schema fields are stored in local state to preserve fields being edited (empty key).
   // Only complete fields are persisted to the manifest via fieldsToSchema.
@@ -88,13 +84,8 @@ function AgentEditorInner({
     type: "agent",
     initialState,
     packageId,
-    presentation,
     tab,
     onTabRequest,
-    validate: (s) =>
-      !embedded && !newPackageContent("agent", s.operations ?? []).trim()
-        ? { error: t("editor.errorPrompt"), tab: "files" }
-        : null,
     onManifestReplace: (manifest) => setSchemaFields(manifestToSchemaFields(manifest)),
   });
   const { state, setState, updateManifest, activeTab } = editor;
@@ -105,10 +96,8 @@ function AgentEditorInner({
   // the saved declaration. When it did not clamp, the ceiling is only known to
   // be >= that value, so we stay silent rather than warn about a number we
   // cannot judge. `undefined` here = no hint.
-  const savedTimeout =
-    typeof initialState.manifest.timeout === "number" ? initialState.manifest.timeout : undefined;
-  const declaredTimeout =
-    typeof state.manifest.timeout === "number" ? state.manifest.timeout : undefined;
+  const savedTimeout = asNumber(initialState.manifest.timeout);
+  const declaredTimeout = asNumber(state.manifest.timeout);
   const knownCeiling =
     effectiveTimeoutSeconds !== undefined &&
     savedTimeout !== undefined &&
@@ -145,28 +134,39 @@ function AgentEditorInner({
       return { ...s, manifest: m };
     });
 
-  const agentTabs: Array<{ id: PackageEditorTab; label: string }> = embedded
-    ? [
-        { id: "general", label: t("editor.tabGeneral") },
-        { id: "schema", label: t("editor.tabSchema") },
-        { id: "skills", label: t("editor.tabSkills") },
-        { id: "integrations", label: t("editor.tabIntegrations") },
-        // The manifest's `runtime_tools`, not integration packages.
-        { id: "tools", label: t("editor.tabTools") },
-      ]
-    : [
-        { id: "general", label: t("editor.tabGeneral") },
-        { id: "files", label: t("files.tabLabel") },
-        { id: "schema", label: t("editor.tabSchema") },
-        { id: "skills", label: t("editor.tabSkills") },
-        { id: "integrations", label: t("editor.tabIntegrations") },
-        { id: "json", label: t("editor.tabJson") },
-      ];
+  const resourceTabs = {
+    skills: {
+      type: "skill",
+      title: t("common:nav.skills"),
+      emptyLabel: t("editor.skillsEmpty"),
+    },
+    integrations: {
+      type: "integration",
+      title: t("common:nav.integrations"),
+      emptyLabel: t("editor.integrationsEmpty"),
+    },
+  } as const;
+  const resourceKey =
+    activeTab === "skills" || activeTab === "integrations" ? activeTab : undefined;
+  const setResources =
+    (key: "skills" | "integrations") => (update: (prev: ResourceEntry[]) => ResourceEntry[]) =>
+      setState((s) => {
+        const m = { ...s.manifest };
+        setResourceEntries(m, key, update(getResourceEntries(s.manifest, key)));
+        return { ...s, manifest: m };
+      });
 
   return (
     <PackageEditorFrame
       editor={editor}
-      tabs={agentTabs}
+      tabs={[
+        { id: "general", label: t("editor.tabGeneral") },
+        { id: "schema", label: t("editor.tabSchema") },
+        { id: "skills", label: t("common:nav.skills") },
+        { id: "integrations", label: t("common:nav.integrations") },
+        // The manifest's `runtime_tools`, not integration packages.
+        { id: "tools", label: t("integrationEditor.tabTools") },
+      ]}
       descriptions={{
         general: t("editor.description.general"),
         schema: t("editor.description.schema"),
@@ -179,21 +179,18 @@ function AgentEditorInner({
         <MetadataSection
           value={editor.metadata}
           onChange={editor.onMetadataChange}
-          isEdit={embedded}
-          surface={embedded ? "settings" : "card"}
+          isEdit
           identityChildren={
             <AgentAppearanceFields manifest={state.manifest} onChange={updateManifest} />
           }
         >
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <FormField
               id="meta-timeout"
               label={t("editor.execTimeout")}
               type="number"
               min={1}
-              value={
-                typeof state.manifest.timeout === "number" ? String(state.manifest.timeout) : ""
-              }
+              value={declaredTimeout !== undefined ? String(declaredTimeout) : ""}
               onChange={(v) => {
                 const n = parseInt(v, 10);
                 // `undefined` clears the key through the shallow manifest merge
@@ -215,15 +212,14 @@ function AgentEditorInner({
           </div>
         </MetadataSection>
       )}
-      {activeTab === "tools" && embedded && (
+      {activeTab === "tools" && (
         <RuntimeToolsGroup
-          showHint={false}
           selected={getRuntimeTools(state.manifest)}
           onChange={setManifestRuntimeTools}
         />
       )}
       {activeTab === "schema" && (
-        <div className="space-y-6">
+        <div className="flex flex-col gap-6">
           <SchemaFieldList
             title={t("editor.inputTitle")}
             mode="input"
@@ -238,48 +234,12 @@ function AgentEditorInner({
           />
         </div>
       )}
-      {activeTab === "skills" && (
+      {resourceKey && (
         <ResourceSection
-          type="skill"
-          title={t("editor.tabSkills")}
-          emptyLabel={t("editor.skillsEmpty")}
-          selectedEntries={getResourceEntries(state.manifest, "skills")}
-          onChange={(updater) => {
-            setState((s) => {
-              const prev = getResourceEntries(s.manifest, "skills");
-              const next = typeof updater === "function" ? updater(prev) : updater;
-              const m = { ...s.manifest };
-              setResourceEntries(m, "skills", next);
-              return { ...s, manifest: m };
-            });
-          }}
-          surface={embedded ? "settings" : "card"}
-        />
-      )}
-      {activeTab === "integrations" && (
-        <ResourceSection
-          type="integration"
-          title={t("editor.tabIntegrations")}
-          emptyLabel={t("editor.integrationsEmpty")}
-          selectedEntries={getResourceEntries(state.manifest, "integrations")}
-          onChange={(updater) => {
-            setState((s) => {
-              const prev = getResourceEntries(s.manifest, "integrations");
-              const next = typeof updater === "function" ? updater(prev) : updater;
-              const m = { ...s.manifest };
-              setResourceEntries(m, "integrations", next);
-              return { ...s, manifest: m };
-            });
-          }}
-          leadingItems={
-            embedded ? undefined : (
-              <RuntimeToolsGroup
-                selected={getRuntimeTools(state.manifest)}
-                onChange={setManifestRuntimeTools}
-              />
-            )
-          }
-          surface={embedded ? "settings" : "card"}
+          key={resourceKey}
+          {...resourceTabs[resourceKey]}
+          selectedEntries={getResourceEntries(state.manifest, resourceKey)}
+          onChange={setResources(resourceKey)}
         />
       )}
     </PackageEditorFrame>
@@ -342,7 +302,6 @@ export function AgentDefinitionEditor({
         }}
         packageId={detail.id}
         effectiveTimeoutSeconds={detail.effective_timeout_seconds}
-        presentation="embedded"
         tab={section}
         onTabRequest={(next) => onSection(next as AgentDefinitionSection)}
       />
@@ -356,23 +315,20 @@ function PackageEditorInner({
   type,
   initialState,
   packageId,
-  presentation = "page",
 }: {
   type: "skill" | "mcp-server";
   initialState: EditorState;
+  /** Undefined on the creation page; set to edit the package in its Package AFPS (Identité). */
   packageId: string | undefined;
-  /** A page to create; embedded in the package's Package AFPS (Identité) to edit. */
-  presentation?: Presentation;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const embedded = presentation === "embedded";
+  const isEdit = packageId !== undefined;
   const editor = usePackageEditor({
     type,
     initialState,
     packageId,
-    presentation,
     validate: (s) => {
-      if (embedded || type !== "skill") return null;
+      if (isEdit || type !== "skill") return null;
       const content = newPackageContent(type, s.operations ?? []);
       if (!content.trim()) {
         return { error: t("editor.errorContent"), tab: "files" };
@@ -386,18 +342,14 @@ function PackageEditorInner({
     },
   });
 
-  const pkgTabs: Array<{ id: PackageEditorTab; label: string }> = embedded
-    ? [{ id: "general", label: t("editor.tabGeneral") }]
-    : [
-        { id: "general", label: t("editor.tabGeneral") },
-        { id: "files", label: t("files.tabLabel") },
-        { id: "json", label: t("editor.tabJson") },
-      ];
-
   return (
     <PackageEditorFrame
       editor={editor}
-      tabs={pkgTabs}
+      tabs={[
+        { id: "general", label: t("editor.tabGeneral") },
+        { id: "files", label: t("files.tabLabel"), createOnly: true },
+        { id: "json", label: t("editor.tabJson"), createOnly: true },
+      ]}
       descriptions={
         type === "mcp-server" ? { general: t("mcpServerEditor.description.general") } : undefined
       }
@@ -406,8 +358,7 @@ function PackageEditorInner({
         <MetadataSection
           value={editor.metadata}
           onChange={editor.onMetadataChange}
-          isEdit={embedded}
-          surface={embedded ? "settings" : "card"}
+          isEdit={isEdit}
         />
       )}
     </PackageEditorFrame>
@@ -419,27 +370,24 @@ function PackageEditorInner({
 function IntegrationEditorInner({
   initialState,
   packageId,
-  presentation = "page",
   tab,
   onTabRequest,
   toolCatalog,
 }: {
   initialState: EditorState;
+  /** Undefined on the creation page; set to edit the integration in its Package AFPS. */
   packageId: string | undefined;
-  /** A page to create; embedded in the integration's Package AFPS to edit. */
-  presentation?: Presentation;
   tab?: PackageEditorTab;
   onTabRequest?: (tab: PackageEditorTab) => void;
-  /** Embedded: the saved package's tool catalog, shown with the draft's policy. */
+  /** Editing: the saved package's tool catalog, shown with the draft's policy. */
   toolCatalog?: IntegrationToolCatalogEntry[];
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const embedded = presentation === "embedded";
+  const isEdit = packageId !== undefined;
   const editor = usePackageEditor({
     type: "integration",
     initialState,
     packageId,
-    presentation,
     tab,
     onTabRequest,
     validate: (s) => {
@@ -451,29 +399,19 @@ function IntegrationEditorInner({
     },
   });
   const { state, activeTab, replaceManifest: onManifestChange } = editor;
-  const sectionSurface = embedded ? "settings" : "card";
-
-  // Embedded, the labels are the settings rail's, so heading and rail agree.
-  const integrationTabs: Array<{ id: PackageEditorTab; label: string }> = embedded
-    ? [
-        { id: "general", label: t("editor.tabGeneral") },
-        { id: "source", label: t("integrationEditor.tabSource") },
-        { id: "auths", label: t("integrationEditor.tabAuthMethods") },
-        { id: "tools", label: t("integrationEditor.tabTools") },
-      ]
-    : [
-        { id: "general", label: t("editor.tabGeneral") },
-        { id: "source", label: t("integrationEditor.tabSource") },
-        { id: "auths", label: t("integrationEditor.tabAuths") },
-        { id: "tools", label: t("integrationEditor.tabTools") },
-        { id: "files", label: t("files.tabLabel") },
-        { id: "json", label: t("editor.tabJson") },
-      ];
 
   return (
     <PackageEditorFrame
       editor={editor}
-      tabs={integrationTabs}
+      // The labels are the settings rail's, so heading and rail agree.
+      tabs={[
+        { id: "general", label: t("editor.tabGeneral") },
+        { id: "source", label: t("integrationEditor.tabSource") },
+        { id: "auths", label: t("integrationEditor.tabAuthMethods") },
+        { id: "tools", label: t("integrationEditor.tabTools") },
+        { id: "files", label: t("files.tabLabel"), createOnly: true },
+        { id: "json", label: t("editor.tabJson"), createOnly: true },
+      ]}
       descriptions={{
         general: t("integrationEditor.description.general"),
         source: t("integrationEditor.description.source"),
@@ -485,40 +423,24 @@ function IntegrationEditorInner({
         <MetadataSection
           value={editor.metadata}
           onChange={editor.onMetadataChange}
-          isEdit={embedded}
-          surface={sectionSurface}
+          isEdit={isEdit}
         />
       )}
 
       {activeTab === "source" && (
-        <SourceSection
-          manifest={state.manifest}
-          onChange={onManifestChange}
-          surface={sectionSurface}
-        />
+        <SourceSection manifest={state.manifest} onChange={onManifestChange} />
       )}
 
       {activeTab === "auths" && (
-        <AuthsSection
-          manifest={state.manifest}
-          onChange={onManifestChange}
-          surface={sectionSurface}
-        />
+        <AuthsSection manifest={state.manifest} onChange={onManifestChange} />
       )}
 
-      {activeTab === "tools" &&
-        (toolCatalog ? (
-          <IntegrationToolsSection
-            tools={toolCatalog}
-            edit={{ manifest: state.manifest, onChange: onManifestChange }}
-          />
-        ) : (
-          <ToolsPolicySection
-            manifest={state.manifest}
-            onChange={onManifestChange}
-            surface={sectionSurface}
-          />
-        ))}
+      {activeTab === "tools" && (
+        <IntegrationToolsSection
+          tools={toolCatalog ?? []}
+          edit={{ manifest: state.manifest, onChange: onManifestChange }}
+        />
+      )}
     </PackageEditorFrame>
   );
 }
@@ -542,7 +464,6 @@ export function IntegrationDefinitionEditor({
       <IntegrationEditorInner
         initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
         packageId={detail.id}
-        presentation="embedded"
         tab={section}
         onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
         toolCatalog={toolCatalog}
@@ -571,7 +492,6 @@ export function PackageDefinitionEditor({
         type={type}
         initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
         packageId={detail.id}
-        presentation="embedded"
       />
     </DraftEditorMount>
   );
@@ -579,19 +499,10 @@ export function PackageDefinitionEditor({
 
 // ─── Page Wrapper ───────────────────────────────────────────────────
 
-/** The creation route of a package type: an existing package is edited in its settings. */
-export function PackageEditorPage({ type }: { type: "agent" | "skill" | "integration" }) {
+/** The creation route of a skill or an integration: an existing package is edited in its settings; an agent is created from a dialog. */
+export function PackageEditorPage({ type }: { type: "skill" | "integration" }) {
   const { user } = useAuth();
   const { currentOrg } = useOrg();
-
-  if (type === "agent") {
-    return (
-      <AgentEditorInner
-        initialState={defaultEditorState(currentOrg?.slug, user?.email)}
-        packageId={undefined}
-      />
-    );
-  }
 
   if (type === "integration") {
     return (

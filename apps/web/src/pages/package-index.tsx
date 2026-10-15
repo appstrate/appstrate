@@ -18,7 +18,6 @@ import {
 } from "@appstrate/core/permissions";
 import { useAgents, usePackageList } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
-import { useListView } from "../stores/list-view-store";
 import { useListParams } from "../lib/list-params";
 import { catalogueHref } from "../lib/catalogue-link";
 import { packageNewPath } from "../lib/package-paths";
@@ -29,10 +28,12 @@ import { PackageCollection } from "../components/package-collection";
 import { EmptyStateAction } from "../components/page-states";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
+import { useListView } from "../stores/list-view-store";
 import { useModalParam } from "../hooks/use-modal-param";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePermissions } from "../hooks/use-permissions";
+import { CreateAgentModal } from "../components/create-agent-modal";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 
@@ -42,7 +43,7 @@ type IndexType = Extract<PackageType, "agent" | "skill" | "mcp-server">;
 function presentation(type: IndexType, t: TFunction) {
   if (type === "agent") {
     return {
-      title: t("list.tabAgents", { ns: "agents" }),
+      title: t("common:nav.agents"),
       empty: t("list.empty", { ns: "agents" }),
       create: t("list.create", { ns: "agents" }),
     };
@@ -123,8 +124,9 @@ function PackageIndexBody({
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
   const importParam = useModalParam("import");
-  const [view, setView] = useListView(type);
+  const createAgentParam = useModalParam("createAgent");
   const list = useListParams(["origin", "activity"]);
+  const [view, setView] = useListView(type);
   // Creating is a write on the package type, as its route is.
   const canCreate = can(packagePermission(type, "write"));
   // An import may carry any package type, so any authoring grant opens it;
@@ -189,6 +191,9 @@ function PackageIndexBody({
       {importParam.value !== null && canImport && (
         <ImportModal onClose={importParam.close} onLeave={importParam.leave} />
       )}
+      {createAgentParam.value !== null && canCreate && type === "agent" && (
+        <CreateAgentModal onClose={createAgentParam.close} onLeave={createAgentParam.leave} />
+      )}
       {creation.isOpen && (
         <CreationHandoffModal
           resource={type}
@@ -199,7 +204,9 @@ function PackageIndexBody({
               importParam.open("1", "create");
               return;
             }
-            creation.leave(packageNewPath(type));
+            // The chooser hands over to the agent dialog; other types have a page of their own.
+            if (type === "agent") createAgentParam.open("1", "create");
+            else creation.leave(packageNewPath(type));
           }}
           onChat={creation.openChat}
         />

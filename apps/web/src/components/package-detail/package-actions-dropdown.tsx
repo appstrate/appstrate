@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Download,
@@ -9,11 +9,13 @@ import {
   GitFork,
   CalendarPlus,
   Trash2,
+  PackageMinus,
   PackagePlus,
   SlidersHorizontal,
   FolderInput,
   Share2,
 } from "lucide-react";
+import { cn } from "@appstrate/ui/cn";
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -21,6 +23,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "../page-actions-menu";
 import type { PackageType } from "@appstrate/core/validation";
+import { schemaHasFileFields } from "@appstrate/core/form";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { packagePermission } from "@appstrate/core/permissions";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -33,14 +36,16 @@ import { isOwnedSource } from "./owned-source";
 import { MoveHomeSpaceDialog, MOVE_HOME_PARAM } from "./move-home-space-dialog";
 import { SharePackageDialog, SHARE_PARAM } from "./share-package-dialog";
 import { useModalParam } from "../../hooks/use-modal-param";
+import { menuSections, type PackageMenuEntry, type PackageMenuGroup } from "./package-menu";
 
-/**
- * What the menu reads off the package's own detail response (`AgentDetail` or
- * `OrgPackageItemDetail`): the home contract, whose verdicts gate every act on
- * the live object, and the facts the confirmations name. `agents` (the agents
- * using it) is on the non-agent shape only; deleting a package that is used is
- * refused.
- */
+const GROUP_LABELS: Record<PackageMenuGroup, string> = {
+  build: "detail.actions.agent",
+  execution: "detail.actions.execution",
+  export: "detail.actions.export",
+  administration: "detail.actions.administration",
+};
+
+/** What the menu reads off the detail response: the home verdicts gating each act, and the facts confirmations name. `agents` exists on the non-agent shape only. */
 type PackageActionsDetail = Pick<
   AgentDetail,
   | "source"
@@ -50,7 +55,23 @@ type PackageActionsDetail = Pick<
   | "home_deletable"
   | "home_shareable"
 > &
+  Partial<Pick<AgentDetail, "running_runs" | "last_run" | "version_count" | "input">> &
   Partial<Pick<OrgPackageItemDetail, "name" | "agents">>;
+
+/** What an agent's menu adds to a package's: its deeds, which the agent page confirms or opens itself. */
+interface AgentMenu {
+  hasMemories: boolean;
+  /** Export the full transitive bundle (.afps-bundle). */
+  onDownloadBundle?: (version?: string) => void;
+  onDeleteAgent: () => void;
+  onDeleteRuns: () => void;
+  onDeleteMemories: () => void;
+  onAddSchedule: () => void;
+  /** Open the advanced run launcher (per-run overrides). */
+  onRunWithOptions: () => void;
+  /** Why this caller cannot launch at all (never published, working copy not theirs, unsaved edits), translated. */
+  runBlockedReason?: string;
+}
 
 interface PackageActionsDropdownProps {
   packageId: string;
@@ -60,42 +81,15 @@ interface PackageActionsDropdownProps {
   isHistoricalVersion: boolean;
   downloadVersion?: string;
   onDownload?: (version: string) => void;
-  /** Agent-only: export the full transitive bundle (.afps-bundle). */
-  onDownloadBundle?: (version?: string) => void;
-  /** Agent-only: true when the package has at least one published version.
-   *  The bundle export endpoint resolves versions from the registry; a
-   *  draft-only agent (versionCount === 0) would 404, so we disable the
-   *  menu item and surface a tooltip pointing to "Créer une version". */
-  hasPublishedVersion?: boolean;
   /**
-   * Whether the package is ACTIVE in the current space; `undefined` when not
-   * known yet, which offers neither switch. The bundle export route runs the
-   * execution gate (`isPackageActiveHere`), not the read gate, so a package
-   * merely placed here — or placed and switched off — answers 404 on click.
+   * ACTIVE in the current space; `undefined` (unknown) offers neither switch. Bundle export runs the
+   * execution gate (`isPackageActiveHere`), so a package placed but switched off answers 404.
    */
   isActiveHere?: boolean;
   onCreateVersion?: () => void;
   /** Why « Créer une version » is held back, already translated; `undefined` when it is not. */
   createVersionBlockedReason?: string;
-  // Agent-specific
-  runningRuns?: number;
-  hasRuns?: boolean;
-  hasMemories?: boolean;
-  hasFileInput?: boolean;
-  /** Agent-only: deleting an agent is the agent page's own confirmation. */
-  onDeleteAgent?: () => void;
-  onDeleteRuns?: () => void;
-  onAddSchedule?: () => void;
-  onDeleteMemories?: () => void;
-  /** Agent-only: open the advanced run launcher (per-run overrides). */
-  onRunWithOptions?: () => void;
-  /**
-   * Agent-only: why this caller cannot launch at all, already translated.
-   * Set when the package has never been published and its working copy is not
-   * theirs to run — the launcher would open on a version that does not exist.
-   * `undefined` means launchable.
-   */
-  runBlockedReason?: string;
+  agent?: AgentMenu;
 }
 
 /** A disabled menu item takes no focus or pointer event: its reason is shown, not titled. */
@@ -116,21 +110,10 @@ export function PackageActionsDropdown({
   isHistoricalVersion,
   downloadVersion,
   onDownload,
-  onDownloadBundle,
-  hasPublishedVersion,
   isActiveHere,
   onCreateVersion,
   createVersionBlockedReason,
-  runningRuns = 0,
-  hasRuns,
-  hasMemories,
-  hasFileInput,
-  onDeleteAgent,
-  onDeleteRuns,
-  onAddSchedule,
-  onDeleteMemories,
-  onRunWithOptions,
-  runBlockedReason,
+  agent,
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   const { can } = usePermissions();
@@ -150,250 +133,167 @@ export function PackageActionsDropdown({
   const isOwned = isOwnedSource(detail?.source);
   const displayName = detail?.display_name || detail?.name || packageId;
 
-  const isAgent = type === "agent";
   // The server's own verdict, not a re-derivation of it.
   const canWrite = detail?.home_writable === true;
-  // The exports carry the manifest and every authored file, so the two download
-  // routes ask for `<type>:read` — the permission a summary-only caller (an
-  // `agents:run` runner) does not hold. Without this the items 403 on click.
-  const canRead = can(packagePermission(type, "read"));
   const isMutable = canWrite && !isHistoricalVersion && isOwned;
-  // Its own verdict, not `canWrite`'s: `DELETE` enforces `<type>:delete`, an
-  // INDEPENDENT permission string, and a custom space role is an arbitrary
-  // bundle — one granting `write` without `delete` must not render a Supprimer
-  // item that 403s on click. The two travel together in every preset, so this
-  // narrows nothing for a preset-only organization.
-  const canDelete = detail?.home_deletable === true;
-  // Its own verdict, not `canWrite`'s: sharing is a third verb on the home
-  // space, and a system package answers `false` (it is already readable
-  // everywhere, and the route refuses it).
+  // Sharing is a third verb on the home space; a system package answers `false`.
   const canShare = detail?.home_shareable === true && !isHistoricalVersion && isOwned;
-  // Activating is a space placement switch, one pair of doors for every family;
-  // deactivating keeps the placement and its settings. Whether the act EXISTS
-  // follows the package's state here; `usePackageActivation` says whether this
-  // caller may perform it — the target space's verdict, not the org∪space union
-  // `can` computes (owning a personal space authorizes it, §3.6).
+  // Whether activation EXISTS follows the package's state here; `usePackageActivation` says whether
+  // this caller may perform it (the target space's verdict, not the org∪space union `can` computes, §3.6).
   const showDeactivate = isActiveHere === true && activation.mayDeactivate;
   const showActivate = isActiveHere === false && activation.mayActivate;
-  const showDelete = isOwned && canDelete;
-  // Deleting a skill, MCP server or integration an agent still uses is refused.
-  const canDeletePackage = !!detail?.agents && detail.agents.length === 0;
-  // Forking writes a NEW package in the current space, so it asks the current
-  // space's write, not the home's verdict on a package it never writes.
+  // `delete` is an independent permission, and a custom role may grant `write` without it.
+  const showDelete = isOwned && detail?.home_deletable === true;
+  // Forking writes a NEW package in the current space, so it asks the current space's write.
   const showFork = can(packagePermission(type, "write")) && !isOwned;
-  // Clearing runs deletes every member's runs of this agent, so the route asks
-  // `runs:read-all` on top of `runs:delete`; clearing memories is its own verb.
-  const showDeleteRuns =
-    can("runs:delete") && can("runs:read-all") && !!hasRuns && Boolean(onDeleteRuns);
-  const showDeleteMemories =
-    can("persistence:delete") && !!hasMemories && Boolean(onDeleteMemories);
-  const hasAgentBuildActions = isAgent && (isMutable || showFork);
-  const hasAgentExecutionActions =
-    isAgent &&
-    ((can("agents:run") && Boolean(onRunWithOptions)) ||
-      (can("schedules:write") && !hasFileInput && Boolean(onAddSchedule)));
-  const hasAgentExportActions =
-    isAgent && canRead && Boolean((downloadVersion && onDownload) || onDownloadBundle);
-  // Every item below carries its own verdict; the group exists when one does.
-  const hasAgentAdministrationActions =
-    isAgent &&
-    (showDeleteRuns ||
-      showDeleteMemories ||
-      showActivate ||
-      showDeactivate ||
-      isMutable ||
-      canShare ||
-      (showDelete && Boolean(onDeleteAgent)));
+  // The exports need `<type>:read`, which a summary-only caller (an `agents:run` runner) lacks.
+  const canRead = can(packagePermission(type, "read"));
+  const canExport = canRead && !!downloadVersion && !!onDownload;
+  const running = detail?.running_runs ?? 0;
+  const hasFileInput = !!schemaHasFileFields(detail?.input?.schema);
+  const published = (detail?.version_count ?? 0) > 0;
 
-  const createVersionItem = isMutable && onCreateVersion && (
-    <DropdownMenuItem
-      onSelect={() => !createVersionBlockedReason && onCreateVersion()}
-      disabled={!!createVersionBlockedReason}
-    >
-      <GitBranchPlus size={14} />
-      <DisabledItemLabel label={t("version.createVersion")} reason={createVersionBlockedReason} />
-    </DropdownMenuItem>
-  );
+  const entries: PackageMenuEntry[] = [
+    {
+      id: "download",
+      group: agent ? "export" : "build",
+      icon: Download,
+      label: t("btn.download", { ns: "common" }),
+      hidden: !canExport,
+      onSelect: () => onDownload?.(downloadVersion!),
+    },
+    {
+      id: "create-version",
+      group: "build",
+      icon: GitBranchPlus,
+      label: t("version.createVersion"),
+      reason: createVersionBlockedReason,
+      hidden: !isMutable || !onCreateVersion,
+      onSelect: onCreateVersion,
+    },
+    {
+      id: "fork",
+      group: "build",
+      icon: GitFork,
+      label: t("fork.button"),
+      hidden: !showFork,
+      onSelect: () => fork.open(),
+    },
+    {
+      id: "run-options",
+      group: "execution",
+      icon: SlidersHorizontal,
+      label: t("run.options.menuItem"),
+      reason: agent?.runBlockedReason,
+      hidden: !agent || !can("agents:run"),
+      onSelect: agent?.onRunWithOptions,
+    },
+    {
+      id: "schedule",
+      group: "execution",
+      icon: CalendarPlus,
+      label: t("schedule.titleNew"),
+      hidden: !agent || !can("schedules:write") || hasFileInput,
+      onSelect: agent?.onAddSchedule,
+    },
+    {
+      id: "bundle",
+      group: "export",
+      icon: Package,
+      label: t("bundle.download"),
+      reason: published ? undefined : t("bundle.requiresVersion"),
+      hidden: !agent?.onDownloadBundle || !canRead || !isActiveHere,
+      onSelect: () => agent?.onDownloadBundle?.(downloadVersion),
+    },
+    {
+      id: "clear-runs",
+      group: "administration",
+      icon: Trash2,
+      label: t("detail.clearRuns"),
+      destructive: true,
+      disabled: running > 0,
+      // Clearing runs deletes every member's runs, so the route asks `runs:read-all` on top of `runs:delete`.
+      hidden: !agent || !can("runs:delete") || !can("runs:read-all") || !detail?.last_run,
+      onSelect: agent?.onDeleteRuns,
+    },
+    {
+      id: "clear-memories",
+      group: "administration",
+      icon: Trash2,
+      label: t("detail.clearMemories"),
+      destructive: true,
+      hidden: !agent?.hasMemories || !can("persistence:delete"),
+      onSelect: agent?.onDeleteMemories,
+    },
+    // Placement: moving the home is the edit authority, sharing a verb of its own (RBAC §6.10).
+    {
+      id: "activate",
+      group: "administration",
+      icon: PackagePlus,
+      label: t("packages.activate", { ns: "settings" }),
+      disabled: activation.pending,
+      hidden: !showActivate,
+      onSelect: () => activation.activate(),
+    },
+    {
+      id: "deactivate",
+      group: "administration",
+      icon: PackageMinus,
+      label: t("packages.deactivate", { ns: "settings" }),
+      disabled: activation.pending,
+      hidden: !showDeactivate,
+      onSelect: () => askConfirm("deactivate"),
+    },
+    {
+      id: "move-home",
+      group: "administration",
+      icon: FolderInput,
+      label: t("packages.moveHome", { ns: "settings" }),
+      hidden: !isMutable,
+      onSelect: () => moveHome.open(packageId),
+    },
+    {
+      id: "share",
+      group: "administration",
+      icon: Share2,
+      label: t("packages.share", { ns: "settings" }),
+      hidden: !canShare,
+      onSelect: () => share.open(packageId),
+    },
+    {
+      id: "delete",
+      group: "administration",
+      icon: Trash2,
+      label: t("btn.delete"),
+      destructive: true,
+      disabled: running > 0,
+      // Deleting a skill, MCP server or integration an agent still uses is refused; an agent's own deletion is its page's confirmation.
+      hidden: !showDelete || (!agent && detail?.agents?.length !== 0),
+      onSelect: agent ? agent.onDeleteAgent : () => askConfirm("delete"),
+    },
+  ];
+  const sections = menuSections(entries);
 
-  // Where the package runs and where it lives, the same group in both menus:
-  // moving the home is the same authority as editing, since it is the home
-  // that grants that authority; sharing is a verb of its own on that same space
-  // (RBAC spec §6.10).
-  const placementItems = (
-    <>
-      {showActivate && (
-        <DropdownMenuItem disabled={activation.pending} onSelect={() => activation.activate()}>
-          <PackagePlus size={14} />
-          {t("packages.activate", { ns: "settings" })}
-        </DropdownMenuItem>
-      )}
-      {showDeactivate && (
-        <DropdownMenuItem disabled={activation.pending} onSelect={() => askConfirm("deactivate")}>
-          <PackagePlus size={14} className="rotate-180" />
-          {t("packages.deactivate", { ns: "settings" })}
-        </DropdownMenuItem>
-      )}
-      {isMutable && (
-        <DropdownMenuItem onSelect={() => moveHome.open(packageId)}>
-          <FolderInput size={14} />
-          {t("packages.moveHome", { ns: "settings" })}
-        </DropdownMenuItem>
-      )}
-      {canShare && (
-        <DropdownMenuItem onSelect={() => share.open(packageId)}>
-          <Share2 size={14} />
-          {t("packages.share", { ns: "settings" })}
-        </DropdownMenuItem>
-      )}
-    </>
-  );
-
-  // The manifest is not reachable from here, and does not need to be:
-  // every page that mounts this dropdown carries both tabs — À propos renders
-  // the manifest, the Contenu tab serves its raw `manifest.json`. That holds for
-  // integrations too, which route to `pages/integration-detail.tsx` and have
-  // their own tab set, and that page mounts the file explorer as well, so an
-  // integration's `manifest.json` and `INTEGRATION.md` are reachable without
-  // downloading the `.afps`.
   return (
     <>
-      <PageActionsMenu contentClassName={isAgent ? "min-w-64" : undefined}>
-        {isAgent ? (
-          <>
-            {hasAgentBuildActions && (
-              <>
-                <DropdownMenuLabel>{t("detail.actions.agent")}</DropdownMenuLabel>
-                {createVersionItem}
-                {showFork && (
-                  <DropdownMenuItem onSelect={() => fork.open()}>
-                    <GitFork size={14} />
-                    {t("fork.button")}
-                  </DropdownMenuItem>
-                )}
-              </>
-            )}
-
-            {hasAgentExecutionActions && (
-              <>
-                {hasAgentBuildActions && <DropdownMenuSeparator />}
-                <DropdownMenuLabel>{t("detail.actions.execution")}</DropdownMenuLabel>
-                {can("agents:run") && onRunWithOptions && (
-                  <DropdownMenuItem
-                    onSelect={() => !runBlockedReason && onRunWithOptions()}
-                    disabled={!!runBlockedReason}
-                  >
-                    <SlidersHorizontal size={14} />
-                    <DisabledItemLabel
-                      label={t("run.options.menuItem")}
-                      reason={runBlockedReason}
-                    />
-                  </DropdownMenuItem>
-                )}
-                {can("schedules:write") && !hasFileInput && onAddSchedule && (
-                  <DropdownMenuItem onSelect={onAddSchedule}>
-                    <CalendarPlus size={14} />
-                    {t("schedule.titleNew")}
-                  </DropdownMenuItem>
-                )}
-              </>
-            )}
-
-            {hasAgentExportActions && (
-              <>
-                {(hasAgentBuildActions || hasAgentExecutionActions) && <DropdownMenuSeparator />}
-                <DropdownMenuLabel>{t("detail.actions.export")}</DropdownMenuLabel>
-                {downloadVersion && onDownload && (
-                  <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
-                    <Download size={14} />
-                    {t("btn.download", { ns: "common" })}
-                  </DropdownMenuItem>
-                )}
-                {isActiveHere && onDownloadBundle && (
-                  <DropdownMenuItem
-                    onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
-                    disabled={!hasPublishedVersion}
-                  >
-                    <Package size={14} />
-                    <DisabledItemLabel
-                      label={t("bundle.download")}
-                      reason={hasPublishedVersion ? undefined : t("bundle.requiresVersion")}
-                    />
-                  </DropdownMenuItem>
-                )}
-              </>
-            )}
-
-            {hasAgentAdministrationActions && (
-              <>
-                {(hasAgentBuildActions || hasAgentExecutionActions || hasAgentExportActions) && (
-                  <DropdownMenuSeparator />
-                )}
-                <DropdownMenuLabel>{t("detail.actions.administration")}</DropdownMenuLabel>
-                {showDeleteRuns && (
-                  <DropdownMenuItem
-                    onSelect={onDeleteRuns}
-                    disabled={runningRuns > 0}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 size={14} />
-                    {t("detail.clearRuns")}
-                  </DropdownMenuItem>
-                )}
-                {showDeleteMemories && (
-                  <DropdownMenuItem
-                    onSelect={onDeleteMemories}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 size={14} />
-                    {t("detail.clearMemories")}
-                  </DropdownMenuItem>
-                )}
-                {placementItems}
-                {showDelete && onDeleteAgent && (
-                  <DropdownMenuItem
-                    onSelect={onDeleteAgent}
-                    disabled={runningRuns > 0}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 size={14} />
-                    {t("btn.delete")}
-                  </DropdownMenuItem>
-                )}
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            {canRead && downloadVersion && onDownload && (
-              <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
-                <Download size={14} />
-                {t("btn.download", { ns: "common" })}
+      <PageActionsMenu contentClassName={agent ? "min-w-64" : undefined}>
+        {sections.map(({ group, entries: items }, index) => (
+          <Fragment key={group}>
+            {index > 0 && <DropdownMenuSeparator />}
+            {agent && <DropdownMenuLabel>{t(GROUP_LABELS[group])}</DropdownMenuLabel>}
+            {items.map((entry) => (
+              <DropdownMenuItem
+                key={entry.id}
+                disabled={entry.disabled || !!entry.reason}
+                onSelect={entry.onSelect}
+                className={cn(entry.destructive && "text-destructive focus:text-destructive")}
+              >
+                <entry.icon />
+                <DisabledItemLabel label={entry.label} reason={entry.reason} />
               </DropdownMenuItem>
-            )}
-            {createVersionItem}
-            {showFork && (
-              <DropdownMenuItem onSelect={() => fork.open()}>
-                <GitFork size={14} />
-                {t("fork.button")}
-              </DropdownMenuItem>
-            )}
-            {(showActivate || showDeactivate || isMutable || canShare || showDelete) && (
-              <>
-                <DropdownMenuSeparator />
-                {placementItems}
-                {showDelete && canDeletePackage && (
-                  <DropdownMenuItem
-                    onSelect={() => askConfirm("delete")}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 size={14} />
-                    {t("btn.delete")}
-                  </DropdownMenuItem>
-                )}
-              </>
-            )}
-          </>
-        )}
+            ))}
+          </Fragment>
+        ))}
       </PageActionsMenu>
 
       {/* Mounted only while open: any way of closing a form modal abandons its input. */}

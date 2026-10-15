@@ -6,8 +6,7 @@
  * Everything the agents, skills and MCP-server pages draw below their title,
  * and everything the organization's catalogue draws inside its panel. They are
  * the SAME list of the same objects, so they are one component: the same
- * search, the same faceted filters, the same column set, the same view toggle,
- * the same empty states. The catalogue adds a tick per row and one action in
+ * search, the same faceted filters, the same column set, the same empty states. The catalogue adds a tick per row and one action in
  * the bar; it does not get a table of its own.
  *
  * What the caller decides is where the state lives (the URL on a page, the
@@ -16,11 +15,10 @@
  */
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { LucideIcon } from "lucide-react";
+import { LayoutGrid, Rows3, type LucideIcon } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { PackageType } from "@appstrate/core/validation";
-import type { ListView } from "@/stores/list-view-store";
 import type { DataColumn } from "./data-table";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { CardGrid } from "./card-grid";
 import { PackageCard } from "./package-card";
 import { PackagesTable } from "./packages-table";
@@ -31,6 +29,7 @@ import { SettingsHeading } from "./settings/settings-heading";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import type { ListState } from "../lib/list-params";
+import type { ListView } from "../stores/list-view-store";
 import { PACKAGE_ACTIVITIES, PACKAGE_ORIGINS, narrowPackages } from "../lib/package-collection";
 import type { CardItem } from "../lib/package-card-item";
 
@@ -63,8 +62,9 @@ export interface PackageCollectionProps {
   /** The page's creation button, when the caller may create: the empty list offers it. */
   emptyAction?: ReactNode;
   list: ListState;
+  /** How this surface draws the list: the index pages let the reader choose, the catalogue's management view is a table. */
   view: ListView;
-  /** Absent when the view is the surface's decision, not the reader's. */
+  /** Offers the choice between the two drawings; without it the list keeps `view`. */
   onViewChange?: (view: ListView) => void;
   /**
    * Whether the list can say what is running or what uses this package. The
@@ -147,7 +147,7 @@ export function PackageCollection({
   const activities = activityFilter ? list.values("activity", PACKAGE_ACTIVITIES) : [];
   const baseColumns = usePackageColumns(holds).filter((c) => !dropColumns.includes(c.id));
   const searchPlaceholder = useSearchPlaceholder(entity);
-  const visibility = useColumnVisibility(tableId);
+  const { columns: shownColumns, menu } = useColumnVisibility(tableId, baseColumns);
 
   const shown = narrowPackages(items ?? [], {
     query,
@@ -163,7 +163,7 @@ export function PackageCollection({
       values: origins,
       options: [
         { value: "local", label: originLabels?.local ?? t("list.filter.local") },
-        { value: "system", label: originLabels?.system ?? t("list.filter.system") },
+        { value: "system", label: originLabels?.system ?? t("list.badgeBuiltIn") },
       ],
       onChange: list.setValues("origin"),
     },
@@ -171,7 +171,7 @@ export function PackageCollection({
       ? [
           {
             id: "activity",
-            label: t(holds === "agent" ? "list.filter.execution" : "list.filter.usage"),
+            label: t(holds === "agent" ? "run.infoExecution" : "run.infoUsage"),
             values: activities,
             options:
               holds === "agent"
@@ -218,27 +218,37 @@ export function PackageCollection({
         onReset={list.reset}
         // Only the table view has columns to choose from, and only the set the
         // list owns: a tick and a deed are not columns anyone hides.
-        columns={view === "table" ? columnMenu(baseColumns, visibility) : undefined}
-        view={view}
-        onViewChange={onViewChange}
-        actions={actions}
+        columns={view === "table" ? menu : undefined}
+        actions={
+          <>
+            {onViewChange && (
+              <Tabs value={view} onValueChange={(next) => onViewChange(next as ListView)}>
+                <TabsList className="h-9">
+                  <TabsTrigger value="table" aria-label={t("toolbar.viewTable", { ns: "common" })}>
+                    <Rows3 className="size-4" />
+                  </TabsTrigger>
+                  <TabsTrigger value="cards" aria-label={t("toolbar.viewCards", { ns: "common" })}>
+                    <LayoutGrid className="size-4" />
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            )}
+            {actions}
+          </>
+        }
       />
       {view === "table" ? (
         <PackagesTable
+          label={entity}
           items={shown}
-          tableId={tableId}
           rowAction={rowAction}
-          columns={[
-            ...leadingColumns,
-            ...visibleColumns(baseColumns, visibility.hidden),
-            ...trailingColumns,
-          ]}
+          columns={[...leadingColumns, ...shownColumns, ...trailingColumns]}
           isLoading={isLoading}
           failure={error}
           empty={emptyBody}
         />
       ) : cardSections && !isLoading && !error && shown.length > 0 ? (
-        <div className="space-y-8 pt-2">
+        <div className="flex flex-col gap-8 pt-2">
           {cardSections(shown)
             .filter((section) => section.items.length > 0)
             .map((section) => (

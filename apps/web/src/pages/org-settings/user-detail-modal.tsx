@@ -73,7 +73,6 @@ export function UserDetailModal({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={memberLabel(member)}
       className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-2xl"
@@ -112,10 +111,10 @@ export function UserDetailModal({
 
         {showSpaces && (
           <section>
-            <h3 className="mb-3 text-base font-semibold">{t("userDetail.spacesSection")}</h3>
+            <h3 className="mb-3 text-base font-semibold">{t("orgSettings.inviteSpacesLabel")}</h3>
             <DataTable
-              tableId="user-spaces"
-              label={t("userDetail.spacesSection")}
+              tiered
+              label={t("orgSettings.inviteSpacesLabel")}
               columns={columns}
               rows={member.spaces}
               rowKey={(space) => space.id}

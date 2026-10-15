@@ -38,7 +38,8 @@ export function useOrgRoleColumns({
     {
       id: "role",
       header: t("roles.colRole"),
-      width: "minmax(200px,2fr)",
+      width: 200,
+      elastic: true,
       cell: (role) => (
         <span className="block min-w-0 py-1">
           <span className="block text-sm font-medium">{t(roleI18nKey(role))}</span>
@@ -51,7 +52,8 @@ export function useOrgRoleColumns({
     {
       id: "access",
       header: t("orgRolesGuide.spaceAccess"),
-      width: "minmax(140px,1fr)",
+      width: 140,
+      elastic: true,
       tier: 2,
       cell: (role) => (
         <span className="text-muted-foreground block text-xs whitespace-normal">
@@ -62,7 +64,7 @@ export function useOrgRoleColumns({
     rowActionsColumn((role: OrgRole) =>
       onPreview && isPreviewable(role) ? (
         <TableRowActions
-          menuLabel={t("roles.moreActions", { name: t(roleI18nKey(role)) })}
+          menuLabel={t("providers.moreActions", { name: t(roleI18nKey(role)) })}
           actions={[
             {
               id: "preview",

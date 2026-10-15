@@ -3,10 +3,10 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
 import { RunStatusIcon } from "@appstrate/ui/components/run-status";
-import { ToneBadge, type ToneBadgeVariant } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 
 /**
- * The outline counterpart to {@link Badge}: it qualifies WHAT a row is
+ * The outline counterpart to {@link RunStatusBadge}: it qualifies WHAT a row is
  * ("Inline", "Distant", "Supprimé") where the status badge says how it ended.
  *
  * Shared by the run provenance badges (`RunProvenanceBadges`: run table, run
@@ -39,16 +39,10 @@ export function MetaBadge({
   );
 }
 
-const statusVariantMap: Record<string, ToneBadgeVariant> = {
-  success: "success",
-  failed: "failed",
-  running: "running",
-  pending: "pending",
-  timeout: "timeout",
-  cancelled: "cancelled",
-};
+const RUN_STATUSES = ["success", "failed", "running", "pending", "timeout", "cancelled"] as const;
+type RunStatus = (typeof RUN_STATUSES)[number];
 
-export function Badge({
+export function RunStatusBadge({
   status,
   compact,
   unread,
@@ -58,7 +52,7 @@ export function Badge({
   unread?: boolean;
 }) {
   const { t } = useTranslation();
-  const variant = statusVariantMap[status] || "pending";
+  const variant: RunStatus = RUN_STATUSES.find((known) => known === status) ?? "pending";
   const icon = <RunStatusIcon status={status} className="h-3 w-3" />;
   const dot = unread && (
     <span className="bg-destructive absolute -top-1 -right-1 size-2 rounded-full" />
@@ -67,10 +61,10 @@ export function Badge({
   if (!compact) {
     return (
       <span className="relative shrink-0">
-        <ToneBadge variant={variant} className="gap-1">
+        <Badge variant={variant} className="gap-1">
           {icon}
           {t(`status.${status}`, status)}
-        </ToneBadge>
+        </Badge>
         {dot}
       </span>
     );
@@ -81,10 +75,10 @@ export function Badge({
       {/* Mobile: bare icon, toned by its status */}
       <span className="sm:hidden [&_svg]:h-4 [&_svg]:w-4">{icon}</span>
       {/* Desktop: full badge */}
-      <ToneBadge variant={variant} className="hidden gap-1 sm:inline-flex">
+      <Badge variant={variant} className="hidden gap-1 sm:inline-flex">
         {icon}
         {t(`status.${status}`, status)}
-      </ToneBadge>
+      </Badge>
       {dot}
     </span>
   );

@@ -1,30 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unified credential modal — single entry point for both API-key and
- * OAuth model provider connections.
+ * Unified credential modal for both API-key and OAuth model provider connections. The
+ * picker is sourced entirely from `useProvidersRegistry()` (module entries appear with
+ * `MODULES`); an OAuth provider swaps the body to the pairing-token UI.
  *
- * The provider picker is fully sourced from `useProvidersRegistry()` —
- * api-key and OAuth providers alike. Selecting an OAuth provider swaps
- * the body to the pairing-token UI (`<OAuthPairingBody>`); api-key
- * providers keep the form. Modules can be added/removed via the
- * `MODULES` env var with zero client churn — their entries appear or
- * disappear in the picker automatically.
- *
- * The form posts the canonical `{ label, providerId, apiKey, baseUrlOverride? }`
- * shape. Providers that declare `baseUrlOverridable: true` collapse into the
- * picker's single "custom endpoint" row and are configured through the shared
- * endpoint fields, which own the API type, the base URL and the key.
- *
- * Renaming is never done here: the name is edited in place in the table
- * (`InlineEditableLabel`), the one rename. Editing a key-based row changes its
- * key; an OAuth row's connection changes only through the reconnect
- * affordance, which re-enters the modal with the exact credential targeted.
- * No key is ever sent for an OAuth row.
+ * `baseUrlOverridable` providers collapse into the picker's single "custom endpoint" row,
+ * configured through the shared endpoint fields. Renaming is never done here
+ * (`InlineEditableLabel`); editing a key row changes its key; an OAuth row changes only
+ * through the reconnect affordance, and no key is ever sent for it.
  */
 
 import { PendingButton } from "@/components/app-ui/pending-button";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
@@ -32,14 +20,6 @@ import { FormModal } from "./form-modal";
 import { TestResultSpan } from "./test-result-span";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
 import {
   useProvidersRegistry,
   useTestModelProviderCredentialInline,
@@ -47,25 +27,14 @@ import {
   type ModelProviderCredentialInfo,
 } from "../hooks/use-model-provider-credentials";
 import type { TestResult } from "@appstrate/shared-types";
-import {
-  buildProviderPickerRows,
-  CUSTOM_ENDPOINT_ID,
-  getProviderById,
-  pickedProviderId,
-  resolveProviderId,
-} from "@/lib/provider-registry-helpers";
+import { getProviderById, resolveProviderId } from "@/lib/provider-registry-helpers";
 import { parsesAsUrl } from "@/lib/model-discovery";
 import { EndpointFields } from "./model-form/endpoint-fields";
-import { CustomEndpointItem } from "./model-form/provider-picker";
-import { PROVIDER_ICONS } from "./icons";
-import { ProviderPickerGroups } from "./provider-picker-groups";
+import { ProviderPicker } from "./model-form/provider-picker";
 import { PairingModal } from "./pairing-modal";
 import { PreferencesModelsLink } from "./preferences-models-link";
 
-/**
- * Canonical payload shape submitted to `POST /api/model-provider-credentials`.
- * `baseUrlOverride` is only meaningful for a base-URL-overridable entry.
- */
+/** Payload of `POST /api/model-provider-credentials`; `baseUrlOverride` only for a base-URL-overridable entry. */
 export interface CredentialFormData {
   label: string;
   providerId: string;
@@ -96,33 +65,6 @@ interface CredentialFormFields {
 }
 
 /**
- * Unified pick-list option model. Built entirely from the registry —
- * api-key entries surface as plain `providerId` options, OAuth entries
- * are prefixed `oauth:` to keep the dispatch unambiguous.
- */
-interface PickerOption {
-  id: string;
-  label: string;
-  authMode: "api_key" | "oauth2";
-  providerId: string;
-  iconUrl: string;
-  featured: boolean;
-  baseUrlOverridable: boolean;
-}
-
-function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[] {
-  return registry.map((p) => ({
-    id: p.authMode === "oauth2" ? `oauth:${p.providerId}` : p.providerId,
-    label: p.displayName,
-    authMode: p.authMode,
-    providerId: p.providerId,
-    iconUrl: p.iconUrl,
-    featured: p.featured,
-    baseUrlOverridable: p.baseUrlOverridable,
-  }));
-}
-
-/**
  * Mounted by the caller while open, one per credential (`key`): the picked provider, the typed
  * values and any pairing token start fresh on every open.
  */
@@ -138,28 +80,19 @@ export function CredentialFormModal({
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   const registry = registryQuery.data ?? [];
-  const options = buildOptions(personal ? registry.filter((p) => p.personal_allowed) : registry);
+  const offered = personal ? registry.filter((p) => p.personal_allowed) : registry;
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     if (initial) return initial.providerId;
-    if (credential?.providerId) {
-      return credential.authMode === "oauth2"
-        ? `oauth:${credential.providerId}`
-        : credential.providerId;
-    }
+    if (credential?.providerId) return credential.providerId;
     return credential ? resolveProviderId(credential, registry) : "";
   });
 
   const isEditing = !!credential;
-  const selectedOption = options.find((o) => o.id === selectedId);
-  const isOAuthSelected = selectedOption?.authMode === "oauth2";
-  const selectedProvider = selectedOption
-    ? getProviderById(selectedOption.providerId, registry)
-    : undefined;
+  const selectedProvider = getProviderById(selectedId, offered);
+  const isOAuthSelected = selectedProvider?.authMode === "oauth2";
   const needsBaseUrlOverride = !!selectedProvider?.baseUrlOverridable;
   const overridableProviders = registry.filter((p) => p.baseUrlOverridable);
-  const pickerRows = buildProviderPickerRows(options);
-  const pickerValue = needsBaseUrlOverride ? CUSTOM_ENDPOINT_ID : selectedId;
 
   const {
     register,
@@ -223,23 +156,17 @@ export function CredentialFormModal({
     }
   };
 
-  const handleProviderChange = (picked: string) => {
-    const id = pickedProviderId(picked, registry);
+  const handleProviderChange = (id: string) => {
     setSelectedId(id);
     clearErrors();
-    const option = options.find((o) => o.id === id);
-    if (!option || option.authMode === "oauth2") {
+    const provider = getProviderById(id, offered);
+    if (!provider || provider.authMode === "oauth2") {
       setValue("baseUrlOverride", "");
       return;
     }
-    const provider = getProviderById(option.providerId, registry);
-    if (provider) {
-      // Pre-seed the override field with the default base URL so users
-      // see the value they're customising. Non-overridable providers
-      // never read this field.
-      setValue("baseUrlOverride", provider.baseUrlOverridable ? provider.defaultBaseUrl : "");
-      applyProviderName(provider);
-    }
+    // Pre-seed the default base URL so users see the value they are customising.
+    setValue("baseUrlOverride", provider.baseUrlOverridable ? provider.defaultBaseUrl : "");
+    applyProviderName(provider);
   };
 
   // The URL follows the new entry, the typed key stays.
@@ -276,26 +203,15 @@ export function CredentialFormModal({
       ? t("credentials.form.reconnectTitle", { label: credential.label })
       : t("credentials.form.editTitle", { label: credential.label });
 
-  const providerPicker = (
-    <Select value={pickerValue} onValueChange={handleProviderChange} disabled={isEditing}>
-      <SelectTrigger id="pk-provider">
-        <SelectValue placeholder={t("models.form.providerPlaceholder")} />
-      </SelectTrigger>
-      <SelectContent>
-        <ProviderPickerGroups
-          items={pickerRows}
-          featuredLabel={t("models.form.providerGroupFeatured")}
-          otherLabel={t("models.form.providerGroupOther")}
-          renderItem={(row) =>
-            row.kind === "customEndpoint" ? (
-              <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} />
-            ) : (
-              <PickerOptionItem key={row.entry.id} option={row.entry} t={t} />
-            )
-          }
-        />
-      </SelectContent>
-    </Select>
+  const providerField = (hint?: ReactNode) => (
+    <FormItem id="pk-provider" label={t("credentials.form.provider")} hint={hint}>
+      <ProviderPicker
+        registry={offered}
+        providerId={selectedId}
+        disabled={isEditing}
+        onChange={handleProviderChange}
+      />
+    </FormItem>
   );
 
   const labelField = (
@@ -314,11 +230,9 @@ export function CredentialFormModal({
     </FormItem>
   );
 
-  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds back). A new
-  // subscription is owned as the form says (the caller's own, or the organization's); an existing
-  // row is re-paired only when it is flagged and the server allows the caller to reconnect it. Its
-  // name is changed in the table.
-  if (isOAuthSelected && selectedOption?.providerId) {
+  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds back). An
+  // existing row is re-paired only when flagged and the server allows the caller to reconnect it.
+  if (isOAuthSelected && selectedProvider) {
     const showPairing = credential
       ? !!credential.needs_reconnection && credential.allowed_actions.includes("reconnect")
       : true;
@@ -326,19 +240,14 @@ export function CredentialFormModal({
       <PairingModal
         title={title}
         onClose={onClose}
-        providerId={selectedOption.providerId}
+        providerId={selectedProvider.providerId}
         target={
           credential ? { credentialId: credential.id } : { ownerType: personal ? "user" : "org" }
         }
         onConnected={() => onClose()}
         showPairing={showPairing}
       >
-        {!isEditing && (
-          <div className="space-y-2">
-            <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
-            {providerPicker}
-          </div>
-        )}
+        {!isEditing && providerField()}
       </PairingModal>
     );
   }
@@ -373,80 +282,35 @@ export function CredentialFormModal({
         </div>
       }
     >
-      <div className="space-y-2">
-        <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
-        {providerPicker}
-        {/* The organization's form: a member's own subscription is connected elsewhere. */}
-        {!personal && !isEditing && (
-          <p className="text-muted-foreground text-sm">
+      {providerField(
+        // The organization's form: a member's own subscription is connected elsewhere.
+        !personal && !isEditing ? (
+          <>
             {t("credentials.form.subscriptionNote")}{" "}
             <PreferencesModelsLink>
               {t("credentials.form.subscriptionNoteLink")}
             </PreferencesModelsLink>
-          </p>
-        )}
-      </div>
+          </>
+        ) : undefined,
+      )}
 
       {!isEditing && labelField}
 
-      {needsBaseUrlOverride ? (
-        <EndpointFields
-          idPrefix="pk"
-          providers={overridableProviders}
-          provider={selectedProvider}
-          onApiTypeChange={handleApiTypeChange}
-          // `apiShape` and `baseUrl` are pinned by `providerId` at create
-          // time — delete and re-create to point the key elsewhere.
-          providerLocked={isEditing}
-          baseUrlProps={register("baseUrlOverride", { validate: baseUrlValidate })}
-          baseUrlLocked={isEditing}
-          baseUrlError={showError("baseUrlOverride") ? errors.baseUrlOverride?.message : undefined}
-          apiKeyProps={register("apiKey", { validate: apiKeyValidate })}
-          apiKeyError={showError("apiKey") ? errors.apiKey?.message : undefined}
-          apiKeyHint={credential ? t("credentials.form.apiKeyHint") : undefined}
-        />
-      ) : (
-        !!selectedProvider && (
-          <FormItem
-            id="pk-apiKey"
-            label={t("credentials.form.apiKey")}
-            hint={credential ? t("credentials.form.apiKeyHint") : undefined}
-            error={showError("apiKey") ? errors.apiKey?.message : undefined}
-          >
-            <Input
-              type="password"
-              {...register("apiKey", { validate: apiKeyValidate })}
-              placeholder={t("credentials.form.apiKeyPlaceholder")}
-            />
-          </FormItem>
-        )
-      )}
+      <EndpointFields
+        idPrefix="pk"
+        providers={overridableProviders}
+        provider={selectedProvider}
+        onApiTypeChange={handleApiTypeChange}
+        // `apiShape` and `baseUrl` are pinned by `providerId` at create
+        // time — delete and re-create to point the key elsewhere.
+        providerLocked={isEditing}
+        baseUrlProps={register("baseUrlOverride", { validate: baseUrlValidate })}
+        baseUrlLocked={isEditing}
+        baseUrlError={showError("baseUrlOverride") ? errors.baseUrlOverride?.message : undefined}
+        apiKeyProps={register("apiKey", { validate: apiKeyValidate })}
+        apiKeyError={showError("apiKey") ? errors.apiKey?.message : undefined}
+        apiKeyHint={credential ? t("credentials.form.apiKeyHint") : undefined}
+      />
     </FormModal>
-  );
-}
-
-function PickerOptionItem({
-  option,
-  t,
-}: {
-  option: PickerOption;
-  t: (key: string) => string;
-}): React.ReactNode {
-  // Inline lookup to satisfy `react-hooks/static-components` — the rule
-  // flags PascalCase consts assigned from helper calls at the top of a
-  // component body. Equivalent to `getProviderIcon(option)`.
-  const Icon = PROVIDER_ICONS[option.iconUrl];
-  return (
-    <SelectItem key={option.id} value={option.id}>
-      <span className="flex items-center gap-2">
-        {Icon && <Icon className="size-4" />}
-        {option.label}
-        {option.authMode === "oauth2" && (
-          <span className="text-muted-foreground ml-1 text-[0.7rem] uppercase">
-            {t("credentials.oauth.badgeOauth")}
-          </span>
-        )}
-      </span>
-    </SelectItem>
   );
 }

@@ -156,7 +156,7 @@ describe("the chat access chip", () => {
     // A closed space the caller has not joined: no space role to show, but
     // there is still a truthful thing to say about who they are.
     const html = chip({ seedSpaces: true, spaceRole: null });
-    expect(html).toContain(i18n.t("settings:orgSettings.roleMember"));
+    expect(html).toContain(i18n.t("common:switcher.role.member"));
   });
 
   it("names its trigger with the visible role, not a label that hides it", () => {

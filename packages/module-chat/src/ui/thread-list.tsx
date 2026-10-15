@@ -189,7 +189,7 @@ export function ChatConversationList({
           <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
             <p className="text-sidebar-foreground/70 text-xs">{t("threads.error")}</p>
             <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
-              {t("turn.retry")}
+              {t("common:btn.retry")}
             </Button>
           </div>
         )}
@@ -308,8 +308,8 @@ function ConversationRow({
           <div className="pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100">
             <button
               type="button"
-              aria-label={t("threads.actions.rename")}
-              title={t("threads.actions.rename")}
+              aria-label={t("common:btn.rename")}
+              title={t("common:btn.rename")}
               onClick={() => setEditing(true)}
               className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-border rounded-md p-0.5"
             >
@@ -317,8 +317,8 @@ function ConversationRow({
             </button>
             <button
               type="button"
-              aria-label={t("threads.actions.delete")}
-              title={t("threads.actions.delete")}
+              aria-label={t("common:btn.delete")}
+              title={t("common:btn.delete")}
               onClick={() => setConfirmingDelete(true)}
               className="text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
             >
@@ -388,7 +388,7 @@ export function ChatConversationTitle({
       type="button"
       onClick={() => setEditing(true)}
       className="hover:bg-accent flex max-w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5"
-      title={t("threads.actions.rename")}
+      title={t("common:btn.rename")}
     >
       <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold">{title}</span>
       <PencilIcon className="text-muted-foreground size-3.5 shrink-0" />

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, FlaskConical, Pencil, Trash2 } from "lucide-react";
 import type { DataColumn } from "../../components/data-table";
@@ -39,8 +39,9 @@ export function useProxyColumns({
   return [
     {
       id: "proxy",
-      header: t("proxies.col.name"),
-      width: "minmax(80px,1.3fr)",
+      header: t("spaces.nameLabel"),
+      width: 80,
+      elastic: true,
       cell: (p) => (
         <div className="min-w-0">
           <CellText strong>{p.label}</CellText>
@@ -48,8 +49,8 @@ export function useProxyColumns({
             <div className="@xl/table:hidden">
               <TestResultSpan
                 result={testResults[p.id]!}
-                successKey="proxies.testSuccess"
-                failedKey="proxies.testFailed"
+                successKey="credentials.testSuccess"
+                failedKey="credentials.testFailed"
               />
             </div>
           )}
@@ -59,7 +60,8 @@ export function useProxyColumns({
     {
       id: "url",
       header: t("proxies.col.url"),
-      width: "minmax(72px,1.5fr)",
+      width: 72,
+      elastic: true,
       tier: 2,
       cell: (p) => (
         <span className="text-muted-foreground block truncate font-mono text-[0.65rem]">
@@ -70,7 +72,7 @@ export function useProxyColumns({
     {
       id: "type",
       header: t("proxies.col.type"),
-      width: "72px",
+      width: 72,
       tier: 2,
       cell: (p) => (
         <CellText>{p.source === "built-in" ? t("source.builtIn") : t("source.custom")}</CellText>
@@ -79,32 +81,29 @@ export function useProxyColumns({
     {
       id: "status",
       header: t("proxies.col.status"),
-      width: "minmax(56px,0.8fr)",
+      width: 56,
+      elastic: true,
       tier: 2,
       cell: (p) =>
         testResults[p.id] ? (
           <TestResultSpan
             result={testResults[p.id]!}
-            successKey="proxies.testSuccess"
-            failedKey="proxies.testFailed"
+            successKey="credentials.testSuccess"
+            failedKey="credentials.testFailed"
           />
         ) : (
-          <ToneBadge variant={p.enabled ? "success" : "secondary"}>
-            {p.enabled ? t("proxies.active") : t("proxies.disabled")}
-          </ToneBadge>
+          <Badge variant={p.enabled ? "success" : "secondary"}>
+            {p.enabled ? t("catalogue.filter.active") : t("proxies.disabled")}
+          </Badge>
         ),
     },
     {
       id: "default",
       header: t("proxies.col.default"),
-      width: "96px",
+      width: 96,
       tier: 2,
       cell: (p) =>
-        p.is_default ? (
-          <ToneBadge variant="success">{t("proxies.default")}</ToneBadge>
-        ) : (
-          <CellEmpty />
-        ),
+        p.is_default ? <Badge variant="success">{t("models.default")}</Badge> : <CellEmpty />,
     },
     rowActionsColumn((p: OrgProxyInfo) => {
       const isTesting = testingIds.has(p.id);
@@ -113,19 +112,19 @@ export function useProxyColumns({
       return (
         <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
           <TableRowActions
-            menuLabel={t("proxies.moreActions", { name: p.label })}
+            menuLabel={t("providers.moreActions", { name: p.label })}
             isPending={isTesting || isSettingDefault}
             actions={[
               {
                 id: "edit",
-                label: t("proxies.edit"),
+                label: t("common:btn.edit"),
                 icon: Pencil,
                 onSelect: () => onEdit?.(p),
                 hidden: !isCustom || !onEdit,
               },
               {
                 id: "test",
-                label: t("proxies.test"),
+                label: t("models.test"),
                 icon: FlaskConical,
                 onSelect: () => onTest(p.id),
                 disabled: isTesting,
@@ -141,7 +140,7 @@ export function useProxyColumns({
               },
               {
                 id: "delete",
-                label: t("proxies.delete"),
+                label: t("common:btn.delete"),
                 icon: Trash2,
                 onSelect: () => onDelete?.(p),
                 destructive: true,

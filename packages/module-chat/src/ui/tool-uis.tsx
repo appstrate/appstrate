@@ -149,7 +149,7 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
   const { t } = useChatHost();
   if (!hasContent(value)) return null;
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       <div className="text-muted-foreground text-[0.65rem] font-semibold tracking-wide uppercase">
         {t(titleKey)}
       </div>
@@ -237,7 +237,7 @@ export function ToolCallCard({
           }
           onClose={() => setOpen(false)}
         >
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
             <DetailSection titleKey="tool.detail.input" value={args} />
             <DetailSection titleKey="tool.detail.output" value={unwrapped} />
             <DetailSection titleKey="tool.detail.metadata" value={meta} />
@@ -311,7 +311,7 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   );
   const output = React.useMemo(() => extractRunOutput(props.result), [props.result]);
   const rawDetails = (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <DetailSection titleKey="tool.detail.input" value={props.args} />
       <DetailSection titleKey="tool.detail.output" value={unwrapped} />
       <DetailSection titleKey="tool.detail.metadata" value={meta} />

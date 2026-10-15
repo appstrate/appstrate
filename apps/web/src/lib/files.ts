@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Pure, React-free helpers for the files surfaces (the run page + the Fichiers page).
- * Kept here (not in a component) so the grouping / icon / href logic is
- * unit-testable in isolation.
- */
+/** Pure, React-free helpers for the files surfaces (run page, Fichiers page). */
 
 import {
   File as FileIcon,
@@ -31,17 +27,7 @@ export interface FileLike {
 /** Which side of the run being viewed a file sits on. */
 export type RunFileDirection = "output" | "input";
 
-/**
- * Where a file stands RELATIVE TO the run being viewed: a file that run
- * produced ("output"), or one it consumed ("input"). The single rule every
- * run-scoped surface reads — the tile badge, the overview's input card, the
- * Résultats list ({@link producedRunFiles}) — so a badge and a list can never
- * disagree about the same row.
- *
- * The ownership question itself is `isFileProducedByRun`
- * (`@appstrate/core/file-uri`), which documents why both halves of the pair
- * are load-bearing; this function only names the two sides for the UI.
- */
+/** Whether a file was produced ("output") or consumed ("input") by the run being viewed; the single rule for badges and lists. Ownership itself is `isFileProducedByRun` (`@appstrate/core/file-uri`). */
 export function runFileDirection<T extends Pick<FileLike, "purpose" | "runId">>(
   file: T,
   runId: string,
@@ -49,16 +35,7 @@ export function runFileDirection<T extends Pick<FileLike, "purpose" | "runId">>(
   return isFileProducedByRun(file, runId) ? "output" : "input";
 }
 
-/**
- * The files a run PRODUCED, out of everything attached to it. A file the run
- * merely consumed as input is not one of them — that distinction is what the
- * Outcome pane is built on, and what separates it from the Fichiers tab, whose
- * job is the complete list.
- *
- * Defined in terms of {@link runFileDirection} so the predicate lives in
- * exactly one place: this list and the per-tile badge answer the same question
- * and must answer it identically.
- */
+/** The files a run PRODUCED (not merely consumed); the Outcome pane's basis, unlike the Fichiers tab's complete list. Built on {@link runFileDirection}. */
 export function producedRunFiles<T extends Pick<FileLike, "purpose" | "runId">>(
   files: readonly T[],
   runId: string,
@@ -66,16 +43,7 @@ export function producedRunFiles<T extends Pick<FileLike, "purpose" | "runId">>(
   return files.filter((file) => runFileDirection(file, runId) === "output");
 }
 
-/**
- * The derived presentation rule, shared by the run page and the chat:
- * a run that produced exactly ONE file features it; zero or several feature
- * nothing — several are just listed, and the user picks.
- *
- * Only what THIS run produced counts (see {@link producedRunFiles}). A file the
- * run merely consumed as input never makes a run "single-file" — not even one
- * that an earlier run produced and this one only read — and no agent-declared
- * field takes part: presentation was never the model's call.
- */
+/** Presentation rule shared by the run page and chat: a run that produced exactly ONE file features it (see {@link producedRunFiles}); no agent-declared field takes part. */
 export function featuredRunFile<T extends Pick<FileLike, "purpose" | "runId">>(
   files: readonly T[],
   runId: string,
@@ -84,35 +52,19 @@ export function featuredRunFile<T extends Pick<FileLike, "purpose" | "runId">>(
   return produced.length === 1 ? produced[0] : undefined;
 }
 
-/**
- * Does this run-log `event` tag announce a published file? The accepted tag
- * lives in `@appstrate/core/file-uri` and is the one the sink writes, shared
- * with the chat module's run card: a tag one of them misses is a file list
- * that silently never refreshes, with no error anywhere. No other spelling
- * is accepted.
- */
+/** Whether a run-log `event` tag announces a published file; the one tag (`@appstrate/core/file-uri`) is shared with the chat run card, and a miss means a list that silently never refreshes. */
 export function isPublishedFileLogEvent(event: string | null | undefined): boolean {
   return event === PUBLISHED_FILE_LOG_EVENT;
 }
 
-/**
- * Markdown detection for the preview modal: an explicit `text/markdown` mime
- * (tolerating a `; charset=…` parameter) or a `.md` filename served with a
- * text-ish mime. The preview route relabels markdown as `text/plain` to defeat
- * md→HTML sniffing, so rich rendering has to be decided client-side from the
- * mime/name pair.
- */
+/** Markdown detection: the preview route relabels markdown as `text/plain` (against md→HTML sniffing), so it is decided client-side from the mime/name pair. */
 export function isMarkdownFile(mime: string, name: string): boolean {
   const m = mime.toLowerCase();
   if (m === "text/markdown" || m.startsWith("text/markdown;")) return true;
   return name.toLowerCase().endsWith(".md") && m.startsWith("text/");
 }
 
-/**
- * Pick a Lucide file icon for a MIME type. A small, deterministic mapping
- * (top-level type first, then a few well-known subtypes) with a neutral
- * `File` fallback — no exhaustive registry to rot.
- */
+/** A Lucide file icon for a MIME type (small mapping, neutral `File` fallback). */
 export function mimeIconFor(mime: string): LucideIcon {
   const m = mime.toLowerCase();
   if (m.startsWith("image/")) return FileImage;
@@ -140,11 +92,7 @@ export function mimeIconFor(mime: string): LucideIcon {
   return FileIcon;
 }
 
-/**
- * In-app run-page URL for a file's producing run, or `undefined` when the
- * file has no run container or no package id (e.g. an inline run's ephemeral
- * shadow).
- */
+/** Run-page URL for a file's producing run; `undefined` without a run container or package id (e.g. an inline run's ephemeral shadow). */
 export function fileRunHref(file: FileLike): string | undefined {
   if (!file.runId || !file.packageId) return undefined;
   return runDetailPath(file.packageId, file.runId);
@@ -165,12 +113,7 @@ interface FileExpiryInfo {
   expired: boolean;
 }
 
-/**
- * Break a file's `expiresAt` into the parts the expiry badge renders, or
- * `null` when the file is permanent (no deadline) or the timestamp is
- * unparseable. Pure (takes `now`) so the day/hour buckets and the amber
- * threshold are unit-testable without faking the clock.
- */
+/** Splits `expiresAt` into the expiry badge's parts; `null` when permanent or unparseable. Takes `now` for testability. */
 export function fileExpiryInfo(
   expiresAt: string | null,
   now: number = Date.now(),

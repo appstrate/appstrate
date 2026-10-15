@@ -16,8 +16,8 @@ export function RequiredScopesField({
 }) {
   const { t } = useTranslation("agents");
   return (
-    <div className="space-y-2">
-      <Label>{t("integrationEditor.toolsPolicy.requiredScopes")}</Label>
+    <div className="flex flex-col gap-2">
+      <Label className="mb-0">{t("integrationEditor.toolsPolicy.requiredScopes")}</Label>
       <p className="text-muted-foreground text-xs">
         {t("integrationEditor.toolsPolicy.requiredScopesDesc")}
       </p>

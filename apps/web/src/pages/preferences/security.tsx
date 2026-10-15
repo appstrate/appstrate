@@ -74,7 +74,7 @@ function LinkedAccountsSection({
             icon: GitHubIcon,
             account: githubAccount,
             link: linkGithub,
-            linkingKey: "preferences.linkingGithub" as const,
+            linkingKey: "preferences.linkingGoogle" as const,
             linkKey: "preferences.linkGithub" as const,
           },
         ]
@@ -92,11 +92,11 @@ function LinkedAccountsSection({
       {accounts === undefined ? (
         <SettingsSkeleton rows={2} />
       ) : (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3">
           {credentialAccount && (
             <div className="border-border bg-card flex items-center justify-between rounded-lg border p-4">
               <div className="flex items-center gap-3">
-                <div className="bg-muted flex h-8 w-8 items-center justify-center rounded-full">
+                <div className="bg-muted flex size-8 items-center justify-center rounded-full">
                   <Mail size={16} />
                 </div>
                 <span className="text-sm font-medium">{t("preferences.emailPassword")}</span>
@@ -116,7 +116,7 @@ function LinkedAccountsSection({
                 className="border-border bg-card flex items-center justify-between rounded-lg border p-4"
               >
                 <div className="flex items-center gap-3">
-                  <Icon className="h-5 w-5" />
+                  <Icon className="size-5" />
                   <div>
                     <span className="text-sm font-medium">{provider.name}</span>
                     <div className="text-muted-foreground text-xs">{account.accountId}</div>
@@ -157,7 +157,7 @@ function LinkedAccountsSection({
                 className="border-border bg-card flex items-center justify-between rounded-lg border border-dashed p-4"
               >
                 <div className="flex items-center gap-3">
-                  <Icon className="h-5 w-5" />
+                  <Icon className="size-5" />
                   <span className="text-muted-foreground text-sm font-medium">{provider.name}</span>
                 </div>
                 <Button
@@ -240,7 +240,7 @@ function PasswordChangeForm() {
 
   return (
     <div className="border-border bg-card mb-4 rounded-lg border p-5">
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 py-1">
         <FormItem
           id="current-password"
           label={t("preferences.currentPassword")}
@@ -257,7 +257,7 @@ function PasswordChangeForm() {
         <NewPasswordFields form={form} />
         {errors.root && <FieldError>{errors.root.message}</FieldError>}
         {success && <div className="text-success text-sm">{success}</div>}
-        <Button type="submit" disabled={isSubmitting}>
+        <Button type="submit" className="self-start" disabled={isSubmitting}>
           {isSubmitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
         </Button>
       </form>
@@ -323,10 +323,10 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
       <p className="text-muted-foreground mb-4 text-sm">
         {t("preferences.setPasswordDescription")}
       </p>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 py-1">
         <NewPasswordFields form={form} />
         {errors.root && <FieldError>{errors.root.message}</FieldError>}
-        <Button type="submit" disabled={isSubmitting}>
+        <Button type="submit" className="self-start" disabled={isSubmitting}>
           {isSubmitting ? t("preferences.settingPassword") : t("preferences.setPassword")}
         </Button>
       </form>

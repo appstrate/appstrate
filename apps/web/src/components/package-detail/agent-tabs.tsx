@@ -89,7 +89,6 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   return (
     <>
       <ListToolbar
-        placement="panel"
         search={{
           value: list.search,
           onChange: list.setSearch,

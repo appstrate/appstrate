@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneAlert } from "@/components/app-ui/status-variants";
+import { Alert } from "@appstrate/ui/components/alert";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, CreditCard } from "lucide-react";
 import { AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
@@ -197,7 +197,7 @@ function BillingOverview() {
         {(storageLoading || storage) && (
           <UsageMeter
             className="mt-4"
-            label={t("billing.storageUsage")}
+            label={t("orgStorage.section")}
             loading={storageLoading}
             percent={storageLimit === null ? null : (storagePercent ?? 0)}
             summary={
@@ -217,22 +217,22 @@ function BillingOverview() {
       </div>
 
       {billing.status === "past_due" && (
-        <ToneAlert variant="warning" className="mb-4">
+        <Alert variant="warning" className="mb-4">
           <AlertTriangle />
           <AlertTitle>{t("billing.pastDueWarning")}</AlertTitle>
           <AlertDescription className="text-muted-foreground">
             {t("billing.pastDueDescription")}
           </AlertDescription>
-        </ToneAlert>
+        </Alert>
       )}
 
       {billing.status === "canceling" && billing.period_end && (
-        <ToneAlert variant="warning" className="mb-4">
+        <Alert variant="warning" className="mb-4">
           <AlertTriangle />
           <AlertTitle>
             {t("billing.cancelingWarning", { date: formatDateField(billing.period_end, "date") })}
           </AlertTitle>
-        </ToneAlert>
+        </Alert>
       )}
 
       {billing.plans.length > 0 && (

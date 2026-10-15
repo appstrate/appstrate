@@ -59,8 +59,8 @@ export function LocalServerField({
 
   return (
     <>
-      <div className="space-y-2">
-        <Label htmlFor="int-source-server">
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="int-source-server" className="mb-0">
           {t("integrationEditor.source.server")}
           {" *"}
         </Label>
@@ -110,10 +110,10 @@ export function LocalServerField({
         )}
       </div>
 
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         <FormItem
           id="int-source-server-version"
-          label={t("integrationEditor.source.serverVersion")}
+          label={t("run.infoVersion")}
           hint={
             known && versions.isSuccess
               ? published.length > 0

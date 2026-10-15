@@ -6,16 +6,9 @@ import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validati
 import { isModelSelectable } from "@appstrate/core/model-selectable";
 
 /**
- * Will a run get a model? Mirrors the server cascade (`resolveModel`): the
- * agent pin wins when it is usable, otherwise the org default is tried.
- *
- * A pin alone is NOT enough — a pinned model on a dead credential resolves to
- * null server-side, so counting it would green-light a run that cannot reach
- * any inference endpoint. An unusable pin is not fatal either: `resolveModel`
- * falls through to the org default, whether the pin is unusable or absent from
- * the list entirely (row deleted, or its provider gone).
- *
- * Exported for its unit test — `agentModelBlocker` is the only production caller.
+ * Will a run get a model? Mirrors `resolveModel`: a usable agent pin wins (a pin on a dead
+ * credential resolves to null server-side), else the org default. An unusable or missing pin
+ * falls through to the default. Exported for its test.
  */
 export function resolvesToUsableModel(
   orgModels: OrgModelInfo[],
@@ -46,10 +39,7 @@ export const AGENT_RUN_BLOCKERS = Object.keys({
   "detail.titleNoDefaultModel": true,
 } satisfies Record<AgentRunBlocker, true>);
 
-/**
- * The refusals no launch option can cure, as i18n keys (namespace `agents`).
- * Switched off here comes first: its cure is one click away on the page.
- */
+/** The refusals no launch option can cure, as i18n keys (namespace `agents`); switched off comes first (one click cures it). */
 export function agentLaunchRefusal(detail: AgentDetail): AgentLaunchRefusal | null {
   if (!detail.active) return "detail.titleNotActive";
   if (isNeverPublishedForReader(detail)) return "detail.titleNeverPublished";
@@ -65,18 +55,14 @@ export function agentModelBlocker(
   return orgModels.some(isModelSelectable) ? "detail.titleNoDefaultModel" : "detail.titleModel";
 }
 
-/**
- * What blocks a plain run of this agent in this space. Unfilled parameters and
- * missing integration connections are not gates: the launch asks for them.
- */
+/** What blocks a plain run in this space. Unfilled parameters and missing connections are not gates: the launch asks for them. */
 export function agentRunBlocker(
   detail: AgentDetail,
   modelBlocker: AgentModelBlocker | null,
 ): AgentRunBlocker | null {
   const refusal = agentLaunchRefusal(detail);
   if (refusal) return refusal;
-  // A summary read (`agents:run` without `agents:read`) omits the prompt:
-  // absent is unknown, not empty.
+  // A summary read (`agents:run` without `agents:read`) omits the prompt: absent is unknown.
   if (detail.prompt !== undefined && isPromptEmpty(detail.prompt)) {
     return "detail.titleEmptyPrompt";
   }

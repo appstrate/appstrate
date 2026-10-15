@@ -37,6 +37,7 @@ export function ScopedRunList({
 
   return (
     <RunList
+      tiered
       {...("packageId" in scope
         ? { packageId: scope.packageId, hideAgentName: true }
         : { scheduleId: scope.scheduleId, fixedAgentName: scope.agentName })}
@@ -46,7 +47,6 @@ export function ScopedRunList({
       tableSurface="integrated"
       toolbar={({ columns }) => (
         <ListToolbar
-          placement="panel"
           columns={columns}
           search={{
             value: list.search,

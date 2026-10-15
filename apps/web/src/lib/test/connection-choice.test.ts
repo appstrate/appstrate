@@ -9,7 +9,6 @@ import {
   picksAfterActorChange,
   refusalForActor,
   refusalReasonKey,
-  refusedScheduleWrite,
   retryDecision,
   scheduleConnectionChoices,
   withConnectionPickAs,
@@ -201,38 +200,6 @@ describe("refusalForActor", () => {
   it("is empty before any save and without a refusal", () => {
     expect(refusalForActor(choices, null, ALICE)).toEqual([]);
     expect(refusalForActor(undefined, { runsAs: ALICE, picks: {} }, ALICE)).toEqual([]);
-  });
-});
-
-describe("refusedScheduleWrite", () => {
-  const outranked = missingConnection([
-    { field: "integrations.@acme/gmail", code: "override_outranked", message: "pinned" },
-  ]);
-  const stored = { actor: ALICE, picks: ALICE_PICKS };
-
-  it("answers a write of any field: a cron change is judged with the stored picks, as Alice", () => {
-    expect(refusedScheduleWrite(outranked, { cron_expression: "0 8 * * *" }, stored)).toEqual({
-      choices: [{ integrationId: "@acme/gmail", code: "override_outranked", candidates: [] }],
-      runsAs: ALICE,
-      picks: ALICE_PICKS,
-    });
-  });
-
-  it("is judged with the picks the write sent, for the actor it moved to", () => {
-    const sent = { actor: BOB, connection_overrides: null };
-    expect(refusedScheduleWrite(outranked, sent, stored)).toMatchObject({ runsAs: BOB, picks: {} });
-    const named = { connection_overrides: BOB_PICKS };
-    expect(refusedScheduleWrite(outranked, named, stored)?.picks).toBe(BOB_PICKS);
-  });
-
-  it("is null for any other outcome", () => {
-    const write = { cron_expression: "0 8 * * *" };
-    expect(refusedScheduleWrite(null, write, stored)).toBeNull();
-    expect(refusedScheduleWrite(new ApiError("forbidden", "no", 403), write, stored)).toBeNull();
-    const notConnected = missingConnection([
-      { field: "integrations.@acme/slack", code: "not_connected", message: "connect" },
-    ]);
-    expect(refusedScheduleWrite(notConnected, write, stored)).toBeNull();
   });
 });
 

@@ -27,7 +27,7 @@ export function ForgotPasswordPage() {
       await requestPasswordReset(email.trim());
       setState("sent");
     } catch {
-      setError(t("forgotPassword.error"));
+      setError(t("magicLink.error"));
       setState("form");
     }
   };
@@ -37,10 +37,10 @@ export function ForgotPasswordPage() {
       <AuthLayout>
         <AuthMessage
           icon={Mail}
-          title={t("forgotPassword.sentTitle")}
+          title={t("magicLink.sentTitle")}
           description={t("forgotPassword.sentDescription")}
           backTo="/login"
-          backLabel={t("forgotPassword.backToLogin")}
+          backLabel={t("magicLink.backToLogin")}
         />
       </AuthLayout>
     );
@@ -72,7 +72,7 @@ export function ForgotPasswordPage() {
           </Button>
         </form>
         <AuthLink to="/login" className="text-center">
-          {t("forgotPassword.backToLogin")}
+          {t("magicLink.backToLogin")}
         </AuthLink>
       </div>
     </AuthLayout>

@@ -2,53 +2,37 @@
 
 /**
  * What the model form puts on the wire. Pinned: the omissions (a value the
- * operator never answered is left to the catalog), the `null` clears on an
- * edit, the credential binding, and that every payload names a registry
- * provider.
+ * operator never answered is left to the catalog), the `null` clears of an
+ * edit, the credential binding, and the entries a model list ships.
  */
 
 import { describe, it, expect } from "bun:test";
 import {
   buildModelFormPayload,
-  buildModelsBatchPayload,
   manualRow,
   rowToEntry,
   modelFormRefusals,
-  toCreateModelBody,
   type ModelFormData,
   type ModelFormFields,
   type ModelFormModelEntry,
   type ModelFormPayloadInput,
   type ModelFormProvider,
 } from "../model-form-payload.ts";
-import { CUSTOM_ENDPOINT_ID } from "../provider-registry-helpers.ts";
 import type { ModelPickRow } from "../model-source.ts";
 import type { CatalogModelValues } from "../row-overrides-catalog.ts";
 
-const ANTHROPIC: ModelFormProvider = {
-  providerId: "anthropic",
-  authMode: "api_key",
-  baseUrlOverridable: false,
-};
+const ANTHROPIC: ModelFormProvider = { providerId: "anthropic", authMode: "api_key" };
 const OPENAI_COMPATIBLE: ModelFormProvider = {
   providerId: "openai-compatible",
   authMode: "api_key",
-  baseUrlOverridable: true,
 };
-const CLAUDE_CODE: ModelFormProvider = {
-  providerId: "claude-code",
-  authMode: "oauth2",
-  baseUrlOverridable: false,
-};
+const CLAUDE_CODE: ModelFormProvider = { providerId: "claude-code", authMode: "oauth2" };
 
 function fields(overrides: Partial<ModelFormFields> = {}): ModelFormFields {
   return {
     label: "",
-    apiShape: "",
-    baseUrl: "",
     modelId: "",
     credentialId: "",
-    inlineApiKey: "",
     capabilitiesExplicit: false,
     inputText: true,
     inputImage: false,
@@ -59,33 +43,29 @@ function fields(overrides: Partial<ModelFormFields> = {}): ModelFormFields {
   };
 }
 
-/** Asserts success and returns the data. */
-function ok<T>(result: { ok: true; data: T } | { ok: false }): T {
-  expect(result.ok).toBe(true);
-  if (!result.ok) throw new Error("unreachable");
-  return result.data;
+/** Asserts a payload was built and returns it. */
+function ok(result: ModelFormData | null): ModelFormData {
+  expect(result).not.toBeNull();
+  if (!result) throw new Error("unreachable");
+  return result;
 }
 
 function build(
   input: Partial<ModelFormPayloadInput> & { fields: ModelFormFields },
-): { ok: true; data: ModelFormData } | { ok: false } {
-  const data = buildModelFormPayload({
+): ModelFormData | null {
+  return buildModelFormPayload({
     dirtyFields: {},
     provider: ANTHROPIC,
     capabilities: "auto",
-    isEdit: false,
     selectedCredentialId: input.fields.credentialId || null,
     unbound: false,
     ...input,
   });
-  return data ? { ok: true, data } : { ok: false };
 }
 
 /** A catalogued row: the fields describe it, but none of it is the operator's. */
 const CATALOGUED_FIELDS = fields({
   label: "Claude Sonnet 4.5",
-  apiShape: "anthropic-messages",
-  baseUrl: "https://api.anthropic.com",
   modelId: "claude-sonnet-4-5-20250929",
   credentialId: "cred_1",
   contextWindow: "200000",
@@ -93,15 +73,8 @@ const CATALOGUED_FIELDS = fields({
 });
 
 describe("buildModelFormPayload — a catalogued model, toggle off", () => {
-  it("sends the binding only, leaving every catalog-derivable field to the server", () => {
+  it("binds the credential and clears the four, a no-op for a row that never overrode", () => {
     expect(ok(build({ fields: CATALOGUED_FIELDS }))).toEqual({
-      modelId: "claude-sonnet-4-5-20250929",
-      credentialId: "cred_1",
-    });
-  });
-
-  it("clears the four on an edit, which is a no-op for a row that never overrode", () => {
-    expect(ok(build({ fields: CATALOGUED_FIELDS, isEdit: true }))).toEqual({
       modelId: "claude-sonnet-4-5-20250929",
       credentialId: "cred_1",
       input: null,
@@ -112,80 +85,15 @@ describe("buildModelFormPayload — a catalogued model, toggle off", () => {
   });
 });
 
-describe("buildModelFormPayload — custom endpoint", () => {
-  const data = ok(
-    build({
-      provider: OPENAI_COMPATIBLE,
-      fields: fields({
-        label: "Local Qwen",
-        apiShape: "openai-completions",
-        baseUrl: "http://localhost:11434/v1",
-        modelId: "qwen3:8b",
-        inlineApiKey: "sk-test",
-        contextWindow: "32768",
-        maxTokens: "8192",
-        reasoning: true,
-      }),
-      dirtyFields: { label: true },
-      capabilities: "explicit",
-    }),
-  );
-
-  it("creates the credential against the registry provider, at the typed base URL", () => {
-    expect(data.newCredential).toEqual({
-      api_key: "sk-test",
-      providerId: "openai-compatible",
-      base_url_override: "http://localhost:11434/v1",
-    });
-    // Filled in from the create response before the model is posted.
-    expect(data.credentialId).toBe("");
-  });
-
-  it("sends everything the operator typed, none of it being catalog-derivable", () => {
-    expect(data).toMatchObject({
-      label: "Local Qwen",
-      modelId: "qwen3:8b",
-      contextWindow: 32768,
-      maxTokens: 8192,
-      reasoning: true,
-      input: ["text"],
-    });
-  });
-
-  it("never puts a client-side picker sentinel on the wire", () => {
-    expect(JSON.stringify(data)).not.toContain(CUSTOM_ENDPOINT_ID);
-  });
-
-  it("omits the base-URL override for a provider that pins its own endpoint", () => {
-    const pinned = ok(
-      build({
-        provider: ANTHROPIC,
-        fields: fields({
-          modelId: "claude-sonnet-4-5-20250929",
-          baseUrl: "https://api.anthropic.com",
-          inlineApiKey: "sk-ant-test",
-        }),
-      }),
-    );
-    expect(pinned.newCredential).toEqual({ api_key: "sk-ant-test", providerId: "anthropic" });
-  });
-});
-
 describe("buildModelFormPayload — capabilities", () => {
-  const CUSTOM = fields({
-    modelId: "qwen3:8b",
-    baseUrl: "http://localhost:11434/v1",
-    inlineApiKey: "sk-test",
-  });
-  const FOUR = ["input", "contextWindow", "maxTokens", "reasoning"] as const;
+  const CUSTOM = fields({ modelId: "qwen3:8b", credentialId: "cred_1" });
 
-  const explicit = (overrides: Partial<ModelFormFields> = {}, isEdit = false) =>
+  const explicit = (overrides: Partial<ModelFormFields> = {}) =>
     ok(
       build({
         provider: OPENAI_COMPATIBLE,
         fields: { ...CUSTOM, capabilitiesExplicit: true, ...overrides },
         capabilities: "explicit",
-        isEdit,
       }),
     );
 
@@ -204,36 +112,23 @@ describe("buildModelFormPayload — capabilities", () => {
     expect(explicit()).toMatchObject({ input: ["text"], reasoning: false });
   });
 
-  it("drops the modalities when neither box is ticked (the server refuses an empty array)", () => {
-    expect("input" in explicit({ inputText: false, inputImage: false })).toBe(false);
+  it("clears the modalities when neither box is ticked (the server refuses an empty array)", () => {
+    expect(explicit({ inputText: false, inputImage: false }).input).toBeNull();
   });
 
-  it("sends only the limits actually filled in", () => {
-    const data = explicit({ contextWindow: "32768", maxTokens: "  " });
-    expect(data.contextWindow).toBe(32768);
-    expect("maxTokens" in data).toBe(false);
-  });
-
-  it("clears a stored limit the operator blanked on an edit", () => {
-    expect(explicit({ contextWindow: "", inputText: false }, true)).toMatchObject({
-      contextWindow: null,
+  it("sends only the limits actually filled in, and clears a blanked one", () => {
+    expect(explicit({ contextWindow: "32768", maxTokens: "  " })).toMatchObject({
+      contextWindow: 32768,
       maxTokens: null,
-      input: null,
     });
   });
 
-  it("sends none of the four when the toggle is off on a create", () => {
-    const data = ok(build({ provider: OPENAI_COMPATIBLE, fields: CUSTOM, capabilities: "auto" }));
-    for (const key of FOUR) expect(key in data).toBe(false);
-  });
-
-  it("clears every stored override when the toggle is off on an edit", () => {
+  it("clears every stored override when the toggle is off", () => {
     const data = ok(
       build({
         provider: OPENAI_COMPATIBLE,
         fields: { ...CUSTOM, contextWindow: "32768", reasoning: true },
         capabilities: "auto",
-        isEdit: true,
       }),
     );
     expect(data).toMatchObject({
@@ -271,7 +166,6 @@ describe("buildModelFormPayload — explicit capabilities on a catalogued model"
       build({
         fields: { ...PREFILLED, ...overrides },
         capabilities: "explicit",
-        isEdit: true,
         catalogEntry,
       }),
     );
@@ -299,12 +193,7 @@ describe("buildModelFormPayload — explicit capabilities on a catalogued model"
 
   it("ships all four for an endpoint no catalog describes", () => {
     const data = ok(
-      build({
-        provider: OPENAI_COMPATIBLE,
-        fields: { ...PREFILLED, inlineApiKey: "sk-test", baseUrl: "http://localhost:11434/v1" },
-        capabilities: "explicit",
-        isEdit: true,
-      }),
+      build({ provider: OPENAI_COMPATIBLE, fields: PREFILLED, capabilities: "explicit" }),
     );
     expect(data).toMatchObject({
       input: ["text", "image"],
@@ -312,12 +201,6 @@ describe("buildModelFormPayload — explicit capabilities on a catalogued model"
       maxTokens: 64000,
       reasoning: true,
     });
-  });
-
-  it("omits the catalog's own values on a create, without clearing", () => {
-    expect(
-      ok(build({ fields: PREFILLED, capabilities: "explicit", catalogEntry: SONNET })),
-    ).toEqual({ modelId: "claude-sonnet-4-5-20250929", credentialId: "cred_1" });
   });
 
   it("reads a catalog entry with no max output as answering nothing for it", () => {
@@ -328,23 +211,18 @@ describe("buildModelFormPayload — explicit capabilities on a catalogued model"
 });
 
 describe("buildModelFormPayload — the model's name", () => {
-  const CUSTOM_ENDPOINT = fields({
-    apiShape: "openai-completions",
-    baseUrl: "http://localhost:11434/v1",
-    modelId: "qwen3:8b",
-    inlineApiKey: "sk-test",
-  });
+  const CUSTOM = fields({ modelId: "qwen3:8b", credentialId: "cred_1" });
   const named = (label: string, dirty: boolean) =>
     ok(
       build({
         provider: OPENAI_COMPATIBLE,
-        fields: { ...CUSTOM_ENDPOINT, label },
+        fields: { ...CUSTOM, label },
         dirtyFields: dirty ? { label: true } : {},
       }),
     );
 
-  it("omits it when nothing was typed, leaving the server to derive it", () => {
-    expect("label" in named("", false)).toBe(false);
+  it("omits it when untouched, so the saved name is kept", () => {
+    expect("label" in named("Local Qwen", false)).toBe(false);
   });
 
   it("sends it, trimmed, once the operator types one", () => {
@@ -356,177 +234,94 @@ describe("buildModelFormPayload — the model's name", () => {
   });
 });
 
-describe("buildModelFormPayload — missing credential", () => {
+describe("buildModelFormPayload — the credential", () => {
+  const model = fields({ modelId: "claude-sonnet-4-5-20250929" });
+
   it.each([
     ["an OAuth provider not left to each member", CLAUDE_CODE],
-    ["an api-key provider with neither a selection nor an inline key", ANTHROPIC],
+    ["an api-key provider with no credential picked", ANTHROPIC],
   ])("builds nothing for %s", (_name, provider) => {
-    expect(build({ provider, fields: fields({ modelId: "claude-sonnet-4-5-20250929" }) }).ok).toBe(
-      false,
-    );
+    expect(build({ provider, fields: model, selectedCredentialId: null })).toBeNull();
   });
 
-  it("ignores a credential the form cannot match (provider switched after the pick), creating one instead", () => {
-    const data = ok(
-      build({
-        provider: OPENAI_COMPATIBLE,
-        fields: fields({
-          modelId: "qwen3:8b",
-          baseUrl: "http://localhost:11434/v1",
-          credentialId: "cred_groq",
-          inlineApiKey: "sk-local",
-        }),
-        selectedCredentialId: null,
-      }),
-    );
-    expect(data.credentialId).toBe("");
-    expect(data.newCredential).toEqual({
-      api_key: "sk-local",
-      providerId: "openai-compatible",
-      base_url_override: "http://localhost:11434/v1",
-    });
-  });
-
-  it("refuses an unmatched credential with no inline key to fall back on", () => {
+  it("ignores a credential the form cannot match (not among those the model may bind)", () => {
     expect(
       build({
         provider: OPENAI_COMPATIBLE,
-        fields: fields({
-          modelId: "qwen3:8b",
-          baseUrl: "http://localhost:11434/v1",
-          credentialId: "cred_groq",
-        }),
+        fields: { ...model, credentialId: "cred_groq" },
         selectedCredentialId: null,
       }),
-    ).toEqual({ ok: false });
+    ).toBeNull();
   });
 
-  it("refuses an inline key typed before any provider is picked", () => {
-    expect(
-      build({
-        provider: undefined,
-        fields: fields({ modelId: "qwen3:8b", inlineApiKey: "sk-test" }),
-      }).ok,
-    ).toBe(false);
-  });
-});
-
-describe("buildModelFormPayload — each member's own credential (unbound)", () => {
-  it("binds the model to no credential, naming the provider the members' credentials match", () => {
+  it("binds the picked organization subscription", () => {
     expect(
       ok(
         build({
-          fields: fields({ modelId: "claude-sonnet-4-5-20250929" }),
-          unbound: true,
+          provider: CLAUDE_CODE,
+          fields: fields({ modelId: "claude-sonnet-4-5", credentialId: "cred_org_sub" }),
         }),
       ),
-    ).toEqual({
-      modelId: "claude-sonnet-4-5-20250929",
-      credentialId: null,
-      providerId: "anthropic",
-    });
+    ).toMatchObject({ modelId: "claude-sonnet-4-5", credentialId: "cred_org_sub" });
   });
 
-  it("refuses neither a missing key nor a missing connection, for either auth mode", () => {
+  it("binds the model to no credential when each member brings their own", () => {
+    for (const provider of [ANTHROPIC, CLAUDE_CODE]) {
+      expect(
+        ok(build({ provider, fields: model, selectedCredentialId: null, unbound: true })),
+      ).toMatchObject({ credentialId: null, providerId: provider.providerId });
+    }
+  });
+});
+
+describe("modelFormRefusals", () => {
+  const base = {
+    modelId: "m",
+    provider: ANTHROPIC,
+    selectedCredentialId: "cred_1",
+    offeredIds: null,
+    unbound: false,
+  };
+
+  it("names no key step for an unbound model, picked or not", () => {
+    for (const provider of [ANTHROPIC, CLAUDE_CODE]) {
+      expect(
+        modelFormRefusals({ ...base, provider, selectedCredentialId: null, unbound: true })
+          .credentialId,
+      ).toBeNull();
+    }
+  });
+
+  it("names the missing key on the key row", () => {
+    expect(modelFormRefusals({ ...base, selectedCredentialId: null })).toEqual({
+      credentialId: "settings:models.form.apiKeyRequired",
+      modelId: null,
+    });
     expect(
-      ok(build({ provider: CLAUDE_CODE, fields: fields({ modelId: "m" }), unbound: true })),
-    ).toEqual({ modelId: "m", credentialId: null, providerId: "claude-code" });
-    expect(ok(build({ fields: fields({ modelId: "m" }), unbound: true })).providerId).toBe(
-      "anthropic",
+      modelFormRefusals({ ...base, provider: CLAUDE_CODE, selectedCredentialId: null }),
+    ).toEqual({ credentialId: "settings:models.form.subscriptionRequired", modelId: null });
+  });
+
+  it("requires an id", () => {
+    expect(modelFormRefusals({ ...base, modelId: "  " }).modelId).toBe(
+      "common:validation.required",
     );
   });
 
-  it("mints nothing from a typed key, which the unbound model never binds", () => {
-    const data = ok(
-      build({
-        provider: OPENAI_COMPATIBLE,
-        fields: fields({
-          modelId: "qwen3:8b",
-          baseUrl: "http://localhost:11434/v1",
-          inlineApiKey: "sk-test",
-        }),
-        unbound: true,
-      }),
+  it("refuses a typed id a catalog provider does not offer — the server does too", () => {
+    const catalog = { ...base, offeredIds: ["deepseek-v4-flash"] };
+    expect(modelFormRefusals({ ...catalog, modelId: "deepseek-chat" }).modelId).toBe(
+      "settings:models.form.modelNotOffered",
     );
-    expect("newCredential" in data).toBe(false);
-    expect(data).toEqual({
-      modelId: "qwen3:8b",
-      credentialId: null,
-      providerId: "openai-compatible",
-    });
+    expect(modelFormRefusals({ ...catalog, modelId: " deepseek-v4-flash " }).modelId).toBeNull();
   });
 
-  it("refuses only when no provider is picked", () => {
-    expect(build({ provider: undefined, fields: fields({ modelId: "m" }), unbound: true })).toEqual(
-      { ok: false },
-    );
+  it("leaves a free-form provider's id alone", () => {
+    expect(modelFormRefusals({ ...base, modelId: "anything" }).modelId).toBeNull();
   });
 });
 
-describe("toCreateModelBody", () => {
-  it("drops the `null` clears, which only PATCH understands", () => {
-    const body = toCreateModelBody(
-      {
-        modelId: "qwen3:8b",
-        credentialId: "",
-        input: null,
-        contextWindow: null,
-        maxTokens: null,
-        reasoning: null,
-      },
-      "cred_new",
-    );
-    expect(body).toEqual({ modelId: "qwen3:8b", credentialId: "cred_new" });
-  });
-
-  it("carries the provider, and no credential, for an unbound model", () => {
-    const body = toCreateModelBody(
-      { modelId: "qwen3:8b", credentialId: null, providerId: "openai-compatible" },
-      null,
-    );
-    expect(body).toEqual({
-      modelId: "qwen3:8b",
-      credentialId: null,
-      providerId: "openai-compatible",
-    });
-  });
-
-  it("keeps every real value, and binds the credential it was created with", () => {
-    const body = toCreateModelBody(
-      {
-        label: "Local Qwen",
-        modelId: "qwen3:8b",
-        credentialId: "",
-        newCredential: { api_key: "sk-test", providerId: "openai-compatible" },
-        input: ["text"],
-        contextWindow: 32768,
-        maxTokens: 8192,
-        reasoning: false,
-      },
-      "cred_new",
-    );
-    expect(body).toEqual({
-      label: "Local Qwen",
-      modelId: "qwen3:8b",
-      credentialId: "cred_new",
-      input: ["text"],
-      contextWindow: 32768,
-      maxTokens: 8192,
-      reasoning: false,
-    });
-    expect("newCredential" in body).toBe(false);
-  });
-});
-
-// --- buildModelsBatchPayload ---
-
-const SAVED_KEY = {
-  provider: OPENAI_COMPATIBLE,
-  selectedCredentialId: "cred_1",
-  inlineApiKey: "",
-  baseUrl: "http://localhost:11434/v1",
-  unbound: false,
-};
+// --- rowToEntry ---
 
 function row(overrides: Partial<ModelPickRow> & { id: string; origin: ModelPickRow["origin"] }) {
   return {
@@ -552,7 +347,7 @@ const DESCRIBED: Partial<ModelPickRow> = {
   cost: { input: 1.25, output: 10 },
 };
 
-describe("buildModelsBatchPayload — what a row ships, per describer", () => {
+describe("rowToEntry — what a row ships, per describer", () => {
   it.each<[string, ModelPickRow, ModelFormModelEntry]>([
     [
       "catalog: the id only, so the catalog keeps answering",
@@ -623,233 +418,7 @@ describe("buildModelsBatchPayload — what a row ships, per describer", () => {
       },
     ],
   ])("%s", (_name, picked, entry) => {
-    expect(ok(buildModelsBatchPayload({ ...SAVED_KEY, rows: [picked] })).models).toEqual([entry]);
-  });
-});
-
-describe("buildModelsBatchPayload — the credential they all share", () => {
-  const ROWS = [row({ id: "a", origin: "discover" }), row({ id: "b", origin: "discover" })];
-
-  it("binds every entry to the saved key that was picked", () => {
-    const data = ok(buildModelsBatchPayload({ ...SAVED_KEY, rows: ROWS }));
-    expect(data.credentialId).toBe("cred_1");
-    expect(data.newCredential).toBeUndefined();
-    expect(data.models).toHaveLength(2);
-  });
-
-  it("creates the typed key ONCE, for the whole batch", () => {
-    const data = ok(
-      buildModelsBatchPayload({
-        ...SAVED_KEY,
-        selectedCredentialId: null,
-        inlineApiKey: "sk-test",
-        rows: ROWS,
-      }),
-    );
-    expect(data.credentialId).toBe("");
-    expect(data.newCredential).toEqual({
-      api_key: "sk-test",
-      providerId: "openai-compatible",
-      base_url_override: "http://localhost:11434/v1",
-    });
-  });
-
-  it("omits the base-URL override for a provider that pins its own endpoint", () => {
-    const data = ok(
-      buildModelsBatchPayload({
-        ...SAVED_KEY,
-        provider: ANTHROPIC,
-        selectedCredentialId: null,
-        inlineApiKey: "sk-ant-test",
-        rows: ROWS,
-      }),
-    );
-    expect(data.newCredential).toEqual({ api_key: "sk-ant-test", providerId: "anthropic" });
-  });
-
-  it("binds every entry to no credential when each member brings their own", () => {
-    const data = ok(
-      buildModelsBatchPayload({
-        ...SAVED_KEY,
-        selectedCredentialId: null,
-        unbound: true,
-        rows: ROWS,
-      }),
-    );
-    expect(data).toEqual({
-      credentialId: null,
-      providerId: "openai-compatible",
-      models: [{ modelId: "a" }, { modelId: "b" }],
-    });
-  });
-
-  it("refuses an unbound batch with no provider picked", () => {
-    expect(
-      buildModelsBatchPayload({ ...SAVED_KEY, provider: undefined, unbound: true, rows: ROWS }),
-    ).toEqual({
-      ok: false,
-      field: "credentialId",
-      messageKey: "models.form.apiKeyRequired",
-    });
-  });
-
-  it("refuses a batch with nothing checked", () => {
-    expect(buildModelsBatchPayload({ ...SAVED_KEY, rows: [] })).toEqual({
-      ok: false,
-      field: "modelId",
-      messageKey: "models.form.selectionRequired",
-    });
-  });
-
-  it("refuses one with no key to open the endpoint", () => {
-    expect(
-      buildModelsBatchPayload({ ...SAVED_KEY, selectedCredentialId: null, rows: ROWS }),
-    ).toEqual({
-      ok: false,
-      field: "credentialId",
-      messageKey: "models.form.apiKeyRequired",
-    });
-  });
-});
-
-describe("a subscription provider — the organization's subscription, or each member's", () => {
-  const SUBSCRIPTION = { provider: CLAUDE_CODE, inlineApiKey: "", baseUrl: "", unbound: false };
-  const ROWS = [row({ id: "claude-sonnet-4-5", origin: "catalog" })];
-  const refusal = (over: { selectedCredentialId: string | null; unbound?: boolean }) =>
-    modelFormRefusals({
-      modelId: "claude-sonnet-4-5",
-      manual: false,
-      offeredIds: null,
-      ...SUBSCRIPTION,
-      ...over,
-    }).credentialId;
-
-  it("binds the picked organization subscription, for one model and for a batch", () => {
-    expect(
-      ok(
-        build({
-          provider: CLAUDE_CODE,
-          fields: fields({ modelId: "claude-sonnet-4-5", credentialId: "cred_org_sub" }),
-        }),
-      ),
-    ).toEqual({ modelId: "claude-sonnet-4-5", credentialId: "cred_org_sub" });
-    expect(
-      ok(
-        buildModelsBatchPayload({
-          ...SUBSCRIPTION,
-          selectedCredentialId: "cred_org_sub",
-          rows: ROWS,
-        }),
-      ),
-    ).toEqual({ credentialId: "cred_org_sub", models: [{ modelId: "claude-sonnet-4-5" }] });
-    expect(refusal({ selectedCredentialId: "cred_org_sub" })).toBeNull();
-  });
-
-  it("asks for a subscription or each member while neither is chosen", () => {
-    expect(
-      buildModelsBatchPayload({ ...SUBSCRIPTION, selectedCredentialId: null, rows: ROWS }),
-    ).toEqual({
-      ok: false,
-      field: "credentialId",
-      messageKey: "models.form.subscriptionRequired",
-    });
-    expect(refusal({ selectedCredentialId: null })).toBe(
-      "settings:models.form.subscriptionRequired",
-    );
-  });
-
-  it("leaves the model unbound when each member is chosen", () => {
-    expect(
-      ok(
-        buildModelsBatchPayload({
-          ...SUBSCRIPTION,
-          selectedCredentialId: null,
-          unbound: true,
-          rows: ROWS,
-        }),
-      ),
-    ).toEqual({
-      credentialId: null,
-      providerId: "claude-code",
-      models: [{ modelId: "claude-sonnet-4-5" }],
-    });
-    expect(refusal({ selectedCredentialId: null, unbound: true })).toBeNull();
-  });
-
-  it("mints no credential from a typed key: a subscription is paired, not typed", () => {
-    const typed = { ...SUBSCRIPTION, inlineApiKey: "sk-typed" };
-    expect(buildModelsBatchPayload({ ...typed, selectedCredentialId: null, rows: ROWS })).toEqual({
-      ok: false,
-      field: "credentialId",
-      messageKey: "models.form.subscriptionRequired",
-    });
-    const bound = ok(
-      buildModelsBatchPayload({ ...typed, selectedCredentialId: "cred_org_sub", rows: ROWS }),
-    );
-    expect("newCredential" in bound).toBe(false);
-  });
-});
-
-describe("modelFormRefusals", () => {
-  const base = {
-    modelId: "",
-    manual: false,
-    provider: ANTHROPIC,
-    selectedCredentialId: "cred_1",
-    inlineApiKey: "",
-    offeredIds: null,
-    unbound: false,
-  };
-
-  it("names no key step for an unbound model, picked or not", () => {
-    expect(
-      modelFormRefusals({ ...base, selectedCredentialId: null, unbound: true }).credentialId,
-    ).toBeNull();
-    expect(
-      modelFormRefusals({
-        ...base,
-        provider: CLAUDE_CODE,
-        selectedCredentialId: null,
-        unbound: true,
-      }).credentialId,
-    ).toBeNull();
-  });
-
-  it("names the missing key on the key row, not the endpoint steps", () => {
-    expect(modelFormRefusals({ ...base, selectedCredentialId: null })).toEqual({
-      credentialId: "settings:models.form.apiKeyRequired",
-      modelId: null,
-    });
-    expect(
-      modelFormRefusals({ ...base, provider: CLAUDE_CODE, selectedCredentialId: null }),
-    ).toEqual({ credentialId: "settings:models.form.subscriptionRequired", modelId: null });
-    // A typed key answers it; with no provider there is no key row to say it on.
-    expect(
-      modelFormRefusals({ ...base, selectedCredentialId: null, inlineApiKey: "sk-x" }).credentialId,
-    ).toBeNull();
-    expect(modelFormRefusals({ ...base, provider: undefined, selectedCredentialId: null })).toEqual(
-      { credentialId: null, modelId: "settings:models.form.modelStepRequired" },
-    );
-  });
-
-  it("names the model step once the endpoint is answered and no id is set", () => {
-    expect(modelFormRefusals(base)).toEqual({
-      credentialId: null,
-      modelId: "settings:models.form.modelStepRequired",
-    });
-    expect(modelFormRefusals({ ...base, manual: true }).modelId).toBe("common:validation.required");
-  });
-
-  it("refuses a typed id a catalog provider does not offer — the server does, edit included", () => {
-    const catalog = { ...base, manual: true, offeredIds: ["deepseek-v4-flash"] };
-    expect(modelFormRefusals({ ...catalog, modelId: "deepseek-chat" }).modelId).toBe(
-      "settings:models.form.modelNotOffered",
-    );
-    expect(modelFormRefusals({ ...catalog, modelId: " deepseek-v4-flash " }).modelId).toBeNull();
-  });
-
-  it("leaves a free-form provider's id alone", () => {
-    expect(modelFormRefusals({ ...base, manual: true, modelId: "anything" }).modelId).toBeNull();
+    expect(rowToEntry(picked)).toEqual(entry);
   });
 });
 

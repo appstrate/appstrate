@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Badge } from "@appstrate/ui/components/badge";
-import { ToneBadge } from "@/components/app-ui/status-variants";
 import { DetailBar, DetailBarId } from "../detail-bar";
 import type { DetailTab } from "../detail-tabs";
 import { PackageIcon } from "../package-icon";
@@ -63,9 +62,9 @@ export function PackageDetailBar<T extends string>({
             </Badge>
           )}
           {hasUnarchivedChanges && !isHistoricalVersion && (
-            <ToneBadge variant="warning" className="shrink-0">
+            <Badge variant="warning" className="shrink-0">
               {t("version.modified")}
-            </ToneBadge>
+            </Badge>
           )}
           {isHistoricalVersion && (
             <Badge variant="secondary" className="shrink-0">
@@ -85,7 +84,7 @@ export function PackageDetailBar<T extends string>({
             <span className="hidden shrink-0 items-center gap-1 sm:inline-flex">
               <span aria-hidden>·</span>
               <ShieldCheck className="size-3" aria-hidden />
-              {t("packages.sourceBuiltIn", { ns: "settings" })}
+              {t("list.badgeBuiltIn", { ns: "agents" })}
             </span>
           )}
           {detail.homeSpaceName && (

@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Routed modals: overlays that keep a real URL, so they can be linked and Back
- * closes them. A path under `OVERLAY_PREFIXES` floats over the page it was
- * opened from, kept in the entry's history state so a reload keeps it too, or
- * over the dashboard when there is none (a pasted link).
- */
+// Routed modals: overlays with a real URL. A path under `OVERLAY_PREFIXES` floats over
+// the page it was opened from (kept in history state), or the dashboard when none.
 import { createContext, useContext, useEffect, useState } from "react";
 import { matchPath, useLocation, useNavigate, type Location } from "react-router-dom";
 import { isOverlayPath, isUnder, ROUTE_ACCESS } from "./route-access";
@@ -14,31 +10,19 @@ const DASHBOARD: Location = { pathname: "/", search: "", hash: "", state: null, 
 
 const PAGE_PATHS = Object.keys(ROUTE_ACCESS).filter((path) => !isOverlayPath(path));
 
-/**
- * A screen of the shell, which an overlay may float over. Sign-in, onboarding
- * and the auth callback are hand-offs: rendered again underneath, their
- * redirects would fire a second time and close the overlay.
- */
+/** A screen an overlay may float over. Sign-in, onboarding and the auth callback are excluded: rendered underneath, their redirects would fire again and close the overlay. */
 export function isPage(pathname: string): boolean {
   return PAGE_PATHS.some((path) => matchPath(path, pathname) !== null);
 }
 
-/**
- * The location the page tree renders: the current one, or under an overlay its
- * background, the dashboard when there is none.
- */
 export function pageLocation(current: Location, background: Location | null): Location {
   if (!isOverlayPath(current.pathname)) return current;
   return background ?? DASHBOARD;
 }
 
 /**
- * An entry's position in the session history, read from its `history.state`.
- *
- * React Router 7's browser history numbers its entries in `idx`, a field it
- * does not document: `lib/test/modal-route.test.ts` drives the real history
- * and fails the day the field moves. Without it every close replaces instead
- * of going back, which is the fallback a reload used to get.
+ * An entry's position in the session history. Reads React Router 7's undocumented
+ * `idx`; `lib/test/modal-route.test.ts` fails the day it moves.
  */
 export function historyIndexOf(state: unknown): number | null {
   const index =
@@ -50,21 +34,15 @@ function historyIndex(): number | null {
   return typeof window === "undefined" ? null : historyIndexOf(window.history.state);
 }
 
-/** The page an overlay floats over, and that page's history entry. */
 export interface OverlayBackground {
   location: Location;
   /** `null` when it has no entry behind the overlay (a pasted link, an organization switch). */
   index: number | null;
 }
 
-/**
- * History state key holding the background on each overlay entry. The entry
- * keeps it, so a reload of the overlay still floats over the page it was
- * opened from, and closing still goes back to it.
- */
+/** History state key holding the background, so a reload still floats over the page it was opened from. */
 const BACKGROUND = "overlayBackground";
 
-/** The background an overlay entry's state holds, or null. */
 export function backgroundOf(state: unknown): OverlayBackground | null {
   if (typeof state !== "object" || state === null) return null;
   const background = (state as Record<string, unknown>)[BACKGROUND];
@@ -74,7 +52,6 @@ export function backgroundOf(state: unknown): OverlayBackground | null {
   return { location, index: typeof index === "number" ? index : null };
 }
 
-/** An entry's state, holding `background`. The rest of the state rides along. */
 export function withBackground(state: unknown, background: OverlayBackground): unknown {
   const rest = typeof state === "object" && state !== null ? state : {};
   const { pathname, search, hash, state: pageState, key } = background.location;
@@ -98,9 +75,7 @@ function sameBackground(a: OverlayBackground, b: OverlayBackground): boolean {
 }
 
 interface OpenOverlay {
-  /** The overlay's own path, as the address bar shows it. */
   path: string;
-  /** The page it floats over. */
   background: Location;
 }
 
@@ -117,12 +92,9 @@ const OverlayExitContext = createContext<OverlayExit | null>(null);
 export const OverlayExitProvider = OverlayExitContext.Provider;
 
 /**
- * The page the page tree renders, and the overlay open over it.
- *
- * Each overlay entry carries its background in its history state. An entry
- * that arrives without one (any plain `<Link>` to an overlay path, a page
- * opened inside the overlay) takes the last background seen: the last page
- * shown, or the overlay entry rendered before it.
+ * The page the page tree renders, and the overlay open over it. An overlay entry
+ * without a background in its state (a plain `<Link>`, a page opened inside the
+ * overlay) takes the last background seen.
  */
 export function useOverlayState(): {
   page: Location;
@@ -136,8 +108,7 @@ export function useOverlayState(): {
   const held = onOverlay ? backgroundOf(location.state) : null;
   if (location !== last?.at) {
     const seen = isPage(location.pathname) ? { location, index: historyIndex() } : held;
-    // The page keeps the object it rendered with: one read back from the
-    // state is a copy, and would re-render it for nothing.
+    // The page keeps the object it rendered with: a copy read back from state would re-render it.
     if (seen && !(last && sameBackground(seen, last.background))) {
       setLast({ at: location, background: seen });
     }
@@ -175,21 +146,15 @@ export function useOverlayState(): {
   };
 }
 
-/** The screen the open overlay floats over, or null when none is open. */
 function useBackgroundLocation(): Location | null {
   return useContext(OverlayContext)?.background ?? null;
 }
 
-/**
- * The open overlay's path, or null. Under an overlay the page tree's
- * `useLocation` answers the page beneath it, so the shell asks here whether
- * settings or the catalogue is open.
- */
+/** The open overlay's path, or null (under an overlay `useLocation` answers the page beneath). */
 export function useOverlayPath(): string | null {
   return useContext(OverlayContext)?.path ?? null;
 }
 
-/** Complete router target for closing a modal without losing filters or anchors. */
 export function modalReturnTarget(background: Location | null): {
   to: { pathname: string; search: string; hash: string };
   state: unknown;
@@ -198,11 +163,7 @@ export function modalReturnTarget(background: Location | null): {
   return { to: { pathname, search, hash }, state };
 }
 
-/**
- * How far back closing an overlay goes: to the background's own entry when the
- * app navigated from it, past every page opened inside the overlay. `null`
- * when it has no entry behind the current one: the close replaces instead.
- */
+/** How far back closing goes (past every page opened inside the overlay); `null` = no entry behind, replace instead. */
 export function overlayCloseStep(
   backgroundIndex: number | null,
   currentIndex: number | null,
@@ -213,10 +174,7 @@ export function overlayCloseStep(
   return backgroundIndex - currentIndex;
 }
 
-/**
- * Closes the open overlay. Back steps over the overlay's entries rather than
- * adding one, so Back after a close does not reopen it.
- */
+/** Closes the open overlay by stepping back over its entries, so Back after a close does not reopen it. */
 export function useCloseOverlay(): () => void {
   const background = useBackgroundLocation();
   const exit = useContext(OverlayExitContext);
@@ -232,16 +190,14 @@ export function useCloseOverlay(): () => void {
   };
 }
 
-/** The page an organization switch lands on: the root of the product it happened in. */
 export function orgSwitchLanding(pagePath: string): "/" | "/chat" {
   return isUnder(pagePath, "/chat") ? "/chat" : "/";
 }
 
 /**
- * After an organization switch, the page may name a resource of the previous
- * organization (an agent, a run): it lands on its product's root. Under an
- * overlay only the page beneath moves — the overlay's paths name a page type,
- * not a resource, so it stays open.
+ * After an organization switch the page may name a resource of the previous org:
+ * it lands on its product's root. Under an overlay only the page beneath moves
+ * (overlay paths name a page type, not a resource).
  */
 export function useLandAfterOrgSwitch(): () => void {
   const background = useBackgroundLocation();

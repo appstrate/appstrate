@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
@@ -11,11 +11,14 @@ import {
   useOnboardingNav,
 } from "../../components/onboarding-layout";
 import { useModalParam } from "../../hooks/use-modal-param";
-import { ModelFormModal } from "../../components/model-form-modal";
+import { ProviderAddFlow } from "../../components/provider-add-flow";
 import { OnboardingQuickConnect } from "../../components/onboarding-quick-connect";
 import { quickConnectProviders } from "../../lib/provider-registry-helpers";
-import { useModels, useModelFormHandler } from "../../hooks/use-models";
-import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
+import { useModels } from "../../hooks/use-models";
+import {
+  useModelProviderCredentials,
+  useProvidersRegistry,
+} from "../../hooks/use-model-provider-credentials";
 import { getModelIcon } from "../../components/icons";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { TextSkeleton } from "../../components/loading-skeletons";
@@ -29,9 +32,7 @@ export function OnboardingModelStep() {
   const newModel = useModalParam("newModel");
   const { data: models } = useModels();
   const { data: registry } = useProvidersRegistry();
-  const { onSubmit, isPending } = useModelFormHandler({
-    onSuccess: newModel.close,
-  });
+  const { data: credentials } = useModelProviderCredentials();
 
   const goNext = () => nextRoute && navigate(nextRoute);
 
@@ -90,9 +91,9 @@ export function OnboardingModelStep() {
                         so a dead one must say so rather than look configured. */}
                     {m.needs_reconnection && <ModelUnavailableBadge className="shrink-0" />}
                     {m.is_default && (
-                      <ToneBadge variant="success" className="shrink-0 text-[0.65rem]">
+                      <Badge variant="success" className="shrink-0 text-[0.65rem]">
                         {t("models.default")}
-                      </ToneBadge>
+                      </Badge>
                     )}
                   </div>
                 );
@@ -118,18 +119,13 @@ export function OnboardingModelStep() {
         )}
 
         <Button variant="outline" size="sm" className="self-center" onClick={() => newModel.open()}>
-          <Plus className="mr-1.5 size-3.5" />
+          <Plus className="mr-1.5" />
           {hasModels ? t("onboarding.modelSeed.addAnother") : t("models.add")}
         </Button>
       </div>
 
       {newModel.value !== null && (
-        <ModelFormModal
-          onClose={newModel.close}
-          model={null}
-          isPending={isPending}
-          onSubmit={onSubmit}
-        />
+        <ProviderAddFlow credentials={credentials ?? []} onClose={newModel.close} />
       )}
     </OnboardingLayout>
   );

@@ -49,10 +49,10 @@ export function DependencyOverridesSection({
   const { t } = useTranslation(["agents"]);
   if (skills.length === 0) return null;
   return (
-    <div className="space-y-2">
-      <Label>{t("run.overrides.dependencyLabel")}</Label>
+    <div className="flex flex-col gap-2">
+      <Label className="mb-0">{t("run.overrides.dependencyLabel")}</Label>
       <p className="text-muted-foreground text-xs">{t("run.overrides.dependencyHint")}</p>
-      <div className="border-border bg-card space-y-3 rounded-md border p-3">
+      <div className="border-border bg-card flex flex-col gap-3 rounded-md border p-3">
         {skills.map((skill) => (
           <DependencyOverrideRow
             key={skill.id}
@@ -84,7 +84,7 @@ function DependencyOverrideRow({
   const { t } = useTranslation(["agents"]);
   const label = skill.name ?? skill.id;
   return (
-    <div className="space-y-1.5" data-testid={`dep-override-row-${skill.id}`}>
+    <div className="flex flex-col gap-1.5" data-testid={`dep-override-row-${skill.id}`}>
       <div className="text-xs font-medium">{label}</div>
       <PackageVersionSelect
         type="skill"

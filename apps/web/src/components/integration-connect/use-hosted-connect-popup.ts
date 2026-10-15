@@ -20,28 +20,11 @@ const CONNECT_POPUP_TIMEOUT_MS = 5 * 60_000;
 const POPUP_POLL_INTERVAL_MS = 500;
 
 /**
- * Drives the unified hosted-connect-portal flow via popup.
- *
- * Auth-type-agnostic: mints a connect session (`/connect/session`) and opens the
- * returned `connect_url`, which dispatches server-side to the provider OAuth
- * screen (oauth2) or the hosted credential form (api_key/basic/mtls/custom). The
- * caller therefore never branches on the auth type — one entry point for every
- * integration.
- *
- * On a reconnect/upgrade (a `connectionId` is supplied) the backend unions the
- * caller scopes with that connection's already-granted set, so re-consent never
- * shrinks the grant. A fresh connect carries no `connectionId` and gets the
- * manifest defaults plus whatever scopes the caller forwards.
- *
- * Completion is event-driven: both the OAuth callback page and the hosted form
- * broadcast `appstrate:integration_connection` on success (postMessage +
- * BroadcastChannel). The promise resolves on that signal OR when the popup
- * closes (cancel fallback) and rejects on timeout / kickoff failure. A success
- * does not close the popup: completion pages close themselves, and one that
- * shows an install block (SSH) stays open until the user dismisses it.
- * `openPopup` resolves `true` once the popup settled AND the integration caches
- * were invalidated (active queries refetched, inactive ones marked stale),
- * `false` after a failure it already toasted.
+ * Hosted-connect-portal flow via popup, auth-type-agnostic (the server dispatches `connect_url`).
+ * On reconnect/upgrade (`connectionId`) the backend unions scopes with the granted set.
+ * Completion is event-driven (`appstrate:integration_connection`), or popup close (cancel
+ * fallback); a success never closes the popup (an SSH install block stays until dismissed).
+ * `openPopup` resolves `true` once caches are invalidated, `false` after a failure it toasted.
  */
 export function useHostedConnectPopup() {
   const { t } = useTranslation("settings");
@@ -57,10 +40,7 @@ export function useHostedConnectPopup() {
       connectionId?: string;
     }): Promise<boolean> => {
       try {
-        // Open the popup synchronously (some browsers block popups opened inside
-        // async callbacks), mint the session, point the popup at connect_url,
-        // then race a 5-min timeout against a success signal or the user closing
-        // the window.
+        // Synchronous: some browsers block popups opened in async callbacks.
         const popup = window.open("", connectPopupName(input.packageId), CONNECT_POPUP_FEATURES);
         if (!popup) {
           throw new Error("popup_blocked");
@@ -82,10 +62,8 @@ export function useHostedConnectPopup() {
               clearTimeout(timer);
               stopListening();
             };
-            // Which completion this popup is waiting for: both carriers fan
-            // out to every listener, so a completion for ANOTHER package must
-            // not settle this promise. Success only: an `ok: false` completion
-            // is a failed connect, and the popup-close poll below settles it.
+            // Both carriers fan out to every listener: filter by package. Success only; an
+            // `ok: false` completion is settled by the popup-close poll below.
             const stopListening = listenConnectCompletion(
               { packageId: input.packageId },
               (completion) => {
@@ -104,9 +82,7 @@ export function useHostedConnectPopup() {
               }
               reject(new Error("connect_timeout"));
             }, CONNECT_POPUP_TIMEOUT_MS);
-            // Close-without-signal = user cancel; resolve so consumers re-read
-            // the truth (the cache invalidation below is a no-op if nothing
-            // changed).
+            // Close-without-signal = user cancel.
             const poll = setInterval(() => {
               if (popup.closed) {
                 cleanup();
@@ -122,9 +98,6 @@ export function useHostedConnectPopup() {
           }
           throw err;
         }
-        // Invalidate the integration + user-connection caches so every consumer
-        // (status cards, pickers, the connections page) reflects the new
-        // connection without waiting for a window-focus refetch.
         await invalidateIntegrationQueries(qc);
         if (scopesDenied.length > 0) {
           toast.warning(t("integration.popup.scopesDenied", { scopes: scopesDenied.join(", ") }));
@@ -144,9 +117,7 @@ export function useHostedConnectPopup() {
           toastError(err);
           return false;
         }
-        // Mint failure (e.g. portal not configured / 5xx), network error, or any
-        // other unexpected throw: surface a generic toast here so callers never
-        // have to handle a rejected openPopup() — the cache stays untouched.
+        // Callers never handle a rejected openPopup().
         toast.error(t("integration.popup.failed"));
         return false;
       }

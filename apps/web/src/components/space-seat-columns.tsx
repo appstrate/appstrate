@@ -54,14 +54,15 @@ export function useSpaceSeatColumns<Row>({
     {
       id: "source",
       header: t("spaceMembers.colSource"),
-      width: "110px",
+      width: 110,
       tier: 2,
       cell: (row) => <CellText>{t(`spaceMembers.source.${seat(row).source}`)}</CellText>,
     },
     {
       id: "role",
       header: t("spaceMembers.colRole"),
-      width: "minmax(120px,1fr)",
+      width: 120,
+      elastic: true,
       // A select: it scrolls into reach rather than waiting for room.
       control: true,
       cell: (row) =>

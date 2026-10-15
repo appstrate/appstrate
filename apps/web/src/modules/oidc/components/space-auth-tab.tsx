@@ -17,7 +17,6 @@
  * so there a row that exists is shown only to be deleted.
  */
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, type ReactNode } from "react";
 import { useModalParam } from "@/hooks/use-modal-param";
@@ -53,7 +52,7 @@ export function SpaceAuthTab() {
   const { inPersonalSpace: personal } = usePermissions();
 
   return (
-    <div className="max-w-2xl space-y-10">
+    <div className="flex max-w-2xl flex-col gap-10">
       {personal && (
         <p className="text-muted-foreground text-sm">{t("settings:spaceAuth.personalSpace")}</p>
       )}
@@ -110,7 +109,7 @@ function SmtpSection({ personal }: { personal: boolean }) {
   return (
     <>
       <ProviderConfigSection
-        icon={<Mail className="h-5 w-5" />}
+        icon={<Mail className="size-5" />}
         title={t("settings:spaceAuth.smtpTitle")}
         hint={t("settings:spaceAuth.smtpHint")}
         loading={isLoading}
@@ -122,7 +121,7 @@ function SmtpSection({ personal }: { personal: boolean }) {
         deletedMessage={t("settings:spaceAuth.smtpDeleted")}
       >
         {(deleteButton) => (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-4">
               <FormItem id="smtp-host" label={requiredLabel(t("settings:spaceAuth.smtpHost"))}>
                 <Input
@@ -154,7 +153,7 @@ function SmtpSection({ personal }: { personal: boolean }) {
               </FormItem>
               <FormItem
                 id="smtp-pass"
-                label={requiredLabel(t("settings:spaceAuth.smtpPass"))}
+                label={requiredLabel(t("common:claim.passwordLabel"))}
                 hint={initial ? t("settings:spaceAuth.smtpPassReuploadHint") : undefined}
               >
                 <Input
@@ -205,7 +204,7 @@ function SmtpSection({ personal }: { personal: boolean }) {
               </PendingButton>
               {initial && (
                 <Button type="button" variant="outline" onClick={() => smtpTest.open()}>
-                  <Send className="h-4 w-4" />
+                  <Send />
                   {t("settings:spaceAuth.smtpTest")}
                 </Button>
               )}
@@ -215,32 +214,31 @@ function SmtpSection({ personal }: { personal: boolean }) {
         )}
       </ProviderConfigSection>
 
-      <SmtpTestModal
-        open={!personal && !!initial && smtpTest.value !== null}
-        onClose={smtpTest.close}
-        isPending={test.isPending}
-        onSend={(to) =>
-          test.mutate(to, {
-            // A failed SMTP send is a non-2xx response (the server surfaces
-            // the SMTP error verbatim), which the mutation cache toasts.
-            onSuccess: () => {
-              toast.success(t("settings:spaceAuth.smtpTestOk"));
-              smtpTest.close();
-            },
-          })
-        }
-      />
+      {!personal && !!initial && smtpTest.value !== null && (
+        <SmtpTestModal
+          onClose={smtpTest.close}
+          isPending={test.isPending}
+          onSend={(to) =>
+            test.mutate(to, {
+              // A failed SMTP send is a non-2xx response (the server surfaces
+              // the SMTP error verbatim), which the mutation cache toasts.
+              onSuccess: () => {
+                toast.success(t("settings:spaceAuth.smtpTestOk"));
+                smtpTest.close();
+              },
+            })
+          }
+        />
+      )}
     </>
   );
 }
 
 function SmtpTestModal({
-  open,
   onClose,
   isPending,
   onSend,
 }: {
-  open: boolean;
   onClose: () => void;
   isPending: boolean;
   onSend: (to: string) => void;
@@ -249,7 +247,6 @@ function SmtpTestModal({
   const [to, setTo] = useState("");
   return (
     <Modal
-      open={open}
       onClose={onClose}
       title={t("settings:spaceAuth.smtpTestTitle")}
       actions={
@@ -314,7 +311,7 @@ function SocialSection({
 
   return (
     <ProviderConfigSection
-      icon={<Icon className="h-5 w-5" aria-hidden />}
+      icon={<Icon className="size-5" aria-hidden />}
       title={title}
       hint={t("settings:spaceAuth.socialHint", { provider: title })}
       loading={isLoading}
@@ -326,7 +323,7 @@ function SocialSection({
       deletedMessage={t("settings:spaceAuth.socialDeleted")}
     >
       {(deleteButton) => (
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <FormItem id={`${provider}-client-id`} label={requiredLabel("Client ID")}>
             <Input
               value={form.clientId}
@@ -435,15 +432,15 @@ function ProviderConfigSection({
   ) : null;
 
   return (
-    <section className="space-y-4">
-      <header className="space-y-1">
+    <section className="flex flex-col gap-4">
+      <header className="flex flex-col gap-1">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           {icon}
           {title}
           {loading ? (
             <Skeleton className="h-5 w-20" />
           ) : configured ? (
-            <ToneBadge variant="running">{t("spaceAuth.configured")}</ToneBadge>
+            <Badge variant="running">{t("spaceAuth.configured")}</Badge>
           ) : (
             <Badge variant="secondary">{t("spaceAuth.notConfigured")}</Badge>
           )}
@@ -451,7 +448,13 @@ function ProviderConfigSection({
         <p className="text-muted-foreground text-sm">{hint}</p>
       </header>
 
-      {loading ? <SettingsSkeleton /> : personal ? deleteButton : children(deleteButton)}
+      {loading ? (
+        <SettingsSkeleton />
+      ) : personal ? (
+        <div>{deleteButton}</div>
+      ) : (
+        children(deleteButton)
+      )}
 
       <ConfirmModal
         open={confirmDelete}
@@ -476,7 +479,7 @@ function DeleteConfigButton({ disabled, onClick }: { disabled: boolean; onClick:
   const { t } = useTranslation("common");
   return (
     <Button type="button" variant="destructive" onClick={onClick} disabled={disabled}>
-      <Trash2 className="h-4 w-4" />
+      <Trash2 />
       {t("btn.delete")}
     </Button>
   );

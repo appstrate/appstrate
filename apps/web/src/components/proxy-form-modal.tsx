@@ -42,13 +42,13 @@ export function ProxyFormModal({ onClose, proxy, isPending, onSubmit }: ProxyFor
   return (
     <FormModal
       onClose={onClose}
-      title={proxy ? t("proxies.modal.editTitle") : t("proxies.modal.createTitle")}
+      title={proxy ? t("proxies.modal.editTitle") : t("proxies.add")}
       onSubmit={handleSubmit(onFormSubmit)}
       isPending={isPending}
     >
       <FormItem
         id="px-label"
-        label={t("proxies.modal.label")}
+        label={t("spaces.nameLabel")}
         error={showError("label") ? errors.label?.message : undefined}
       >
         <Input

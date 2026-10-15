@@ -1,20 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The code of the overlays the sidebar opens, downloaded before the click.
- *
- * Each overlay is a lazy chunk. Fetched on the click, its Suspense fallback
- * commits first, and React then holds that fallback for its reveal throttle
- * (~300 ms) however fast the chunk arrives: the catalogue measured 330 ms cold
- * for chunks that landed in 10 ms. Settings paid it twice, because the layout
- * had to render before its page's chunk was even requested (620 ms). Already in
- * the module map, nothing suspends and both open in one frame.
- *
- * So each chunk here is the ONE `import()` its route component in `app.tsx`
- * renders through (`lib/lazy-chunk.tsx`, which renders a loaded module without
- * suspending), and the shell preloads them on intent (hover, focus, touch) and
- * once the browser is idle — what `<Link prefetch="intent">` does in React Router's
- * framework mode, which the declarative mode this app uses leaves to the app.
+ * Overlay code downloaded before the click: fetched on the click, a lazy chunk's
+ * Suspense fallback is held for React's reveal throttle (~300 ms). Each chunk is the
+ * ONE `import()` its route in `app.tsx` renders through (`lib/lazy-chunk.tsx`).
  */
 
 import { warmChunk } from "./chunk-warmup";
@@ -29,11 +18,7 @@ export const workspaceSettingsGeneralChunk = chunk(
 );
 export const preferencesGeneralChunk = chunk(() => import("../pages/preferences/general"));
 
-/**
- * What opening each overlay renders. A settings scope's index lands on its
- * first page, `general` unless the caller's grants skip it: the layout and that
- * page load together, never one after the other.
- */
+/** What opening each overlay renders: a settings scope's layout and its first page (`general`) load together. */
 const OVERLAY_CHUNKS: ReadonlyArray<readonly [prefix: string, chunks: Chunk<unknown>[]]> = [
   ["/catalogue", [catalogueChunk]],
   [SETTINGS_INDEX.organization, [settingsLayoutChunk, orgSettingsGeneralChunk]],
@@ -49,7 +34,6 @@ function preloadOverlay(path: string): void {
   }
 }
 
-/** The handlers that preload an overlay link's destination on intent. */
 export function overlayIntent(path: string) {
   const preload = () => preloadOverlay(path);
   return { onPointerEnter: preload, onFocus: preload, onTouchStart: preload };

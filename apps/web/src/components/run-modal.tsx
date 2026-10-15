@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, type RefObject } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { RunLaunchModal } from "./run-launch-modal";
+import { FormModal } from "./form-modal";
 import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { initialInputValues } from "../lib/agent-input";
 import { useModels, useAgentModel } from "../hooks/use-models";
@@ -20,63 +20,48 @@ interface RunModalProps {
   initialInput?: Record<string, unknown>;
 }
 
-export function RunModal({
-  open,
+/** Mounted afresh at each opening, so the fields seed from the agent again. */
+export function RunModal({ open, ...props }: RunModalProps) {
+  return open ? <RunModalForm {...props} /> : null;
+}
+
+function RunModalForm({
   onClose,
   agent,
   onSubmit,
   isPending,
   initialInput,
-}: RunModalProps) {
+}: Omit<RunModalProps, "open">) {
   const { t } = useTranslation(["agents"]);
-  return (
-    <RunLaunchModal
-      open={open}
-      onClose={onClose}
-      title={t("input.title", { name: agent.display_name })}
-      isPending={isPending}
-    >
-      {(formRef) => (
-        <RunModalForm
-          formRef={formRef}
-          agent={agent}
-          onSubmit={onSubmit}
-          initialInput={initialInput}
-        />
-      )}
-    </RunLaunchModal>
-  );
-}
-
-function RunModalForm({
-  formRef,
-  agent,
-  onSubmit,
-  initialInput,
-}: {
-  formRef: RefObject<AgentInputFormHandle | null>;
-  agent: AgentDetail;
-  onSubmit: (input: Record<string, unknown>) => void;
-  initialInput?: Record<string, unknown>;
-}) {
+  const inputRef = useRef<AgentInputFormHandle>(null);
   // `agent.input` carries both halves: the AFPS wrapper and this space's
   // stored values + locks.
   const [inputData, setInputData] = useState<Record<string, unknown>>(() =>
     initialInputValues(agent.input, agent.input, initialInput),
   );
 
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (inputRef.current?.validate() ?? true) onSubmit(inputData);
+  };
+
   return (
-    <>
+    <FormModal
+      onClose={onClose}
+      title={t("input.title", { name: agent.display_name })}
+      onSubmit={submit}
+      isPending={isPending}
+      submitLabel={t("input.run")}
+    >
       <ResolvedModelHint packageId={agent.id} />
       <AgentInputForm
-        ref={formRef}
+        ref={inputRef}
         wrapper={agent.input}
         settings={agent.input}
         value={inputData}
         onChange={setInputData}
-        onSubmit={onSubmit}
       />
-    </>
+    </FormModal>
   );
 }
 
@@ -125,7 +110,7 @@ function ResolvedModelHint({ packageId }: { packageId: string }) {
   const source = pinned ? t("input.modelSourceAgent") : t("input.modelSourceOrgDefault");
 
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       <p className="text-muted-foreground text-xs" data-testid="run-resolved-model">
         {t("input.modelResolved", { name: resolved.label, source })}{" "}
         <ModelBillingHint billedTo={resolved.billed_to} />

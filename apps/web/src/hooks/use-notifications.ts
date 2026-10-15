@@ -7,20 +7,9 @@ import { useOrgScope } from "./use-org-scope";
 import { paginatedRunsKeys, runKeys } from "../lib/query-keys";
 
 /**
- * Safety-net poll for the notification queries — a BACKSTOP, not the freshness
- * mechanism.
- *
- * Freshness comes from the realtime stream: `use-global-run-sync` invalidates
- * these caches on every terminal run it sees, and re-invalidates them on every
- * reconnect, which is what covers the frames lost while the stream was down
- * (the SSE protocol has no replay). With both of those in place the poll only
- * has to cover a client that is somehow neither streaming nor reconnecting, so
- * it runs at 5 minutes instead of 30 seconds — 10× fewer requests per open tab,
- * across three queries.
- *
- * Do NOT raise this without keeping the reconnect-side invalidation: on its own
- * the interval is the ONLY thing that would eventually correct a badge, and
- * "eventually" would become five minutes.
+ * Safety-net poll, a BACKSTOP: freshness comes from `use-global-run-sync`, which invalidates
+ * these caches on every terminal run and on every reconnect (SSE has no replay). Do NOT raise
+ * this without keeping the reconnect-side invalidation, or a badge would take five minutes to correct.
  */
 const NOTIFICATION_POLL_INTERVAL_MS = 300_000;
 
@@ -98,11 +87,7 @@ export function useMarkRead() {
   });
 }
 
-/**
- * Mark the caller's notification for a run read, keyed by run id — used by the
- * run-detail page, which holds the run id but not the notification id.
- * Backed by `PUT /api/notifications/read/{runId}`.
- */
+/** Mark the caller's notification for a run read, by run id (the run-detail page has no notification id). */
 export function useMarkReadByRun() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/notifications/read/{runId}", {

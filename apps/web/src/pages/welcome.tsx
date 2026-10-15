@@ -62,7 +62,7 @@ export function WelcomePage() {
 
         <form onSubmit={handleSubmit}>
           <div className="flex flex-col gap-4">
-            <FormItem id="displayName" label={t("welcome.displayName")}>
+            <FormItem id="displayName" label={t("preferences.displayName")}>
               <Input
                 type="text"
                 value={displayName}

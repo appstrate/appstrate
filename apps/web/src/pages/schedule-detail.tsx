@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneAlert } from "@/components/app-ui/status-variants";
+import { Alert } from "@appstrate/ui/components/alert";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -77,8 +77,8 @@ export function ScheduleDetailPage() {
   if (error || !schedule) return <ResourceErrorState error={error} />;
   const tabs: DetailTab<ScheduleTab>[] = [
     { value: "details", label: t("detail.overview.summary"), icon: LayoutGrid },
-    { value: "runs", label: t("schedule.tabRuns"), icon: Play },
-    { value: "settings", label: t("schedule.tabSettings"), icon: Settings2 },
+    { value: "runs", label: t("common:nav.runs"), icon: Play },
+    { value: "settings", label: t("common:nav.settings"), icon: Settings2 },
   ];
   const disabledReason = schedule.disabled_reason
     ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
@@ -95,7 +95,7 @@ export function ScheduleDetailPage() {
             </span>
           }
           badge={<ScheduleStatusBadge schedule={schedule} />}
-          parent={{ label: t("schedule.breadcrumbList"), href: "/schedules" }}
+          parent={{ label: t("common:nav.schedules"), href: "/schedules" }}
           tabs={tabs}
           actions={
             <>
@@ -122,7 +122,7 @@ export function ScheduleDetailPage() {
             blocks it. A lost connection is repaired in the form's connection
             choice, so the alert opens it. */}
         {disabledReason && (
-          <ToneAlert variant="warning" className="mb-4">
+          <Alert variant="warning" className="mb-4">
             <Pause aria-hidden />
             <AlertDescription className="flex items-start justify-between gap-3">
               <span className="min-w-0">{disabledReason}</span>
@@ -137,7 +137,7 @@ export function ScheduleDetailPage() {
                 </Button>
               )}
             </AlertDescription>
-          </ToneAlert>
+          </Alert>
         )}
         <DetailTabPanel value="runs">
           {readsRuns ? (
@@ -167,7 +167,7 @@ export function ScheduleDetailPage() {
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
         title={t("schedule.deleteTitle")}
-        confirmLabel={t("schedule.delete")}
+        confirmLabel={t("common:btn.delete")}
         description={t("schedule.deleteConfirm")}
         isPending={deleteSchedule.isPending}
         onConfirm={() => {
@@ -214,7 +214,7 @@ function ScheduleParams({
         headerAction={open("execution")}
       >
         <FactGrid columns={2}>
-          <Fact label={t("schedule.paramAgent")}>
+          <Fact label={t("schedule.agent")}>
             {agentsPending ? (
               <Skeleton className="h-4 w-32" />
             ) : canReach(agentPath) ? (
@@ -253,7 +253,7 @@ function ScheduleParams({
         </FactGrid>
       </DetailSectionCard>
       <DetailSectionCard
-        title={t("schedule.timing")}
+        title={t("schedule.settings.recurrence")}
         icon={CalendarClock}
         headerAction={open("recurrence")}
       >
@@ -264,7 +264,7 @@ function ScheduleParams({
               value:
                 describeFrequency(parseCron(schedule.cron_expression)) ?? schedule.cron_expression,
             },
-            { labelKey: "schedule.paramTimezone", value: schedule.timezone },
+            { labelKey: "schedule.timezone", value: schedule.timezone },
             {
               labelKey: "schedule.paramNextRun",
               value: nextRunAt
@@ -281,7 +281,7 @@ function ScheduleParams({
         />
       </DetailSectionCard>
       <DetailSectionCard
-        title={t("schedule.tabInput")}
+        title={t("detail.configuration.inputsShort")}
         icon={FileInput}
         headerAction={open("inputs")}
         className="lg:col-span-2"

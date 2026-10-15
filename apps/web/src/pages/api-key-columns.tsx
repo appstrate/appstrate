@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToneBadge } from "@/components/app-ui/status-variants";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import type { DataColumn } from "../components/data-table";
@@ -46,33 +46,34 @@ export function useApiKeyColumns({
   return [
     {
       id: "name",
-      header: t("apiKeys.nameLabel"),
-      width: "minmax(104px,1.3fr)",
+      header: t("spaces.nameLabel"),
+      width: 104,
+      elastic: true,
       cell: (key) => <CellText strong>{key.name}</CellText>,
     },
     {
       id: "prefix",
-      header: t("apiKeys.keyColumn"),
-      width: "88px",
+      header: t("spaces.metadataKey"),
+      width: 88,
       tier: 2,
       cell: (key) => <CellText mono>{key.keyPrefix}…</CellText>,
     },
     {
       id: "status",
-      header: t("apiKeys.statusColumn"),
-      width: "80px",
+      header: t("proxies.col.status"),
+      width: 80,
       tier: 2,
       cell: (key) =>
         isApiKeyExpired(key.expiresAt) ? (
-          <ToneBadge variant="failed">{t("apiKeys.expired")}</ToneBadge>
+          <Badge variant="failed">{t("apiKeys.expired")}</Badge>
         ) : (
-          <ToneBadge variant="success">{t("apiKeys.active")}</ToneBadge>
+          <Badge variant="success">{t("apiKeys.active")}</Badge>
         ),
     },
     {
       id: "expires",
       header: t("apiKeys.expirationColumn"),
-      width: "96px",
+      width: 96,
       tier: 2,
       cell: (key) => (
         <span className="text-muted-foreground text-xs">
@@ -82,8 +83,9 @@ export function useApiKeyColumns({
     },
     {
       id: "scopes",
-      header: t("apiKeys.permissionSummary"),
-      width: "minmax(112px,1.1fr)",
+      header: t("roles.permissionsLabel"),
+      width: 112,
+      elastic: true,
       tier: 3,
       cell: (key) => {
         const summary = scopeSummary(key, availableScopes);
@@ -98,7 +100,7 @@ export function useApiKeyColumns({
     {
       id: "lastUsed",
       header: t("apiKeys.lastUsedColumn"),
-      width: "104px",
+      width: 104,
       align: "end",
       tier: 3,
       cell: (key) => <CellDate value={key.lastUsedAt} granularity="date" />,
@@ -106,19 +108,20 @@ export function useApiKeyColumns({
     {
       id: "createdBy",
       header: t("apiKeys.createdByColumn"),
-      width: "minmax(96px,1fr)",
+      width: 96,
+      elastic: true,
       tier: 3,
       cell: (key) =>
         key.created_by_name ? <CellText>{key.created_by_name}</CellText> : <CellEmpty />,
     },
     rowActionsColumn((key) => (
       <TableRowActions
-        menuLabel={t("apiKeys.moreActions", { name: key.name })}
+        menuLabel={t("providers.moreActions", { name: key.name })}
         isPending={revokingKeyId === key.id}
         actions={[
           {
             id: "revoke",
-            label: t("apiKeys.revoke"),
+            label: t("devices.revoke"),
             icon: Trash2,
             onSelect: () => onRevoke?.(key),
             destructive: true,

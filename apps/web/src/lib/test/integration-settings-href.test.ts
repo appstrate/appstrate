@@ -45,7 +45,7 @@ describe("leavesEditor on an integration's Paramètres", () => {
 
   it("stops a switch to a section another view renders", () => {
     expect(leaves(identity, integrationSettingsHref(INTEGRATION, "authentication"))).toBe(true);
-    expect(leaves(identity, integrationSettingsHref(INTEGRATION, "bundle"))).toBe(true);
+    expect(leaves(identity, integrationSettingsHref(INTEGRATION, "functioning"))).toBe(true);
     expect(leaves(identity, `${INTEGRATION}#connections`)).toBe(true);
   });
 

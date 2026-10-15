@@ -58,7 +58,7 @@ function EmailVerificationBadge() {
         className="text-primary text-xs underline underline-offset-2 hover:no-underline disabled:no-underline disabled:opacity-50"
       >
         {resendState === "sending"
-          ? t("preferences.resendingVerification")
+          ? t("verifyEmail.resending")
           : resendState === "sent"
             ? t("preferences.verificationResent")
             : t("preferences.resendVerification")}
@@ -93,7 +93,7 @@ export function EmailChangeField({
   const invalid = dirty && !EMAIL_FORMAT.test(next);
 
   return (
-    <div className="w-full space-y-1.5">
+    <div className="flex w-full flex-col gap-1.5">
       <form
         className="flex w-full items-center gap-2"
         onSubmit={(e) => {
@@ -105,7 +105,7 @@ export function EmailChangeField({
           type="email"
           value={draft ?? email}
           disabled={pending}
-          aria-label={t("preferences.email")}
+          aria-label={t("common:claim.emailLabel")}
           aria-invalid={invalid}
           onChange={(e) => onDraftChange(e.target.value)}
         />
@@ -162,7 +162,7 @@ function EmailRow() {
   return (
     <SettingRow
       variant="field"
-      label={t("preferences.email")}
+      label={t("common:claim.emailLabel")}
       description={
         <>
           <EmailVerificationBadge />
@@ -235,7 +235,7 @@ export function PreferencesGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
 
   return (
-    <SettingsGroup title={t("preferences.account")}>
+    <SettingsGroup title={t("preferences.sectionAccount")}>
       <DisplayNameRow />
       <EmailRow />
     </SettingsGroup>

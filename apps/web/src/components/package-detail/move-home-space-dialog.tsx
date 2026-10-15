@@ -16,11 +16,7 @@ import { writableDestinations } from "../../lib/package-home";
 /** The URL parameter that opens the dialog; its value is the package. */
 export const MOVE_HOME_PARAM = "moveHome";
 
-/**
- * Move a package's home space — the counterpart of `PUT
- * /api/packages/{scope}/{name}/home`, and the only way out of the 409 a space
- * deletion answers when it still homes packages.
- */
+/** `PUT /api/packages/{scope}/{name}/home`; the only way out of the 409 a space deletion answers while it homes packages. */
 export function MoveHomeSpaceDialog({
   onClose,
   packageId,
@@ -36,19 +32,14 @@ export function MoveHomeSpaceDialog({
   const { data: spaces } = useSpaces();
   const move = useMovePackageHome(type);
   const [target, setTarget] = useState("");
-  // Checked by default: that is what the move has always done, so opening this
-  // dialog and pressing Move changes nothing about what the space being left
-  // runs. Unchecking is the deliberate act, not the default one.
+  // Checked by default: pressing Move alone changes nothing about what the space being left runs.
   const [keepInPreviousHome, setKeepInPreviousHome] = useState(true);
 
   const writable = writableDestinations(spaces, type, homeSpaceId);
-  // The space being LEFT, named so the checkbox can say which one it is about.
-  // `home_space_id` is null when the caller cannot reach that space — but the
-  // move requires `<type>:write` THERE, so a caller who got this far can.
+  // The space being LEFT; `home_space_id` is null only when unreachable, which the move's `<type>:write` there rules out.
   const previousHome = spaces?.find((space) => space.id === homeSpaceId);
 
-  // The dialog stays mounted between openings, so the selection is cleared on
-  // the way OUT — every exit goes through here (cancel, Esc, overlay, success).
+  // The dialog stays mounted between openings, so every exit clears the selection.
   const close = () => {
     setTarget("");
     setKeepInPreviousHome(true);
@@ -92,13 +83,6 @@ export function MoveHomeSpaceDialog({
           options={writable.map((space) => ({ value: space.id, label: space.name }))}
         />
       </FormItem>
-      {/*
-        The half of the act the word "move" does not carry: the space being
-        LEFT keeps the package unless this is unchecked. Rendered whether or
-        not that space currently runs it, because the answer is the same either
-        way — a dialog that appeared only for an activated package would put
-        the old asymmetry back where the user cannot see it.
-      */}
       {previousHome ? (
         <CheckboxField
           id="move-home-keep"

@@ -9,7 +9,6 @@ import {
   getManifestName,
   getResourceEntries,
   setResourceEntries,
-  schemaToFields,
   fieldsToSchema,
   changeType,
   fieldType,
@@ -35,6 +34,15 @@ import type { SchemaField } from "../types";
 import type { JSONSchema7, JSONSchemaObject } from "@appstrate/core/form";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
+
+/** `schemaToFields` is internal to `../utils`; the tests reach it through the manifest entry point. */
+function schemaToFields(
+  schema: JSONSchemaObject | undefined,
+  mode: "input" | "output",
+  wrapper: Record<string, unknown> = {},
+): SchemaField[] {
+  return manifestToSchemaFields({ [mode]: { schema, ...wrapper } })[mode]!;
+}
 
 // ─── getManifestName ────────────────────────────────────────
 

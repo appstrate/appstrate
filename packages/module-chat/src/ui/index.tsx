@@ -363,7 +363,7 @@ export function ChatPage({
               `ChatConversationTitle`. What is left is the thread itself. */}
           {/* A plain div, not a `main`: the host shell's inset already IS the
               page's `main` landmark, and two nested ones name two pages. */}
-          <div className="bg-canvas flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
+          <div className="bg-canvas flex size-full min-h-0 min-w-0 flex-col overflow-hidden">
             <Conversation
               key={activeId}
               id={activeId}
@@ -782,17 +782,17 @@ function ConversationSkeleton({
       role="status"
       aria-busy="true"
       aria-label={label}
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="flex size-full flex-col overflow-hidden"
     >
       <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-6 px-4 pt-8">
         <Skeleton aria-hidden className="ml-auto h-10 w-2/5 rounded-2xl" />
-        <div aria-hidden className="space-y-2.5">
+        <div aria-hidden className="flex flex-col gap-2.5">
           <Skeleton className="h-3.5 w-full" />
           <Skeleton className="h-3.5 w-11/12" />
           <Skeleton className="h-3.5 w-3/5" />
         </div>
         <Skeleton aria-hidden className="ml-auto h-10 w-1/3 rounded-2xl" />
-        <div aria-hidden className="space-y-2.5">
+        <div aria-hidden className="flex flex-col gap-2.5">
           <Skeleton className="h-3.5 w-full" />
           <Skeleton className="h-3.5 w-2/5" />
         </div>

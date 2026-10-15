@@ -379,7 +379,7 @@ function Composer({
               className="size-8 shrink-0 rounded-lg"
               aria-label={t("composer.stop")}
             >
-              <SquareIcon className="size-3 fill-current" />
+              <SquareIcon className="fill-current" />
             </Button>
           </ComposerPrimitive.Cancel>
         </ThreadPrimitive.If>
@@ -539,8 +539,8 @@ export function MessageError() {
             asChild
           >
             <Button type="button" variant="outline" size="sm" className="shrink-0">
-              <RotateCcwIcon className="size-3.5" />
-              {t("turn.retry")}
+              <RotateCcwIcon />
+              {t("common:btn.retry")}
             </Button>
           </ThreadPrimitive.Suggestion>
         </ThreadPrimitive.If>
@@ -577,7 +577,7 @@ function AssistantMessage() {
             snapshot), which is the seamless behavior we want. */}
         <ActionBarPrimitive.Root className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <ActionBarPrimitive.Copy asChild>
-            <IconButton label={t("action.copy")}>
+            <IconButton label={t("common:btn.copy")}>
               <MessagePrimitive.If copied>
                 <CheckIcon />
               </MessagePrimitive.If>

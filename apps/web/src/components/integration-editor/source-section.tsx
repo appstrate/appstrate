@@ -2,25 +2,22 @@
 
 import { useTranslation } from "react-i18next";
 import { FormField } from "../form-field";
-import { EditorSection, type EditorSurface } from "./editor-section";
 import { LocalServerField } from "./local-server-field";
 import { getSource, setSource, type SourceKind } from "./utils";
 
 interface SourceSectionProps {
-  /** `settings` inside the edit panel, `card` on the editor page. */
-  surface?: EditorSurface;
   manifest: Record<string, unknown>;
   onChange: (manifest: Record<string, unknown>) => void;
 }
 
-export function SourceSection({ manifest, onChange, surface = "card" }: SourceSectionProps) {
+export function SourceSection({ manifest, onChange }: SourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const source = getSource(manifest);
   const update = (patch: Partial<typeof source>) =>
     onChange(setSource(manifest, { ...source, ...patch }));
 
   return (
-    <EditorSection surface={surface} title={t("integrationEditor.source.title")}>
+    <section className="flex max-w-2xl flex-col gap-5">
       <FormField
         id="int-source-kind"
         label={t("integrationEditor.source.kind")}
@@ -70,6 +67,6 @@ export function SourceSection({ manifest, onChange, surface = "card" }: SourceSe
       {source.kind === "none" && (
         <p className="text-muted-foreground text-sm">{t("integrationEditor.source.noneDesc")}</p>
       )}
-    </EditorSection>
+    </section>
   );
 }

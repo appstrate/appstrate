@@ -12,30 +12,17 @@ import {
 } from "../../hooks/use-integrations";
 import { ClientsTable } from "./clients-table";
 
-// ─────────────────────────────────────────────
-// Configuration tab — per-auth metadata + OAuth clients
-// ─────────────────────────────────────────────
-
-/**
- * The redirect URI an admin registers at the provider, once per auth, under
- * the clients table.
- */
+/** The redirect URI an admin registers at the provider, once per auth. */
 function AuthTechnicalSettings({ packageId, authKey }: { packageId: string; authKey: string }) {
   const { t } = useTranslation("settings");
-  // Same query keys the table above holds: React Query dedupes, no request.
   const { data: clients, isLoading: clientsLoading } = useIntegrationClients(
     "space",
     packageId,
     authKey,
   );
   const { data: detail } = useIntegrationDetail(packageId);
-  // What connect will ACTUALLY send. A registered client may carry its own
-  // `redirect_uri`, and `OAuth2Strategy.begin` prefers it over the platform
-  // callback (`clientRedirectUri ?? redirectUri`) — so showing the platform
-  // value unconditionally would hand the admin the wrong string to register in
-  // exactly the setup this display exists to get right. New connections always
-  // use the space's default client (its own or the org's it inherits), so that
-  // client's override is the one that decides.
+  // What connect will ACTUALLY send: `OAuth2Strategy.begin` prefers the default client's own
+  // `redirect_uri` over the platform callback (`clientRedirectUri ?? redirectUri`).
   const redirectUri =
     clients?.find((c) => c.is_default)?.redirect_uri || detail?.platform_redirect_uri;
   if (!clientsLoading && !redirectUri) return null;
@@ -43,7 +30,7 @@ function AuthTechnicalSettings({ packageId, authKey }: { packageId: string; auth
     <section className="mt-8">
       <h4 className="mb-4 text-sm font-medium">{t("integration.presentation.technicalDetails")}</h4>
       {redirectUri && (
-        <div className="mb-4 space-y-2">
+        <div className="mb-4 flex flex-col gap-2">
           <p className="text-muted-foreground text-sm">
             {t("integration.oauthClient.platformRedirectUri")}
           </p>
@@ -58,12 +45,7 @@ function AuthTechnicalSettings({ packageId, authKey }: { packageId: string; auth
   );
 }
 
-/**
- * Per-auth admin configuration: what the auth is for, what its manifest pins (the RFC 8707
- * resource, the addresses its credential may reach), the OAuth clients table (one table for the
- * space's, the organization's and the system's clients) and the redirect URI to register at the
- * provider.
- */
+/** Per-auth admin configuration: manifest pins, the OAuth clients table and the redirect URI to register. */
 export function ConfigAuthBlock({
   packageId,
   status,
@@ -95,9 +77,11 @@ export function ConfigAuthBlock({
           )}
           {authorizedUris.length > 0 && (
             <SettingValue label={t("integration.structure.addresses")}>
-              {authorizedUris.map((uri) => (
-                <CopyBlock key={uri} value={uri} />
-              ))}
+              <div className="flex flex-col gap-2">
+                {authorizedUris.map((uri) => (
+                  <CopyBlock key={uri} value={uri} />
+                ))}
+              </div>
             </SettingValue>
           )}
         </dl>

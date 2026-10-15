@@ -6,10 +6,9 @@ import type { components } from "../api/client";
 type RunModelError = NonNullable<components["schemas"]["Run"]["model_error"]>;
 
 /**
- * The sentence a run's failure is shown as, in a list or on the run itself. The run keeps its
- * `error` verbatim (a debugging surface); what is said is chosen from what the server
- * classified — `status` and `model_error` — never from that text, which is shown as written
- * when nothing classified it.
+ * The sentence a run's failure is shown as, chosen from what the server classified
+ * (`status`, `model_error`), never from the verbatim `error` text, which is shown
+ * as written only when nothing classified it.
  */
 export function runErrorText(
   run: { status: string; error?: string | null; model_error?: RunModelError | null },
@@ -26,7 +25,7 @@ export function runErrorText(
   return run.error ?? "";
 }
 
-/** A cancelled run's error is a member's choice, not a failure: muted, never red. */
+// A cancelled run is a member's choice, not a failure: muted, never red.
 export function runErrorTone(run: { status: string }): string {
   return run.status === "cancelled" ? "text-muted-foreground" : "text-destructive";
 }

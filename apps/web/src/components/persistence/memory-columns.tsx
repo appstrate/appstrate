@@ -45,7 +45,7 @@ export function useMemoryColumns({
     {
       id: "type",
       header: t("agents:detail.memoryColumnType"),
-      width: "112px",
+      width: 112,
       cell: (item) => (
         <span className="flex items-center gap-2 text-sm">
           {item.kind === "pinned" ? (
@@ -60,7 +60,8 @@ export function useMemoryColumns({
     {
       id: "content",
       header: t("agents:detail.memoryColumnContent"),
-      width: "minmax(160px,3fr)",
+      width: 160,
+      elastic: true,
       cell: (item) => {
         const content = memoryText(item.content);
         return (
@@ -84,14 +85,14 @@ export function useMemoryColumns({
     {
       id: "scope",
       header: t("agents:detail.memoryColumnScope"),
-      width: "128px",
+      width: 128,
       tier: 2,
       cell: (item) => <ActorBadge actor_type={item.actor_type} actor_id={item.actor_id} />,
     },
     {
       id: "updated",
       header: t("agents:detail.memoryColumnUpdated"),
-      width: "160px",
+      width: 160,
       align: "end",
       tier: 3,
       cell: (item) => <CellDate value={item.updatedAt} />,

@@ -68,12 +68,12 @@ describe("ConnectionSetPicker, the encoding of 'no connection'", () => {
 
   it("only the none mode writes none, and going back to « Hériter » is no choice", () => {
     const unset = menu({ value: null, allowNone: true, inheritDescription: "d" });
-    expect(unset.item("p-none-k")).toMatchObject({ "aria-checked": false });
+    expect(unset.item("p-none-k")).toMatchObject({ checked: false });
     unset.select("p-none-k");
     expect(unset.written).toEqual([[]]);
 
     const none = menu({ value: [], allowNone: true, inheritDescription: "d" });
-    expect(none.item("p-none-k")).toMatchObject({ "aria-checked": true });
+    expect(none.item("p-none-k")).toMatchObject({ checked: true });
     none.select("p-none-k");
     expect(none.written).toEqual([]);
     none.select("p-reset-k");
@@ -115,16 +115,16 @@ describe("ConnectionSetPicker, the encoding of 'no connection'", () => {
 describe("ConnectionSetPicker, three exclusive modes", () => {
   it("ticks exactly one mode: « Hériter » while nothing is chosen", () => {
     const m = menu({ value: null, allowNone: true, inheritDescription: "d" });
-    expect(m.item("p-reset-k")).toMatchObject({ role: "menuitemradio", "aria-checked": true });
-    expect(m.item("p-choose-k")).toMatchObject({ role: "menuitemradio", "aria-checked": false });
-    expect(m.item("p-none-k")).toMatchObject({ role: "menuitemradio", "aria-checked": false });
+    expect(m.item("p-reset-k")).toMatchObject({ checked: true });
+    expect(m.item("p-choose-k")).toMatchObject({ checked: false });
+    expect(m.item("p-none-k")).toMatchObject({ checked: false });
   });
 
   it("switches to « Choisir » as soon as a connection is ticked, boxes under it", () => {
     const m = menu({ value: ["a"], allowNone: true, inheritDescription: "d" });
-    expect(m.item("p-reset-k")).toMatchObject({ "aria-checked": false });
-    expect(m.item("p-choose-k")).toMatchObject({ "aria-checked": true });
-    expect(m.item("p-option-a")).toMatchObject({ role: "menuitemcheckbox", "aria-checked": true });
+    expect(m.item("p-reset-k")).toMatchObject({ checked: false });
+    expect(m.item("p-choose-k")).toMatchObject({ checked: true });
+    expect(m.item("p-option-a")).toMatchObject({ checked: true });
   });
 
   it("leaves « Hériter » out where inheriting is no answer", () => {
@@ -173,6 +173,6 @@ describe("ConnectionSetPicker, the trigger reads the choice", () => {
     expect(m.trigger()).toBe(
       `A · ${i18n.t("agents:detail.integrationMemberPicker.unavailableCount", { count: 1 })}`,
     );
-    expect(m.item("p-unavailable-gone")).toMatchObject({ "aria-checked": false, disabled: true });
+    expect(m.item("p-unavailable-gone")).toMatchObject({ checked: false, disabled: true });
   });
 });

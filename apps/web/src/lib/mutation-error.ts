@@ -21,11 +21,7 @@ export const SKILL_FRONTMATTER_ERROR_KEYS = {
   skill_invalid_frontmatter_description: "editor.errorSkillDescriptionTooLong",
 } as const satisfies Partial<Record<Lowercase<CompanionViolationReason>, string>>;
 
-/**
- * Where the validator stopped in the file, said in the reader's language: « (ligne 3,
- * colonne 14) », or "". The server sends the position (`line`/`column`, 1-based, in the file's
- * own lines); nothing is read from its sentence.
- */
+/** Where the validator stopped, in the reader's language (« (ligne 3, colonne 14) » or ""), from the server's 1-based `line`/`column`. */
 export function filePosition(err: { line?: number; column?: number }): string {
   if (err.line === undefined || err.column === undefined) return "";
   return i18n.t("editor.errorSkillYamlPosition", {
@@ -61,10 +57,7 @@ const RESOLUTION_ERROR_KEYS = {
   string
 >;
 
-/**
- * Refusals whose sentence is `agents:*` copy other components reuse; the lock codes interpolate
- * the field named in `param`. Every other code resolves to `common:apiError.<code>`.
- */
+/** Refusals whose sentence is `agents:*` copy reused elsewhere; every other code resolves to `common:apiError.<code>`. */
 export const REFUSAL_ERROR_KEYS = {
   locked_input_field: "error.lockedInputField",
   locked_required_field_empty: "error.lockedRequiredFieldEmpty",
@@ -79,46 +72,39 @@ export const REFUSAL_ERROR_KEYS = {
   ...SKILL_FRONTMATTER_ERROR_KEYS,
 } as const;
 
-/** `keys[code]`, for a code that may lie outside the table's closed key set. */
 export function sentenceKey(keys: Readonly<Record<string, string>>, code: string) {
   return Object.prototype.hasOwnProperty.call(keys, code) ? keys[code] : undefined;
 }
 
-/** What a refusal carries: a problem body, or one item of its `errors[]`. */
+/** A problem body, or one item of its `errors[]`. */
 interface Refusal {
   code: string;
   param?: string;
   field?: string;
   message?: string;
-  /** 1-based position in the offending file, on a file-level item. */
+  /** 1-based position in the offending file. */
   line?: number;
   column?: number;
 }
 
-/**
- * The translated sentence for a server refusal `code`, or `null` when it has none. Better
- * Auth's and the importers' UPPER_SNAKE codes share the table, lower-cased.
- */
+/** The translated sentence for a refusal `code`, or `null`. Better Auth's and the importers' UPPER_SNAKE codes share the table, lower-cased. */
 export function refusalMessage(err: Refusal): string | null {
   const code = err.code.toLowerCase();
   const message = err.message ?? "";
   const agentsKey = sentenceKey(REFUSAL_ERROR_KEYS, code);
   if (agentsKey) {
-    // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
-    // the first segment is the prefix.
+    // `param` is `<prefix>.<field>`; the field may contain dots, only the first segment is the prefix.
     const field = err.param?.slice(err.param.indexOf(".") + 1) || err.param || "";
     const position = filePosition(err);
     return i18n.t(agentsKey, { field, message, detail: message, position, ns: "agents" });
   }
   const key = `apiError.${code}`;
   if (!i18n.exists(key, { ns: "common" })) return null;
-  // `input.` is a launch parameter's wire prefix. `<key>_nofield` is the sentence of a code
-  // also emitted without a field, so the first never renders an empty « ».
+  // `input.` is a launch parameter's wire prefix; `<key>_nofield` is for a code also emitted without a field.
   const field = (err.field ?? err.param)?.replace(/^input\./, "");
   return i18n.t(key, { field, message, context: field ? undefined : "nofield", ns: "common" });
 }
 
-/** The `errors[]` items of a `validation_failed`: each one's own code names a refusal. */
 function fieldErrors(err: ApiError): Refusal[] {
   return (err.errors ?? []).flatMap((item: unknown) => {
     if (typeof item !== "object" || item === null) return [];
@@ -164,7 +150,6 @@ export function errorDetail(err: unknown): string | null {
   return translated(err) ?? (getErrorMessage(err) || null);
 }
 
-/** The sentence for an inline slot (a form error): never empty. */
 export function errorMessage(err: unknown): string {
   return errorDetail(err) ?? i18n.t("error.generic");
 }
@@ -176,20 +161,19 @@ export function toastError(err: unknown, options?: Parameters<typeof toast.error
 
 /** A failed write, as a mutation's `onError` — and what the global mutation toast calls. */
 export function onMutationError(err: Error) {
-  // A run launch answers this 409 with its recovery modal, a schedule form inline, and a
-  // surface with no picker with `toastScheduleConnectionChoice`.
+  // Answered elsewhere: the run launch's recovery modal, a schedule form inline, or `toastScheduleConnectionChoice`.
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
     return;
   }
   toastError(err);
 }
 
-/**
- * A schedule write's `409 missing_integration_connection`, for a surface with no picker (the
- * detail page's enable toggle). Anything else is left to `onMutationError`.
- */
-export function toastScheduleConnectionChoice(err: Error) {
+/** A schedule write's `409 missing_integration_connection` (the enable toggle has no picker; the settings' Save leads to Connexions with `action`); anything else is left to `onMutationError`. */
+export function toastScheduleConnectionChoice(
+  err: Error,
+  action?: { label: string; onClick: () => void },
+) {
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
-    toast.error(i18n.t("schedule.connectionChoiceRequired", { ns: "agents" }));
+    toast.error(i18n.t("schedule.connectionChoiceRequired", { ns: "agents" }), { action });
   }
 }

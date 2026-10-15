@@ -35,8 +35,8 @@ export function RowsEditor<T>({
   const { t } = useTranslation("common");
 
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
+    <div className="flex flex-col gap-2">
+      <Label className="mb-0">{label}</Label>
       {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
       {rows.map((row, index) => (
         <div key={index} className="flex items-center gap-2">
@@ -46,17 +46,23 @@ export function RowsEditor<T>({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-8 w-8 shrink-0"
+              className="size-8 shrink-0"
               aria-label={t("btn.delete")}
               onClick={() => onChange(rows.filter((_, i) => i !== index))}
             >
-              <Trash2 size={14} />
+              <Trash2 />
             </Button>
           )}
         </div>
       ))}
-      <Button type="button" variant="outline" size="sm" onClick={() => onChange([...rows, newRow])}>
-        <Plus size={14} />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="self-start"
+        onClick={() => onChange([...rows, newRow])}
+      >
+        <Plus />
         {addLabel}
       </Button>
     </div>

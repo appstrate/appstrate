@@ -16,6 +16,7 @@ import {
 } from "@appstrate/ui/components/select";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
@@ -48,11 +49,7 @@ import { TextSkeleton } from "../loading-skeletons";
 /** The subject of one offer, as the picker encodes it. */
 type ShareTarget = { kind: "user"; userId: string } | { kind: "space"; spaceId: string };
 
-/**
- * One `<SelectItem>` value carrying both halves of a target. A space id is
- * `spc_…` and a user id is not, so the prefix is redundant for parsing — it is
- * there so a value can never be read as the other kind by accident.
- */
+/** One `<SelectItem>` value carrying both halves of a target; the prefix keeps a value from being read as the other kind. */
 function targetValue(target: ShareTarget): string {
   return target.kind === "user" ? `user:${target.userId}` : `space:${target.spaceId}`;
 }
@@ -72,23 +69,11 @@ function parseTargetValue(value: string): ShareTarget | null {
 export const SHARE_PARAM = "share";
 
 /**
- * The two things "sharing" can mean, named separately.
- *
- * DISTRIBUTION ("Utiliser") is the offer of RBAC spec §6.10: the recipient gets
- * the package placed in their own space, switches it on themselves, and it runs
- * with THEIR credentials against its latest published version. Editing stays
- * home.
- *
- * COLLABORATION ("Co-éditer") is not that act at all — it is a role in the
- * package's HOME space, so the other person works on the live object where it
- * lives. Two tables, two targets, and one of them is refused outright when the
- * home is personal, which is why this is two tabs and not one dropdown of
- * escalating strengths: a spectrum would promise a middle that does not exist.
- *
- * Distribution takes ONE picker over people AND spaces, the shape Notion and
- * Copilot Studio both use, because "person or space" is a property of the
- * target, not a second intent — splitting it into tabs put two different axes
- * in one `TabsList`.
+ * Two tabs, because "sharing" means two different acts. DISTRIBUTION ("Utiliser", RBAC §6.10): the
+ * package is placed in the recipient's space and runs with THEIR credentials on its latest
+ * published version. COLLABORATION ("Co-éditer"): a role in the package's HOME space, refused when
+ * the home is personal. Distribution uses one picker over people AND spaces (kind is a property of
+ * the target, not a second intent).
  */
 export function SharePackageDialog({
   onClose,
@@ -104,29 +89,17 @@ export function SharePackageDialog({
   type: PackageType;
   /** The package's home — never a share destination; it already lives there. */
   homeSpaceId: string | null | undefined;
-  /**
-   * `home_writable`: publishing is a WRITE in the home space, and a custom role
-   * may grant `share` without it (RBAC spec §6.10). Without it the dialog states
-   * the refusal and names no button the server would turn down.
-   */
+  /** `home_writable`: publishing is a WRITE in the home, which a custom role may withhold from `share` (RBAC §6.10). */
   canPublish: boolean;
-  /**
-   * Hand the reader over to the move-home dialog, the ONE way a package leaves
-   * a personal space (`PUT …/home`; a personal space is never converted —
-   * `personal_space_not_orphaned`). Owned by the caller rather than rendered
-   * here so two modals never stack.
-   */
+  /** Hands over to the move-home dialog (the one way out of a personal space); the caller owns it so two modals never stack. */
   onMoveHome?: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const { data: shares, isLoading } = usePackageShares(packageId, true);
   const { data: spaces } = useSpaces();
   const { data: org } = useOrgDetail();
-  // Only an AGENT declares integrations; the other families have no closure a
-  // recipient has to hold.
+  // Only an AGENT declares integrations.
   const detail = usePackageDetail("agent", type === "agent" ? packageId : undefined);
-  // The names as a reader knows them, not the ids: one read of exactly the
-  // declared integrations.
   const declared = detail.data?.dependencies.integrations ?? [];
   const { data: integrationRows } = useIntegrationsById(declared.map((entry) => entry.id));
   const declaredIntegrations = declared.map((entry) => {
@@ -143,18 +116,10 @@ export function SharePackageDialog({
   /** Already-offered subjects, so the picker does not propose a no-op. */
   const offered = useMemo(() => new Set((shares ?? []).map(shareTargetHandle)), [shares]);
 
-  /**
-   * The home's OWNER is a no-op target as surely as the home space itself — a
-   * person resolves server-side to their personal space — but this projection
-   * cannot identify them: a personal space's owner is deliberately not named on
-   * the wire. So the picker may still offer one, and the `409
-   * share_target_is_home` branch below is what says so, in the reader's own
-   * language.
-   */
+  // The home's OWNER is a no-op target too, but a personal space's owner is not named on the wire,
+  // so the picker may offer them; the `409 share_target_is_home` branch below says so.
   const members = (org?.members ?? []).filter((member) => !offered.has(member.userId));
-  // A share destination is a space the caller reaches that is neither the
-  // package's home nor their OWN personal space: the first already has it, and
-  // the second is reached by activating it, not by offering it to yourself.
+  // Neither the package's home (already has it) nor the caller's own personal space (reached by activating).
   const destinations = (spaces ?? []).filter(
     (candidate) =>
       !candidate.personal &&
@@ -181,17 +146,12 @@ export function SharePackageDialog({
           setNeedsVersion(null);
         },
         onError: (error) => {
-          // Not an error to report and walk away from: it is a missing step,
-          // and the next panel performs it. Every other refusal is terminal
-          // here and stays a toast.
+          // A missing step, performed by the next panel; every other refusal is a toast.
           if (error instanceof ApiError && error.code === "package_has_no_version") {
             setNeedsVersion(offer);
             return;
           }
-          // Terminal like the rest, but said in the reader's language: the
-          // server's `detail` is English, and the picker cannot always rule
-          // this target out beforehand (it never learns whose personal space
-          // another member's is).
+          // The picker cannot always rule this target out beforehand (another member's personal space is unknown to it).
           if (error instanceof ApiError && error.code === "share_target_is_home") {
             toast.error(t("packages.shareTargetIsHome"));
             return;
@@ -201,13 +161,7 @@ export function SharePackageDialog({
       },
     );
 
-  /**
-   * Publish the draft under the version its own manifest declares, then replay
-   * the refused offer. Two calls the author could make by hand, in the order
-   * that makes the second one succeed — the server publishes nothing on its own
-   * (freezing somebody's working copy is their decision, not a side effect of
-   * a share).
-   */
+  /** Publish the draft, then replay the refused offer; the server never publishes on its own (freezing a working copy is the author's call). */
   const publishAndShare = async () => {
     const offer = needsVersion;
     if (!offer) return;
@@ -217,15 +171,12 @@ export function SharePackageDialog({
       setNeedsVersion(null);
       submit(offer);
     } catch (error) {
-      // An incomplete draft is refused at publish (empty callable selections,
-      // a manifest the freeze point rejects): the server's own words say which.
       toastError(error);
     }
   };
 
   return (
     <Modal
-      open
       onClose={close}
       title={t("packages.shareTitle")}
       actions={
@@ -239,8 +190,10 @@ export function SharePackageDialog({
           <TabsTrigger value="use">{t("packages.shareTabUse")}</TabsTrigger>
           <TabsTrigger value="coedit">{t("packages.shareTabCoedit")}</TabsTrigger>
         </TabsList>
-        <TabsContent value="use" className="space-y-2">
-          <Label htmlFor="share-target">{t("packages.shareUseLabel")}</Label>
+        <TabsContent value="use" className="flex flex-col gap-2">
+          <Label htmlFor="share-target" className="mb-0">
+            {t("packages.shareUseLabel")}
+          </Label>
           <div className="flex gap-2">
             <Select value={target || undefined} onValueChange={setTarget}>
               <SelectTrigger id="share-target" className="w-full">
@@ -262,7 +215,7 @@ export function SharePackageDialog({
                 )}
                 {destinations.length > 0 && (
                   <SelectGroup>
-                    <SelectLabel>{t("packages.shareGroupSpaces")}</SelectLabel>
+                    <SelectLabel>{t("orgSettings.inviteSpacesLabel")}</SelectLabel>
                     {destinations.map((candidate) => (
                       <SelectItem
                         key={candidate.id}
@@ -284,11 +237,6 @@ export function SharePackageDialog({
               {t("packages.shareSubmit")}
             </PendingButton>
           </div>
-          {/*
-            One picker, two outcomes: what the recipient gets differs by KIND,
-            so the hint follows the selection rather than stating a half-truth
-            about whichever one the reader did not pick.
-          */}
           <p className="text-muted-foreground text-sm">
             {selected?.kind === "user"
               ? t("packages.shareUserHint")
@@ -296,12 +244,7 @@ export function SharePackageDialog({
                 ? t("packages.shareSpaceHint")
                 : t("packages.shareUseHint")}
           </p>
-          {/* What the recipient will have to do, said BEFORE the offer goes
-              out. An agent's skills travel with it — they are judged from its
-              home space — but its integrations are judged where the run starts,
-              so a recipient without them gets `integration_not_active` and no
-              explanation. This is the first failure of every share, and it is
-              avoidable with one sentence. */}
+          {/* Said BEFORE the offer: integrations are judged where the run starts, so a recipient without them gets an unexplained `integration_not_active`. */}
           {declaredIntegrations.length > 0 && (
             <p className="text-muted-foreground text-sm">
               {t("packages.shareIntegrationsHint", {
@@ -312,28 +255,31 @@ export function SharePackageDialog({
           )}
 
           {needsVersion && (
-            <div
+            <Alert
+              variant="warning"
               data-testid="share-needs-version"
-              className="border-warning/40 bg-warning/10 mt-4 space-y-2 rounded-md border p-3 text-sm"
+              className="bg-warning/10 mt-2 rounded-md p-3"
             >
-              <p>{t("packages.shareNeedsVersion")}</p>
-              {canPublish ? (
-                <PendingButton
-                  type="button"
-                  size="sm"
-                  pending={publish.isPending}
-                  disabled={share.isPending}
-                  onClick={() => void publishAndShare()}
-                >
-                  {t("packages.sharePublishAndShare")}
-                </PendingButton>
-              ) : (
-                <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
-              )}
-            </div>
+              <AlertDescription className="flex flex-col items-start gap-2">
+                <p>{t("packages.shareNeedsVersion")}</p>
+                {canPublish ? (
+                  <PendingButton
+                    type="button"
+                    size="sm"
+                    pending={publish.isPending}
+                    disabled={share.isPending}
+                    onClick={() => void publishAndShare()}
+                  >
+                    {t("packages.sharePublishAndShare")}
+                  </PendingButton>
+                ) : (
+                  <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
+                )}
+              </AlertDescription>
+            </Alert>
           )}
 
-          <div className="mt-4 space-y-1 border-t pt-4">
+          <div className="mt-2 flex flex-col gap-1 border-t pt-4">
             <p className="text-sm font-medium">{t("packages.shareCurrent")}</p>
             {isLoading ? (
               <TextSkeleton lines={2} className="py-1.5" />
@@ -373,7 +319,7 @@ export function SharePackageDialog({
                         )
                       }
                     >
-                      <Trash2 size={14} />
+                      <Trash2 />
                     </Button>
                   </li>
                 ))}
@@ -394,13 +340,8 @@ export function SharePackageDialog({
 }
 
 /**
- * Co-authoring, which is a role in the package's HOME space and nothing else.
- *
- * Always rendered, never hidden behind the cases where it is possible: the
- * absence of this gesture IS the bug, so the tab that cannot perform it
- * has to say why instead of disappearing. Three answers, read off the home
- * space's own grant rather than `can` — `can` answers for the space the reader
- * is standing in, which is rarely this one.
+ * Co-authoring: a role in the package's HOME space. Always rendered; a caller who cannot perform it
+ * is told why. The verdict is read off the home space's own grant, not `can` (which answers for the current space).
  */
 function CoeditTab({
   homeSpaceId,
@@ -417,32 +358,24 @@ function CoeditTab({
   const verdict = coeditVerdict(home);
   const mayInvite = verdict === "invite";
   const mayRead = home?.permissions.includes("space-members:read") ?? false;
-  // Only to spare the picker a candidate the server would refuse with `409
-  // space_member_exists`: `space-members:read` is a separate grant from
-  // `invite`, so when it is missing the list is simply not narrowed and the
-  // refusal does the talking.
+  // Only narrows candidates; `space-members:read` is separate from `invite`, and without it the 409 does the talking.
   const { data: existing } = useSpaceMembers(homeSpaceId ?? "", mayInvite && mayRead);
   const roles = useSpaceRoleOptions(homeSpaceId ?? undefined, mayInvite);
   const addMember = useAddSpaceMember({ errorHandledByCaller: true });
   const [member, setMember] = useState("");
   const [role, setRole] = useState(DEFAULT_SPACE_ROLE_VALUE);
 
-  // Everyone who already reaches the home space — the CALLER included, since
-  // holding `<type>:share` there means holding a role there. So this is also
-  // what keeps the reader from offering the space to themselves, and when
-  // `space-members:read` is absent the `409` is what says it instead.
+  // Everyone already in the home space, the CALLER included (`<type>:share` there implies a role).
   const reached = useMemo(() => new Set((existing ?? []).map((row) => row.userId)), [existing]);
   const candidates = orgMembers.filter((candidate) => !reached.has(candidate.userId));
 
   if (verdict === "unknown") return <TextSkeleton lines={2} />;
 
-  // A personal space belongs to ONE member and takes no others
-  // (`personal_space_has_no_members`), and it is never converted while it lives
-  // (`personal_space_not_orphaned`). So the gesture is to move the PACKAGE out,
-  // which `PUT …/home` already allows in exactly this direction.
+  // A personal space takes no other members (`personal_space_has_no_members`) and is never
+  // converted (`personal_space_not_orphaned`): the gesture is to move the PACKAGE out (`PUT …/home`).
   if (verdict === "personal") {
     return (
-      <div className="space-y-3" data-testid="coedit-personal">
+      <div className="flex flex-col items-start gap-3" data-testid="coedit-personal">
         <p className="text-muted-foreground text-sm">{t("packages.coeditPersonal")}</p>
         {onMoveHome && (
           <Button type="button" size="sm" variant="outline" onClick={onMoveHome}>
@@ -474,9 +407,7 @@ function CoeditTab({
           setMember("");
         },
         onError: (error) => {
-          // Said in the reader's language: the picker cannot narrow this one
-          // away without `space-members:read`, and an owner/admin is refused
-          // for a reason of its own the server states in English.
+          // The picker cannot narrow this away without `space-members:read`.
           if (error instanceof ApiError && error.code === "space_member_exists") {
             toast.error(t("packages.coeditMemberExists"));
             return;
@@ -488,8 +419,10 @@ function CoeditTab({
   };
 
   return (
-    <div className="space-y-2" data-testid="coedit-invite">
-      <Label htmlFor="coedit-member">{t("packages.coeditLabel")}</Label>
+    <div className="flex flex-col gap-2" data-testid="coedit-invite">
+      <Label htmlFor="coedit-member" className="mb-0">
+        {t("packages.coeditLabel")}
+      </Label>
       <div className="flex gap-2">
         <OptionSelect
           id="coedit-member"

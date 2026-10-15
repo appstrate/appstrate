@@ -43,8 +43,7 @@ describe("route declarations", () => {
     "components/org-switcher.tsx",
     "components/notification-bell.tsx",
     "components/nav-user.tsx",
-    "components/app-sidebar.tsx",
-    "components/shell-frame.tsx",
+    "components/app-shell.tsx",
     "components/product-tabs.tsx",
     "components/shell-breadcrumb.tsx",
   ].map((file) => ({ file, text: source(`../../${file}`) }));
@@ -194,7 +193,7 @@ describe("routeOf", () => {
   });
 
   it("ranks a concrete URL the way the router does: static segments first", () => {
-    expect(routeOf("/agents/new")).toBe("/agents/new");
+    expect(routeOf("/skills/new")).toBe("/skills/new");
     expect(routeOf("/agents/@acme/triage")).toBe("/agents/:scope/:name");
     expect(routeOf("/agents/@acme/triage/1.2.0")).toBe("/agents/:scope/:name/:version");
     expect(routeOf("/agents/@acme/triage/runs/run_1?tab=logs#x")).toBe(

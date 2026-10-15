@@ -110,7 +110,7 @@ describe("a failed chat turn, through the real assistant-ui runtime", () => {
     expect(html).toContain("turn.error.quotaExceeded turn.error.contactAdmin");
     expect(html).not.toContain("turn.error.unknown");
     expect(html).not.toContain("English prose");
-    expect(html).not.toContain("turn.retry");
+    expect(html).not.toContain("common:btn.retry");
   });
 
   it("links a billing manager to the billing page", () => {
@@ -126,14 +126,14 @@ describe("a failed chat turn, through the real assistant-ui runtime", () => {
     const html = renderFailedTurn(refused(body));
     expect(html).toContain("turn.error.needsReconnection");
     expect(html).not.toContain("turn.error.unknown");
-    expect(html).not.toContain("turn.retry");
+    expect(html).not.toContain("common:btn.retry");
   });
 
   it("names a pre-stream 429 as rate limiting, and offers a retry", () => {
     // The capacity cap, serialized as the API's error handler does.
     const html = renderFailedTurn(refused(chatCapacityError().toProblemDetail("req_1")));
     expect(html).toContain("turn.error.rateLimited");
-    expect(html).toContain("turn.retry");
+    expect(html).toContain("common:btn.retry");
     expect(html).not.toContain("turn.error.unknown");
   });
 
@@ -141,7 +141,7 @@ describe("a failed chat turn, through the real assistant-ui runtime", () => {
     // What `processUIMessageStream` (`ai`) raises for an `error` chunk.
     const html = renderFailedTurn(new Error("appstrate:chat-turn-error:rate_limited"));
     expect(html).toContain("turn.error.rateLimited");
-    expect(html).toContain("turn.retry");
+    expect(html).toContain("common:btn.retry");
     expect(html).not.toContain("turn.error.unknown");
   });
 

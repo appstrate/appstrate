@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Read the results of the two first-party runtime tools a run can call,
- * `recall_memory` and `run_history`, so the journal can list them instead of
- * printing JSON. Both answer through the sidecar as an MCP text part holding
- * the platform's JSON (`GET /internal/memories` → `{ memories }`,
- * `GET /internal/run-history` → a `{ data }` list envelope); a result logged
- * already parsed, or as a bare string, reads the same.
- *
- * `null` means "not a shape this knows", and the caller keeps the raw JSON.
+ * Reads the results of `recall_memory` and `run_history` (an MCP text part holding
+ * `{ memories }` / a `{ data }` envelope; an already-parsed or bare-string result
+ * reads the same). `null` = unknown shape, the caller keeps the raw JSON.
  */
 
 import { asRecordOrNull } from "@appstrate/core/safe-json";

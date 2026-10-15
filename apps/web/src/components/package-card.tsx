@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
-import { Badge, MetaBadge } from "./status-badge";
+import { Card } from "@appstrate/ui/components/card";
+import { RunStatusBadge, MetaBadge } from "./status-badge";
 import { CountBadge } from "./count-badge";
 import { PackageIcon } from "./package-icon";
 import { RunAgentButton } from "./run-agent-button";
@@ -19,6 +20,8 @@ import type { CardItem } from "../lib/package-card-item";
  * stretched over the surface (`after:absolute after:inset-0`); what acts on
  * its own (run, the state control, the footer) is raised above it.
  */
+const KEYWORD_PILL = "bg-background text-muted-foreground shrink-0 px-2 text-[0.7rem] font-normal";
+
 export function PackageCard({
   id,
   displayName,
@@ -29,7 +32,6 @@ export function PackageCard({
   runningRuns,
   keywords,
   usedByAgents,
-  connectionCount,
   unreadCount,
   actions,
   autoInstalled,
@@ -61,7 +63,7 @@ export function PackageCard({
   const Heading = headingLevel === 3 ? "h3" : "h2";
 
   return (
-    <div className="border-border bg-card hover:border-foreground/20 hover:bg-accent/50 relative flex h-full w-full flex-col rounded-lg border p-4 transition-colors">
+    <Card className="hover:border-foreground/20 hover:bg-accent/50 relative flex h-full w-full flex-col p-4 transition-colors">
       {/* The icon tile sits LEFT of the title and its description, the way a
           store's card reads: what it is, then what it does. */}
       <div className="flex min-w-0 gap-3">
@@ -91,7 +93,7 @@ export function PackageCard({
               {source === "system" && (
                 <span title={t("list.badgeBuiltIn")}>
                   <ShieldCheck
-                    className="text-muted-foreground h-4 w-4"
+                    className="text-muted-foreground size-4"
                     role="img"
                     aria-label={t("list.badgeBuiltIn")}
                   />
@@ -102,7 +104,9 @@ export function PackageCard({
                 count={unreadCount ?? 0}
                 label={t("dashboard.unreadRuns", { ns: "agents", count: unreadCount ?? 0 })}
               />
-              {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
+              {type === "agent" && !!runningRuns && runningRuns > 0 && (
+                <RunStatusBadge status="running" />
+              )}
               {/* Listed here IS runnable here: the index and the launch routes
                   read the same rule (placed in this space and switched on), so
                   the card never has to explain an activation the row could not
@@ -140,26 +144,18 @@ export function PackageCard({
             sits: the text wraps before it instead of running underneath. */}
         {status && <div className="relative z-10 shrink-0 self-start">{status}</div>}
       </div>
-      {keywords?.length || (type !== "agent" && (usedByAgents ?? 0) > 0) || connectionCount ? (
+      {keywords?.length || (type !== "agent" && (usedByAgents ?? 0) > 0) ? (
         <ScrollArea className="relative z-10 mt-2 w-full">
           <div className="flex gap-1">
             {keywords?.map((kw) => (
-              <span
-                key={kw}
-                className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]"
-              >
+              <UIBadge key={kw} variant="outline" className={KEYWORD_PILL}>
                 {kw}
-              </span>
+              </UIBadge>
             ))}
-            {connectionCount !== undefined && connectionCount > 0 && (
-              <span className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]">
-                {t("integrations.connectionCount", { count: connectionCount, ns: "settings" })}
-              </span>
-            )}
             {type !== "agent" && usedByAgents !== undefined && usedByAgents > 0 && (
-              <span className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]">
+              <UIBadge variant="outline" className={KEYWORD_PILL}>
                 {t("list.usedByAgents", { count: usedByAgents, ns: "agents" })}
-              </span>
+              </UIBadge>
             )}
           </div>
           <ScrollBar orientation="horizontal" className="h-0 opacity-0" />
@@ -175,6 +171,6 @@ export function PackageCard({
           {actions}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

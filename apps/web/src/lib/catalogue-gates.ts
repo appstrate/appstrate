@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * What the catalogue lets a reader DO to one package, as pure verdicts: every
- * switch, add button, bulk tick and row menu reads them, so a control can never
- * offer what the server refuses.
- */
+// Pure verdicts on what a reader may DO to a package: controls read them so none offers what the server refuses.
 
 import type { LibraryPackageItem } from "../hooks/use-library";
 
-/** Why a switch cannot go the way it would go — each one its own sentence. */
 export type ActivationRefusal = "notPlaced" | "activate" | "deactivate";
 
 export interface ActivationGate {
@@ -17,7 +12,7 @@ export interface ActivationGate {
   refusal: ActivationRefusal | null;
 }
 
-/** The sentence each refusal carries, spelled out so the locale test sees every key. */
+/** Spelled out so the locale test sees every key. */
 export const ACTIVATION_REFUSAL_KEY: Record<ActivationRefusal, string> = {
   notPlaced: "library.cannotShareHere",
   activate: "library.cannotActivate",
@@ -25,10 +20,9 @@ export const ACTIVATION_REFUSAL_KEY: Record<ActivationRefusal, string> = {
 };
 
 /**
- * May the reader switch `pkg` on (`next: true`) or off in `spaceId`? The server's verdict, served
- * on the library row (`activation`): the type's grant in the target space (the owner of a
- * personal space needs none), and, where the package is not placed yet, the share right in its
- * home. A space the row has no verdict for refuses without blaming either half.
+ * The server's verdict (library row `activation`): the type's grant in the target space (a personal
+ * space's owner needs none) and, where not placed yet, the share right in its home. No verdict
+ * for a space refuses without blaming either half.
  */
 export function activationGate(
   pkg: Pick<LibraryPackageItem, "activation">,
@@ -43,13 +37,11 @@ export function activationGate(
   return { allowed: false, refusal: next ? "activate" : "deactivate" };
 }
 
-/** The deeds on the package itself, behind a row's "…" and the sheet's Actions menu. */
 export interface CatalogueDeeds {
-  /** `home_writable`: moving a package is the same authority as editing it. */
+  /** `home_writable`: moving is the same authority as editing. */
   moveHome: boolean;
-  /** `home_shareable`: a verb of its own on the home space (RBAC spec §6.10). */
+  /** `home_shareable`: a verb of its own (RBAC spec §6.10). */
   share: boolean;
-  /** Spaces whose share the reader may withdraw, with the activation it backs. */
   revokeFrom: string[];
 }
 

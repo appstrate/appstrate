@@ -8,7 +8,7 @@ import { FormModal } from "./form-modal";
 import { ConfirmModal } from "./confirm-modal";
 import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { Button } from "@appstrate/ui/components/button";
-import { Label } from "@appstrate/ui/components/label";
+import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { Badge } from "@appstrate/ui/components/badge";
 import { useDeleteEndUser, useUpdateEndUser, type EndUserInfo } from "../hooks/use-end-users";
 import { usePermissions } from "../hooks/use-permissions";
@@ -35,28 +35,6 @@ function formValues(endUser: EndUserInfo | null): EndUserFormValues {
     externalId: endUser?.externalId ?? "",
     metadata: metadataToEntries(endUser?.metadata ?? null),
   };
-}
-
-function CopyableField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-muted-foreground text-xs">{label}</Label>
-      <div className="flex items-center gap-2">
-        <span className="text-sm break-all">{value}</span>
-        <CopyButton value={value} />
-      </div>
-    </div>
-  );
-}
-
-function ReadOnlyField({ label, value }: { label: string; value: string | null | undefined }) {
-  if (!value) return null;
-  return (
-    <div className="space-y-1">
-      <Label className="text-muted-foreground text-xs">{label}</Label>
-      <p className="text-sm">{value}</p>
-    </div>
-  );
 }
 
 export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDetail }: Props) {
@@ -116,7 +94,7 @@ export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDe
     return (
       <FormModal
         onClose={stopEditing}
-        title={t("spaces.editEndUser")}
+        title={t("common:btn.edit")}
         onSubmit={handleSave}
         isPending={updateMutation.isPending}
         error={updateMutation.error ? errorMessage(updateMutation.error) : null}
@@ -129,7 +107,6 @@ export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDe
   return (
     <>
       <Modal
-        open
         onClose={onClose}
         title={endUserLabel(endUser, t("spaces.endUserDetail"))}
         actions={
@@ -150,19 +127,21 @@ export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDe
           ) : undefined
         }
       >
-        <div className="space-y-4">
-          <CopyableField label="ID" value={endUser.id} />
-          <ReadOnlyField label={t("spaces.endUserName")} value={endUser.name} />
-          <ReadOnlyField label={t("spaces.endUserEmail")} value={endUser.email} />
-          <ReadOnlyField label={t("spaces.endUserExternalId")} value={endUser.externalId} />
-          <ReadOnlyField
-            label={t("spaces.createdAtLabel")}
-            value={formatDateField(endUser.createdAt)}
-          />
-
+        <FactGrid columns={1} className="gap-y-4">
+          <Fact label="ID">
+            <div className="flex items-center gap-2">
+              <span className="break-all">{endUser.id}</span>
+              <CopyButton value={endUser.id} />
+            </div>
+          </Fact>
+          {endUser.name && <Fact label={t("spaces.nameLabel")}>{endUser.name}</Fact>}
+          {endUser.email && <Fact label={t("login.email")}>{endUser.email}</Fact>}
+          {endUser.externalId && (
+            <Fact label={t("spaces.endUserExternalId")}>{endUser.externalId}</Fact>
+          )}
+          <Fact label={t("spaces.createdAtLabel")}>{formatDateField(endUser.createdAt)}</Fact>
           {metaEntries.length > 0 && (
-            <div className="space-y-2">
-              <Label className="text-muted-foreground text-xs">{t("spaces.metadata")}</Label>
+            <Fact label={t("spaces.metadata")}>
               <div className="flex flex-wrap gap-1.5">
                 {metaEntries.map(([key, val]) => (
                   <Badge key={key} variant="outline" className="text-xs font-normal">
@@ -172,9 +151,9 @@ export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDe
                   </Badge>
                 ))}
               </div>
-            </div>
+            </Fact>
           )}
-        </div>
+        </FactGrid>
       </Modal>
 
       <ConfirmModal

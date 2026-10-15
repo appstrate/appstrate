@@ -99,7 +99,6 @@ export function ConnectionsTable({
   return (
     <div data-testid="integration-connections-table">
       <ListToolbar
-        placement="panel"
         search={{
           value: list.search,
           onChange: list.setSearch,
@@ -147,7 +146,7 @@ export function ConnectionsTable({
         }
       />
       <DataTable
-        tableId="integration-connections"
+        tiered
         surface="integrated"
         label={t("integration.connection.tableLabel")}
         columns={columns}

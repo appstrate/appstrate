@@ -31,10 +31,8 @@ export function SchedulesTable({
 
   return (
     <DataTable
-      tableId="schedules"
       label={t("schedules.tableLabel")}
       columns={columns}
-      columnMode="scroll"
       surface={surface}
       rows={schedules}
       isLoading={isLoading}

@@ -61,7 +61,7 @@ function ChoiceDialog({
   title,
   intro,
   provider,
-  existing: given,
+  existing,
   credentialId,
   credentialUnavailable,
   newCredential,
@@ -75,7 +75,6 @@ function ChoiceDialog({
   header,
 }: ChoiceDialogProps) {
   const { t } = useTranslation(["settings", "common"]);
-  const existing = given;
   const choice = useModelChoice({
     provider,
     existing,
@@ -109,7 +108,6 @@ function ChoiceDialog({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={title}
       actions={
@@ -139,7 +137,7 @@ function ChoiceDialog({
         </>
       }
     >
-      <fieldset disabled={isPending} className="min-w-0 space-y-3">
+      <fieldset disabled={isPending} className="flex min-w-0 flex-col gap-3">
         {intro && <p className="text-muted-foreground text-sm">{intro}</p>}
         {header}
         <ModelChoiceList
@@ -171,6 +169,32 @@ function ChoiceDialog({
   );
 }
 
+/** The dialog's stand-in while what it lists is loading, failed to load, or names no provider. */
+function ChoiceGate({
+  title,
+  onClose,
+  error,
+  unavailable = false,
+}: {
+  title: string;
+  onClose: () => void;
+  error: unknown;
+  unavailable?: boolean;
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <Modal onClose={onClose} title={title}>
+      {error ? (
+        <ErrorState error={error} compact />
+      ) : unavailable ? (
+        <ErrorState message={t("models.form.providerUnavailable")} compact />
+      ) : (
+        <TextSkeleton lines={4} className="py-2" />
+      )}
+    </Modal>
+  );
+}
+
 /** The models an organization key serves. Mounted only while open. */
 export function ProviderModelsModal({
   credential,
@@ -187,25 +211,18 @@ export function ProviderModelsModal({
   const registry = registryQuery.data;
   const provider = registry ? resolveProviderEntry(credential, registry) : undefined;
 
-  if (!registry || !modelsQuery.data) {
-    return (
-      <Modal open onClose={onClose} title={t("models.choice.title")}>
-        {registryQuery.error || modelsQuery.error ? (
-          <ErrorState error={registryQuery.error ?? modelsQuery.error} compact />
-        ) : (
-          <TextSkeleton lines={4} className="py-2" />
-        )}
-      </Modal>
-    );
-  }
-  if (!provider) {
-    return (
-      <Modal open onClose={onClose} title={t("models.choice.title")}>
-        <ErrorState message={t("models.form.providerUnavailable")} compact />
-      </Modal>
-    );
-  }
   const models = modelsQuery.data;
+
+  if (!registry || !models || !provider) {
+    return (
+      <ChoiceGate
+        title={t("models.choice.title")}
+        onClose={onClose}
+        error={registryQuery.error ?? modelsQuery.error}
+        unavailable={!!registry && !!models}
+      />
+    );
+  }
   return (
     <ChoiceDialog
       title={t("models.choice.titleOf", { name: credential.label })}
@@ -246,13 +263,11 @@ export function PersonalModelsModal({
 
   if (!models || !provider) {
     return (
-      <Modal open onClose={onClose} title={t("models.choice.personalTitle")}>
-        {modelsQuery.error ? (
-          <ErrorState error={modelsQuery.error} compact />
-        ) : (
-          <TextSkeleton lines={4} className="py-2" />
-        )}
-      </Modal>
+      <ChoiceGate
+        title={t("models.choice.personalTitle")}
+        onClose={onClose}
+        error={modelsQuery.error}
+      />
     );
   }
   return (
@@ -271,7 +286,7 @@ export function PersonalModelsModal({
       onClose={onClose}
       onAdvanced={onAdvanced}
       header={
-        <FormItem id="personal-models-service" label={t("models.form.provider")}>
+        <FormItem id="personal-models-service" label={t("providers.col.provider")}>
           <OptionSelect
             value={provider.providerId}
             onValueChange={onChangeService}
@@ -303,15 +318,12 @@ export function NewProviderModelsModal({
 
   if (!registryQuery.data || !modelsQuery.data || !provider) {
     return (
-      <Modal open onClose={onClose} title={t("credentials.form.title")}>
-        {registryQuery.error || modelsQuery.error ? (
-          <ErrorState error={registryQuery.error ?? modelsQuery.error} compact />
-        ) : registryQuery.data ? (
-          <ErrorState message={t("models.form.providerUnavailable")} compact />
-        ) : (
-          <TextSkeleton lines={4} className="py-2" />
-        )}
-      </Modal>
+      <ChoiceGate
+        title={t("credentials.form.title")}
+        onClose={onClose}
+        error={registryQuery.error ?? modelsQuery.error}
+        unavailable={!!registryQuery.data && !!modelsQuery.data}
+      />
     );
   }
   return (

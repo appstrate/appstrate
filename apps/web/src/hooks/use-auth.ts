@@ -78,26 +78,12 @@ registerSessionCheck({
   },
 });
 
-/**
- * Start the session resync at boot rather than on the first `useAuth()`
- * render. Called from `main.tsx` before `createRoot`, so the session/profile
- * round-trip overlaps the locale fetch and the first render instead of
- * queueing behind them. Idempotent — `useAuth()` still calls the same
- * initializer, which no-ops once this has run.
- */
+/** Start the session resync at boot (from `main.tsx`, before `createRoot`) so it overlaps the locale fetch and first render. Idempotent. */
 export function startAuthBootstrap(): void {
   initAuth();
 }
 
-/**
- * Thrown by `refreshAuth()` when the resync completed but did not
- * establish an authenticated user — e.g. `getSession()` returned null
- * because of a stale Better Auth cookie. Callers that depend on a
- * session being present after `refreshAuth()` (the OIDC callback,
- * post-email-change) can catch this discriminant and show a
- * meaningful "please sign in again" message instead of navigating into a
- * silent loop.
- */
+/** Thrown by `refreshAuth()` when the resync established no user (e.g. a stale Better Auth cookie), so callers can show "sign in again" instead of looping. */
 export class AuthRefreshError extends Error {
   constructor(
     public code: "no_session",
@@ -108,12 +94,7 @@ export class AuthRefreshError extends Error {
   }
 }
 
-/**
- * Thrown by `changeEmail()` on a 409 address collision, so the caller can show
- * its dedicated "email already in use" message without reaching into the raw
- * Better Auth result shape — the seam is the only place that touches
- * `authClient`. Any other failure is thrown as a coded `ApiError`.
- */
+/** Thrown by `changeEmail()` on a 409 address collision (this seam is the only place touching `authClient`); other failures are coded `ApiError`s. */
 export class EmailChangeError extends Error {
   constructor(message: string) {
     super(message);
@@ -121,14 +102,7 @@ export class EmailChangeError extends Error {
   }
 }
 
-/**
- * Resync auth state from the server cookie and assert that a user was
- * established. Use after any flow that should have left a valid session
- * behind (OIDC callback, email change). On the no-user
- * path `syncAuth` already best-effort clears the stale cookie via
- * `signOut()`; this throw lets the caller surface the failure in the UI
- * rather than silently navigating onwards on a null user.
- */
+/** Resync auth state from the server cookie and assert a user was established (after OIDC callback, email change). `syncAuth` already clears a stale cookie; the throw surfaces the failure. */
 export async function refreshAuth(): Promise<void> {
   await syncAuth(true);
   if (!authStore.getState().user) {
@@ -149,15 +123,10 @@ export function useAuth() {
 
   const state = useStore(authStore);
 
-  /**
-   * Email/password login — used by the OSS login form and the invite
-   * acceptance flow, which authenticate inline without redirecting. In OIDC
-   * mode these forms never render (`HostedAuthGate` redirects first), so
-   * there is no redirect variant here — the gate owns that path.
-   */
+  // Email/password login (OSS form, invite acceptance). In OIDC mode these forms never render
+  // (`HostedAuthGate` redirects first), so there is no OIDC branch here.
   const login = useCallback(
-    // `callbackURL`: where the re-sent verification link of an unverified
-    // account lands; given one, the client also navigates there on success.
+    // `callbackURL`: where an unverified account's re-sent verification link lands.
     async (email: string, password: string, callbackURL?: string) => {
       rememberSignedIn(localStorage, true);
       const result = await authClient.signIn.email({ email, password, callbackURL });
@@ -178,9 +147,7 @@ export function useAuth() {
       // Where the verification link lands (e.g. the invitation that asked).
       callbackURL: string,
     ): Promise<{ emailVerificationRequired: boolean }> => {
-      // Native email/password signup (OSS). In OIDC mode the register form
-      // never renders — `HostedAuthGate` redirects to the hosted register
-      // page first — so signup has no OIDC branch; the gate owns that path.
+      // OSS only: in OIDC mode `HostedAuthGate` redirects before the register form renders.
       rememberSignedIn(localStorage, true);
       const result = await authClient.signUp.email({
         email,
@@ -200,23 +167,14 @@ export function useAuth() {
     [],
   );
 
-  /**
-   * Log out. `redirectTo`, when given, is where the user should land after
-   * they sign in again — used by the invite "log out and retry" flow so a
-   * wrong-account user returns to the invitation. In OIDC mode it is stashed
-   * for the post-re-login callback (see `startOidcLogout`); in OSS mode the
-   * page that called logout stays mounted (e.g. /invite re-renders into its
-   * login form), so no explicit navigation is needed.
-   */
+  // `redirectTo` is where the user lands after signing in again (invite "log out and retry"); in
+  // OIDC mode it is stashed for the post-re-login callback (`startOidcLogout`).
   const logout = useCallback(async (redirectTo?: string) => {
     const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
     if (oidcConfig) {
-      // Navigate to the server-side logout endpoint FIRST — it clears the
-      // BA session cookie and redirects back to /login. Do NOT call
-      // clearSession() before this: setting user=null triggers a React
-      // re-render that navigates to /login (via the catch-all route),
-      // which starts a new OIDC login flow before the browser can follow
-      // the logout redirect — effectively re-logging the user in.
+      // Navigate to the server-side logout FIRST. Do NOT call clearSession() before: user=null
+      // re-renders to /login, which starts a new OIDC login before the logout redirect —
+      // re-logging the user in.
       const { startOidcLogout } = await import("../modules/oidc/lib/oidc");
       rememberSignedIn(localStorage, false);
       startOidcLogout(redirectTo);
@@ -257,16 +215,9 @@ export function useAuth() {
   const linkGithub = useCallback(() => linkSocial("github"), [linkSocial]);
 
   /**
-   * Unlink ONE linked account, named by the `id` of the row `listAccounts()`
-   * returned for it — Better Auth's `account.id` primary key.
-   *
-   * The wire field is called `accountId`, which is a different thing from the
-   * `accountId` on that same row: that one is the identifier AT THE PROVIDER
-   * (a Google `sub`, a GitHub numeric id) and the endpoint never looks at it.
-   * `/unlink-account` resolves the target as
-   * `findAccounts(session.user.id).find((a) => a.id === accountId)`, so
-   * feeding it the provider-side value simply misses and answers
-   * `ACCOUNT_NOT_FOUND`.
+   * Unlink ONE account by the `id` of its `listAccounts()` row (Better Auth's primary key). The
+   * wire field `accountId` is NOT the row's `accountId` (the provider-side id): feeding it that
+   * misses and answers `ACCOUNT_NOT_FOUND`.
    */
   const unlinkAccount = useCallback(async (accountRowId: string) => {
     const result = await authClient.unlinkAccount({ accountId: accountRowId });
@@ -278,14 +229,8 @@ export function useAuth() {
     if (result.error) throw toAuthError(result.error);
   }, []);
 
-  // ─── Password recovery / passwordless (OSS-only at runtime) ─────────────
-  //
-  // These recovery flows have no OIDC branch on purpose: when the OIDC module
-  // is configured, `HostedAuthGate` / `useHostedAuthRedirect` redirect the
-  // forgot-password / reset-password / magic-link routes to the hosted IdP
-  // *before* their forms ever render, so these methods are only reachable in
-  // OSS mode. They live on the seam (not inline in the pages) solely so the
-  // ESLint `auth-client` ban can guarantee no page bypasses that redirect.
+  // Password recovery / passwordless: no OIDC branch on purpose (`HostedAuthGate` redirects those
+  // routes first, so only OSS mode reaches them). On the seam so the ESLint `auth-client` ban holds.
 
   const requestPasswordReset = useCallback(async (email: string) => {
     const result = await authClient.requestPasswordReset({
@@ -310,11 +255,7 @@ export function useAuth() {
     if (result.error) throw toAuthError(result.error);
   }, []);
 
-  // ─── Authenticated account management (no OIDC entry redirect) ───────────
-  //
-  // changeEmail / listLinkedAccounts operate on the *existing* session from
-  // inside the dashboard — they are not unauthenticated entry points, so they
-  // run natively in both modes. Routed through the seam only for the ban.
+  // changeEmail / listLinkedAccounts act on the existing session, so they run natively in both modes.
 
   const changeEmail = useCallback(
     async (newEmail: string): Promise<"changed" | "confirmation_sent"> => {

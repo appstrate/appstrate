@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What the chat assistant can do for the caller. It acts through an MCP bearer
- * carrying the caller's effective set — minus what the composer's
- * agent-authoring switch turns off (`turnPermissions`), never more — so this is
- * the caller's RBAC translated into the assistant's acts. Not a gate — every act is re-checked
- * server-side — but a row must never claim what the route would refuse.
- * Pinned to the routes' guards by `catalog-requirements.test.ts` (apps/api).
+ * What the chat assistant can do for the caller: their RBAC translated into the
+ * assistant's acts (its MCP bearer carries the caller's set minus what the
+ * authoring switch turns off, never more). Not a gate (acts are re-checked
+ * server-side), but a row must never claim what the route would refuse; pinned
+ * to the routes' guards by `catalog-requirements.test.ts` (apps/api).
  */
 
 import {
@@ -43,15 +42,13 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     held: (_ctx, turn) => turn.invokes,
   },
   {
-    // `run_and_wait` is not declared without run-read; a fire-and-forget run
-    // the assistant could never report on does not count.
+    // `run_and_wait` is not declared without run-read.
     id: "runAgents",
     labelKey: "access.capability.runAgents",
     held: (_ctx, turn) => reaches(turn.runLevel, "run"),
   },
   {
-    // Creating only: editing an existing agent is authorized by its HOME space,
-    // which for a shared agent is not this one.
+    // Creating only: editing is authorized by the agent's HOME space.
     id: "createAgents",
     labelKey: "access.capability.createAgents",
     held: (ctx) => canAuthorAgents(ctx.can),
@@ -63,9 +60,8 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     held: (_ctx, turn) => reaches(turn.runLevel, "read"),
   },
   {
-    // Browsing (`list_files`), not reading: `read_file` applies the file ACL,
-    // not `files:read`, so a "read your files" row would deny what is allowed.
-    // A tool of its own, so no `mcp:invoke`.
+    // Browsing (`list_files`), not reading: `read_file` applies the file ACL, not
+    // `files:read`. A tool of its own, so no `mcp:invoke`.
     id: "browseFiles",
     labelKey: "access.capability.browseFiles",
     held: (ctx) => ctx.can("mcp:read") && ctx.can("files:read"),

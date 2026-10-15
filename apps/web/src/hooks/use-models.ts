@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useQuery, useMutation, useQueryClient, type MutationMeta } from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
@@ -10,13 +9,7 @@ import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { packageSightPermissions } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
-import type { ModelFormSubmission, ModelFormSubmitOutcome } from "../lib/model-form-payload";
-import { submitModelForm } from "../lib/model-form-submit";
-import { useApplyModelChoice } from "./use-apply-model-choice";
-import {
-  invalidateCredentialsAndModels,
-  useCreateModelProviderCredential,
-} from "./use-model-provider-credentials";
+import { invalidateCredentialsAndModels } from "./use-model-provider-credentials";
 import { agentModelKeys, packageKeys } from "../lib/query-keys";
 import { useInvalidatePaths } from "./use-invalidate-paths";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -34,7 +27,7 @@ export function useModels(enabled = true) {
   );
 }
 
-function useUpdateModel() {
+export function useUpdateModel() {
   const invalidate = useInvalidatePaths("/api/models");
   return $api.useMutation("patch", "/api/models/{id}", {
     meta: { errorHandledByCaller: true },
@@ -141,43 +134,4 @@ export function useSetAgentModel(packageId: string) {
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
     },
   });
-}
-
-/**
- * ModelFormModal submission: a creation (the inline key, the model or the batch) is ONE
- * `POST /api/models/apply`; an edit is one `PATCH`, the inline key minted first if any.
- */
-export function useModelFormHandler(opts: {
-  editModel?: OrgModelInfo | null;
-  onSuccess: () => void;
-}) {
-  const applyChoice = useApplyModelChoice();
-  const updateModel = useUpdateModel();
-  const createCredential = useCreateModelProviderCredential({ errorHandledByCaller: true });
-
-  // Spans the whole submission: the per-mutation flags drop between calls.
-  const [submitPending, setSubmitPending] = useState(false);
-  const isPending =
-    submitPending || applyChoice.isPending || updateModel.isPending || createCredential.isPending;
-
-  const submit = submitModelForm({
-    writes: {
-      applyChoice: applyChoice.applyBody,
-      createCredential: (body) => createCredential.mutateAsync({ body }),
-      updateModel: (id, body) => updateModel.mutateAsync({ params: { path: { id } }, body }),
-    },
-    editModelId: opts.editModel?.id ?? null,
-    onSuccess: opts.onSuccess,
-  });
-
-  const onSubmit = async (data: ModelFormSubmission): Promise<ModelFormSubmitOutcome> => {
-    setSubmitPending(true);
-    try {
-      return await submit(data);
-    } finally {
-      setSubmitPending(false);
-    }
-  };
-
-  return { onSubmit, isPending };
 }

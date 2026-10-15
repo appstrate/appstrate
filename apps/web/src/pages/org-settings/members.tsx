@@ -126,9 +126,8 @@ export function OrgSettingsMembersPage() {
       {/* The invitation is one form wherever it is made: the org role, then the
           spaces it opens and the role in each — which is what a guest needs,
           having no implicit access anywhere. */}
-      {canInvite && orgId && (
+      {canInvite && orgId && invite.value !== null && (
         <Modal
-          open={invite.value !== null}
           onClose={invite.close}
           title={t("orgSettings.inviteMember")}
           className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
@@ -148,7 +147,6 @@ export function OrgSettingsMembersPage() {
           per-list empty sentence here would fire while invitations are pending
           and say the page is empty when it is not. */}
       <DataTable
-        tableId="members"
         label={t("orgSettings.tabMembers")}
         columns={memberColumns}
         rows={members}
@@ -189,10 +187,10 @@ export function OrgSettingsMembersPage() {
         onClose={() => setRoleChange(null)}
         title={t(
           roleChange?.role === "owner"
-            ? "orgSettings.promoteOwnerTitle"
+            ? "orgSettings.promoteOwner"
             : roleChange?.from === "owner"
               ? "orgSettings.demoteOwnerTitle"
-              : "orgSettings.demoteTitle",
+              : "orgSettings.demote",
         )}
         description={
           !roleChange

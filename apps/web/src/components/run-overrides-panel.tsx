@@ -30,12 +30,8 @@ import {
 } from "@appstrate/core/model-generation";
 
 const INHERIT = "__inherit__";
-// Wire value the server recognizes as "no proxy" (distinct from INHERIT =
-// "use the org default"). Emitting it verbatim — rather than an internal
-// `__none__` sentinel each caller has to translate — means both the run
-// launcher and the schedule form send the right value, so a scheduled run
-// with "None" selected is not silently routed through the org-default
-// proxy.
+// Wire value the server recognizes as "no proxy" (distinct from INHERIT). Emitted
+// verbatim so a scheduled run with "None" is not silently routed through the org-default proxy.
 const NONE = "none";
 
 interface AgentIntegrationRef {
@@ -52,38 +48,24 @@ interface RunOverridesPanelProps {
   persistedGenerationConfig: ModelGenerationSettings | null;
   /** Persisted proxy id (or null = inherit org default). */
   persistedProxyId: string | null;
-  /**
-   * Agent's declared integration dependencies — drives the
-   * connection-overrides pickers. Pass an empty array to hide the section
-   * (e.g. for agents without integrations). The caller is responsible
-   * for reading `dependencies.integrations` off the agent manifest.
-   */
+  /** The agent's `dependencies.integrations`; drives the connection pickers (empty hides the section). */
   agentIntegrations?: AgentIntegrationRef[];
   /** Current value (controlled). */
   value: RunOverridesValue;
   /** A model, generation or proxy change: the whole next value. */
   onChange: (next: RunOverridesValue) => void;
   /**
-   * One integration's connection pick; the connection pickers appear with it (and
-   * `agentIntegrations`). A picker calls it once its connect popup settles, long after the
-   * render that built it: the parent applies it to the value it holds then.
+   * One integration's connection pick. A picker calls it once its connect popup settles,
+   * long after the render that built it: the parent applies it to the value it holds then.
    */
   onConnectionPick?: (integrationId: string, connectionIds: ConnectionSet) => void;
-  /**
-   * Version selector forwarded to the integration connection pickers so
-   * their per-integration readiness verdict judges the definition that runs.
-   */
+  /** Forwarded to the connection pickers so their readiness verdict judges the definition that runs. */
   version: string;
-  /**
-   * `launch` (the run modal): labelled fields, temperature and reasoning as
-   * sliders. `settings` (a schedule's Exécution): the settings rows and selects
-   * of the agent's own Modèle and Proxy sections.
-   */
+  /** `launch` (run modal): labelled fields with sliders. `settings` (a schedule's Exécution): settings rows. */
   layout?: "launch" | "settings";
   /**
-   * For a schedule: it spends organization credentials only, so a model each
-   * member pays for themselves cannot be picked, and nobody's credential is named.
-   * The connection hint then speaks of every fire instead of this run.
+   * For a schedule: it spends organization credentials only, so a model each member pays
+   * for cannot be picked; the connection hint speaks of every fire.
    */
   scheduled?: boolean;
   /** Set when the form sits in a URL-param modal: a picker's way out leaves that modal. */
@@ -110,27 +92,18 @@ function OverrideRow({
     );
   }
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
+    <div className="flex flex-col gap-2">
+      <Label className="mb-0">{label}</Label>
       {children}
     </div>
   );
 }
 
 /**
- * Override editor for the agent's resolution defaults — model, proxy and
- * integration connections. Shared by the schedule editor and the run launcher,
- * where these three carry identical semantics (no pick = the agent default).
- * The value is a delta: each field is present only when it differs from the
- * persisted default, so the caller never re-implements diff detection.
- *
- * Agent parameters are deliberately NOT here — they are the agent's single
- * `input` schema, rendered by {@link AgentInputForm} at the top of every launch
- * surface, not an override layer.
- *
- * Version is deliberately NOT here either — its semantics are context-specific
- * (a schedule inherits/pins; a run defaults to `draft` and applies every pick),
- * so each caller composes {@link AgentVersionField} itself.
+ * Override editor for model, proxy and integration connections, shared by the schedule
+ * editor and the run launcher (no pick = the agent default). The value is a delta: a
+ * field is present only when it differs from the persisted default. Agent parameters
+ * ({@link AgentInputForm}) and version ({@link AgentVersionField}) are deliberately NOT here.
  */
 export function RunOverridesPanel({
   packageId,
@@ -155,11 +128,9 @@ export function RunOverridesPanel({
   const modelsPending = isQueryInFlight(modelsQuery);
   const proxiesPending = isQueryInFlight(proxiesQuery);
 
-  // The inherited row stays visible even when the default is unavailable, so
-  // users can still clear an override and see which model will be resolved.
+  // The inherited row stays visible even when the default is unavailable, so an override can be cleared.
   const orgDefaultModel = orgModels?.find((model) => model.is_default);
   const orgDefaultProxy = orgProxies?.find((proxy) => proxy.is_default && proxy.enabled);
-  // "Inherit" names what applies with no override.
   const inheritedModel = inheritedEntry(
     orgModels,
     persistedModelId,
@@ -228,14 +199,14 @@ export function RunOverridesPanel({
   const proxySelectValue = value.proxy_id_override ?? INHERIT;
 
   return (
-    <div className={layout === "launch" ? "space-y-4" : undefined}>
+    <div className={layout === "launch" ? "flex flex-col gap-4" : undefined}>
       {(modelsPending || (orgModels && orgModels.length > 0)) && (
         <OverrideRow
           layout={layout}
           label={
             layout === "settings"
               ? t("detail.configuration.modelChoice", { ns: "agents" })
-              : t("models.tabTitle", { ns: "settings" })
+              : t("providers.col.models", { ns: "settings" })
           }
           description={t("schedule.settings.modelHint", { ns: "agents" })}
         >
@@ -247,8 +218,7 @@ export function RunOverridesPanel({
               value={value.model_id_override ?? null}
               onChange={setModel}
               scheduled={scheduled}
-              // "Inherit" stays selectable even when the default is dead: it is the absence of an
-              // override, so disabling it would trap a user who wants to clear one.
+              // "Inherit" stays selectable even when the default is dead, so an override can be cleared.
               inherit={{
                 label: inheritedModel
                   ? t("run.overrides.modelInheritWithDefault", {
@@ -356,16 +326,9 @@ export function RunOverridesPanel({
 }
 
 /**
- * Per-integration picker section that drives `value.connection_overrides`.
- * Renders the shared `IntegrationConnectionPicker` (one dropdown per
- * integration) in `override` mode: validating a set writes it into the
- * `connection_overrides` map, the reset entry clears the key, "No connection"
- * writes `[]`. The map is the launch override (below admin pins, above member
- * pins) of the form that holds it: one run's, or a schedule's on every fire.
- *
- * Identical UX to the agent page's connection picker — same candidate
- * list, scope/lock verdicts and inline connect flow — only the
- * persistence target differs (transient form value vs. member pin).
+ * Drives `value.connection_overrides` with `IntegrationConnectionPicker` in `override`
+ * mode: a validated set writes the key, reset clears it, "No connection" writes `[]`.
+ * The map is the launch override (below admin pins, above member pins).
  */
 function ConnectionOverridesSection({
   agentPackageId,
@@ -386,12 +349,12 @@ function ConnectionOverridesSection({
 }) {
   const { t } = useTranslation(["agents"]);
   return (
-    <div className="space-y-2">
-      <Label>{t("connectionOverrides.label")}</Label>
+    <div className="flex flex-col gap-2">
+      <Label className="mb-0">{t("connectionOverrides.label")}</Label>
       <p className="text-muted-foreground text-xs">
         {scheduled ? t("schedule.connectionOverrides.hint") : t("run.overrides.connectionHint")}
       </p>
-      <div className="border-border bg-card space-y-3 rounded-md border p-3">
+      <div className="border-border bg-card flex flex-col gap-3 rounded-md border p-3">
         {integrations.map((integ) => (
           <IntegrationOverrideRow
             key={integ.id}
@@ -428,15 +391,12 @@ function IntegrationOverrideRow({
   const { data: detail } = detailQuery;
   const displayName = useIntegrationName(integration.id);
 
-  // Gate the row on whether the agent can connect this integration at all
-  // (declared auth the actor can start a flow on, given its EFFECTIVE tool
-  // selection: an agent writing no `tools` inherits `default_tools`).
-  // Mirrors the run-time `integration_not_active`/no-auth gates so neither
-  // form offers an override for an unconnectable integration.
+  // Gate on whether the agent can connect this integration at all (given its EFFECTIVE tool
+  // selection: no `tools` inherits `default_tools`), mirroring the run-time gates.
   if (!detail) {
     if (!isQueryInFlight(detailQuery)) return null;
     return (
-      <div className="space-y-1.5">
+      <div className="flex flex-col gap-1.5">
         <Skeleton className="h-4 w-24" />
         <Skeleton className="h-8 w-full" />
       </div>
@@ -446,7 +406,7 @@ function IntegrationOverrideRow({
   if (connectableAuthKeysForAgent(detail.manifest, effectiveTools).length === 0) return null;
 
   return (
-    <div className="space-y-1.5" data-testid={`conn-override-row-${integration.id}`}>
+    <div className="flex flex-col gap-1.5" data-testid={`conn-override-row-${integration.id}`}>
       <div className="text-xs font-medium">{displayName}</div>
       <IntegrationConnectionPicker
         integration={integration}

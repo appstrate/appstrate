@@ -43,7 +43,7 @@ export function EndUserCreateModal({ onClose }: Props) {
   return (
     <FormModal
       onClose={onClose}
-      title={t("spaces.createEndUserTitle")}
+      title={t("spaces.newEndUser")}
       onSubmit={onSubmit}
       isPending={createMutation.isPending}
       submitLabel={t("btn.create")}
