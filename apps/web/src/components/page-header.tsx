@@ -6,7 +6,7 @@ import type { BreadcrumbEntry } from "@/stores/breadcrumb-store";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 
 interface PageHeaderProps {
-  title: string;
+  title: ReactNode;
   /** Level-one collection pages use a larger destination title. */
   variant?: "default" | "collection";
   titleClassName?: string;

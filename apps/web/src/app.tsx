@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, lazy, Suspense, type ReactNode } from "react";
+import { useEffect, Suspense, type ReactNode } from "react";
 import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
 import { PackageIndexPage } from "./pages/package-index";
 import { DashboardPage } from "./pages/dashboard";
@@ -15,7 +15,6 @@ import { MagicLinkPage } from "./pages/magic-link";
 import { MagicLinkConfirmPage } from "./pages/magic-link-confirm";
 import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
-import { AppSidebar } from "./components/app-sidebar";
 import { OverlayExitProvider, OverlayProvider, useOverlayState } from "./lib/modal-route";
 import {
   catalogueChunk,
@@ -24,9 +23,9 @@ import {
   settingsLayoutChunk,
   workspaceSettingsGeneralChunk,
 } from "./lib/overlay-chunks";
-import { chunkComponent } from "./lib/lazy-chunk";
+import { chunkComponent, lazyPage } from "./lib/lazy-chunk";
 import { OverlayUnavailable } from "./components/overlay-unavailable";
-import { ShellFrameProvider, ShellHeader } from "./components/shell-frame";
+import { AppSidebar, ShellFrameProvider, ShellHeader } from "./components/app-shell";
 import {
   ChatPanelSkeleton,
   DashboardSkeleton,
@@ -66,76 +65,65 @@ import type { PackageType } from "@appstrate/core/validation";
 
 // Module pages are lazy-loaded so a disabled module's bundle is never fetched
 // (zero-footprint): `RouteGate` renders its unavailable state when the `feature` is off.
-const WebhooksPage = lazy(() =>
-  import("./modules/webhooks/pages/webhooks-page").then((m) => ({ default: m.WebhooksPage })),
+const WebhooksPage = lazyPage(
+  () => import("./modules/webhooks/pages/webhooks-page"),
+  "WebhooksPage",
 );
-const WebhookDetailPage = lazy(() =>
-  import("./modules/webhooks/pages/webhook-detail-page").then((m) => ({
-    default: m.WebhookDetailPage,
-  })),
+const WebhookDetailPage = lazyPage(
+  () => import("./modules/webhooks/pages/webhook-detail-page"),
+  "WebhookDetailPage",
 );
-const AuthCallbackPage = lazy(() =>
-  import("./modules/oidc/pages/auth-callback").then((m) => ({ default: m.AuthCallbackPage })),
+const AuthCallbackPage = lazyPage(
+  () => import("./modules/oidc/pages/auth-callback"),
+  "AuthCallbackPage",
 );
-const ChatModulePage = lazy(() =>
-  import("./modules/chat/chat-page").then((m) => ({ default: m.ChatModulePage })),
-);
+const ChatModulePage = lazyPage(() => import("./modules/chat/chat-page"), "ChatModulePage");
 
 // Heavy authenticated pages are lazy-loaded; each waits on its chunk under `skeletonOf`.
-const UnifiedPackageDetailPage = lazy(() =>
-  import("./pages/unified-package-detail").then((m) => ({ default: m.UnifiedPackageDetailPage })),
+const UnifiedPackageDetailPage = lazyPage(
+  () => import("./pages/unified-package-detail"),
+  "UnifiedPackageDetailPage",
 );
-const PackageEditorPage = lazy(() =>
-  import("./pages/package-editor").then((m) => ({ default: m.PackageEditorPage })),
-);
-const RunDetailPage = lazy(() =>
-  import("./pages/run-detail").then((m) => ({ default: m.RunDetailPage })),
-);
-const RunsPage = lazy(() => import("./pages/runs-page").then((m) => ({ default: m.RunsPage })));
-const FilesPage = lazy(() => import("./pages/files").then((m) => ({ default: m.FilesPage })));
-const SchedulesListPage = lazy(() =>
-  import("./pages/schedules-list").then((m) => ({ default: m.SchedulesListPage })),
-);
-const ScheduleDetailPage = lazy(() =>
-  import("./pages/schedule-detail").then((m) => ({ default: m.ScheduleDetailPage })),
-);
-const SkillsPage = lazy(() =>
-  import("./pages/skills-page").then((m) => ({ default: m.SkillsPage })),
-);
-const McpServersPage = lazy(() =>
-  import("./pages/mcp-servers-page").then((m) => ({ default: m.McpServersPage })),
-);
-const IntegrationsPage = lazy(() =>
-  import("./pages/integrations-page").then((m) => ({ default: m.IntegrationsPage })),
-);
-const IntegrationDetailPage = lazy(() =>
-  import("./pages/integration-detail").then((m) => ({ default: m.IntegrationDetailPage })),
+const PackageEditorPage = lazyPage(() => import("./pages/package-editor"), "PackageEditorPage");
+const RunDetailPage = lazyPage(() => import("./pages/run-detail"), "RunDetailPage");
+const RunsPage = lazyPage(() => import("./pages/runs-page"), "RunsPage");
+const FilesPage = lazyPage(() => import("./pages/files"), "FilesPage");
+const SchedulesListPage = lazyPage(() => import("./pages/schedules-list"), "SchedulesListPage");
+const ScheduleDetailPage = lazyPage(() => import("./pages/schedule-detail"), "ScheduleDetailPage");
+const SkillsPage = lazyPage(() => import("./pages/skills-page"), "SkillsPage");
+const McpServersPage = lazyPage(() => import("./pages/mcp-servers-page"), "McpServersPage");
+const IntegrationsPage = lazyPage(() => import("./pages/integrations-page"), "IntegrationsPage");
+const IntegrationDetailPage = lazyPage(
+  () => import("./pages/integration-detail"),
+  "IntegrationDetailPage",
 );
 
-const EndUsersPage = lazy(() =>
-  import("./pages/end-users-page").then((m) => ({ default: m.EndUsersPage })),
+const EndUsersPage = lazyPage(() => import("./pages/end-users-page"), "EndUsersPage");
+const ApiKeysPage = lazyPage(() => import("./pages/api-keys-page"), "ApiKeysPage");
+const WelcomePage = lazyPage(() => import("./pages/welcome"), "WelcomePage");
+const OnboardingCreateStep = lazyPage(
+  () => import("./pages/onboarding/create-step"),
+  "OnboardingCreateStep",
 );
-const ApiKeysPage = lazy(() =>
-  import("./pages/api-keys-page").then((m) => ({ default: m.ApiKeysPage })),
+const OnboardingPlanStep = lazyPage(
+  () => import("./pages/onboarding/plan-step"),
+  "OnboardingPlanStep",
 );
-const WelcomePage = lazy(() => import("./pages/welcome").then((m) => ({ default: m.WelcomePage })));
-const OnboardingCreateStep = lazy(() =>
-  import("./pages/onboarding/create-step").then((m) => ({ default: m.OnboardingCreateStep })),
+const OnboardingModelStep = lazyPage(
+  () => import("./pages/onboarding/model-step"),
+  "OnboardingModelStep",
 );
-const OnboardingPlanStep = lazy(() =>
-  import("./pages/onboarding/plan-step").then((m) => ({ default: m.OnboardingPlanStep })),
+const OnboardingMembersStep = lazyPage(
+  () => import("./pages/onboarding/members-step"),
+  "OnboardingMembersStep",
 );
-const OnboardingModelStep = lazy(() =>
-  import("./pages/onboarding/model-step").then((m) => ({ default: m.OnboardingModelStep })),
+const OnboardingDoneStep = lazyPage(
+  () => import("./pages/onboarding/done-step"),
+  "OnboardingDoneStep",
 );
-const OnboardingMembersStep = lazy(() =>
-  import("./pages/onboarding/members-step").then((m) => ({ default: m.OnboardingMembersStep })),
-);
-const OnboardingDoneStep = lazy(() =>
-  import("./pages/onboarding/done-step").then((m) => ({ default: m.OnboardingDoneStep })),
-);
-const OnboardingWaitingStep = lazy(() =>
-  import("./pages/onboarding/waiting-step").then((m) => ({ default: m.OnboardingWaitingStep })),
+const OnboardingWaitingStep = lazyPage(
+  () => import("./pages/onboarding/waiting-step"),
+  "OnboardingWaitingStep",
 );
 const UnifiedSettingsLayout = chunkComponent(settingsLayoutChunk, (m) => m.UnifiedSettingsLayout);
 const CataloguePage = chunkComponent(catalogueChunk, (m) => m.CataloguePage);
@@ -145,82 +133,98 @@ const OrgSettingsGeneralPage = chunkComponent(
   orgSettingsGeneralChunk,
   (m) => m.OrgSettingsGeneralPage,
 );
-const OrgSettingsMembersPage = lazy(() =>
-  import("./pages/org-settings/members").then((m) => ({ default: m.OrgSettingsMembersPage })),
+const OrgSettingsMembersPage = lazyPage(
+  () => import("./pages/org-settings/members"),
+  "OrgSettingsMembersPage",
 );
-const OrgSettingsModelsPage = lazy(() =>
-  import("./pages/org-settings/models").then((m) => ({ default: m.OrgSettingsModelsPage })),
+const OrgSettingsModelsPage = lazyPage(
+  () => import("./pages/org-settings/models"),
+  "OrgSettingsModelsPage",
 );
-const OrgSettingsProxiesPage = lazy(() =>
-  import("./pages/org-settings/proxies").then((m) => ({ default: m.OrgSettingsProxiesPage })),
+const OrgSettingsProxiesPage = lazyPage(
+  () => import("./pages/org-settings/proxies"),
+  "OrgSettingsProxiesPage",
 );
-const OrgSettingsOAuthPage = lazy(() =>
-  import("./pages/org-settings/oauth").then((m) => ({ default: m.OrgSettingsOAuthPage })),
+const OrgSettingsOAuthPage = lazyPage(
+  () => import("./pages/org-settings/oauth"),
+  "OrgSettingsOAuthPage",
 );
-const PreferencesMcpAccessPage = lazy(() =>
-  import("./pages/preferences/mcp-access").then((m) => ({
-    default: m.PreferencesMcpAccessPage,
-  })),
+const PreferencesMcpAccessPage = lazyPage(
+  () => import("./pages/preferences/mcp-access"),
+  "PreferencesMcpAccessPage",
 );
-const OrgSettingsBillingPage = lazy(() =>
-  import("./pages/org-settings/billing").then((m) => ({ default: m.OrgSettingsBillingPage })),
+const OrgSettingsBillingPage = lazyPage(
+  () => import("./pages/org-settings/billing"),
+  "OrgSettingsBillingPage",
 );
-const OrgSettingsCliSessionsPage = lazy(() =>
-  import("./pages/org-settings/cli-sessions").then((m) => ({
-    default: m.OrgSettingsCliSessionsPage,
-  })),
+const OrgSettingsCliSessionsPage = lazyPage(
+  () => import("./pages/org-settings/cli-sessions"),
+  "OrgSettingsCliSessionsPage",
 );
-const OrgSettingsRolesPage = lazy(() =>
-  import("./pages/org-settings/roles").then((m) => ({ default: m.OrgSettingsRolesPage })),
+const OrgSettingsRolesPage = lazyPage(
+  () => import("./pages/org-settings/roles"),
+  "OrgSettingsRolesPage",
 );
-const OrgSettingsSpacesPage = lazy(() =>
-  import("./pages/org-settings/spaces").then((m) => ({
-    default: m.OrgSettingsSpacesPage,
-  })),
+const OrgSettingsSpacesPage = lazyPage(
+  () => import("./pages/org-settings/spaces"),
+  "OrgSettingsSpacesPage",
 );
 const WorkspaceSettingsGeneralPage = chunkComponent(
   workspaceSettingsGeneralChunk,
   (m) => m.WorkspaceSettingsGeneralPage,
 );
-const WorkspaceSettingsMembersPage = lazy(() =>
-  import("./pages/workspace-settings/members").then((m) => ({
-    default: m.WorkspaceSettingsMembersPage,
-  })),
+const WorkspaceSettingsMembersPage = lazyPage(
+  () => import("./pages/workspace-settings/members"),
+  "WorkspaceSettingsMembersPage",
 );
-const WorkspaceSettingsAuthPage = lazy(() =>
-  import("./pages/workspace-settings/auth").then((m) => ({ default: m.WorkspaceSettingsAuthPage })),
+const WorkspaceSettingsAuthPage = lazyPage(
+  () => import("./pages/workspace-settings/auth"),
+  "WorkspaceSettingsAuthPage",
 );
-const WorkspaceSettingsOAuthPage = lazy(() =>
-  import("./pages/workspace-settings/oauth").then((m) => ({
-    default: m.WorkspaceSettingsOAuthPage,
-  })),
+const WorkspaceSettingsOAuthPage = lazyPage(
+  () => import("./pages/workspace-settings/oauth"),
+  "WorkspaceSettingsOAuthPage",
 );
 const PreferencesGeneralPage = chunkComponent(
   preferencesGeneralChunk,
   (m) => m.PreferencesGeneralPage,
 );
-const PreferencesAppearancePage = lazy(() =>
-  import("./pages/preferences/appearance").then((m) => ({ default: m.PreferencesAppearancePage })),
+const PreferencesAppearancePage = lazyPage(
+  () => import("./pages/preferences/appearance"),
+  "PreferencesAppearancePage",
 );
-const PreferencesSecurityPage = lazy(() =>
-  import("./pages/preferences/security").then((m) => ({ default: m.PreferencesSecurityPage })),
+const PreferencesSecurityPage = lazyPage(
+  () => import("./pages/preferences/security"),
+  "PreferencesSecurityPage",
 );
-const PreferencesConnectionsPage = lazy(() =>
-  import("./pages/preferences/connections").then((m) => ({
-    default: m.PreferencesConnectionsPage,
-  })),
+const PreferencesConnectionsPage = lazyPage(
+  () => import("./pages/preferences/connections"),
+  "PreferencesConnectionsPage",
 );
-const PreferencesDevicesPage = lazy(() =>
-  import("./pages/preferences/devices").then((m) => ({ default: m.PreferencesDevicesPage })),
+const PreferencesDevicesPage = lazyPage(
+  () => import("./pages/preferences/devices"),
+  "PreferencesDevicesPage",
 );
-const PreferencesModelsPage = lazy(() =>
-  import("./pages/preferences/models").then((m) => ({ default: m.PreferencesModelsPage })),
+const PreferencesModelsPage = lazyPage(
+  () => import("./pages/preferences/models"),
+  "PreferencesModelsPage",
 );
 
 /** A lazy screen outside the shell (welcome, onboarding): it waits like the boot does. */
 function PreShellRoute({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<BootScreen />}>{children}</Suspense>;
 }
+
+/** The screens outside the shell, in the order of the onboarding. */
+const PRE_SHELL_PAGES = [
+  ["/welcome", WelcomePage],
+  ["/onboarding/waiting", OnboardingWaitingStep],
+  ["/onboarding/create", OnboardingCreateStep],
+  ["/onboarding/plan", OnboardingPlanStep],
+  ["/onboarding/model", OnboardingModelStep],
+  ["/onboarding/members", OnboardingMembersStep],
+  ["/onboarding/complete", OnboardingDoneStep],
+] as const;
 
 /**
  * The page of every signed-in route, keyed like its access declaration
@@ -646,62 +650,17 @@ export function App() {
                 />
               )}
               <Route path="/invite/:token" element={<InviteAcceptPage />} />
-              <Route
-                path="/welcome"
-                element={
-                  <PreShellRoute>
-                    <WelcomePage />
-                  </PreShellRoute>
-                }
-              />
-              <Route
-                path="/onboarding/waiting"
-                element={
-                  <PreShellRoute>
-                    <OnboardingWaitingStep />
-                  </PreShellRoute>
-                }
-              />
-              <Route
-                path="/onboarding/create"
-                element={
-                  <PreShellRoute>
-                    <OnboardingCreateStep />
-                  </PreShellRoute>
-                }
-              />
-              <Route
-                path="/onboarding/plan"
-                element={
-                  <PreShellRoute>
-                    <OnboardingPlanStep />
-                  </PreShellRoute>
-                }
-              />
-              <Route
-                path="/onboarding/model"
-                element={
-                  <PreShellRoute>
-                    <OnboardingModelStep />
-                  </PreShellRoute>
-                }
-              />
-              <Route
-                path="/onboarding/members"
-                element={
-                  <PreShellRoute>
-                    <OnboardingMembersStep />
-                  </PreShellRoute>
-                }
-              />
-              <Route
-                path="/onboarding/complete"
-                element={
-                  <PreShellRoute>
-                    <OnboardingDoneStep />
-                  </PreShellRoute>
-                }
-              />
+              {PRE_SHELL_PAGES.map(([path, Page]) => (
+                <Route
+                  key={path}
+                  path={path}
+                  element={
+                    <PreShellRoute>
+                      <Page />
+                    </PreShellRoute>
+                  }
+                />
+              ))}
               <Route element={<MainLayout />}>
                 {flatPaths("main").map(pageRoute)}
                 <Route path="*" element={<NotFoundPage />} />

@@ -124,7 +124,7 @@ export function OnboardingLayout({
               </Button>
             )}
             <div className="shrink-0">
-              <NavUser minimal />
+              <NavUser variant="minimal" />
             </div>
           </div>
         </div>

@@ -23,7 +23,7 @@ import {
   conversationSidebarReducer,
 } from "./conversation-sidebar-state";
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
-import { ShellHeaderActions } from "../../components/shell-frame";
+import { ShellHeaderActions } from "../../components/app-shell";
 import { useChatGetHeaders, useChatTranslate } from "./use-chat-runtime";
 import { ChatAccessChip } from "./chat-access-chip";
 import { readChatComposerDraft } from "../../lib/creation-handoff";

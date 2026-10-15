@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { Blocks, MessageSquare } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { CountBadge } from "@/components/count-badge";
 import { useCanReach } from "@/hooks/use-can-reach";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
@@ -93,13 +94,12 @@ export function ProductTabs() {
         >
           <span className="flex shrink-0 items-center justify-center">{p.icon}</span>
           <span className="truncate">{p.label}</span>
-          {!p.active && (p.unread ?? 0) > 0 && (
-            <span
-              className="bg-primary text-primary-foreground rounded-full px-1.5 text-[10px] leading-4 font-semibold tabular-nums"
-              aria-label={t("products.unread", { count: p.unread })}
-            >
-              {p.unread}
-            </span>
+          {!p.active && (
+            <CountBadge
+              count={p.unread ?? 0}
+              label={t("products.unread", { count: p.unread })}
+              tone="primary"
+            />
           )}
         </Link>
       ))}

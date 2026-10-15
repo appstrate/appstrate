@@ -43,8 +43,7 @@ describe("route declarations", () => {
     "components/org-switcher.tsx",
     "components/notification-bell.tsx",
     "components/nav-user.tsx",
-    "components/app-sidebar.tsx",
-    "components/shell-frame.tsx",
+    "components/app-shell.tsx",
     "components/product-tabs.tsx",
     "components/shell-breadcrumb.tsx",
   ].map((file) => ({ file, text: source(`../../${file}`) }));

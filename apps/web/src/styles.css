@@ -59,8 +59,6 @@
   /* Soft tints of the brand blue and the spark. Selection
      fills in the switcher, where two dimensions are picked side by side and
      need to be told apart at a glance. */
-  --color-primary-soft: var(--primary-soft);
-  --color-spark-soft: var(--spark-soft);
   /* Person palette — the colour an end-user's initials sit in, hashed from
      their id so the same person is always the same colour. Eight hues that
      tell people apart in a list; never a status, which is what success,
@@ -130,8 +128,6 @@
   --canvas: oklch(0.985 0 0); /* #FAFAFA */
   --spark: oklch(0.682 0.18 37.9); /* #F2683C */
   --spark-foreground: oklch(1 0 0);
-  --primary-soft: oklch(0.957 0.019 263); /* #EAF1FE */
-  --spark-soft: oklch(0.956 0.021 51.5); /* #FDEDE4 */
   --avatar-1: oklch(0.546 0.215 263);
   --avatar-2: oklch(0.596 0.145 163);
   --avatar-3: oklch(0.541 0.281 293);
@@ -180,8 +176,6 @@
   --canvas: oklch(0.145 0.004 286);
   --spark: oklch(0.72 0.16 38);
   --spark-foreground: oklch(0.145 0.004 286);
-  --primary-soft: oklch(0.3 0.06 262);
-  --spark-soft: oklch(0.3 0.06 38);
   --avatar-1: oklch(0.707 0.165 255);
   --avatar-2: oklch(0.765 0.177 163);
   --avatar-3: oklch(0.702 0.183 294);

@@ -10,7 +10,7 @@ import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { Boxes, LibraryBig, Plus } from "lucide-react";
 import { PageHeader } from "../components/page-header";
-import { CollectionTabs } from "../components/collection-tabs";
+import { CollectionTabs } from "../components/detail-tabs";
 import { CardGrid } from "../components/card-grid";
 import { DataTable } from "../components/data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";

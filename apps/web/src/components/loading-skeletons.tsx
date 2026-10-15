@@ -9,18 +9,14 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import type { PackageType } from "@appstrate/core/validation";
-import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
 import { cn } from "@appstrate/ui/cn";
 import { usePageBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import type { BreadcrumbEntry } from "../stores/breadcrumb-store";
-import { useCurrentOrgId } from "../hooks/use-org";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { agentsKeys, packageKeys } from "../lib/query-keys";
 import { usePackageListCrumb } from "../hooks/use-package-list-crumb";
+import { PageHeader } from "./page-header";
 
 /** One `status` for assistive technology; the blocks themselves are hidden from it. */
 function Waiting({ className, children }: { className?: string; children: ReactNode }) {
@@ -60,40 +56,27 @@ export function TextSkeleton({ lines = 3, className }: { lines?: number; classNa
   );
 }
 
-/**
- * `PageHeader`'s box: the same height, so the real title replaces it in place.
- * Publishes the part of the trail the page already knows from its address, and
- * writes the title itself when a cached row already names it.
- */
+/** `PageHeader` with blocks for its content: the same box, so the real title replaces it in place. */
 function HeaderBlocks({
   breadcrumbs,
-  title,
   icon,
   subtitle,
   actions = true,
   collection,
 }: {
   breadcrumbs: BreadcrumbEntry[];
-  title?: string;
   icon?: boolean;
   subtitle?: "lines" | "line";
   actions?: boolean;
   collection?: boolean;
 }) {
-  usePageBreadcrumb(breadcrumbs);
   return (
-    <div data-page-header className="mb-4">
-      <div className="flex min-h-9 items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-2">
-          {icon && <Skeleton className="size-10 shrink-0 rounded-[10px]" />}
-          {title ? (
-            <span className="truncate text-xl font-semibold">{title}</span>
-          ) : (
-            <Skeleton className={collection ? "h-7 w-44" : "h-6 w-52"} />
-          )}
-        </div>
-        {actions && <Skeleton className="h-8 w-24 shrink-0" />}
-      </div>
+    <PageHeader
+      title={<Skeleton className={collection ? "h-7 w-44" : "h-6 w-52"} />}
+      icon={icon && <Skeleton className="size-10 shrink-0 rounded-[10px]" />}
+      breadcrumbs={breadcrumbs}
+      actions={actions && <Skeleton className="h-8 w-24 shrink-0" />}
+    >
       {subtitle === "lines" && (
         <div className="mt-2 flex flex-col gap-2">
           <Skeleton className="h-3 w-40" />
@@ -101,26 +84,11 @@ function HeaderBlocks({
         </div>
       )}
       {subtitle === "line" && <Skeleton className="mt-2 mb-2 h-3.5 w-72 max-w-full" />}
-    </div>
+    </PageHeader>
   );
 }
 
-/** The tab strip: the real labels when the page knows them, a block otherwise. */
-function TabStrip({ tabs }: { tabs?: string[] }) {
-  if (!tabs) return <Skeleton className="mt-6 mb-3 h-9 w-72 max-w-full rounded-lg" />;
-  return (
-    <div className="bg-muted text-muted-foreground mt-6 mb-3 inline-flex h-9 max-w-full items-center rounded-lg p-1 text-sm font-medium">
-      {tabs.map((label, i) => (
-        <span
-          key={label}
-          className={cn("rounded-md px-3 py-1", i === 0 && "bg-background text-foreground shadow")}
-        >
-          {label}
-        </span>
-      ))}
-    </div>
-  );
-}
+const TAB_STRIP = "mt-6 mb-3 h-9 w-72 max-w-full rounded-lg";
 
 function CardBlocks({ count }: { count: number }) {
   return (
@@ -140,25 +108,21 @@ function CardBlocks({ count }: { count: number }) {
  * detail route draws the same element as its fallback and as its page's
  * loading state, so the two waits share one shape. `subtitle` is what the
  * header carries under its title (a package's id and description: `lines`; a
- * run's summary: `line`); `title` and `tabs` are drawn as text when known.
+ * run's summary: `line`).
  */
 export function DetailPageSkeleton({
   breadcrumbs = NO_CRUMBS,
-  title,
   icon = true,
   subtitle,
-  tabs,
 }: {
   breadcrumbs?: BreadcrumbEntry[];
-  title?: string;
   icon?: boolean;
   subtitle?: "lines" | "line";
-  tabs?: string[];
 }) {
   return (
     <Waiting>
-      <HeaderBlocks breadcrumbs={breadcrumbs} title={title} icon={icon} subtitle={subtitle} />
-      <TabStrip tabs={tabs} />
+      <HeaderBlocks breadcrumbs={breadcrumbs} icon={icon} subtitle={subtitle} />
+      <Skeleton className={TAB_STRIP} />
       <div className="bg-card rounded-lg border p-6">
         <CardBlocks count={3} />
       </div>
@@ -166,40 +130,10 @@ export function DetailPageSkeleton({
   );
 }
 
-/** The name the family's list already holds for this package, when it was read. */
-function useCachedPackageName(type: PackageType, packageId: string | undefined) {
-  const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
-  if (!packageId) return undefined;
-  if (type === "agent") {
-    return qc
-      .getQueryData<{ id: string; display_name?: string }[]>(agentsKeys.list(orgId, spaceId))
-      ?.find((row) => row.id === packageId)?.display_name;
-  }
-  return qc
-    .getQueryData<{ id: string; name?: string }[]>(
-      packageKeys.list(PACKAGE_TYPE_ROUTE_SEGMENT[type], orgId, spaceId),
-    )
-    ?.find((row) => row.id === packageId)?.name;
-}
-
-/**
- * A package's page while its detail loads (and its route's fallback): its
- * family's crumb, and its name when the list was read on the way here.
- */
+/** A package's page while its detail loads (and its route's fallback): its family's crumb. */
 export function PackageDetailSkeleton({ type }: { type: PackageType }) {
-  const { scope, name } = useParams();
-  const packageId = scope && name ? `${scope}/${name}` : undefined;
   const listCrumb = usePackageListCrumb(type);
-  const title = useCachedPackageName(type, packageId);
-  return (
-    <DetailPageSkeleton
-      breadcrumbs={title ? [listCrumb, { label: title }] : [listCrumb]}
-      title={title}
-      subtitle="lines"
-    />
-  );
+  return <DetailPageSkeleton breadcrumbs={[listCrumb]} subtitle="lines" />;
 }
 
 /** A run's page: no identity tile, one summary line, under its agent's crumbs. */
@@ -265,7 +199,7 @@ export function FormPageSkeleton() {
   return (
     <Waiting>
       <HeaderBlocks breadcrumbs={NO_CRUMBS} actions={false} />
-      <TabStrip />
+      <Skeleton className={TAB_STRIP} />
       <SettingsSkeleton rows={4} className="mt-4" />
     </Waiting>
   );
@@ -315,7 +249,7 @@ export function DashboardSkeleton() {
   const { t } = useTranslation("agents");
   usePageBreadcrumb([{ label: t("common:nav.dashboard") }]);
   return (
-    <div className="mx-auto w-full max-w-[1300px] space-y-8">
+    <div className="space-y-8">
       <div className="mb-4 flex min-h-9 items-start justify-between gap-4">
         <div className="flex flex-col gap-2">
           <Skeleton className="h-9 w-64" />
@@ -336,7 +270,10 @@ export function DashboardSkeleton() {
 export function OverlayPanelSkeleton({ list }: { list?: boolean }) {
   return (
     <Dialog open>
-      <DialogContent className="flex h-[min(720px,calc(100dvh-6rem))] w-[min(1080px,calc(100vw-4rem))] max-w-none gap-0 overflow-hidden p-0 max-sm:-m-4 max-sm:h-[100dvh] max-sm:w-[100vw] max-sm:rounded-none max-sm:border-0 [&>button]:hidden">
+      <DialogContent
+        className="flex h-[min(720px,calc(100dvh-6rem))] w-[min(1080px,calc(100vw-4rem))] max-w-none gap-0 overflow-hidden p-0 max-sm:-m-4 max-sm:h-[100dvh] max-sm:w-[100vw] max-sm:rounded-none max-sm:border-0"
+        closeClassName="hidden"
+      >
         <DialogTitle className="sr-only">…</DialogTitle>
         <aside className="bg-sidebar border-sidebar-border flex w-56 shrink-0 flex-col gap-2 border-r p-3 max-md:hidden">
           {Array.from({ length: 8 }, (_, i) => (

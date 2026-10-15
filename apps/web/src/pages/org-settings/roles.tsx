@@ -42,7 +42,7 @@ import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useRoleColumns } from "./role-columns";
 import { RoleMatrix } from "./role-matrix";
-import { CollectionTabs } from "../../components/collection-tabs";
+import { CollectionTabs } from "../../components/detail-tabs";
 import { ViewToggle } from "../../components/view-toggle";
 import { OrgRolesList, OrgRolesMatrix } from "./org-roles";
 import {

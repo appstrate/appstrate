@@ -37,7 +37,7 @@ export function DashboardPage() {
   // The greeting is known before any read: only the body waits.
   if (isLoading)
     return (
-      <div className="mx-auto w-full max-w-[1300px] space-y-8">
+      <div className="space-y-8">
         <DashboardHeader firstName={firstName} />
         <DashboardBodySkeleton />
       </div>
@@ -73,18 +73,16 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1300px]">
-      <DashboardContent
-        {...{
-          firstName,
-          agents: orderedAgents,
-          runs,
-          runTotal: runsData?.total ?? runs.length,
-          schedules: schedules ?? [],
-          agentName,
-          unreadCounts,
-        }}
-      />
-    </div>
+    <DashboardContent
+      {...{
+        firstName,
+        agents: orderedAgents,
+        runs,
+        runTotal: runsData?.total ?? runs.length,
+        schedules: schedules ?? [],
+        agentName,
+        unreadCounts,
+      }}
+    />
   );
 }

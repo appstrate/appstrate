@@ -2,60 +2,8 @@
 
 import * as React from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import { cn } from "@appstrate/ui/cn";
-
-/** The fade is drawn on the edge that hides tabs, nothing when they all fit. */
-const FADE_EDGE = {
-  none: "",
-  start: "[mask-image:linear-gradient(to_right,transparent,#000_2rem)]",
-  end: "[mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]",
-  both: "[mask-image:linear-gradient(to_right,transparent,#000_2rem,#000_calc(100%-2rem),transparent)]",
-} as const;
-
-function useScrollEdges() {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const [edge, setEdge] = React.useState<keyof typeof FADE_EDGE>("none");
-
-  React.useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => {
-      const hiddenStart = el.scrollLeft > 1;
-      const hiddenEnd = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
-      setEdge(
-        hiddenStart && hiddenEnd ? "both" : hiddenStart ? "start" : hiddenEnd ? "end" : "none",
-      );
-    };
-    measure();
-    el.addEventListener("scroll", measure, { passive: true });
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    if (el.firstElementChild) observer.observe(el.firstElementChild);
-    return () => {
-      el.removeEventListener("scroll", measure);
-      observer.disconnect();
-    };
-  }, []);
-
-  return { ref, edge };
-}
-
-/** Stock shadcn tabs, tighter on a phone; when they still do not fit they scroll, with a fade on the hidden edge. */
-function DetailTabsList(props: Omit<React.ComponentPropsWithoutRef<typeof TabsList>, "className">) {
-  const { ref, edge } = useScrollEdges();
-  return (
-    <div ref={ref} className={cn("max-w-full overflow-x-auto", FADE_EDGE[edge])}>
-      <TabsList className="mt-6 mb-3 w-max justify-start" {...props} />
-    </div>
-  );
-}
-
-function DetailTabsTrigger({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<typeof TabsTrigger>) {
-  return <TabsTrigger className={cn("max-sm:px-2", className)} {...props} />;
-}
 
 export interface DetailTab<T extends string> {
   value: T;
@@ -79,16 +27,19 @@ export function DetailTabs<T extends string>({
   );
 }
 
-/** The tab bar of `tabs`. */
+/** The tab bar of `tabs`: tighter on a phone, and scrolling sideways when they still do not fit. */
 export function DetailTabBar<T extends string>({ tabs }: { tabs: readonly DetailTab<T>[] }) {
   return (
-    <DetailTabsList>
-      {tabs.map((tab) => (
-        <DetailTabsTrigger key={tab.value} value={tab.value}>
-          {tab.label}
-        </DetailTabsTrigger>
-      ))}
-    </DetailTabsList>
+    <ScrollArea type="auto" className="mt-6 mb-3 max-w-full">
+      <TabsList className="w-max justify-start">
+        {tabs.map((tab) => (
+          <TabsTrigger key={tab.value} value={tab.value} className="max-sm:px-2">
+            {tab.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      <ScrollBar orientation="horizontal" />
+    </ScrollArea>
   );
 }
 
@@ -109,5 +60,47 @@ export function DetailTabPanel({
     >
       {children}
     </TabsContent>
+  );
+}
+
+export interface CollectionTabOption<T extends string> {
+  value: T;
+  label: string;
+  /** How many the part holds, when the screen knows. */
+  count?: number;
+}
+
+/**
+ * Tabs that split ONE collection into parts (organization and space roles, remote and local
+ * integrations), unlike the tabs of a detail page, which move between views of one object.
+ * They sit at the head of a list's bar, on the line of its search and at its height.
+ */
+export function CollectionTabs<T extends string>({
+  value,
+  options,
+  label,
+  onChange,
+}: {
+  value: T;
+  options: CollectionTabOption<T>[];
+  /** Names the tab list for screen readers. */
+  label: string;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <Tabs value={value} onValueChange={(next) => onChange(next as T)}>
+      <TabsList aria-label={label} className="h-8 shrink-0 p-0.5">
+        {options.map((option) => (
+          <TabsTrigger key={option.value} value={option.value} className="h-7 px-2.5 text-sm">
+            {option.label}
+            {option.count !== undefined && (
+              <span className="text-muted-foreground ml-1.5 text-xs tabular-nums">
+                {option.count}
+              </span>
+            )}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }

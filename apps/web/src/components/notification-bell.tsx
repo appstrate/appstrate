@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/component
 import { Sheet, SheetContent, SheetTrigger } from "@appstrate/ui/components/sheet";
 import { Separator } from "@appstrate/ui/components/separator";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { ErrorState } from "./page-states";
+import { EmptyState, ErrorState } from "./page-states";
 import {
   useUnreadCount,
   useMarkRead,
@@ -30,9 +30,6 @@ import type { paths } from "../api/client";
 /** One notification as returned by `GET /api/notifications`. */
 type NotificationItem =
   paths["/api/notifications"]["get"]["responses"]["200"]["content"]["application/json"]["data"][number];
-
-const ITEM_CLASS =
-  "hover:bg-muted/50 group flex w-full gap-3 px-4 py-3 text-left transition-colors";
 
 /**
  * Where a notification leads, or `null` when that page is closed to the caller:
@@ -103,11 +100,7 @@ export function NotificationContent({
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
           <h4 className="text-sm font-semibold">{t("notifications.ariaLabel")}</h4>
-          {unread > 0 && (
-            <span className="bg-spark text-spark-foreground flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium">
-              {unread}
-            </span>
-          )}
+          <CountBadge count={unread} label={t("notifications.ariaLabel")} tone="spark" />
         </div>
         {unread > 0 && (
           <Button
@@ -139,10 +132,7 @@ export function NotificationContent({
       ) : failed ? (
         <ErrorState compact />
       ) : notifications.length === 0 ? (
-        <div className="flex flex-col items-center justify-center px-4 py-10">
-          <Bell size={32} className="text-muted-foreground/30 mb-3" />
-          <p className="text-muted-foreground text-sm">{t("notifications.empty")}</p>
-        </div>
+        <EmptyState compact icon={Bell} message={t("notifications.empty")} />
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
@@ -177,25 +167,17 @@ export function NotificationContent({
                 </div>
               </>
             );
+            const row = {
+              onClick: () => onItemClick(notification.id),
+              className:
+                "hover:bg-muted/50 flex w-full gap-3 px-4 py-3 text-left transition-colors",
+              children: body,
+            };
             // Nowhere to go: clicking still marks it read.
             return target ? (
-              <Link
-                key={notification.id}
-                to={target}
-                onClick={() => onItemClick(notification.id)}
-                className={ITEM_CLASS}
-              >
-                {body}
-              </Link>
+              <Link key={notification.id} to={target} {...row} />
             ) : (
-              <button
-                key={notification.id}
-                type="button"
-                onClick={() => onItemClick(notification.id)}
-                className={ITEM_CLASS}
-              >
-                {body}
-              </button>
+              <button key={notification.id} type="button" {...row} />
             );
           })}
         </div>

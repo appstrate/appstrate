@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -10,14 +9,6 @@ import type { AgentListItem, EnrichedRun, EnrichedSchedule } from "@appstrate/sh
 import { ArrowRight, Bot, MessageSquareText, Copy, LayoutDashboard, Sparkles } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-  type CarouselApi,
-} from "@appstrate/ui/components/carousel";
 import { PackageIcon } from "../components/package-icon";
 import { EmptyState } from "../components/page-states";
 import { ChoiceCard } from "../components/choice-card";
@@ -180,66 +171,18 @@ function MetricCard({
 function RecentAgents({
   agents,
   unreadCounts,
-  className,
 }: {
   agents: AgentListItem[];
   unreadCounts: Record<string, number> | undefined;
-  className?: string;
 }) {
-  const { t } = useTranslation("agents");
-  const [api, setApi] = useState<CarouselApi>();
-  const [canScrollNext, setCanScrollNext] = useState(false);
-  useEffect(() => {
-    if (!api) return;
-    const read = () => setCanScrollNext(api.canScrollNext());
-    read();
-    api.on("select", read).on("reInit", read);
-    return () => {
-      api.off("select", read).off("reInit", read);
-    };
-  }, [api]);
-
   return (
-    <Carousel
-      setApi={setApi}
-      opts={{ align: "start", dragFree: true, slidesToScroll: "auto" }}
-      className={className}
-      aria-label={t("dashboard.recentAgents")}
-      data-dashboard-agent-carousel
-    >
-      <CarouselContent className="-ml-3 pb-1">
-        {agents.map((agent) => (
-          <CarouselItem key={agent.id} className="basis-auto pl-3">
-            <div className="h-full w-[19rem]">
-              <PackageCard {...agentCardItem(agent, unreadCounts?.[agent.id])} headingLevel={3} />
-            </div>
-          </CarouselItem>
-        ))}
-      </CarouselContent>
-      <CarouselPrevious
-        className="left-2 z-20 disabled:hidden"
-        aria-label={t("dashboard.previousAgents")}
-      />
-      <RecentAgentsEndFade visible={canScrollNext} />
-      <CarouselNext
-        className="right-2 z-20 disabled:hidden"
-        aria-label={t("dashboard.moreAgents")}
-      />
-    </Carousel>
-  );
-}
-
-/** Fades the last visible card while more agents sit past the edge. */
-function RecentAgentsEndFade({ visible }: { visible: boolean }) {
-  return (
-    <div
-      className={cn(
-        "from-canvas pointer-events-none absolute inset-y-0 right-0 z-10 w-24 bg-gradient-to-l to-transparent transition-opacity",
-        visible ? "opacity-100" : "opacity-0",
-      )}
-      aria-hidden="true"
-      data-carousel-end-fade
-    />
+    <div className="flex gap-3 overflow-x-auto pb-1">
+      {agents.map((agent) => (
+        <div key={agent.id} className="w-[19rem] shrink-0">
+          <PackageCard {...agentCardItem(agent, unreadCounts?.[agent.id])} headingLevel={3} />
+        </div>
+      ))}
+    </div>
   );
 }
 
