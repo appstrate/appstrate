@@ -80,4 +80,4 @@ function Combobox({
   );
 }
 
-export { Combobox, type ComboboxOption };
+export { Combobox };
