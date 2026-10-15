@@ -67,12 +67,11 @@ export function DetailTabs<T extends string>({
 }
 
 /**
- * The tab bar of a page whose title block is in the shell header (`DetailBar`):
- * underlined tabs on the band's own rule, `end` at the far right (a search, a
- * filter). Must render inside the page's `DetailTabs`: it is portalled to the
- * header, and the portal keeps the tabs' context.
+ * Underlined tabs, `end` at the far right (a search, a filter): the tab list of
+ * `HeaderTabBar`, and of a page with no shell header of its own (an overlay's)
+ * once it draws the band's rule under it. Needs a `<DetailTabs>` above.
  */
-export function HeaderTabBar<T extends string>({
+export function UnderlineTabList<T extends string>({
   tabs,
   end,
 }: {
@@ -81,30 +80,48 @@ export function HeaderTabBar<T extends string>({
 }) {
   const { ref, edge } = useScrollEdges();
   return (
-    <ShellHeaderTabs>
-      <div className="flex items-center justify-between gap-4">
-        <div
-          ref={ref}
-          className={cn(
-            "-mb-px min-w-0 [scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden",
-            FADE_EDGE[edge],
-          )}
-        >
-          <TabsList className="h-11 w-max justify-start gap-1 rounded-none bg-transparent p-0">
-            {tabs.map(({ value, label, icon: Icon }) => (
-              <TabsTrigger
-                key={value}
-                value={value}
-                className="text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground h-full gap-2 rounded-none border-b-2 border-transparent px-2.5 py-0 data-[state=active]:bg-transparent data-[state=active]:shadow-none max-sm:px-2"
-              >
-                {Icon && <Icon className="size-4 shrink-0" aria-hidden />}
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-        {end && <div className="flex shrink-0 items-center gap-2">{end}</div>}
+    <div className="flex items-center justify-between gap-4">
+      <div
+        ref={ref}
+        className={cn(
+          "min-w-0 [scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden",
+          FADE_EDGE[edge],
+        )}
+      >
+        <TabsList className="h-11 w-max justify-start gap-1 rounded-none bg-transparent p-0">
+          {tabs.map(({ value, label, icon: Icon }) => (
+            <TabsTrigger
+              key={value}
+              value={value}
+              className="text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground h-full gap-2 rounded-none border-b-2 border-transparent px-2.5 py-0 data-[state=active]:bg-transparent data-[state=active]:shadow-none max-sm:px-2"
+            >
+              {Icon && <Icon className="size-4 shrink-0" aria-hidden />}
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
       </div>
+      {end && <div className="flex shrink-0 items-center gap-2">{end}</div>}
+    </div>
+  );
+}
+
+/**
+ * The tab bar of a page whose title block is in the shell header (`DetailBar`):
+ * `UnderlineTabList`, portalled to the header, where the band's own rule runs
+ * under it. Must render inside the page's `DetailTabs`: the portal keeps the
+ * tabs' context.
+ */
+export function HeaderTabBar<T extends string>({
+  tabs,
+  end,
+}: {
+  tabs: readonly DetailTab<T>[];
+  end?: React.ReactNode;
+}) {
+  return (
+    <ShellHeaderTabs>
+      <UnderlineTabList tabs={tabs} end={end} />
     </ShellHeaderTabs>
   );
 }

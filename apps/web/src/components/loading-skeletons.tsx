@@ -70,27 +70,16 @@ export function TextSkeleton({ lines = 3, className }: { lines?: number; classNa
  * replaces it in place. Publishes the part of the trail the page already knows
  * from its address.
  */
-function HeaderBlocks({
-  breadcrumbs,
-  actions = true,
-}: {
-  breadcrumbs: BreadcrumbEntry[];
-  actions?: boolean;
-}) {
+function HeaderBlocks({ breadcrumbs }: { breadcrumbs: BreadcrumbEntry[] }) {
   usePageBreadcrumb(breadcrumbs);
   return (
     <div data-page-header className="mb-4">
       <div className="flex min-h-9 items-center justify-between gap-4">
         <Skeleton className="h-7 w-44" />
-        {actions && <Skeleton className="h-8 w-24 shrink-0" />}
+        <Skeleton className="h-8 w-24 shrink-0" />
       </div>
     </div>
   );
-}
-
-/** The tab strip of a page whose tabs are in the page: a block. */
-function TabStrip() {
-  return <Skeleton className="mt-6 mb-3 h-9 w-72 max-w-full rounded-lg" />;
 }
 
 function CardBlocks({ count }: { count: number }) {
@@ -232,13 +221,12 @@ export function SettingsSkeleton({ rows = 3, className }: { rows?: number; class
   );
 }
 
-/** A form page with its own header and tabs (the package editor). */
+/** A form page with its header and tabs in the shell header (the package editor). */
 export function FormPageSkeleton() {
   return (
     <Waiting>
-      <HeaderBlocks breadcrumbs={NO_CRUMBS} actions={false} />
-      <TabStrip />
-      <SettingsSkeleton rows={4} className="mt-4" />
+      <DetailBarSkeleton tabCount={3} />
+      <SettingsSkeleton rows={4} />
     </Waiting>
   );
 }
