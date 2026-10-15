@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
 import { Modal } from "./modal";
-import { Spinner } from "./spinner";
 
 interface FormModalProps {
   title: string;
@@ -66,9 +65,9 @@ export function FormModal({
             type="submit"
             form={formId}
             data-testid={submitTestId}
-            disabled={isPending || submitDisabled}
+            pending={isPending}
+            disabled={submitDisabled}
           >
-            {isPending && <Spinner label={t("loading")} />}
             {submitLabel ?? t("btn.save")}
           </Button>
         </>

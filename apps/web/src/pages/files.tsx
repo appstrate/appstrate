@@ -7,15 +7,14 @@
  * files, end-users see only their own.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { formatBytes } from "../lib/format-bytes";
 import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { useFiles, type FileDto } from "../hooks/use-files";
+import { useFilesPaged } from "../hooks/use-files";
 import { PageHeader } from "../components/page-header";
 import { DocumentListPanel } from "../components/document-list-panel";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
@@ -28,7 +27,7 @@ import { useDebouncedValue } from "../hooks/use-debounced-value";
 const PURPOSES = ["agent_output", "user_upload"] as const;
 
 export function FilesPage() {
-  // Remount on space switch so the cursor + accumulated pages reset.
+  // Remount on space switch so the loaded pages reset.
   const spaceId = useCurrentSpaceId();
   return <DocumentsPageContent key={spaceId ?? "none"} />;
 }
@@ -70,60 +69,23 @@ function DocumentsCollection({
   const canReach = useCanReach();
   const [view, setView] = useListView("documents");
   const searchPlaceholder = useSearchPlaceholder(t("page.title"));
-  const { storage, limitBytes: limit } = useOrgStorage();
+  const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
   const query = useDebouncedValue(search);
-  const signature = `${effectivePurpose ?? ""}|${query}`;
 
-  // Search and purpose changes clear pagination without remounting the toolbar:
-  // remounting drops search focus and closes the purpose multi-select.
-  const [paging, setPaging] = useState<{
-    signature: string;
-    cursor: string | undefined;
-    loadedPages: FileDto[];
-  }>({ signature, cursor: undefined, loadedPages: [] });
-  const cursor = paging.signature === signature ? paging.cursor : undefined;
-
-  const { data, isLoading, error } = useFiles({
-    search: query || undefined,
+  const { data, isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } = useFilesPaged({
+    search: query,
     purpose: effectivePurpose,
-    startingAfter: cursor,
-    limit: 25,
   });
-
-  const currentPage = useMemo(() => data?.data ?? [], [data?.data]);
-  const hasMore = data?.hasMore ?? false;
-
-  // Merge accumulated pages with the current one, deduping by id (the current
-  // page briefly overlaps the accumulator between "Load more" and the fetch).
-  const files = useMemo(() => {
-    const seen = new Set<string>();
-    const out: FileDto[] = [];
-    const priorPages = paging.signature === signature ? paging.loadedPages : [];
-    for (const doc of [...priorPages, ...currentPage]) {
-      if (!seen.has(doc.id)) {
-        seen.add(doc.id);
-        out.push(doc);
-      }
-    }
-    return out;
-  }, [paging, signature, currentPage]);
+  const files = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
 
   const filtering = purposes.length > 0 || query.trim() !== "";
-  const countLabel = hasMore
+  const countLabel = hasNextPage
     ? t("page.countLoaded", { count: files.length })
     : t("page.count", { count: files.length });
-  const usageLabel = storage
-    ? limit === null
-      ? t("storage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
-      : t("storage.usedOfLimit", {
-          used: formatBytes(storage.used_bytes),
-          limit: formatBytes(limit),
-        })
-    : null;
   const overLimit = storage !== undefined && limit !== null && storage.used_bytes >= limit;
   const footerLabel = usageLabel ? (
     <>
-      {countLabel} <span aria-hidden>·</span> {usageLabel}
+      {countLabel} <span aria-hidden>·</span> {t("storage.usage", { usage: usageLabel })}
     </>
   ) : (
     countLabel
@@ -182,43 +144,14 @@ function DocumentsCollection({
             : { message: t("page.empty"), hint: t("page.emptyHint") }
         }
         showRunLink={canReach("/agents/:scope/:name/runs/:runId")}
-        onDeleted={(id) =>
-          setPaging((previous) => ({
-            signature,
-            cursor: previous.signature === signature ? previous.cursor : undefined,
-            loadedPages: (previous.signature === signature ? previous.loadedPages : []).filter(
-              (document) => document.id !== id,
-            ),
-          }))
-        }
-        onKept={(id) =>
-          setPaging((previous) => ({
-            signature,
-            cursor: previous.signature === signature ? previous.cursor : undefined,
-            loadedPages: (previous.signature === signature ? previous.loadedPages : []).map(
-              (document) => (document.id === id ? { ...document, expiresAt: null } : document),
-            ),
-          }))
-        }
         footer={
           <ListFooter count={isLoading || error ? undefined : footerLabel}>
-            {hasMore && (
+            {hasNextPage && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  const last = currentPage[currentPage.length - 1];
-                  if (last) {
-                    setPaging((previous) => ({
-                      signature,
-                      cursor: last.id,
-                      loadedPages: [
-                        ...(previous.signature === signature ? previous.loadedPages : []),
-                        ...currentPage,
-                      ],
-                    }));
-                  }
-                }}
+                pending={isFetchingNextPage}
+                onClick={() => void fetchNextPage()}
               >
                 {t("page.loadMore")}
               </Button>

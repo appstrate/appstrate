@@ -58,7 +58,7 @@ import { asRecord, isPlainObject } from "@appstrate/core/safe-json";
 import { formatBytes } from "../../lib/format-bytes";
 import { matchesSearch } from "../../lib/strings";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
-import { client, $api, ApiError } from "../../api/client";
+import { $api, ApiError } from "../../api/client";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { useUpdatePackage } from "../../hooks/use-mutations";
 import { useOrgScope } from "../../hooks/use-org-scope";
@@ -67,7 +67,6 @@ import { useUnsavedChanges } from "../../hooks/use-unsaved-changes";
 import { useReportEditorDirty } from "../../hooks/use-editor-state";
 import {
   isPinnedEntry,
-  languageForPath,
   previewBlockReason,
   type PackageFileEntry,
   type PackageFileWriteOperation,
@@ -80,18 +79,20 @@ import {
   type DraftFile,
 } from "../../lib/package-file-drafts";
 import { errorMessage } from "../../lib/mutation-error";
+import { invalidatePaths } from "../../lib/query-keys";
 import { packageFilesErrorKey, primaryDisplayFile } from "../../lib/package-files";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { CompareWithDraftModal } from "../package-detail/compare-with-draft-modal";
 import { Modal } from "../modal";
 import { ErrorState } from "../page-states";
 import { TextSkeleton } from "../loading-skeletons";
-import { ContentEditor } from "../package-editor/content-editor";
-import { Spinner } from "../spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { UnsavedChangesModal } from "../unsaved-changes-modal";
-import { FilePreview } from "./file-preview";
+import { PackageFileSource } from "./package-file-source";
+import { PackageFileTextEditor } from "./package-file-text-editor";
+import { usePackageFileIndex, usePackageFileIndexes } from "./use-package-file-index";
 import { FileTree } from "./file-tree";
-import { usePackageFile, usePackageFileDownload } from "./use-package-file";
+import { usePackageFileDownload } from "./use-package-file";
 import { useStagedPackageFiles } from "./use-staged-package-files";
 import { getSource } from "../integration-editor/utils";
 import { AgentDetailPaneHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
@@ -219,17 +220,9 @@ export function PackageFilesView({
     packageId,
     selectedVersion === "draft" ? undefined : selectedVersion,
   );
-  const { data: bundleIndex, error: bundleError } = $api.useQuery(
-    "get",
-    "/api/packages/{scope}/{name}/files",
-    {
-      params: {
-        path: splitPackageRef(packageId),
-        ...(selectedVersion === "draft" ? {} : { query: { version: selectedVersion } }),
-        header: scope.header,
-      },
-    },
-    { enabled: scope.enabled },
+  const { data: bundleIndex, error: bundleError } = usePackageFileIndex(
+    packageId,
+    selectedVersion === "draft" ? undefined : selectedVersion,
   );
 
   // ── The draft's file edits ──
@@ -289,7 +282,7 @@ export function PackageFilesView({
         body: packageUpdateBody({ manifest: base.manifest, operations }),
       });
       // Start again from what the server now holds, not from the staged tree.
-      await queryClient.refetchQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/files"] });
+      await invalidatePaths(queryClient, ["/api/packages/{scope}/{name}/files"], "all");
       discardEdits();
       toast.success(t("files.saved"));
     } catch (error) {
@@ -315,54 +308,21 @@ export function PackageFilesView({
     ],
     [manifest],
   );
-  const skillIndexes = useQueries({
-    queries: skills.map((skill) => ({
-      queryKey: [
-        "agent-runtime-skill-files",
-        scope.header["X-Org-Id"],
-        scope.header["X-Space-Id"],
-        skill.id,
-      ],
-      enabled: scope.enabled,
-      queryFn: async () => {
-        const { data, error } = await client.GET("/api/packages/{scope}/{name}/files", {
-          params: { path: splitPackageRef(skill.id), header: scope.header },
-        });
-        if (error) throw error;
-        return data;
-      },
-    })),
-  });
-  const localMcpIndexes = useQueries({
+  const skillIndexes = usePackageFileIndexes(skills.map((skill) => skill.id));
+  const mcpDetails = useQueries({
     queries: mcpServers.map((server) => ({
-      queryKey: [
-        "agent-runtime-local-mcp-files",
-        scope.header["X-Org-Id"],
-        scope.header["X-Space-Id"],
-        server.id,
-      ],
+      ...$api.queryOptions("get", "/api/packages/mcp-servers/{scope}/{name}", {
+        params: { path: splitPackageRef(server.id), header: scope.header },
+      }),
       enabled: scope.enabled,
-      queryFn: async () => {
-        const { data: detail, error: detailError } = await client.GET(
-          "/api/packages/mcp-servers/{scope}/{name}",
-          { params: { path: splitPackageRef(server.id), header: scope.header } },
-        );
-        if (detailError) throw detailError;
-        const serverManifest = asRecord(detail.manifest).server;
-        if (!isPlainObject(serverManifest) || typeof serverManifest.entry_point !== "string")
-          return null;
-
-        const { data: files, error: filesError } = await client.GET(
-          "/api/packages/{scope}/{name}/files",
-          { params: { path: splitPackageRef(server.id), header: scope.header } },
-        );
-        if (filesError) throw filesError;
-        const paths = new Set(files.data.map((entry) => entry.path));
-        if (!paths.has("manifest.json") || !paths.has(serverManifest.entry_point)) return null;
-        return files;
-      },
     })),
   });
+  // Only a server whose manifest names an entry point has files to index.
+  const mcpIndexes = usePackageFileIndexes(
+    mcpServers.map((server, index) =>
+      hasEntryPoint(mcpDetails[index]?.data) ? server.id : undefined,
+    ),
+  );
 
   const files = useMemo<VirtualFile[]>(() => {
     const bundle =
@@ -390,7 +350,7 @@ export function PackageFilesView({
         }));
     });
     const localServers = mcpServers.flatMap((server, index) => {
-      const entries = localMcpIndexes[index]?.data?.data ?? [];
+      const entries = localServerFiles(mcpDetails[index]?.data, mcpIndexes[index]?.data?.data);
       return entries.map((entry) => ({
         source: "dependency" as const,
         packageId: server.id,
@@ -403,7 +363,7 @@ export function PackageFilesView({
       }));
     });
     return [...bundle, ...runtimeSkills, ...localServers];
-  }, [bundleEntries, localMcpIndexes, mcpServers, packageId, skillIndexes, skills]);
+  }, [bundleEntries, mcpDetails, mcpIndexes, mcpServers, packageId, skillIndexes, skills]);
 
   const visibleFiles = useMemo(
     () =>
@@ -442,7 +402,8 @@ export function PackageFilesView({
   const publishedVersions = versions?.filter((version) => !version.yanked) ?? [];
   const dependenciesLoading =
     skillIndexes.some((result) => result.isLoading) ||
-    localMcpIndexes.some((result) => result.isLoading);
+    mcpIndexes.some((result) => result.isLoading) ||
+    mcpDetails.some((result) => result.isLoading);
   const selectedVersionLabel =
     selectedVersion === "draft" ? t("agents:detail.files.currentDraft") : `v${selectedVersion}`;
 
@@ -603,61 +564,60 @@ export function PackageFilesView({
                   )}
                   compact
                 />
-              ) : !bundleIndex || dependenciesLoading ? (
+              ) : !bundleIndex ? (
                 <TextSkeleton lines={6} />
               ) : (
-                <FileTree
-                  entries={visibleFiles.map((file) => file.treeEntry)}
-                  directories={[
-                    TREE_BUNDLE,
-                    ...(skills.length > 0 ? [TREE_DEPENDENCIES, TREE_SKILLS] : []),
-                    ...(mcpServers.length > 0 ? [TREE_DEPENDENCIES, TREE_MCP_SERVERS] : []),
-                  ]}
-                  initialCollapsedPaths={[TREE_SKILLS, TREE_MCP_SERVERS]}
-                  directoryLabels={folderLabels}
-                  selectedPath={
-                    activeSelection?.kind === "file"
-                      ? activeSelection.file.treeEntry.path
-                      : (activeSelection?.path ?? null)
-                  }
-                  onSelect={(path) => {
-                    const file = fileByPath.get(path);
-                    if (file) setSelected({ kind: "file", file });
-                  }}
-                  onSelectNode={(node) => {
-                    if (node.kind === "dir") selectPath(node.path, node);
-                  }}
-                  label={t("agents:files.treeLabel")}
-                  controlsId="agent-file-preview"
-                  className="h-full w-full p-1 text-left"
-                  // Its new-file and import buttons live in the bar above.
-                  showToolbar={false}
-                  actions={
-                    editing
-                      ? {
-                          onCreate: staged.openNewFile,
-                          onUpload: () => staged.pickUpload(null),
-                          onRename: (path) =>
-                            path.startsWith(BUNDLE_ROOT) &&
-                            staged.openRename(path.slice(BUNDLE_ROOT.length)),
-                          onDelete: (path) =>
-                            path.startsWith(BUNDLE_ROOT) &&
-                            staged.openDelete(path.slice(BUNDLE_ROOT.length)),
-                          // Dependencies are other packages: never renamed or deleted here.
-                          isPinned: (path) =>
-                            !path.startsWith(BUNDLE_ROOT) ||
-                            isPinned(path.slice(BUNDLE_ROOT.length)),
-                          isBusy: busy,
-                          labels: {
-                            newFile: t("files.newFile"),
-                            upload: t("files.upload"),
-                            rename: t("files.rename"),
-                            delete: t("files.delete"),
-                          },
-                        }
-                      : undefined
-                  }
-                />
+                // The bundle is drawn as soon as its index is in; only the
+                // dependencies folder waits for the indexes it lists.
+                <div className="flex h-full flex-col">
+                  <FileTree
+                    entries={visibleFiles.map((file) => file.treeEntry)}
+                    directories={[
+                      TREE_BUNDLE,
+                      ...(skills.length > 0 ? [TREE_DEPENDENCIES, TREE_SKILLS] : []),
+                      ...(mcpServers.length > 0 ? [TREE_DEPENDENCIES, TREE_MCP_SERVERS] : []),
+                    ]}
+                    initialCollapsedPaths={[TREE_SKILLS, TREE_MCP_SERVERS]}
+                    directoryLabels={folderLabels}
+                    selectedPath={
+                      activeSelection?.kind === "file"
+                        ? activeSelection.file.treeEntry.path
+                        : (activeSelection?.path ?? null)
+                    }
+                    onSelect={(path) => {
+                      const file = fileByPath.get(path);
+                      if (file) setSelected({ kind: "file", file });
+                    }}
+                    onSelectNode={(node) => {
+                      if (node.kind === "dir") selectPath(node.path, node);
+                    }}
+                    label={t("agents:files.treeLabel")}
+                    controlsId="agent-file-preview"
+                    className="min-h-0 w-full flex-1 p-1 text-left"
+                    // Its new-file and import buttons live in the bar above.
+                    showToolbar={false}
+                    actions={
+                      editing
+                        ? {
+                            onCreate: staged.openNewFile,
+                            onUpload: () => staged.pickUpload(null),
+                            onRename: (path) =>
+                              path.startsWith(BUNDLE_ROOT) &&
+                              staged.openRename(path.slice(BUNDLE_ROOT.length)),
+                            onDelete: (path) =>
+                              path.startsWith(BUNDLE_ROOT) &&
+                              staged.openDelete(path.slice(BUNDLE_ROOT.length)),
+                            // Dependencies are other packages: never renamed or deleted here.
+                            isPinned: (path) =>
+                              !path.startsWith(BUNDLE_ROOT) ||
+                              isPinned(path.slice(BUNDLE_ROOT.length)),
+                            isBusy: busy,
+                          }
+                        : undefined
+                    }
+                  />
+                  {dependenciesLoading && <TextSkeleton lines={2} className="shrink-0 px-3 pb-3" />}
+                </div>
               )}
             </div>
           </>
@@ -697,7 +657,7 @@ export function PackageFilesView({
                     : (selectedDependencyDetail?.version ?? undefined)
                 }
               />
-              <FilePreview
+              <PackageFileSource
                 id="agent-file-preview"
                 packageId={activeSelection.file.packageId}
                 version={
@@ -757,11 +717,12 @@ export function PackageFilesView({
               link that lands before the tree has loaded) would open an empty
               file that never fills in. */}
           {editedFile ? (
-            <FileTextEditor
+            <PackageFileTextEditor
               packageId={packageId}
               entry={editedFile.sourceEntry}
               path={editingFile.value}
-              onApply={(text) => {
+              commit="apply"
+              onCommit={(text) => {
                 if (staged.stage([fileTextOperation(editingFile.value!, text)]))
                   editingFile.close();
               }}
@@ -1042,6 +1003,31 @@ function FolderPreview({ path, dependency }: { path: string; dependency?: Packag
   );
 }
 
+/**
+ * A local MCP server's files, once its manifest names an entry point the
+ * bundle holds; nothing otherwise (a remote server has no files to show).
+ */
+function localServerFiles(
+  detail: { manifest?: unknown } | undefined,
+  files: readonly PackageFileEntry[] | undefined,
+): readonly PackageFileEntry[] {
+  const entryPoint = entryPointOf(detail);
+  if (!files || entryPoint === undefined) return [];
+  const paths = new Set(files.map((entry) => entry.path));
+  return paths.has("manifest.json") && paths.has(entryPoint) ? files : [];
+}
+
+function entryPointOf(detail: { manifest?: unknown } | undefined): string | undefined {
+  const server = asRecord(detail?.manifest).server;
+  return isPlainObject(server) && typeof server.entry_point === "string"
+    ? server.entry_point
+    : undefined;
+}
+
+function hasEntryPoint(detail: { manifest?: unknown } | undefined): boolean {
+  return entryPointOf(detail) !== undefined;
+}
+
 /** A file just created in the draft, before the tree hands back its entry. */
 function emptyBundleFile(packageId: string, path: string): VirtualFile {
   const entry: PackageFileEntry = { path, size: 0, media_kind: "text", inline: "" };
@@ -1052,54 +1038,6 @@ function emptyBundleFile(packageId: string, path: string): VirtualFile {
     sourceEntry: entry,
     treeEntry: { ...entry, path: `${BUNDLE_ROOT}${path}` },
   };
-}
-
-/** A text file's editor in its modal: Appliquer stages it, the save bar saves it. */
-function FileTextEditor({
-  packageId,
-  entry,
-  path,
-  onApply,
-}: {
-  packageId: string;
-  entry: PackageFileEntry;
-  path: string;
-  onApply: (text: string) => void;
-}) {
-  const { t } = useTranslation("agents");
-  const { text, isLoading, isError } = usePackageFile(packageId, undefined, entry, true);
-  if (isError) return <ErrorState message={t("files.errorLoad")} />;
-  if (isLoading || text === undefined) return <TextSkeleton lines={8} />;
-  return <FileTextEditorBody initial={text} path={path} onApply={onApply} />;
-}
-
-function FileTextEditorBody({
-  initial,
-  path,
-  onApply,
-}: {
-  initial: string;
-  path: string;
-  onApply: (text: string) => void;
-}) {
-  const { t } = useTranslation("agents");
-  const [value, setValue] = useState(initial);
-  return (
-    <div className="flex flex-col gap-3">
-      <ContentEditor
-        value={value}
-        onChange={setValue}
-        language={languageForPath(path)}
-        // Fits a short window: the modal must never push Appliquer off screen.
-        height="min(60vh, 560px)"
-      />
-      <div className="flex justify-end">
-        <Button type="button" onClick={() => onApply(value)}>
-          {t("editor.apply")}
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 /** One of the tree bar's icon buttons: named for a screen reader, titled for a pointer. */

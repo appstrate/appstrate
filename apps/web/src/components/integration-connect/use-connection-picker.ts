@@ -16,7 +16,7 @@ import {
   useUpsertMemberIntegrationPin,
   useDeleteMemberIntegrationPin,
 } from "../../hooks/use-member-integration-pins";
-import { useHostedConnectPopup } from "./use-integration-oauth-popup";
+import { useHostedConnectPopup } from "./use-hosted-connect-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { describeResolution, unboundLabel } from "./integration-run-readiness";
 import { scopeLabels } from "./scope-labels";

@@ -23,7 +23,6 @@ import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-u
 import {
   BookOpenIcon,
   BracesIcon,
-  Loader2Icon,
   PencilIcon,
   PlayIcon,
   PlusIcon,
@@ -32,7 +31,9 @@ import {
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
+import { formatDuration } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { Modal } from "./modal.tsx";
 import { useChatHost } from "./runtime-context.ts";
@@ -54,13 +55,13 @@ import {
   extractRunAndWaitAuthOffers,
   isStartedRunResult,
 } from "./auth-offer.ts";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
+import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import {
-  asRecord,
   definedEntries,
   deriveToolPhase,
   extractErrorMessage,
   httpStatusOf,
-  unwrapResult,
   type ToolPhase,
 } from "./tool-result.ts";
 
@@ -86,15 +87,11 @@ const OP_RULES: { re: RegExp; labelKey: string; Icon: LucideIcon }[] = [
 // assistant-stream ToolCallTiming = { startedAt, completedAt? } (epoch ms;
 // completedAt absent while running).
 function readDurationMs(timing: unknown): number | undefined {
-  const t = asRecord(timing);
+  const t = asRecordOrNull(timing);
   if (t && typeof t.startedAt === "number" && typeof t.completedAt === "number") {
     return t.completedAt - t.startedAt;
   }
   return undefined;
-}
-
-function formatMs(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
 const BADGE_TONE: Record<ToolPhase, string> = {
@@ -120,7 +117,7 @@ function Meta({
         <code className={`rounded px-1.5 py-0.5 font-medium ${BADGE_TONE[phase]}`}>{status}</code>
       ) : null}
       {durationMs !== undefined ? (
-        <span className="text-muted-foreground">{formatMs(durationMs)}</span>
+        <span className="text-muted-foreground">{formatDuration(durationMs)}</span>
       ) : null}
     </span>
   );
@@ -134,7 +131,7 @@ function Meta({
  */
 function LeadIcon({ phase, Icon }: { phase: ToolPhase; Icon: LucideIcon }) {
   if (phase === "running") {
-    return <Loader2Icon className="text-muted-foreground size-4 shrink-0 animate-spin" />;
+    return <Spinner className="text-muted-foreground size-4 shrink-0" />;
   }
   const tone = phase === "error" ? "text-destructive" : "text-muted-foreground";
   return <Icon className={`size-4 shrink-0 ${tone}`} />;
@@ -142,7 +139,7 @@ function LeadIcon({ phase, Icon }: { phase: ToolPhase; Icon: LucideIcon }) {
 
 function hasContent(value: unknown): boolean {
   if (value === undefined || value === null || value === "") return false;
-  const rec = asRecord(value);
+  const rec = asRecordOrNull(value);
   if (rec) return Object.keys(rec).length > 0;
   if (Array.isArray(value)) return value.length > 0;
   return true;
@@ -193,10 +190,10 @@ export function ToolCallCard({
   const { t } = useChatHost();
   const title = labelKey ? t(labelKey) : (label ?? "");
   const [open, setOpen] = React.useState(false);
-  // `unwrapResult` JSON-parses the tool payload. Unmemoized it re-parsed on
+  // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on
   // every render of this card — and during a stream the thread re-renders per
   // chunk, so a tool-heavy conversation paid it once per card per frame.
-  const unwrapped = React.useMemo(() => unwrapResult(result), [result]);
+  const unwrapped = React.useMemo(() => unwrapMcpResult(result), [result]);
   const status = httpStatusOf(unwrapped);
   const durationMs = readDurationMs(timing);
   const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
@@ -297,7 +294,7 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   const runId = extractRunId(props.result);
   const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
   // Same reason as `ToolCallCard` — see the note there.
-  const unwrapped = React.useMemo(() => unwrapResult(props.result), [props.result]);
+  const unwrapped = React.useMemo(() => unwrapMcpResult(props.result), [props.result]);
   const meta = definedEntries({
     tool_call_id: props.toolCallId,
     is_error: props.isError,
@@ -371,7 +368,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
             packageId={args?.path_params?.packageId}
             toolCallId={props.toolCallId}
             errorText={
-              phase === "error" && !offer ? extractErrorMessage(unwrapResult(result)) : undefined
+              phase === "error" && !offer ? extractErrorMessage(unwrapMcpResult(result)) : undefined
             }
           />
         );

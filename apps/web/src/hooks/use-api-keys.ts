@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../api/client";
-import { useCurrentOrgId } from "./use-org";
-import { useOrgScope } from "./use-org-scope";
+import { useInvalidatePaths } from "./use-invalidate-paths";
+import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 
 /** Wire shape from the OpenAPI spec (components.schemas.ApiKeyInfo). */
@@ -22,31 +21,25 @@ export function useApiKeys() {
 }
 
 export function useAvailableScopes() {
-  const orgId = useCurrentOrgId();
+  const scope = useOrgOnlyScope();
   const { can } = usePermissions();
   return $api.useQuery(
     "get",
     "/api/api-keys/available-scopes",
-    { params: { header: { "X-Org-Id": orgId ?? undefined } } },
-    { enabled: can("api-keys:read") && !!orgId, select: (e) => e.data },
+    { params: { header: scope.header } },
+    { enabled: can("api-keys:read") && scope.enabled, select: (e) => e.data },
   );
 }
 
 export function useCreateApiKey() {
-  const qc = useQueryClient();
+  const invalidate = useInvalidatePaths("/api/api-keys");
   return $api.useMutation("post", "/api/api-keys", {
     meta: { errorHandledByCaller: true },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/api-keys"] });
-    },
+    onSuccess: invalidate,
   });
 }
 
 export function useRevokeApiKey() {
-  const qc = useQueryClient();
-  return $api.useMutation("delete", "/api/api-keys/{id}", {
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/api-keys"] });
-    },
-  });
+  const invalidate = useInvalidatePaths("/api/api-keys");
+  return $api.useMutation("delete", "/api/api-keys/{id}", { onSuccess: invalidate });
 }

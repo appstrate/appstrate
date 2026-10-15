@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { isMemberPaid, isModelSelectable } from "../model-selectability";
+import { isMemberPaid, isModelPinUnavailable } from "../model-selectability";
 import type { OrgModelInfo } from "../../hooks/use-models";
 
 function model(over: Partial<OrgModelInfo>): OrgModelInfo {
@@ -32,17 +32,19 @@ function model(over: Partial<OrgModelInfo>): OrgModelInfo {
   };
 }
 
-describe("isModelSelectable", () => {
-  it("enabled + live credential → selectable", () => {
-    expect(isModelSelectable(model({}))).toBe(true);
+describe("isModelPinUnavailable", () => {
+  it("no pin → available", () => {
+    expect(isModelPinUnavailable([model({})], null)).toBe(false);
   });
 
-  it("disabled → not selectable", () => {
-    expect(isModelSelectable(model({ enabled: false }))).toBe(false);
+  it("a pin on an enabled, connected model → available", () => {
+    expect(isModelPinUnavailable([model({})], "m1")).toBe(false);
   });
 
-  it("dead credential → not selectable even though the row is listed", () => {
-    expect(isModelSelectable(model({ needs_reconnection: true }))).toBe(false);
+  it("a pin on a model that is gone, disabled or needs reconnection → unavailable", () => {
+    expect(isModelPinUnavailable([model({})], "other")).toBe(true);
+    expect(isModelPinUnavailable([model({ enabled: false })], "m1")).toBe(true);
+    expect(isModelPinUnavailable([model({ needs_reconnection: true })], "m1")).toBe(true);
   });
 });
 

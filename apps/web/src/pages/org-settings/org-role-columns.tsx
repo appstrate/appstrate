@@ -15,8 +15,6 @@ import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
 import { roleI18nKey } from "../../hooks/use-permissions";
 
-export const ORG_ROLES_ORDER: readonly OrgRole[] = ["owner", "admin", "member", "guest"];
-
 /** How far each org role reaches into spaces (`resolveSpaceRole`). */
 export const ORG_ROLE_SPACE_ACCESS: Record<OrgRole, "all" | "open" | "assigned"> = {
   owner: "all",

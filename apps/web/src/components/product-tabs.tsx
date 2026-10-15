@@ -21,6 +21,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Blocks, MessageSquare } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useCanReach } from "@/hooks/use-can-reach";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
@@ -43,7 +44,7 @@ export function ProductTabs() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
   const canReach = useCanReach();
-  const { can } = usePermissions();
+  const { can, ready } = usePermissions();
   const previewing = useViewAsHeader() !== null;
   const chatReachable = canReach("/chat");
   // The chat has no entry in the Studio's navigation: its unread count rides
@@ -56,6 +57,12 @@ export function ProductTabs() {
     previewing,
     hasOwnSessions: hasChatSessions,
   });
+
+  // Whether the Chat tab is still undecided: its permission set, or (for a
+  // reader) the answer to "do I have conversations" — the slot is reserved so
+  // Studio does not fill the row and then split when Chat appears.
+  const chatPending =
+    !ready || (chatReachable && !can("chat:write") && !previewing && hasChatSessions === undefined);
 
   // Studio owns every route the chat does not, so it cannot be matched by
   // prefix — it is the active one whenever the chat is not.
@@ -110,6 +117,7 @@ export function ProductTabs() {
           )}
         </Link>
       ))}
+      {chatPending && !chatShown && <Skeleton className="h-7 flex-1 rounded-md" />}
     </nav>
   );
 }

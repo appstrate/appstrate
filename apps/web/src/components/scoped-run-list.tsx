@@ -25,7 +25,7 @@ export function ScopedRunList({
 }: {
   scope: RunScope;
   initialStatus?: RunStatus[];
-  /** Row above the first page, shown only while nothing is filtered. */
+  /** Row above the first page, and above `emptyState`; shown only while nothing is filtered. */
   banner?: ReactNode;
   /** The panel's empty state when nothing is filtered. */
   emptyState: ReactNode;
@@ -57,12 +57,15 @@ export function ScopedRunList({
           onReset={list.reset}
         />
       )}
-      firstPageBanner={filtered ? null : banner}
+      banner={filtered ? null : banner}
       emptyState={
         filtered ? (
           <NoMatchState message={t("runs.emptyFiltered")} onReset={list.reset} />
         ) : (
-          emptyState
+          <>
+            {banner}
+            {emptyState}
+          </>
         )
       }
     />

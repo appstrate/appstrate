@@ -37,8 +37,6 @@ export function DocumentListPanel({
   showRunLink,
   runId,
   footer,
-  onDeleted,
-  onKept,
   display = "cards",
   toolbar,
   tableLabel,
@@ -60,14 +58,6 @@ export function DocumentListPanel({
   runId?: string;
   /** Rendered after the list: the gallery's "Load more", a run's truncation notice. */
   footer?: ReactNode;
-  /** Let the caller prune its own list (e.g. the gallery's page accumulator). */
-  onDeleted?: (id: string) => void;
-  /**
-   * Let the caller patch its own list after a "keep" (e.g. the gallery's page
-   * accumulator, whose older pages the query invalidation does not refetch) so
-   * the pinned row loses its expiry badge without a full remount.
-   */
-  onKept?: (id: string) => void;
   /** The main Documents page offers cards and table; the run overview lists compactly. */
   display?: "cards" | "table" | "compact";
   /** Apparatus owned by the caller, built from the table's real columns. */
@@ -104,7 +94,6 @@ export function DocumentListPanel({
       {
         onSuccess: () => {
           toast.success(t("keep.success"));
-          onKept?.(doc.id);
         },
       },
     );
@@ -117,7 +106,6 @@ export function DocumentListPanel({
       {
         onSuccess: () => {
           toast.success(t("delete.success"));
-          onDeleted?.(id);
           setPendingDelete(null);
         },
       },
@@ -147,7 +135,7 @@ export function DocumentListPanel({
           <ItemList
             items={documents}
             itemKey={(doc) => doc.id}
-            isLoading={isLoading}
+            isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
             renderItem={(doc) => (
@@ -179,7 +167,7 @@ export function DocumentListPanel({
             rowAction={(doc) => preview.open(doc.id)}
             rowActionable={(doc) => doc.capabilities.preview}
             rowLabel={(doc) => doc.name}
-            isLoading={isLoading}
+            isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
           />
@@ -189,13 +177,14 @@ export function DocumentListPanel({
             items={documents}
             min="10rem"
             itemKey={(doc) => doc.id}
-            isLoading={isLoading}
+            isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
             renderCard={(doc) => (
               <FileTile
                 file={doc}
-                onDownload={download}
+                isKeepPending={pendingKeepId === doc.id}
+                onDownload={onDownload}
                 onDelete={onDelete}
                 onKeep={onKeep}
                 onPreview={(d) => preview.open(d.id)}

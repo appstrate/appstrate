@@ -6,7 +6,7 @@
  * Its own file because several surfaces need it — the run table and cards, the
  * dashboard, the run-detail header and its overview — and because of what the
  * live variant is: a LEAF. An interval in the row itself would re-render badges, trigger, links
- * and popover ten times a second, per running run on screen. Here the state
+ * and popover five times a second, per running run on screen. Here the state
  * that changes is owned by the only node that shows it, and a tick re-renders
  * one `<span>`.
  *
@@ -15,30 +15,21 @@
  * « 5 min 12 s » rather than « 312,0 s ».
  */
 
-import { useState, useEffect } from "react";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/shared-types";
 import { formatDuration } from "../lib/format-duration";
 import { cn } from "@appstrate/ui/cn";
+import { useLiveElapsedMs } from "@appstrate/ui/use-live-elapsed-ms";
 
 /** The statuses that mean "still going" are owned by the wire contract. */
 const ACTIVE = ACTIVE_RUN_STATUSES as ReadonlySet<string>;
 
 function ElapsedDuration({ startedAt, className }: { startedAt: string; className?: string }) {
-  const [elapsed, setElapsed] = useState(() => Date.now() - new Date(startedAt).getTime());
-
-  useEffect(() => {
-    const start = new Date(startedAt).getTime();
-    const tick = () => setElapsed(Date.now() - start);
-    tick();
-    const id = setInterval(tick, 100);
-    return () => clearInterval(id);
-  }, [startedAt]);
-
+  const elapsed = useLiveElapsedMs(startedAt);
   // A run that has not measurably started yet renders nothing rather than a
   // flickering `0.0s`.
   if (!elapsed) return null;
   return (
-    <span className={cn("text-muted-foreground font-mono text-xs", className)}>
+    <span className={cn("text-muted-foreground text-xs tabular-nums", className)}>
       {formatDuration(elapsed)}
     </span>
   );
@@ -65,7 +56,7 @@ export function RunDuration({
   }
   if (!duration) return null;
   return (
-    <span className={cn("text-muted-foreground font-mono text-xs", className)}>
+    <span className={cn("text-muted-foreground text-xs tabular-nums", className)}>
       {formatDuration(duration)}
     </span>
   );

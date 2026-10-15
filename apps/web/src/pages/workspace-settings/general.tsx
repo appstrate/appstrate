@@ -40,7 +40,7 @@ export function WorkspaceSettingsGeneralPage() {
   const { data: space, isLoading, error } = useSpace(spaceId ?? "");
 
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={AppWindow} />;
-  if (isLoading) return <SettingsSkeleton rows={4} />;
+  if (isLoading) return <SettingsSkeleton />;
   if (error) return <ErrorState error={error} />;
   if (!space) return <ErrorState />;
 
@@ -276,12 +276,14 @@ function GeneralForm({
                     options={presetOptions}
                     fallbackLabel={t(`roles.preset.${activeDefaultRole}`)}
                     disabled={updateMutation.isPending}
+                    loading={rolesLoading || !rolesKnown}
                     onValueChange={(value) => commitDefaultRole(value as SpaceRolePreset)}
                   />
                   <p className="text-muted-foreground text-xs">
                     {t(`roles.presetDesc.${activeDefaultRole}`)}
                   </p>
                   <RoleCatalogState
+                    pending={null}
                     isLoading={rolesLoading}
                     rolesKnown={rolesKnown}
                     error={rolesError}

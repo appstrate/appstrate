@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  type MutationMeta,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { client, type components } from "../api/client";
@@ -18,6 +23,8 @@ import {
   paginatedRunsKeys,
   persistenceKeys,
   invalidatePackageFiles,
+  invalidatePackageCaches,
+  versionKeys,
 } from "../lib/query-keys";
 import {
   launchFlight,
@@ -173,17 +180,31 @@ export function useRunLauncher(packageId: string) {
 
 export type RunLauncher = ReturnType<typeof useRunLauncher>;
 
-export function useImportPackage() {
+/** After an import: refresh every package cache and surface the non-blocking import-time warnings. */
+function afterImport(qc: QueryClient, data: { type: string; warnings?: string[] }) {
+  // An import REPLACES the draft artifact, and the import modal opens the
+  // detail page straight away — without the file caches the explorer renders
+  // the pre-import index until the query goes stale.
+  invalidatePackageCaches(qc);
+  if (data.type === "integration") void invalidateIntegrationQueries(qc);
+  for (const message of data.warnings ?? []) toast.warning(message);
+  // The library feeds the integration editor's picker, which imports in place
+  // and must see the new package.
+  void invalidateLibraries(qc);
+}
+
+/** `meta`: the import modal answers a refusal itself (overwrite and integrity prompts). */
+export function useImportPackage(meta?: MutationMeta) {
   const qc = useQueryClient();
   return useMutation({
-    meta: { errorHandledByCaller: true },
+    meta,
     mutationFn: async ({
       file,
       force,
     }: {
       file: File;
       force?: boolean;
-    }): Promise<{ packageId: string; type: string; warnings?: string[] }> => {
+    }): Promise<{ packageId: string; type: string; version?: string; warnings?: string[] }> => {
       const fd = new FormData();
       fd.append("file", file);
       // Multi-package bundles route to a different endpoint; the
@@ -211,26 +232,7 @@ export function useImportPackage() {
       });
       return data!;
     },
-    onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
-      // An import REPLACES the draft artifact, and the import modal opens the
-      // detail page straight away — without this the explorer renders the
-      // pre-import index and the pre-import `inline` bodies until the query
-      // goes stale.
-      invalidatePackageFiles(qc);
-      if (data.type === "integration") void invalidateIntegrationQueries(qc);
-      // Non-blocking import-time warnings — surface each one as a sonner
-      // warning toast so publishers see them immediately after a successful import.
-      if (data.warnings && data.warnings.length > 0) {
-        for (const message of data.warnings) {
-          toast.warning(message);
-        }
-      }
-      // The library lists servers for the integration editor's picker, which
-      // imports in place and must see the new one.
-      void invalidateLibraries(qc);
-    },
+    onSuccess: (data) => afterImport(qc, data),
   });
 }
 
@@ -242,15 +244,7 @@ export function useImportFromGithub() {
       const { data } = await client.POST("/api/packages/import-github", { body: { url } });
       return data!;
     },
-    onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
-      // Same reasons as `useImportPackage`: the draft artifact was replaced,
-      // and the library feeds the integration editor's picker.
-      invalidatePackageFiles(qc);
-      if (data.type === "integration") void invalidateIntegrationQueries(qc);
-      void invalidateLibraries(qc);
-    },
+    onSuccess: (data) => afterImport(qc, data),
   });
 }
 
@@ -284,22 +278,6 @@ export function useDeleteAgentRuns(packageId: string) {
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
-    },
-  });
-}
-
-export function useDeleteAgent() {
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-  return useMutation({
-    mutationFn: async (packageId: string) => {
-      await client.DELETE("/api/packages/agents/{scope}/{name}", {
-        params: { path: splitPackageRef(packageId) },
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      navigate("/");
     },
   });
 }
@@ -428,7 +406,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       if (type === "agent" || type === "integration") {
         void invalidateIntegrationQueries(qc);
       }
-      qc.invalidateQueries({ queryKey: ["version-info"] });
+      qc.invalidateQueries({ queryKey: versionKeys.infoAll });
     },
   });
 }

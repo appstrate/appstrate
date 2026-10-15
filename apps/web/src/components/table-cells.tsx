@@ -20,23 +20,22 @@ export function CellText({
   className,
 }: {
   children: ReactNode;
-  /** Full text on hover; `true` reuses `children` when it is a string. */
-  title?: string | true;
+  /** Full text on hover. */
+  title?: string;
   strong?: boolean;
   mono?: boolean;
   className?: string;
 }) {
-  const hover = title === true ? (typeof children === "string" ? children : undefined) : title;
   return (
     <span
       className={cn(
         "block truncate",
         strong ? "text-foreground text-sm font-medium" : "text-muted-foreground text-xs",
         mono && "font-mono",
-        hover && "relative z-10",
+        title && "relative z-10",
         className,
       )}
-      title={hover}
+      title={title}
     >
       {children}
     </span>

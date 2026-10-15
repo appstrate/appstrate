@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { toggleValue } from "../../lib/toggle-value";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Label } from "@appstrate/ui/components/label";
+import { CheckboxField } from "@appstrate/ui/components/checkbox";
 import { Modal } from "../modal";
-import { useHostedConnectPopup } from "../integration-connect/use-integration-oauth-popup";
+import { useHostedConnectPopup } from "../integration-connect/use-hosted-connect-popup";
 import { scopeLabels } from "../integration-connect/scope-labels";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { connectPopupInput, type ScopeTarget } from "./connect-scope-choice";
@@ -66,10 +66,7 @@ export function ConnectScopesForm({
   const { t } = useTranslation("settings");
   const [ticked, setTicked] = useState<string[]>([]);
   const { choice } = target;
-  const toggle = (value: string) =>
-    setTicked((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    );
+  const toggle = (value: string) => setTicked((prev) => toggleValue(prev, value));
 
   return (
     <form
@@ -102,20 +99,15 @@ export function ConnectScopesForm({
         {choice.selectable.map((entry) => {
           const id = `${formId}-${entry.value}`;
           return (
-            <div key={entry.value} className="flex items-start gap-2">
-              <Checkbox
-                id={id}
-                checked={ticked.includes(entry.value)}
-                onCheckedChange={() => toggle(entry.value)}
-                data-testid={id}
-              />
-              <Label htmlFor={id} className="min-w-0 text-xs font-normal" title={entry.value}>
-                {entry.label}
-                {entry.description && (
-                  <span className="text-muted-foreground mt-1 block">{entry.description}</span>
-                )}
-              </Label>
-            </div>
+            <CheckboxField
+              key={entry.value}
+              id={id}
+              label={<span title={entry.value}>{entry.label}</span>}
+              description={entry.description}
+              checked={ticked.includes(entry.value)}
+              onCheckedChange={() => toggle(entry.value)}
+              data-testid={id}
+            />
           );
         })}
         {ticked.length === 0 && (

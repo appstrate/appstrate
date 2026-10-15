@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { $api } from "../api/client";
+import { invalidatePaths } from "../lib/query-keys";
+import { useInvalidatePaths } from "./use-invalidate-paths";
 import { queryClient } from "../lib/query-client";
+import { spaceLabel } from "../lib/space-label";
 import { getCurrentOrgId } from "../stores/org-store";
 import { orgOnlyHeader, useOrgOnlyScope } from "./use-org-scope";
 import { invalidateIntegrationQueries } from "./use-integrations";
@@ -19,6 +23,16 @@ export function useSpaces(enabled = true) {
     enabled: enabled && scope.enabled,
     select: (e) => e.data,
   });
+}
+
+/** What to call a space of the listing, by id; `undefined` for one the caller does not reach. */
+export function useSpaceLabelOf(): (id: string | null | undefined) => string | undefined {
+  const { t } = useTranslation();
+  const { data: spaces } = useSpaces();
+  return (id) => {
+    const space = spaces?.find((s) => s.id === id);
+    return space && spaceLabel(space, t);
+  };
 }
 
 /**
@@ -60,20 +74,17 @@ export function useSpace(spaceId: string) {
 }
 
 /**
- * openapi-react-query keys are [method, path, init] with the literal spec
- * path — list and detail live under different path strings, so both need
- * invalidating after a write.
+ * List and detail live under different path strings, so both are invalidated
+ * after a write; visibility and the default role determine implicit member rows
+ * and roles.
  */
-function useInvalidateSpaces() {
-  const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/roles"] });
-    // Visibility and the default role determine implicit member rows and roles.
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/members"] });
-  };
-}
+const useInvalidateSpaces = () =>
+  useInvalidatePaths(
+    "/api/spaces",
+    "/api/spaces/{id}",
+    "/api/spaces/{id}/roles",
+    "/api/spaces/{id}/members",
+  );
 
 export function useCreateSpace() {
   const invalidate = useInvalidateSpaces();
@@ -101,15 +112,13 @@ export function useDeleteSpace() {
   return $api.useMutation("delete", "/api/spaces/{id}", {
     meta: { errorHandledByCaller: true },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
+      void invalidatePaths(qc, ["/api/spaces"]);
       // The page still showing the deleted space would re-read it, a 404: stale only.
-      for (const path of [
-        "/api/spaces/{id}",
-        "/api/spaces/{id}/roles",
-        "/api/spaces/{id}/members",
-      ]) {
-        void qc.invalidateQueries({ queryKey: ["get", path], refetchType: "none" });
-      }
+      void invalidatePaths(
+        qc,
+        ["/api/spaces/{id}", "/api/spaces/{id}/roles", "/api/spaces/{id}/members"],
+        "none",
+      );
     },
   });
 }

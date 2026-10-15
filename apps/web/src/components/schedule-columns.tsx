@@ -15,7 +15,8 @@
 
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
-import { Loader2 } from "lucide-react";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
 import type { DataColumn } from "./data-table";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
@@ -29,10 +30,13 @@ import { describeSchedule } from "../lib/frequency-summary";
 /** The column set, as a value the caller holds — see `useRunColumns` on why. */
 export function useScheduleColumns({
   agentName,
+  agentPending = false,
   showAgentName = true,
 }: {
   /** What to call the agent a schedule fires. */
   agentName: (schedule: EnrichedSchedule) => string;
+  /** The agents list is still loading: the name is not known yet, only the id. */
+  agentPending?: boolean;
   /** Embedded agent detail already supplies this context in the page heading. */
   showAgentName?: boolean;
 }): DataColumn<EnrichedSchedule>[] {
@@ -56,7 +60,12 @@ export function useScheduleColumns({
           {/* Which agent it fires: the whole point of a schedule, and the card
               only showed it inside the next-run strip, so a disabled schedule
               did not say it at all. */}
-          {showAgentName && <CellText>{agentName(schedule)}</CellText>}
+          {showAgentName &&
+            (agentPending ? (
+              <Skeleton className="mt-0.5 h-4 w-24" />
+            ) : (
+              <CellText>{agentName(schedule)}</CellText>
+            ))}
         </div>
       ),
     },
@@ -85,9 +94,9 @@ export function useScheduleColumns({
         <>
           <ScheduleStatusBadge schedule={schedule} />
           {schedule.running_runs > 0 && (
-            <Loader2
-              className="text-primary size-3.5 shrink-0 animate-spin"
-              aria-label={t("status.running", { ns: "common" })}
+            <Spinner
+              className="text-primary size-3.5 shrink-0"
+              label={t("status.running", { ns: "common" })}
             />
           )}
         </>

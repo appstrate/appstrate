@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
 import { Plug } from "lucide-react";
 import { DataTable } from "../data-table";
 import { EmptyState } from "../page-states";
@@ -13,6 +11,8 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { useAuth } from "../../hooks/use-auth";
 import { authMethodLabel } from "../../lib/integration-presentation";
 import { connectionOptionLabel } from "../../lib/connection-set";
+import { useConsumedSearchParam } from "../../hooks/use-consumed-search-param";
+import { useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
 import { useConnectionColumns } from "./integration-columns";
 import type {
@@ -35,13 +35,11 @@ export function ConnectionsTable({
   detail,
   canConfigure,
   onConfigure,
-  initialMethod,
 }: {
   packageId: string;
   detail: IntegrationDetailWire;
   canConfigure: boolean;
   onConfigure: (authKey?: string) => void;
-  initialMethod?: string;
 }) {
   const { t } = useTranslation("settings");
   const { can } = usePermissions();
@@ -49,26 +47,17 @@ export function ConnectionsTable({
   // The space's `block_user_connections` gate: the server answers 403
   // `connection_blocked_by_admin`, and `integrations:configure` is exempt.
   const blockedByAdmin = detail.block_user_connections && !canConfigure;
-  const [search, setSearch] = useState("");
-  const [sharing, setSharing] = useState<string[]>([]);
-  const location = useLocation();
-  const navigate = useNavigate();
   // `?connectionMethod` opens the table filtered once (« see the connections » of a method); the
   // table is remounted at every tab switch, so the parameter is consumed rather than re-applied.
-  const urlMethod =
-    initialMethod === undefined
-      ? new URLSearchParams(location.search).get("connectionMethod")
-      : null;
-  const [methods, setMethods] = useState<string[]>(() => {
-    const method = initialMethod ?? urlMethod;
-    return detail.auths.some((auth) => auth.auth_key === method) ? [method!] : [];
-  });
-  useEffect(() => {
-    if (urlMethod === null) return;
-    const params = new URLSearchParams(location.search);
-    params.delete("connectionMethod");
-    void navigate({ search: params.toString(), hash: location.hash }, { replace: true });
-  }, [urlMethod, location.search, location.hash, navigate]);
+  const method = useConsumedSearchParam("connectionMethod");
+  const list = useLocalListParams(
+    detail.auths.some((auth) => auth.auth_key === method) ? { method: [method!] } : {},
+  );
+  const sharing = list.values("sharing", ["shared", "private"] as const);
+  const methods = list.values(
+    "method",
+    detail.auths.map((auth) => auth.auth_key),
+  );
   const { user } = useAuth();
   const connections = detail.auths.flatMap((auth) =>
     auth.connections.map((connection) => ({ ...connection, auth_key: auth.auth_key })),
@@ -98,7 +87,7 @@ export function ConnectionsTable({
   const rows = connections.filter((connection) => {
     const auth = authOf(connection);
     return (
-      matchesSearch(search, [
+      matchesSearch(list.search, [
         connectionOptionLabel(connection),
         connection.owner_name,
         auth ? labelFor(auth) : null,
@@ -112,8 +101,8 @@ export function ConnectionsTable({
       <ListToolbar
         placement="panel"
         search={{
-          value: search,
-          onChange: setSearch,
+          value: list.search,
+          onChange: list.setSearch,
           placeholder: t("detail.connectionsTable.search", { ns: "agents" }),
         }}
         filters={[
@@ -125,7 +114,7 @@ export function ConnectionsTable({
               { value: "shared", label: t("detail.sharingShared", { ns: "agents" }) },
               { value: "private", label: t("detail.sharingPrivate", { ns: "agents" }) },
             ],
-            onChange: setSharing,
+            onChange: list.setValues("sharing"),
           },
           ...(detail.auths.length > 1
             ? [
@@ -137,16 +126,12 @@ export function ConnectionsTable({
                     value: auth.auth_key,
                     label: labelFor(auth),
                   })),
-                  onChange: setMethods,
+                  onChange: list.setValues("method"),
                 },
               ]
             : []),
         ]}
-        onReset={() => {
-          setSearch("");
-          setSharing([]);
-          setMethods([]);
-        }}
+        onReset={list.reset}
         actions={
           canConfigure || canConnect ? (
             <AddIntegrationConnection
@@ -171,7 +156,7 @@ export function ConnectionsTable({
         empty={
           <EmptyState
             message={t(
-              search || sharing.length || methods.length
+              list.search || sharing.length || methods.length
                 ? "integration.presentation.noMatch"
                 : "integration.auth.noConnection",
             )}

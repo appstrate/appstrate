@@ -285,11 +285,6 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
     reason: WIRE_DTO,
   },
   { path: "apps/web/src/pages/integration-detail.tsx", keys: ["displayName"], reason: WIRE_DTO },
-  {
-    path: "apps/web/src/pages/preferences/connections.tsx",
-    keys: ["displayName"],
-    reason: WIRE_DTO,
-  },
 
   // ── Group 4: `maxSize` as a byte cap ──
   { path: "apps/api/src/middleware/body-limit.ts", keys: ["maxSize"], reason: BYTE_LIMIT },

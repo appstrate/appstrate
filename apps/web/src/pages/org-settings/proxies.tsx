@@ -3,10 +3,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Globe, Plus } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
-import { PageActionsMenu } from "../../components/page-actions-menu";
+import type { MenuAction } from "../../lib/menu-action";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   useProxies,
@@ -22,7 +21,6 @@ import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
-import { NoAccessState } from "../../components/route-gate";
 import { useProxyColumns } from "./proxy-columns";
 
 export function OrgSettingsProxiesPage() {
@@ -49,7 +47,13 @@ export function OrgSettingsProxiesPage() {
   const testMutation = useTestProxy();
   const { testingIds, testResults, handleTest } = useConnectionTest(testMutation);
 
-  const onCreate = () => newProxy.open();
+  const create: MenuAction = {
+    id: "create",
+    icon: Plus,
+    label: t("proxies.add"),
+    onSelect: () => newProxy.open(),
+    hidden: !canWrite,
+  };
   const onEdit = (p: OrgProxyInfo) => editParam.open(p.id);
   const onDelete = (p: OrgProxyInfo) => setConfirmState({ label: p.label, id: p.id });
   const onSetDefault = (p: OrgProxyInfo) => setDefaultMutation.mutate({ body: { proxyId: p.id } });
@@ -65,25 +69,12 @@ export function OrgSettingsProxiesPage() {
       : null,
   });
 
-  // Every hook first, THEN the guard: the column set is a hook, and a
-  // return above it makes the call conditional.
-  if (!can("proxies:read")) return <NoAccessState />;
-
   return (
     <>
       {/* The page's own action, in the treatment every list bar uses: a white
           surface, not a filled blue. A screen whose table now looks like every
           other table cannot keep the one button that does not. */}
-      {canWrite && (
-        <SettingsPageActions>
-          <PageActionsMenu>
-            <DropdownMenuItem data-page-action="create" onSelect={onCreate}>
-              <Plus />
-              {t("proxies.add")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        </SettingsPageActions>
-      )}
+      <SettingsPageActions actions={[create]} />
 
       <DataTable
         tableId="proxies"
@@ -98,7 +89,7 @@ export function OrgSettingsProxiesPage() {
         failure={error}
         empty={
           <EmptyState message={t("proxies.empty")} icon={Globe} compact>
-            {canWrite && <EmptyStateAction label={t("proxies.add")} onClick={onCreate} />}
+            <EmptyStateAction action={create} />
           </EmptyState>
         }
       />

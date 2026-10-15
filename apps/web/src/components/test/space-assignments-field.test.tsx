@@ -40,12 +40,12 @@ function field({
 }
 
 describe("space assignment catalog recovery", () => {
-  it("preserves selected identities while loading and does not present loading as an empty catalog", () => {
+  it("draws skeleton rows for selected identities while loading and does not present loading as an empty catalog", () => {
     const html = field({ loading: true });
-    expect(html).toContain(spaces[0]!.name);
+    expect(html).not.toContain(spaces[0]!.name);
+    expect(html).not.toContain("Espace indisponible");
     expect(html).toContain('role="status"');
-    expect(html).toContain('role="combobox"');
-    expect(html).toContain('disabled=""');
+    expect(html).toContain("animate-pulse");
     expect(html).not.toContain("Aucun espace disponible");
   });
 

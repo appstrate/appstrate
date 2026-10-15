@@ -12,15 +12,14 @@
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { $api, type components } from "../api/client";
-import { useOrg } from "../hooks/use-org";
+import type { components } from "../api/client";
+import { useCancelInvitation, useOrg } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
-import { useSpaces } from "../hooks/use-spaces";
+import { useSpaceLabelOf, useSpaces } from "../hooks/use-spaces";
 import { invitationUrl } from "../lib/invitation-url";
 import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { useModalTarget } from "../hooks/use-modal-param";
 import { ConfirmModal } from "./confirm-modal";
 import { DataTable } from "./data-table";
@@ -41,11 +40,11 @@ export function InvitationsTable({
   spaceId?: string;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const queryClient = useQueryClient();
   const { currentOrg } = useOrg();
   const { can } = usePermissions();
-  const { data: spaces } = useSpaces();
-  const { options: roles } = useSpaceRoleOptions();
+  const { isLoading: spacesLoading } = useSpaces();
+  const spaceLabelOf = useSpaceLabelOf();
+  const { options: roles, isLoading: rolesLoading } = useSpaceRoleOptions();
   const { copy } = useCopyToClipboard();
   const [cancelingId, setCancelingId] = useState<string | null>(null);
 
@@ -59,16 +58,9 @@ export function InvitationsTable({
   const editParam = useModalTarget("invitation", canEdit ? visible : undefined);
   const editing = editParam.target;
   const canceling = visible.find((invitation) => invitation.id === cancelingId);
-  const spaceName = (id: string) =>
-    spaces?.find((space) => space.id === id)?.name ?? t("orgSettings.assignmentUnavailableSpace");
+  const spaceName = (id: string) => spaceLabelOf(id) ?? t("orgSettings.assignmentUnavailableSpace");
 
-  const cancel = $api.useMutation("delete", "/api/orgs/{orgId}/invitations/{invitationId}", {
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
-      setCancelingId(null);
-      toast.success(t("orgSettings.invitationCanceled"));
-    },
-  });
+  const cancel = useCancelInvitation();
 
   // Resolved on click: the origin is a browser fact, and nothing on screen
   // shows the clipboard changed, hence the toast. A refused copy toasts its own
@@ -80,6 +72,7 @@ export function InvitationsTable({
   };
 
   const columns = useInvitationColumns({
+    assignmentsLoading: spacesLoading || rolesLoading,
     assignments: (invitation) =>
       invitation.space_assignments.map(
         (assignment) =>
@@ -149,7 +142,16 @@ export function InvitationsTable({
             : ""
         }
         onConfirm={() => {
-          if (canceling) cancel.mutate({ params: { path: { orgId, invitationId: canceling.id } } });
+          if (!canceling) return;
+          cancel.mutate(
+            { params: { path: { orgId, invitationId: canceling.id } } },
+            {
+              onSuccess: () => {
+                setCancelingId(null);
+                toast.success(t("orgSettings.invitationCanceled"));
+              },
+            },
+          );
         }}
       />
     </SettingsGroup>

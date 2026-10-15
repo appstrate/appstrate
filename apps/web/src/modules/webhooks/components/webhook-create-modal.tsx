@@ -9,7 +9,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { FormItem } from "@appstrate/ui/components/field";
 import { WebhookFormFields } from "./webhook-form-fields";
-import { toggleEvent } from "../hooks/use-webhooks";
+import { toggleValue } from "@/lib/toggle-value";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { useCreateWebhook } from "../hooks/use-webhooks";
 import { errorMessage } from "../../../lib/mutation-error";
@@ -162,7 +162,7 @@ function WebhookCreateForm({
 
       <WebhookFormFields
         selectedEvents={selectedEvents}
-        onToggleEvent={(e) => toggleEvent(e, setSelectedEvents)}
+        onToggleEvent={(e) => setSelectedEvents((prev) => toggleValue(prev, e))}
         payloadMode={payloadMode}
         onPayloadModeChange={setPayloadMode}
         idPrefix="create-"

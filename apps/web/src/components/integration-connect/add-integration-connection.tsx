@@ -13,7 +13,7 @@ import type { IntegrationDetailWire, IntegrationAuthStatus } from "../../hooks/u
 import { authMethodLabel } from "../../lib/integration-presentation";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { isConnectionOwnedBy } from "./connection-ownership";
-import { useHostedConnectPopup } from "./use-integration-oauth-popup";
+import { useHostedConnectPopup } from "./use-hosted-connect-popup";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { useModalTarget } from "../../hooks/use-modal-param";
 import { connectPopupInput, scopeChoiceFor } from "../integration-detail/connect-scope-choice";

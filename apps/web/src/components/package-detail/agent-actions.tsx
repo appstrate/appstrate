@@ -3,11 +3,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { schemaHasFileFields } from "@appstrate/core/form";
-import { usePackageDetail } from "../../hooks/use-packages";
+import { useDeletePackage, usePackageDetail } from "../../hooks/use-packages";
 import { agentLaunchRefusal } from "../../hooks/use-agent-readiness";
 import { useAgentMemories } from "../../hooks/use-persistence";
 import {
-  useDeleteAgent,
   useDeleteAgentRuns,
   useDeleteAllMemories,
   useRunLauncher,
@@ -52,7 +51,7 @@ export function AgentActions({
   const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: memories } = useAgentMemories(packageId);
-  const deleteAgent = useDeleteAgent();
+  const deleteAgent = useDeletePackage("agent");
   const deleteRuns = useDeleteAgentRuns(packageId);
   const deleteAllMemories = useDeleteAllMemories(packageId);
   const launcher = useRunLauncher(packageId);

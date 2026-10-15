@@ -5,14 +5,12 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
 import { SectionCard } from "../section-card";
+import { ActivateIntegrationButton } from "../activate-integration-button";
 import { packageDetailPath, packageListPath } from "../../lib/package-paths";
+import { useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
-import {
-  usePackageList,
-  useUploadPackage,
-  usePackageVersions,
-  type PackageType,
-} from "../../hooks/use-packages";
+import { usePackageList, usePackageVersions, type PackageType } from "../../hooks/use-packages";
+import { useImportPackage } from "../../hooks/use-mutations";
 import {
   Select,
   SelectContent,
@@ -32,7 +30,7 @@ import {
   Upload,
   Wrench,
 } from "lucide-react";
-import { Spinner } from "../spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { ListToolbar } from "../list-toolbar";
 import { Badge } from "@appstrate/ui/components/badge";
 import { ErrorState, EmptyState, EmptyStateAction, NoMatchState } from "../page-states";
@@ -41,6 +39,7 @@ import { caretRange } from "./utils";
 import { IntegrationToolPicker } from "./integration-tool-picker";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { TableRowActions } from "../table-row-actions";
+import { FormModal } from "../form-modal";
 import { Modal } from "../modal";
 import { PageActionsMenu } from "../page-actions-menu";
 import {
@@ -52,12 +51,13 @@ import {
   TableRow,
 } from "@appstrate/ui/components/table";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
-import { usePackageActivation } from "../../hooks/use-library";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { packagePermission } from "@appstrate/core/permissions";
 import { TextSkeleton } from "../loading-skeletons";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+
+const SELECTIONS = ["selected", "available"] as const;
 
 type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
 
@@ -76,23 +76,6 @@ interface ResourceSectionProps {
    */
   leadingItems?: ReactNode;
   surface?: "card" | "settings";
-}
-
-/** Switches a declared integration on in this space; dead, with the reason, for a caller the route would refuse. */
-function ActivateIntegrationButton({ packageId }: { packageId: string }) {
-  const { t } = useTranslation(["agents", "common"]);
-  const { mayActivate, activate, pending } = usePackageActivation("integration", packageId);
-  return (
-    <Button
-      size="sm"
-      variant="outline"
-      disabled={pending || !mayActivate}
-      title={mayActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
-      onClick={() => activate()}
-    >
-      {pending ? <Spinner /> : t("editor.activateIntegration")}
-    </Button>
-  );
 }
 
 function VersionSelect({
@@ -160,8 +143,8 @@ export function ResourceSection({
   const { t } = useTranslation(["agents", "common"]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resourceId = useId();
-  const [search, setSearch] = useState("");
-  const [selection, setSelection] = useState<string[]>([]);
+  const list = useLocalListParams();
+  const selection = list.values("selection", SELECTIONS);
   // The picker offers what this space RUNS: activation governs what a space
   // offers — hints, CLI sync, this list — so the index (placed here and
   // switched on, every type) is the offer. It is narrower than what a manifest
@@ -173,7 +156,7 @@ export function ResourceSection({
   // entries are then all this section knows, listed by id.
   const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
   const canReach = useCanReach();
-  const upload = useUploadPackage(type);
+  const upload = useImportPackage();
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
@@ -231,8 +214,8 @@ export function ResourceSection({
     if (!file) return;
 
     try {
-      const result = await upload.mutateAsync(file);
-      const newId = result.id;
+      const result = await upload.mutateAsync({ file });
+      const newId = result.packageId;
       const newVersion = result.version;
       if (!newVersion) return;
 
@@ -262,7 +245,7 @@ export function ResourceSection({
   );
 
   const matchesFilter = (id: string, name = "", description = "") =>
-    matchesSearch(search, [id, name, description]) &&
+    matchesSearch(list.search, [id, name, description]) &&
     (selection.length === 0 || selection.includes(selectedMap.has(id) ? "selected" : "available"));
   const visibleItems = (items ?? []).filter((item) =>
     matchesFilter(item.id, item.name ?? "", item.description ?? ""),
@@ -272,7 +255,11 @@ export function ResourceSection({
   const toolbar = (
     <ListToolbar
       placement="panel"
-      search={{ value: search, onChange: setSearch, placeholder: t("editor.resourceSearch") }}
+      search={{
+        value: list.search,
+        onChange: list.setSearch,
+        placeholder: t("editor.resourceSearch"),
+      }}
       filters={[
         {
           id: "selection",
@@ -282,14 +269,11 @@ export function ResourceSection({
             { value: "selected", label: t("editor.resourceSelected") },
             { value: "available", label: t("editor.resourceAvailable") },
           ],
-          onChange: setSelection,
+          onChange: list.setValues("selection"),
         },
       ]}
       actions={uploadButton}
-      onReset={() => {
-        setSearch("");
-        setSelection([]);
-      }}
+      onReset={list.reset}
     />
   );
 
@@ -557,16 +541,24 @@ function SelectedResources({
           <Badge variant="secondary">{rows.length}</Badge>
         </div>
         {importInput}
-        <PageActionsMenu>
-          <DropdownMenuItem disabled={!canReadCatalog} onSelect={() => picker.open()}>
-            <Plus />
-            {t("editor.resourceAdd")}
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={importing} onSelect={onImport}>
-            <Upload />
-            {t("editor.importZip")}
-          </DropdownMenuItem>
-        </PageActionsMenu>
+        <PageActionsMenu
+          actions={[
+            {
+              id: "add",
+              label: t("editor.resourceAdd"),
+              icon: Plus,
+              onSelect: () => picker.open(),
+              disabled: !canReadCatalog,
+            },
+            {
+              id: "import",
+              label: t("editor.importZip"),
+              icon: Upload,
+              onSelect: onImport,
+              disabled: importing,
+            },
+          ]}
+        />
       </div>
 
       {error ? (
@@ -580,7 +572,9 @@ function SelectedResources({
           compact
         >
           {canReadCatalog && (
-            <EmptyStateAction label={t("editor.resourceAdd")} onClick={() => picker.open()} />
+            <EmptyStateAction
+              action={{ label: t("editor.resourceAdd"), onSelect: () => picker.open() }}
+            />
           )}
         </EmptyState>
       ) : (
@@ -737,26 +731,20 @@ function ToolsModal({
   const { t } = useTranslation(["agents", "common"]);
   const [draft, setDraft] = useState(entry);
   return (
-    <Modal
-      open
-      onClose={onClose}
+    <FormModal
       title={t("editor.toolsTitle", { name })}
+      onClose={onClose}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onApply(draft);
+      }}
+      submitLabel={t("editor.apply")}
       className="sm:max-w-2xl"
-      actions={
-        <>
-          <Button type="button" variant="outline" onClick={onClose}>
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-          <Button type="button" onClick={() => onApply(draft)}>
-            {t("editor.apply")}
-          </Button>
-        </>
-      }
     >
       <div className="max-h-[60dvh] overflow-y-auto">
         <IntegrationToolPicker packageId={entry.id} entry={draft} onChange={setDraft} />
       </div>
-    </Modal>
+    </FormModal>
   );
 }
 
@@ -794,7 +782,6 @@ function ResourcePicker({
       <ListToolbar
         placement="panel"
         search={{ value: search, onChange: setSearch, placeholder: t("editor.resourceSearch") }}
-        filters={[]}
       />
       <div className="border-border max-h-[50dvh] divide-y overflow-y-auto rounded-lg border">
         {shown.length === 0 ? (

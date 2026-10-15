@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { useOrg } from "./use-org.ts";
-import { useSpaces } from "./use-spaces.ts";
+import { useSpaceLabelOf, useSpaces } from "./use-spaces.ts";
 import type { SpaceGrant } from "../lib/package-permissions.ts";
 import { isSpaceEnterable, useCurrentSpaceId } from "./use-current-space.ts";
 import type { OrgRole } from "@appstrate/shared-types";
@@ -54,8 +54,7 @@ export function useCanPreviewRole(): boolean {
  * package's own read, computed server-side.
  */
 export function useHomeSpaceName(homeSpaceId: string | null | undefined): string | null {
-  const { data: spaces } = useSpaces();
-  return (homeSpaceId && spaces?.find((s) => s.id === homeSpaceId)?.name) || null;
+  return useSpaceLabelOf()(homeSpaceId) ?? null;
 }
 
 /**

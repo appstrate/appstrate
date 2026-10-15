@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Check, Copy } from "lucide-react";
-import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
-import { cn } from "@appstrate/ui/cn";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { cn } from "../cn.ts";
+import { Button } from "./button.tsx";
+import { useUiLabels } from "./ui-labels.ts";
+import { useCopyToClipboard } from "../use-copy-to-clipboard.ts";
 
 /**
  * The one copy affordance. `icon` is a square ghost button (beside a value);
@@ -26,9 +26,9 @@ export function CopyButton({
   /** What a screen reader hears when the word alone does not say what is copied. */
   "aria-label"?: string;
 } & ({ value: string; getValue?: never } | { value?: never; getValue: () => string })) {
-  const { t } = useTranslation("common");
+  const labels = useUiLabels();
   const { copied, copy } = useCopyToClipboard();
-  const name = label ?? t("btn.copy");
+  const name = label ?? labels.copy;
   const onClick = () => void copy(source.getValue ? source.getValue() : source.value);
 
   if (variant === "text") {
@@ -42,7 +42,7 @@ export function CopyButton({
         onClick={onClick}
       >
         {copied ? <Check className="text-success" /> : <Copy />}
-        {copied ? t("btn.copied") : name}
+        {copied ? labels.copied : name}
       </Button>
     );
   }

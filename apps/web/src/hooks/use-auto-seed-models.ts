@@ -15,6 +15,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
+import { invalidatePaths } from "../lib/query-keys";
 import { toastError } from "../lib/mutation-error";
 import { useProvidersRegistry, type ProviderRegistryEntry } from "./use-model-provider-credentials";
 
@@ -49,7 +50,7 @@ export function useAutoSeedFeaturedModels() {
       });
       // Non-2xx throws via the client middleware, so `data` is defined here.
       if (!data) return { created: 0, promotedDefault: false };
-      qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
+      void invalidatePaths(qc, ["/api/models"]);
       return { created: data.created, promotedDefault: data.promoted_default };
     } catch (err) {
       // The subscription is connected either way: the step continues, and the

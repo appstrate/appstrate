@@ -38,7 +38,7 @@ import {
 } from "@appstrate/ui/components/artifact";
 import { useFileDownload, useFileTextCopy } from "../hooks/use-files";
 import { mimeKind } from "../lib/files";
-import { ExpiryBadge, MimeIcon } from "./file-tile";
+import { ExpiryBadge, MimeIcon } from "./file-badges";
 import { FileViewer, type ViewableFile } from "./file-viewer";
 
 export function FileArtifact({

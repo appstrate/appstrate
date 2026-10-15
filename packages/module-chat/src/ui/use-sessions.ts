@@ -96,9 +96,11 @@ export function useChatUnreadCount(getHeaders?: GetHeaders, enabled = true): num
 
 /**
  * Whether the caller has any conversation of their own — the same query as the
- * unread badge, so it costs no request. Undefined until it answers.
+ * unread badge, so it costs no request. Undefined until it answers; a failed read is no.
  */
 export function useHasChatSessions(getHeaders?: GetHeaders, enabled = true): boolean | undefined {
-  const { data } = useInfiniteQuery(sessionsQuery(getHeaders, enabled));
+  const { data, isError } = useInfiniteQuery(sessionsQuery(getHeaders, enabled));
+  // A failed read answers "none": undecided would hold the caller's placeholder forever.
+  if (isError) return false;
   return data === undefined ? undefined : data.length > 0;
 }

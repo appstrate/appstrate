@@ -27,6 +27,7 @@ import type {
   IntegrationPin,
 } from "@appstrate/shared-types";
 import { $api, client, type paths } from "../api/client";
+import { invalidatePaths } from "../lib/query-keys";
 import { splitPackageRef } from "../lib/package-paths";
 
 // Spec-pinned narrowing for the integration list and detail endpoints. It takes
@@ -175,7 +176,7 @@ const IDS_PER_REQUEST = 100;
 export function useIntegrationsById(
   ids: readonly string[],
   options?: { enabled?: boolean },
-): { data: IntegrationSummaryWire[] | undefined; isLoading: boolean } {
+): { data: IntegrationSummaryWire[] | undefined; isLoading: boolean; error: unknown } {
   const scope = useIntegrationsReadScope();
   // Sorted and unique, so the same set is the same keys whatever order it came in.
   const unique = [...new Set(ids)].sort();
@@ -195,6 +196,7 @@ export function useIntegrationsById(
         ? results.flatMap((result) => result.data!.data as IntegrationSummaryWire[])
         : undefined,
       isLoading: results.some((result) => result.isLoading),
+      error: results.find((result) => result.error)?.error ?? null,
     }),
   });
 }
@@ -407,9 +409,7 @@ function useClientMutationSuccess(messageKey?: string) {
   const qc = useQueryClient();
   return () => {
     if (messageKey) toast.success(t(messageKey));
-    for (const path of [SPACE_CLIENTS, ORG_CLIENTS, "/api/integrations/{packageId}"]) {
-      void qc.invalidateQueries({ queryKey: ["get", path] });
-    }
+    void invalidatePaths(qc, [SPACE_CLIENTS, ORG_CLIENTS, "/api/integrations/{packageId}"]);
   };
 }
 
@@ -608,7 +608,7 @@ export function useUpdateIntegrationSettings() {
     },
     onSuccess: () => {
       toast.success(t("integration.admin.blockUserConnections.updated"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+      void invalidatePaths(qc, ["/api/integrations/{packageId}"]);
     },
   });
 }

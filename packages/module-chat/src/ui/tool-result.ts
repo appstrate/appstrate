@@ -6,8 +6,8 @@
  *
  * A tool `result` reaches us as a raw MCP `CallToolResult`
  * `{ content: [{ type:"text", text }] }`, a bare content array, or a JSON
- * string. `unwrapResult` peels those layers down to the actual payload so the
- * rest of the UI never has to know which shape arrived.
+ * string. `unwrapMcpResult` (`@appstrate/core/mcp-result`) peels those layers down
+ * to the actual payload so the rest of the UI never has to know which shape arrived.
  *
  * It does NOT peel the AI-SDK `ToolResultOutput` envelopes
  * `{ type:"json", value }` / `{ type:"content", value }`, and that is a checked
@@ -36,6 +36,9 @@
  * removing an Appstrate envelope, so it stays unpeeled.
  */
 
+import { asRecordOrNull } from "@appstrate/core/safe-json";
+import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+
 /** Lifecycle phase of a tool call, derived from status + result. */
 export type ToolPhase = "pending" | "running" | "success" | "error";
 
@@ -46,81 +49,9 @@ interface ToolPhaseInput {
   result?: unknown;
 }
 
-function isTextPart(value: unknown): value is { type: "text"; text: string } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { type?: unknown }).type === "text" &&
-    typeof (value as { text?: unknown }).text === "string"
-  );
-}
-
-/**
- * Peel the runtime/bridge envelopes off a tool result, returning the inner
- * payload (parsed when it arrives as a JSON string). Depth-bounded so a
- * pathological structure can't loop.
- *
- * A content array may carry text parts that are NOT part of the payload: the Pi
- * engine appends a model-facing `[turn budget] …` line to every tool result, so
- * the payload is no longer the only text part and the concatenation
- * `{"id":"run_…"}[turn budget] …` is not JSON. Hence the rule for an array: the
- * first text part that parses on its own wins — producers put the payload in
- * one block, anything after it is prose. When no part parses, the joined text
- * is returned, so a plain-text result still reads verbatim. Without this the
- * payload reads as a string, and every consumer built on `asRecord` (run
- * id/status for the run card, the error-shape checks behind `deriveToolPhase`)
- * silently degrades — a failed call would read as a success.
- */
-export function unwrapResult(value: unknown, depth = 0): unknown {
-  if (depth > 8 || value == null) return value;
-
-  if (typeof value === "string") {
-    const s = value.trim();
-    if (s[0] === "{" || s[0] === "[") {
-      try {
-        return unwrapResult(JSON.parse(s), depth + 1);
-      } catch {
-        return value;
-      }
-    }
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    // MCP content array of text parts → the first part that is a payload on its
-    // own, else the joined text (no payload here, just prose).
-    const texts = value.filter(isTextPart).map((p) => p.text);
-    if (texts.length > 0) {
-      for (const text of texts) {
-        const part = unwrapResult(text, depth + 1);
-        if (typeof part === "object" && part !== null) return part;
-      }
-      return texts.join("");
-    }
-    if (value.length === 1) return unwrapResult(value[0], depth + 1);
-    return value;
-  }
-
-  if (typeof value === "object") {
-    const o = value as Record<string, unknown>;
-    if (Array.isArray(o.content)) return unwrapResult(o.content, depth + 1);
-    if (o.type === "text" && typeof o.text === "string") return unwrapResult(o.text, depth + 1);
-    return o;
-  }
-
-  return value;
-}
-
-/** Plain-object view of a value, or null when it isn't a record. */
-export function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 /** HTTP status carried by an unwrapped result, when present. */
 export function httpStatusOf(unwrapped: unknown): number | undefined {
-  const rec = asRecord(unwrapped);
+  const rec = asRecordOrNull(unwrapped);
   return typeof rec?.status === "number" ? rec.status : undefined;
 }
 
@@ -130,7 +61,7 @@ export function httpStatusOf(unwrapped: unknown): number | undefined {
  * by the `{ code, message }` branch below.
  */
 function isErrorPayload(unwrapped: unknown): boolean {
-  const rec = asRecord(unwrapped);
+  const rec = asRecordOrNull(unwrapped);
   if (!rec) return false;
   if (typeof rec.status === "number" && rec.status >= 400) return true;
   if (typeof rec.error === "string" && rec.error.length > 0) return true;
@@ -150,7 +81,7 @@ export function deriveToolPhase(part: ToolPhaseInput): ToolPhase {
   if (type === "requires-action") return "pending";
   if (part.isError === true) return "error";
   if (type === "incomplete") return "error";
-  if (isErrorPayload(unwrapResult(part.result))) return "error";
+  if (isErrorPayload(unwrapMcpResult(part.result))) return "error";
   if (part.result === undefined) return type === "complete" ? "success" : "pending";
   return "success";
 }
@@ -176,7 +107,7 @@ function pickMessage(rec: Record<string, unknown> | null): string | undefined {
  * a bare `HTTP <status>` when nothing carries a message.
  */
 export function extractErrorMessage(unwrapped: unknown): string | undefined {
-  const rec = asRecord(unwrapped);
+  const rec = asRecordOrNull(unwrapped);
   if (!rec) return typeof unwrapped === "string" ? unwrapped : undefined;
 
   const direct = pickMessage(rec);
@@ -184,7 +115,7 @@ export function extractErrorMessage(unwrapped: unknown): string | undefined {
 
   if (typeof rec.status === "number" && rec.status >= 400) {
     if (typeof rec.body === "string" && rec.body) return rec.body;
-    const fromBody = pickMessage(asRecord(rec.body));
+    const fromBody = pickMessage(asRecordOrNull(rec.body));
     if (fromBody) return fromBody;
     return `HTTP ${rec.status}`;
   }

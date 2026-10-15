@@ -6,9 +6,7 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, Building, HardDrive, Smile, Trash2, Upload } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { Label } from "@appstrate/ui/components/label";
-import { Switch } from "@appstrate/ui/components/switch";
-import { formatBytes } from "../../lib/format-bytes";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
@@ -17,12 +15,13 @@ import { useOrg, useOrgDetail } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useCanCreateOrg } from "../../hooks/use-auth";
 import { useOrgStorage } from "../../hooks/use-org-storage";
-import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
-import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
+import { USAGE_WARN } from "../../lib/usage-severity";
+import { UsageBar } from "../../components/usage-bar";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { SaveFeedback } from "../../components/settings/save-feedback";
 import { fieldWriteState } from "../../lib/field-write-state";
+import { OrgSettingToggle } from "../../components/settings/org-setting-toggle";
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { EmptyState } from "../../components/page-states";
 import { orgKeys } from "../../lib/query-keys";
@@ -78,8 +77,6 @@ export function OrgSettingsGeneralPage() {
   const { currentOrg, orgs, forgetOrg } = useOrg();
   const { can, orgRole } = usePermissions();
   const canCreateOrg = useCanCreateOrg();
-  const { data: orgSettings } = useOrgSettings();
-  const updateSettingsMutation = useUpdateOrgSettings();
   // Every member opens this page (leaving lives here); each change is drawn
   // only for whoever holds its permission.
   const canUpdateOrg = can("org:update");
@@ -89,7 +86,13 @@ export function OrgSettingsGeneralPage() {
 
   // Single source of truth for the storage gauge (shared with billing +
   // files). `limitBytes` null = unlimited (per-org override ?? global quota).
-  const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
+  const {
+    storage,
+    limitBytes: storageLimit,
+    percent: storagePercent,
+    usageLabel,
+    isLoading: storageLoading,
+  } = useOrgStorage();
   // The heads-up banner fires at the shared WARN threshold — the same point the
   // bar turns yellow — so the user is warned well before uploads get rejected.
   const storageNearLimit = storagePercent !== null && storagePercent >= USAGE_WARN;
@@ -102,11 +105,13 @@ export function OrgSettingsGeneralPage() {
 
   // Owners always get the member list.
   const { data: orgDetail } = useOrgDetail();
+  const orgDetailPending = !orgDetail;
   const ownerCount = orgDetail?.members?.filter((m) => m.role === "owner").length ?? 0;
   // Under a preview `orgRole` is the persona's, not the real membership.
   const previewing = useViewAsHeader() !== null;
   const lastOwner = !!orgDetail && orgRole !== null && !canLeaveOrg({ role: orgRole, ownerCount });
-  const canLeave = orgRole !== null && !previewing && !lastOwner;
+  // Until the member list answers, the last-owner guard cannot be evaluated: keep leaving off.
+  const canLeave = orgRole !== null && !previewing && !lastOwner && !orgDetailPending;
   // An only member has nobody to name owner: point to delete instead.
   const leaveHint = previewing
     ? t("orgSettings.leavePreview")
@@ -275,6 +280,14 @@ export function OrgSettingsGeneralPage() {
         </SettingRow>
       </SettingsGroup>
 
+      {storageLoading && (
+        <>
+          <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
+            {t("orgStorage.section")}
+          </div>
+          <Skeleton className="mb-4 h-24 w-full rounded-lg" />
+        </>
+      )}
       {storage && (
         <>
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
@@ -285,32 +298,13 @@ export function OrgSettingsGeneralPage() {
               <HardDrive size={18} className="text-muted-foreground shrink-0" />
               <div className="flex-1">
                 <h3 className="text-sm font-semibold">{t("orgStorage.title")}</h3>
-                <span className="text-muted-foreground text-sm">
-                  {storage.effective_limit_bytes === null
-                    ? t("orgStorage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
-                    : t("orgStorage.usedOfLimit", {
-                        used: formatBytes(storage.used_bytes),
-                        limit: formatBytes(storage.effective_limit_bytes),
-                      })}
-                </span>
+                <span className="text-muted-foreground text-sm">{usageLabel}</span>
               </div>
             </div>
 
             {storageLimit !== null && (
               <div className="mt-4">
-                <div
-                  className="bg-muted h-2 w-full overflow-hidden rounded-full"
-                  role="progressbar"
-                  aria-valuenow={storagePercent ?? 0}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label={t("orgStorage.title")}
-                >
-                  <div
-                    className={`h-full rounded-full transition-all ${getUsageBarColor(storagePercent ?? 0)}`}
-                    style={{ width: `${storagePercent ?? 0}%` }}
-                  />
-                </div>
+                <UsageBar percent={storagePercent ?? 0} label={t("orgStorage.title")} />
                 <div className="text-muted-foreground mt-1 text-right text-xs tabular-nums">
                   {t("orgStorage.percentUsed", { percent: storagePercent ?? 0 })}
                 </div>
@@ -334,32 +328,12 @@ export function OrgSettingsGeneralPage() {
       {canSettings && (
         <>
           <SettingsGroup title={t("orgSettings.distributionTitle")}>
-            <SettingRow
-              variant="toggle"
-              label={
-                <Label htmlFor="restrict-package-copy" className="cursor-pointer">
-                  {t("orgSettings.restrictCopyTitle")}
-                </Label>
-              }
+            <OrgSettingToggle
+              id="restrict-package-copy"
+              field="restrict_package_copy"
+              label={t("orgSettings.restrictCopyTitle")}
               description={t("orgSettings.restrictCopyDesc")}
-              status={
-                <SaveFeedback
-                  {...fieldWriteState(updateSettingsMutation, "restrict_package_copy")}
-                />
-              }
-            >
-              <Switch
-                id="restrict-package-copy"
-                checked={orgSettings?.restrict_package_copy ?? false}
-                disabled={updateSettingsMutation.isPending}
-                onCheckedChange={(checked) =>
-                  updateSettingsMutation.mutate({
-                    params: { path: { orgId: currentOrg.id } },
-                    body: { restrict_package_copy: checked === true },
-                  })
-                }
-              />
-            </SettingRow>
+            />
           </SettingsGroup>
 
           <SettingsGroup title={t("models.tabTitle")}>
@@ -376,11 +350,17 @@ export function OrgSettingsGeneralPage() {
         <SettingRow
           variant="action"
           label={t("orgSettings.leaveOrg")}
-          description={<span id={leaveHintId}>{leaveHint}</span>}
+          description={
+            orgDetailPending && !previewing ? (
+              <Skeleton className="h-3.5 w-64" />
+            ) : (
+              <span id={leaveHintId}>{leaveHint}</span>
+            )
+          }
         >
           <Button
             data-testid="leave-org-button"
-            aria-describedby={leaveHintId}
+            aria-describedby={orgDetailPending && !previewing ? undefined : leaveHintId}
             variant="destructive"
             disabled={!canLeave || leaveOrgMutation.isPending}
             onClick={() => setConfirmLeave(true)}

@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "../components/spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
 import { initialCredentialValues } from "../components/integration-connect/credential-schema";
 import {

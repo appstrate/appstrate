@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Fact, FactGrid } from "./fact-grid.tsx";
+
 /**
  * A run's structured output read as facts: one label above one value, in the
- * fact-grid shape of the manifest view (`manifest-fact.tsx`). The label is the
+ * `FactGrid` shape of the manifest view. The label is the
  * field's `title` in the agent's output schema, and its `description` sits
  * under the value; a field the schema does not describe keeps its key. Schema
  * fields come first, in schema order, then whatever else the run returned.
@@ -64,18 +66,15 @@ export function StructuredOutput({
     ...Object.keys(value).filter((key) => !(key in fields)),
   ];
   return (
-    <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+    <FactGrid>
       {keys.map((key) => (
-        <div key={key} className="min-w-0">
-          <dt className="text-muted-foreground text-xs">{fields[key]?.title ?? key}</dt>
-          <dd className="text-foreground mt-1 text-sm break-words">
-            <FactValue value={value[key]} />
-            {fields[key]?.description && (
-              <p className="text-muted-foreground mt-1 text-xs">{fields[key].description}</p>
-            )}
-          </dd>
-        </div>
+        <Fact key={key} label={fields[key]?.title ?? key}>
+          <FactValue value={value[key]} />
+          {fields[key]?.description && (
+            <p className="text-muted-foreground mt-1 text-xs">{fields[key].description}</p>
+          )}
+        </Fact>
       ))}
-    </dl>
+    </FactGrid>
   );
 }

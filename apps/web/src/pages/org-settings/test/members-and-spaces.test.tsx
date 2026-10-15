@@ -14,7 +14,7 @@ installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
   location: { origin: "https://app.example.test" },
 });
-const { invalidateMemberWrite } = await import("../../../lib/member-write.ts");
+const { invalidateMemberWrite } = await import("../../../hooks/use-org.ts");
 
 await i18nReady;
 await i18n.changeLanguage("fr");

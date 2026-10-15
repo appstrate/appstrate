@@ -11,7 +11,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { ChevronDownIcon, SlidersHorizontalIcon } from "lucide-react";
+import { ChevronDownIcon, SlidersHorizontalIcon, TriangleAlertIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
@@ -19,10 +19,11 @@ import { buildGenerationLabels } from "@appstrate/ui/components/model-generation
 import { ModelPickerList } from "@appstrate/ui/components/model-picker";
 import { groupModelsForPicker } from "@appstrate/ui/components/model-picker-groups";
 import { buildModelPickerLabels } from "@appstrate/ui/components/model-picker-labels";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { OrgModelOption } from "./models-data.ts";
-import { isModelLive } from "../model-liveness.ts";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
 import { useChatHost } from "./runtime-context.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -32,6 +33,10 @@ interface Props {
   onSelect: (id: string) => void;
   generation: ModelGenerationSettings;
   onGenerationChange: (value: ModelGenerationSettings) => void;
+  /** The catalog is being read: the pill's box is reserved. */
+  pending?: boolean;
+  /** The catalog could not be read: the pill says so, disabled. */
+  failed?: boolean;
 }
 
 export function ModelSelect({
@@ -40,6 +45,8 @@ export function ModelSelect({
   onSelect,
   generation,
   onGenerationChange,
+  pending = false,
+  failed = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"models" | "configuration">("models");
@@ -59,7 +66,25 @@ export function ModelSelect({
     active?.generation?.temperature === "unsupported" &&
     active.generation.reasoning.supported === "unsupported";
 
-  if (models.length === 0) return null;
+  if (models.length === 0) {
+    if (pending) return <Skeleton className="h-7 w-32 rounded-md" aria-hidden />;
+    if (failed) {
+      return (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled
+          className="h-auto max-w-64 justify-start gap-1.5 px-2.5 py-1 text-left font-normal shadow-none [&_svg]:size-3.5"
+          title={t("model.loadFailed")}
+        >
+          <TriangleAlertIcon className="text-destructive shrink-0" />
+          <span className="truncate font-medium">{t("model.loadFailed")}</span>
+        </Button>
+      );
+    }
+    return null;
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -99,7 +124,7 @@ export function ModelSelect({
               groups={groups}
               value={selectedId}
               onSelect={(id) => id !== null && onSelect(id)}
-              selectable={isModelLive}
+              selectable={isModelSelectable}
               // `settings:` — the picker's labels live in the settings bundle (a boot
               // namespace, so already loaded); the host binds `t` to `chat`.
               labels={buildModelPickerLabels((key, options) => t(`settings:${key}`, options))}

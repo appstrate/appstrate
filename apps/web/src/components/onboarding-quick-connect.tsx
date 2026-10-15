@@ -24,10 +24,8 @@ import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, Plug } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@appstrate/ui/cn";
-import { Modal } from "./modal";
-import { Spinner } from "./spinner";
-import { OAuthPairingBody } from "./oauth-pairing-body";
-import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
+import { Spinner } from "@appstrate/ui/components/spinner";
+import { PairingModal } from "./pairing-modal";
 import { PROVIDER_ICONS } from "./icons";
 import {
   useModelProviderCredentials,
@@ -58,7 +56,6 @@ function QuickConnectCard({
   const { seed } = useAutoSeedFeaturedModels();
 
   const [working, setWorking] = useState(false);
-  const oauthDismiss = usePairingDismissConfirm(onCloseDialog);
 
   // Inline lookup to satisfy `react-hooks/static-components` — the rule
   // flags PascalCase consts assigned from helper calls. Equivalent to
@@ -135,23 +132,17 @@ function QuickConnectCard({
       </button>
 
       {dialogOpen && (
-        <Modal
-          open
-          onClose={oauthDismiss.requestClose}
+        <PairingModal
           title={t("credentials.oauth.cliStageTitle")}
-        >
-          <OAuthPairingBody
-            providerId={entry.providerId}
-            target={{ ownerType: "org" }}
-            onConnected={(newId) => {
-              onCloseDialog();
-              void handleConnected(newId);
-            }}
-            onBusyChange={oauthDismiss.onBusyChange}
-          />
-        </Modal>
+          onClose={onCloseDialog}
+          providerId={entry.providerId}
+          target={{ ownerType: "org" }}
+          onConnected={(newId) => {
+            onCloseDialog();
+            void handleConnected(newId);
+          }}
+        />
       )}
-      {oauthDismiss.confirmDialog}
     </>
   );
 }

@@ -106,7 +106,10 @@
     "./run-and-wait-client": "./src/run-and-wait-client.ts",
     "./run-status": "./src/run-status.ts",
     "./log-line": "./src/log-line.ts",
-    "./connect-handshake": "./src/connect-handshake.ts"
+    "./connect-handshake": "./src/connect-handshake.ts",
+    "./mcp-result": "./src/mcp-result.ts",
+    "./realtime-url": "./src/realtime-url.ts",
+    "./model-selectable": "./src/model-selectable.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^0.9.0",
@@ -118,7 +121,7 @@
     "fflate": "^0.8.3",
     "pino": "^10.4.0",
     "semver": "^7.8.4",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/mime-db": "^1.43.6",

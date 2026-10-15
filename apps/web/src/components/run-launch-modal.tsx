@@ -4,7 +4,6 @@ import { useRef, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "./modal";
-import { Spinner } from "./spinner";
 import type { AgentInputFormHandle } from "./agent-input-form";
 
 /**
@@ -39,8 +38,7 @@ export function RunLaunchModal({
             <Button variant="outline" onClick={onClose} disabled={isPending}>
               {t("btn.cancel")}
             </Button>
-            <Button onClick={() => formRef.current?.submit()} disabled={isPending}>
-              {isPending && <Spinner />}
+            <Button onClick={() => formRef.current?.submit()} pending={isPending}>
               {t("input.run")}
             </Button>
           </div>

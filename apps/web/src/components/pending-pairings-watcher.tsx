@@ -22,6 +22,7 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { invalidateCredentialsAndModels } from "../hooks/use-model-provider-credentials";
 import { useModelProviderPairingStatus } from "../hooks/use-model-provider-pairing";
 import { useCurrentOrgId } from "../hooks/use-org";
 import {
@@ -42,8 +43,7 @@ function PairingPoll({ pairing }: { pairing: PendingPairing }) {
     if (state === "pending") return;
     if (state === "connected") {
       toast.success(t("credentials.oauth.callbackSuccess"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
+      void invalidateCredentialsAndModels(qc);
     } else if (state === "failed" && !isPairingShown(pairing.id)) {
       toast.error(t("credentials.oauth.pairingFailed"));
     }

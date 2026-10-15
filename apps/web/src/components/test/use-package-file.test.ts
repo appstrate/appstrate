@@ -7,7 +7,7 @@
  * zero-byte file, and openapi-fetch returns `{ data: undefined }` for that
  * response BEFORE `parseAs` is honoured — on a fully successful 200. Reading
  * `data` alone therefore cannot tell "this file is empty" from "no result yet",
- * and `file-preview` draws its loading skeleton for `text === undefined`: an
+ * and `package-file-source` draws its loading skeleton for `text === undefined`: an
  * endless placeholder on every empty file in an artifact.
  *
  * `packageFileText` is the decision, extracted so it can be tested as a

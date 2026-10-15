@@ -73,7 +73,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const { t } = useTranslation();
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
   const { currentOrg, orgs, switchOrg, loading } = useOrg();
-  const { data: spaces } = useSpaces();
+  const { data: spaces, isPending: spacesPending } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -98,7 +98,21 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   // Spaces of the EXPLORED organization; your own org shares `useSpaces()`'s cache entry.
   const exploredSpaces = useOrgSpaces(open ? exploredId : null);
 
-  if (loading) return <Skeleton className="h-6 w-40" />;
+  // The trigger's own box (avatar + name), so the column does not move when the org lands.
+  if (loading) {
+    return (
+      <div
+        className={cn(
+          "flex items-center gap-2 px-1.5",
+          variant === "mobile" ? "h-11 min-w-0 flex-1" : "h-9 w-full",
+        )}
+        aria-hidden
+      >
+        <Skeleton className="size-6 shrink-0 rounded-md" />
+        <Skeleton className="h-4 w-32" />
+      </div>
+    );
+  }
   if (!currentOrg) return null;
 
   const shownOrgs = orgs.filter((o) => matchesSearch(query, [o.name]));
@@ -155,7 +169,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
             />
             <span className="flex min-w-0 flex-1 items-center text-left">
               <span className="max-w-[48%] shrink-0 truncate font-semibold">{currentOrg.name}</span>
-              {currentSpace && (
+              {currentSpace ? (
                 <>
                   <span className="text-border mx-1.5 shrink-0" aria-hidden>
                     |
@@ -164,6 +178,15 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                     {spaceLabel(currentSpace, t)}
                   </span>
                 </>
+              ) : (
+                spacesPending && (
+                  <>
+                    <span className="text-border mx-1.5 shrink-0" aria-hidden>
+                      |
+                    </span>
+                    <Skeleton className="h-3.5 w-16" />
+                  </>
+                )
               )}
             </span>
             <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
@@ -188,13 +211,22 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
               <span className="font-semibold">{currentOrg.name}</span>
               {/* The workspace stays visible even when there is only one: a
                   level nobody ever sees is a level nobody learns. */}
-              {currentSpace && (
+              {currentSpace ? (
                 <>
                   <span className="text-border mx-1.5" aria-hidden>
                     |
                   </span>
                   <span className="text-muted-foreground">{spaceLabel(currentSpace, t)}</span>
                 </>
+              ) : (
+                spacesPending && (
+                  <>
+                    <span className="text-border mx-1.5" aria-hidden>
+                      |
+                    </span>
+                    <Skeleton className="inline-block h-3.5 w-16 align-middle" />
+                  </>
+                )
               )}
             </span>
             <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />

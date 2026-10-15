@@ -6,7 +6,8 @@ import { RunLaunchModal } from "./run-launch-modal";
 import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { initialInputValues } from "../lib/agent-input";
 import { useModels, useAgentModel } from "../hooks/use-models";
-import { isModelPinUnavailable, isModelSelectable } from "../lib/model-selectability";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
+import { isModelPinUnavailable } from "../lib/model-selectability";
 import { ModelBillingHint } from "./model-billing-hint";
 import type { AgentDetail } from "@appstrate/shared-types";
 

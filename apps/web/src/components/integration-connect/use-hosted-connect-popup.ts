@@ -5,10 +5,9 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  INTEGRATION_CONNECT_CHANNEL,
-  acceptsCompletionMessage,
-  completionMatches,
-  type IntegrationConnectCompletion,
+  CONNECT_POPUP_FEATURES,
+  connectPopupName,
+  listenConnectCompletion,
 } from "@appstrate/core/connect-handshake";
 import { ApiError } from "../../api/errors";
 import { toastError } from "../../lib/mutation-error";
@@ -19,7 +18,6 @@ import {
 
 const CONNECT_POPUP_TIMEOUT_MS = 5 * 60_000;
 const POPUP_POLL_INTERVAL_MS = 500;
-const POPUP_FEATURES = "width=600,height=700";
 
 /**
  * Drives the unified hosted-connect-portal flow via popup.
@@ -63,7 +61,7 @@ export function useHostedConnectPopup() {
         // async callbacks), mint the session, point the popup at connect_url,
         // then race a 5-min timeout against a success signal or the user closing
         // the window.
-        const popup = window.open("", "integration-connect", POPUP_FEATURES);
+        const popup = window.open("", connectPopupName(input.packageId), CONNECT_POPUP_FEATURES);
         if (!popup) {
           throw new Error("popup_blocked");
         }
@@ -82,45 +80,21 @@ export function useHostedConnectPopup() {
             const cleanup = () => {
               clearInterval(poll);
               clearTimeout(timer);
-              window.removeEventListener("message", onMessage);
-              bc?.close();
+              stopListening();
             };
-            const onHit = (completion: IntegrationConnectCompletion) => {
-              cleanup();
-              resolve(completion.scopesDenied ?? []);
-            };
-            // Which completion this popup is waiting for. Both carriers fan
-            // out — a `BroadcastChannel` publish reaches every listener on the
-            // origin, a `postMessage` every listener on the window — so a
-            // completion for ANOTHER package would otherwise settle this
-            // promise and report a connect that never happened for the
-            // integration the caller asked about. `completionMatches` is the
-            // same predicate the in-chat connect card correlates with.
-            const target = { packageId: input.packageId };
-            // Success only: an `ok: false` completion is a failed connect, and
-            // the popup-close poll below is what settles that case.
-            const isSuccess = (data: unknown): data is IntegrationConnectCompletion =>
-              completionMatches(data, target) && data.ok === true;
-            const onMessage = (e: MessageEvent) => {
-              // The completion pages (hosted form + OAuth popup HTML) are served
-              // from our own origin, so a foreign-origin message is a forgery —
-              // it must not stand in for a real connect. Origin first, then the
-              // correlation, in one call.
-              if (!acceptsCompletionMessage(e, window.location.origin, target)) return;
-              if (isSuccess(e.data)) onHit(e.data);
-            };
-            window.addEventListener("message", onMessage);
-            let bc: BroadcastChannel | null = null;
-            try {
-              // No origin to check: `BroadcastChannel` is same-origin by spec —
-              // correlation only, which is what `isSuccess` applies.
-              bc = new BroadcastChannel(INTEGRATION_CONNECT_CHANNEL);
-              bc.onmessage = (e) => {
-                if (isSuccess(e.data)) onHit(e.data);
-              };
-            } catch {
-              /* BroadcastChannel unsupported — postMessage + close-poll cover it */
-            }
+            // Which completion this popup is waiting for: both carriers fan
+            // out to every listener, so a completion for ANOTHER package must
+            // not settle this promise. Success only: an `ok: false` completion
+            // is a failed connect, and the popup-close poll below settles it.
+            const stopListening = listenConnectCompletion(
+              { packageId: input.packageId },
+              (completion) => {
+                if (completion.ok !== true) return;
+                cleanup();
+                resolve(completion.scopesDenied ?? []);
+              },
+              window,
+            );
             const timer = setTimeout(() => {
               cleanup();
               try {

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, CheckCircle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError } from "@appstrate/ui/components/field";
 import { AuthLayout } from "../components/auth-layout";
-import { AuthSuccessState } from "../components/auth-success-state";
+import { AuthLink, AuthMessage } from "../components/auth-message";
 import { NewPasswordFields, type NewPasswordValues } from "../components/auth-fields";
 import { useAppForm } from "../hooks/use-app-form";
 import { useAuth } from "../hooks/use-auth";
@@ -30,18 +30,13 @@ export function ResetPasswordPage() {
   if (!token) {
     return (
       <AuthLayout>
-        <div className="flex flex-col items-center gap-6 text-center">
-          <div className="bg-destructive/10 flex h-16 w-16 items-center justify-center rounded-full">
-            <AlertCircle className="text-destructive h-8 w-8" />
-          </div>
-          <p className="text-muted-foreground text-sm">{t("resetPassword.invalidToken")}</p>
-          <Link
-            to="/forgot-password"
-            className="text-muted-foreground hover:text-primary text-sm underline underline-offset-4"
-          >
-            {t("resetPassword.requestNew")}
-          </Link>
-        </div>
+        <AuthMessage
+          icon={AlertCircle}
+          tone="destructive"
+          description={t("resetPassword.invalidToken")}
+          backTo="/forgot-password"
+          backLabel={t("resetPassword.requestNew")}
+        />
       </AuthLayout>
     );
   }
@@ -62,7 +57,7 @@ export function ResetPasswordPage() {
   if (success) {
     return (
       <AuthLayout>
-        <AuthSuccessState
+        <AuthMessage
           icon={CheckCircle}
           title={t("resetPassword.successTitle")}
           description={t("resetPassword.successDescription")}
@@ -90,23 +85,15 @@ export function ResetPasswordPage() {
           <NewPasswordFields form={form} />
           <FieldError>{error}</FieldError>
           {revocationFailed && (
-            <Link
-              to="/forgot-password"
-              className="text-muted-foreground hover:text-primary text-sm underline underline-offset-4"
-            >
-              {t("resetPassword.requestNew")}
-            </Link>
+            <AuthLink to="/forgot-password">{t("resetPassword.requestNew")}</AuthLink>
           )}
           <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
             {form.formState.isSubmitting ? t("loading") : t("resetPassword.submit")}
           </Button>
         </form>
-        <Link
-          to="/login"
-          className="text-muted-foreground hover:text-primary text-center text-sm underline underline-offset-4"
-        >
+        <AuthLink to="/login" className="text-center">
           {t("resetPassword.backToLogin")}
-        </Link>
+        </AuthLink>
       </div>
     </AuthLayout>
   );

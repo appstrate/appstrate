@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { To } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 
-/** One deed of a row's « … » menu (`TableRowActions`). */
-export interface RowAction {
+/**
+ * One deed of a menu, declared once whichever menu draws it: a row's « … »
+ * (`TableRowActions`), a page's Actions menu (`PageActionsMenu`), or the button
+ * of an empty collection (`EmptyStateAction`). `onSelect` acts in place, `to`
+ * goes to a route of the app, `href` opens an external page in a new tab.
+ */
+export interface MenuAction {
   id: string;
   label: string;
   icon: LucideIcon;
-  /** A deed that acts here; mutually exclusive with `href`. */
   onSelect?: () => void;
-  /** A deed that goes somewhere. */
+  to?: To;
   href?: string;
   disabled?: boolean;
   /** Destroys or revokes: drawn last, behind a separator, in the destructive tone. */
@@ -19,13 +24,10 @@ export interface RowAction {
   testId?: string;
 }
 
-/**
- * The menu's order: the visible deeds in the caller's order, then the
- * destructive ones, which the menu puts behind one separator.
- */
-export function orderRowActions(actions: readonly RowAction[]): {
-  plain: RowAction[];
-  destructive: RowAction[];
+/** The visible deeds, the destructive ones apart: a menu draws them last, behind a separator. */
+export function splitMenuActions(actions: readonly MenuAction[]): {
+  plain: MenuAction[];
+  destructive: MenuAction[];
 } {
   const visible = actions.filter((action) => !action.hidden);
   return {

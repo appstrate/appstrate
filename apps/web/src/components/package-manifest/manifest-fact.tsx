@@ -16,7 +16,7 @@
 
 import { useTranslation } from "react-i18next";
 import type { ManifestLink } from "../../lib/package-manifest";
-import { Fact, FactGrid } from "../fact-grid";
+import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 
 export function ManifestFacts({ facts }: { facts: ManifestLink[] }) {
   const { t } = useTranslation("agents");

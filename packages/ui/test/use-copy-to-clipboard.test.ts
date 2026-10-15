@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, spyOn, type Mock } from "bun:test";
 import { toast } from "sonner";
-import { copyText } from "../use-copy-to-clipboard.ts";
+import { copyText } from "../src/use-copy-to-clipboard.ts";
 
 const setClipboard = (clipboard: unknown) =>
   Object.defineProperty(globalThis, "navigator", { value: { clipboard }, configurable: true });
@@ -28,7 +28,7 @@ describe("copyText", () => {
     const written: string[] = [];
     setClipboard({ writeText: async (text: string) => void written.push(text) });
 
-    expect(await copyText("https://app.test/invite/tok")).toBe(true);
+    expect(await copyText("https://app.test/invite/tok", "refused")).toBe(true);
     expect(written).toEqual(["https://app.test/invite/tok"]);
     expect(toastError).not.toHaveBeenCalled();
   });
@@ -40,14 +40,14 @@ describe("copyText", () => {
       },
     });
 
-    expect(await copyText("x")).toBe(false);
+    expect(await copyText("x", "refused")).toBe(false);
     expect(toastError).toHaveBeenCalledTimes(1);
   });
 
   it("reports a context with no clipboard at all", async () => {
     setClipboard(undefined);
 
-    expect(await copyText("x")).toBe(false);
+    expect(await copyText("x", "refused")).toBe(false);
     expect(toastError).toHaveBeenCalledTimes(1);
   });
 });

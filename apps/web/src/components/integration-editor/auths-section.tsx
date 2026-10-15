@@ -5,8 +5,8 @@ import { useTranslation } from "react-i18next";
 import { Trash2, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Checkbox, CheckboxField } from "@appstrate/ui/components/checkbox";
-import { FieldError } from "@appstrate/ui/components/field";
+import { CheckboxField } from "@appstrate/ui/components/checkbox";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
 import { FormField } from "../form-field";
 import { RowsEditor } from "../rows-editor";
@@ -80,21 +80,23 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
       {rows.map((auth, idx) => (
         <div key={idx} className="border-border space-y-3 rounded-md border p-3">
           <div className="flex items-center gap-2">
-            <div className="flex-1">
-              <Label htmlFor={`auth-key-${idx}`}>{t("integrationEditor.auths.key")}</Label>
+            <FormItem
+              id={`auth-key-${idx}`}
+              label={t("integrationEditor.auths.key")}
+              className="flex-1"
+            >
               <Input
-                id={`auth-key-${idx}`}
                 value={auth.key}
                 onChange={(e) => updateAuth(idx, { key: e.target.value })}
                 placeholder="primary"
-                className="mt-1 font-mono"
+                className="font-mono"
               />
-            </div>
+            </FormItem>
             <Button
               type="button"
               size="icon"
               variant="ghost"
-              className="mt-5"
+              className="mt-7"
               onClick={() => removeAuth(idx)}
               title={t("btn.delete", { ns: "common" })}
             >
@@ -117,13 +119,12 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
             enumLabel={(v) => t(`settings:integration.auth.type.${v}`)}
           />
 
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={auth.allowAllUris}
-              onCheckedChange={(c) => updateAuth(idx, { allowAllUris: Boolean(c) })}
-            />
-            {t("integrationEditor.auths.allowAllUris")}
-          </label>
+          <CheckboxField
+            id={`auth-all-uris-${idx}`}
+            label={t("integrationEditor.auths.allowAllUris")}
+            checked={auth.allowAllUris}
+            onCheckedChange={(c) => updateAuth(idx, { allowAllUris: Boolean(c) })}
+          />
 
           {!auth.allowAllUris && (
             <StringListInput
