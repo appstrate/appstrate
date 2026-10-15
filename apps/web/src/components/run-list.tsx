@@ -37,8 +37,6 @@ interface RunListProps {
   hideAgentName?: boolean;
   /** Custom empty state (replaces default) */
   emptyState?: React.ReactNode;
-  /** Preview row shown above the first page (e.g. scheduled next-run) */
-  banner?: React.ReactNode;
   /** Filter runs by user -- "me" for current user only */
   user?: "me";
   /** Filter runs by kind -- "all" | "package" | "inline" */
@@ -74,7 +72,6 @@ export function RunList({
   paginated = true,
   hideAgentName = false,
   emptyState,
-  banner,
   user,
   kind,
   status,
@@ -145,7 +142,6 @@ export function RunList({
         isError={failed}
         error={errorBody}
         empty={emptyBody}
-        banner={page === 0 ? banner : undefined}
         tiered={tiered}
         surface={tableSurface}
       />

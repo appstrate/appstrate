@@ -92,8 +92,6 @@ interface DataTableProps<T> extends CollectionState {
   rowLabel?: (row: T) => string;
   /** Router state to carry, e.g. a run number the destination can show before it loads. */
   rowState?: (row: T) => unknown;
-  /** Pinned above the first row, inside the frame (e.g. a scheduled next run). */
-  banner?: ReactNode;
   /** Names the table for screen readers (never drawn). */
   label: string;
   /** Read columns wait for room by `tier`; otherwise every column is drawn and the table scrolls. */
@@ -236,7 +234,6 @@ export function DataTable<T>({
   rowActionable,
   rowLabel,
   rowState,
-  banner,
   label,
   tiered = false,
   surface = "framed",
@@ -352,11 +349,6 @@ export function DataTable<T>({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {banner && (
-            <TableRow className="border-border/60 hover:bg-transparent">
-              <TableCell colSpan={columns.length}>{banner}</TableCell>
-            </TableRow>
-          )}
           {verdict === "loading"
             ? Array.from({ length: SKELETON_ROWS }, (_, i) => (
                 <TableRow

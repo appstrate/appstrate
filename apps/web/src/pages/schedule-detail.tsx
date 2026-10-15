@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Alert } from "@appstrate/ui/components/alert";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
@@ -24,8 +24,6 @@ import { ActorLabel } from "../components/actor-label";
 import { Badge } from "@appstrate/ui/components/badge";
 import { ScopedRunList } from "../components/scoped-run-list";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { NextRunPreview } from "../components/next-run-preview";
-import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useDeleteSchedule } from "../hooks/use-schedules";
@@ -255,7 +253,7 @@ function ScheduleParams({
       <DetailSectionCard
         title={t("schedule.settings.recurrence")}
         icon={CalendarClock}
-        headerAction={open("recurrence")}
+        headerAction={open("general")}
       >
         <ManifestFacts
           facts={[
@@ -309,57 +307,9 @@ function ScheduleHistory({
   const agentName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
 
-  const isActive = schedule.enabled;
-
-  // The same query ScopedRunList makes for its first page (12 rows), so React
-  // Query serves both from one fetch.
-  // We only need the first run for the "next run" preview row.
-  const runsQuery = usePaginatedRuns({
-    scheduleId: schedule.id,
-    limit: 12,
-    offset: 0,
-  });
-  const { data } = runsQuery;
-  const firstExec = data?.data?.[0];
-
-  // Show the fake "next run" row only if the last run started > 30s ago.
-  const lastStartedAt = firstExec?.started_at;
-  const [showNext, setShowNext] = useState(true);
-
-  /* eslint-disable react-hooks/set-state-in-effect -- syncing with wall clock timer */
-  useEffect(() => {
-    if (!lastStartedAt) {
-      setShowNext(true);
-      return;
-    }
-    const elapsed = Date.now() - new Date(lastStartedAt).getTime();
-    if (elapsed > 30_000) {
-      setShowNext(true);
-      return;
-    }
-    setShowNext(false);
-    const timer = setTimeout(() => setShowNext(true), 30_000 - elapsed);
-    return () => clearTimeout(timer);
-  }, [lastStartedAt]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  const nextRunAt = scheduleNextRunAt(schedule);
-  const previewRow =
-    isActive && showNext && nextRunAt ? (
-      <NextRunPreview
-        // The last run's + 1: unknown while the runs load.
-        runNumber={isQueryInFlight(runsQuery) ? null : (firstExec?.runNumber ?? 0) + 1}
-        agentName={agentName}
-        schedule_name={schedule.name || t("schedule.unnamed")}
-        next_run_at={nextRunAt}
-        timezone={schedule.timezone}
-      />
-    ) : null;
-
   return (
     <ScopedRunList
       scope={{ scheduleId: schedule.id, agentName }}
-      banner={previewRow}
       emptyState={
         <div className="p-6">
           <EmptyState message={t("schedule.noRuns")} icon={Clock} compact />

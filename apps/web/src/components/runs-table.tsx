@@ -14,7 +14,6 @@ export function RunsTable({
   isError,
   error,
   empty,
-  banner,
   tiered,
   surface,
 }: {
@@ -29,8 +28,6 @@ export function RunsTable({
   error?: ReactNode;
   /** What an empty list says; `RunList` resolves the default. */
   empty: ReactNode;
-  /** Pinned above the first row (e.g. a scheduled next run). */
-  banner?: ReactNode;
   /** Read columns wait for room by their tier; see `DataTable`. */
   tiered?: boolean;
   surface?: "framed" | "integrated";
@@ -49,7 +46,6 @@ export function RunsTable({
       isError={isError}
       error={error}
       empty={empty}
-      banner={banner}
       tiered={tiered}
       surface={surface}
       rowKey={(run) => run.id}

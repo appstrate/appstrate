@@ -11,8 +11,8 @@
  */
 
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Lock, Pause, Play, Trash2, Unplug } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Pause, Play, Trash2, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
@@ -26,9 +26,8 @@ import { RoleLimitNotice } from "./role-limit-notice";
 import { ActorSelect } from "./actor-select";
 import { PackageVersionSelect } from "./package-version-select";
 import { RunOverridesPanel } from "./run-overrides-panel";
-import { PackageIcon } from "./package-icon";
 import { AgentIntegrationsBlock } from "./package-detail/agent-integrations-block";
-import { InputFieldRow } from "./settings/input-field-row";
+import { ScheduleInputFields } from "./schedule-input-fields";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
 import { useActorName } from "../hooks/use-actor-name";
@@ -36,25 +35,15 @@ import { SaveBar } from "./save-bar";
 import { UnsavedChangesModal } from "./unsaved-changes-modal";
 import { EmptyState, ErrorState } from "./page-states";
 import { SettingsSkeleton } from "./loading-skeletons";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { isQueryInFlight } from "../lib/query-state";
 import { FrequencyComposer } from "./frequency-composer";
 import { NoAccessState } from "./route-gate";
 import { useAuth } from "../hooks/use-auth";
 import { usePermissions } from "../hooks/use-permissions";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
-import { useAgents, usePackageDetail } from "../hooks/use-packages";
+import { usePackageDetail } from "../hooks/use-packages";
 import { useScheduleFormDeps, useUpdateSchedule } from "../hooks/use-schedules";
 import { useUnsavedChanges } from "../hooks/use-unsaved-changes";
-import {
-  changedInputValues,
-  formatInputValue,
-  hasInputFields,
-  initialInputValues,
-} from "../lib/agent-input";
-import { authorDefaults, getOrderedKeys } from "@appstrate/core/form";
-import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { useUploadClient } from "../hooks/use-upload";
+import { changedInputValues, initialInputValues } from "../lib/agent-input";
 import { type ConnectionChoice, scheduleConnectionChoices } from "../lib/connection-choice";
 import { withConnectionOverride } from "../lib/connection-set";
 import {
@@ -221,8 +210,7 @@ function ScheduleSettingsPanel({
   // Read alongside the facts, not once the section mounts: the agent-bound sections wait for it
   // under the same skeleton.
   const formDeps = useScheduleFormDeps(schedule.packageId);
-  const agentBound =
-    active.id !== "general" && active.id !== "recurrence" && active.id !== "identity";
+  const agentBound = active.id !== "general";
   const formDepsSettled = !agentBound || !!formDeps.deps || !!formDeps.error || formDeps.denied;
 
   // An edit back to what is stored is no edit; a new actor drops the picks made for the old one.
@@ -336,8 +324,6 @@ interface BodyProps extends SectionProps {
 
 function SectionBody({ section, ...props }: BodyProps & { section: ScheduleSettingsSection }) {
   if (section === "general") return <GeneralSection {...props} />;
-  if (section === "recurrence") return <RecurrenceSection {...props} />;
-  if (section === "identity") return <IdentitySection {...props} />;
   return <AgentBoundSection section={section} {...props} />;
 }
 
@@ -345,9 +331,7 @@ function SectionBody({ section, ...props }: BodyProps & { section: ScheduleSetti
 
 function GeneralSection({ schedule, draft, edit }: SectionProps) {
   const { t } = useTranslation(["agents"]);
-  const agentsQuery = useAgents();
-  const agent = agentsQuery.data?.find((a) => a.id === schedule.packageId);
-  const agentPending = isQueryInFlight(agentsQuery);
+  const stored = storedActor(schedule);
   return (
     <>
       <SettingRow label={t("schedule.name")}>
@@ -358,75 +342,21 @@ function GeneralSection({ schedule, draft, edit }: SectionProps) {
           onChange={(e) => edit({ name: e.target.value })}
         />
       </SettingRow>
-      <SettingRow label={t("schedule.agent")} description={t("schedule.settings.agentHint")}>
-        {/* The agent's identity, as its own Général previews it. */}
-        <Link
-          to={`/agents/${schedule.packageId}`}
-          className="border-border bg-muted/20 hover:bg-muted/40 flex w-full items-center gap-3 rounded-lg border p-3 transition-colors"
-        >
-          {agentPending ? (
-            <>
-              <Skeleton className="size-11 shrink-0 rounded-xl" />
-              <span className="min-w-0 flex-1">
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="mt-1.5 h-3 w-48 max-w-full" />
-              </span>
-            </>
-          ) : (
-            <>
-              <PackageIcon
-                type="agent"
-                icon={agent?.icon}
-                color={agent?.color}
-                className="size-11 rounded-xl"
-                iconClassName="size-5"
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">
-                  {agent?.display_name || schedule.packageId}
-                </span>
-                {agent?.description && (
-                  <span className="text-muted-foreground block truncate text-xs">
-                    {agent.description}
-                  </span>
-                )}
-              </span>
-            </>
-          )}
-          <ArrowRight className="text-muted-foreground size-4 shrink-0" aria-hidden />
-        </Link>
+      {/* A rhythm is composed field by field (a number typed, a day ticked): the composer
+          reports it once it is valid. */}
+      <FrequencyComposer
+        cron={draft.cron ?? schedule.cron_expression}
+        timezone={draft.timezone ?? schedule.timezone}
+        onChange={(next) => next && edit({ cron: next })}
+        onTimezoneChange={(timezone) => edit({ timezone })}
+      />
+      <SettingRow label={t("schedule.actorTitle")} description={t("schedule.actorHint")}>
+        <ActorSelect
+          value={draft.actor ?? stored}
+          onChange={(next) => edit({ actor: next ?? stored })}
+        />
       </SettingRow>
     </>
-  );
-}
-
-// ─── Récurrence ──────────────────────────────────────────
-
-function RecurrenceSection({ schedule, draft, edit }: SectionProps) {
-  // A rhythm is composed field by field (a number typed, a day ticked): the composer reports it
-  // once it is complete.
-  return (
-    <FrequencyComposer
-      cron={draft.cron ?? schedule.cron_expression}
-      timezone={draft.timezone ?? schedule.timezone}
-      onChange={(next) => next && edit({ cron: next })}
-      onTimezoneChange={(timezone) => edit({ timezone })}
-    />
-  );
-}
-
-// ─── Identité ────────────────────────────────────────────
-
-function IdentitySection({ schedule, draft, edit }: SectionProps) {
-  const { t } = useTranslation(["agents"]);
-  const stored = storedActor(schedule);
-  return (
-    <SettingRow label={t("schedule.actorTitle")} description={t("schedule.actorHint")}>
-      <ActorSelect
-        value={draft.actor ?? stored}
-        onChange={(next) => edit({ actor: next ?? stored })}
-      />
-    </SettingRow>
   );
 }
 
@@ -450,60 +380,13 @@ function AgentBoundSection({
 // ─── Entrées ─────────────────────────────────────────────
 
 function InputsSection({ schedule, draft, edit, deps }: BodyProps & { deps: Deps }) {
-  const { t } = useTranslation(["agents"]);
-  const labels = useSchemaFormLabels();
-  const upload = useUploadClient();
-  const wrapper = deps.inputWrapper;
   // The schedule's frozen values over the agent's resolved ones, minus every locked field; only
   // what differs from the agent is sent back, so a later change of the agent's stored value
   // still reaches every fire.
-  const values = draft.input ?? initialInputValues(wrapper, wrapper, schedule.input ?? undefined);
-
-  if (deps.hasFileInputs) {
-    return <p className="text-muted-foreground text-sm">{t("schedule.fileInputBlocked")}</p>;
-  }
-  if (!hasInputFields(wrapper)) {
-    return <p className="text-muted-foreground text-sm">{t("detail.emptyConfig")}</p>;
-  }
-  const defaults = authorDefaults(wrapper.schema);
-  return (
-    <div className="flex flex-col gap-4">
-      {getOrderedKeys(wrapper.schema, wrapper.property_order).map((key) => {
-        // A field the agent locks is the agent's value at every fire.
-        const locked = wrapper.locked_fields.includes(key);
-        const agentValue = wrapper.values[key] ?? defaults[key];
-        return (
-          <InputFieldRow
-            key={key}
-            fieldKey={key}
-            wrapper={wrapper}
-            value={locked ? agentValue : values[key]}
-            disabled={locked}
-            labels={labels}
-            upload={upload}
-            onValueChange={(next) => {
-              const out = { ...values };
-              if (next === undefined) delete out[key];
-              else out[key] = next;
-              edit({ input: out });
-            }}
-            hint={
-              locked ? (
-                <>
-                  <Lock className="size-3.5" aria-hidden />
-                  {t("schedule.settings.lockedByAgent")}
-                </>
-              ) : agentValue !== undefined &&
-                JSON.stringify(values[key]) !== JSON.stringify(agentValue) ? (
-                // Said only when this schedule replaces the agent's value.
-                t("schedule.settings.agentValue", { value: formatInputValue(agentValue) })
-              ) : undefined
-            }
-          />
-        );
-      })}
-    </div>
-  );
+  const values =
+    draft.input ??
+    initialInputValues(deps.inputWrapper, deps.inputWrapper, schedule.input ?? undefined);
+  return <ScheduleInputFields deps={deps} values={values} onChange={(input) => edit({ input })} />;
 }
 
 // ─── Exécution ───────────────────────────────────────────

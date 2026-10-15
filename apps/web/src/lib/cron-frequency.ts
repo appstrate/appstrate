@@ -114,17 +114,12 @@ export function toCron(frequency: Frequency): string {
   }
 }
 
-/** Uses the parser the scheduler itself uses; `null` when the expression does not parse. */
-export function nextFires(
-  cron: string,
-  timezone: string,
-  count = 3,
-  from = new Date(),
-): Date[] | null {
+/** Whether the parser the scheduler itself uses accepts the expression and finds a next fire. */
+export function cronFires(cron: string, timezone: string): boolean {
   try {
-    const interval = CronExpressionParser.parse(cron, { tz: timezone, currentDate: from });
-    return Array.from({ length: count }, () => interval.next().toDate());
+    CronExpressionParser.parse(cron, { tz: timezone }).next();
+    return true;
   } catch {
-    return null;
+    return false;
   }
 }

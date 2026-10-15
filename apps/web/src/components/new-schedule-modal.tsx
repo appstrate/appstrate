@@ -20,10 +20,10 @@ import { OptionSelect } from "@/components/app-ui/option-select";
 import { Modal } from "./modal";
 import { ActorSelect } from "./actor-select";
 import { AdvancedSection } from "./advanced-section";
-import { AgentInputForm } from "./agent-input-form";
 import { FrequencyComposer } from "./frequency-composer";
 import { AgentVersionField } from "./package-version-select";
 import { RunOverridesPanel } from "./run-overrides-panel";
+import { ScheduleInputFields } from "./schedule-input-fields";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
 import { ErrorState } from "./page-states";
@@ -264,12 +264,7 @@ export function ScheduleFieldsReady({
       {hasInputFields(wrapper) && (
         <Field>
           <Label>{t("schedule.inputTitle")}</Label>
-          <AgentInputForm
-            wrapper={wrapper}
-            settings={wrapper}
-            value={values}
-            onChange={setValues}
-          />
+          <ScheduleInputFields deps={deps} values={values} onChange={setValues} />
         </Field>
       )}
       {/* Open while a refusal speaks for this actor: answering it may mean changing them. */}
