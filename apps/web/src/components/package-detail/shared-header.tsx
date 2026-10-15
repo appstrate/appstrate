@@ -11,6 +11,7 @@ import { PageHeader } from "../page-header";
 import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 import { PackageIcon } from "../package-icon";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { versionBadges } from "./version-badge";
 
 interface SharedHeaderDetail {
   id: string;
@@ -59,6 +60,12 @@ export function SharedHeader({
   const { t } = useTranslation(["agents", "settings", "common"]);
   const listCrumb = usePackageListCrumb(detail.type);
 
+  const badges = versionBadges({
+    ...detail,
+    isHistoricalVersion,
+    hasUnarchivedChanges,
+    draftVerdictPending,
+  });
   const iconNode = <PackageIcon type={detail.type} icon={detail.icon} color={detail.color} />;
 
   return (
@@ -92,17 +99,6 @@ export function SharedHeader({
                 {t("packages.homeSpace", { ns: "settings", space: detail.homeSpaceName })}
               </Badge>
             )}
-            {detail.type !== "agent" && detail.version && (
-              <Badge variant="secondary" className="font-mono">
-                v{detail.version}
-              </Badge>
-            )}
-            {detail.type !== "agent" && hasUnarchivedChanges && !isHistoricalVersion && (
-              <Badge variant="warning">{t("version.modified")}</Badge>
-            )}
-            {detail.type !== "agent" && isHistoricalVersion && (
-              <Badge variant="secondary">{t("version.readOnly")}</Badge>
-            )}
             {detail.type === "agent" && detail.source === "system" && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -118,47 +114,51 @@ export function SharedHeader({
                 </TooltipContent>
               </Tooltip>
             )}
-            {detail.type === "agent" && detail.readsPublished && !isHistoricalVersion && (
-              <Badge variant="secondary" className="font-mono">
-                v{detail.version}
-              </Badge>
-            )}
-            {/* A draft that says what the last published version already says is not worth a
-                badge of its own: the version is. "Draft" means it differs, or nothing is published. */}
-            {detail.type === "agent" &&
-              detail.source !== "system" &&
-              !detail.readsPublished &&
-              !isHistoricalVersion &&
-              (draftVerdictPending ? (
-                <Skeleton className="h-5 w-14" />
-              ) : hasUnarchivedChanges || !detail.version ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span tabIndex={0}>
-                      <Badge variant="secondary">{t("version.draft")}</Badge>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-80">
-                    {latestPublishedVersion
-                      ? t("version.draftTooltip", { version: latestPublishedVersion })
-                      : t("version.draftTooltipNoVersion")}
-                  </TooltipContent>
-                </Tooltip>
-              ) : (
-                <Badge variant="secondary" className="font-mono">
-                  v{detail.version}
-                </Badge>
-              ))}
-            {detail.type === "agent" && isHistoricalVersion && detail.version && (
-              <Badge variant="secondary" className="font-mono">
-                v{detail.version} · <span className="font-sans">{t("version.readOnly")}</span>
-              </Badge>
-            )}
-            {detail.type === "agent" && detail.source === "system" && detail.version && (
-              <Badge variant="secondary" className="font-mono">
-                v{detail.version}
-              </Badge>
-            )}
+            {badges.map((badge) => {
+              switch (badge.kind) {
+                case "version":
+                  return (
+                    <Badge key="version" variant="secondary" className="font-mono">
+                      v{badge.version}
+                    </Badge>
+                  );
+                case "modified":
+                  return (
+                    <Badge key="modified" variant="warning">
+                      {t("version.modified")}
+                    </Badge>
+                  );
+                case "readOnly":
+                  return (
+                    <Badge key="readOnly" variant="secondary">
+                      {t("version.readOnly")}
+                    </Badge>
+                  );
+                case "readOnlyVersion":
+                  return (
+                    <Badge key="readOnly" variant="secondary" className="font-mono">
+                      v{badge.version} · <span className="font-sans">{t("version.readOnly")}</span>
+                    </Badge>
+                  );
+                case "draftPending":
+                  return <Skeleton key="draft" className="h-5 w-14" />;
+                case "draft":
+                  return (
+                    <Tooltip key="draft">
+                      <TooltipTrigger asChild>
+                        <span tabIndex={0}>
+                          <Badge variant="secondary">{t("version.draft")}</Badge>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-80">
+                        {latestPublishedVersion
+                          ? t("version.draftTooltip", { version: latestPublishedVersion })
+                          : t("version.draftTooltipNoVersion")}
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+              }
+            })}
             {actionsLeft}
             {actionsRight}
           </>

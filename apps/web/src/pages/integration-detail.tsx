@@ -27,7 +27,6 @@ import {
   FolderTree,
   Wrench,
   History,
-  FileArchive,
   IdCard,
   Server,
 } from "lucide-react";
@@ -114,7 +113,6 @@ function IntegrationSettings({
     requested === "tools" ||
     requested === "functioning" ||
     (requested === "versions" && isOwned) ||
-    requested === "bundle" ||
     (definition && requested && DEFINITION_SECTIONS.includes(requested))
       ? (requested as IntegrationSettingsSection)
       : requested === "files" || !canConfigure
@@ -168,7 +166,6 @@ function IntegrationSettings({
             ]
           : [item("functioning", Plug, t("orgSettings.tabGeneral"))]),
         item("tools", Wrench, t("integrationEditor.tabTools", { ns: "agents" })),
-        item("bundle", FileArchive, t("editor.tabPackageFiles", { ns: "agents" })),
       ],
     },
   ];
@@ -202,7 +199,6 @@ function IntegrationSettings({
             section={active}
             type="integration"
             packageId={packageId}
-            manifest={detail.manifest}
             file={file}
             href={href}
             manifestSection={definition ? "identity" : undefined}

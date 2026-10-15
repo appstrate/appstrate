@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Puzzle } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -16,8 +17,6 @@ import { ActivateIntegrationButton } from "../activate-integration-button";
 import { ApiError } from "../../api/errors";
 import { errorMessage } from "../../lib/mutation-error";
 import type { ConnectionSet } from "../../lib/connection-set";
-import { useLocalListParams } from "../../lib/list-params";
-import { matchesSearch } from "../../lib/strings";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import {
   describeResolution,
@@ -26,8 +25,6 @@ import {
   UNBOUND_LABEL_KEYS,
 } from "../integration-connect/integration-run-readiness";
 import { AMBER_TEXT } from "../integration-connect/connection-picker-states";
-import { DataTable, type DataColumn } from "../data-table";
-import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 interface AgentIntegrationsBlockProps {
@@ -35,7 +32,7 @@ interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
   /** The agent whose resolution each row reads and whose member pin its picker writes. */
   agentPackageId: string;
-  /** The table for a schedule: "Compte utilisé" picks the connections frozen on it (`connection_overrides`) instead of the member's pin, and the readiness column goes. */
+  /** The rows for a schedule: "Compte utilisé" picks the connections frozen on it (`connection_overrides`) instead of the member's pin, and the readiness column goes. */
   scheduleOverrides?: ScheduleOverrides;
 }
 
@@ -56,8 +53,22 @@ interface DetailState {
 /** 404: the integration is not placed in this space, which is what activating it fixes. */
 const isNotPlaced = (error: unknown) => error instanceof ApiError && error.status === 404;
 
+const TRACKS = "md:grid-cols-[minmax(160px,1.2fr)_minmax(120px,0.8fr)_minmax(200px,1.4fr)]";
+const TRACKS_WITH_STATUS =
+  "md:grid-cols-[minmax(160px,1.2fr)_minmax(120px,0.8fr)_minmax(200px,1.4fr)_130px]";
+
+/** A row's cell: its column name heads it on a phone, and is read out beside it everywhere else. */
+function Cell({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <span className="text-muted-foreground mb-1 block text-xs md:sr-only">{label}</span>
+      {children}
+    </div>
+  );
+}
+
 /**
- * Connection-status table for every declared integration, driven by the server's
+ * Connection status for every declared integration, driven by the server's
  * `IntegrationAgentResolution` from the bulk `connection-readiness` query (the same verdict as the
  * launch badge and the run-kickoff 409). The picker shows for every integration, even inert ones;
  * whether one BLOCKS the run is the server's `run_blocking` flag. Activity comes from the
@@ -69,120 +80,64 @@ export function AgentIntegrationsBlock({
   scheduleOverrides,
 }: AgentIntegrationsBlockProps) {
   const { t } = useTranslation(["agents", "settings"]);
-  const list = useLocalListParams();
-  const states = list.values("activation", ["active", "inactive"] as const);
   const details = useIntegrationDetails(entries.map((entry) => entry.id));
-
-  const rows = entries
-    .map((entry, index) => {
-      const query = details[index]!;
-      const state: DetailState = {
-        detail: query.data,
-        isLoading: query.isLoading,
-        error: query.error,
-      };
-      return {
-        entry,
-        state,
-        displayName: state.detail?.manifest.display_name ?? entry.id,
-        // Optimistic while the detail loads so the table does not flash an inactive state.
-        spaceActive: state.detail ? state.detail.active : !isNotPlaced(state.error),
-      };
-    })
-    .filter((row) => {
-      const state = row.spaceActive ? "active" : "inactive";
-      const matchesState = states.length === 0 || states.includes(state);
-      return matchesState && matchesSearch(list.search, [row.entry.id, row.displayName]);
-    });
-  type Row = (typeof rows)[number];
-  const columns: DataColumn<Row>[] = [
-    {
-      id: "integration",
-      header: t("detail.connectionsTable.integration"),
-      width: "minmax(160px,1.2fr)",
-      cell: ({ entry, displayName }) => (
-        <IntegrationIdentityCell
-          packageId={entry.id}
-          displayName={displayName}
-          required={entry.required === true}
-        />
-      ),
-    },
-    {
-      id: "access",
-      header: t("detail.connectionsTable.access"),
-      width: "minmax(120px,0.8fr)",
-      cell: ({ state }) => <IntegrationAccessCell state={state} />,
-    },
-    {
-      id: "account",
-      header: t("detail.connectionsTable.account"),
-      width: "minmax(200px,1.4fr)",
-      // The connection picker.
-      control: true,
-      cell: ({ entry, state }) => (
-        <IntegrationConnectionCell
-          entry={entry}
-          state={state}
-          agentPackageId={agentPackageId}
-          {...(scheduleOverrides ? { scheduleOverrides } : {})}
-        />
-      ),
-    },
-  ];
-  if (!scheduleOverrides)
-    columns.push({
-      id: "status",
-      header: t("detail.connectionsTable.status"),
-      width: "130px",
-      cell: ({ entry, spaceActive }) => (
-        <IntegrationStatusCell
-          packageId={entry.id}
-          spaceActive={spaceActive}
-          agentPackageId={agentPackageId}
-        />
-      ),
-    });
-  const filters: FilterSpec[] = [
-    {
-      id: "activation",
-      label: t("detail.connectionsTable.filterActivation"),
-      values: states,
-      options: [
-        { value: "active", label: t("detail.connectionsTable.active") },
-        { value: "inactive", label: t("detail.connectionsTable.inactive") },
-      ],
-      onChange: list.setValues("activation"),
-    },
-  ];
+  const tracks = scheduleOverrides ? TRACKS : TRACKS_WITH_STATUS;
+  const rowClass = cn("flex flex-col gap-3 px-3 py-3 md:grid md:items-center md:gap-4", tracks);
 
   return (
-    <>
-      <ListToolbar
-        placement="panel"
-        search={{
-          value: list.search,
-          onChange: list.setSearch,
-          placeholder: t("detail.connectionsTable.search"),
-        }}
-        filters={filters}
-        onReset={list.reset}
-      />
-      <DataTable
-        tableId="agent-connections"
-        label={t("detail.connectionsTable.label")}
-        columns={columns}
-        columnMode="scroll"
-        surface="integrated"
-        rows={rows}
-        rowKey={({ entry }) => entry.id}
-        empty={
-          <p className="text-muted-foreground px-3 py-6 text-sm">
-            {t("detail.connectionsTable.noMatch")}
-          </p>
-        }
-      />
-    </>
+    <ul aria-label={t("detail.connectionsTable.label")} className="divide-y rounded-lg border">
+      <li
+        aria-hidden
+        className={cn(
+          "text-muted-foreground hidden gap-4 px-3 py-2 text-xs font-medium md:grid",
+          tracks,
+        )}
+      >
+        <span>{t("detail.connectionsTable.integration")}</span>
+        <span>{t("detail.connectionsTable.access")}</span>
+        <span>{t("detail.connectionsTable.account")}</span>
+        {!scheduleOverrides && <span>{t("detail.connectionsTable.status")}</span>}
+      </li>
+      {entries.map((entry, index) => {
+        const query = details[index]!;
+        const state: DetailState = {
+          detail: query.data,
+          isLoading: query.isLoading,
+          error: query.error,
+        };
+        // Optimistic while the detail loads so the status does not flash inactive.
+        const spaceActive = state.detail ? state.detail.active : !isNotPlaced(state.error);
+        return (
+          <li key={entry.id} className={rowClass}>
+            <IntegrationIdentityCell
+              packageId={entry.id}
+              displayName={state.detail?.manifest.display_name ?? entry.id}
+              required={entry.required === true}
+            />
+            <Cell label={t("detail.connectionsTable.access")}>
+              <IntegrationAccessCell state={state} />
+            </Cell>
+            <Cell label={t("detail.connectionsTable.account")}>
+              <IntegrationConnectionCell
+                entry={entry}
+                state={state}
+                agentPackageId={agentPackageId}
+                scheduleOverrides={scheduleOverrides}
+              />
+            </Cell>
+            {!scheduleOverrides && (
+              <Cell label={t("detail.connectionsTable.status")}>
+                <IntegrationStatusCell
+                  packageId={entry.id}
+                  spaceActive={spaceActive}
+                  agentPackageId={agentPackageId}
+                />
+              </Cell>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

@@ -5,15 +5,14 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, KeyRound, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { FieldError } from "@appstrate/ui/components/field";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
+import { FormItem } from "../app-ui/form-item";
 import { CopyBlock } from "../copy-block";
 import { CallbackUrlHint } from "../package-detail/callback-url-hint";
 import { ConfirmModal } from "../confirm-modal";
@@ -158,24 +157,26 @@ function OAuthClientModal({
         onSubmit={submit}
         data-testid={`oauth-client-form-${authKey}`}
       >
-        <div className="space-y-1">
-          <Label htmlFor={`cid-${authKey}`} className="text-xs">
-            {t("oauthClients.clientIdColumn")}
-          </Label>
+        <FormItem id={`cid-${authKey}`} label={t("oauthClients.clientIdColumn")}>
           <Input
-            id={`cid-${authKey}`}
             value={clientId}
             onChange={(e) => setClientId(e.target.value)}
             disabled={mode === "edit"}
             data-testid={`oauth-clientid-${authKey}`}
           />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor={`csecret-${authKey}`} className="text-xs">
-            {t("integration.oauthClient.clientSecret")}
-          </Label>
+        </FormItem>
+        <FormItem
+          id={`csecret-${authKey}`}
+          label={t("integration.oauthClient.clientSecret")}
+          error={
+            secretMissing && (secretTouched || attempted) ? (
+              <span data-testid={`oauth-clientsecret-error-${authKey}`}>
+                {t("integration.oauthClient.clientSecretRequired")}
+              </span>
+            ) : undefined
+          }
+        >
           <Input
-            id={`csecret-${authKey}`}
             type="password"
             value={clientSecret}
             onChange={(e) => setClientSecret(e.target.value)}
@@ -184,42 +185,30 @@ function OAuthClientModal({
             placeholder={existing?.has_client_secret ? "••••••••" : ""}
             data-testid={`oauth-clientsecret-${authKey}`}
           />
-          {secretMissing && (secretTouched || attempted) && (
-            <FieldError data-testid={`oauth-clientsecret-error-${authKey}`}>
-              {t("integration.oauthClient.clientSecretRequired")}
-            </FieldError>
-          )}
-        </div>
-        <div className="space-y-1 sm:col-span-2">
-          <Label htmlFor={`redir-${authKey}`} className="text-xs">
-            {t("integration.oauthClient.redirectUri")}
-          </Label>
-          <Input
-            id={`redir-${authKey}`}
-            type="url"
-            value={redirectUri}
-            onChange={(e) => setRedirectUri(e.target.value)}
+        </FormItem>
+        <FormItem
+          id={`redir-${authKey}`}
+          label={t("integration.oauthClient.redirectUri")}
+          className="sm:col-span-2"
+        >
+          <Input type="url" value={redirectUri} onChange={(e) => setRedirectUri(e.target.value)} />
+        </FormItem>
+        {/* The redirect_uri connect will send for THIS client: the override typed above when it
+            is set, else the platform callback. Providers compare it byte-for-byte and reject a
+            mismatch with an opaque error, so the admin is shown the exact string to register
+            rather than left to reconstruct it from the browser's origin (which is NOT
+            authoritative — `APP_URL` is). */}
+        <div className="flex flex-col gap-1 sm:col-span-2">
+          <p className="text-muted-foreground text-[0.7rem]">
+            {t("integration.oauthClient.platformRedirectUri")}
+          </p>
+          <CopyBlock
+            value={effectiveRedirectUri}
+            dense
+            testId={`platform-redirect-uri-modal-${authKey}`}
           />
-          {/* The redirect_uri connect will send for THIS client: the override
-              typed above when it is set, else the platform callback. Providers
-              compare it byte-for-byte and reject a mismatch with an opaque
-              error, so the admin is shown the exact string to register rather
-              than left to reconstruct it from the browser's origin (which is
-              NOT authoritative — `APP_URL` is). */}
-          <div className="flex flex-col gap-1">
-            <p className="text-muted-foreground text-[0.7rem]">
-              {t("integration.oauthClient.platformRedirectUri")}
-            </p>
-            <CopyBlock
-              value={effectiveRedirectUri}
-              dense
-              testId={`platform-redirect-uri-modal-${authKey}`}
-            />
-          </div>
-          {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`, with its
-              `{{callback_url}}` placeholder resolved against the SAME value
-              shown above. Read-only display; the editable override lives in
-              the input. */}
+          {/* AFPS §7.10: `auths.<key>.callback_url_hint`, its `{{callback_url}}` placeholder
+              resolved against the SAME value shown above. */}
           {authDecl?.callback_url_hint && (
             <CallbackUrlHint
               hint={authDecl.callback_url_hint}
@@ -334,20 +323,14 @@ export function ClientsTable({
       ? { mode: "create", tier: newTier }
       : null;
   const closeModal = editedRow ? editClient.close : newClient.close;
-  const pending = [
-    setSpaceDefault,
-    setOrgDefault,
-    deleteSpaceClient,
-    deleteOrgClient,
-    promote,
-  ].find((mutation) => mutation.isPending);
-  const pendingClientRef = !pending
-    ? null
-    : pending === setSpaceDefault || pending === setOrgDefault
-      ? ((pending.variables as { body: { client_ref: string } } | undefined)?.body.client_ref ??
-        null)
-      : ((pending.variables as { params: { path: { clientId: string } } } | undefined)?.params.path
-          .clientId ?? null);
+  const pendingDefault = [setSpaceDefault, setOrgDefault].find((mutation) => mutation.isPending);
+  const pendingRemoval = [deleteSpaceClient, deleteOrgClient, promote].find(
+    (mutation) => mutation.isPending,
+  );
+  const pendingClientRef =
+    pendingDefault?.variables?.body.client_ref ??
+    pendingRemoval?.variables?.params.path.clientId ??
+    null;
   const columns = useIntegrationClientColumns({
     canUseHere: (spaceClients.data?.length ?? 0) > 1,
     canManageOrg,

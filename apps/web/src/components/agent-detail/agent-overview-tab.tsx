@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChartNoAxesCombined, Database, PlayCircle } from "lucide-react";
@@ -15,6 +16,23 @@ import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
 import { DetailSectionCard } from "../detail-section-card";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+
+/** A figure read from a query: a placeholder while it loads, « unknown » when the read failed. */
+function QueryValue({
+  loading,
+  error,
+  skeleton = "h-6 w-10",
+  children,
+}: {
+  loading: boolean;
+  error: boolean;
+  skeleton?: string;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation("agents");
+  if (loading) return <Skeleton className={skeleton} />;
+  return error ? t("detail.overview.unknown") : children;
+}
 
 export function AgentOverviewTab({
   packageId,
@@ -60,7 +78,6 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
   } = useAgentPinned(packageId);
   const nextSchedule = schedules?.find((schedule) => schedule.enabled && schedule.next_run_at);
   const activeScheduleCount = schedules?.filter((schedule) => schedule.enabled).length;
-  const unknown = t("detail.overview.unknown");
   const latestMemory = pinned && memories ? latestMemoryDate(pinned, memories) : undefined;
 
   const destination = (hash: string, key?: string, value?: string) => {
@@ -107,7 +124,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
                   formatDateField(nextSchedule.next_run_at, "datetime", nextSchedule.timezone)
                 ) : (
                   <span className="text-muted-foreground">
-                    {schedulesError ? unknown : t("detail.overview.noSchedule")}
+                    {t(schedulesError ? "detail.overview.unknown" : "detail.overview.noSchedule")}
                   </span>
                 )
               }
@@ -138,13 +155,9 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
             <OperationalStat
               label={t("detail.overview.activeSchedules")}
               value={
-                schedulesLoading ? (
-                  <Skeleton className="h-6 w-10" />
-                ) : schedulesError || !schedulesSuccess ? (
-                  unknown
-                ) : (
-                  String(activeScheduleCount)
-                )
+                <QueryValue loading={schedulesLoading} error={schedulesError || !schedulesSuccess}>
+                  {String(activeScheduleCount)}
+                </QueryValue>
               }
               target={
                 activeScheduleCount && activeScheduleCount > 0
@@ -167,13 +180,9 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
             <OperationalStat
               label={t("detail.overview.pinnedItems")}
               value={
-                pinnedLoading ? (
-                  <Skeleton className="h-6 w-10" />
-                ) : pinnedError ? (
-                  unknown
-                ) : (
-                  String(pinned?.length ?? 0)
-                )
+                <QueryValue loading={pinnedLoading} error={pinnedError}>
+                  {String(pinned?.length ?? 0)}
+                </QueryValue>
               }
               target={
                 pinned && pinned.length > 0
@@ -184,13 +193,9 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
             <OperationalStat
               label={t("detail.overview.archivedItems")}
               value={
-                memoriesLoading ? (
-                  <Skeleton className="h-6 w-10" />
-                ) : memoriesError ? (
-                  unknown
-                ) : (
-                  String(memories?.length ?? 0)
-                )
+                <QueryValue loading={memoriesLoading} error={memoriesError}>
+                  {String(memories?.length ?? 0)}
+                </QueryValue>
               }
               target={
                 memories && memories.length > 0
@@ -201,15 +206,13 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
             <OperationalStat
               label={t("detail.overview.lastUpdated")}
               value={
-                pinnedLoading || memoriesLoading ? (
-                  <Skeleton className="h-5 w-32" />
-                ) : pinnedError || memoriesError ? (
-                  unknown
-                ) : latestMemory ? (
-                  formatDateField(latestMemory, "datetime")
-                ) : (
-                  "—"
-                )
+                <QueryValue
+                  loading={pinnedLoading || memoriesLoading}
+                  error={pinnedError || memoriesError}
+                  skeleton="h-5 w-32"
+                >
+                  {latestMemory ? formatDateField(latestMemory, "datetime") : "—"}
+                </QueryValue>
               }
             />
           </dl>

@@ -49,10 +49,12 @@ export function VersionHistory({
   const states = list.values("status", ["published", "yanked"] as const);
   const restoreVersion = useRestoreVersion(type, packageId);
   const deleteVersion = useDeleteVersion(type, packageId);
+  const busy = restoreVersion.isPending || deleteVersion.isPending;
   const [confirmState, setConfirmState] = useState<{
     type: "restore" | "delete";
     version: string;
   } | null>(null);
+  const restoring = confirmState?.type === "restore";
 
   const rows = (versions ?? []).filter(
     (version) =>
@@ -152,7 +154,7 @@ export function VersionHistory({
                         id: "restore",
                         label: t("version.restore"),
                         icon: RotateCcw,
-                        disabled: restoreVersion.isPending || deleteVersion.isPending,
+                        disabled: busy,
                         onSelect: () =>
                           setConfirmState({ type: "restore", version: version.version }),
                         hidden: !canRestore,
@@ -162,7 +164,7 @@ export function VersionHistory({
                         label: t("btn.delete", { ns: "common" }),
                         icon: Trash2,
                         destructive: true,
-                        disabled: deleteVersion.isPending || restoreVersion.isPending,
+                        disabled: busy,
                         onSelect: () =>
                           setConfirmState({ type: "delete", version: version.version }),
                         hidden: !canDelete,
@@ -178,32 +180,17 @@ export function VersionHistory({
       <ConfirmModal
         open={confirmState !== null}
         onClose={() => setConfirmState(null)}
-        title={
-          confirmState?.type === "restore" ? t("version.restoreTitle") : t("version.deleteTitle")
-        }
-        confirmLabel={
-          confirmState?.type === "restore"
-            ? t("version.restore")
-            : t("btn.delete", { ns: "common" })
-        }
-        description={
-          confirmState?.type === "restore"
-            ? t("version.restoreConfirm", { version: confirmState.version })
-            : t("version.deleteConfirm", { version: confirmState?.version })
-        }
-        variant={confirmState?.type === "restore" ? "default" : "destructive"}
-        isPending={restoreVersion.isPending || deleteVersion.isPending}
+        title={restoring ? t("version.restoreTitle") : t("version.deleteTitle")}
+        confirmLabel={restoring ? t("version.restore") : t("btn.delete", { ns: "common" })}
+        description={t(restoring ? "version.restoreConfirm" : "version.deleteConfirm", {
+          version: confirmState?.version,
+        })}
+        variant={restoring ? "default" : "destructive"}
+        isPending={busy}
         onConfirm={() => {
           if (!confirmState) return;
-          if (confirmState.type === "restore") {
-            restoreVersion.mutate(confirmState.version, {
-              onSuccess: () => setConfirmState(null),
-            });
-          } else {
-            deleteVersion.mutate(confirmState.version, {
-              onSuccess: () => setConfirmState(null),
-            });
-          }
+          const mutation = restoring ? restoreVersion : deleteVersion;
+          mutation.mutate(confirmState.version, { onSuccess: () => setConfirmState(null) });
         }}
       />
     </>

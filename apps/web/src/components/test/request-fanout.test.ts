@@ -74,6 +74,7 @@ const RUNS_TABLE = read("../runs-table.tsx");
 const NOTIFICATIONS = read("../../hooks/use-notifications.ts");
 const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
 const AGENT_ACTIONS = read("../package-detail/agent-actions.tsx");
+const ACTIONS_DROPDOWN = read("../package-detail/package-actions-dropdown.tsx");
 const MUTATIONS = read("../../hooks/use-mutations.ts");
 
 describe("dashboard reuses its own runs", () => {
@@ -120,7 +121,8 @@ describe("schedule cards read their counters from the schedule", () => {
 describe("agent page", () => {
   it("reads whether the agent has runs off the detail it already holds", () => {
     expect(code(AGENT_ACTIONS)).not.toMatch(/use(Paginated)?Runs\(/);
-    expect(AGENT_ACTIONS).toContain("hasRuns={detail.last_run !== null}");
+    expect(code(ACTIONS_DROPDOWN)).not.toMatch(/use(Paginated)?Runs\(/);
+    expect(ACTIONS_DROPDOWN).toContain("!detail?.last_run");
   });
 
   it("marks the run lists stale on launch without refetching the page being left", () => {

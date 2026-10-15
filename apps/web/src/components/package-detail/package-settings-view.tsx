@@ -2,12 +2,12 @@
 
 /**
  * Paramètres for packages with nothing set per space (skills, local MCP servers): Explorer (tree,
- * versions) and Package AFPS (Identité for writers, Contenu for readers). The raw manifest is a
- * modal reached from Identité, not a section.
+ * versions) and, for writers, Identité. The raw manifest is a modal reached from Identité, not a
+ * section.
  */
 import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import { FileArchive, FolderTree, History, IdCard } from "lucide-react";
+import { FolderTree, History, IdCard } from "lucide-react";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { Versioned } from "../../hooks/use-packages";
 import type { PackageSettingsSection } from "../../lib/settings-section-href";
@@ -44,8 +44,7 @@ export function PackageSettingsView({
   const resolve = (requested: string | null): PackageSettingsSection => {
     if (requested === "versions" && hasVersions) return "versions";
     if (requested === "general" && editable) return "general";
-    // Contenu reads the bundle, so whoever reads the package reads it.
-    return requested === "bundle" ? "bundle" : "files";
+    return "files";
   };
   const groups = [
     {
@@ -57,15 +56,14 @@ export function PackageSettingsView({
           : []),
       ],
     },
-    {
-      title: t("detail.settings.definitionGroup"),
-      items: [
-        ...(editable
-          ? [{ id: "general" as const, icon: IdCard, label: t("editor.tabGeneral") }]
-          : []),
-        { id: "bundle" as const, icon: FileArchive, label: t("editor.tabPackageFiles") },
-      ],
-    },
+    ...(editable
+      ? [
+          {
+            title: t("detail.settings.definitionGroup"),
+            items: [{ id: "general" as const, icon: IdCard, label: t("editor.tabGeneral") }],
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -86,7 +84,6 @@ export function PackageSettingsView({
             section={active === "general" ? "files" : active}
             type={type}
             packageId={packageId}
-            manifest={detail?.manifest ?? {}}
             file={file}
             href={href}
             version={version}

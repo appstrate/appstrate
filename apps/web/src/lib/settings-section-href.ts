@@ -14,15 +14,14 @@ export const AGENT_DEFINITION_SECTIONS = [
 
 export type AgentDefinitionSection = (typeof AGENT_DEFINITION_SECTIONS)[number];
 
-/** Package AFPS › Contenu is `bundle` in the URL: `files` is Explorer's tree. */
 export type AgentSettingsSection =
   ConfigurationSection | AgentDefinitionSection | PackageCommonSectionId;
 
 /** The sections every package's Paramètres has (`PackageCommonSection`). */
-export type PackageCommonSectionId = "files" | "versions" | "bundle";
+export type PackageCommonSectionId = "files" | "versions";
 
 export const isPackageCommonSection = (section: string): section is PackageCommonSectionId =>
-  section === "files" || section === "versions" || section === "bundle";
+  section === "files" || section === "versions";
 
 export type PackageSettingsSection = PackageCommonSectionId | "general";
 
@@ -35,8 +34,7 @@ export type IntegrationSettingsSection =
   | "identity"
   | "source"
   | "auth-methods"
-  | "tools"
-  | "bundle";
+  | "tools";
 
 /** `extra` names what opens inside the section: a file, a modal. */
 type Extra = Record<string, string>;

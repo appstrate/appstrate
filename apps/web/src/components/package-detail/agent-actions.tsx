@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { schemaHasFileFields } from "@appstrate/core/form";
 import { useDeletePackage, usePackageDetail } from "../../hooks/use-packages";
 import { agentLaunchRefusal } from "../../hooks/use-agent-readiness";
 import { useAgentMemories } from "../../hooks/use-persistence";
@@ -20,12 +19,17 @@ import { launchFromOptions } from "../../lib/run-launch";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
 
+type Confirmation = "deleteAgent" | "clearRuns" | "clearMemories";
+
 /** The title of each confirmation names its act; the button repeats the verb. */
-const CONFIRM_TITLES = {
-  deleteAgent: "detail.deleteTitle",
-  clearRuns: "detail.clearRunsTitle",
-  clearMemories: "detail.clearMemoriesTitle",
-} as const;
+const CONFIRM_TEXT: Record<Confirmation, { title: string; description: string }> = {
+  deleteAgent: { title: "detail.deleteTitle", description: "detail.deleteConfirm" },
+  clearRuns: { title: "detail.clearRunsTitle", description: "detail.clearRunsConfirm" },
+  clearMemories: {
+    title: "detail.clearMemoriesTitle",
+    description: "detail.clearMemoriesConfirm",
+  },
+};
 
 export function AgentActions({
   packageId,
@@ -49,48 +53,29 @@ export function AgentActions({
   const { t } = useTranslation(["agents", "common"]);
   const { can } = usePermissions();
   const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
+  const runOptions = useModalParam("runOptions");
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: memories } = useAgentMemories(packageId);
   const deleteAgent = useDeletePackage("agent");
   const deleteRuns = useDeleteAgentRuns(packageId);
   const deleteAllMemories = useDeleteAllMemories(packageId);
   const launcher = useRunLauncher(packageId);
-
-  const [confirmState, setConfirmState] = useState<{
-    type: "deleteAgent" | "clearRuns" | "clearMemories";
-    label: string;
-  } | null>(null);
-  const runOptions = useModalParam("runOptions");
+  const [confirming, setConfirming] = useState<Confirmation | null>(null);
 
   if (!detail) return null;
 
-  const hasFileInput = schemaHasFileFields(detail.input?.schema);
-  // Whether the agent RUNS in the space this page is read from, straight off
-  // the response this menu already has. `GET /api/packages/agents/{id}` answers
-  // it for the same space it resolved everything else in, so the menu and the
-  // rest of the page cannot disagree — and a caller the library stays silent
-  // about (a `runner` holds `agents:run` and no `agents:read`, so the space
-  // library lists no agents at all) still gets a verdict here.
-  const activeHere = detail.active;
   // Not the full run verdict: the options modal picks the model and the version.
   const refusal = agentLaunchRefusal(detail);
   const runBlockedReason = refusal ? t(refusal) : unsavedReason;
   const canRunWithOptions = can("agents:run") && !runBlockedReason;
+  const pendingConfirmation =
+    deleteAgent.isPending || deleteRuns.isPending || deleteAllMemories.isPending;
 
-  const handleConfirm = () => {
-    if (!confirmState) return;
-    const onSuccess = () => setConfirmState(null);
-    switch (confirmState.type) {
-      case "deleteAgent":
-        deleteAgent.mutate(detail.id, { onSuccess });
-        break;
-      case "clearRuns":
-        deleteRuns.mutate(undefined, { onSuccess });
-        break;
-      case "clearMemories":
-        deleteAllMemories.mutate(undefined, { onSuccess });
-        break;
-    }
+  const confirm = () => {
+    const onSuccess = () => setConfirming(null);
+    if (confirming === "deleteAgent") deleteAgent.mutate(detail.id, { onSuccess });
+    else if (confirming === "clearRuns") deleteRuns.mutate(undefined, { onSuccess });
+    else if (confirming === "clearMemories") deleteAllMemories.mutate(undefined, { onSuccess });
   };
 
   return (
@@ -102,42 +87,22 @@ export function AgentActions({
         isHistoricalVersion={isHistoricalVersion}
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
-        onDownloadBundle={downloadBundle}
-        hasPublishedVersion={(detail.version_count ?? 0) > 0}
-        // The agents index lists what this space READS — an agent placed here
-        // and switched off is on it, and running it needs the switch on. A
-        // SYSTEM agent is not exempt: "active here" has one definition for the
-        // four families, the row wins over the platform's default, and switching
-        // one off per space is the sticky opt-out the run gate then honours.
-        isActiveHere={activeHere}
+        // Whether the agent RUNS in the space this page is read from, off the response the menu
+        // already has: a system agent is no exception, and a caller the library stays silent
+        // about (a `runner` holds no `agents:read`) still gets a verdict.
+        isActiveHere={detail.active}
         onCreateVersion={onCreateVersion}
         createVersionBlockedReason={unsavedReason}
-        runningRuns={detail.running_runs}
-        // Under the same run visibility as the list the item would clear.
-        hasRuns={detail.last_run !== null}
-        hasMemories={!!memories && memories.length > 0}
-        hasFileInput={!!hasFileInput}
-        onDeleteAgent={() =>
-          setConfirmState({
-            type: "deleteAgent",
-            label: t("detail.deleteConfirm", { name: detail.display_name }),
-          })
-        }
-        onDeleteRuns={() =>
-          setConfirmState({
-            type: "clearRuns",
-            label: t("detail.clearRunsConfirm"),
-          })
-        }
-        onAddSchedule={() => newSchedule.open(packageId)}
-        onDeleteMemories={() =>
-          setConfirmState({
-            type: "clearMemories",
-            label: t("detail.clearMemoriesConfirm"),
-          })
-        }
-        onRunWithOptions={() => runOptions.open()}
-        {...(runBlockedReason ? { runBlockedReason } : {})}
+        agent={{
+          hasMemories: !!memories && memories.length > 0,
+          onDownloadBundle: downloadBundle,
+          onDeleteAgent: () => setConfirming("deleteAgent"),
+          onDeleteRuns: () => setConfirming("clearRuns"),
+          onDeleteMemories: () => setConfirming("clearMemories"),
+          onAddSchedule: () => newSchedule.open(packageId),
+          onRunWithOptions: () => runOptions.open(),
+          runBlockedReason,
+        }}
       />
       <RunWithOptionsModal
         open={runOptions.value !== null && canRunWithOptions}
@@ -155,13 +120,15 @@ export function AgentActions({
         integrationEntries={detail.dependencies.integrations}
       />
       <ConfirmModal
-        open={confirmState !== null}
-        onClose={() => setConfirmState(null)}
-        onConfirm={handleConfirm}
-        title={confirmState ? t(CONFIRM_TITLES[confirmState.type]) : ""}
-        description={confirmState?.label ?? ""}
+        open={confirming !== null}
+        onClose={() => setConfirming(null)}
+        onConfirm={confirm}
+        title={confirming ? t(CONFIRM_TEXT[confirming].title) : ""}
+        description={
+          confirming ? t(CONFIRM_TEXT[confirming].description, { name: detail.display_name }) : ""
+        }
         confirmLabel={t("btn.delete", { ns: "common" })}
-        isPending={deleteAgent.isPending || deleteRuns.isPending || deleteAllMemories.isPending}
+        isPending={pendingConfirmation}
       />
     </>
   );

@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BrainCircuit } from "lucide-react";
-import type { PersistenceActorType } from "@appstrate/shared-types";
 import { EmptyState, NoMatchState } from "../page-states";
 import { ActorBadge } from "./actor-badge";
 import { useMemoryColumns, type MemoryCollectionItem } from "./memory-columns";
@@ -34,8 +33,16 @@ interface MemoryPanelProps {
   initialTypes?: Array<"pinned" | "archive">;
 }
 
+const EMPTY_MEMORY_TYPES: Array<"pinned" | "archive"> = [];
+const MEMORY_TYPES = ["pinned", "archive"] as const;
+const MEMORY_SCOPES = ["shared", "mine"] as const;
+
 /** Pinned slots (always-in-prompt, incl. `checkpoint`) and archive memories in one filterable list. */
-export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps) {
+export function MemoryPanel({
+  packageId,
+  runId,
+  initialTypes = EMPTY_MEMORY_TYPES,
+}: MemoryPanelProps) {
   const { t } = useTranslation(["agents", "common"]);
   const isRunView = !!runId;
 
@@ -58,125 +65,22 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
   const [toDelete, setToDelete] = useState<{ kind: "pinned" | "archive"; id: number } | null>(null);
   const deletion = toDelete?.kind === "pinned" ? deletePinned : deleteMemory;
 
-  const pinnedCount = pinned?.length ?? 0;
-  const memoriesCount = memories?.length ?? 0;
   const isLoading = pinnedQ.isLoading || memoriesQ.isLoading;
   const isError = pinnedQ.isError || memoriesQ.isError;
 
-  // Empty in BOTH tiers, once both answered: two failed queries also count zero, and a 500 must not draw "no memory yet".
-  if (!isLoading && !isError && pinnedCount + memoriesCount === 0) {
-    return (
-      <EmptyState
-        message={isRunView ? t("run.memoryEmpty") : t("detail.memoryEmptyAll")}
-        hint={isRunView ? undefined : t("detail.memoryEmptyAllHint")}
-        icon={BrainCircuit}
-        compact
-      />
-    );
-  }
-
-  return (
-    <>
-      <AgentMemoryCollection
-        pinned={pinned ?? []}
-        memories={memories ?? []}
-        pinnedLoading={pinnedQ.isLoading}
-        memoriesLoading={memoriesQ.isLoading}
-        failure={pinnedQ.error ?? memoriesQ.error}
-        onDeletePinned={canDelete ? (id) => setToDelete({ kind: "pinned", id }) : undefined}
-        onDeleteMemory={canDelete ? (id) => setToDelete({ kind: "archive", id }) : undefined}
-        isDeleting={(item) =>
-          deletion.isPending && toDelete?.kind === item.kind && toDelete.id === item.id
-        }
-        embedded={isRunView}
-        initialTypes={initialTypes}
-      />
-      <ConfirmModal
-        open={toDelete !== null}
-        onClose={() => setToDelete(null)}
-        onConfirm={() => {
-          if (toDelete) deletion.mutate(toDelete.id, { onSuccess: () => setToDelete(null) });
-        }}
-        title={t("detail.memoryDeleteTitle")}
-        description={t("detail.memoryDeleteConfirm")}
-        confirmLabel={t("btn.delete", { ns: "common" })}
-        isPending={deletion.isPending}
-      />
-    </>
-  );
-}
-
-const EMPTY_MEMORY_TYPES: Array<"pinned" | "archive"> = [];
-const MEMORY_TYPES = ["pinned", "archive"] as const;
-const MEMORY_SCOPES = ["shared", "mine"] as const;
-
-function AgentMemoryCollection({
-  pinned,
-  memories,
-  pinnedLoading,
-  memoriesLoading,
-  failure,
-  onDeletePinned,
-  onDeleteMemory,
-  isDeleting,
-  embedded,
-  initialTypes = EMPTY_MEMORY_TYPES,
-}: {
-  pinned: Array<{
-    id: number;
-    key: string;
-    content: unknown;
-    actor_type: PersistenceActorType;
-    actor_id: string | null;
-    runId: string | null;
-    updatedAt: string | null;
-  }>;
-  memories: Array<{
-    id: number;
-    content: unknown;
-    actor_type: PersistenceActorType;
-    actor_id: string | null;
-    runId: string | null;
-    createdAt: string | null;
-  }>;
-  pinnedLoading: boolean;
-  memoriesLoading: boolean;
-  failure: unknown;
-  onDeletePinned?: (id: number) => void;
-  onDeleteMemory?: (id: number) => void;
-  isDeleting: (item: { kind: "pinned" | "archive"; id: number }) => boolean;
-  /** Run results already own the section heading and outer content padding. */
-  embedded: boolean;
-  initialTypes?: Array<"pinned" | "archive">;
-}) {
-  const { t } = useTranslation(["agents", "common"]);
   const list = useLocalListParams({ type: initialTypes });
-  const query = list.search;
   const types = list.values("type", MEMORY_TYPES);
   const scopes = list.values("scope", MEMORY_SCOPES);
   const { copy } = useCopyToClipboard(1_500);
 
   const allItems = useMemo<MemoryCollectionItem[]>(
     () => [
-      ...pinned.map((item) => ({
-        id: item.id,
-        kind: "pinned" as const,
-        key: item.key,
-        content: item.content,
-        actor_type: item.actor_type,
-        actor_id: item.actor_id,
-        runId: item.runId,
-        updatedAt: item.updatedAt,
-      })),
-      ...memories.map((item) => ({
-        id: item.id,
+      ...(pinned ?? []).map((slot) => ({ ...slot, kind: "pinned" as const })),
+      ...(memories ?? []).map((memory) => ({
+        ...memory,
         kind: "archive" as const,
         key: null,
-        content: item.content,
-        actor_type: item.actor_type,
-        actor_id: item.actor_id,
-        runId: item.runId,
-        updatedAt: item.createdAt,
+        updatedAt: memory.createdAt,
       })),
     ],
     [memories, pinned],
@@ -185,12 +89,12 @@ function AgentMemoryCollection({
   // The entry read in the modal: `?memory=pinned:12`.
   const memoryParam = useModalTarget(
     "memory",
-    pinnedLoading || memoriesLoading ? undefined : allItems,
+    isLoading ? undefined : allItems,
     (item) => `${item.kind}:${item.id}`,
   );
   const selected = memoryParam.target ?? null;
 
-  const filteredItems = filterMemoryItems(allItems, { query, scopes, types });
+  const filteredItems = filterMemoryItems(allItems, { query: list.search, scopes, types });
 
   const filters: FilterSpec[] = [
     {
@@ -203,7 +107,7 @@ function AgentMemoryCollection({
       ],
       onChange: list.setValues("type"),
     },
-    ...(!embedded
+    ...(!isRunView
       ? [
           {
             id: "scope",
@@ -218,69 +122,70 @@ function AgentMemoryCollection({
         ]
       : []),
   ];
-  const canDelete = Boolean(onDeletePinned || onDeleteMemory);
   const columns = useMemoryColumns({
-    isDeleting,
+    // Only the row being deleted shows the spinner.
+    isDeleting: (item) =>
+      deletion.isPending && toDelete?.kind === item.kind && toDelete.id === item.id,
     onCopy: (item) => void copy(memoryText(item.content)),
-    onDelete: canDelete
-      ? (item) => {
-          if (item.kind === "pinned") onDeletePinned?.(item.id);
-          else onDeleteMemory?.(item.id);
-        }
-      : undefined,
+    onDelete: canDelete ? (item) => setToDelete({ kind: item.kind, id: item.id }) : undefined,
   });
 
-  const collection = (
-    <section className={embedded ? "min-w-0" : "min-w-0 p-6"}>
-      <ListToolbar
-        placement="panel"
-        search={{
-          value: query,
-          onChange: list.setSearch,
-          placeholder: t("agents:detail.memorySearch"),
-        }}
-        filters={filters}
-        onReset={list.reset}
+  // Empty in BOTH tiers, once both answered: two failed queries also count zero, and a 500 must not draw "no memory yet".
+  if (!isLoading && !isError && allItems.length === 0) {
+    return (
+      <EmptyState
+        message={isRunView ? t("run.memoryEmpty") : t("detail.memoryEmptyAll")}
+        hint={isRunView ? undefined : t("detail.memoryEmptyAllHint")}
+        icon={BrainCircuit}
+        compact
       />
-      {!embedded && (
-        <p className="text-muted-foreground mb-2 text-xs">{t("agents:detail.memoryHelp")}</p>
-      )}
-      <DataTable
-        tableId="memory"
-        label={t("agents:detail.tabMemory")}
-        columns={columns}
-        rows={filteredItems}
-        rowKey={(item) => `${item.kind}:${item.id}`}
-        rowAction={(item) => memoryParam.open(`${item.kind}:${item.id}`)}
-        rowLabel={(item) => item.key ?? memoryText(item.content)}
-        isLoading={pinnedLoading || memoriesLoading}
-        failure={failure}
-        empty={<NoMatchState message={t("agents:list.noMatch")} onReset={list.reset} />}
-      />
-    </section>
-  );
+    );
+  }
+
+  const selectedTypeLabel =
+    selected?.kind === "pinned"
+      ? t("agents:detail.memoryTypePinned")
+      : t("agents:detail.memoryTypeArchive");
 
   return (
     <>
-      {collection}
+      {/* Run results already own the section heading and outer content padding. */}
+      <section className={isRunView ? "min-w-0" : "min-w-0 p-6"}>
+        <ListToolbar
+          placement="panel"
+          search={{
+            value: list.search,
+            onChange: list.setSearch,
+            placeholder: t("agents:detail.memorySearch"),
+          }}
+          filters={filters}
+          onReset={list.reset}
+        />
+        {!isRunView && (
+          <p className="text-muted-foreground mb-2 text-xs">{t("agents:detail.memoryHelp")}</p>
+        )}
+        <DataTable
+          tableId="memory"
+          label={t("agents:detail.tabMemory")}
+          columns={columns}
+          rows={filteredItems}
+          rowKey={(item) => `${item.kind}:${item.id}`}
+          rowAction={(item) => memoryParam.open(`${item.kind}:${item.id}`)}
+          rowLabel={(item) => item.key ?? memoryText(item.content)}
+          isLoading={isLoading}
+          failure={pinnedQ.error ?? memoriesQ.error}
+          empty={<NoMatchState message={t("agents:list.noMatch")} onReset={list.reset} />}
+        />
+      </section>
       {selected !== null && (
         <Modal
           onClose={memoryParam.close}
-          title={
-            selected.key ??
-            (selected.kind === "pinned"
-              ? t("agents:detail.memoryTypePinned")
-              : t("agents:detail.memoryTypeArchive"))
-          }
+          title={selected.key ?? selectedTypeLabel}
           className="max-w-3xl"
         >
           <div className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-muted-foreground text-sm">
-                {selected.kind === "pinned"
-                  ? t("agents:detail.memoryTypePinned")
-                  : t("agents:detail.memoryTypeArchive")}
-              </span>
+              <span className="text-muted-foreground text-sm">{selectedTypeLabel}</span>
               <ActorBadge actor_type={selected.actor_type} actor_id={selected.actor_id} />
               {selected.updatedAt && (
                 <span className="text-muted-foreground ml-auto text-xs">
@@ -294,6 +199,17 @@ function AgentMemoryCollection({
           </div>
         </Modal>
       )}
+      <ConfirmModal
+        open={toDelete !== null}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => {
+          if (toDelete) deletion.mutate(toDelete.id, { onSuccess: () => setToDelete(null) });
+        }}
+        title={t("detail.memoryDeleteTitle")}
+        description={t("detail.memoryDeleteConfirm")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
+        isPending={deletion.isPending}
+      />
     </>
   );
 }

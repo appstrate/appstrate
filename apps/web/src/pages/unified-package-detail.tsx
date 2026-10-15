@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { TriangleAlert } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
@@ -41,6 +40,7 @@ import { CreateVersionModal } from "../components/create-version-modal";
 import { AgentActions } from "../components/package-detail/agent-actions";
 import { AgentRunsTab, AgentMemoryTab } from "../components/package-detail/agent-tabs";
 import { AgentInactiveAlert } from "../components/package-detail/agent-inactive-alert";
+import { ModelRequiredAlert } from "../components/package-detail/model-required-alert";
 import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
 import { AgentSettingsView } from "../components/agent-detail/agent-settings-view";
 import {
@@ -60,47 +60,15 @@ type PackageTab = "overview" | "runs" | "settings" | "memory" | "usedBy";
 
 const AGENT_DETAIL_TABS = ["overview", "runs", "memory", "settings"] as const;
 
+const TAB_LABEL_KEYS: Record<PackageTab, string> = {
+  overview: "detail.overview.summary",
+  runs: "detail.tabRuns",
+  memory: "detail.tabMemory",
+  settings: "detail.tabSettings",
+  usedBy: "packages.usedBy",
+};
+
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
-
-/** No model a run could use: said where it can be acted on, graded by who may act. */
-function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentModelBlocker> }) {
-  const { t } = useTranslation(["settings"]);
-  const { can } = usePermissions();
-
-  const copy =
-    blocker === "detail.titleModel"
-      ? {
-          title: t("models.alert.noModel"),
-          // Only `models:write` can act on "configure a model" (POST /api/models).
-          description: t(
-            can("models:write")
-              ? "models.alert.noModelDescription"
-              : "models.alert.noModelAskAdmin",
-          ),
-        }
-      : blocker === "detail.titleNoDefaultModel"
-        ? {
-            title: t("models.alert.noDefaultModel"),
-            // Only `models:write` can set the default (PUT /api/models/default).
-            description: t(
-              can("models:write")
-                ? "models.alert.noDefaultModelDescription"
-                : "models.alert.noDefaultModelAskAdmin",
-            ),
-          }
-        : null;
-  if (!copy) return null;
-
-  return (
-    <Alert variant="destructive" className="mb-4">
-      <TriangleAlert className="size-4" />
-      <AlertTitle>{copy.title}</AlertTitle>
-      <AlertDescription className="flex items-center justify-between">
-        <span>{copy.description}</span>
-      </AlertDescription>
-    </Alert>
-  );
-}
 
 // ─── Main Page ──────────────────────────────────────────────────────
 
@@ -276,32 +244,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // ── Render ──
   const isBuiltIn = source === "system";
 
-  // Determine available tabs based on type
-
-  // The rendered manifest, next to the raw artifact it comes from.
-  const overviewTab: DetailTab<PackageTab> = {
-    value: "overview",
-    label: t("detail.overview.summary"),
-  };
-
-  const agentTabLabels: Record<(typeof AGENT_DETAIL_TABS)[number], string> = {
-    overview: t("detail.overview.summary"),
-    runs: t("detail.tabRuns"),
-    memory: t("detail.tabMemory"),
-    settings: t("detail.tabSettings"),
-  };
-  const agentTabs: Array<DetailTab<PackageTab>> = AGENT_DETAIL_TABS.map((value) => ({
+  const tabDefs: Array<DetailTab<PackageTab>> = allValidTabs.map((value) => ({
     value,
-    label: agentTabLabels[value],
+    label: t(TAB_LABEL_KEYS[value]),
   }));
-
-  const pkgTabs: Array<DetailTab<PackageTab>> = [
-    overviewTab,
-    { value: "settings", label: t("detail.tabSettings") },
-    { value: "usedBy", label: t("packages.usedBy") },
-  ];
-
-  const tabDefs = type === "agent" ? agentTabs : pkgTabs;
 
   // The trigger's own verdict, which also bounds its `?newVersion` URL.
   const canCreateVersion = !!homeWritable && !isBuiltIn && !isHistoricalVersion && isOwned;
@@ -333,7 +279,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           }
           latestPublishedVersion={versionInfo?.latest_published_version}
           activeSubpage={{
-            label: tabDefs.find((item) => item.value === tab)?.label ?? overviewTab.label,
+            label: tabDefs.find((item) => item.value === tab)?.label ?? t(TAB_LABEL_KEYS.overview),
           }}
           actionsLeft={
             type === "agent" ? (
@@ -398,7 +344,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         {type === "agent" && agentDetail && (
           <div className="overflow-visible" data-agent-detail-surface>
             <DetailTabs value={tab} onChange={setTab}>
-              <DetailTabBar tabs={agentTabs} />
+              <DetailTabBar tabs={tabDefs} />
 
               <DetailTabPanel value="overview">
                 {fullRead ? (
