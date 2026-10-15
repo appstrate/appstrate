@@ -180,8 +180,8 @@ export function ShellHeader() {
     // filled the lead slot (`has-[[data-header-lead]:not(:empty)]`). Its rule is
     // an inset shadow, not a border: a border would add a pixel to rows that
     // are exactly `--spacing-header`, the height the sidebar's brand cell shares.
-    // A phone with a title block draws navigation row, title block and tabs as one
-    // band: shorter navigation row, no divider under it.
+    // A phone draws one row (burger, trail, controls, bell); a page with a title
+    // block adds that block and its tabs under it, in the same band.
     <header
       className={cn(
         "bg-canvas group/header sticky top-0 z-20 grid shrink-0 grid-cols-[minmax(0,1fr)_auto] shadow-[inset_0_-1px_0_0_var(--color-border)]",
@@ -199,7 +199,7 @@ export function ShellHeader() {
           collapsed && "md:pl-2",
         )}
       >
-        <div className="h-header pl-gutter col-start-1 row-start-1 flex min-w-0 items-center gap-2 border-b border-b-black/5 max-md:group-has-[[data-header-lead]:not(:empty)]/header:h-12 max-md:group-has-[[data-header-lead]:not(:empty)]/header:border-b-0 md:contents">
+        <div className="h-header pl-gutter col-start-1 row-start-1 flex min-w-0 items-center gap-2 max-md:group-has-[[data-header-lead]:not(:empty)]/header:h-12 md:contents">
           {/* Mobile-only trigger: on desktop the collapse lives in the sidebar */}
           <SidebarTrigger className="-ml-5 size-11 shrink-0 rounded-l-none md:hidden">
             <Menu className="size-4" />
@@ -215,11 +215,15 @@ export function ShellHeader() {
               )}
             </SidebarTrigger>
           )}
-          {/* Yields to a detail page's own controls: the phone's first row has
-              room for the burger, those controls and the bell, not for the
-              organization too (the sidebar still holds it). */}
-          <div className="flex min-w-0 flex-1 group-has-[[data-header-lead]:not(:empty)]/header:hidden md:hidden">
+          {/* The phone's one row holds the burger, then EITHER the page's trail
+              OR (where there is none) the organization, then the controls and
+              the bell. A detail page's title block is drawn under it
+              instead, so both yield: the sidebar still holds the organization. */}
+          <div className="flex min-w-0 flex-1 group-has-[[data-header-lead]:not(:empty)]/header:hidden group-has-[[data-trail]:not(:empty)]/header:hidden md:hidden">
             <OrgSwitcher variant="mobile" />
+          </div>
+          <div className="flex min-w-0 flex-1 items-center group-has-[[data-header-lead]:not(:empty)]/header:hidden">
+            <ShellBreadcrumb />
           </div>
         </div>
         {/* The title block of a page that draws one (a detail page), else the
@@ -230,16 +234,13 @@ export function ShellHeader() {
           data-header-lead
           className="px-gutter flex min-w-0 items-center py-1.5 empty:hidden max-md:col-span-2 max-md:row-start-2 max-md:py-1 md:flex-1 md:px-0 md:py-0"
         />
-        <div className="px-gutter flex h-10 min-w-0 items-center group-has-[[data-header-lead]:not(:empty)]/header:hidden max-md:col-span-2 max-md:row-start-2 md:h-auto md:flex-1 md:px-0">
-          <ShellBreadcrumb />
-        </div>
       </div>
       {/* The page's own actions, then the one utility that is global but not
           personal: notifications. It sits here rather than in the sidebar
           because the sidebar answers "where am I" and this answers "what is
           new" — and because a header holding only a trail is a header holding
           nothing. */}
-      <div className="px-gutter h-header md:min-h-header col-start-2 row-start-1 flex shrink-0 items-center gap-1 border-b border-b-black/5 max-md:group-has-[[data-header-lead]:not(:empty)]/header:h-12 max-md:group-has-[[data-header-lead]:not(:empty)]/header:border-b-0 md:h-auto md:border-b-0 md:pl-2 md:group-has-[[data-header-lead]:not(:empty)]/header:pt-5">
+      <div className="px-gutter h-header md:min-h-header col-start-2 row-start-1 flex shrink-0 items-center gap-1 max-md:group-has-[[data-header-lead]:not(:empty)]/header:h-12 md:h-auto md:pl-2 md:group-has-[[data-header-lead]:not(:empty)]/header:pt-5">
         <HeaderSlotOutlet slot="actions" className="flex items-center gap-1 empty:hidden" />
         <NotificationBell />
       </div>
