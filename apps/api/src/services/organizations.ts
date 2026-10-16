@@ -39,7 +39,13 @@ import {
   asc,
 } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
-import { isUuid, scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
+import {
+  isUuid,
+  lockOrganizationRow,
+  scopedWhere,
+  type DbOrTx,
+  type Tx,
+} from "../lib/db-helpers.ts";
 import { countInProgressRuns, orgRunConcurrencyLockKey } from "./state/runs.ts";
 import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
@@ -427,21 +433,7 @@ interface MemberExitResult {
   deletedModelCredentialIds: string[];
 }
 
-/**
- * Serialises every write to the org's owner set. NO KEY UPDATE: child inserts
- * take FOR KEY SHARE on this row and must not queue behind a membership change.
- */
-async function lockOrgOwnership(tx: Tx, orgId: string): Promise<void> {
-  const [org] = await tx
-    .select({ id: organizations.id })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .limit(1)
-    .for("no key update");
-  if (!org) throw notFound("Organization not found");
-}
-
-/** Under {@link lockOrgOwnership}, which all role writers take — not the request's role. */
+/** Under {@link lockOrganizationRow}, which all role writers take — not the request's role. */
 async function lockedActorRole(tx: Tx, orgId: string, actor: MemberActor): Promise<OrgRole> {
   const row = await getOrgMember(orgId, actor.userId, tx);
   if (!row) throw forbidden("Not a member of this organization");
@@ -610,7 +602,7 @@ async function exitOrg(
   authorize: (tx: Tx, role: OrgRole) => Promise<void>,
 ): Promise<MemberExitResult> {
   const { disabledScheduleIds, ...result } = await db.transaction(async (tx) => {
-    await lockOrgOwnership(tx, orgId);
+    await lockOrganizationRow(tx, orgId);
     const member = await lockOrgMember(tx, orgId, userId);
     if (!member) throw notFound("Member not found");
     await authorize(tx, member.role);
@@ -673,7 +665,7 @@ export async function updateMemberRole(
   unsharedShares: ConnectionShare[];
 }> {
   const { disabledScheduleIds, ...result } = await db.transaction(async (tx) => {
-    await lockOrgOwnership(tx, orgId);
+    await lockOrganizationRow(tx, orgId);
     const target = await lockOrgMember(tx, orgId, targetUserId);
     if (!target) throw notFound("Member not found");
     const assignable = assignableRolesForMember({

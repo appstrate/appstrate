@@ -4,7 +4,7 @@
  * The edits of a connection: renaming it, sharing it into a space and withdrawing it (one
  * `integration_connection_shares` row per (connection, space)). Each edit authorizes on the locked
  * row by the actions {@link connectionActions} projects, so what a list offers is what an edit
- * accepts. Future sharing and withdrawals first lock the org to serialize with space creation.
+ * accepts. Future sharing first locks the org to serialize with space creation.
  * Other lock order, as every connection write: the owner's membership and the target
  * space (`assertConnectionShareable`) or the label keys, the connection row, then schedules.
  */
@@ -15,13 +15,14 @@ import { db } from "@appstrate/db/client";
 import {
   integrationConnectionShares as shares,
   integrationConnections as c,
+  organizationMembers,
   spaces,
   type IntegrationConnectionRow as ConnectionRow,
 } from "@appstrate/db/schema";
 import type { OrgRole } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError, conflict, forbidden, notFound } from "../lib/errors.ts";
-import { isUniqueViolation, type Tx } from "../lib/db-helpers.ts";
+import { isUniqueViolation, lockOrganizationRow, type Tx } from "../lib/db-helpers.ts";
 import { actorFilter, actorFromIds } from "../lib/actor.ts";
 import { boundSpaceOf } from "../lib/connection-principal.ts";
 import {
@@ -34,7 +35,6 @@ import {
 } from "./connection-reach.ts";
 import {
   assertConnectionShareable,
-  lockOrgMember,
   invalidShareTarget,
   type ConnectionShare,
 } from "./space-members.ts";
@@ -42,7 +42,6 @@ import { assertConnectionsUnpinned, lockLabelKeys } from "./integration-connecti
 import { disableForeignSchedules } from "./schedules-naming-connection.ts";
 import { isUserConnectionCreationBlocked } from "./integration-connection-resolver.ts";
 import { recordAudit, recordAuditFromContext } from "./audit.ts";
-import { lockConnectionSharingOrg } from "./connection-future-shares.ts";
 
 interface EditInput {
   connectionId: string;
@@ -222,10 +221,8 @@ export async function unshareConnection(input: ShareInput): Promise<{
   disabledScheduleIds: string[];
 }> {
   const { connectionId, spaceId, caller } = input;
-  const [read] = await db.select({ orgId: c.orgId }).from(c).where(visibleTo(input)).limit(1);
-  if (!read) throw connectionNotFound(connectionId);
   return db.transaction(async (tx) => {
-    await lockConnectionSharingOrg(tx, read.orgId);
+    // The row lock orders this with space creation, which re-reads `share_new_spaces` after it.
     const row = await lockVisible(tx, input);
     const [existing] = await tx
       .select({ spaceId: shares.spaceId })
@@ -273,10 +270,21 @@ export async function setConnectionFutureSharing(input: EditInput & { enabled: b
   const [read] = await db.select({ orgId: c.orgId }).from(c).where(visibleTo(input)).limit(1);
   if (!read) throw connectionNotFound(input.connectionId);
   return db.transaction(async (tx) => {
-    await lockConnectionSharingOrg(tx, read.orgId);
+    await lockOrganizationRow(tx, read.orgId);
+    // Role writers take the org lock first, so this read is stable without a member lock.
     const actor = input.caller.principal.actor;
-    if (actor.type !== "user") throw forbidden("Only a member can share a connection");
-    const member = await lockOrgMember(tx, read.orgId, actor.id);
+    const [member] =
+      actor.type === "user"
+        ? await tx
+            .select({ role: organizationMembers.role })
+            .from(organizationMembers)
+            .where(
+              and(
+                eq(organizationMembers.orgId, read.orgId),
+                eq(organizationMembers.userId, actor.id),
+              ),
+            )
+        : [];
     // Org administrators reach all team spaces; personal spaces are always isolated.
     const targets = input.enabled
       ? await tx

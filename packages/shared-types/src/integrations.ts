@@ -59,7 +59,7 @@ export interface ConnectionReach {
   shared_here: boolean;
   /** The owner only (absent otherwise): every space it is shared into, within its credential's binding. */
   shared_space_ids?: string[];
-  /** Owner only: automatically share with future team spaces. Current exceptions are kept. */
+  /** Owner only: shared with every current team space and automatically with future ones. */
   share_new_spaces?: boolean;
   /** The owner only (absent otherwise): where an org-scoped row was connected from, within that binding. */
   origin_space_id?: string | null;

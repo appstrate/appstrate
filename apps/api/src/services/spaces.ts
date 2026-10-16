@@ -18,7 +18,7 @@ import {
 } from "@appstrate/db/schema";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
-import { scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
+import { lockOrganizationRow, scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
@@ -44,7 +44,6 @@ import {
 } from "../lib/space-role.ts";
 
 import {
-  lockConnectionSharingOrg,
   shareConnectionsWithNewSpace,
   recordFutureConnectionShares,
 } from "./connection-future-shares.ts";
@@ -124,7 +123,7 @@ export async function createSpace(
 ) {
   const id = prefixedId("spc");
   const result = await db.transaction(async (tx) => {
-    await lockConnectionSharingOrg(tx, orgId);
+    await lockOrganizationRow(tx, orgId);
     const [space] = await tx
       .insert(spaces)
       .values({
@@ -689,7 +688,7 @@ export async function convertPersonalSpaceToTeam(
   spaceId: string,
 ): Promise<SpaceRow> {
   const result = await db.transaction(async (tx) => {
-    await lockConnectionSharingOrg(tx, orgId);
+    await lockOrganizationRow(tx, orgId);
     const [current] = await tx
       .select({
         id: spaces.id,

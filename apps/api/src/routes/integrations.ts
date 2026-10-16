@@ -1769,10 +1769,8 @@ export function connectionCaller(c: Context<AppEnv>, spaceId: string | null): Co
         ? ceilingAllows(c, "integrations:connect")
         : (c.get("permissions")?.has("integrations:connect") ?? false),
     governs: spaceId !== null && canConfigureIntegrations(c),
-    canShareAll: (orgId) =>
-      !personaFor(c, orgId) &&
-      ceilingAllows(c, "integrations:configure") &&
-      ceilingAllows(c, "integrations:connect"),
+    // `integrations:connect` is already `canConnect`, which `connectionActions` requires first.
+    canShareAll: (orgId) => !personaFor(c, orgId) && ceilingAllows(c, "integrations:configure"),
     permissionsIn: (target, orgId) => callerPermissionsInSpace(c, target, orgId),
     spacesSeen: (orgId, orgRole) => callerSpacesSeen(c, orgId, orgRole),
   };

@@ -4,24 +4,12 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import {
   integrationConnections as c,
   integrationConnectionShares as shares,
-  organizations,
   organizationMembers,
 } from "@appstrate/db/schema";
 import type { Tx } from "../lib/db-helpers.ts";
-import { notFound } from "../lib/errors.ts";
 import { recordAudit } from "./audit.ts";
 
-/** Same org lock as membership changes: policy changes and new spaces must see each other. */
-export async function lockConnectionSharingOrg(tx: Tx, orgId: string): Promise<void> {
-  const [org] = await tx
-    .select({ id: organizations.id })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .for("no key update");
-  if (!org) throw notFound("Organization not found");
-}
-
-/** Caller holds the org lock. Only team-space creation/conversion enters this path. */
+/** Caller holds `lockOrganizationRow`. Only team-space creation/conversion enters this path. */
 export async function shareConnectionsWithNewSpace(tx: Tx, orgId: string, spaceId: string) {
   const rows = await tx
     .select({ id: c.id })
