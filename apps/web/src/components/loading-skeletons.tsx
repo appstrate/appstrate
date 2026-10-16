@@ -11,6 +11,7 @@
  */
 
 import { Card } from "@appstrate/ui/components/card";
+import { CardList } from "./card-list";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
@@ -252,7 +253,7 @@ export function DashboardBodySkeleton() {
         {[3, 2].map((rows, i) => (
           <div key={i}>
             <Skeleton className="mb-3 h-5 w-40" />
-            <Card className="divide-border divide-y rounded-xl">
+            <CardList>
               {Array.from({ length: rows }, (_, j) => (
                 <div key={j} className="flex min-h-[74px] items-center gap-3 px-4">
                   <Skeleton className="size-8 shrink-0 rounded-md" />
@@ -262,7 +263,7 @@ export function DashboardBodySkeleton() {
                   </div>
                 </div>
               ))}
-            </Card>
+            </CardList>
           </div>
         ))}
       </div>

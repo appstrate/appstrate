@@ -265,6 +265,11 @@ export function DataTable<T>({
     "[--dt-surface-hover:color-mix(in_oklab,var(--color-muted)_50%,var(--dt-surface))]",
   );
 
+  // The frame's border is the head's top rule; only a frameless table (an integrated surface, or
+  // one inside an integrated settings section) draws its own, or the head would stack two lines.
+  const headTopRule =
+    surface === "integrated" ? "border-t" : "[[data-settings-table-surface=integrated]_&]:border-t";
+
   // A failure always draws something, whether or not the caller wrote the
   // sentence: folded into `empty` at the call site, a 500 would read as
   // "no runs".
@@ -314,7 +319,7 @@ export function DataTable<T>({
         )}
       >
         <TableHeader>
-          <TableRow className="border-border h-10 border-y hover:bg-transparent">
+          <TableRow className={cn("border-border h-10 hover:bg-transparent", headTopRule)}>
             {columns.map((column) => {
               const hold = held.get(column.id);
               return (
