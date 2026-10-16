@@ -3,8 +3,8 @@
 /**
  * `shareConnection` / `unshareConnection`: one `integration_connection_shares` row per
  * (connection, space). Only the owner shares; the owner or a governor of the request space
- * withdraws. The two invariants the table does not enforce (an end user's row is never shared, a
- * space-scoped row only into its own space) are the service's, and pinned here.
+ * withdraws. The service enforces team-only targets, no end-user sharing and confinement of
+ * space-scoped rows to their own space.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -136,7 +136,7 @@ describe("connection shares", () => {
       },
     );
 
-  it("shares current and future team spaces, with durable exceptions and an off switch", async () => {
+  it("shares all team spaces until a withdrawal selects specific spaces", async () => {
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
     const input = { connectionId: id, integrationId: INTEGRATION, caller: orgOwner() };
     const app = await getTestApp();
@@ -151,13 +151,89 @@ describe("connection shares", () => {
     expect((await sharesOf(id)).some((s) => s.spaceId === future.id)).toBe(true);
     // Existing unshare/pin/schedule behavior stays the authority, also with future sharing on.
     await unshareConnection({ ...input, spaceId: other });
-    await createSpace(ctx.orgId, { name: "Another team" });
+    const specificFuture = await createSpace(ctx.orgId, { name: "Another team" });
     expect((await sharesOf(id)).some((s) => s.spaceId === other)).toBe(false);
+    expect((await sharesOf(id)).some((s) => s.spaceId === specificFuture.id)).toBe(false);
+    const [specific] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, id));
+    expect(specific!.shareNewSpaces).toBe(false);
     const before = await sharesOf(id);
     await setConnectionFutureSharing({ ...input, enabled: false });
     const excludedFuture = await createSpace(ctx.orgId, { name: "Not auto-shared" });
     expect(await sharesOf(id)).toEqual(before);
     expect((await sharesOf(id)).some((s) => s.spaceId === excludedFuture.id)).toBe(false);
+  });
+
+  it("a governor's withdrawal selects specific spaces and never shares new spaces implicitly", async () => {
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
+    await db
+      .update(organizationMembers)
+      .set({ role: "admin" })
+      .where(
+        and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, memberId)),
+      );
+    await setConnectionFutureSharing({
+      connectionId: id,
+      integrationId: INTEGRATION,
+      caller: { ...owner(GOVERN), canShareAll: () => true },
+      enabled: true,
+    });
+    const { connection, removed } = await unshareConnection({
+      connectionId: id,
+      integrationId: INTEGRATION,
+      caller: governor(),
+      spaceId: here,
+    });
+    expect(removed).toBe(true);
+    expect(connection.shareNewSpaces).toBe(false);
+    expect((await sharesOf(id)).map((s) => s.spaceId)).toEqual([other]);
+    const future = await createSpace(ctx.orgId, { name: "Unselected future" });
+    expect((await sharesOf(id)).some((s) => s.spaceId === future.id)).toBe(false);
+  });
+
+  it("refuses sharing into a personal space through either route and omits it from targets", async () => {
+    const personal = await seedSpace({
+      orgId: ctx.orgId,
+      name: "My private space",
+      ownerUserId: ctx.user.id,
+      visibility: "private",
+    });
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
+    const app = await getTestApp();
+    for (const path of [
+      `/api/me/connections/${id}/shares/${personal.id}`,
+      `/api/integrations/${INTEGRATION}/connections/${id}/shares/${personal.id}`,
+    ]) {
+      const response = await app.request(path, { method: "PUT", headers: authHeaders(ctx) });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ code: "invalid_share_target" });
+    }
+    for (const path of ["/api/me/connections", `/api/integrations/${INTEGRATION}/connections`]) {
+      const response = await app.request(path, { headers: authHeaders(ctx) });
+      expect(response.status).toBe(200);
+      expect(await response.text()).not.toContain(personal.id);
+    }
+    expect(await sharesOf(id)).toEqual([]);
+  });
+
+  it("a withdrawal with nothing to remove preserves all-space mode", async () => {
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
+    const input = { connectionId: id, integrationId: INTEGRATION, caller: orgOwner() };
+    await setConnectionFutureSharing({ ...input, enabled: true });
+    const personal = await seedSpace({
+      orgId: ctx.orgId,
+      ownerUserId: ctx.user.id,
+      visibility: "private",
+    });
+    const before = (
+      await db.select().from(integrationConnections).where(eq(integrationConnections.id, id))
+    )[0]!;
+    const result = await unshareConnection({ ...input, spaceId: personal.id });
+    expect(result.removed).toBe(false);
+    expect(result.connection.shareNewSpaces).toBe(true);
+    expect(result.connection.updatedAt).toEqual(before.updatedAt);
   });
 
   it("explicitly re-enabling all-space sharing restores individual withdrawals", async () => {
@@ -522,6 +598,11 @@ describe("connection shares", () => {
       userId: null,
       connectionIds: [id],
     });
+    await db
+      .update(integrationConnections)
+      .set({ shareNewSpaces: true })
+      .where(eq(integrationConnections.id, id));
+    await seedShare(id, other);
     await expect(
       unshareConnection({
         connectionId: id,
@@ -530,7 +611,12 @@ describe("connection shares", () => {
         caller: owner(),
       }),
     ).rejects.toMatchObject({ status: 409, code: "connection_pinned" });
-    expect((await sharesOf(id)).map((s) => s.spaceId)).toEqual([here]);
+    expect((await sharesOf(id)).map((s) => s.spaceId).sort()).toEqual([here, other].sort());
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, id));
+    expect(row!.shareNewSpaces).toBe(true);
   });
 
   it("withdrawing a share that does not exist reports removed: false", async () => {

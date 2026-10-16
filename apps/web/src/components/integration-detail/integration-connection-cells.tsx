@@ -187,7 +187,6 @@ export function SharingCell({
         rowSpaceId={connection.spaceId}
         hereSpaceId={spaceId}
         targets={shareTargets}
-        teamSpaceIds={orgSpaces?.filter((s) => !s.personal).map((s) => s.id)}
         sharedSpaceIds={connection.shared_space_ids ?? []}
         sharedHere={connection.shared_here}
         canShare={canShare}

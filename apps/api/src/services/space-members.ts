@@ -478,7 +478,7 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
     if (gone.length === 0 && !(scope.stopFutureSharing && row.shareNewSpaces)) continue;
     await tx
       .update(c)
-      .set({ updatedAt: new Date(), ...(scope.stopFutureSharing ? { shareNewSpaces: false } : {}) })
+      .set({ updatedAt: new Date(), shareNewSpaces: false })
       .where(eq(c.id, row.id));
     for (const { spaceId } of gone) withdrawn.push({ connectionId: row.id, spaceId });
   }
@@ -548,11 +548,13 @@ export async function assertConnectionShareable(
   await lockOrgMember(tx, conn.orgId, conn.userId);
   const target = eq(spaces.id, spaceId);
   const [locked] = await tx
-    .select({ id: spaces.id })
+    .select({ id: spaces.id, ownerUserId: spaces.ownerUserId })
     .from(spaces)
     .where(and(target, eq(spaces.orgId, conn.orgId)))
     .for("share");
   if (!locked) throw invalidShareTarget(`'${spaceId}' is not a space of this organization`);
+  if (locked.ownerUserId !== null)
+    throw invalidShareTarget("Connections can only be shared with team spaces");
   const [lost] = await sharesOfOwnersWithoutAccess(
     tx,
     target,

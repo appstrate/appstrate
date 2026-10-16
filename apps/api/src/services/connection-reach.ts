@@ -152,6 +152,7 @@ export function shareableIn(t: ShareTargets): SQL<string[]> {
   return spacesWhere(t.spaceIds, (spaceId) =>
     and(
       connectionInSpace(spaceId),
+      sql`EXISTS (SELECT 1 FROM ${spaces} WHERE ${spaces.id} = ${spaceId} AND ${spaces.ownerUserId} IS NULL)`,
       t.configures.has(spaceId) ? sql`TRUE` : not(userConnectionsBlocked(spaceId, c.integrationId)),
     )!,
   );

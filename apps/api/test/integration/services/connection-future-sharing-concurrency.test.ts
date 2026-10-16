@@ -15,7 +15,10 @@ import { seedPackage } from "../../helpers/seed.ts";
 import { testCaller } from "../../helpers/connection-shares.ts";
 import { describeRequiresPostgres } from "../../helpers/tier.ts";
 import { lockConnectionSharingOrg } from "../../../src/services/connection-future-shares.ts";
-import { setConnectionFutureSharing } from "../../../src/services/connection-shares.ts";
+import {
+  setConnectionFutureSharing,
+  unshareConnection,
+} from "../../../src/services/connection-shares.ts";
 import { createSpace } from "../../../src/services/spaces.ts";
 
 describeRequiresPostgres("future connection sharing serializes with space creation", () => {
@@ -115,5 +118,72 @@ describeRequiresPostgres("future connection sharing serializes with space creati
     expect(
       await db.select().from(shares).where(eq(shares.connectionId, connectionId)),
     ).toContainEqual(expect.objectContaining({ spaceId }));
+  });
+  it("withdrawal waits for space creation and switches off sharing before subsequent creations", async () => {
+    const caller = testCaller(
+      { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      { canShareAll: () => true },
+    );
+    const input = { connectionId, integrationId: "@future-lock/svc", caller };
+    await setConnectionFutureSharing({ ...input, enabled: true });
+    const locked = Promise.withResolvers<number>();
+    const release = Promise.withResolvers<void>();
+    const concurrentId = prefixedId("spc");
+    const creating = db.transaction(async (tx) => {
+      await lockConnectionSharingOrg(tx, ctx.orgId);
+      await tx.insert(spaces).values({ id: concurrentId, orgId: ctx.orgId, name: "Concurrent" });
+      await tx.insert(shares).values({ connectionId, orgId: ctx.orgId, spaceId: concurrentId });
+      locked.resolve(
+        toRows<{ pid: number }>(await tx.execute(sql`SELECT pg_backend_pid() AS pid`))[0]!.pid,
+      );
+      await release.promise;
+    });
+    const blockerPid = await locked.promise;
+    const withdrawal = unshareConnection({ ...input, spaceId: ctx.defaultSpaceId });
+    try {
+      await waitsForOrgLock(blockerPid);
+    } finally {
+      release.resolve();
+      await creating;
+    }
+    expect((await withdrawal).connection.shareNewSpaces).toBe(false);
+    const later = await createSpace(ctx.orgId, { name: "After withdrawal" });
+    const remaining = await db.select().from(shares).where(eq(shares.connectionId, connectionId));
+    expect(remaining.map((row) => row.spaceId)).toEqual([concurrentId]);
+    expect(remaining.some((row) => row.spaceId === later.id)).toBe(false);
+  });
+
+  it("creation waiting behind a withdrawal sees specific-space mode", async () => {
+    const caller = testCaller(
+      { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      { canShareAll: () => true },
+    );
+    await setConnectionFutureSharing({
+      connectionId,
+      integrationId: "@future-lock/svc",
+      caller,
+      enabled: true,
+    });
+    const locked = Promise.withResolvers<number>();
+    const release = Promise.withResolvers<void>();
+    const withdrawing = db.transaction(async (tx) => {
+      await lockConnectionSharingOrg(tx, ctx.orgId);
+      await tx.delete(shares).where(eq(shares.connectionId, connectionId));
+      await tx.update(c).set({ shareNewSpaces: false }).where(eq(c.id, connectionId));
+      locked.resolve(
+        toRows<{ pid: number }>(await tx.execute(sql`SELECT pg_backend_pid() AS pid`))[0]!.pid,
+      );
+      await release.promise;
+    });
+    const blockerPid = await locked.promise;
+    const creating = createSpace(ctx.orgId, { name: "After withdrawal" });
+    try {
+      await waitsForOrgLock(blockerPid);
+    } finally {
+      release.resolve();
+      await withdrawing;
+    }
+    await creating;
+    expect(await db.select().from(shares).where(eq(shares.connectionId, connectionId))).toEqual([]);
   });
 });

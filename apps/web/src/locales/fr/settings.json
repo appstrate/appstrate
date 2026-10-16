@@ -855,7 +855,6 @@
   "integration.connection.share.count_one": "{{count}} espace",
   "integration.connection.share.count_other": "{{count}} espaces",
   "integration.connection.share.help": "Partager donne aux autres membres des espaces cochés accès à cette connexion pour leurs runs. Leurs administrateurs et créateurs peuvent aussi l'utiliser directement, hors run.",
-  "integration.connection.share.custom": "Personnalisé",
   "integration.connection.share.all": "Tous les espaces",
   "integration.connection.share.allHelp": "Partage avec tous les espaces d'équipe, actuels et futurs. Décochez pour choisir des espaces précis en conservant la sélection actuelle. Les espaces personnels restent privés.",
   "integration.connection.share.search": "Rechercher un espace",

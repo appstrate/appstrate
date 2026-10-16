@@ -854,7 +854,6 @@
   "integration.connection.share.count_one": "{{count}} space",
   "integration.connection.share.count_other": "{{count}} spaces",
   "integration.connection.share.help": "Sharing gives other members of the checked spaces access to this connection for their runs. Their admins and builders can also use it directly, outside a run.",
-  "integration.connection.share.custom": "Custom",
   "integration.connection.share.all": "All spaces",
   "integration.connection.share.allHelp": "Share with all current and future team spaces. Uncheck to choose specific spaces, keeping the current selection. Personal spaces stay private.",
   "integration.connection.share.search": "Search a space",

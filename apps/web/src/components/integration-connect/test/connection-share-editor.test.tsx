@@ -32,7 +32,6 @@ const base: Props = {
     { id: HERE, name: "Ici" },
     { id: "spc_other", name: "Ailleurs" },
   ],
-  teamSpaceIds: [HERE, "spc_other"],
   sharedSpaceIds: [],
   sharedHere: false,
   canShare: true,
@@ -125,7 +124,6 @@ describe("ConnectionShareEditor — the owner's org-scoped row", () => {
       const tree = treeOf({
         ...base,
         targets: [],
-        teamSpaceIds: [],
         shareNewSpaces: enabled,
         onFutureSharingChange: (value) => changes.push(value),
       });
@@ -162,31 +160,13 @@ describe("ConnectionShareEditor — the owner's org-scoped row", () => {
     ]);
   });
 
-  it("marks exclusions as a partial selection and restores all spaces when checked", () => {
-    const changes: boolean[] = [];
-    const props = {
-      ...base,
-      shareNewSpaces: true,
-      sharedSpaceIds: [HERE],
-      onFutureSharingChange: (value: boolean) => changes.push(value),
-    };
-    expect(render(<ConnectionShareEditor {...props} />)).toContain("Personnalisé");
-    const control = propsOf(treeOf(props), "share-all-" + CONN)!;
-    expect(control.checked).toBe("indeterminate");
-    (control.onCheckedChange as (checked: boolean) => void)(true);
-    expect(changes).toEqual([true]);
-  });
-
-  it("does not claim all-space consent before the team list loads or when future sharing is off", () => {
-    const props = { ...base, shareNewSpaces: true, sharedSpaceIds: [HERE, "spc_other"] };
-    expect(render(<ConnectionShareEditor {...props} teamSpaceIds={undefined} />)).toContain(
-      "Personnalisé",
-    );
+  it("reads the canonical server mode without a separate team-space listing", () => {
+    const props = { ...base, shareNewSpaces: true, sharedSpaceIds: [HERE], targets: [] };
+    expect(render(<ConnectionShareEditor {...props} />)).toContain("Tous les espaces");
+    expect(propsOf(treeOf(props), "share-all-" + CONN)?.checked).toBe(true);
+    expect(targetTestIds(treeOf(props))).toEqual([]);
     expect(render(<ConnectionShareEditor {...props} shareNewSpaces={false} />)).toContain(
-      "2 espaces",
-    );
-    expect(propsOf(treeOf({ ...props, shareNewSpaces: false }), "share-all-" + CONN)?.checked).toBe(
-      false,
+      "1 espace",
     );
   });
 
@@ -226,6 +206,12 @@ describe("ConnectionShareEditor — the owner's space-scoped row", () => {
     expect(html).toContain(`share-toggle-${CONN}`);
     expect(html).not.toContain(`share-editor-${CONN}`);
     expect(html).toContain(i18n.t("settings:integration.connection.share.thisSpace"));
+  });
+
+  it("offers no share toggle when the row's space is not a shareable target", () => {
+    const html = render(<ConnectionShareEditor {...base} {...space} targets={[]} />);
+    expect(html).not.toContain(`share-toggle-${CONN}`);
+    expect(html).toContain("Vous uniquement");
   });
 
   it("shares into and out of its space", () => {

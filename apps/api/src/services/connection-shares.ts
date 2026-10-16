@@ -4,7 +4,8 @@
  * The edits of a connection: renaming it, sharing it into a space and withdrawing it (one
  * `integration_connection_shares` row per (connection, space)). Each edit authorizes on the locked
  * row by the actions {@link connectionActions} projects, so what a list offers is what an edit
- * accepts. Lock order, as every other connection write: the owner's membership and the target
+ * accepts. Future sharing and withdrawals first lock the org to serialize with space creation.
+ * Other lock order, as every connection write: the owner's membership and the target
  * space (`assertConnectionShareable`) or the label keys, the connection row, then schedules.
  */
 
@@ -221,7 +222,10 @@ export async function unshareConnection(input: ShareInput): Promise<{
   disabledScheduleIds: string[];
 }> {
   const { connectionId, spaceId, caller } = input;
+  const [read] = await db.select({ orgId: c.orgId }).from(c).where(visibleTo(input)).limit(1);
+  if (!read) throw connectionNotFound(connectionId);
   return db.transaction(async (tx) => {
+    await lockConnectionSharingOrg(tx, read.orgId);
     const row = await lockVisible(tx, input);
     const [existing] = await tx
       .select({ spaceId: shares.spaceId })
@@ -245,14 +249,19 @@ export async function unshareConnection(input: ShareInput): Promise<{
       spaceId,
     );
     await tx.delete(shares).where(shareRow(connectionId, spaceId));
-    const connection = await touch(tx, connectionId);
-    const owner = actorFromIds(connection.userId, connection.endUserId)!;
+    // Any effective withdrawal chooses specific spaces and stops future sharing atomically.
+    const [connection] = await tx
+      .update(c)
+      .set({ shareNewSpaces: false, updatedAt: new Date() })
+      .where(eq(c.id, connectionId))
+      .returning();
+    const owner = actorFromIds(connection!.userId, connection!.endUserId)!;
     const disabledScheduleIds = await disableForeignSchedules(
       tx,
       [{ id: connectionId, owner, inSpaceId: spaceId }],
       "connection_unshared",
     );
-    return { connection, removed: true, disabledScheduleIds };
+    return { connection: connection!, removed: true, disabledScheduleIds };
   });
 }
 
