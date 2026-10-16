@@ -331,6 +331,9 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   `LazySchemaForm` (`components/lazy-schema-form.tsx`) so RJSF and AJV stay out of
   the entry chunk. Labels come from `useSchemaFormLabels`, file fields from
   `useUploadClient`; an agent's input form is `components/agent-input-form.tsx`.
+- Lists of text tokens use `app-ui/string-list-input.tsx`: auth/scopes commit on
+  blur; metadata keywords keep their Enter/comma-only commit and normal typography.
+- Local advanced disclosures use shadcn `Collapsible`; the fields keep their own draft.
 - Field error text is never `err.message` (section 10).
 
 ## 7. Collections

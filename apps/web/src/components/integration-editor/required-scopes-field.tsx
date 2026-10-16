@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
-import { StringListInput } from "./string-list-input";
+import { StringListInput } from "../app-ui/string-list-input";
 
 /** A tool's `tools_policy.<tool>.required_scopes`: one scope list per auth. */
 export function RequiredScopesField({

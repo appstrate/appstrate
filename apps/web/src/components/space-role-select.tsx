@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { SelectItem } from "@appstrate/ui/components/select";
+import { OptionSelect } from "./app-ui/option-select";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import type { SpaceRoleOption } from "../hooks/use-roles";
@@ -50,24 +44,23 @@ export function SpaceRoleSelect({
   if (loading) return <Skeleton className={cn("h-9 w-full", className)} />;
 
   return (
-    <Select value={value || undefined} onValueChange={onValueChange} disabled={disabled}>
-      <SelectTrigger id={id} aria-label={ariaLabel} className={className}>
-        <SelectValue placeholder={placeholder} />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectGroup>
-          {!!value && !options.some((option) => option.value === value) && (
-            <SelectItem value={value} disabled>
-              {fallbackLabel}
-            </SelectItem>
-          )}
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      </SelectContent>
-    </Select>
+    <OptionSelect
+      value={value || undefined}
+      onValueChange={onValueChange}
+      disabled={disabled}
+      id={id}
+      aria-label={ariaLabel}
+      className={className}
+      placeholder={placeholder}
+      options={options}
+      leading={
+        !!value &&
+        !options.some((option) => option.value === value) && (
+          <SelectItem value={value} disabled>
+            {fallbackLabel}
+          </SelectItem>
+        )
+      }
+    />
   );
 }

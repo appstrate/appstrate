@@ -36,6 +36,11 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Badge } from "@appstrate/ui/components/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
 import { Button } from "@appstrate/ui/components/button";
 import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import {
@@ -299,7 +304,6 @@ function FieldModal({
   const { t } = useTranslation(["agents", "common"]);
   const [draft, setDraft] = useState<SchemaField>(() => field ?? blankField());
   const ids = useId();
-  const [advanced, setAdvanced] = useState(false);
   const set = (patch: Partial<SchemaField>) => setDraft((d) => ({ ...d, ...patch }));
 
   const { prop } = draft;
@@ -391,134 +395,130 @@ function FieldModal({
         />
 
         {mode === "input" && (
-          <div className="border-border border-t pt-3">
-            <button
+          <Collapsible className="border-border border-t pt-3">
+            <CollapsibleTrigger
               type="button"
-              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-sm"
-              aria-expanded={advanced}
-              onClick={() => setAdvanced((v) => !v)}
+              className="group text-muted-foreground hover:text-foreground flex items-center gap-1 text-sm"
             >
-              <ChevronDown className={advanced ? "size-4 rotate-180" : "size-4"} />
+              <ChevronDown className="size-4 group-data-[state=open]:rotate-180" />
               {t("editor.fieldAdvanced")}
-            </button>
-            {advanced && (
-              <div className="mt-3 grid gap-4 sm:grid-cols-2">
-                {isFile ? (
-                  <>
-                    <Row label={t("editor.fieldAcceptLabel")}>
-                      <Input
-                        value={draft.accept ?? ""}
-                        onChange={(e) => set({ accept: e.target.value })}
-                      />
-                    </Row>
-                    <Row label={t("editor.fieldMaxSizeLabel")}>
-                      <DraftInput
-                        text={draft.maxSize !== undefined ? String(draft.maxSize) : ""}
-                        onCommit={(text) => set({ maxSize: toKeywordNumber("maxSize", text) })} // canonical-casing-exempt: SchemaField TS-internal; written as `max_size`
-                      />
-                    </Row>
-                    <CheckboxField
-                      id={`${ids}-multiple`}
-                      label={t("editor.fieldMultipleLabel")}
-                      checked={kind === "multiple"}
-                      onCheckedChange={(v) => setProp(setFileKind(prop, v ? "multiple" : "single"))}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-3 grid gap-4 sm:grid-cols-2">
+              {isFile ? (
+                <>
+                  <Row label={t("editor.fieldAcceptLabel")}>
+                    <Input
+                      value={draft.accept ?? ""}
+                      onChange={(e) => set({ accept: e.target.value })}
                     />
-                    {kind === "multiple" && (
+                  </Row>
+                  <Row label={t("editor.fieldMaxSizeLabel")}>
+                    <DraftInput
+                      text={draft.maxSize !== undefined ? String(draft.maxSize) : ""}
+                      onCommit={(text) => set({ maxSize: toKeywordNumber("maxSize", text) })} // canonical-casing-exempt: SchemaField TS-internal; written as `max_size`
+                    />
+                  </Row>
+                  <CheckboxField
+                    id={`${ids}-multiple`}
+                    label={t("editor.fieldMultipleLabel")}
+                    checked={kind === "multiple"}
+                    onCheckedChange={(v) => setProp(setFileKind(prop, v ? "multiple" : "single"))}
+                  />
+                  {kind === "multiple" && (
+                    <NumberRow
+                      label={t("editor.fieldMaxFilesLabel")}
+                      keyword="maxItems"
+                      prop={prop}
+                      onChange={setProp}
+                    />
+                  )}
+                </>
+              ) : (
+                <>
+                  {(isTextType(type) || prop.default !== undefined) && (
+                    <Row label={t("editor.fieldDefaultLabel")}>
+                      <KeywordInput
+                        value={valueToText(prop.default, type)}
+                        onCommit={(text) =>
+                          setProp(setKeyword(prop, "default", textToValue(text, type)))
+                        }
+                      />
+                    </Row>
+                  )}
+                  <Row label={t("editor.fieldPlaceholderLabel")}>
+                    <Input
+                      value={draft.placeholder ?? ""}
+                      onChange={(e) => set({ placeholder: e.target.value })}
+                    />
+                  </Row>
+                  {enumRow.show && (
+                    <Row label={t("editor.fieldEnumLabel")}>
+                      <KeywordInput value={enumRow.value} onCommit={enumRow.commit} />
+                    </Row>
+                  )}
+                  {isString && (
+                    <>
+                      <Row label={t("editor.fieldFormat")}>
+                        <OptionSelect
+                          value={prop.format || "__none"}
+                          onValueChange={(v) =>
+                            setProp(setKeyword(prop, "format", v === "__none" ? undefined : v))
+                          }
+                          options={STRING_FORMATS.map((format) => ({
+                            value: format || "__none",
+                            label: format || "—",
+                          }))}
+                        />
+                      </Row>
                       <NumberRow
-                        label={t("editor.fieldMaxFilesLabel")}
-                        keyword="maxItems"
+                        label={t("editor.fieldMinLength")}
+                        keyword="minLength"
                         prop={prop}
                         onChange={setProp}
                       />
-                    )}
-                  </>
-                ) : (
-                  <>
-                    {(isTextType(type) || prop.default !== undefined) && (
-                      <Row label={t("editor.fieldDefaultLabel")}>
-                        <KeywordInput
-                          value={valueToText(prop.default, type)}
-                          onCommit={(text) =>
-                            setProp(setKeyword(prop, "default", textToValue(text, type)))
-                          }
-                        />
-                      </Row>
-                    )}
-                    <Row label={t("editor.fieldPlaceholderLabel")}>
-                      <Input
-                        value={draft.placeholder ?? ""}
-                        onChange={(e) => set({ placeholder: e.target.value })}
+                      <NumberRow
+                        label={t("editor.fieldMaxLength")}
+                        keyword="maxLength"
+                        prop={prop}
+                        onChange={setProp}
                       />
-                    </Row>
-                    {enumRow.show && (
-                      <Row label={t("editor.fieldEnumLabel")}>
-                        <KeywordInput value={enumRow.value} onCommit={enumRow.commit} />
+                      <Row label={t("editor.fieldPattern")}>
+                        <Input
+                          value={prop.pattern ?? ""}
+                          onChange={(e) =>
+                            setProp(setKeyword(prop, "pattern", e.target.value || undefined))
+                          }
+                          className="font-mono"
+                        />
                       </Row>
-                    )}
-                    {isString && (
-                      <>
-                        <Row label={t("editor.fieldFormat")}>
-                          <OptionSelect
-                            value={prop.format || "__none"}
-                            onValueChange={(v) =>
-                              setProp(setKeyword(prop, "format", v === "__none" ? undefined : v))
-                            }
-                            options={STRING_FORMATS.map((format) => ({
-                              value: format || "__none",
-                              label: format || "—",
-                            }))}
-                          />
-                        </Row>
-                        <NumberRow
-                          label={t("editor.fieldMinLength")}
-                          keyword="minLength"
-                          prop={prop}
-                          onChange={setProp}
-                        />
-                        <NumberRow
-                          label={t("editor.fieldMaxLength")}
-                          keyword="maxLength"
-                          prop={prop}
-                          onChange={setProp}
-                        />
-                        <Row label={t("editor.fieldPattern")}>
-                          <Input
-                            value={prop.pattern ?? ""}
-                            onChange={(e) =>
-                              setProp(setKeyword(prop, "pattern", e.target.value || undefined))
-                            }
-                            className="font-mono"
-                          />
-                        </Row>
-                      </>
-                    )}
-                    {isNumeric && (
-                      <>
-                        <NumberRow
-                          label={t("editor.fieldMin")}
-                          keyword="minimum"
-                          prop={prop}
-                          onChange={setProp}
-                        />
-                        <NumberRow
-                          label={t("editor.fieldMax")}
-                          keyword="maximum"
-                          prop={prop}
-                          onChange={setProp}
-                        />
-                        <NumberRow
-                          label={t("editor.fieldStep")}
-                          keyword="multipleOf"
-                          prop={prop}
-                          onChange={setProp}
-                        />
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+                    </>
+                  )}
+                  {isNumeric && (
+                    <>
+                      <NumberRow
+                        label={t("editor.fieldMin")}
+                        keyword="minimum"
+                        prop={prop}
+                        onChange={setProp}
+                      />
+                      <NumberRow
+                        label={t("editor.fieldMax")}
+                        keyword="maximum"
+                        prop={prop}
+                        onChange={setProp}
+                      />
+                      <NumberRow
+                        label={t("editor.fieldStep")}
+                        keyword="multipleOf"
+                        prop={prop}
+                        onChange={setProp}
+                      />
+                    </>
+                  )}
+                </>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
         )}
       </div>
     </Modal>

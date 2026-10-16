@@ -11,9 +11,9 @@
  */
 
 import { toggleValue } from "../../lib/toggle-value";
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import {
   apiUploadToolNameFor,
   expandScopesGranted,
@@ -35,6 +35,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
 import { Button } from "@appstrate/ui/components/button";
 import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
@@ -92,7 +97,6 @@ function RequiredIntegrationToggle({ packageId, entry, onChange }: IntegrationTo
 function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPickerProps) {
   const { t } = useTranslation("settings");
   const { data: detail, isLoading } = useIntegrationDetail(packageId);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   if (isLoading) {
     return <TextSkeleton lines={2} className="mt-2" />;
@@ -456,65 +460,57 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
       )}
 
       {hasScopeCatalog && (
-        <div>
-          <button
+        <Collapsible>
+          <CollapsibleTrigger
             type="button"
-            className="text-muted-foreground hover:text-foreground -mx-1 flex items-center gap-1 px-1 py-0.5 text-xs font-semibold"
-            onClick={() => setAdvancedOpen((v) => !v)}
-            aria-expanded={advancedOpen}
+            className="group text-muted-foreground hover:text-foreground -mx-1 flex items-center gap-1 px-1 py-0.5 text-xs font-semibold"
             data-testid={`integ-advanced-toggle-${packageId}`}
           >
-            {advancedOpen ? (
-              <ChevronDown className="size-3" />
-            ) : (
-              <ChevronRight className="size-3" />
-            )}
+            <ChevronRight className="size-3 group-data-[state=open]:rotate-90" />
             {t("agentEditor.integrations.scopes.advancedToggle")}
-          </button>
-          {advancedOpen && (
-            <div className="mt-2">
-              <p className="text-muted-foreground mb-2 text-[11px]">
-                {t("agentEditor.integrations.scopes.advancedNotice")}
-              </p>
-              <div className="grid gap-1.5">
-                {[...scopeCatalog.values()].map((s) => {
-                  const isInferred = inferredExpanded.has(s.value);
-                  const checked = isInferred || selectedScopes.has(s.value);
-                  return (
-                    <label
-                      key={s.value}
-                      className={`flex items-start gap-2 text-xs ${
-                        isInferred ? "cursor-not-allowed opacity-60" : "cursor-pointer"
-                      }`}
-                      data-testid={`integ-scope-${packageId}-${s.value}`}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        disabled={isInferred}
-                        onCheckedChange={isInferred ? undefined : () => toggleScope(s.value)}
-                        className="mt-0.5"
-                      />
-                      <span className="flex min-w-0 flex-col">
-                        <span>
-                          {s.label}{" "}
-                          <span className="text-muted-foreground font-mono">({s.value})</span>
-                          {isInferred && (
-                            <span className="text-muted-foreground ml-1 text-[10px]">
-                              {t("agentEditor.integrations.scopes.alreadyInferred")}
-                            </span>
-                          )}
-                        </span>
-                        {s.description && (
-                          <span className="text-muted-foreground">{s.description}</span>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2">
+            <p className="text-muted-foreground mb-2 text-[11px]">
+              {t("agentEditor.integrations.scopes.advancedNotice")}
+            </p>
+            <div className="grid gap-1.5">
+              {[...scopeCatalog.values()].map((s) => {
+                const isInferred = inferredExpanded.has(s.value);
+                const checked = isInferred || selectedScopes.has(s.value);
+                return (
+                  <label
+                    key={s.value}
+                    className={`flex items-start gap-2 text-xs ${
+                      isInferred ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                    }`}
+                    data-testid={`integ-scope-${packageId}-${s.value}`}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      disabled={isInferred}
+                      onCheckedChange={isInferred ? undefined : () => toggleScope(s.value)}
+                      className="mt-0.5"
+                    />
+                    <span className="flex min-w-0 flex-col">
+                      <span>
+                        {s.label}{" "}
+                        <span className="text-muted-foreground font-mono">({s.value})</span>
+                        {isInferred && (
+                          <span className="text-muted-foreground ml-1 text-[10px]">
+                            {t("agentEditor.integrations.scopes.alreadyInferred")}
+                          </span>
                         )}
                       </span>
-                    </label>
-                  );
-                })}
-              </div>
+                      {s.description && (
+                        <span className="text-muted-foreground">{s.description}</span>
+                      )}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
-          )}
-        </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
     </div>
   );

@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
+import { StringListInput } from "../app-ui/string-list-input";
 import { Label } from "@appstrate/ui/components/label";
 import { Textarea } from "@appstrate/ui/components/textarea";
 import { FormField } from "../form-field";
@@ -44,22 +43,6 @@ export function MetadataSection({
   const { t } = useTranslation(["agents", "common"]);
   const update = (patch: Partial<MetadataState>) => onChange({ ...value, ...patch });
   const [nameEdited, setNameEdited] = useState(isEdit);
-
-  const handleKeywordInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" || e.key === ",") {
-      e.preventDefault();
-      const input = e.currentTarget;
-      const keyword = input.value.trim().replace(/,$/g, "");
-      if (keyword && !value.keywords.includes(keyword)) {
-        update({ keywords: [...value.keywords, keyword] });
-      }
-      input.value = "";
-    }
-  };
-
-  const removeKeyword = (keyword: string) => {
-    update({ keywords: value.keywords.filter((k) => k !== keyword) });
-  };
 
   const handleDisplayNameChange = (v: string) => {
     if (nameEdited) {
@@ -124,35 +107,15 @@ export function MetadataSection({
             placeholder={t("editor.metaDescPlaceholder")}
           />
         </div>
-        <div className="flex flex-col gap-2">
-          <Label className="mb-0">{t("manifest.keywords")}</Label>
-          {value.keywords.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {value.keywords.map((keyword) => (
-                <span
-                  key={keyword}
-                  className="border-border bg-background text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs"
-                >
-                  {keyword}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-destructive size-auto p-0 text-sm leading-none"
-                    onClick={() => removeKeyword(keyword)}
-                  >
-                    &times;
-                  </Button>
-                </span>
-              ))}
-            </div>
-          )}
-          <Input
-            type="text"
-            placeholder={t("editor.metaKeywordPlaceholder")}
-            onKeyDown={handleKeywordInput}
-          />
-        </div>
+        <StringListInput
+          label={t("manifest.keywords")}
+          labelClassName="mb-0"
+          values={value.keywords}
+          onChange={(keywords) => update({ keywords })}
+          placeholder={t("editor.metaKeywordPlaceholder")}
+          commitOnBlur={false}
+          monospace={false}
+        />
       </SettingsFieldGroup>
       {children && (
         <SettingsFieldGroup title={t("run.infoExecution")}>{children}</SettingsFieldGroup>

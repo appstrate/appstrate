@@ -9,13 +9,12 @@ import type {
   FieldTemplateProps,
   TitleFieldProps,
   DescriptionFieldProps,
-  SubmitButtonProps,
   ArrayFieldTemplateProps,
   ArrayFieldItemTemplateProps,
   ObjectFieldTemplateProps,
   MultiSchemaFieldTemplateProps,
 } from "@rjsf/utils";
-import { getInputProps, getSubmitButtonOptions } from "@rjsf/utils";
+import { getInputProps } from "@rjsf/utils";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "../cn.ts";
 import { Button } from "../components/button.tsx";
@@ -267,16 +266,5 @@ export function ArrayFieldTemplate(props: ArrayFieldTemplateProps) {
         </Button>
       )}
     </div>
-  );
-}
-
-export function SubmitButton(props: SubmitButtonProps) {
-  const { uiSchema } = props;
-  const { norender, submitText, props: btnProps } = getSubmitButtonOptions(uiSchema);
-  if (norender) return null;
-  return (
-    <Button type="submit" {...btnProps}>
-      {submitText ?? "Submit"}
-    </Button>
   );
 }
