@@ -143,29 +143,31 @@ export function ConnectionShareEditor({
               </>
             )}
           </div>
-          <Command>
-            <CommandInput placeholder={t("integration.connection.share.search")} />
-            <CommandList>
-              <CommandEmpty>{t("viewAs.noSpace")}</CommandEmpty>
-              <CommandGroup>
-                {targets.map((space) => {
-                  const selected = sharedSpaceIds.includes(space.id);
-                  return (
-                    <CommandItem
-                      key={space.id}
-                      value={`${space.name} ${space.id}`}
-                      disabled={pending}
-                      onSelect={() => (selected ? onUnshare(space.id) : onShare(space.id))}
-                      data-testid={`share-target-${connectionId}-${space.id}`}
-                    >
-                      <Check className={cn(selected ? "opacity-100" : "opacity-0")} />
-                      <span className="truncate">{space.name}</span>
-                    </CommandItem>
-                  );
-                })}
-              </CommandGroup>
-            </CommandList>
-          </Command>
+          {!allShared && (
+            <Command>
+              <CommandInput placeholder={t("integration.connection.share.search")} />
+              <CommandList>
+                <CommandEmpty>{t("viewAs.noSpace")}</CommandEmpty>
+                <CommandGroup>
+                  {targets.map((space) => {
+                    const selected = sharedSpaceIds.includes(space.id);
+                    return (
+                      <CommandItem
+                        key={space.id}
+                        value={`${space.name} ${space.id}`}
+                        disabled={pending}
+                        onSelect={() => (selected ? onUnshare(space.id) : onShare(space.id))}
+                        data-testid={`share-target-${connectionId}-${space.id}`}
+                      >
+                        <Check className={cn(selected ? "opacity-100" : "opacity-0")} />
+                        <span className="truncate">{space.name}</span>
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          )}
         </PopoverContent>
       </Popover>
     );

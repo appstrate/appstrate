@@ -154,6 +154,12 @@ describe("ConnectionShareEditor — the owner's org-scoped row", () => {
     expect(html).toContain("Tous les espaces");
     expect(html).not.toContain("+ futurs");
     expect(propsOf(treeOf(props), "share-all-" + CONN)?.checked).toBe(true);
+    expect(targetTestIds(treeOf(props))).toEqual([]);
+    expect(targetTestIds(treeOf({ ...props, shareNewSpaces: false }))).toEqual([
+      target(HERE),
+      target("spc_other"),
+      target("personal"),
+    ]);
   });
 
   it("marks exclusions as a partial selection and restores all spaces when checked", () => {

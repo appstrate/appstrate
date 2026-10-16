@@ -284,7 +284,8 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   naming multi-space or single-space use by the owner; Sharing holds the access picker ("Only you",
   "N spaces", "All spaces" or "Custom"). The sharing control stays visible on narrow tables;
   the usage column waits for room. The member-access explanation is visible in the popover. Sharing with all listed
-  team spaces uses an "All spaces" checkbox that includes future team spaces; it is indeterminate
+  team spaces uses an "All spaces" checkbox that includes future team spaces. While checked, it hides
+  the individual-space list; unchecking reveals the current selection for editing and stops future sharing. It is indeterminate
   when future sharing remains enabled with individual exclusions. Only an organization
   administrator owning an org-scoped connection may consent; personal spaces stay private.
   Current-space withdrawals remain effective until explicit all-space sharing is enabled again;

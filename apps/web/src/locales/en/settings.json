@@ -856,7 +856,7 @@
   "integration.connection.share.help": "Sharing gives other members of the checked spaces access to this connection for their runs. Their admins and builders can also use it directly, outside a run.",
   "integration.connection.share.custom": "Custom",
   "integration.connection.share.all": "All spaces",
-  "integration.connection.share.allHelp": "Includes future team spaces. Personal spaces stay private. Unchecking stops future sharing and keeps current shares. Checking again also restores removed spaces.",
+  "integration.connection.share.allHelp": "Share with all current and future team spaces. Uncheck to choose specific spaces, keeping the current selection. Personal spaces stay private.",
   "integration.connection.share.search": "Search a space",
   "integration.connection.share.thisSpace": "Share with this space",
   "integration.connection.share.thisSpaceHelp": "Other users of this space will be able to pick it for their runs. Its admins and builders can also call it directly, outside a run.",
