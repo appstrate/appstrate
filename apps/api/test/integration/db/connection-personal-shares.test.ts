@@ -15,7 +15,10 @@ import { seedShares } from "../../helpers/connection-shares.ts";
 
 async function repair() {
   const script = await Bun.file(
-    new URL("../../../../../scripts/migration/0046-connection-sharing-modes.sql", import.meta.url),
+    new URL(
+      "../../../../../scripts/migration/0047-connection-personal-shares.sql",
+      import.meta.url,
+    ),
   ).text();
   const embedded = getPGliteClient();
   const reserved = embedded ? null : await reservePgConnection();
@@ -32,7 +35,7 @@ async function repair() {
   }
 }
 
-it("repairs personal shares and hybrid modes without restoring access, and replays without writes", async () => {
+it("removes personal-space shares, audits each, and replays without writes", async () => {
   await truncateAll();
   const ctx = await createTestContext();
   await seedPackage({ id: "@repair/svc", orgId: ctx.orgId, type: "integration" });
@@ -42,10 +45,10 @@ it("repairs personal shares and hybrid modes without restoring access, and repla
     visibility: "private",
   });
   const team = await seedSpace({ orgId: ctx.orgId });
-  const [all, hybrid, specific] = await db
+  const [mixed, personalOnly] = await db
     .insert(c)
     .values(
-      [true, true, false].map((shareNewSpaces, i) => ({
+      [0, 1].map((i) => ({
         integrationId: "@repair/svc",
         authKey: "key",
         accountId: String(i),
@@ -53,26 +56,27 @@ it("repairs personal shares and hybrid modes without restoring access, and repla
         orgId: ctx.orgId,
         userId: ctx.user.id,
         credentialsEncrypted: "x",
-        shareNewSpaces,
       })),
     )
     .returning();
-  await seedShares(all!.id, [ctx.defaultSpaceId, team.id, personal.id]);
-  await seedShares(hybrid!.id, [ctx.defaultSpaceId]);
-  await seedShares(specific!.id, [personal.id]);
+  await seedShares(mixed!.id, [ctx.defaultSpaceId, team.id, personal.id]);
+  await seedShares(personalOnly!.id, [personal.id]);
   await repair();
-  const connections = await db.select().from(c).orderBy(c.id);
-  expect(connections.find((row) => row.id === all!.id)!.shareNewSpaces).toBe(true);
-  expect(connections.find((row) => row.id === hybrid!.id)!.shareNewSpaces).toBe(false);
-  expect(connections.find((row) => row.id === specific!.id)!.shareNewSpaces).toBe(false);
   expect(await db.select().from(shares).where(eq(shares.spaceId, personal.id))).toEqual([]);
   const kept = await db.select().from(shares).orderBy(shares.connectionId, shares.spaceId);
-  expect(kept).toHaveLength(3);
-  expect(kept.filter((row) => row.connectionId === hybrid!.id).map((row) => row.spaceId)).toEqual([
-    ctx.defaultSpaceId,
-  ]);
+  expect(kept.map((row) => [row.connectionId, row.spaceId]).toSorted()).toEqual(
+    [
+      [mixed!.id, ctx.defaultSpaceId],
+      [mixed!.id, team.id],
+    ].toSorted(),
+  );
   const audited = await db.select().from(auditEvents).orderBy(auditEvents.id);
-  expect(audited.filter((row) => row.action.startsWith("integration.connection."))).toHaveLength(3);
+  const removals = audited.filter((row) => row.action === "integration.connection.share_removed");
+  expect(removals.map((row) => row.resourceId).toSorted()).toEqual(
+    [mixed!.id, personalOnly!.id].toSorted(),
+  );
+  expect(removals.every((row) => row.spaceId === personal.id)).toBe(true);
+  const connections = await db.select().from(c).orderBy(c.id);
   await repair();
   expect(await db.select().from(c).orderBy(c.id)).toEqual(connections);
   expect(await db.select().from(shares).orderBy(shares.connectionId, shares.spaceId)).toEqual(kept);

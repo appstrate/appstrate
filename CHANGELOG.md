@@ -13,10 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   future team spaces and hides the individual list. Any effective withdrawal switches atomically
   to specific-space sharing, preserving pin checks and schedule revocation. Personal spaces are
   excluded from sharing targets and rejected by the API.
-  **Operators:** after schema migration `0099` and the `0044` share copy, with the app stopped,
-  run `scripts/migration/0046-connection-sharing-modes.sql` before starting this version. It removes
-  redundant personal-space shares and turns existing future-sharing policies with missing team
-  shares into specific-space mode, without restoring withdrawn access. See `scripts/migration/README.md`.
+  **Operators:** with the app stopped, run `scripts/migration/0047-connection-personal-shares.sql`
+  before starting this version. It removes redundant personal-space shares, each audited.
+  See `scripts/migration/README.md`.
 
 - **The dashboard is redesigned** (#1937): settings and preferences open as
   routed overlays, every real dialog has a URL, tables share one component, and

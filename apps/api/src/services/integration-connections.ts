@@ -3908,9 +3908,10 @@ export function connectionViewOf(
  * owner, its shares and origin, within the space its credential is bound to.
  */
 export function connectionReach(
-  row: Pick<typeof integrationConnections.$inferSelect, "spaceId" | "originSpaceId"> & {
-    shareNewSpaces?: boolean;
-  },
+  row: Pick<
+    typeof integrationConnections.$inferSelect,
+    "spaceId" | "originSpaceId" | "shareNewSpaces"
+  >,
   view: ConnectionView,
 ): ConnectionReach {
   const bound = view.owner?.boundSpaceId ?? null;
@@ -3923,7 +3924,7 @@ export function connectionReach(
     ...(view.owner
       ? {
           shared_space_ids: seen(view.shares),
-          ...(bound === null ? { share_new_spaces: row.shareNewSpaces ?? false } : {}),
+          ...(bound === null ? { share_new_spaces: row.shareNewSpaces } : {}),
           origin_space_id: seen([row.originSpaceId])[0] ?? null,
         }
       : {}),
