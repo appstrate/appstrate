@@ -17,21 +17,16 @@ export function PreferencesAppearancePage() {
     <SettingsGroup title={t("preferences.interface")}>
       <SettingRow variant="field" label={t("common:userMenu.theme")}>
         {(labelId) => (
-          <ManualSetting value={theme} onSave={async (value) => setTheme(value)}>
-            {(value, onChange, pending) => (
-              <OptionSelect
-                value={value}
-                onValueChange={(v) => onChange(v as "light" | "dark" | "system")}
-                disabled={pending}
-                aria-labelledby={labelId}
-                options={[
-                  { value: "light", label: t("common:userMenu.themeLight") },
-                  { value: "dark", label: t("common:userMenu.themeDark") },
-                  { value: "system", label: t("common:userMenu.themeSystem") },
-                ]}
-              />
-            )}
-          </ManualSetting>
+          <OptionSelect
+            value={theme}
+            onValueChange={(v) => setTheme(v as "light" | "dark" | "system")}
+            aria-labelledby={labelId}
+            options={[
+              { value: "light", label: t("common:userMenu.themeLight") },
+              { value: "dark", label: t("common:userMenu.themeDark") },
+              { value: "system", label: t("common:userMenu.themeSystem") },
+            ]}
+          />
         )}
       </SettingRow>
 

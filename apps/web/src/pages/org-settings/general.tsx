@@ -138,15 +138,26 @@ export function OrgSettingsGeneralPage() {
     },
   });
 
+  // The logo has its own patch so that saving the name never shows as a logo write.
+  const patchLogoMutation = $api.useMutation("patch", "/api/orgs/{orgId}", {
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: orgKeys.all });
+    },
+  });
+
   const logoDraft = useSettingDraft<{ logo: OrgLogo | null; image: Blob | null }>({
     logo: currentOrg?.logo ?? null,
     image: null,
   });
-  const logoWrite = {
-    pending: uploadLogoMutation.isPending || updateNameMutation.isPending,
-    success: false,
-    error: false,
-  };
+  // The logo is written by two requests: an image upload, or an emoji / removal patch.
+  // Each starts by clearing the other's state, so the feedback is the latest write's.
+  const logoWrite = uploadLogoMutation.isIdle
+    ? fieldWriteState(patchLogoMutation, "logo")
+    : {
+        pending: uploadLogoMutation.isPending,
+        success: uploadLogoMutation.isSuccess,
+        error: uploadLogoMutation.isError,
+      };
   const previewUrl =
     logoDraft.value.image && logoDraft.value.logo?.kind === "image"
       ? logoDraft.value.logo.url
@@ -164,6 +175,7 @@ export function OrgSettingsGeneralPage() {
     if (!orgId) throw new Error("org_missing");
     const sent = logoDraft.value;
     if (sent.image) {
+      patchLogoMutation.reset();
       await uploadLogoMutation.mutateAsync({
         params: { path: { orgId } },
         body: sent.image,
@@ -172,7 +184,8 @@ export function OrgSettingsGeneralPage() {
       });
     } else {
       const logo = sent.logo?.kind === "emoji" ? sent.logo : null;
-      await updateNameMutation.mutateAsync({ params: { path: { orgId } }, body: { logo } });
+      uploadLogoMutation.reset();
+      await patchLogoMutation.mutateAsync({ params: { path: { orgId } }, body: { logo } });
     }
     logoDraft.accept(sent);
   };

@@ -104,8 +104,7 @@ function GeneralForm({
   };
   const commitDefaultRole = (next: SpaceRolePreset) =>
     draft.set((previous) => ({ ...previous, defaultRole: next }));
-  const commitDomains = (next: string[]) =>
-    draft.set((previous) => ({ ...previous, domains: next }));
+  const setDomains = (next: string[]) => draft.set((previous) => ({ ...previous, domains: next }));
   const save = async () => {
     const sent = draft.value;
     const body = spaceSettingsUpdate(draft.baseline, sent, space.personal);
@@ -151,7 +150,7 @@ function GeneralForm({
                         value={domain}
                         className="min-w-0 flex-1"
                         onChange={(e) =>
-                          commitDomains(
+                          setDomains(
                             activeDomains.map((d, i) => (i === index ? e.target.value : d)),
                           )
                         }
@@ -163,20 +162,19 @@ function GeneralForm({
                         variant="ghost"
                         size="icon"
                         aria-label={t("spaces.removeDomain")}
-                        onClick={() => commitDomains(activeDomains.filter((_, i) => i !== index))}
+                        onClick={() => setDomains(activeDomains.filter((_, i) => i !== index))}
                       >
                         <X />
                       </Button>
                     </div>
                   ))}
-                  {/* Adding one does not save: an empty row is not a domain. It
-                commits when the field it opened is filled and left. */}
+                  {/* An empty row is not a domain: Save ignores it until it is filled. */}
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     className="self-start"
-                    onClick={() => commitDomains([...activeDomains, ""])}
+                    onClick={() => setDomains([...activeDomains, ""])}
                   >
                     <Plus className="mr-1.5" />
                     {t("spaces.addDomain")}

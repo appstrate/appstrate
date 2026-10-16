@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link } from "react-router-dom";
-import { ManualSetting } from "./settings/manual-save";
 import { useTranslation } from "react-i18next";
 import { DOCS_URL, SUPPORT_URL } from "@/lib/external-links";
 import { BookOpen, Check, FileText, LifeBuoy, LogOut, Palette, Settings } from "lucide-react";
@@ -118,27 +117,15 @@ export function NavUser({ variant }: NavUserProps) {
             {t("userMenu.theme")}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
-            <ManualSetting compact value={theme} onSave={async (next) => setTheme(next)}>
-              {(draft, onChange) => (
-                <>
-                  {themeOptions.map(({ value, labelKey, icon: Icon }) => (
-                    <DropdownMenuItem
-                      key={value}
-                      onSelect={(event) => {
-                        event.preventDefault();
-                        onChange(value);
-                      }}
-                    >
-                      <Icon />
-                      {t(labelKey)}
-                      {draft === value && (
-                        <Check strokeWidth={2.5} className="text-primary ml-auto shrink-0" />
-                      )}
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-            </ManualSetting>
+            {themeOptions.map(({ value, labelKey, icon: Icon }) => (
+              <DropdownMenuItem key={value} onSelect={() => setTheme(value)}>
+                <Icon />
+                {t(labelKey)}
+                {theme === value && (
+                  <Check strokeWidth={2.5} className="text-primary ml-auto shrink-0" />
+                )}
+              </DropdownMenuItem>
+            ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         {links.map(({ href, icon: Icon, label }) => (

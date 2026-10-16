@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useSettingDraft } from "../hooks/use-setting-draft";
 import { createKeyedLocalStore } from "./local-storage";
 
 /** Column widths per table, persisted like `column-visibility-store.ts`; no account identifier in storage. */
@@ -25,20 +24,11 @@ const columnWidths = createKeyedLocalStore<ColumnWidths>(
 /** `table` names the table; `width: null` gives a column back its declared width. */
 export function useColumnWidths(table: string) {
   const [widths, setWidths] = columnWidths.useValue(table);
-  const draft = useSettingDraft(widths);
   return {
-    widths: draft.value,
-    dirty: draft.dirty,
-    save: async () => {
-      setWidths(draft.value);
-      draft.accept(draft.value);
-    },
-    discard: draft.reset,
+    widths,
     set: (id: string, width: number | null) => {
-      draft.set((previous) => {
-        const { [id]: _dropped, ...rest } = previous;
-        return width === null ? rest : { ...rest, [id]: Math.round(width) };
-      });
+      const { [id]: _dropped, ...rest } = widths;
+      setWidths(width === null ? rest : { ...rest, [id]: Math.round(width) });
     },
   };
 }

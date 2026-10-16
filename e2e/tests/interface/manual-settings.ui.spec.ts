@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
-import { createSpace, createAgentWithInputSchema } from "../../helpers/seed.ts";
+import { createOrg, createSpace, createAgentWithInputSchema } from "../../helpers/seed.ts";
 import { Sidebar } from "../../pages/sidebar.ts";
 
 test("settings never write on typing, blur, delay or cancel; a refused save keeps the draft", async ({
@@ -33,7 +33,7 @@ test("settings never write on typing, blur, delay or cancel; a refused save keep
   const original = await name.inputValue();
   await name.fill("Not saved");
   await name.blur();
-  // Longer than the retired debounce; an idle page must not send a write.
+  // An idle page must not send a write.
   await page.waitForTimeout(800);
   expect(writes).toEqual([]);
   await page.getByRole("button", { name: "Annuler les modifications", exact: true }).click();
@@ -56,7 +56,7 @@ test("settings never write on typing, blur, delay or cancel; a refused save keep
   await expect(name).toHaveValue("Manual name");
 });
 
-test("two dirty preferences remain guarded, and a failed save prevents navigation", async ({
+test("the theme applies at once, the language waits for Save and a failed save prevents navigation", async ({
   authedPage: page,
 }) => {
   let writes = 0;
@@ -82,24 +82,23 @@ test("two dirty preferences remain guarded, and a failed save prevents navigatio
   const language = page.getByRole("combobox", { name: "Langue", exact: true });
   await theme.click();
   await page.getByRole("option", { name: "Sombre", exact: true }).click();
+  // A display preference: applied and stored at once, no save bar.
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("appstrate-theme")))
+    .toContain("dark");
+  await expect(page.getByRole("button", { name: "Enregistrer", exact: true })).toHaveCount(0);
   await language.click();
   await page.getByRole("option", { name: "English", exact: true }).click();
   expect(writes).toBe(0);
-  expect(await page.evaluate(() => localStorage.getItem("appstrate-theme"))).not.toBe("dark");
+  const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
   await page
     .getByRole("navigation", { name: "Compte", exact: true })
     .getByRole("link", { name: "Général", exact: true })
     .click();
-  const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
-  // The language form still guards the destination after the theme's decision.
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Annuler", exact: true }).click();
   await expect(page).toHaveURL(/preferences\/appearance/);
   expect(writes).toBe(0);
-  await page.getByRole("button", { name: "Enregistrer", exact: true }).first().click();
-  expect(await page.evaluate(() => localStorage.getItem("appstrate-theme"))).toBe("dark");
   await page
     .getByRole("navigation", { name: "Compte", exact: true })
     .getByRole("link", { name: "Général", exact: true })
@@ -139,6 +138,28 @@ test("switching spaces asks before discarding the current form", async ({
   await expect(name).toHaveValue(target.name);
   const original = await orgOnlyClient.get(`/spaces/${browserCtx.org.defaultSpaceId}`);
   expect((await original.json()).name).not.toBe("Unsaved space name");
+});
+
+test("switching organizations drops the draft instead of saving it into the next one", async ({
+  authedPage: page,
+  browserCtx,
+  request,
+}) => {
+  const next = await createOrg(request, browserCtx.auth.cookie);
+  await page.goto("/org-settings/general");
+  const name = page.getByRole("textbox", { name: "Nom", exact: true });
+  await expect(name).toHaveValue(browserCtx.org.orgName);
+  await name.fill("Draft made in the first organization");
+  await page.getByRole("combobox", { name: "Choisir une organisation", exact: true }).click();
+  await page.getByRole("option", { name: next.orgName, exact: true }).click();
+  const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
+  await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
+  await expect(name).toHaveValue(next.orgName);
+  await expect(page.getByRole("button", { name: "Enregistrer", exact: true })).toHaveCount(0);
+  const orgs = await request.get("/api/orgs", { headers: { Cookie: browserCtx.auth.cookie } });
+  const names = ((await orgs.json()).data as Array<{ name: string }>).map((org) => org.name);
+  expect(names).toContain(next.orgName);
+  expect(names).not.toContain("Draft made in the first organization");
 });
 
 test("browser Back can be cancelled without unmounting the edited form", async ({

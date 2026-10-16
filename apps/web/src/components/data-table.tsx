@@ -41,7 +41,6 @@ import {
 import { collectionVerdict, type CollectionState } from "./collection";
 import { ErrorState } from "./page-states";
 import { isIdentityColumn } from "../lib/column-visibility";
-import { ManualSave } from "./settings/manual-save";
 import { useColumnWidths } from "../stores/column-widths-store";
 
 interface DataColumnBase<T> {
@@ -451,7 +450,6 @@ export function DataTable<T>({
               })}
         </TableBody>
       </Table>
-      <ManualSave dirty={stored.dirty} onSave={stored.save} onDiscard={stored.discard} />
     </div>
   );
 }

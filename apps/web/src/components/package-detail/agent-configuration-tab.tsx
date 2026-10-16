@@ -414,9 +414,8 @@ export function AgentConfigurationTab({
 
   return (
     <InputSettingsSection
-      // Not remounted when the saved settings change: the form saves itself,
-      // so its local state IS what was written, and a remount would take the
-      // focus away mid-typing.
+      // Not remounted when the saved settings change: the draft keeps unsaved
+      // edits across refetches, and a remount would take the focus away mid-typing.
       packageId={packageId}
       wrapper={wrapper}
       initialValues={detail.input.values}

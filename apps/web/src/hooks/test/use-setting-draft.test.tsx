@@ -70,6 +70,13 @@ describe("manual setting drafts", () => {
       },
     ]);
   });
+  it("is clean again when an edit restores the stored value with its keys in another order", () => {
+    exercise([
+      (draft) => draft.set({ locked: [], name: "typed" }),
+      (draft) => draft.set({ locked: [], name: "stored" }),
+      (draft) => expect(draft.dirty).toBe(false),
+    ]);
+  });
   it("follows remote data while clean", () => {
     exercise([() => {}, () => {}, (draft) => expect(draft.value).toEqual(refreshed)], 1);
   });

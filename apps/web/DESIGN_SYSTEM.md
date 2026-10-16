@@ -189,23 +189,26 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 - **Every editable setting is saved manually.** Typing, selecting, checking a box,
   leaving a field, waiting, hiding the page or unmounting never persists an edit.
   `ManualSave` reuses `SaveBar`: show Save / Cancel while the form is dirty.
-  In narrow table cells and shortcut menus, use its compact icon buttons with translated accessible labels.
+  In narrow table cells, use its compact icon buttons with translated accessible labels.
   `ManualSetting` and `useSettingDraft` hold independent settings; related values
   (input values and locks, model and generation, schedule and connections) share
   one form and one write. Keep API and permission boundaries explicit.
 - Clean forms follow refreshed data. Dirty forms preserve their edits on refetch
   and failure. Save accepts the sent values only after success; Cancel restores
-  the latest stored values. Disable editing during a write.
+  the latest stored values. Disable editing during a write. A change of
+  organization or space drops a draft (the guard has asked first): it was made
+  against the previous scope's values.
 - `useUnsavedChanges` guards page/section navigation and reload. Multiple dirty
   forms share one history interceptor. Saving before leaving waits for success;
-  failure keeps the form open. Menus and popovers keep choices local until Save;
-  closing them can abandon their draft, never save it.
+  failure keeps the form open.
 - Renaming a table row uses `InlineEditableLabel`, opened by the row's menu only,
   with explicit Save / Cancel (Enter submits, Escape cancels); blur never writes.
-- The rule also applies to browser-persisted preferences (theme, language, chat
-  model/generation, column widths/visibility and cards/table choice). Operational
-  state and navigation history (auth, selected org/space, sidebar open state,
-  pairing recovery, sent messages, runs and logs) are not editable form drafts.
+- **Display preferences apply at once**, without Save: theme, cards/table choice,
+  column widths and visibility, and the chat's model, generation and agent-authoring
+  choices. They are reversible, have no effect beyond this view, and a save bar
+  would add friction without reducing risk. Operational state and navigation
+  history (auth, selected org/space, sidebar open state, pairing recovery, sent
+  messages, runs and logs) are not editable form drafts either.
   Explicit deeds such as Send, Run, Delete, Connect and Set as default commit
   their named action. They do not need an additional Save.
 - **One return of a write, everywhere** (agent, schedule, organisation,

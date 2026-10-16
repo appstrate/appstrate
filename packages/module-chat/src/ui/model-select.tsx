@@ -25,10 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/componen
 import type { OrgModelOption } from "./models-data.ts";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
 import { useChatHost } from "./runtime-context.ts";
-import {
-  reconcileModelGenerationSettings,
-  type ModelGenerationSettings,
-} from "@appstrate/core/model-generation";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 interface Props {
   models: OrgModelOption[];
@@ -52,23 +49,9 @@ export function ModelSelect({
   failed = false,
 }: Props) {
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<{
-    id: string | null;
-    generation: ModelGenerationSettings;
-  } | null>(null);
-  const shownId = draft?.id ?? selectedId;
-  const shownGeneration = draft?.generation ?? generation;
-  const changeModel = (id: string) =>
-    setDraft({
-      id,
-      generation: reconcileModelGenerationSettings(
-        shownGeneration,
-        models.find((model) => model.id === id)?.generation,
-      ),
-    });
   const [tab, setTab] = useState<"models" | "configuration">("models");
   const { t, can, personalModelCredentials, modelCredentials } = useChatHost();
-  const active = models.find((m) => m.id === shownId);
+  const active = models.find((m) => m.id === selectedId);
   const groups = useMemo(
     () =>
       groupModelsForPicker(models, {
@@ -104,13 +87,7 @@ export function ModelSelect({
   }
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setDraft(null);
-        setOpen(next);
-      }}
-    >
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverContent
         side="top"
         align="start"
@@ -143,8 +120,8 @@ export function ModelSelect({
           <TabsContent value="models" className="mt-1 min-h-0 overflow-y-auto p-0">
             <ModelPickerList
               groups={groups}
-              value={shownId}
-              onSelect={(id) => id !== null && changeModel(id)}
+              value={selectedId}
+              onSelect={(id) => id !== null && onSelect(id)}
               selectable={isModelSelectable}
               // `settings:` — the picker's labels live in the settings bundle (a boot
               // namespace, so already loaded); the host binds `t` to `chat`.
@@ -171,9 +148,9 @@ export function ModelSelect({
                   </p>
                 ) : (
                   <ModelGenerationControls
-                    value={shownGeneration}
+                    value={generation}
                     capabilities={active.generation}
-                    onChange={(value) => setDraft({ id: shownId, generation: value })}
+                    onChange={onGenerationChange}
                     // `settings:` — the shared label family lives in the
                     // settings bundle (a boot namespace, so already loaded);
                     // the host binds `t` to `chat`.
@@ -187,31 +164,6 @@ export function ModelSelect({
             )}
           </TabsContent>
         </Tabs>
-        <div className="flex justify-end gap-2 border-t p-2">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => {
-              setDraft(null);
-              setOpen(false);
-            }}
-          >
-            {t("common:btn.cancel")}
-          </Button>
-          <Button
-            type="button"
-            disabled={draft === null}
-            onClick={() => {
-              if (!draft) return;
-              if (draft.id !== null) onSelect(draft.id);
-              onGenerationChange(draft.generation);
-              setDraft(null);
-              setOpen(false);
-            }}
-          >
-            {t("common:btn.save")}
-          </Button>
-        </div>
       </PopoverContent>
       <PopoverTrigger asChild>
         <Button

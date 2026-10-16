@@ -333,7 +333,8 @@ export function CataloguePreview({
       >
         {(value, onChange, busy) => (
           <div>
-            {value && (
+            {/* Imposing discloses the content to every member who chats there: say so before Save. */}
+            {value && !verdict.checked && (
               <p className="text-muted-foreground mb-2 text-xs">
                 {t("library.chatEnforce.confirmDescription", {
                   ns: "common",

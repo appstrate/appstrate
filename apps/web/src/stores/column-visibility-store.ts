@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useSettingDraft } from "../hooks/use-setting-draft";
 import type { DataColumn } from "../components/data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { toggleValue } from "../lib/toggle-value";
@@ -23,20 +22,8 @@ const hiddenColumns = createKeyedLocalStore<string[]>(
  */
 export function useColumnVisibility<T>(key: string, all: DataColumn<T>[]) {
   const [hidden, setHidden] = hiddenColumns.useValue(key);
-  const draft = useSettingDraft(hidden);
   return {
     columns: visibleColumns(all, hidden),
-    menu: {
-      ...columnMenu(all, {
-        hidden: draft.value,
-        toggle: (id) => draft.set((previous) => toggleValue(previous, id)),
-      }),
-      dirty: draft.dirty,
-      onSave: () => {
-        setHidden(draft.value);
-        draft.accept(draft.value);
-      },
-      onDiscard: draft.reset,
-    },
+    menu: columnMenu(all, { hidden, toggle: (id) => setHidden(toggleValue(hidden, id)) }),
   };
 }

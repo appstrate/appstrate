@@ -12,6 +12,7 @@ for (const width of [1440, 390]) {
     const logo = page
       .getByRole("dialog", { name: "Paramètres", exact: true })
       .locator('img[src*="/logo?v="]');
+    const save = page.getByRole("button", { name: "Enregistrer", exact: true });
     const upload = async (color: string) => {
       const base64 = await page.evaluate((fill) => {
         const canvas = document.createElement("canvas");
@@ -26,6 +27,9 @@ for (const width of [1440, 390]) {
         mimeType: "image/png",
         buffer: Buffer.from(base64, "base64"),
       });
+      // The chosen image is a draft until Save; the stored logo carries a version.
+      await save.click();
+      await expect(save).toHaveCount(0);
       await expect(logo).toBeVisible();
       await expect
         .poll(() => logo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0))
@@ -45,7 +49,14 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "Choisir un emoji", exact: true }).click();
     await page.getByRole("button", { name: "Utiliser 🧠 comme logo", exact: true }).click();
     await expect(logo).toHaveCount(0);
+    await save.click();
+    await expect(save).toHaveCount(0);
+    await page.reload();
+    await expect(logo).toHaveCount(0);
     await page.getByRole("button", { name: "Retirer", exact: true }).click();
+    await save.click();
+    await expect(save).toHaveCount(0);
+    await page.reload();
     await expect(page.getByRole("button", { name: "Retirer", exact: true })).toHaveCount(0);
   });
 }
