@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
-import { createSpace } from "../../helpers/seed.ts";
+import { createSpace, createAgentWithInputSchema } from "../../helpers/seed.ts";
 import { Sidebar } from "../../pages/sidebar.ts";
 
 test("settings never write on typing, blur, delay or cancel; a refused save keeps the draft", async ({
@@ -207,4 +207,56 @@ test("a conversation rename stays with its target across guarded navigation", as
   expect(writes).toEqual([{ id: b, title: "Saved B" }]);
   const original = await apiClient.get(`/chat/sessions/${a}`);
   expect((await original.json()).title).toBe("Rename A");
+});
+
+test("author defaults never dirty input settings, and Save sends only edited values with their locks", async ({
+  authedPage: page,
+  apiClient,
+  browserCtx,
+}) => {
+  const scope = `@${browserCtx.org.orgSlug}`;
+  const name = `manual-defaults-${Date.now()}`;
+  await createAgentWithInputSchema(apiClient, scope, name, {
+    destination: { type: "string", title: "Destination", default: "Author destination" },
+    attempts: { type: "integer", title: "Attempts", default: 2 },
+    verbose: { type: "boolean", title: "Verbose", default: false },
+    options: {
+      type: "object",
+      title: "Options",
+      properties: { region: { type: "string", default: "eu" } },
+    },
+    tags: { type: "array", title: "Tags", items: { type: "string" }, minItems: 1 },
+  });
+  const writes: unknown[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "PUT" && request.url().endsWith("/input-settings"))
+      writes.push(request.postDataJSON());
+  });
+  await page.goto(`/agents/${scope}/${name}?agentSettings=inputs#settings`);
+  const destination = page.getByRole("textbox", { name: "Destination", exact: true });
+  const save = page.getByRole("button", { name: "Enregistrer", exact: true });
+  const lock = page
+    .getByTestId("input-setting-destination")
+    .getByRole("checkbox", { name: "Verrouiller", exact: true });
+  await expect(destination).toBeVisible();
+  await expect(save).toHaveCount(0);
+  await destination.fill("Local draft");
+  await lock.check();
+  expect(writes).toEqual([]);
+  await page.getByRole("button", { name: "Annuler les modifications", exact: true }).click();
+  await expect(destination).toHaveValue("");
+  await expect(lock).not.toBeChecked();
+  await expect(save).toHaveCount(0);
+  expect(writes).toEqual([]);
+  await destination.fill("Saved destination");
+  await lock.check();
+  await save.click();
+  await expect(save).toHaveCount(0);
+  expect(writes).toEqual([
+    { values: { destination: "Saved destination" }, locked_fields: ["destination"] },
+  ]);
+  await page.reload();
+  await expect(destination).toHaveValue("Saved destination");
+  await expect(lock).toBeChecked();
+  await expect(save).toHaveCount(0);
 });
