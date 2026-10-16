@@ -185,6 +185,7 @@ export function OrgSettingsModelsPage() {
       {tab === "org" && (
         <div className="mb-8">
           <ProvidersTable
+            tableId="org-model-keys"
             label={t("providers.tabOrg")}
             rows={orgRows}
             isLoading={modelsLoading || (canReadCredentials && pkLoading)}
@@ -232,6 +233,7 @@ export function OrgSettingsModelsPage() {
                 <section className="mb-6">
                   <h3 className="mb-3 text-sm font-semibold">{t("providers.memberKeys")}</h3>
                   <ProvidersTable
+                    tableId="member-model-keys"
                     label={t("providers.memberKeys")}
                     rows={personalRows}
                     showType

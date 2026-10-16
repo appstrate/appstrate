@@ -208,6 +208,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
 
       {canRead && (
         <DataTable
+          tableId="space-members"
           label={t("spaceMembers.tabTitle")}
           columns={columns}
           rows={members ?? []}

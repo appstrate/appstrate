@@ -39,6 +39,7 @@ export function RunsTable({
 
   return (
     <DataTable
+      tableId="runs"
       label={t("runs.tableLabel")}
       columns={columns}
       rows={runs}

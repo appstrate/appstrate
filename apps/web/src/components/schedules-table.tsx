@@ -31,6 +31,7 @@ export function SchedulesTable({
 
   return (
     <DataTable
+      tableId="schedules"
       label={t("schedules.tableLabel")}
       columns={columns}
       surface={surface}

@@ -81,6 +81,7 @@ export function VersionHistory({
         onReset={list.reset}
       />
       <DataTable
+        tableId="package-versions"
         label={t("version.history")}
         rows={rows}
         rowKey={(version) => String(version.id)}

@@ -146,6 +146,7 @@ export function ConnectionsTable({
         }
       />
       <DataTable
+        tableId="integration-connections"
         tiered
         surface="integrated"
         label={t("integration.connection.tableLabel")}

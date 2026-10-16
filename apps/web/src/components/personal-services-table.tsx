@@ -29,6 +29,7 @@ export function PersonalServicesTable({
   const columns = usePersonalServiceColumns({ canWriteModels, onChooseModels });
   return (
     <DataTable
+      tableId="personal-model-services"
       label={t("providers.personalTableLabel")}
       columns={columns}
       rows={rows}

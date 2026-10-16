@@ -164,6 +164,7 @@ export function MemoryPanel({
           <p className="text-muted-foreground mb-2 text-xs">{t("agents:detail.memoryHelp")}</p>
         )}
         <DataTable
+          tableId="package-memories"
           tiered
           label={t("agents:detail.tabMemory")}
           columns={columns}

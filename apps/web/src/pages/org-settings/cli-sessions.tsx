@@ -59,6 +59,7 @@ export function OrgSettingsCliSessionsPage() {
         </p>
       </div>
       <DataTable
+        tableId="cli-sessions"
         columns={columns}
         rows={sessions}
         rowKey={(session) => session.familyId}

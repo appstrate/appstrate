@@ -26,10 +26,12 @@ import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 import { agentCardItem, packageCardItem, type CardItem } from "../lib/package-card-item";
 import { PageHeader } from "../components/page-header";
 import { PackageCollection } from "../components/package-collection";
+import { usePackageColumns } from "../components/package-columns";
 import { EmptyStateAction } from "../components/page-states";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
 import { useListView } from "../stores/list-view-store";
+import { useColumnVisibility } from "../stores/column-visibility-store";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePermissions } from "../hooks/use-permissions";
@@ -127,6 +129,7 @@ function PackageIndexBody({
   const [creatingAgent, setCreatingAgent] = useState(false);
   const list = useListParams(["origin", "activity"]);
   const [view, setView] = useListView(type);
+  const { columns, menu } = useColumnVisibility(`packages-${type}`, usePackageColumns(type));
   // Creating is a write on the package type, as its route is.
   const canCreate = can(packagePermission(type, "write"));
   // An import may carry any package type, so any authoring grant opens it;
@@ -174,6 +177,8 @@ function PackageIndexBody({
         }
       />
       <PackageCollection
+        columns={columns}
+        columnMenu={menu}
         tableId={`packages-${type}`}
         items={items}
         isLoading={isLoading}

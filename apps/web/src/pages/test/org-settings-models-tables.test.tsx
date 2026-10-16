@@ -140,6 +140,7 @@ function providersTable(
 ): string {
   return render(
     <ProvidersTable
+      tableId="test-org-model-keys"
       label={settingsFr["providers.tabOrg"]}
       rows={providerRows(models, credentials, SERVICES, "usr_me")}
       showType={over.showType}

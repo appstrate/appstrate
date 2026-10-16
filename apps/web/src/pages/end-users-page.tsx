@@ -104,6 +104,7 @@ function EndUsersPageContent() {
       />
 
       <DataTable
+        tableId="end-users"
         label={t("endUsers.pageTitle")}
         columns={columns}
         rows={endUsers}
