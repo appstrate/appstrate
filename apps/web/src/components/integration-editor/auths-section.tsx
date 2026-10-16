@@ -11,7 +11,7 @@ import { FormItem } from "@/components/app-ui/form-item";
 import { Label } from "@appstrate/ui/components/label";
 import { FormField } from "../form-field";
 import { RowsEditor } from "../rows-editor";
-import { StringListInput } from "./string-list-input";
+import { StringListInput } from "../app-ui/string-list-input";
 import {
   getAuths,
   setAuths,

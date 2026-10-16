@@ -1,20 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 
 interface StringListInputProps {
   label?: string;
+  labelClassName?: string;
+  commitOnBlur?: boolean;
+  monospace?: boolean;
   values: string[];
   onChange: (values: string[]) => void;
   placeholder?: string;
   description?: string;
 }
 
-/** Enter/comma-to-add chip list. Pending text is committed on blur rather than silently discarded. */
+/** Enter/comma-to-add chip list. Auth lists also commit pending text on blur. */
 export function StringListInput({
   label,
+  labelClassName,
+  commitOnBlur = true,
+  monospace = true,
   values,
   onChange,
   placeholder,
@@ -35,13 +42,16 @@ export function StringListInput({
 
   return (
     <div className="flex flex-col gap-2">
-      {label && <Label>{label}</Label>}
+      {label && <Label className={labelClassName}>{label}</Label>}
       {values.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {values.map((v) => (
             <span
               key={v}
-              className="border-border bg-background text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-mono text-xs"
+              className={cn(
+                "border-border bg-background text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs",
+                monospace && "font-mono",
+              )}
             >
               {v}
               <Button
@@ -61,7 +71,7 @@ export function StringListInput({
         type="text"
         placeholder={placeholder}
         onKeyDown={handleKeyDown}
-        onBlur={(e) => commitFromInput(e.currentTarget)}
+        onBlur={commitOnBlur ? (e) => commitFromInput(e.currentTarget) : undefined}
       />
       {description && <p className="text-muted-foreground text-xs">{description}</p>}
     </div>

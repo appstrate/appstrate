@@ -39,6 +39,19 @@ function inputTag(property: Record<string, unknown>): string {
 }
 
 describe("SchemaForm inputs", () => {
+  it("leaves submission to the host even when uiSchema asks for an internal submit button", () => {
+    const html = renderToStaticMarkup(
+      <SchemaForm
+        wrapper={{ schema: { type: "object", properties: { field: { type: "string" } } } }}
+        uiSchema={{ "ui:submitButtonOptions": { norender: false, submitText: "Internal submit" } }}
+        formData={{ field: "kept" }}
+      />,
+    );
+    expect(html).toContain('value="kept"');
+    expect(html).not.toContain('type="submit"');
+    expect(html).not.toContain("Internal submit");
+  });
+
   it("renders an integer as a numeric input", () => {
     setBrowserLanguages(["en-US"]);
     expect(inputTag({ type: "integer" })).toContain('type="number"');

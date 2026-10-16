@@ -15,7 +15,7 @@
  * whole rule: nested scrolling is what makes these surfaces confusing, not
  * scrolling as such.
  */
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
@@ -47,27 +47,9 @@ interface PanelLayoutProps {
 
 export function PanelLayout({ title, rail, contentHeader, children }: PanelLayoutProps) {
   const { pathname } = useLocation();
-  // Whether the pane has scrolled past its own top. Read off the scroll
-  // container itself — the `ScrollArea` viewport, which is not reachable from
-  // here by ref, found by walking up from a sentinel.
   const [stuck, setStuck] = useState(false);
-  // A callback ref rather than an object ref: the band is rendered inside the
-  // dialog's portal, and the node has to be caught when it attaches there.
-  const [pane, setPane] = useState<HTMLElement | null>(null);
-  useEffect(() => {
-    if (!pane) return;
-    const read = () => setStuck(pane.scrollTop > 4);
-    read();
-    pane.addEventListener("scroll", read, { passive: true });
-    return () => pane.removeEventListener("scroll", read);
-  }, [pane]);
-  // Stable, so React calls it on mount and unmount only, not on every commit.
-  const attach = useCallback((node: HTMLDivElement | null) => {
-    let scroller: HTMLElement | null = node?.parentElement ?? null;
-    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
-      scroller = scroller.parentElement;
-    }
-    setPane(scroller);
+  const attach = useCallback((viewport: HTMLDivElement | null) => {
+    if (viewport) setStuck(viewport.scrollTop > 4);
   }, []);
   const content = (
     <div className="w-full max-w-full min-w-0 p-6 pt-0" style={{ contain: "inline-size" }}>
@@ -86,8 +68,8 @@ export function PanelLayout({ title, rail, contentHeader, children }: PanelLayou
             title, so two panels leave the same room above their page. */}
         <div className="flex min-h-8 items-center">{contentHeader(stuck)}</div>
       </div>
-      {/* Only a handle on the scrolling pane. */}
-      <div ref={attach} aria-hidden className="-mt-12 h-px" />
+      {/* Preserve the pane spacing independently of its scroll viewport. */}
+      <div aria-hidden className="-mt-12 h-px" />
       <PhoneNavigation title={title} rail={rail} className="md:hidden" />
       {/* A page that crashes takes only the pane down: the rail stays, and
           picking another entry clears the error. */}
@@ -110,7 +92,15 @@ export function PanelLayout({ title, rail, contentHeader, children }: PanelLayou
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <ViewAsBanner inOverlay />
-        <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
+        <ScrollArea
+          className="min-h-0 min-w-0 flex-1"
+          viewportProps={{
+            ref: attach,
+            onScroll: (event) => setStuck(event.currentTarget.scrollTop > 4),
+          }}
+        >
+          {content}
+        </ScrollArea>
       </div>
     </>
   );
