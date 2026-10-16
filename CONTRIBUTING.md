@@ -173,7 +173,8 @@ Deliberately **not** required, because a required check that does not report blo
 the workflow, so they always report: `skipped` satisfies a required check, a job that is never created
 does not. `Integration tests` and `Runtime container e2e` run on the `integration` / `e2e` label or on
 `main`. `E2E tests` runs on those too, and also **automatically on any PR that changes `apps/web/**`,
-`packages/ui/**` or `e2e/**`** (the `Detect E2E-relevant changes` job in `test.yml`); add the `e2e` label
+`packages/ui/**`, `packages/module-chat/src/ui/**`, `e2e/**`, the root `package.json`, `bun.lock`
+or the test workflow itself** (the `Detect E2E-relevant changes` job in `test.yml`); add the `e2e` label
 for a change outside those paths that the Playwright suite exercises (API, runtime).
 The same rule applies to any check added later: require it only once it is observed reporting on an
 ordinary PR. `Dependency Audit` meets it: it triggers on `pull_request` like `Secret Scanning`, so it

@@ -485,7 +485,7 @@ jobs:
         run: |
           changed=$(git diff --name-only HEAD^1 HEAD)
           printf 'Changed files:\n%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -qE '^(apps/web|packages/ui|e2e)/'; then
+          if grep -qE '^(apps/web/|packages/ui/|packages/module-chat/src/ui/|e2e/|package\.json$|bun\.lock$|\.github/workflows/test\.yml$)' <<< "$changed"; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -495,7 +495,7 @@ jobs:
     name: E2E tests
     needs: e2e-changes
     # Label-OR-main like the other heavy jobs, plus every PR touching the web
-    # app, the UI package or the specs themselves (a UI change broke 16 specs on
+    # app, shared/chat UI, their dependencies or the specs themselves (a UI change broke 16 specs on
     # main while this ran on the label alone). `!cancelled()` so the job still
     # evaluates when `e2e-changes` is skipped (push) or failed (run anyway).
     if: >-
