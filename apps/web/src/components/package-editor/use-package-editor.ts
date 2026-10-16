@@ -58,7 +58,6 @@ export function usePackageEditor({
   tab,
   onTabRequest,
   validate,
-  onManifestReplace,
 }: {
   type: EditablePackageType;
   initialState: EditorState;
@@ -67,8 +66,6 @@ export function usePackageEditor({
   tab?: PackageEditorTab;
   onTabRequest?: (tab: PackageEditorTab) => void;
   validate?: (state: EditorState) => ValidationError;
-  /** The manifest was replaced whole (discard, raw JSON): for state an editor keeps beside it. */
-  onManifestReplace?: (manifest: Record<string, unknown>) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const [activeTab, setActiveTab] = useEditorTab(tab, onTabRequest);
@@ -92,12 +89,10 @@ export function usePackageEditor({
 
   const replaceManifest = (manifest: Record<string, unknown>) => {
     setState((s) => ({ ...s, manifest }));
-    onManifestReplace?.(manifest);
   };
 
   const discard = () => {
     setState(initialState);
-    onManifestReplace?.(initialState.manifest);
     setError(null);
     bumpJsonKey();
   };

@@ -45,7 +45,7 @@ import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
-import { orgLogoDeletionJob } from "./org-logo.ts";
+import { orgLogoDeletionJob, logoImageVersion } from "./org-logo.ts";
 import { orgApiVersionCache } from "./org-settings-cache.ts";
 import { clearResolvedModelCache } from "./resolved-model-cache.ts";
 import {
@@ -794,7 +794,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // FK inserts then either commit before this snapshot or wait until the
     // organization is gone; no child can disappear without an outbox job.
     const [lockedOrg] = await tx
-      .select({ id: organizations.id })
+      .select({ id: organizations.id, logo: organizations.logo })
       .from(organizations)
       .where(eq(organizations.id, orgId))
       .limit(1)
@@ -836,9 +836,8 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // cannot purge another org's or the system catalog's artifacts even though
     // `agent-packages` keys are not org-prefixed (see the module doc).
     storageJobs.push(...(await orgPackageStorageDeletionJobs(tx, orgId, "org_deleted")));
-    // The logo image, whether or not one was ever uploaded: an org id is never reused,
-    // so the key can hold no successor's bytes.
-    storageJobs.push(orgLogoDeletionJob(orgId, "org_deleted"));
+    const logoVersion = logoImageVersion(lockedOrg.logo);
+    if (logoVersion) storageJobs.push(orgLogoDeletionJob(orgId, logoVersion, "org_deleted"));
     await enqueueStorageDeletion(tx, storageJobs);
 
     // run_logs → runs (cascade exists, but org_id FK needs manual delete)

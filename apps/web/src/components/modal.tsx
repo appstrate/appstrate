@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@appstrate/ui/components/dialog";
 import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
+import { useDialogFocus } from "../hooks/use-dialog-focus";
 
 interface ModalProps {
   onClose: () => void;
@@ -31,9 +32,11 @@ export function Modal({
   actions,
   className,
 }: ModalProps) {
+  const focus = useDialogFocus();
   return (
     <Dialog open onOpenChange={(v) => !v && !preventClose && onClose()}>
       <DialogContent
+        {...focus}
         className={className}
         onEscapeKeyDown={keepOpenWhileRenaming}
         {...(description ? {} : { "aria-describedby": undefined })}

@@ -35,7 +35,12 @@ import {
   cleanupExpiredFiles,
 } from "../../../src/services/files.ts";
 import { deleteOrganization } from "../../../src/services/organizations.ts";
-import { ORG_LOGO_BUCKET, orgLogoKey } from "../../../src/services/org-logo.ts";
+import {
+  ORG_LOGO_BUCKET,
+  orgLogoKey,
+  logoImageVersion,
+  setOrgLogo,
+} from "../../../src/services/org-logo.ts";
 import { createEndUser, deleteEndUser } from "../../../src/services/end-users.ts";
 import { createSpace, deleteSpace } from "../../../src/services/spaces.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
@@ -342,6 +347,12 @@ describe("storage-deletion outbox", () => {
       .where(eq(uploads.id, up.id));
     const { bucket: upBucket, inKey: upKey } = split(upRow!.storageKey);
 
+    await setOrgLogo(scope.orgId, { image: new TextEncoder().encode("RIFF0000WEBP") });
+    const [logoOrg] = await db
+      .select({ logo: organizations.logo })
+      .from(organizations)
+      .where(eq(organizations.id, scope.orgId));
+    const logoKey = orgLogoKey(scope.orgId, logoImageVersion(logoOrg!.logo)!);
     await deleteOrganization(scope.orgId);
 
     // Org (and its cascade) gone.
@@ -375,12 +386,12 @@ describe("storage-deletion outbox", () => {
     expect(runKeys.has(`${runId}.afps`)).toBe(true);
     expect(runKeys.has(`${runId}/manifest.json`)).toBe(true);
 
-    // The logo image, enqueued whether or not one was ever uploaded.
+    // The exact immutable logo version is enqueued with the cascade.
     const logoJob = await db
       .select()
       .from(storageDeletionJobs)
       .where(eq(storageDeletionJobs.bucket, ORG_LOGO_BUCKET));
-    expect(logoJob.map((j) => j.storageKey)).toEqual([orgLogoKey(scope.orgId)]);
+    expect(logoJob.map((j) => j.storageKey)).toEqual([logoKey]);
     expect(logoJob[0]!.reason).toBe("org_deleted");
   });
 
