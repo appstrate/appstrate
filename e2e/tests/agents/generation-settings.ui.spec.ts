@@ -33,12 +33,10 @@ const HIGH = "Élevé";
 const REASONING_INHERIT = "Par défaut (Moyen)";
 
 /**
- * The reasoning select. The model, temperature and reasoning selects carry no
- * accessible name of their own (the row's label is plain text beside them), so
- * it is the one whose value is either of the two states this test moves between.
+ * Find the shared reasoning select by its accessible label.
  */
 function reasoningSelect(page: Page) {
-  return page.getByRole("combobox").filter({ hasText: /^(Par défaut \(Moyen\)|Élevé)$/ });
+  return page.getByRole("combobox", { name: "Niveau de raisonnement", exact: true });
 }
 
 async function openModelSection(page: Page) {
@@ -53,6 +51,41 @@ function waitForModelPatch(page: Page, scope: string, name: string) {
       decodeURIComponent(new URL(response.url()).pathname) === `/api/agents/${scope}/${name}/model`,
   );
 }
+
+test("the shared temperature select preserves an exact saved value, zero, and inheritance", async ({
+  authedPage: page,
+  apiClient,
+  browserCtx,
+}) => {
+  const scope = `@${browserCtx.org.orgSlug}`;
+  const name = `temperature-${Date.now().toString(36)}`;
+  await createAgent(apiClient, scope, name);
+  const seeded = await apiClient.patch(`/agents/${scope}/${name}/model`, {
+    modelId: null,
+    generation: { temperature: 0.37, reasoning_level: "off" },
+  });
+  expect(seeded.status()).toBe(200);
+  await page.goto(`/agents/${scope}/${name}?agentSettings=model#settings`);
+  const temperature = page.getByRole("combobox", { name: "Température", exact: true });
+  await expect(temperature).toHaveText("0.37");
+  const saved = waitForModelPatch(page, scope, name);
+  await temperature.click();
+  await page.getByRole("option", { name: "0", exact: true }).click();
+  const response = await saved;
+  expect(response.status()).toBe(200);
+  expect(response.request().postDataJSON().generation).toEqual({
+    temperature: 0,
+    reasoning_level: "off",
+  });
+  await page.reload();
+  await expect(temperature).toHaveText("0");
+  const inherited = waitForModelPatch(page, scope, name);
+  await temperature.click();
+  await page.getByRole("option", { name: "Valeur du fournisseur", exact: true }).click();
+  const cleared = await inherited;
+  expect(cleared.status()).toBe(200);
+  expect(cleared.request().postDataJSON().generation).toEqual({ reasoning_level: "off" });
+});
 
 test("an agent's reasoning level set in the UI persists across a reload and on the wire", async ({
   authedPage: page,

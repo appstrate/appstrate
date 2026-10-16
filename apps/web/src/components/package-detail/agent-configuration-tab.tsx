@@ -37,7 +37,7 @@ import { SettingsSkeleton } from "../loading-skeletons";
 import { SettingRow } from "../settings/setting-row";
 import { SaveFeedback } from "../settings/save-feedback";
 import { InputFieldRow } from "../settings/input-field-row";
-import { GenerationSettingRows } from "../model-generation-rows";
+import { ModelGenerationFields } from "../model-generation-fields";
 
 // ─── Input Settings Section ─────────────────────────────────────────
 
@@ -285,9 +285,9 @@ function ModelSectionEditor({
         />
       </SettingRow>
 
-      <GenerationSettingRows
+      <ModelGenerationFields
         model={resolvedModel}
-        generation={generation}
+        value={generation}
         disabled={setAgentModel.isPending}
         onChange={(nextGeneration) => {
           setGeneration(nextGeneration);

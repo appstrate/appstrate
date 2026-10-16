@@ -23,7 +23,6 @@ import type { ConnectionSet } from "../lib/connection-set";
 import { inheritedEntry } from "../lib/run-launch";
 import type { RunOverridesValue } from "../lib/schedule-payload";
 import { ModelGenerationFields } from "./model-generation-fields";
-import { GenerationSettingRows } from "./model-generation-rows";
 import { SettingRow } from "./settings/setting-row";
 import {
   reconcileModelGenerationSettings,
@@ -232,9 +231,9 @@ export function RunOverridesPanel({
       )}
 
       {orgModels && orgModels.length > 0 && layout === "settings" && (
-        <GenerationSettingRows
+        <ModelGenerationFields
           model={selectedModel}
-          generation={value.generation_config_override ?? {}}
+          value={value.generation_config_override ?? {}}
           inheritLabels={{
             ...(persistedGenerationConfig?.temperature != null
               ? { temperature: t("schedule.settings.inheritAgent", { ns: "agents" }) }

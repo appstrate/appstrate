@@ -294,6 +294,12 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 
 A `Select` never holds hundreds of entries.
 
+Temperature and reasoning use the same `ModelGenerationControls` (`packages/ui`):
+two labelled `Field` + `Select` controls in agent settings, schedules, launches and chat.
+Temperature offers 0–1 in steps of 0.1 and preserves an existing value between steps;
+zero is not inheritance. Reasoning offers the model's supported levels. An inherited
+value removes the override rather than writing a client sentinel.
+
 **The model picker** shows only what the PERSON can use, grouped by who pays, in this
 order: « <key> · Clé org » (the organization's keys, named after the key or, for someone who
 cannot read it, its provider: « Mistral · Clé org »), « <credential> · Clé perso » or
