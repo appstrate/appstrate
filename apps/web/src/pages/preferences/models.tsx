@@ -139,6 +139,7 @@ export function PreferencesModelsPage() {
       <p className="text-muted-foreground mb-4 text-sm">{t("modelCredentials.description")}</p>
 
       <ProvidersTable
+        tableId="own-model-keys"
         label={t("preferences.tabModels")}
         rows={rows}
         showType

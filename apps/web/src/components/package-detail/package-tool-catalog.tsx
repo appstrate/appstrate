@@ -139,6 +139,7 @@ export function PackageToolCatalog({
         onReset={list.reset}
       />
       <DataTable
+        tableId="package-tools"
         label={t("manifest.tools")}
         columns={columns}
         rows={rows}

@@ -44,6 +44,7 @@ const COLUMNS: DataColumn<Row>[] = [
 function table(props: Partial<Parameters<typeof DataTable<Row>>[0]> = {}) {
   return render(
     <DataTable
+      tableId="test-table"
       label="Essai"
       columns={COLUMNS}
       rows={ROWS}
@@ -209,14 +210,24 @@ describe("resizing", () => {
     expect([...html.matchAll(/role="separator"/g)]).toHaveLength(1);
   });
 
-  it("applies the width the reader chose, keyed on the table's label", () => {
-    storage.setItem("appstrate-column-widths-Mesuré", JSON.stringify({ name: 321 }));
-    expect(table({ label: "Mesuré" })).toContain("width:321px");
-    expect(table({ label: "Autre" })).not.toContain("width:321px");
+  it("keeps the chosen width when the table's accessible label changes language", () => {
+    storage.setItem("appstrate-column-widths-measured", JSON.stringify({ name: 321 }));
+    const french = table({ tableId: "measured", label: "Mesuré" });
+    const english = table({ tableId: "measured", label: "Measured" });
+    expect(french).toContain('aria-label="Mesuré"');
+    expect(english).toContain('aria-label="Measured"');
+    expect(french).toContain("width:321px");
+    expect(english).toContain("width:321px");
+  });
+
+  it("isolates tables even when their accessible labels are identical", () => {
+    storage.setItem("appstrate-column-widths-first", JSON.stringify({ name: 345 }));
+    expect(table({ tableId: "first", label: "Packages" })).toContain("width:345px");
+    expect(table({ tableId: "second", label: "Packages" })).not.toContain("width:345px");
   });
 
   it("never goes under the declared width", () => {
-    storage.setItem("appstrate-column-widths-Étroit", JSON.stringify({ when: 10 }));
-    expect(table({ label: "Étroit" })).toContain("width:96px");
+    storage.setItem("appstrate-column-widths-narrow", JSON.stringify({ when: 10 }));
+    expect(table({ tableId: "narrow" })).toContain("width:96px");
   });
 });

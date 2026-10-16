@@ -73,6 +73,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
 
       <div className="mb-4">
         <DataTable
+          tableId="integration-pins"
           tiered
           label={t("integration.admin.exceptions.title")}
           columns={columns}

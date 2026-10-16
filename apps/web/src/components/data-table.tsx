@@ -79,6 +79,8 @@ type DataColumnNature =
 export type DataColumn<T> = DataColumnBase<T> & DataColumnNature;
 
 interface DataTableProps<T> extends CollectionState {
+  /** Stable preference key, independent of the translated accessible label. */
+  tableId: string;
   columns: DataColumn<T>[];
   rows: T[];
   rowKey: (row: T) => string;
@@ -228,6 +230,7 @@ function ResizeHandle({
 }
 
 export function DataTable<T>({
+  tableId,
   columns: declared,
   rows,
   rowKey,
@@ -246,7 +249,7 @@ export function DataTable<T>({
   const navigate = useNavigate();
   // The width the reader chose, and the one being dragged until it is let go. A column given a
   // width stops sharing the room: it is exactly that wide.
-  const stored = useColumnWidths(label);
+  const stored = useColumnWidths(tableId);
   const [dragged, setDragged] = useState<{ id: string; width: number } | null>(null);
   const columns = declared.map((column) => {
     const width = dragged?.id === column.id ? dragged.width : stored.widths[column.id];

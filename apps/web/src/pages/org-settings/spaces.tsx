@@ -89,6 +89,7 @@ export function OrgSettingsSpacesPage() {
       <SettingsPageActions actions={[create]} />
 
       <DataTable
+        tableId="spaces"
         label={t("common:switcher.workspacesColumn")}
         columns={columns}
         rows={spaces ?? []}

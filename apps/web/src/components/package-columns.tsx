@@ -22,55 +22,54 @@ import { CellEmpty, CellText } from "./table-cells";
 import { useOrg } from "../hooks/use-org";
 import type { CardItem } from "../lib/package-card-item";
 
-/**
- * The column set, as a value the caller holds — see `useRunColumns` on why.
- *
- * @param holds What the list contains. Only an AGENT can be running or be run,
- * so on any other list the `state` column would be a column of em dashes and
- * the actions column empty: they are left out. A column that can never say
- * anything is not a column.
- */
+/** The package identity shared by the index, usage and catalogue tables. */
+export function usePackageNameColumn(): DataColumn<CardItem> {
+  const { t } = useTranslation(["agents", "common"]);
+  return {
+    id: "name",
+    header: t("list.column.name"),
+    width: 188,
+    elastic: true,
+    cell: (item) => (
+      <div className="flex min-w-0 items-center gap-3">
+        {item.identity && (
+          <PackageIcon
+            type="agent"
+            icon={item.identity.icon}
+            color={item.identity.color}
+            className="size-8 rounded-md"
+            iconClassName="size-4"
+          />
+        )}
+        {item.type === "integration" && (
+          <PackageIcon type="integration" icon={item.logo} size="sm" />
+        )}
+        <div className="flex min-w-0 flex-col">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate font-medium">{item.displayName}</span>
+            <CountBadge
+              count={item.unreadCount ?? 0}
+              label={t("dashboard.unreadRuns", { count: item.unreadCount ?? 0 })}
+              className="relative z-10 shrink-0"
+            />
+          </span>
+          {/* One line, where the card gives two: at this density a description
+                is there to tell two neighbours apart, not to be read. */}
+          {item.description && <CellText>{item.description}</CellText>}
+        </div>
+      </div>
+    ),
+  };
+}
+
+/** Only agents have a run state and a run action. */
 export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
   const { t } = useTranslation(["agents", "common"]);
+  const name = usePackageNameColumn();
   const runnable = holds === "agent";
   const origin = useCatalogueOriginColumn<CardItem>(useOrg().currentOrg?.name ?? "");
-
   const columns: DataColumn<CardItem>[] = [
-    {
-      id: "name",
-      header: t("list.column.name"),
-      width: 188,
-      elastic: true,
-      cell: (item) => (
-        <div className="flex min-w-0 items-center gap-3">
-          {item.identity && (
-            <PackageIcon
-              type="agent"
-              icon={item.identity.icon}
-              color={item.identity.color}
-              className="size-8 rounded-md"
-              iconClassName="size-4"
-            />
-          )}
-          {item.type === "integration" && (
-            <PackageIcon type="integration" icon={item.logo} size="sm" />
-          )}
-          <div className="flex min-w-0 flex-col">
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate font-medium">{item.displayName}</span>
-              <CountBadge
-                count={item.unreadCount ?? 0}
-                label={t("dashboard.unreadRuns", { count: item.unreadCount ?? 0 })}
-                className="relative z-10 shrink-0"
-              />
-            </span>
-            {/* One line, where the card gives two: at this density a description
-                is there to tell two neighbours apart, not to be read. */}
-            {item.description && <CellText>{item.description}</CellText>}
-          </div>
-        </div>
-      ),
-    },
+    name,
     origin,
     {
       id: "keywords",

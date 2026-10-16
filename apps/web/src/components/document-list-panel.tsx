@@ -144,6 +144,7 @@ export function DocumentListPanel({
           />
         ) : (
           <DataTable
+            tableId="documents"
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
             tiered={tiered}

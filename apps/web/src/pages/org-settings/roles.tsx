@@ -217,6 +217,7 @@ export function OrgSettingsRolesPage() {
             <>
               <SettingsGroup title={t("roles.presetsSection")}>
                 <DataTable
+                  tableId="preset-roles"
                   label={t("roles.presetsSection")}
                   columns={presetColumns}
                   rows={presets}
@@ -229,6 +230,7 @@ export function OrgSettingsRolesPage() {
 
               <SettingsGroup title={t("roles.customSection")}>
                 <DataTable
+                  tableId="custom-roles"
                   label={t("roles.customSection")}
                   columns={customColumns}
                   rows={custom}

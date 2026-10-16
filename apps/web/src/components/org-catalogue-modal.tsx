@@ -79,6 +79,8 @@ import { CatalogueAddButton } from "./catalogue-add-button";
 import { PageActionsMenu } from "./page-actions-menu";
 import { PanelLayout } from "./panel-layout";
 import { PackageCollection } from "./package-collection";
+import { usePackageNameColumn } from "./package-columns";
+import { useColumnVisibility } from "../stores/column-visibility-store";
 import type { FilterSpec } from "./list-toolbar";
 import {
   useCatalogueActionsColumn,
@@ -97,12 +99,6 @@ const TITLE_KEY: Record<PackageType, string> = {
   "mcp-server": "packages.type.mcp-servers",
   integration: "packages.type.integrations",
 };
-
-/**
- * Columns the catalogue drops. `origin` is drawn again with each package's home
- * space under its provider, and `keywords` goes because the library carries none.
- */
-const CATALOGUE_DROPS = ["state", "actions", "origin", "keywords"];
 
 /** The parameter that qualifies the sheet's `?package=`, and leaves with it. */
 const SHEET_COMPANIONS = [CATALOGUE_VERSION_PARAM];
@@ -364,6 +360,9 @@ export function OrgCatalogueModal({
   };
   const previewedItem = previewed ? toCardItem(previewed) : undefined;
 
+  const { columns: nameColumns, menu: columnMenu } = useColumnVisibility(`catalogue-${active}`, [
+    usePackageNameColumn(),
+  ]);
   const selectColumn = useCatalogueSelectColumn({
     selected,
     allSelected,
@@ -622,6 +621,7 @@ export function OrgCatalogueModal({
         />
       ) : (
         <PackageCollection
+          columnMenu={columnMenu}
           items={offered}
           isLoading={isLoading || (active === "integration" && integrationsQuery.isLoading)}
           error={
@@ -666,10 +666,9 @@ export function OrgCatalogueModal({
           extraFilters={discovering ? [] : [stateFilter]}
           // A package this space has not activated cannot be run from here.
           cardRun={false}
-          // A tick is a table affordance; cards carry their own deed.
-          leadingColumns={view === "table" ? [selectColumn] : []}
-          dropColumns={CATALOGUE_DROPS}
-          trailingColumns={[
+          columns={[
+            selectColumn,
+            ...nameColumns,
             originColumn,
             ...(active === "integration" && execution === "remote" ? [protocolColumn] : []),
             ...spaceColumns,

@@ -77,8 +77,9 @@ they start with `packages/` or `e2e/`.
   per pane), opened by a plain navigation to a path under `OVERLAY_PREFIXES` (`lib/route-access.ts`).
   `App` remembers the last page shown and keeps it rendered underneath (the
   dashboard when the app opened on the overlay); closing returns to it
-  (`lib/modal-route.ts`). Nothing rides in the history state. **The dialog opens
-  once.** Everything an overlay goes through on a cold address — the skeleton while
+  (`lib/modal-route.ts`). The background location and its history index are kept in
+  the overlay entry's history state, so reloading restores the background and closing
+  steps back over the overlay's entries. **The dialog opens once.** Everything an overlay goes through on a cold address — the skeleton while
   its chunk or the permissions load (`OverlayPanelSkeleton`), a refusal
   (`PanelMessage`), then the page — happens inside that one box; a skeleton or a
   page that drew a `Dialog` of its own would be unmounted and mounted in turn,
@@ -349,6 +350,10 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   a name has a floor that fits a usual one. Every column is drawn and the table
   scrolls sideways, unless the table is `tiered` (a narrow panel, a modal, a detail
   tab): then a READ column waits for room by its `tier`.
+  Its required `tableId` is the stable key for column widths, independent of its
+  translated accessible `label`; occurrences of the same table share that key.
+  `PackageCollection` callers compose their columns and visibility menu directly,
+  sharing `usePackageNameColumn` for the identity column.
 - **Three rules for every table** (both live in `DataTable`, no caller opts in):
   1. **A column that can be acted on never disappears.** A column declares what it
      is in its definition: a READ column (text, badge, date) may carry a `tier`

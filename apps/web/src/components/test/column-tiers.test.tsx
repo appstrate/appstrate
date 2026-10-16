@@ -11,7 +11,7 @@ import type { IntegrationManifestView } from "../../hooks/use-integrations.ts";
 import type { DataColumn } from "../data-table.tsx";
 import { useRunColumns } from "../run-columns.tsx";
 import { useScheduleColumns } from "../schedule-columns.tsx";
-import { usePackageColumns } from "../package-columns.tsx";
+import { usePackageColumns, usePackageNameColumn } from "../package-columns.tsx";
 import { useProxyColumns } from "../../pages/org-settings/proxy-columns.tsx";
 import {
   useConnectionColumns,
@@ -61,9 +61,7 @@ function columnsFrom<T>(useColumns: () => DataColumn<T>[]): Track[] {
 }
 
 const SETS = {
-  // Composed exactly as `OrgCatalogueModal` composes it: the tick, the list's
-  // own set minus what a catalogue cannot answer, then provenance, one column
-  // per space, and the one deed.
+  // The catalogue composes its identity, placement controls and actions directly.
   packageCatalogue: () => {
     return columnsFrom(() => [
       useCatalogueSelectColumn({
@@ -73,9 +71,7 @@ const SETS = {
         onToggle: () => {},
         onToggleAll: () => {},
       }),
-      ...usePackageColumns("agent").filter(
-        (c) => !["state", "actions", "origin", "keywords"].includes(c.id),
-      ),
+      usePackageNameColumn(),
       // The organization view, the wider of the two: provenance, then one
       // column per space the caller reaches — three here, which is what the
       // arithmetic below has to hold.

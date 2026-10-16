@@ -39,6 +39,7 @@ export function WebhooksPage() {
       <SettingsPageActions actions={[create]} />
 
       <DataTable
+        tableId="webhooks"
         label={t("settings:webhooks.pageTitle")}
         columns={columns}
         rows={webhooks ?? []}

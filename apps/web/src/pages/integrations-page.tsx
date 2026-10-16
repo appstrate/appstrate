@@ -179,6 +179,7 @@ export function IntegrationsPage() {
       />
 
       <DataTable
+        tableId="integrations"
         label={t("integrations.tableLabel")}
         columns={columns}
         rows={shown}

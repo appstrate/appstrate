@@ -7,6 +7,7 @@ import { packageDetailPath } from "../lib/package-paths";
 import type { CardItem } from "../lib/package-card-item";
 
 export function PackagesTable({
+  tableId,
   items,
   columns,
   rowAction,
@@ -14,8 +15,9 @@ export function PackagesTable({
   surface,
   ...state
 }: {
+  tableId: string;
   items: CardItem[];
-  /** From {@link usePackageColumns}, minus whatever the reader hid. */
+  /** The caller's columns, minus whatever the reader hid. */
   columns: DataColumn<CardItem>[];
   /**
    * Read the package HERE rather than on its own page. The catalogue does
@@ -35,6 +37,7 @@ export function PackagesTable({
   // same props and branch on nothing.
   return (
     <DataTable
+      tableId={tableId}
       label={label ?? t("list.tableLabel")}
       columns={columns}
       rows={items}

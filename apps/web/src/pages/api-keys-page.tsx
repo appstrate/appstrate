@@ -64,6 +64,7 @@ export function ApiKeysPage() {
       />
 
       <DataTable
+        tableId="api-keys"
         label={t("settings:orgSettings.tabApiKeys")}
         columns={columns}
         rows={apiKeys ?? []}
