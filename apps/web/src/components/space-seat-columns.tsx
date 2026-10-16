@@ -69,6 +69,7 @@ export function useSpaceSeatColumns<Row>({
       cell: (row) =>
         editable(row) ? (
           <ManualSetting
+            compact
             value={memberRoleValue(seat(row).role, roles) ?? `current:${seat(row).role?.key}`}
             disabled={isChangingRole}
             onSave={(value) => onChangeRole(row, value)}

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   useConnectionPicker,
   type ConnectionPickerOptions,
+  type ConnectionPicker,
   type ConnectionPickerPersistence,
 } from "./use-connection-picker";
 import { useIntegrationDetail, useIntegrationReadinessEntry } from "../../hooks/use-integrations";
@@ -61,15 +62,65 @@ type LoadedPickerProps = Omit<ConnectionPickerOptions, "persistence"> & {
 };
 
 function LoadedPicker({ persistence = DEFAULT_PERSISTENCE, ...options }: LoadedPickerProps) {
-  const { t } = useTranslation(["agents", "settings"]);
   const { integrationId, agentPackageId, version } = options;
   const picker = useConnectionPicker({ ...options, persistence });
   const { isError } = useIntegrationReadinessEntry(integrationId, agentPackageId, version);
 
-  // Failure first: `isPending` is false once a query failed, so a missing verdict alone would spin forever.
-  if (isError) return <FailedPicker integrationId={integrationId} />;
-  if (!picker) return <LoadingPicker integrationId={integrationId} />;
+  if (!picker)
+    return isError ? (
+      <FailedPicker integrationId={integrationId} />
+    ) : (
+      <LoadingPicker integrationId={integrationId} />
+    );
+  return (
+    <ConnectionPickerForm
+      integrationId={integrationId}
+      picker={picker}
+      failed={isError}
+      member={persistence.mode === "pin"}
+    />
+  );
+}
 
+/** Keep a pending member edit reachable even when its new selection has no picker to render. */
+export function ConnectionPickerForm({
+  integrationId,
+  picker,
+  failed,
+  member,
+}: {
+  integrationId: string;
+  picker: ConnectionPicker;
+  failed: boolean;
+  member: boolean;
+}) {
+  return (
+    <div>
+      <PickerState integrationId={integrationId} picker={picker} failed={failed} />
+      {member && (
+        <ManualSave
+          dirty={picker.memberDraft.dirty}
+          pending={picker.busy}
+          saveDisabled={failed || picker.lockedBy !== null}
+          onSave={picker.saveMember}
+          onDiscard={picker.memberDraft.reset}
+        />
+      )}
+    </div>
+  );
+}
+
+function PickerState({
+  integrationId,
+  picker,
+  failed,
+}: {
+  integrationId: string;
+  picker: ConnectionPicker;
+  failed: boolean;
+}) {
+  const { t } = useTranslation(["agents", "settings"]);
+  if (failed) return <FailedPicker integrationId={integrationId} />;
   const {
     canAddConnection,
     lockedBy,
@@ -115,14 +166,7 @@ function LoadedPicker({ persistence = DEFAULT_PERSISTENCE, ...options }: LoadedP
   return (
     <div data-testid={`member-picker-${integrationId}`}>
       <PickerMenu integrationId={integrationId} picker={picker} />
-      {persistence.mode === "pin" && (
-        <ManualSave
-          dirty={picker.memberDraft.dirty}
-          pending={picker.busy}
-          onSave={picker.saveMember}
-          onDiscard={picker.memberDraft.reset}
-        />
-      )}
+
       {unavailableIds.length > 0 && (
         <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
           {t(

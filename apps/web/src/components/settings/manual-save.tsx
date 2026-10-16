@@ -10,12 +10,16 @@ import { errorMessage } from "../../lib/mutation-error";
 
 export function ManualSave({
   dirty,
+  compact = false,
   pending = false,
+  saveDisabled = false,
   onSave,
   onDiscard,
 }: {
   dirty: boolean;
+  compact?: boolean;
   pending?: boolean;
+  saveDisabled?: boolean;
   onSave: () => Promise<void>;
   onDiscard: () => void;
 }) {
@@ -30,7 +34,7 @@ export function ManualSave({
     setError(null);
     const work = onSave()
       .catch((cause: unknown) => {
-        setError(cause);
+        if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(cause);
         throw cause;
       })
       .finally(() => {
@@ -45,8 +49,10 @@ export function ManualSave({
   return (
     <>
       <SaveBar
+        compact={compact}
         message={t("unsaved.title")}
         pending={saving || pending}
+        saveDisabled={saveDisabled}
         onDiscard={() => {
           setError(null);
           onDiscard();
@@ -60,7 +66,11 @@ export function ManualSave({
           {errorMessage(error)}
         </p>
       )}
-      <UnsavedChangesModal blocker={blocker} onSaveDraft={save} saveLabel={t("btn.save")} />
+      <UnsavedChangesModal
+        blocker={blocker}
+        onSaveDraft={saveDisabled ? undefined : save}
+        saveLabel={t("btn.save")}
+      />
     </>
   );
 }
@@ -70,9 +80,11 @@ export function ManualSetting<T>({
   value,
   onSave,
   children,
+  compact = false,
   disabled = false,
 }: {
   value: T;
+  compact?: boolean;
   onSave: (value: T) => Promise<unknown>;
   children: (value: T, onChange: (next: T) => void, pending: boolean) => ReactNode;
   disabled?: boolean;
@@ -92,7 +104,14 @@ export function ManualSetting<T>({
   return (
     <div className="w-full min-w-0">
       {children(draft.value, draft.set, pending || disabled)}
-      <ManualSave dirty={draft.dirty} pending={pending} onSave={save} onDiscard={draft.reset} />
+      <ManualSave
+        compact={compact}
+        dirty={draft.dirty}
+        pending={pending}
+        saveDisabled={disabled}
+        onSave={save}
+        onDiscard={draft.reset}
+      />
     </div>
   );
 }

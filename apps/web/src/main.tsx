@@ -10,6 +10,7 @@ import { App } from "./app";
 import { TranslatedUiLabels } from "./components/translated-ui-labels";
 import { queryClient } from "./lib/query-client";
 import { startAuthBootstrap } from "./hooks/use-auth";
+import { installUnsavedChangesGuard } from "./hooks/use-unsaved-changes";
 import { sessionExpected } from "./lib/session-read";
 import { primeOrgList } from "./hooks/use-org";
 import { primeSpaceList } from "./hooks/use-spaces";
@@ -17,6 +18,8 @@ import { clearChunkReloadFlag, reloadOnceForChunkError } from "./lib/chunk-reloa
 import { warmChunk, warmupPending } from "./lib/chunk-warmup";
 import "./stores/theme-store";
 import "./styles.css";
+
+installUnsavedChangesGuard();
 
 // A failed dynamic-import preload is typically a stale hashed chunk after a redeploy:
 // hard-reload once (the sessionStorage guard in reloadOnceForChunkError prevents loops).

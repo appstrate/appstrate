@@ -25,8 +25,7 @@ import { SettingsGroup, SettingRow } from "../../components/settings/setting-row
 import { ApiError } from "../../api/errors";
 import { toastError } from "../../lib/mutation-error";
 import {
-  domainsChanged,
-  spaceUpdateBody,
+  spaceSettingsUpdate,
   visibilityChangeNeedsConfirmation,
 } from "../../lib/space-update-body";
 
@@ -109,20 +108,14 @@ function GeneralForm({
     draft.set((previous) => ({ ...previous, domains: next }));
   const save = async () => {
     const sent = draft.value;
-    const body = {
-      ...(sent.name !== space.name ? spaceUpdateBody({ field: "name", value: sent.name }) : {}),
-      ...(domainsChanged(domains, sent.domains)
-        ? spaceUpdateBody({ field: "domains", value: sent.domains })
-        : {}),
-      ...(!space.personal && sent.visibility !== space.visibility
-        ? spaceUpdateBody({ field: "visibility", value: sent.visibility })
-        : {}),
-      ...(!space.personal && sent.defaultRole !== space.default_role
-        ? spaceUpdateBody({ field: "defaultRole", value: sent.defaultRole })
-        : {}),
-    };
-    await updateMutation.mutateAsync({ params: { path: { id: spaceId } }, body });
-    draft.accept(sent);
+    const body = spaceSettingsUpdate(draft.baseline, sent, space.personal);
+    const saved = await updateMutation.mutateAsync({ params: { path: { id: spaceId } }, body });
+    draft.accept(sent, {
+      name: saved.name,
+      domains: saved.settings?.allowedRedirectDomains ?? [],
+      visibility: saved.visibility,
+      defaultRole: saved.default_role,
+    });
   };
 
   return (

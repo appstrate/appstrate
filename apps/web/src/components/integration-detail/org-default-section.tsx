@@ -54,6 +54,8 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
     draft.set({ connection_ids: nextIds, mode: nextMode });
   const save = async () => {
     const sent = draft.value;
+    if (sent.mode !== "choice" && connectionIds.length === 0)
+      throw new Error("connection_required");
     if (sent.mode !== "choice" && sent.connection_ids.length > 0) {
       await upsert.mutateAsync({
         params: { path: { packageId } },
@@ -62,8 +64,8 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
     } else {
       await remove.mutateAsync({ params: { path: { packageId } } });
     }
-    await refetch();
     draft.accept(sent);
+    await refetch();
   };
   const connectionsLabel = t(
     `integration.admin.orgDefault.connection.${mode === "forced" ? "forced" : "default"}`,
@@ -145,7 +147,23 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
           ) : null}
         </div>
       )}
-      <ManualSave dirty={draft.dirty} pending={pending} onSave={save} onDiscard={draft.reset} />
+      {mode !== "choice" && connectionIds.length === 0 && (
+        <p className="text-muted-foreground text-xs">
+          {t("integration.admin.orgDefault.pickBeforeMode")}
+        </p>
+      )}
+      <ManualSave
+        dirty={draft.dirty}
+        pending={pending}
+        saveDisabled={
+          isLoading ||
+          isError ||
+          connectionsLoading ||
+          (mode !== "choice" && connectionIds.length === 0)
+        }
+        onSave={save}
+        onDiscard={draft.reset}
+      />
     </div>
   );
 }

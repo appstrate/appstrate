@@ -3,7 +3,7 @@
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createIntegration } from "../../helpers/seed.ts";
 
-test("a resized column survives a language change and resets on double-click", async ({
+test("column width and language changes persist only after Save, including a width reset", async ({
   authedPage: page,
   apiClient,
   browserCtx,
@@ -11,6 +11,7 @@ test("a resized column survives a language change and resets on double-click", a
   await createIntegration(apiClient, `@${browserCtx.org.orgSlug}`, `widths-${Date.now()}`);
   await page.goto("/integrations?execution=local");
   await page.getByRole("tab", { name: "Vue tableau", exact: true }).click();
+  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   const table = page.getByRole("table", { name: "Intégrations de l'organisation", exact: true });
   const head = table.locator('th[data-column="name"]');
   await expect(head).toBeVisible();
@@ -28,6 +29,8 @@ test("a resized column survives a language change and resets on double-click", a
       const widths = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, number>;
       return widths.name;
     }, widthKey);
+  expect(await savedWidth()).toBeUndefined();
+  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   await expect.poll(savedWidth).toBeGreaterThan(0);
   const width = await savedWidth();
   await expect(head).toHaveCSS("width", `${width}px`);
@@ -40,6 +43,7 @@ test("a resized column survives a language change and resets on double-click", a
       new URL(response.url()).pathname === "/api/profile",
   );
   await page.getByRole("option", { name: "English", exact: true }).click();
+  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   expect((await savedLanguage).status()).toBe(200);
   await page.goto("/integrations?execution=local");
   const englishHead = page
@@ -47,5 +51,7 @@ test("a resized column survives a language change and resets on double-click", a
     .locator('th[data-column="name"]');
   await expect(englishHead).toHaveCSS("width", `${width}px`);
   await englishHead.getByRole("separator").dblclick();
+  expect(await savedWidth()).toBe(width);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(savedWidth).toBeUndefined();
 });

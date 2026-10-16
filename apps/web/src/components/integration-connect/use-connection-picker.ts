@@ -234,8 +234,8 @@ export function useConnectionPicker(
     const sent = memberDraft.value;
     if (sent === null) await deletePin.mutateAsync({ agentPackageId, integrationId });
     else await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionIds: sent });
-    await invalidateIntegrationQueries(qc);
     memberDraft.accept(sent);
+    await invalidateIntegrationQueries(qc);
   };
 
   const toggle = (connectionId: string) => setDraft(toggleCapped(checkedIds, connectionId));

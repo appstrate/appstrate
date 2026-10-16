@@ -60,6 +60,7 @@ export type {
   OpenFile,
   SelectConversation,
 } from "./runtime-context.ts";
+export type { RenameGuardProps } from "./thread-list.tsx";
 export { ChatConversationList, ChatConversationTitle } from "./thread-list.tsx";
 export { ChatHeadersProvider, SelectConversationProvider } from "./runtime-context.ts";
 import { ModelSelect } from "./model-select.tsx";

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { leavesEditor, type EditorPlace } from "../lib/editor-place";
 import { createNavigationApprovals } from "../lib/navigation-approvals";
@@ -12,7 +12,7 @@ export interface UnsavedBlocker {
 }
 
 export const EditorPlaceContext = createContext<EditorPlace>(() => "");
-type PendingNavigation = { to: string; replace: boolean; state: unknown };
+type PendingNavigation = { to: string; replace: boolean; state: unknown; action?: () => void };
 interface Guard {
   current: () => {
     path: string;
@@ -25,7 +25,31 @@ interface Guard {
 }
 const guards = new Map<symbol, Guard>();
 const approvals = createNavigationApprovals<symbol>();
-let uninstall: (() => void) | null = null;
+let installed = false;
+let changingScope = false;
+
+/** Store scope changes can unmount editors without changing the URL. Guard before mutating stores. */
+export function requestScopeChange(key: string, action: () => void): void {
+  for (const [id, guard] of guards) {
+    const state = guard.current();
+    if (state.dirty && !state.skip && !approvals.has(id, key)) {
+      guard.block({
+        to: key,
+        replace: false,
+        state: null,
+        action: () => requestScopeChange(key, action),
+      });
+      return;
+    }
+  }
+  changingScope = true;
+  try {
+    action();
+  } finally {
+    changingScope = false;
+    approvals.clear();
+  }
+}
 
 /** Undo one Back/Forward before asking whether to leave the mounted editor. */
 export function undoLeavingPop(
@@ -40,12 +64,14 @@ export function undoLeavingPop(
   return `${to.pathname}${to.search}${to.hash}`;
 }
 
-/** All dirty forms share one history interceptor; mounting another cannot overwrite its guard. */
-function install() {
-  if (uninstall) return;
+/** Install before BrowserRouter: a pop must be intercepted before its listener can unmount editors. */
+export function installUnsavedChangesGuard() {
+  if (installed) return;
+  installed = true;
   const push = history.pushState.bind(history);
   const replace = history.replaceState.bind(history);
   const findGuard = (from: URL, to: URL) => {
+    if (changingScope) return null;
     const target = `${to.pathname}${to.search}${to.hash}`;
     for (const [id, guard] of guards) {
       const current = guard.current();
@@ -81,7 +107,7 @@ function install() {
     };
   history.pushState = patch(push, false);
   history.replaceState = patch(replace, true);
-  const pop = () => {
+  const pop = (event: PopStateEvent) => {
     const to = new URL(window.location.href);
     for (const guard of guards.values()) {
       const current = guard.current();
@@ -93,7 +119,10 @@ function install() {
         current.place,
         push,
       );
-      if (target) blocked.guard.block({ to: target, replace: false, state: null });
+      if (target) {
+        event.stopImmediatePropagation();
+        blocked.guard.block({ to: target, replace: false, state: event.state?.usr ?? null });
+      }
       return;
     }
     approvals.clear();
@@ -109,16 +138,8 @@ function install() {
     event.preventDefault();
     event.returnValue = "";
   };
-  window.addEventListener("popstate", pop);
+  window.addEventListener("popstate", pop, true);
   window.addEventListener("beforeunload", unload);
-  uninstall = () => {
-    history.pushState = push;
-    history.replaceState = replace;
-    window.removeEventListener("popstate", pop);
-    window.removeEventListener("beforeunload", unload);
-    approvals.clear();
-    uninstall = null;
-  };
 }
 
 export function useUnsavedChanges(isDirty: boolean): {
@@ -140,10 +161,10 @@ export function useUnsavedChanges(isDirty: boolean): {
     skip: boolean;
   }>({ path: "", state: null, place, dirty: isDirty, skip: false });
   const path = `${location.pathname}${location.search}${location.hash}`;
-  useEffect(() => {
+  useLayoutEffect(() => {
     current.current = { path, state: history.state, place, dirty: isDirty, skip: skip.current };
   }, [path, place, isDirty]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isDirty) {
       skip.current = false;
       return;
@@ -155,10 +176,9 @@ export function useUnsavedChanges(isDirty: boolean): {
         setBlocked(true);
       },
     });
-    install();
     return () => {
       guards.delete(id);
-      if (guards.size === 0) uninstall?.();
+      if (guards.size === 0) approvals.clear();
     };
   }, [id, isDirty]);
   const allowNavigation = useCallback((allowed = true) => {
@@ -170,7 +190,8 @@ export function useUnsavedChanges(isDirty: boolean): {
     setBlocked(false);
     if (!target) return;
     approvals.approve(id, target.to);
-    navigate(target.to, { replace: target.replace, state: target.state });
+    if (target.action) target.action();
+    else navigate(target.to, { replace: target.replace, state: target.state });
   }, [id, navigate]);
   const reset = useCallback(() => {
     pending.current = null;

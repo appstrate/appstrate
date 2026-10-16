@@ -13,6 +13,7 @@ import { ChatConversationTitle, type ChatCan, type ChatTranslate } from "@appstr
 import { useSessions } from "@appstrate/module-chat/unread";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 import { ShellTrailContent } from "@/components/shell-breadcrumb";
+import { ChatRenameGuard } from "./rename-guard";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 export function ChatTitleCrumb({
@@ -43,7 +44,12 @@ export function ChatTitleCrumb({
   }
   return conversationId && title !== null ? (
     <ShellTrailContent>
-      <ChatConversationTitle activeId={conversationId} t={t} can={can} />
+      <ChatConversationTitle
+        activeId={conversationId}
+        t={t}
+        can={can}
+        RenameGuard={ChatRenameGuard}
+      />
     </ShellTrailContent>
   ) : null;
 }

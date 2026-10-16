@@ -64,6 +64,7 @@ export function ConnectionShareEditor({
   if (canShare && scope === "space") {
     return (
       <ManualSetting
+        compact
         value={!!rowSpaceId && sharedSpaceIds.includes(rowSpaceId)}
         disabled={pending || !rowSpaceId}
         onSave={(shared) => (shared ? onShare(rowSpaceId!) : onUnshare(rowSpaceId!))}
@@ -117,6 +118,7 @@ export function ConnectionShareEditor({
                   const selected = sharedSpaceIds.includes(space.id);
                   return (
                     <ManualSetting
+                      compact
                       key={space.id}
                       value={selected}
                       disabled={pending}

@@ -189,6 +189,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 - **Every editable setting is saved manually.** Typing, selecting, checking a box,
   leaving a field, waiting, hiding the page or unmounting never persists an edit.
   `ManualSave` reuses `SaveBar`: show Save / Cancel while the form is dirty.
+  In narrow table cells and shortcut menus, use its compact icon buttons with translated accessible labels.
   `ManualSetting` and `useSettingDraft` hold independent settings; related values
   (input values and locks, model and generation, schedule and connections) share
   one form and one write. Keep API and permission boundaries explicit.

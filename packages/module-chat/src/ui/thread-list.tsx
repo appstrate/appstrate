@@ -20,7 +20,7 @@
  * fill as Studio's, or the two products would not read as one app.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { relativeAge } from "@appstrate/core/format";
@@ -112,14 +112,23 @@ function useNowTick(): number {
  * `t` and `can` arrive as props, not from `useChatHost()`: the shell mounts
  * this list outside `ChatPage`, where the host bag is published.
  */
+export interface RenameGuardProps {
+  dirty: boolean;
+  onSave?: () => Promise<void>;
+}
+
+type RenameGuard = ComponentType<RenameGuardProps>;
+
 export function ChatConversationList({
   activeId,
   t,
   can,
+  RenameGuard,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
+  RenameGuard?: RenameGuard;
 }) {
   const select = useSelectConversation();
   const {
@@ -168,6 +177,7 @@ export function ChatConversationList({
               now={now}
               t={t}
               canWrite={canWrite}
+              RenameGuard={RenameGuard}
             />
           ))}
           {/* A plain button, not a menu row: a menu row closes the phone's
@@ -227,6 +237,7 @@ function ConversationRow({
   now,
   t,
   canWrite,
+  RenameGuard,
 }: {
   session: SessionSummary;
   active: boolean;
@@ -234,6 +245,7 @@ function ConversationRow({
   now: number;
   t: ChatTranslate;
   canWrite: boolean;
+  RenameGuard?: RenameGuard;
 }) {
   const getHeaders = useChatHeaders();
   const select = useSelectConversation();
@@ -259,7 +271,13 @@ function ConversationRow({
   if (editing) {
     return (
       <SidebarMenuItem className="px-2">
-        <RenameInput current={session.title ?? ""} onDone={() => setEditing(false)} onSave={save} />
+        <RenameInput
+          t={t}
+          current={session.title ?? ""}
+          onDone={() => setEditing(false)}
+          onSave={save}
+          RenameGuard={RenameGuard}
+        />
       </SidebarMenuItem>
     );
   }
@@ -356,14 +374,25 @@ function ConversationRow({
  * segment on the same condition, so an unknown conversation costs no segment
  * rather than a segment with a made-up name.
  */
-export function ChatConversationTitle({
+export function ChatConversationTitle(props: {
+  activeId: string | null;
+  t: ChatTranslate;
+  can: ChatCan;
+  RenameGuard?: RenameGuard;
+}) {
+  return <ConversationTitle key={props.activeId} {...props} />;
+}
+
+function ConversationTitle({
   activeId,
   t,
   can,
+  RenameGuard,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
+  RenameGuard?: RenameGuard;
 }) {
   const { editing, setEditing, save } = useInlineRename(activeId ?? "");
   const { data: sessions } = useSessions();
@@ -381,7 +410,13 @@ export function ChatConversationTitle({
 
   if (editing) {
     return (
-      <RenameInput current={session.title ?? ""} onDone={() => setEditing(false)} onSave={save} />
+      <RenameInput
+        t={t}
+        current={session.title ?? ""}
+        onDone={() => setEditing(false)}
+        onSave={save}
+        RenameGuard={RenameGuard}
+      />
     );
   }
   return (
@@ -397,36 +432,75 @@ export function ChatConversationTitle({
   );
 }
 
-/** Inline title editor — commits on Enter/blur, cancels on Escape. */
+/** Inline title editor: explicit Save/Enter, Cancel/Escape; blur never writes. */
 function RenameInput({
   current,
   onDone,
   onSave,
+  t,
+  RenameGuard,
 }: {
   current: string;
   onDone: () => void;
   onSave: (title: string) => Promise<void>;
+  RenameGuard?: RenameGuard;
+  t: ChatTranslate;
 }) {
   const [value, setValue] = useState(current);
-  const done = useRef(false);
-  const finish = (save: boolean) => {
-    if (done.current) return;
-    done.current = true;
-    const next = value.trim();
-    if (save && next && next !== current) void onSave(next);
-    onDone();
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const next = value.trim();
+  const finish = async () => {
+    if (saving || !next || next === current) return;
+    setSaving(true);
+    setFailed(false);
+    try {
+      await onSave(next);
+      onDone();
+    } catch (error) {
+      setFailed(true);
+      throw error;
+    } finally {
+      setSaving(false);
+    }
   };
   return (
-    <Input
-      autoFocus
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={() => finish(true)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") finish(true);
-        else if (e.key === "Escape") finish(false);
-      }}
-      className="h-7 min-w-0 flex-1 px-1.5 py-0.5"
-    />
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+      <Input
+        autoFocus
+        value={value}
+        disabled={saving}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            void finish().catch(() => {});
+          } else if (event.key === "Escape" && !saving) onDone();
+        }}
+        className="h-7 min-w-0 flex-1 px-1.5 py-0.5"
+      />
+      <Button
+        type="button"
+        size="sm"
+        disabled={saving || !next || next === current}
+        onClick={() => void finish().catch(() => {})}
+      >
+        {t("common:btn.save")}
+      </Button>
+      <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={onDone}>
+        {t("common:btn.cancel")}
+      </Button>
+      {RenameGuard && (
+        <RenameGuard
+          dirty={value !== current || saving}
+          onSave={!saving && next && next !== current ? finish : undefined}
+        />
+      )}
+      {failed && (
+        <p role="alert" className="text-destructive w-full text-xs">
+          {t("common:saveFeedback.error")}
+        </p>
+      )}
+    </div>
   );
 }

@@ -206,7 +206,7 @@ export function CataloguePreview({
   onUnpin?: () => void;
   busy: boolean;
   /** Goes through the catalogue's own activation, which asks about integrations first. */
-  onSetActive: (spaceId: string, next: boolean) => void;
+  onSetActive: (spaceId: string, next: boolean) => Promise<unknown>;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { currentOrg } = useOrg();
@@ -277,13 +277,25 @@ export function CataloguePreview({
     return row.home ? t("catalogue.sheet.atHome", { state: base }) : base;
   };
   const switchFor = (row: SheetSpaceRow) => (
-    <Switch
-      checked={row.state === "active"}
+    <ManualSetting
+      compact={mode !== "single"}
+      value={row.state === "active"}
       disabled={busy || !row.mayToggle}
-      aria-label={t("catalogue.spaceSwitch", { package: item.name || item.id, space: row.name })}
-      title={row.refusal ? t(ACTIVATION_REFUSAL_KEY[row.refusal], { ns: "common" }) : undefined}
-      onCheckedChange={(next) => onSetActive(row.id, next === true)}
-    />
+      onSave={(next) => onSetActive(row.id, next)}
+    >
+      {(value, onChange, pending) => (
+        <Switch
+          checked={value}
+          disabled={pending}
+          aria-label={t("catalogue.spaceSwitch", {
+            package: item.name || item.id,
+            space: row.name,
+          })}
+          title={row.refusal ? t(ACTIVATION_REFUSAL_KEY[row.refusal], { ns: "common" }) : undefined}
+          onCheckedChange={onChange}
+        />
+      )}
+    </ManualSetting>
   );
   // ── Imposed on the chat (skills only, `lib/catalogue-sheet`) ──
   const setChatEnforced = useSetChatEnforced();
@@ -309,6 +321,7 @@ export function CataloguePreview({
       setChatEnforced.variables.spaceId === row.id;
     return (
       <ManualSetting
+        compact={mode !== "single"}
         value={verdict.checked}
         disabled={verdict.disabled || pending}
         onSave={(next) =>
@@ -385,7 +398,13 @@ export function CataloguePreview({
           body={missingText(offer.id) ?? t("catalogue.sheet.offerCredentials")}
           action={
             offer.mayToggle && (
-              <Button size="sm" disabled={busy} onClick={() => onSetActive(offer.id, true)}>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  void onSetActive(offer.id, true).catch(() => {});
+                }}
+              >
                 {t("catalogue.sheet.activateIn", { space: offer.name })}
               </Button>
             )

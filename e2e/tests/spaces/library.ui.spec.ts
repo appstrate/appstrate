@@ -13,7 +13,7 @@
  * So the four acts below have to work, on one screen:
  *
  *   - switching a package ON in a space it never reached shares it there and
- *     activates it in one click, and the chip under "Partagé avec" appears;
+ *     activates it after Save, and the chip under "Partagé avec" appears;
  *   - removing that chip revokes the share, and the switch falls with it,
  *     because a revocation takes the placement away;
  *   - switching a package OFF at home keeps the row and everything on it — the
@@ -75,13 +75,14 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
   const targetSwitch = spaceSwitch(row, displayName, target.name);
   const homeSwitch = spaceSwitch(row, displayName, homeSpaceName);
 
-  // ── One click places it in a space it never reached ──
+  // ── Save places it in a space it never reached ──
   const activated = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
       response.url().endsWith(`/spaces/${target.id}/packages`),
   );
   await targetSwitch.click();
+  await row.getByRole("button", { name: "Enregistrer", exact: true }).click();
   expect((await activated).status()).toBe(201);
   await expect(targetSwitch).toBeChecked();
   // The share it minted is a fact on the wire, not only a switch: the row's menu
@@ -133,6 +134,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
       response.url().includes(`/spaces/${browserCtx.org.defaultSpaceId}/packages/${scope}/${name}`),
   );
   await homeSwitch.click();
+  await row.getByRole("button", { name: "Enregistrer", exact: true }).click();
   expect((await deactivated).status()).toBe(204);
   const offRow = (await packagesIn(browserCtx.org.defaultSpaceId)).find(
     (p) => p.packageId === `${scope}/${name}`,
@@ -147,6 +149,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
       response.url().endsWith(`/spaces/${browserCtx.org.defaultSpaceId}/packages`),
   );
   await homeSwitch.click();
+  await row.getByRole("button", { name: "Enregistrer", exact: true }).click();
   // 201 says THIS call turned it on — the status reports the state change, not
   // whether a row was created; the row never went away.
   expect((await reactivated).status()).toBe(201);

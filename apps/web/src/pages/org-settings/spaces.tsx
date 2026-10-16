@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { requestScopeChange } from "../../hooks/use-unsaved-changes";
+
 /**
  * The organization's spaces as one table. Personal and ORPHANED personal spaces
  * (owner left, 30-day window, convert or sweep: RBAC spec §3.6) are ordinary
@@ -37,8 +39,10 @@ export function OrgSettingsSpacesPage() {
   const busy = convert.isPending || sweep.isPending;
 
   const handleSpaceClick = (spaceId: string) => {
-    switchSpace(spaceId);
-    navigate("/workspace-settings/general");
+    requestScopeChange(`space:${spaceId}`, () => {
+      switchSpace(spaceId);
+      navigate("/workspace-settings/general");
+    });
   };
 
   const runPending = () => {

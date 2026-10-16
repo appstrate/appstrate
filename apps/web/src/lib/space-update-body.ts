@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The `PATCH /api/spaces/{id}` body for one setting. Each control commits alone:
+ * The `PATCH /api/spaces/{id}` body contains only edited fields:
  * the route refuses `visibility`/`default_role` on a personal space whatever their
  * value (409 `personal_space_immutable`), so a rename carrying them would fail.
  */
@@ -51,4 +51,31 @@ export function spaceUpdateBody(change: SpaceSettingChange): SpaceUpdateBody {
     case "defaultRole":
       return { default_role: change.value };
   }
+}
+
+export interface SpaceSettingsDraft {
+  name: string;
+  domains: string[];
+  visibility: SpaceObject["visibility"];
+  defaultRole: SpaceObject["default_role"];
+}
+
+/** Compare with the edit baseline, never with a refetch that may contain another admin's changes. */
+export function spaceSettingsUpdate(
+  baseline: SpaceSettingsDraft,
+  next: SpaceSettingsDraft,
+  personal: boolean,
+): SpaceUpdateBody {
+  return {
+    ...(next.name !== baseline.name ? spaceUpdateBody({ field: "name", value: next.name }) : {}),
+    ...(domainsChanged(baseline.domains, next.domains)
+      ? spaceUpdateBody({ field: "domains", value: next.domains })
+      : {}),
+    ...(!personal && next.visibility !== baseline.visibility
+      ? spaceUpdateBody({ field: "visibility", value: next.visibility })
+      : {}),
+    ...(!personal && next.defaultRole !== baseline.defaultRole
+      ? spaceUpdateBody({ field: "defaultRole", value: next.defaultRole })
+      : {}),
+  };
 }

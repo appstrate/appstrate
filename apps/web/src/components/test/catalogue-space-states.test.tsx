@@ -69,7 +69,7 @@ function cells(): Record<string, string> {
       placementOf: () => PLACEMENT,
       gateOf: () => ALLOWED,
       busy: false,
-      onSetActive: () => {},
+      onSetActive: async () => {},
     });
     return null;
   }
@@ -112,7 +112,7 @@ describe("the sheet's offer", () => {
         integrations={[]}
         agents={[]}
         busy={false}
-        onSetActive={() => {}}
+        onSetActive={async () => {}}
       />,
     );
     expect(html).toContain(settingsFr["catalogue.sheet.offer"].replace("{{space}}", "Proposé"));

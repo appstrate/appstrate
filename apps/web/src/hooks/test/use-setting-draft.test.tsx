@@ -57,6 +57,19 @@ describe("manual setting drafts", () => {
       2,
     );
   });
+  it("keeps an edit made while a previous save was awaiting its refresh", () => {
+    const sent = { ...original, name: "sent" };
+    exercise([
+      (draft) => draft.set(sent),
+      (draft) => draft.set({ ...sent, name: "newer" }),
+      (draft) => draft.accept(sent),
+      (draft) => {
+        expect(draft.value.name).toBe("newer");
+        expect(draft.dirty).toBe(true);
+        expect(draft.baseline).toEqual(sent);
+      },
+    ]);
+  });
   it("follows remote data while clean", () => {
     exercise([() => {}, () => {}, (draft) => expect(draft.value).toEqual(refreshed)], 1);
   });

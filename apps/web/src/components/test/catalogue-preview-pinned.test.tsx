@@ -63,7 +63,7 @@ function sheet(options: { pinnedVersion?: string; latest?: string }): string {
       pinnedVersion={options.pinnedVersion}
       onUnpin={() => {}}
       busy={false}
-      onSetActive={() => {}}
+      onSetActive={async () => {}}
     />,
     { queryClient },
   );

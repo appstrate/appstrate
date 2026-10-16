@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
+import { createSpace } from "../../helpers/seed.ts";
+import { Sidebar } from "../../pages/sidebar.ts";
 
 test("settings never write on typing, blur, delay or cancel; a refused save keeps the draft", async ({
   authedPage: page,
@@ -76,15 +78,19 @@ test("two dirty preferences remain guarded, and a failed save prevents navigatio
     return route.continue();
   });
   await page.goto("/preferences/appearance");
-  const selects = page.getByRole("combobox");
-  await selects.nth(0).click();
+  const theme = page.getByRole("combobox", { name: "Thème", exact: true });
+  const language = page.getByRole("combobox", { name: "Langue", exact: true });
+  await theme.click();
   await page.getByRole("option", { name: "Sombre", exact: true }).click();
-  await selects.nth(1).click();
+  await language.click();
   await page.getByRole("option", { name: "English", exact: true }).click();
   expect(writes).toBe(0);
   expect(await page.evaluate(() => localStorage.getItem("appstrate-theme"))).not.toBe("dark");
-  await page.getByRole("link", { name: "Général", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Modifications non enregistrées" });
+  await page
+    .getByRole("navigation", { name: "Compte", exact: true })
+    .getByRole("link", { name: "Général", exact: true })
+    .click();
+  const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
   // The language form still guards the destination after the theme's decision.
@@ -94,15 +100,111 @@ test("two dirty preferences remain guarded, and a failed save prevents navigatio
   expect(writes).toBe(0);
   await page.getByRole("button", { name: "Enregistrer", exact: true }).first().click();
   expect(await page.evaluate(() => localStorage.getItem("appstrate-theme"))).toBe("dark");
-  await page.getByRole("link", { name: "Général", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Compte", exact: true })
+    .getByRole("link", { name: "Général", exact: true })
+    .click();
   await dialog.getByRole("button", { name: "Enregistrer", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page).toHaveURL(/preferences\/appearance/);
   expect(writes).toBe(1);
-  await expect(selects.nth(1)).toHaveText("English");
+  await expect(language).toHaveText("English");
   refuse = false;
-  await page.getByRole("link", { name: "Général", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Compte", exact: true })
+    .getByRole("link", { name: "Général", exact: true })
+    .click();
   await dialog.getByRole("button", { name: "Enregistrer", exact: true }).click();
   await expect(page).toHaveURL(/preferences\/general/);
   expect(writes).toBe(2);
+});
+
+test("switching spaces asks before discarding the current form", async ({
+  authedPage: page,
+  browserCtx,
+  orgOnlyClient,
+}) => {
+  const target = await createSpace(orgOnlyClient, `Manual target ${Date.now()}`);
+  await page.goto("/workspace-settings/general");
+  const name = page.getByRole("textbox", { name: "Nom", exact: true });
+  await name.fill("Unsaved space name");
+  const sidebar = new Sidebar(page);
+  await sidebar.switchSpaceInSettings(target.name);
+  const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Annuler", exact: true }).click();
+  await expect(name).toHaveValue("Unsaved space name");
+  await sidebar.switchSpaceInSettings(target.name);
+  await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
+  await expect(name).toHaveValue(target.name);
+  const original = await orgOnlyClient.get(`/spaces/${browserCtx.org.defaultSpaceId}`);
+  expect((await original.json()).name).not.toBe("Unsaved space name");
+});
+
+test("browser Back can be cancelled without unmounting the edited form", async ({
+  authedPage: page,
+}) => {
+  await page.goto("/preferences/general");
+  await page
+    .getByRole("navigation", { name: "Compte", exact: true })
+    .getByRole("link", { name: "Apparence", exact: true })
+    .click();
+  await page.getByRole("combobox", { name: "Langue", exact: true }).click();
+  await page.getByRole("option", { name: "English", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Enregistrer", exact: true })).toBeVisible();
+  await page.goBack();
+  const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Annuler", exact: true }).click();
+  await expect(page).toHaveURL(/preferences\/appearance/);
+  await expect(page.getByRole("combobox", { name: "Langue", exact: true })).toHaveText("English");
+  await page.goBack();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
+  await expect(page).toHaveURL(/preferences\/general/);
+});
+
+test("a conversation rename stays with its target across guarded navigation", async ({
+  authedPage: page,
+  apiClient,
+}) => {
+  const create = async (title: string) => {
+    const response = await apiClient.post("/chat/sessions", { title });
+    expect(response.status()).toBe(201);
+    return ((await response.json()) as { id: string }).id;
+  };
+  const a = await create("Rename A");
+  const b = await create("Rename B");
+  const writes: { id: string; title: string }[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "PATCH" && request.url().includes("/api/chat/sessions/")) {
+      writes.push({
+        id: new URL(request.url()).pathname.split("/").at(-1)!,
+        title: request.postDataJSON().title,
+      });
+    }
+  });
+  await page.goto(`/chat/${a}`);
+  const trail = page.locator("[data-trail]:visible");
+  await trail.getByRole("button", { name: "Rename A", exact: true }).click();
+  const name = trail.getByRole("textbox");
+  await name.fill("Pending A");
+  await page.getByRole("button", { name: "Rename B", exact: true }).click();
+  const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Annuler", exact: true }).click();
+  await expect(name).toHaveValue("Pending A");
+  expect(writes).toEqual([]);
+  await page.getByRole("button", { name: "Rename B", exact: true }).click();
+  await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
+  await expect(page).toHaveURL(new RegExp(`/chat/${b}$`));
+  await expect(trail.getByRole("textbox")).toHaveCount(0);
+  await trail.getByRole("button", { name: "Rename B", exact: true }).click();
+  await expect(name).toHaveValue("Rename B");
+  await name.fill("Saved B");
+  await trail.getByRole("button", { name: "Enregistrer", exact: true }).click();
+  await expect(trail.getByRole("button", { name: "Saved B", exact: true })).toBeVisible();
+  expect(writes).toEqual([{ id: b, title: "Saved B" }]);
+  const original = await apiClient.get(`/chat/sessions/${a}`);
+  expect((await original.json()).title).toBe("Rename A");
 });

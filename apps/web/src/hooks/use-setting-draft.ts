@@ -16,6 +16,7 @@ export function useSettingDraft<T>(stored: T) {
   }
   return {
     value: state.value,
+    baseline: state.baseline,
     dirty,
     set: (next: SetStateAction<T>) =>
       setState((previous) => ({
@@ -23,6 +24,11 @@ export function useSettingDraft<T>(stored: T) {
         value: typeof next === "function" ? (next as (value: T) => T)(previous.value) : next,
       })),
     reset: () => setState({ source, baseline: stored, value: stored }),
-    accept: (value: T) => setState((previous) => ({ ...previous, baseline: value, value })),
+    accept: (sent: T, accepted: T = sent) =>
+      setState((previous) => ({
+        ...previous,
+        baseline: accepted,
+        value: JSON.stringify(previous.value) === JSON.stringify(sent) ? accepted : previous.value,
+      })),
   };
 }

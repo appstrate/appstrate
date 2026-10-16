@@ -15,7 +15,7 @@ export function ListViewTabs({
 }) {
   const { t } = useTranslation("common");
   return (
-    <ManualSetting value={view} onSave={async (next) => onChange(next)}>
+    <ManualSetting compact value={view} onSave={async (next) => onChange(next)}>
       {(value, setValue, pending) => (
         <Tabs
           value={value}

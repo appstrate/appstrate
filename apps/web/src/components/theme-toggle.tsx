@@ -28,7 +28,7 @@ export function ThemeToggle() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <ManualSetting value={theme} onSave={async (next) => setTheme(next)}>
+        <ManualSetting compact value={theme} onSave={async (next) => setTheme(next)}>
           {(draft, onChange) => (
             <>
               {themeOptions.map(({ value, labelKey, icon: Icon }) => (

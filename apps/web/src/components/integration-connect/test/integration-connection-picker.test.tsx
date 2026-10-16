@@ -26,7 +26,10 @@ import {
   type IntegrationManifestView,
 } from "../../../hooks/use-integrations.ts";
 import { ConfirmModal } from "../../confirm-modal.tsx";
-import { IntegrationConnectionPicker } from "../integration-connection-picker.tsx";
+import {
+  IntegrationConnectionPicker,
+  ConnectionPickerForm,
+} from "../integration-connection-picker.tsx";
 import { PickerMenu } from "../connection-picker-menu.tsx";
 import { ConnectionChoiceMenu } from "../connection-choice-menu.tsx";
 import { UnderScopedWarning } from "../connection-picker-states.tsx";
@@ -1695,5 +1698,36 @@ describe("IntegrationConnectionPicker — the trigger against an uncommitted dra
     const committed = pickerFor(verdict, { persistence: override([WEB, DB]) });
     expect(committed.deadConns.map((c) => c.id)).toEqual([DB]);
     expect(trigger(committed)).toContain("text-warning");
+  });
+});
+
+describe("a pending member connection edit", () => {
+  it("keeps Save available when clearing a stale pin leaves no candidate or add permission", async () => {
+    const deletion = spyOn(client, "DELETE").mockResolvedValue({ data: {} });
+    try {
+      const base = pickerFor(
+        resolution({
+          candidates: [],
+          member_pinned_connection_ids: null,
+          can_add_connection: false,
+          resolved_connection_ids: [],
+        }),
+      );
+      const picker = { ...base, memberDraft: { ...base.memberDraft, dirty: true } };
+      const html = render(
+        <ConnectionPickerForm integrationId={INTEGRATION} picker={picker} failed={false} member />,
+      );
+      expect(html).toContain("Enregistrer");
+      expect(html).toContain("Annuler les modifications");
+      expect(deletion).not.toHaveBeenCalled();
+      await picker.saveMember();
+      expect(deletion).toHaveBeenCalledTimes(1);
+      expect(deletion).toHaveBeenCalledWith(
+        "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
+        expect.anything(),
+      );
+    } finally {
+      deletion.mockRestore();
+    }
   });
 });
