@@ -34,7 +34,7 @@ export function UnsavedChangesModal({ blocker, onSaveDraft, saveLabel }: Unsaved
       await onSaveDraft();
       blocker.proceed();
     } catch {
-      // The editor shows why.
+      // The refusal is toasted, and the editor keeps its draft for a retry.
       blocker.reset();
     } finally {
       setIsSaving(false);

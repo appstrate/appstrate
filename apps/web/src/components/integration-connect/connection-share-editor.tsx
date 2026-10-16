@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ManualSetting } from "../settings/manual-save";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronsUpDown } from "lucide-react";
@@ -55,35 +54,30 @@ export function ConnectionShareEditor({
   /** Why a governor's withdrawal here is refused; the owner's edits ignore it. */
   lockHint: string | null;
   pending: boolean;
-  onShare: (spaceId: string) => Promise<unknown>;
-  onUnshare: (spaceId: string) => Promise<unknown>;
+  onShare: (spaceId: string) => void;
+  onUnshare: (spaceId: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
 
   if (canShare && scope === "space") {
     return (
-      <ManualSetting
-        compact
-        value={!!rowSpaceId && sharedSpaceIds.includes(rowSpaceId)}
-        disabled={pending || !rowSpaceId}
-        onSave={(shared) => (shared ? onShare(rowSpaceId!) : onUnshare(rowSpaceId!))}
+      <label
+        className="flex items-center gap-1.5 text-xs"
+        title={t("integration.connection.share.thisSpaceHelp")}
       >
-        {(shared, setShared, busy) => (
-          <label
-            className="flex items-center gap-1.5 text-xs"
-            title={t("integration.connection.share.thisSpaceHelp")}
-          >
-            <Checkbox
-              checked={shared}
-              disabled={busy}
-              onCheckedChange={(checked) => setShared(checked === true)}
-              data-testid={`share-toggle-${connectionId}`}
-            />
-            {t("integration.connection.share.thisSpace")}
-          </label>
-        )}
-      </ManualSetting>
+        <Checkbox
+          checked={!!rowSpaceId && sharedSpaceIds.includes(rowSpaceId)}
+          disabled={pending || !rowSpaceId}
+          onCheckedChange={(checked) => {
+            if (!rowSpaceId) return;
+            if (checked === true) onShare(rowSpaceId);
+            else onUnshare(rowSpaceId);
+          }}
+          data-testid={`share-toggle-${connectionId}`}
+        />
+        {t("integration.connection.share.thisSpace")}
+      </label>
     );
   }
 
@@ -117,26 +111,16 @@ export function ConnectionShareEditor({
                 {targets.map((space) => {
                   const selected = sharedSpaceIds.includes(space.id);
                   return (
-                    <ManualSetting
-                      compact
+                    <CommandItem
                       key={space.id}
-                      value={selected}
+                      value={`${space.name} ${space.id}`}
                       disabled={pending}
-                      onSave={(shared) => (shared ? onShare(space.id) : onUnshare(space.id))}
+                      onSelect={() => (selected ? onUnshare(space.id) : onShare(space.id))}
+                      data-testid={`share-target-${connectionId}-${space.id}`}
                     >
-                      {(shared, setShared, busy) => (
-                        <CommandItem
-                          key={space.id}
-                          value={`${space.name} ${space.id}`}
-                          disabled={busy}
-                          onSelect={() => setShared(!shared)}
-                          data-testid={`share-target-${connectionId}-${space.id}`}
-                        >
-                          <Check className={cn(shared ? "opacity-100" : "opacity-0")} />
-                          <span className="truncate">{space.name}</span>
-                        </CommandItem>
-                      )}
-                    </ManualSetting>
+                      <Check className={cn(selected ? "opacity-100" : "opacity-0")} />
+                      <span className="truncate">{space.name}</span>
+                    </CommandItem>
                   );
                 })}
               </CommandGroup>
@@ -156,9 +140,7 @@ export function ConnectionShareEditor({
           className="h-7 text-xs"
           disabled={pending || !!lockHint}
           title={lockHint ? undefined : t("integration.connection.share.removeHereHelp")}
-          onClick={() => {
-            void onUnshare(hereSpaceId).catch(() => {});
-          }}
+          onClick={() => onUnshare(hereSpaceId)}
           data-testid={`share-remove-here-${connectionId}`}
         >
           {t("integration.connection.share.removeHere")}

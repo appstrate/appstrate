@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, type SetStateAction } from "react";
-import { useStore } from "zustand";
-import { orgStore } from "../stores/org-store";
-import { spaceStore } from "../stores/space-store";
 
 /** Key-order independent, so re-adding a key does not make an unchanged value dirty. */
 function stableJson(value: unknown): string {
@@ -16,21 +13,13 @@ function stableJson(value: unknown): string {
   );
 }
 
-/**
- * A local edit survives refetches; a clean form follows the latest stored value.
- * A change of organization or space drops the edit: it was made against the previous
- * scope's values, and the navigation guard has already asked before the switch.
- */
+/** A local edit survives refetches; a clean form follows the latest stored value. */
 export function useSettingDraft<T>(stored: T) {
-  const scope = `${useStore(orgStore, (s) => s.id)}:${useStore(spaceStore, (s) => s.id)}`;
   const source = stableJson(stored);
-  const [state, setState] = useState({ scope, source, baseline: stored, value: stored });
+  const [state, setState] = useState({ source, baseline: stored, value: stored });
   const dirty = stableJson(state.value) !== stableJson(state.baseline);
-  if (scope !== state.scope) {
-    setState({ scope, source, baseline: stored, value: stored });
-  } else if (source !== state.source) {
+  if (source !== state.source) {
     setState({
-      scope,
       source,
       baseline: dirty ? state.baseline : stored,
       value: dirty ? state.value : stored,
@@ -45,7 +34,7 @@ export function useSettingDraft<T>(stored: T) {
         ...previous,
         value: typeof next === "function" ? (next as (value: T) => T)(previous.value) : next,
       })),
-    reset: () => setState({ scope, source, baseline: stored, value: stored }),
+    reset: () => setState({ source, baseline: stored, value: stored }),
     accept: (sent: T, accepted: T = sent) =>
       setState((previous) => ({
         ...previous,

@@ -10,7 +10,6 @@
 import { useTranslation } from "react-i18next";
 import type { DataColumn } from "./data-table";
 import { CellText } from "./table-cells";
-import { ManualSetting } from "./settings/manual-save";
 import { SpaceRoleSelect } from "./space-role-select";
 import { roleI18nKey } from "../hooks/use-permissions";
 import {
@@ -38,7 +37,7 @@ export function useSpaceSeatColumns<Row>({
   roles: RoleObject[] | undefined;
   roleOptions: SpaceRoleOption[];
   isChangingRole: boolean;
-  onChangeRole: (row: Row, value: string) => Promise<unknown>;
+  onChangeRole: (row: Row, value: string) => void;
 }): DataColumn<Row>[] {
   const { t } = useTranslation(["settings", "common"]);
 
@@ -68,25 +67,16 @@ export function useSpaceSeatColumns<Row>({
       control: true,
       cell: (row) =>
         editable(row) ? (
-          <ManualSetting
-            compact
+          <SpaceRoleSelect
             value={memberRoleValue(seat(row).role, roles) ?? `current:${seat(row).role?.key}`}
+            options={roleOptions}
+            fallbackLabel={heldRole(row)}
+            placeholder={t("spaceMembers.noRole")}
+            className="h-7 w-full text-xs"
+            ariaLabel={t("spaceMembers.roleAriaLabel", { name: seatName(row) })}
             disabled={isChangingRole}
-            onSave={(value) => onChangeRole(row, value)}
-          >
-            {(value, onChange, pending) => (
-              <SpaceRoleSelect
-                value={value}
-                options={roleOptions}
-                fallbackLabel={heldRole(row)}
-                placeholder={t("spaceMembers.noRole")}
-                className="h-7 w-full text-xs"
-                ariaLabel={t("spaceMembers.roleAriaLabel", { name: seatName(row) })}
-                disabled={pending}
-                onValueChange={onChange}
-              />
-            )}
-          </ManualSetting>
+            onValueChange={(value) => onChangeRole(row, value)}
+          />
         ) : (
           <CellText title={fixedRole(row)}>{fixedRole(row)}</CellText>
         ),

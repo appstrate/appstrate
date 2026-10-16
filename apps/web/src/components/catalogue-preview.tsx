@@ -10,11 +10,10 @@
  * `chat_enforced` switch.
  */
 import { Alert } from "@appstrate/ui/components/alert";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
-import { ManualSetting } from "./settings/manual-save";
 import { useTranslation } from "react-i18next";
 import {
   Boxes,
@@ -72,6 +71,7 @@ import {
 } from "../lib/catalogue-sheet";
 import { formatDateField } from "../lib/format-date";
 import { packageKeys } from "../lib/query-keys";
+import { ConfirmModal } from "./confirm-modal";
 import { SettingsGroup } from "./settings/setting-row";
 import { SettingsHeading } from "./settings/settings-heading";
 
@@ -206,7 +206,7 @@ export function CataloguePreview({
   onUnpin?: () => void;
   busy: boolean;
   /** Goes through the catalogue's own activation, which asks about integrations first. */
-  onSetActive: (spaceId: string, next: boolean) => Promise<unknown>;
+  onSetActive: (spaceId: string, next: boolean) => void;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { currentOrg } = useOrg();
@@ -277,28 +277,17 @@ export function CataloguePreview({
     return row.home ? t("catalogue.sheet.atHome", { state: base }) : base;
   };
   const switchFor = (row: SheetSpaceRow) => (
-    <ManualSetting
-      compact={mode !== "single"}
-      value={row.state === "active"}
+    <Switch
+      checked={row.state === "active"}
       disabled={busy || !row.mayToggle}
-      onSave={(next) => onSetActive(row.id, next)}
-    >
-      {(value, onChange, pending) => (
-        <Switch
-          checked={value}
-          disabled={pending}
-          aria-label={t("catalogue.spaceSwitch", {
-            package: item.name || item.id,
-            space: row.name,
-          })}
-          title={row.refusal ? t(ACTIVATION_REFUSAL_KEY[row.refusal], { ns: "common" }) : undefined}
-          onCheckedChange={onChange}
-        />
-      )}
-    </ManualSetting>
+      aria-label={t("catalogue.spaceSwitch", { package: item.name || item.id, space: row.name })}
+      title={row.refusal ? t(ACTIVATION_REFUSAL_KEY[row.refusal], { ns: "common" }) : undefined}
+      onCheckedChange={(next) => onSetActive(row.id, next === true)}
+    />
   );
   // ── Imposed on the chat (skills only, `lib/catalogue-sheet`) ──
   const setChatEnforced = useSetChatEnforced();
+  const [confirmEnforce, setConfirmEnforce] = useState<SheetSpaceRow | null>(null);
   const enforceable = type === "skill";
   const chatEnforcedIn = (spaceId: string) =>
     item.placements.some((entry) => entry.space_id === spaceId && entry.chat_enforced);
@@ -320,49 +309,31 @@ export function CataloguePreview({
       setChatEnforced.variables?.packageId === item.id &&
       setChatEnforced.variables.spaceId === row.id;
     return (
-      <ManualSetting
-        compact={mode !== "single"}
-        value={verdict.checked}
+      <Switch
+        checked={verdict.checked}
         disabled={verdict.disabled || pending}
-        onSave={(next) =>
-          setChatEnforced.mutateAsync(
-            { spaceId: row.id, packageId: item.id, enforced: next },
-            { onError: notifyEnforceError },
-          )
+        aria-label={t("library.chatEnforce.toggle", {
+          ns: "common",
+          package: item.name || item.id,
+          space: row.name,
+        })}
+        title={
+          verdict.refusal === "configure"
+            ? t("library.chatEnforce.cannot", { ns: "common" })
+            : verdict.refusal === "publishFirst"
+              ? t("library.chatEnforce.publishFirst", { ns: "common" })
+              : undefined
         }
-      >
-        {(value, onChange, busy) => (
-          <div>
-            {/* Imposing discloses the content to every member who chats there: say so before Save. */}
-            {value && !verdict.checked && (
-              <p className="text-muted-foreground mb-2 text-xs">
-                {t("library.chatEnforce.confirmDescription", {
-                  ns: "common",
-                  package: item.name || item.id,
-                  space: row.name,
-                })}
-              </p>
-            )}
-            <Switch
-              checked={value}
-              disabled={busy}
-              aria-label={t("library.chatEnforce.toggle", {
-                ns: "common",
-                package: item.name || item.id,
-                space: row.name,
-              })}
-              title={
-                verdict.refusal === "configure"
-                  ? t("library.chatEnforce.cannot", { ns: "common" })
-                  : verdict.refusal === "publishFirst"
-                    ? t("library.chatEnforce.publishFirst", { ns: "common" })
-                    : undefined
-              }
-              onCheckedChange={onChange}
-            />
-          </div>
-        )}
-      </ManualSetting>
+        onCheckedChange={(next) => {
+          // Imposing discloses the content to every member who chats there: confirm first.
+          if (next) setConfirmEnforce(row);
+          else
+            setChatEnforced.mutate(
+              { spaceId: row.id, packageId: item.id, enforced: false },
+              { onError: notifyEnforceError },
+            );
+        }}
+      />
     );
   };
 
@@ -399,13 +370,7 @@ export function CataloguePreview({
           body={missingText(offer.id) ?? t("catalogue.sheet.offerCredentials")}
           action={
             offer.mayToggle && (
-              <Button
-                size="sm"
-                disabled={busy}
-                onClick={() => {
-                  void onSetActive(offer.id, true).catch(() => {});
-                }}
-              >
+              <Button size="sm" disabled={busy} onClick={() => onSetActive(offer.id, true)}>
                 {t("catalogue.sheet.activateIn", { space: offer.name })}
               </Button>
             )
@@ -641,6 +606,29 @@ export function CataloguePreview({
           </div>
         )}
       </SettingsGroup>
+
+      {enforceable && (
+        <ConfirmModal
+          open={confirmEnforce !== null}
+          onClose={() => setConfirmEnforce(null)}
+          title={t("library.chatEnforce.confirmTitle", { ns: "common" })}
+          description={t("library.chatEnforce.confirmDescription", {
+            ns: "common",
+            package: item.name || item.id,
+            space: confirmEnforce?.name ?? "",
+          })}
+          confirmLabel={t("library.chatEnforce.confirm", { ns: "common" })}
+          variant="default"
+          isPending={setChatEnforced.isPending}
+          onConfirm={() => {
+            if (!confirmEnforce) return;
+            setChatEnforced.mutate(
+              { spaceId: confirmEnforce.id, packageId: item.id, enforced: true },
+              { onError: notifyEnforceError, onSettled: () => setConfirmEnforce(null) },
+            );
+          }}
+        />
+      )}
     </div>
   );
 }

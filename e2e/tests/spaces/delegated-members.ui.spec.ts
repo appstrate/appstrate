@@ -155,9 +155,9 @@ test("space settings retain edits and expose a forbidden save response", async (
   );
   await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   await refused;
-  // The refusal stays visible beside the form, and what was typed stays typed.
+  // The refusal is toasted, and what was typed stays typed.
   await expect(
-    page.getByRole("alert").filter({ hasText: "Space update denied for this role" }),
+    page.locator("[data-sonner-toast]").filter({ hasText: "Space update denied for this role" }),
   ).toBeVisible();
   await expect(name).toHaveValue("Unpersisted name");
   const persisted = await orgOnlyClient.get(`/spaces/${browserCtx.org.defaultSpaceId}`);

@@ -40,7 +40,7 @@ export function useSpaceMemberColumns({
   roles: RoleObject[] | undefined;
   roleOptions: SpaceRoleOption[];
   isChangingRole: boolean;
-  onChangeRole: (member: SpaceMemberObject, value: string) => Promise<unknown>;
+  onChangeRole: (member: SpaceMemberObject, value: string) => void;
   /** What removing the seat does, or `null` when it is not the caller's to remove. */
   removal: (member: SpaceMemberObject) => "reset" | "remove" | null;
   isRemoving: boolean;

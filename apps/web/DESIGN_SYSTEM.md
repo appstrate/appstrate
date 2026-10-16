@@ -196,8 +196,9 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 - Clean forms follow refreshed data. Dirty forms preserve their edits on refetch
   and failure. Save accepts the sent values only after success; Cancel restores
   the latest stored values. Disable editing during a write. A change of
-  organization or space drops a draft (the guard has asked first): it was made
-  against the previous scope's values.
+  organization or space drops a draft once the guard has asked: the switch drops
+  the scope's caches, and a form renders only from its loaded data, so it unmounts.
+  Keep it that way (no placeholder data across scopes) or the draft would survive.
 - `useUnsavedChanges` guards page/section navigation and reload. Multiple dirty
   forms share one history interceptor. Saving before leaving waits for success;
   failure keeps the form open.
@@ -210,7 +211,11 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   history (auth, selected org/space, sidebar open state, pairing recovery, sent
   messages, runs and logs) are not editable form drafts either.
   Explicit deeds such as Send, Run, Delete, Connect and Set as default commit
-  their named action. They do not need an additional Save.
+  their named action. They do not need an additional Save. Nor does a single
+  switch or select whose change IS the command: activating a package in a space,
+  a space member's role, sharing a connection with a space, an organization policy
+  switch. A deed whose effect reaches others asks first with a `ConfirmModal`
+  (imposing a skill on a space's chat, an organization member's role).
 - **One return of a write, everywhere** (agent, schedule, organisation,
   workspace, preferences, integration rules): `SaveFeedback`
   (`components/settings/save-feedback.tsx`: Enregistrement… / Enregistré / Erreur
@@ -262,7 +267,8 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
     all three modes, « Valider » writes the ticked set, « Hériter » and « Aucune connexion »
     write at once, a lone connection writes when ticked (unticking it goes back to « Hériter »);
   - the **organisation default** of an integration page (`OrgDefaultSection`): the list alone
-    (an empty set is « no default », which its own select says), each tick commits alone;
+    (an empty set is « no default », which its own select says), the set and its enforcement
+    mode saved together by the section's save bar;
   - **pins** of an integration page (`NewPinForm`): « Choisir » and « Aucune connexion », no
     « Hériter » (a pin is the exception, its absence is the delete button), a form value;
   - the **identity of a schedule** (`ScheduleActorConnectionChoice`, in Identité, Connexions and

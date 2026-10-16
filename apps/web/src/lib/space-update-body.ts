@@ -13,12 +13,6 @@ type SpaceUpdateBody = NonNullable<
 >["content"]["application/json"];
 type SpaceObject = components["schemas"]["SpaceObject"];
 
-export type SpaceSettingChange =
-  | { field: "name"; value: string }
-  | { field: "domains"; value: string[] }
-  | { field: "visibility"; value: SpaceObject["visibility"] }
-  | { field: "defaultRole"; value: SpaceObject["default_role"] };
-
 function cleanDomains(domains: readonly string[]): string[] {
   return domains.map((domain) => domain.trim()).filter(Boolean);
 }
@@ -40,19 +34,6 @@ export function visibilityChangeNeedsConfirmation(
   return from === "open" && to !== "open";
 }
 
-export function spaceUpdateBody(change: SpaceSettingChange): SpaceUpdateBody {
-  switch (change.field) {
-    case "name":
-      return { name: change.value.trim() };
-    case "domains":
-      return { settings: { allowedRedirectDomains: cleanDomains(change.value) } };
-    case "visibility":
-      return { visibility: change.value };
-    case "defaultRole":
-      return { default_role: change.value };
-  }
-}
-
 export interface SpaceSettingsDraft {
   name: string;
   domains: string[];
@@ -60,22 +41,20 @@ export interface SpaceSettingsDraft {
   defaultRole: SpaceObject["default_role"];
 }
 
-/** Compare with the edit baseline, never with a refetch that may contain another admin's changes. */
+/**
+ * Compare with the edit baseline, never with a refetch that may contain another admin's changes.
+ * A personal space never offers visibility or default role, so neither appears in its diff.
+ */
 export function spaceSettingsUpdate(
   baseline: SpaceSettingsDraft,
   next: SpaceSettingsDraft,
-  personal: boolean,
 ): SpaceUpdateBody {
   return {
-    ...(next.name !== baseline.name ? spaceUpdateBody({ field: "name", value: next.name }) : {}),
+    ...(next.name !== baseline.name ? { name: next.name.trim() } : {}),
     ...(domainsChanged(baseline.domains, next.domains)
-      ? spaceUpdateBody({ field: "domains", value: next.domains })
+      ? { settings: { allowedRedirectDomains: cleanDomains(next.domains) } }
       : {}),
-    ...(!personal && next.visibility !== baseline.visibility
-      ? spaceUpdateBody({ field: "visibility", value: next.visibility })
-      : {}),
-    ...(!personal && next.defaultRole !== baseline.defaultRole
-      ? spaceUpdateBody({ field: "defaultRole", value: next.defaultRole })
-      : {}),
+    ...(next.visibility !== baseline.visibility ? { visibility: next.visibility } : {}),
+    ...(next.defaultRole !== baseline.defaultRole ? { default_role: next.defaultRole } : {}),
   };
 }

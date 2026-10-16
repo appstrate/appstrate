@@ -107,8 +107,14 @@ function GeneralForm({
   const setDomains = (next: string[]) => draft.set((previous) => ({ ...previous, domains: next }));
   const save = async () => {
     const sent = draft.value;
-    const body = spaceSettingsUpdate(draft.baseline, sent, space.personal);
-    const saved = await updateMutation.mutateAsync({ params: { path: { id: spaceId } }, body });
+    const body = spaceSettingsUpdate(draft.baseline, sent);
+    // The space mutation leaves its refusals to the caller (`useUpdateSpace`).
+    const saved = await updateMutation
+      .mutateAsync({ params: { path: { id: spaceId } }, body })
+      .catch((error: unknown) => {
+        toastError(error);
+        throw error;
+      });
     draft.accept(sent, {
       name: saved.name,
       domains: saved.settings?.allowedRedirectDomains ?? [],
@@ -265,12 +271,7 @@ function GeneralForm({
           )}
         </SettingsGroup>
       </fieldset>
-      <ManualSave
-        dirty={draft.dirty}
-        pending={updateMutation.isPending}
-        onSave={save}
-        onDiscard={draft.reset}
-      />
+      <ManualSave dirty={draft.dirty} onSave={save} onDiscard={draft.reset} />
 
       {/* The danger zone is a settings group like any other. Its exception is
           the CONTROL — a button that opens a confirm — which is what the row

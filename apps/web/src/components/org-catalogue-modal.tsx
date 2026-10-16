@@ -116,7 +116,6 @@ interface Closure {
   item: CardItem;
   spaceId: string;
   missing: MissingDependency[];
-  complete: { resolve: () => void; reject: (cause: unknown) => void };
 }
 
 export function OrgCatalogueModal({
@@ -322,7 +321,7 @@ export function OrgCatalogueModal({
           spaces={addable}
           currentSpaceId={spaceId}
           busy={activate.isPending}
-          onAdd={(targetSpaceId) => void onSetActive(row, targetSpaceId, true).catch(() => {})}
+          onAdd={(targetSpaceId) => void onSetActive(row, targetSpaceId, true)}
         />
       ),
       meta: (
@@ -384,7 +383,7 @@ export function OrgCatalogueModal({
   });
   // Every control that changes where a package runs lands here; the mutation reports success and failure.
   const setActive = (item: CardItem, targetSpaceId: string, next: boolean) =>
-    activate.mutateAsync({ spaceId: targetSpaceId, packageId: item.id, active: next });
+    activate.mutate({ spaceId: targetSpaceId, packageId: item.id, active: next });
 
   // Only an AGENT has a closure the target space must hold: its skills travel with it, its
   // integrations do not. The manifest is read at click time, from a space that holds the agent.
@@ -414,18 +413,13 @@ export function OrgCatalogueModal({
       (row) => activationGate(row, targetSpaceId, true).allowed,
     );
     if (missing.length === 0) return setActive(item, targetSpaceId, next);
-    await new Promise<void>((resolve, reject) =>
-      setClosures((queue) => [
-        ...queue,
-        { item, spaceId: targetSpaceId, missing, complete: { resolve, reject } },
-      ]),
-    );
+    setClosures((queue) => [...queue, { item, spaceId: targetSpaceId, missing }]);
   };
 
   /** The ticked rows, each through the same door as its own switch. */
   const activatePicked = () => {
     if (!spaceId) return;
-    for (const item of picked) void onSetActive(item, spaceId, true).catch(() => {});
+    for (const item of picked) void onSetActive(item, spaceId, true);
     setSelected(new Set());
   };
 
@@ -438,7 +432,7 @@ export function OrgCatalogueModal({
       return row ? activationGate(row, targetSpaceId, next) : { allowed: false, refusal: null };
     },
     busy: activate.isPending,
-    onSetActive: (item, targetSpaceId, next) => onSetActive(item, targetSpaceId, next),
+    onSetActive: (item, targetSpaceId, next) => void onSetActive(item, targetSpaceId, next),
   });
   const protocolColumn = useCatalogueProtocolColumn((item) => {
     const row = integrationById.get(item.id);
@@ -570,7 +564,7 @@ export function OrgCatalogueModal({
           mayActivateIn={mayActivateIn}
           busy={activate.isPending}
           onActivate={(pkg, targetSpaceId) =>
-            void onSetActive(toCardItem(pkg), targetSpaceId, true).catch(() => {})
+            void onSetActive(toCardItem(pkg), targetSpaceId, true)
           }
           // Opens in the package's own kind, pushed as the sheet's own opening so Back returns to this list.
           onOpen={(pkg) =>
@@ -621,7 +615,9 @@ export function OrgCatalogueModal({
             </PageActionsMenu>
           }
           busy={activate.isPending}
-          onSetActive={(targetSpaceId, next) => onSetActive(previewedItem, targetSpaceId, next)}
+          onSetActive={(targetSpaceId, next) =>
+            void onSetActive(previewedItem, targetSpaceId, next)
+          }
         />
       ) : (
         <PackageCollection
@@ -720,27 +716,16 @@ export function OrgCatalogueModal({
           spaceName={spaceNameOf(closure.spaceId)}
           missing={closure.missing}
           isPending={activate.isPending}
-          onClose={() => {
-            closure.complete.reject(new DOMException("Cancelled", "AbortError"));
+          onClose={nextClosure}
+          onAgentOnly={() => {
+            setActive(closure.item, closure.spaceId, true);
             nextClosure();
           }}
-          onAgentOnly={async () => {
-            try {
-              await setActive(closure.item, closure.spaceId, true);
-              closure.complete.resolve();
-            } catch (cause) {
-              closure.complete.reject(cause);
-            }
-            nextClosure();
-          }}
-          onActivateAll={async () => {
-            try {
-              await setActive(closure.item, closure.spaceId, true);
-              for (const entry of closure.missing)
-                activate.mutate({ spaceId: closure.spaceId, packageId: entry.id, active: true });
-              closure.complete.resolve();
-            } catch (cause) {
-              closure.complete.reject(cause);
+          onActivateAll={() => {
+            // Each is its own call: the API has no cascade, and one refusal must not take the others down.
+            setActive(closure.item, closure.spaceId, true);
+            for (const entry of closure.missing) {
+              activate.mutate({ spaceId: closure.spaceId, packageId: entry.id, active: true });
             }
             nextClosure();
           }}

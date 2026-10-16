@@ -3,7 +3,6 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { leavesEditor, type EditorPlace } from "../lib/editor-place";
-import { createNavigationApprovals } from "../lib/navigation-approvals";
 
 export interface UnsavedBlocker {
   state: "blocked" | "unblocked";
@@ -24,7 +23,29 @@ interface Guard {
   block: (pending: PendingNavigation) => void;
 }
 const guards = new Map<symbol, Guard>();
-const approvals = createNavigationApprovals<symbol>();
+let approvedDestination: string | null = null;
+const approvedGuards = new Set<symbol>();
+/** A leave confirmation applies to one destination and one form, never a later navigation. */
+export const approvals = {
+  select(target: string) {
+    if (approvedDestination !== target) {
+      approvedGuards.clear();
+      approvedDestination = target;
+    }
+  },
+  approve(id: symbol, target: string) {
+    approvals.select(target);
+    approvedGuards.add(id);
+  },
+  has(id: symbol, target: string) {
+    approvals.select(target);
+    return approvedGuards.has(id);
+  },
+  clear() {
+    approvedDestination = null;
+    approvedGuards.clear();
+  },
+};
 let installed = false;
 let changingScope = false;
 

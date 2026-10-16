@@ -116,7 +116,6 @@ function InputSettingsSection({
       </div>
       <ManualSave
         dirty={draft.dirty}
-        pending={mutation.isPending}
         onDiscard={draft.reset}
         onSave={async () => {
           const sent = draft.value;
@@ -276,7 +275,6 @@ function ModelSectionEditor({
       />
       <ManualSave
         dirty={draft.dirty}
-        pending={setAgentModel.isPending}
         onDiscard={draft.reset}
         onSave={async () => {
           const sent = draft.value;

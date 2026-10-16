@@ -6,39 +6,35 @@ import { SaveBar } from "../save-bar";
 import { useUnsavedChanges } from "../../hooks/use-unsaved-changes";
 import { useSettingDraft } from "../../hooks/use-setting-draft";
 import { UnsavedChangesModal } from "../unsaved-changes-modal";
-import { errorMessage } from "../../lib/mutation-error";
 
 interface ManualSaveProps {
   dirty: boolean;
   compact?: boolean;
+  /** Work outside `onSave` that must hold the bar and the guard (e.g. preparing an image). */
   pending?: boolean;
   saveDisabled?: boolean;
   onSave: () => Promise<void>;
   onDiscard: () => void;
 }
 
-/** One save at a time; a refusal stays on screen until the next attempt or a discard. */
+/**
+ * One save at a time: the leave dialog's Save joins a write already in flight. A refusal is
+ * told by the mutation's own toast (`lib/query-client.ts`); the draft stays for a retry.
+ */
 function useSaveAction(onSave: () => Promise<void>) {
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<unknown>(null);
   const inFlight = useRef<Promise<void> | null>(null);
   const save = () => {
     if (inFlight.current) return inFlight.current;
     setSaving(true);
-    setError(null);
-    const work = onSave()
-      .catch((cause: unknown) => {
-        if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(cause);
-        throw cause;
-      })
-      .finally(() => {
-        inFlight.current = null;
-        setSaving(false);
-      });
+    const work = onSave().finally(() => {
+      inFlight.current = null;
+      setSaving(false);
+    });
     inFlight.current = work;
     return work;
   };
-  return { save, saving, error, clearError: () => setError(null) };
+  return { save, saving };
 }
 
 type SaveAction = ReturnType<typeof useSaveAction>;
@@ -61,19 +57,11 @@ function SaveControls({
         message={t("unsaved.title")}
         pending={action.saving || pending}
         saveDisabled={saveDisabled}
-        onDiscard={() => {
-          action.clearError();
-          onDiscard();
-        }}
+        onDiscard={onDiscard}
         onSave={() => {
           void action.save().catch(() => {});
         }}
       />
-      {action.error != null && (
-        <p className="text-destructive text-sm" role="alert">
-          {errorMessage(action.error)}
-        </p>
-      )}
       <UnsavedChangesModal
         blocker={blocker}
         onSaveDraft={saveDisabled ? undefined : action.save}
@@ -114,32 +102,24 @@ export function ManualSetting<T>({
   canSave?: (value: T) => boolean;
 }) {
   const draft = useSettingDraft(value);
-  const [pending, setPending] = useState(false);
   const action = useSaveAction(async () => {
     const sent = draft.value;
-    setPending(true);
-    try {
-      await onSave(sent);
-      draft.accept(sent);
-    } finally {
-      setPending(false);
-    }
+    await onSave(sent);
+    draft.accept(sent);
   });
   const saveDisabled = disabled || (canSave !== undefined && !canSave(draft.value));
-  const discard = () => {
-    action.clearError();
-    draft.reset();
-  };
   const submit = () => {
     if (draft.dirty && !saveDisabled) void action.save().catch(() => {});
   };
   return (
     <div className="w-full min-w-0">
-      {children(draft.value, draft.set, pending || disabled, { submit, discard })}
+      {children(draft.value, draft.set, action.saving || disabled, {
+        submit,
+        discard: draft.reset,
+      })}
       <SaveControls
         compact={compact}
         dirty={draft.dirty}
-        pending={pending}
         saveDisabled={saveDisabled}
         onDiscard={draft.reset}
         action={action}

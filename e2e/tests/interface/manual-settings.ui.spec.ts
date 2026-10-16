@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
-import { createOrg, createSpace, createAgentWithInputSchema } from "../../helpers/seed.ts";
+import {
+  activatePackageInSpace,
+  createAgentWithInputSchema,
+  createSpace,
+} from "../../helpers/seed.ts";
 import { Sidebar } from "../../pages/sidebar.ts";
 
 test("settings never write on typing, blur, delay or cancel; a refused save keeps the draft", async ({
@@ -41,7 +45,7 @@ test("settings never write on typing, blur, delay or cancel; a refused save keep
   expect(writes).toEqual([]);
   await name.fill("Manual name");
   await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
-  await expect(page.getByRole("alert").filter({ hasText: /./ }).last()).toBeVisible();
+  await expect(page.locator("[data-sonner-toast]").last()).toBeVisible();
   await expect(name).toHaveValue("Manual name");
   expect(writes).toEqual([{ name: "Manual name" }]);
   refuse = false;
@@ -140,26 +144,37 @@ test("switching spaces asks before discarding the current form", async ({
   expect((await original.json()).name).not.toBe("Unsaved space name");
 });
 
-test("switching organizations drops the draft instead of saving it into the next one", async ({
+test("switching spaces under a mounted agent page drops its draft instead of saving it into the next space", async ({
   authedPage: page,
+  apiClient,
+  orgOnlyClient,
   browserCtx,
-  request,
 }) => {
-  const next = await createOrg(request, browserCtx.auth.cookie);
-  await page.goto("/org-settings/general");
-  const name = page.getByRole("textbox", { name: "Nom", exact: true });
-  await expect(name).toHaveValue(browserCtx.org.orgName);
-  await name.fill("Draft made in the first organization");
-  await page.getByRole("combobox", { name: "Choisir une organisation", exact: true }).click();
-  await page.getByRole("option", { name: next.orgName, exact: true }).click();
+  const scope = `@${browserCtx.org.orgSlug}`;
+  const name = `manual-scope-${Date.now()}`;
+  await createAgentWithInputSchema(apiClient, scope, name, {
+    destination: { type: "string", title: "Destination" },
+  });
+  const target = await createSpace(orgOnlyClient, `Manual scope ${Date.now()}`);
+  await activatePackageInSpace(orgOnlyClient, target.id, `${scope}/${name}`);
+  const writes: unknown[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "PUT" && request.url().endsWith("/input-settings"))
+      writes.push(request.postDataJSON());
+  });
+  await page.goto(`/agents/${scope}/${name}?agentSettings=inputs#settings`);
+  const destination = page.getByRole("textbox", { name: "Destination", exact: true });
+  const save = page.getByRole("button", { name: "Enregistrer", exact: true });
+  await destination.fill("Draft made in the first space");
+  await expect(save).toBeVisible();
+  // A space switch drops the space's caches (`selectSpace`), so the form unmounts with its draft.
+  await new Sidebar(page).switchSpace(target.name);
   const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
   await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
-  await expect(name).toHaveValue(next.orgName);
-  await expect(page.getByRole("button", { name: "Enregistrer", exact: true })).toHaveCount(0);
-  const orgs = await request.get("/api/orgs", { headers: { Cookie: browserCtx.auth.cookie } });
-  const names = ((await orgs.json()).data as Array<{ name: string }>).map((org) => org.name);
-  expect(names).toContain(next.orgName);
-  expect(names).not.toContain("Draft made in the first organization");
+  await expect(page).toHaveURL(new RegExp(`/agents/${scope}/${name}`));
+  await expect(destination).toHaveValue("");
+  await expect(save).toHaveCount(0);
+  expect(writes).toEqual([]);
 });
 
 test("browser Back can be cancelled without unmounting the edited form", async ({

@@ -4,7 +4,7 @@
  * Skills in the chat, from the browser: the picker's mode and chosen skills
  * stay in the page — nothing is written, no conversation is created — until a
  * message carries them. A skill the space imposes is set from its sheet
- * in the catalogue, behind an explicit save, and reaches the picker locked.
+ * in the catalogue, behind a confirmation, and reaches the picker locked.
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
@@ -60,7 +60,7 @@ test("carries the chosen mode and skills with the first message, and writes noth
   expect(body.pinned_skills).toEqual([packageId]);
 });
 
-test("a skill imposed from the space library is locked in the picker, after an explicit save", async ({
+test("a skill imposed from the space library is locked in the picker, after a confirmation", async ({
   authedPage: page,
   apiClient,
   browserCtx,
@@ -82,13 +82,14 @@ test("a skill imposed from the space library is locked in the picker, after an e
 
   // Imposing discloses the content to every member who chats here: the reader
   // is told so before anything is written.
-  await expect(page.getByText(/quels que soient leurs droits|whatever their skill/)).toBeVisible();
+  const dialog = page.getByRole("alertdialog", { name: /Imposer ce skill|Require this skill/ });
+  await expect(dialog).toContainText(/quels que soient leurs droits|whatever their skill/);
   const patched = page.waitForResponse(
     (response) =>
       response.request().method() === "PATCH" &&
       response.url().includes(`/packages/${scope}/${name}`),
   );
-  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
+  await dialog.getByRole("button", { name: /^(Imposer|Require)$/ }).click();
   expect((await patched).status()).toBe(200);
   await expect(enforce).toBeChecked();
 

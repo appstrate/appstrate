@@ -5,7 +5,6 @@ import { Label } from "@appstrate/ui/components/label";
 import { Switch } from "@appstrate/ui/components/switch";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SettingRow } from "./setting-row";
-import { ManualSetting } from "./manual-save";
 import { SaveFeedback } from "./save-feedback";
 import { useOrg } from "../../hooks/use-org";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
@@ -51,20 +50,20 @@ export function OrgSettingToggle({
       status={<SaveFeedback {...fieldWriteState(update, field)} />}
     >
       {!isLoading ? (
-        <ManualSetting
-          value={orgSettings?.[field] ?? false}
-          disabled={!can("org:settings") || !orgSettings}
-          onSave={(checked) =>
-            update.mutateAsync(
-              { params: { path: { orgId: currentOrg.id } }, body: { [field]: checked } },
+        <Switch
+          id={id}
+          checked={orgSettings?.[field] ?? false}
+          disabled={!can("org:settings") || !orgSettings || update.isPending}
+          onCheckedChange={(checked) =>
+            update.mutate(
+              {
+                params: { path: { orgId: currentOrg.id } },
+                body: { [field]: checked === true },
+              },
               { onSuccess },
             )
           }
-        >
-          {(value, onChange, pending) => (
-            <Switch id={id} checked={value} disabled={pending} onCheckedChange={onChange} />
-          )}
-        </ManualSetting>
+        />
       ) : (
         <Skeleton className="h-5 w-9 rounded-full" />
       )}

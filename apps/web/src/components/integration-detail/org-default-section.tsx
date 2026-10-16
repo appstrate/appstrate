@@ -154,7 +154,6 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
       )}
       <ManualSave
         dirty={draft.dirty}
-        pending={pending}
         saveDisabled={
           isLoading ||
           isError ||

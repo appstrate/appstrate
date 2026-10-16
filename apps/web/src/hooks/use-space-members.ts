@@ -56,12 +56,13 @@ export function useAssignSpaceRole(roleOptions: SpaceRoleOption[]) {
         }),
       );
     if (member.source === "explicit") {
-      return updateMember.mutateAsync(
+      updateMember.mutate(
         { params: { path: { id: spaceId, userId: member.userId } }, body },
         { onSuccess },
       );
+      return;
     }
-    return addMember.mutateAsync(
+    addMember.mutate(
       { params: { path: { id: spaceId } }, body: { userId: member.userId, ...body } },
       { onSuccess },
     );

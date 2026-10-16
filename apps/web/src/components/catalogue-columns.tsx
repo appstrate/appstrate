@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ManualSetting } from "./settings/manual-save";
-
 /**
  * The columns the catalogue adds to the package table: the tick, the origin, one
  * switch per space (where a package is active) and the row deeds. There is no
@@ -179,7 +177,7 @@ export function useCatalogueSpaceColumns({
   placementOf: (item: CardItem) => CataloguePlacement | undefined;
   gateOf: (item: CardItem, spaceId: string, next: boolean) => ActivationGate;
   busy: boolean;
-  onSetActive: (item: CardItem, spaceId: string, next: boolean) => Promise<unknown>;
+  onSetActive: (item: CardItem, spaceId: string, next: boolean) => void;
 }): DataColumn<CardItem>[] {
   const { t } = useTranslation("settings");
 
@@ -208,31 +206,22 @@ export function useCatalogueSpaceColumns({
       return (
         // `relative z-10`: sit above the row link's overlay or the row swallows the click (see `data-table.tsx`).
         <span className="relative z-10 flex min-w-0 items-center gap-1.5 overflow-hidden">
-          <ManualSetting
-            compact
-            value={state === "active"}
+          <Switch
+            checked={state === "active"}
             disabled={busy || !gate.allowed}
-            onSave={(next) => onSetActive(item, space.id, next)}
-          >
-            {(value, onChange, pending) => (
-              <Switch
-                checked={value}
-                disabled={pending}
-                aria-label={t("catalogue.spaceSwitch", {
-                  package: item.displayName,
-                  space: space.name,
-                })}
-                title={
-                  gate.refusal
-                    ? t(ACTIVATION_REFUSAL_KEY[gate.refusal], { ns: "common" })
-                    : state === "offered"
-                      ? t("catalogue.sheet.offerCredentials")
-                      : undefined
-                }
-                onCheckedChange={onChange}
-              />
-            )}
-          </ManualSetting>
+            aria-label={t("catalogue.spaceSwitch", {
+              package: item.displayName,
+              space: space.name,
+            })}
+            title={
+              gate.refusal
+                ? t(ACTIVATION_REFUSAL_KEY[gate.refusal], { ns: "common" })
+                : state === "offered"
+                  ? t("catalogue.sheet.offerCredentials")
+                  : undefined
+            }
+            onCheckedChange={(next) => onSetActive(item, space.id, next === true)}
+          />
           {state === "offered" && (
             // One word: who shared it is on the sheet and in "Partages en attente".
             <span className="text-primary text-[0.7rem] font-medium">

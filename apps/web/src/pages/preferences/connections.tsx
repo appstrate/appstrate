@@ -39,8 +39,8 @@ function ConnectionRow({
 }: {
   conn: MeConnectionEntry;
   onRename: (label: string) => Promise<unknown>;
-  onShare: (spaceId: string) => Promise<unknown>;
-  onUnshare: (spaceId: string) => Promise<unknown>;
+  onShare: (spaceId: string) => void;
+  onUnshare: (spaceId: string) => void;
   sharing: boolean;
 }) {
   const { t } = useTranslation(["settings", "common", "agents"]);
@@ -357,10 +357,10 @@ export function PreferencesConnectionsPage() {
                     })
                   }
                   onShare={(spaceId) =>
-                    shareIntegration.mutateAsync({ connectionId: conn.connection_id, spaceId })
+                    shareIntegration.mutate({ connectionId: conn.connection_id, spaceId })
                   }
                   onUnshare={(spaceId) =>
-                    unshareIntegration.mutateAsync({ connectionId: conn.connection_id, spaceId })
+                    unshareIntegration.mutate({ connectionId: conn.connection_id, spaceId })
                   }
                 />
               )}

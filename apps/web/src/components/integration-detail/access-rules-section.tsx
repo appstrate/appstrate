@@ -3,7 +3,6 @@
 import { useTranslation } from "react-i18next";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { SettingsHeading } from "../settings/settings-heading";
-import { ManualSetting } from "../settings/manual-save";
 import { SaveFeedback } from "../settings/save-feedback";
 import { useUpdateIntegrationSettings } from "../../hooks/use-integrations";
 import { OrgDefaultSection } from "./org-default-section";
@@ -54,29 +53,22 @@ function BlockUserConnectionsToggle({
         <p id="account-creation-label" className="mb-3 text-sm font-medium">
           {t("integration.admin.creation.title")}
         </p>
-        <ManualSetting
-          value={blocked ?? false}
-          onSave={(value) =>
-            updateSettings.mutateAsync({
+        <OptionSelect
+          value={blocked ? "admins" : "members"}
+          disabled={updateSettings.isPending}
+          onValueChange={(value) =>
+            updateSettings.mutate({
               params: { path: { packageId } },
-              body: { block_user_connections: value },
+              body: { block_user_connections: value === "admins" },
             })
           }
-        >
-          {(value, onChange, pending) => (
-            <OptionSelect
-              value={value ? "admins" : "members"}
-              disabled={pending}
-              onValueChange={(value) => onChange(value === "admins")}
-              aria-labelledby="account-creation-label"
-              data-testid="block-user-connections-toggle"
-              options={(["admins", "members"] as const).map((value) => ({
-                value,
-                label: t(`integration.admin.creation.${value}`),
-              }))}
-            />
-          )}
-        </ManualSetting>
+          aria-labelledby="account-creation-label"
+          data-testid="block-user-connections-toggle"
+          options={(["admins", "members"] as const).map((value) => ({
+            value,
+            label: t(`integration.admin.creation.${value}`),
+          }))}
+        />
         <div className="mt-1.5">
           <SaveFeedback
             pending={updateSettings.isPending}

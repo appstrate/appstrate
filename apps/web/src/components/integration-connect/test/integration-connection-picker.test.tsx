@@ -26,10 +26,7 @@ import {
   type IntegrationManifestView,
 } from "../../../hooks/use-integrations.ts";
 import { ConfirmModal } from "../../confirm-modal.tsx";
-import {
-  IntegrationConnectionPicker,
-  ConnectionPickerForm,
-} from "../integration-connection-picker.tsx";
+import { IntegrationConnectionPicker } from "../integration-connection-picker.tsx";
 import { PickerMenu } from "../connection-picker-menu.tsx";
 import { ConnectionChoiceMenu } from "../connection-choice-menu.tsx";
 import { UnderScopedWarning } from "../connection-picker-states.tsx";
@@ -976,15 +973,24 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     mounted.unsubscribe();
   });
 
-  it("stages a newly connected account without persisting a member pin", async () => {
+  it("writes the fallback's set with the created connection as the member's pin", async () => {
     const put = spyOn(client, "PUT").mockResolvedValue({ data: {} });
     try {
-      const { mounted, picker } = await mount([fallbackBefore, fallbackAfter], settles, {
-        mode: "pin",
-      });
+      const { mounted, picker } = await mount(
+        [fallbackBefore, fallbackAfter, fallbackAfter],
+        settles,
+        { mode: "pin" },
+      );
       await picker.triggerConnect("primary");
-      expect(put).not.toHaveBeenCalled();
-      expect(mounted.asked()).toBe(2);
+      const calls = put.mock.calls as unknown as Array<[string, { body: unknown }]>;
+      expect(calls.map(([path, init]) => [path, init.body])).toEqual([
+        [
+          "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
+          { connection_ids: [WEB, ADDED] },
+        ],
+      ]);
+      // The pin write moved the verdict: it is read again.
+      expect(mounted.asked()).toBe(3);
       mounted.unsubscribe();
     } finally {
       put.mockRestore();
@@ -1115,14 +1121,8 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
   it("reports a refused pin write, and reads no verdict it did not move", async () => {
     const put = spyOn(client, "PUT").mockRejectedValue(new ApiError("forbidden", "no", 403));
     try {
-      const { mounted, picker } = await mount(
-        [answer({ member_pinned_connection_ids: [WEB] })],
-        settles,
-        { mode: "pin" },
-      );
-      expect(await picker.persist([WEB])).toBe(true);
-      expect(put).not.toHaveBeenCalled();
-      await expect(picker.saveMember()).rejects.toBeInstanceOf(ApiError);
+      const { mounted, picker } = await mount([before], settles, { mode: "pin" });
+      expect(await picker.persist([WEB])).toBe(false);
       expect(put).toHaveBeenCalledTimes(1);
       expect(mounted.asked()).toBe(1);
       mounted.unsubscribe();
@@ -1131,7 +1131,7 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     }
   });
 
-  it("connecting never attempts a pin write, even when that write would be refused", async () => {
+  it("a connect whose pin write is refused settles without a second write or read", async () => {
     const warned = spyOn(toast, "warning").mockImplementation(() => 0);
     const put = spyOn(client, "PUT").mockRejectedValue(new ApiError("forbidden", "no", 403));
     try {
@@ -1140,7 +1140,7 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
       });
       await expect(picker.triggerConnect("primary")).resolves.toBeUndefined();
       const calls = put.mock.calls as unknown as Array<[string, { body: unknown }]>;
-      expect(calls).toEqual([]);
+      expect(calls.map(([, init]) => init.body)).toEqual([{ connection_ids: [WEB, ADDED] }]);
       // The mount, then the popup's refetch: the refused write moved no verdict.
       expect(mounted.asked()).toBe(2);
       expect(warned).not.toHaveBeenCalled();
@@ -1698,36 +1698,5 @@ describe("IntegrationConnectionPicker — the trigger against an uncommitted dra
     const committed = pickerFor(verdict, { persistence: override([WEB, DB]) });
     expect(committed.deadConns.map((c) => c.id)).toEqual([DB]);
     expect(trigger(committed)).toContain("text-warning");
-  });
-});
-
-describe("a pending member connection edit", () => {
-  it("keeps Save available when clearing a stale pin leaves no candidate or add permission", async () => {
-    const deletion = spyOn(client, "DELETE").mockResolvedValue({ data: {} });
-    try {
-      const base = pickerFor(
-        resolution({
-          candidates: [],
-          member_pinned_connection_ids: null,
-          can_add_connection: false,
-          resolved_connection_ids: [],
-        }),
-      );
-      const picker = { ...base, memberDraft: { ...base.memberDraft, dirty: true } };
-      const html = render(
-        <ConnectionPickerForm integrationId={INTEGRATION} picker={picker} failed={false} member />,
-      );
-      expect(html).toContain("Enregistrer");
-      expect(html).toContain("Annuler les modifications");
-      expect(deletion).not.toHaveBeenCalled();
-      await picker.saveMember();
-      expect(deletion).toHaveBeenCalledTimes(1);
-      expect(deletion).toHaveBeenCalledWith(
-        "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
-        expect.anything(),
-      );
-    } finally {
-      deletion.mockRestore();
-    }
   });
 });

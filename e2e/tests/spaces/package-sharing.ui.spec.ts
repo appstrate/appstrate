@@ -379,8 +379,6 @@ test("a guest finds an offer in the catalogue and switches it on", async ({
         response.url().includes(`/packages/${scope}/${name}`),
     );
     await toggle.click();
-    // The switch is a draft until Save.
-    await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
     expect((await deactivated).status()).toBe(204);
     await expect(toggle).not.toBeChecked();
 
@@ -390,7 +388,6 @@ test("a guest finds an offer in the catalogue and switches it on", async ({
         response.url().endsWith(`/spaces/${guestSpaceId}/packages`),
     );
     await toggle.click();
-    await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
     expect((await reactivated).status()).toBe(201);
     await expect(toggle).toBeChecked();
   } finally {
@@ -535,7 +532,6 @@ test("a non-admin builder switches a team offer on and off from the space packag
         response.url().endsWith(`/spaces/${spaceId}/packages`),
     );
     await toggle.click();
-    await row.getByRole("button", { name: "Enregistrer", exact: true }).click();
     expect((await activated).status()).toBe(201);
     await expect(toggle).toBeChecked();
     const removed = page.waitForResponse(
@@ -544,7 +540,6 @@ test("a non-admin builder switches a team offer on and off from the space packag
         response.url().includes(`/packages/${scope}/${name}`),
     );
     await toggle.click();
-    await row.getByRole("button", { name: "Enregistrer", exact: true }).click();
     expect((await removed).status()).toBe(204);
     // The row survives the switch — deactivating is not a removal.
     await expect(toggle).not.toBeChecked();
