@@ -5,8 +5,8 @@ import { expect, type Locator, type Page } from "@playwright/test";
 /**
  * Page Object for the organisation and workspace switcher (`OrgSwitcher`).
  *
- * The switcher is one searchable command list: organizations followed by the
- * workspaces of the organization being explored. Choosing an
+ * The switcher is a two-column popover: organisations on the left, the
+ * workspaces of the organisation being explored on the right. Clicking an
  * organisation only explores it; a pick ends on a workspace, and org and
  * workspace are applied together.
  */

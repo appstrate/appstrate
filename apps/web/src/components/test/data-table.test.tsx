@@ -10,9 +10,12 @@ import { describe, it, expect } from "bun:test";
 import { DataTable, type DataColumn } from "../data-table.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
+import { installFakeStorage } from "../../test/fake-storage.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
+
+const storage = installFakeStorage();
 
 interface Row {
   id: string;
@@ -103,11 +106,13 @@ describe("the row's link", () => {
     expect(html).not.toMatch(/<a[^>]*>\s*<div[^>]*>\s*<span>a<\/span>/);
   });
 
-  it("names the identity link and leaves the other cells independently accessible", () => {
+  it("carries a name of its own and covers the whole row", () => {
     const html = table();
     expect(html).toContain('aria-label="Ligne Alpha"');
-    expect([...html.matchAll(/<a /g)]).toHaveLength(ROWS.length);
-    expect(html).not.toContain('aria-hidden="true"');
+    // The cover lives in a cell that is not held: a `sticky` cell would be its containing block.
+    expect(html).toMatch(/<a tabindex="-1" aria-hidden="true" class="absolute inset-0"/);
+    // One focusable node per row, not one per cell: the cover is out of the tab order.
+    expect([...html.matchAll(/<a (?![^>]*tabindex="-1")/g)]).toHaveLength(ROWS.length);
   });
 
   it("renders a static row when there is nowhere to go", () => {
@@ -119,18 +124,12 @@ describe("the row's link", () => {
 });
 
 describe("states", () => {
-  it("offers a named identity button for an in-place detail", () => {
+  it("offers one full-row button for an in-place detail", () => {
     const html = table({ rowHref: undefined, rowAction: () => {} });
     expect(html).not.toContain("<a ");
     expect([...html.matchAll(/<button /g)]).toHaveLength(ROWS.length);
     expect(html).toContain('aria-label="Ligne Alpha"');
-    expect(html).toMatch(/<button[^>]*>\s*<div[^>]*>\s*<span>Alpha<\/span>/);
-  });
-
-  it("leaves a row static when the caller cannot open its detail", () => {
-    const html = table({ rowHref: undefined, rowAction: () => {}, rowActionable: () => false });
-    expect(html).not.toContain("<button");
-    expect(html).toContain("Alpha");
+    expect(html).toContain("cursor-pointer");
   });
 
   it("replaces the head with the empty node — it would label nothing", () => {
@@ -181,5 +180,43 @@ describe("controls and the row's end", () => {
     const cells = html.match(/<td[^>]*data-column="(?:name|actions)"[^>]*>/g) ?? [];
     expect(cells).toHaveLength(2 * ROWS.length);
     for (const cell of cells) expect(cell).toContain("group-hover/row:bg-(--dt-surface-hover)");
+  });
+});
+
+describe("resizing", () => {
+  it("gives every head a named handle", () => {
+    const html = table();
+    expect([...html.matchAll(/role="separator"/g)]).toHaveLength(COLUMNS.length);
+    expect(html).toContain('aria-label="Redimensionner la colonne Nom"');
+    expect(html).toContain("cursor-col-resize");
+  });
+
+  it("offers none on a fixed control or on the row's end", () => {
+    const html = table({
+      columns: [
+        COLUMNS[1]!,
+        {
+          id: "tick",
+          header: "",
+          headerNode: <i>x</i>,
+          width: 40,
+          control: true,
+          cell: () => null,
+        },
+        { id: "actions", header: "", width: 80, cell: () => <span>…</span> },
+      ],
+    });
+    expect([...html.matchAll(/role="separator"/g)]).toHaveLength(1);
+  });
+
+  it("applies the width the reader chose, keyed on the table's label", () => {
+    storage.setItem("appstrate-column-widths-Mesuré", JSON.stringify({ name: 321 }));
+    expect(table({ label: "Mesuré" })).toContain("width:321px");
+    expect(table({ label: "Autre" })).not.toContain("width:321px");
+  });
+
+  it("never goes under the declared width", () => {
+    storage.setItem("appstrate-column-widths-Étroit", JSON.stringify({ when: 10 }));
+    expect(table({ label: "Étroit" })).toContain("width:96px");
   });
 });

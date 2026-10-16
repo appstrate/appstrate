@@ -15,7 +15,8 @@
  */
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { LucideIcon } from "lucide-react";
+import { LayoutGrid, Rows3, type LucideIcon } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { PackageType } from "@appstrate/core/validation";
 import type { DataColumn } from "./data-table";
 import { CardGrid } from "./card-grid";
@@ -28,6 +29,7 @@ import { SettingsHeading } from "./settings/settings-heading";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import type { ListState } from "../lib/list-params";
+import type { ListView } from "../stores/list-view-store";
 import { PACKAGE_ACTIVITIES, PACKAGE_ORIGINS, narrowPackages } from "../lib/package-collection";
 import type { CardItem } from "../lib/package-card-item";
 
@@ -61,7 +63,9 @@ export interface PackageCollectionProps {
   emptyAction?: ReactNode;
   list: ListState;
   /** How this surface draws the list: the index pages let the reader choose, the catalogue's management view is a table. */
-  view: "cards" | "table";
+  view: ListView;
+  /** Offers the choice between the two drawings; without it the list keeps `view`. */
+  onViewChange?: (view: ListView) => void;
   /**
    * Whether the list can say what is running or what uses this package. The
    * catalogue reads the library, which knows neither, so it offers origin only
@@ -120,6 +124,7 @@ export function PackageCollection({
   emptyAction,
   list,
   view,
+  onViewChange,
   activityFilter = true,
   originLabels,
   extraFilters = NO_FILTERS,
@@ -214,7 +219,23 @@ export function PackageCollection({
         // Only the table view has columns to choose from, and only the set the
         // list owns: a tick and a deed are not columns anyone hides.
         columns={view === "table" ? menu : undefined}
-        actions={actions}
+        actions={
+          <>
+            {onViewChange && (
+              <Tabs value={view} onValueChange={(next) => onViewChange(next as ListView)}>
+                <TabsList className="h-9">
+                  <TabsTrigger value="table" aria-label={t("toolbar.viewTable", { ns: "common" })}>
+                    <Rows3 className="size-4" />
+                  </TabsTrigger>
+                  <TabsTrigger value="cards" aria-label={t("toolbar.viewCards", { ns: "common" })}>
+                    <LayoutGrid className="size-4" />
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            )}
+            {actions}
+          </>
+        }
       />
       {view === "table" ? (
         <PackagesTable

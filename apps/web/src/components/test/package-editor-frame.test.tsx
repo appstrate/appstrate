@@ -54,9 +54,7 @@ function frame(isPending: boolean) {
 
 describe("PackageEditorFrame editing", () => {
   it("makes the form inert while saving", () => {
-    expect(frame(true)).toMatch(
-      /<div[^>]*inert=""[^>]*aria-busy="true"[^>]*>[^]*<input name="description"/,
-    );
+    expect(frame(true)).toMatch(/<div[^>]*inert=""[^>]*aria-busy="true"[^>]*><input/);
   });
 
   it("CONTROL: leaves it editable otherwise", () => {

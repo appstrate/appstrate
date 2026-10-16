@@ -23,7 +23,9 @@ export async function openRowMenuItem(
 }
 
 /**
- * Open a table detail through its identity link or button, leaving other cells independent.
+ * Open a table row by pressing its name. The row's cover button is stretched over the whole row,
+ * and its centre may lie under a control of another column (a switch), so it is not the one to
+ * press; the row opens on a click anywhere on it that is not a control.
  */
 export async function openRow(page: Page, rowName: string): Promise<void> {
   await page

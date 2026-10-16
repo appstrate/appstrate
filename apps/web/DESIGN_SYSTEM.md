@@ -56,8 +56,8 @@ they start with `packages/` or `e2e/`.
   frame of both products (`AppSidebar` picks Studio's or the chat's navigation);
   the header's slots are `components/shell-header-slots.tsx`. Never copy the frame.
 - The sidebar head is the organisation and workspace switcher
-  (`components/org-switcher.tsx`: one searchable `Command` list, organizations then the
-  workspaces of the one being explored; a pick always ends on a workspace). Products are tabs
+  (`components/org-switcher.tsx`: organisations left, the workspaces of the one
+  being explored right; a pick always ends on a workspace). Products are tabs
   (`components/product-tabs.tsx`), the foot is the profile (`components/nav-user.tsx`).
   Navigation links are `SidebarNavLink`.
 - **The sidebar's two groups are split by what you do, not by object type**
@@ -187,8 +187,8 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   `SaveBar` sends as one write, since a move of the actor or the version is judged
   with the connections of the state it moves to): a
   select, switch or toggle on change; a text on blur or Enter, Escape reverts
-  (`InlineTextSetting`, `components/settings/inline-text-setting.tsx`); a debounced
-  text field after a 650 ms pause. A rename in a table is `InlineEditableLabel`
+  (`InlineTextSetting`, `components/settings/inline-text-setting.tsx`); typing or
+  a slider after a 650 ms pause. A rename in a table is `InlineEditableLabel`
   (`components/inline-editable-label.tsx`), the one rename affordance, and it is
   **opened by the row's menu only**: a click on the name does nothing and no pencil
   appears on hover (both are noise next to the « … »). The row's « Edit » never
@@ -287,7 +287,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 | Several of a long set (scopes, permissions)                          | `ScopeMultiSelect` (`components/scope-multi-select.tsx`, a searchable multi combobox grouped by resource, with a count and an all / none shortcut)                                                                                                                                                                                                                                          |
 | A model (agent, schedule, run with options, chat)                    | `ModelSelect` (`components/model-select.tsx`, over `ModelPicker` of `packages/ui/src/components/model-picker.tsx`): the one list, in a Popover + Command, grouped by who pays (see below). Never a `Select` of models, never a flat list. The groups are `groupModelsForPicker` (`packages/ui/src/components/model-picker-groups.ts`), the chat's composer draws the same `ModelPickerList` |
 | Which connections of one integration                                 | `ConnectionChoiceMenu` / `ConnectionSetPicker` (`integration-connect/connection-choice-menu.tsx`): the one component, section 4 lists where it serves. Never a bare list of checkboxes                                                                                                                                                                                                      |
-| A time                                                               | `Input type="time"`, storing `HH:mm`; its clock presentation follows the browser locale. The timezone remains a separate setting.                                                                                                                                                                                                                                                           |
+| A time                                                               | `TimeField` (`components/time-field.tsx`): hour and minute selects, a period select only where the app's language counts in 12 hours. Never `Input type="time"`: the browser draws it in ITS locale, not the app's                                                                                                                                                                          |
 | A schedule's rhythm                                                  | `FrequencyComposer` (`components/frequency-composer.tsx`; the cron model is `lib/cron-frequency.ts`), never raw presets                                                                                                                                                                                                                                                                     |
 | A value to copy exactly (endpoint, redirect URI)                     | `CopyBlock` (`components/copy-block.tsx`); programmatic copies go through `useCopyToClipboard`                                                                                                                                                                                                                                                                                              |
 | A secret shown once                                                  | `SecretRevealModal`                                                                                                                                                                                                                                                                                                                                                                         |
@@ -349,7 +349,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   a name has a floor that fits a usual one. Every column is drawn and the table
   scrolls sideways, unless the table is `tiered` (a narrow panel, a modal, a detail
   tab): then a READ column waits for room by its `tier`.
-- **Two rules for every table** (both live in `DataTable`, no caller opts in):
+- **Three rules for every table** (both live in `DataTable`, no caller opts in):
   1. **A column that can be acted on never disappears.** A column declares what it
      is in its definition: a READ column (text, badge, date) may carry a `tier`
      and wait for room in a `tiered` table (tier `2` for a 36rem table, `3` for a
@@ -363,15 +363,19 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
      is always named and its actions are always in reach. A scroll is better than
      a lost control, and a « … » menu is not the place for a dropdown: a control
      that is the setting (role, share, default) stays in its own column.
-  2. **The identity opens the detail.** Its link (`rowHref`) supports modified clicks
-     and new tabs; its button (`rowAction`) opens an in-place detail. The rest of the
-     row is ordinary table content: selecting text or using another cell's control
-     never opens it. Widths are declared by the column set, with no resize or width store.
+  2. **A row is a link.** The cover link stretches over the row; the named link
+     lives in the first read cell.
+  3. **Columns resize.** Drag the right edge of a head; a double-click gives the
+     column back its declared width. The width is kept per table (its `label`) in
+     `localStorage`, never goes under the declared one, and the table works without
+     it (`stores/column-widths-store.ts`). Fixed-size ticks and the row's end have
+     no handle.
 - **List state lives in the URL** (`lib/list-params.ts`: `useListParams` on a
   page, `useLocalListParams` in a panel that floats over a page): filters are
   pushed, the search is replaced, a reset is one update. Runs, schedules, files
-  and integrations are tables, as are package indexes (agents, skills, MCP).
-  Cards remain for discovery and dashboard summaries. Hidden columns
+  and integrations are tables; the package indexes (agents, skills, MCP) let the reader
+  choose cards or table (`Tabs`, `stores/list-view-store.ts`, one preference per
+  index: a preference, not a location). Hidden columns
   are in `stores/column-visibility-store.ts`.
 - Toolbar buttons have two treatments (`lib/toolbar-button.ts`): `TOOLBAR_UTILITY`
   adjusts the view (filters, columns), `TOOLBAR_ACTION` acts on the data (outline,
@@ -500,14 +504,18 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   only way in: it puts the name in edit, focused and selected (`editing` /
   `onEditingChange`, both required, and `renaming` on `TableRowActions` so the menu
   does not take focus back). A click on the name does not edit it: out of edit the name is
-  the identity link or button; no pencil shows on
+  the row's text (raised above the row's cover so its `title` reads, and `DataTable` hands its click to the
+  row, which opens as everywhere else), no pencil shows on
   hover, and every renamable name has its « Rename » entry in the same row's menu. A row with nothing to offer has no menu
   (no `menuLabel`), and a row whose only deed is the click (an integration that
   opens its page) has none either: no empty menu for one deed. A control that
   IS the setting (role select, switch, tick, share editor, default) stays in its
   own column; it is not an action of the row. The `ROW_ACTION_BANS` lint rules (`eslint.config.mjs`)
-  fails on a direct action beside the menu. The first read cell opens the detail;
-  other cells keep their own pointer and keyboard behavior. A menu deed that opens the page's own modal pre-filled
+  fails on a direct action beside the menu. A row is a link through the first
+  cell (`rowHref`), a titled element inside it needs `relative z-10`. Whatever is raised and is not a
+  control (a name, a held cell) hands its click to the row (`handOver` in
+  `data-table.tsx`: a plain click, on anything that is not a link, button, field or tab stop), so a click
+  on a name opens the row like a click anywhere else. A menu deed that opens the page's own modal pre-filled
   on the row says so in the modal's initial value (the roles page's « Prévisualiser »
   opens the preview on that role), the same modal as the page's Actions menu.
 - States: a skeleton (section 1), `EmptyState`, `ErrorState error=…`, and
@@ -531,7 +539,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   journal, memory, devices and CLI sessions, shares, tools of a catalogue, files) and
   an empty state that is a fault or a locked page.
 - Adding something is one gesture: the surface (white) outline button with a `+`
-  icon, or an item in the Actions menu, opening a modal.
+  icon, or an item in the Actions menu, opening a modal; when « create » means a
+  whole editor (agent, skill) it is a link to that page.
 
 ## 8. Cards, badges, atoms
 
@@ -612,11 +621,9 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   (`components/new-schedule-modal.tsx` is the example to follow). **Creating a package**
   (agent, skill, integration, MCP server): the creation hand-off modal
   (`components/creation-handoff-modal.tsx`, `hooks/use-creation-handoff.ts`:
-  manual / chat / coding agent), then `components/create-package-modal.tsx` for manual
-  creation: identity and prompt for an agent, identity and instructions for a skill,
-  identity, source and authentication for an integration. A skill's frontmatter is
-  generated from its slug and description. After creation, advanced settings and files
-  are edited on the object's detail page. MCP servers are imported.
+  manual / chat / coding agent), then, for the manual way, the editor page: an agent
+  is created from `components/create-agent-modal.tsx` (name, identifier, description, prompt)
+  and edited on its own page; skills and integrations keep a creation page.
 
 ## 10. Feedback
 
@@ -696,7 +703,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   is `allow-scripts` only, never loosen it). A file list is `DocumentListPanel`
   (a table), a preview is addressable as `?preview=<id>`.
 - **A package's files** are one explorer in Paramètres › Explorer
-  (`components/package-files/`: `FileTree` is a WAI-ARIA tree,
+  (`components/package-files/`: `FileTree` is a virtualised WAI-ARIA tree,
   `PackageFilesView` the editor). Edits stay in the package draft until the save
   bar sends them in one write; `useUnsavedChanges` blocks navigation while dirty.
 - **An agent's input and output schemas** are edited one way: `SchemaFieldList`
@@ -744,7 +751,7 @@ that needs a module says so in `lib/route-access.ts` (`feature`).
   external OAuth application.
 - No development wording in the product (« à brancher », « dev », TODO).
 - A permission is always named by its sentence (`lib/permission-labels.ts`:
-  `permissionLabel`, `permissionResourceLabel`), in role details, in the pickers
+  `permissionLabel`, `permissionResourceLabel`), in the matrix, in the pickers
   (`ScopeMultiSelect`) and in badges, never by its wire string (`agents:share`).
 
 ## 16. Motion

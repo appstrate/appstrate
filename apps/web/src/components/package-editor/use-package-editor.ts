@@ -13,7 +13,15 @@ import {
 } from "../agent-editor/utils";
 
 export type PackageEditorTab =
-  "general" | "schema" | "skills" | "integrations" | "source" | "auths" | "tools";
+  | "general"
+  | "schema"
+  | "skills"
+  | "integrations"
+  | "source"
+  | "auths"
+  | "tools"
+  | "files"
+  | "json";
 
 type ValidationError = { error: string; tab?: string } | null;
 
@@ -38,7 +46,11 @@ function useEditorTab(
   return [tab ?? localTab, setActiveTab] as const;
 }
 
-/** Definition draft, open section and save/discard, shared by existing package editors. */
+/**
+ * The editor state every package type shares: draft, open section, identity form, save and discard.
+ * Without a `packageId` it creates a package (every tab, files included); with one it edits that
+ * package inside Paramètres › Package AFPS, the MANIFEST only (files are changed in Explorer › Fichiers).
+ */
 export function usePackageEditor({
   type,
   initialState,
@@ -50,7 +62,7 @@ export function usePackageEditor({
 }: {
   type: EditablePackageType;
   initialState: EditorState;
-  packageId: string;
+  packageId: string | undefined;
   /** Editing: the section is the settings rail's, not the editor's. */
   tab?: PackageEditorTab;
   onTabRequest?: (tab: PackageEditorTab) => void;
@@ -72,7 +84,8 @@ export function usePackageEditor({
         ? (validate?.(s) ?? null)
         : { error: t("editor.errorRequired"), tab: "general" },
   });
-  const { state, setState, updateManifest, setError, bumpJsonKey, saveDraft } = editor;
+  const { state, setState, updateManifest, setError, bumpJsonKey, saveDraft, handleSubmit } =
+    editor;
 
   const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
   const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
@@ -89,7 +102,10 @@ export function usePackageEditor({
     bumpJsonKey();
   };
 
-  const submit = () => void saveEdit(saveDraft, t("editor.saved"));
+  const submit = () =>
+    isEdit
+      ? void saveEdit(saveDraft, t("editor.saved"))
+      : handleSubmit(undefined, (next) => next && setActiveTab(next as PackageEditorTab));
 
   return {
     ...editor,

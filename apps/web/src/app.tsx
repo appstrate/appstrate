@@ -85,6 +85,7 @@ const UnifiedPackageDetailPage = lazyPage(
   () => import("./pages/unified-package-detail"),
   "UnifiedPackageDetailPage",
 );
+const PackageEditorPage = lazyPage(() => import("./pages/package-editor"), "PackageEditorPage");
 const RunDetailPage = lazyPage(() => import("./pages/run-detail"), "RunDetailPage");
 const RunsPage = lazyPage(() => import("./pages/runs-page"), "RunsPage");
 const FilesPage = lazyPage(() => import("./pages/files"), "FilesPage");
@@ -267,9 +268,11 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/schedules": <SchedulesListPage />,
   "/schedules/:id": <ScheduleDetailPage />,
   "/skills": <SkillsPage />,
+  "/skills/new": <PackageEditorPage type="skill" />,
   "/skills/:scope/:name": <UnifiedPackageDetailPage type="skill" />,
   "/skills/:scope/:name/:version": <UnifiedPackageDetailPage type="skill" />,
   "/integrations": <IntegrationsPage />,
+  "/integrations/new": <PackageEditorPage type="integration" />,
   "/integrations/:scope/:name": <IntegrationDetailPage />,
   "/mcp-servers": <McpServersPage />,
   "/mcp-servers/:scope/:name": <UnifiedPackageDetailPage type="mcp-server" />,

@@ -70,10 +70,12 @@ describe("route declarations", () => {
       "/chat",
       "/files",
       "/integrations",
+      "/org-settings",
       "/preferences",
       "/runs",
       "/schedules",
       "/skills",
+      "/workspace-settings",
     ]);
     expect(targets.filter((t) => !declared.has(t) && !OUTSIDE_MAIN_LAYOUT.has(t))).toEqual([]);
   });
@@ -191,9 +193,7 @@ describe("routeOf", () => {
   });
 
   it("ranks a concrete URL the way the router does: static segments first", () => {
-    expect(routeOf("/skills")).toBe("/skills");
-    expect(routeOf("/skills/new")).toBeUndefined();
-    expect(routeOf("/integrations/new")).toBeUndefined();
+    expect(routeOf("/skills/new")).toBe("/skills/new");
     expect(routeOf("/agents/@acme/triage")).toBe("/agents/:scope/:name");
     expect(routeOf("/agents/@acme/triage/1.2.0")).toBe("/agents/:scope/:name/:version");
     expect(routeOf("/agents/@acme/triage/runs/run_1?tab=logs#x")).toBe(

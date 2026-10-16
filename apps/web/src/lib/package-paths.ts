@@ -24,6 +24,10 @@ export function scheduleDetailPath(scheduleId: string): string {
   return `/schedules/${scheduleId}`;
 }
 
+export function packageNewPath(type: PackageType | string): string {
+  return `/${PACKAGE_TYPE_ROUTE_SEGMENT[type as PackageType]}/new`;
+}
+
 /** Split `@scope/name` into the client's path params; the scope keeps its `@` (matches the API's `:scope{@[^/]+}` routes). */
 export function splitPackageRef(packageId: string): { scope: string; name: string } {
   const slash = packageId.indexOf("/");

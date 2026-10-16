@@ -5,8 +5,7 @@
  * placed here but switched off, or merely offered, is in the space library.
  */
 
-import { useMemo, useState } from "react";
-import { CreatePackageModal } from "../components/create-package-modal";
+import { useMemo } from "react";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { Boxes, LibraryBig, Plus } from "lucide-react";
@@ -38,7 +37,6 @@ import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useIntegrationListColumns } from "./integration-list-columns";
 
 export function IntegrationsPage() {
-  const [creating, setCreating] = useState(false);
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const orgName = useOrg().currentOrg?.name ?? "";
@@ -199,15 +197,9 @@ export function IntegrationsPage() {
         <CreationHandoffModal
           resource="integration"
           onClose={creation.close}
-          onManual={() => {
-            creation.close();
-            setCreating(true);
-          }}
+          onManual={() => creation.leave("/integrations/new")}
           onChat={creation.openChat}
         />
-      )}
-      {creating && canCreate && (
-        <CreatePackageModal type="integration" onClose={() => setCreating(false)} />
       )}
     </div>
   );

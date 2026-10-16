@@ -33,12 +33,10 @@ const HIGH = "Élevé";
 const REASONING_INHERIT = "Par défaut (Moyen)";
 
 /**
- * The reasoning select. The model, temperature and reasoning selects carry no
- * accessible name of their own (the row's label is plain text beside them), so
- * it is the one whose value is either of the two states this test moves between.
+ * Find the shared reasoning select by its accessible label.
  */
 function reasoningSelect(page: Page) {
-  return page.getByRole("combobox").filter({ hasText: /^(Par défaut \(Moyen\)|Élevé)$/ });
+  return page.getByRole("combobox", { name: "Niveau de raisonnement", exact: true });
 }
 
 async function openModelSection(page: Page) {

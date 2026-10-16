@@ -271,6 +271,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
   "orgRolesGuide.access.", // pages/org-settings/org-roles.tsx — space reach per org role
+  "orgRolesGuide.can.", // pages/org-settings/org-roles.tsx — one key per capability row
   "orgSettings.roleHint.", // components/org-invitation-form.tsx + OAuth signup form
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx
   "permissions.label.", // lib/permission-labels.ts — permissionLabel()
@@ -286,6 +287,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "spaceMembers.source.", // components/space-seat-columns.tsx
   "spaces.visibility.", // pages/workspace-settings/general.tsx — t(`spaces.visibility.${value}`)
   "spaces.visibilityDesc.", // pages/workspace-settings/general.tsx — t(`spaces.visibilityDesc.${value}`)
+  "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
   "validation.schema.", // hooks/use-schema-form-labels.ts — one key per JSON Schema keyword
   "viewAs.stopped.", // components/view-as-banner.tsx — t(`viewAs.stopped.${code}`)
 ];
