@@ -17,6 +17,8 @@ import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useFilesPaged } from "../hooks/use-files";
 import { PageHeader } from "../components/page-header";
+import { ListViewTabs } from "../components/list-view-tabs";
+import { useListView } from "../stores/list-view-store";
 import { DocumentListPanel } from "../components/document-list-panel";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useListParams } from "../lib/list-params";
@@ -67,6 +69,7 @@ function DocumentsCollection({
 }) {
   const { t } = useTranslation(["files", "common"]);
   const canReach = useCanReach();
+  const [view, setView] = useListView("documents");
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.files"));
   const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
   const query = useDebouncedValue(search);
@@ -107,6 +110,7 @@ function DocumentsCollection({
 
       <DocumentListPanel
         documents={files}
+        display={view}
         isLoading={isLoading}
         error={error}
         tableLabel={t("tableLabel")}
@@ -130,7 +134,8 @@ function DocumentsCollection({
               },
             ]}
             onReset={onReset}
-            columns={columns}
+            columns={view === "table" ? columns : undefined}
+            actions={<ListViewTabs view={view} onChange={setView} />}
           />
         )}
         empty={

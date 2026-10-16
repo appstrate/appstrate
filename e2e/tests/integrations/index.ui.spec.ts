@@ -17,58 +17,79 @@
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createIntegration, deactivatePackageInSpace } from "../../helpers/seed.ts";
 
-test("the integrations index shows what this space runs, and searches manifest keywords", async ({
-  authedPage: page,
-  apiClient,
-  browserCtx,
-  orgOnlyClient,
-}) => {
-  const scope = `@${browserCtx.org.orgSlug}`;
-  const tag = Date.now().toString(36);
-  const running = `ui-int-on-${tag}`;
-  const switchedOff = `ui-int-off-${tag}`;
-  // A keyword that shares nothing with either id or display name: only a search
-  // that reads `keywords` can find it.
-  const keyword = `pelican${tag}`;
+for (const view of ["cards", "table"] as const) {
+  test(`the integrations index in ${view} shows the active set and searches keywords`, async ({
+    authedPage: page,
+    apiClient,
+    browserCtx,
+    orgOnlyClient,
+  }) => {
+    const scope = `@${browserCtx.org.orgSlug}`;
+    const tag = Date.now().toString(36);
+    const running = `ui-int-on-${tag}`;
+    const switchedOff = `ui-int-off-${tag}`;
+    // A keyword that shares nothing with either id or display name: only a search
+    // that reads `keywords` can find it.
+    const keyword = `pelican${tag}`;
 
-  // Creating a package homes it here AND switches it on here, for every type.
-  await createIntegration(apiClient, scope, running, { keywords: [keyword] });
-  await createIntegration(apiClient, scope, switchedOff);
-  // Switching it off leaves the placement and its settings in place — the space
-  // library still lists it — and takes it out of the index.
-  await deactivatePackageInSpace(orgOnlyClient, browserCtx.org.defaultSpaceId, scope, switchedOff);
+    // Creating a package homes it here AND switches it on here, for every type.
+    await createIntegration(apiClient, scope, running, { keywords: [keyword] });
+    await createIntegration(apiClient, scope, switchedOff);
+    // Switching it off leaves the placement and its settings in place — the space
+    // library still lists it — and takes it out of the index.
+    await deactivatePackageInSpace(
+      orgOnlyClient,
+      browserCtx.org.defaultSpaceId,
+      scope,
+      switchedOff,
+    );
 
-  const row = (name: string) =>
-    page.getByRole("row").filter({ hasText: `Test Integration ${name}` });
+    const row = (name: string) =>
+      view === "table"
+        ? page.getByRole("row").filter({ hasText: `Test Integration ${name}` })
+        : page.getByRole("link", { name: `Test Integration ${name}`, exact: true });
 
-  // The route the page asks is the assertion: the index, which leaves the
-  // switched-off integration out.
-  const indexRead = page.waitForResponse(
-    (response) =>
-      response.request().method() === "GET" &&
-      new URL(response.url()).pathname === "/api/packages/integrations",
-  );
-  // Custom integrations run in a sandbox: they sit under the « Locales » tab.
-  await page.goto("/integrations?execution=local");
-  const listed = await indexRead;
-  expect(listed.status()).toBe(200);
-  const { data } = (await listed.json()) as { data: { id: string; source_kind: string }[] };
-  const ids = data.map((entry) => entry.id);
-  expect(ids).toContain(`${scope}/${running}`);
-  expect(ids).not.toContain(`${scope}/${switchedOff}`);
-  expect(data.find((entry) => entry.id === `${scope}/${running}`)?.source_kind).toBe("local");
+    // The route the page asks is the assertion: the index, which leaves the
+    // switched-off integration out.
+    const indexRead = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === "/api/packages/integrations",
+    );
+    // Custom integrations run in a sandbox: they sit under the « Locales » tab.
+    await page.goto("/integrations?execution=local");
+    await expect(page.getByRole("tab", { name: "Vue cartes", exact: true })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    if (view === "table") {
+      await page.getByRole("tab", { name: "Vue tableau", exact: true }).click();
+    }
+    const listed = await indexRead;
+    expect(listed.status()).toBe(200);
+    const { data } = (await listed.json()) as { data: { id: string; source_kind: string }[] };
+    const ids = data.map((entry) => entry.id);
+    expect(ids).toContain(`${scope}/${running}`);
+    expect(ids).not.toContain(`${scope}/${switchedOff}`);
+    expect(data.find((entry) => entry.id === `${scope}/${running}`)?.source_kind).toBe("local");
 
-  // The row carries the manifest's display name, not the bare package id.
-  await expect(row(running)).toBeVisible();
-  await expect(row(switchedOff)).toHaveCount(0);
+    await page.reload();
+    await expect(
+      page.getByRole("tab", { name: view === "cards" ? "Vue cartes" : "Vue tableau", exact: true }),
+    ).toHaveAttribute("data-state", "active");
 
-  await page.getByRole("textbox", { name: /Rechercher des intégrations/ }).fill(keyword);
-  await expect(row(running)).toBeVisible();
+    // The row carries the manifest's display name, not the bare package id.
+    await expect(row(running)).toBeVisible();
+    await expect(row(switchedOff)).toHaveCount(0);
 
-  // A query that matches nothing empties the list rather than falling back to
-  // the unfiltered one.
-  await page
-    .getByRole("textbox", { name: /Rechercher des intégrations/ })
-    .fill(`no-such-integration-${tag}`);
-  await expect(row(running)).toHaveCount(0);
-});
+    await page.getByRole("textbox", { name: /Rechercher des intégrations/ }).fill(keyword);
+    await expect(row(running)).toBeVisible();
+
+    // A query that matches nothing empties the list rather than falling back to
+    // the unfiltered one.
+    await page
+      .getByRole("textbox", { name: /Rechercher des intégrations/ })
+      .fill(`no-such-integration-${tag}`);
+    await expect(row(running)).toHaveCount(0);
+  });
+}
