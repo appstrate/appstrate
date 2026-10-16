@@ -25,10 +25,10 @@ test.describe("Org switching in UI", () => {
     await search.press("ArrowDown");
     await search.press("Enter");
     await expect(page.getByTestId(`space-item-${orgB.defaultSpaceId}`)).toBeVisible();
-    await expect(page.getByTestId("org-switcher-button")).toContainText(orgA.orgName);
+    await expect(sidebar.switcherButton).toContainText(orgA.orgName);
     await expect(page).toHaveURL("/agents");
     await search.press("Escape");
-    await expect(page.getByTestId("org-switcher-button")).toContainText(orgA.orgName);
+    await expect(sidebar.switcherButton).toContainText(orgA.orgName);
 
     await sidebar.openSwitcher();
     await search.fill(orgB.orgName);
@@ -39,7 +39,7 @@ test.describe("Org switching in UI", () => {
     await search.fill((await space.innerText()).trim());
     await search.press("ArrowDown");
     await search.press("Enter");
-    await expect(page.getByTestId("org-switcher-button")).toContainText(orgB.orgName);
+    await expect(sidebar.switcherButton).toContainText(orgB.orgName);
     await expect(search).toHaveCount(0);
   });
 
