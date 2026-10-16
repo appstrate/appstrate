@@ -282,9 +282,10 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 
 - **Connection use and sharing** occupy separate table columns: Use is a read-only scope badge
   naming multi-space or single-space use by the owner; Sharing holds the access picker ("Only you",
-  "N spaces" or "N spaces + future"). The sharing control stays visible on narrow tables;
+  "N spaces", "All spaces" or "Custom"). The sharing control stays visible on narrow tables;
   the usage column waits for room. The member-access explanation is visible in the popover. Sharing with all listed
-  team spaces also enables automatic sharing with future team spaces. Only an organization
+  team spaces uses an "All spaces" checkbox that includes future team spaces; it is indeterminate
+  when future sharing remains enabled with individual exclusions. Only an organization
   administrator owning an org-scoped connection may consent; personal spaces stay private.
   Current-space withdrawals remain effective until explicit all-space sharing is enabled again;
   stopping future sharing keeps existing shares.

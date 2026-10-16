@@ -28,6 +28,7 @@ export function ConnectionShareEditor({
   rowSpaceId,
   hereSpaceId,
   targets,
+  teamSpaceIds,
   sharedSpaceIds,
   sharedHere,
   canShare,
@@ -48,6 +49,8 @@ export function ConnectionShareEditor({
   hereSpaceId: string | null;
   /** Spaces offered in the picker, with their names. */
   targets: { id: string; name: string }[];
+  /** Every team space in the organization; undefined until its listing is loaded. */
+  teamSpaceIds: string[] | undefined;
   /** The owner's full set of shared spaces; empty for anyone else. */
   sharedSpaceIds: string[];
   /** Whether the connection is shared into `hereSpaceId`. */
@@ -89,6 +92,11 @@ export function ConnectionShareEditor({
 
   if (canShare) {
     const names = targets.filter((s) => sharedSpaceIds.includes(s.id)).map((s) => s.name);
+    const allShared =
+      canShareAll &&
+      shareNewSpaces &&
+      teamSpaceIds !== undefined &&
+      teamSpaceIds.every((id) => sharedSpaceIds.includes(id));
     return (
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -101,11 +109,13 @@ export function ConnectionShareEditor({
             data-testid={`share-editor-${connectionId}`}
           >
             <span className="truncate">
-              {shareNewSpaces
-                ? t("integration.connection.share.countFuture", { count: sharedSpaceIds.length })
-                : sharedSpaceIds.length === 0
-                  ? t("integration.connection.share.none")
-                  : t("integration.connection.share.count", { count: sharedSpaceIds.length })}
+              {allShared
+                ? t("integration.connection.share.all")
+                : shareNewSpaces
+                  ? t("integration.connection.share.custom")
+                  : sharedSpaceIds.length === 0
+                    ? t("integration.connection.share.none")
+                    : t("integration.connection.share.count", { count: sharedSpaceIds.length })}
             </span>
             <ChevronsUpDown className="shrink-0 opacity-50" />
           </Button>
@@ -117,18 +127,17 @@ export function ConnectionShareEditor({
             </p>
             {canShareAll && (
               <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={pending}
-                  onClick={() => onFutureSharingChange(!shareNewSpaces)}
-                  data-testid={`share-all-${connectionId}`}
-                >
-                  {shareNewSpaces
-                    ? t("integration.connection.share.currentOnly")
-                    : t("integration.connection.share.all")}
-                </Button>
-                <p className="text-muted-foreground text-xs">
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={allShared ? true : shareNewSpaces ? "indeterminate" : false}
+                    disabled={pending}
+                    onCheckedChange={(checked) => onFutureSharingChange(checked === true)}
+                    aria-describedby={`share-all-help-${connectionId}`}
+                    data-testid={`share-all-${connectionId}`}
+                  />
+                  {t("integration.connection.share.all")}
+                </label>
+                <p id={`share-all-help-${connectionId}`} className="text-muted-foreground text-xs">
                   {t("integration.connection.share.allHelp")}
                 </p>
               </>

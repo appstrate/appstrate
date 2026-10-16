@@ -20,6 +20,7 @@ import { TableRowActions } from "../../components/table-row-actions";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
 import { ConnectionDeleteConfirm } from "../../components/integration-connect/connection-delete-confirm";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
+import { useOrgSpaces } from "../../hooks/use-spaces";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { connectionLockHintKey } from "../../components/integration-connect/connection-ownership";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -54,6 +55,8 @@ function ConnectionRow({
   const lockHint = lockKey ? t(lockKey) : null;
   const canRename = conn.allowed_actions.includes("rename");
   const canShare = conn.allowed_actions.includes("share");
+  const canShareAll = conn.allowed_actions.includes("share_all");
+  const { data: orgSpaces } = useOrgSpaces(canShareAll ? conn.org.id : null);
   // Shareable spaces and the ones it is already shared into, one entry each.
   const shareTargets = [
     ...conn.shareable_spaces,
@@ -158,6 +161,7 @@ function ConnectionRow({
             rowSpaceId={conn.space?.id ?? null}
             hereSpaceId={null}
             targets={shareTargets}
+            teamSpaceIds={orgSpaces?.filter((s) => !s.personal).map((s) => s.id)}
             sharedSpaceIds={conn.shared_spaces.map((s) => s.id)}
             sharedHere={false}
             canShare={canShare}
@@ -165,7 +169,7 @@ function ConnectionRow({
             lockHint={null}
             pending={sharing}
             onShare={onShare}
-            canShareAll={conn.allowed_actions.includes("share_all")}
+            canShareAll={canShareAll}
             shareNewSpaces={conn.share_new_spaces ?? false}
             onFutureSharingChange={onFutureSharingChange}
             onUnshare={onUnshare}

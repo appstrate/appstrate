@@ -32,6 +32,7 @@ const base: Props = {
     { id: HERE, name: "Ici" },
     { id: "spc_other", name: "Ailleurs" },
   ],
+  teamSpaceIds: [HERE, "spc_other"],
   sharedSpaceIds: [],
   sharedHere: false,
   canShare: true,
@@ -124,12 +125,14 @@ describe("ConnectionShareEditor — the owner's org-scoped row", () => {
       const tree = treeOf({
         ...base,
         targets: [],
+        teamSpaceIds: [],
         shareNewSpaces: enabled,
         onFutureSharingChange: (value) => changes.push(value),
       });
       const control = propsOf(tree, "share-all-" + CONN)!;
       expect(control.disabled).toBe(false);
-      (control.onClick as () => void)();
+      expect(control.checked).toBe(enabled);
+      (control.onCheckedChange as (checked: boolean) => void)(!enabled);
       expect(changes).toEqual([!enabled]);
     }
   });
@@ -139,11 +142,45 @@ describe("ConnectionShareEditor — the owner's org-scoped row", () => {
     expect(propsOf(treeOf({ ...base, pending: true }), "share-all-" + CONN)?.disabled).toBe(true);
   });
 
-  it("names private access and future sharing in the trigger", () => {
+  it("names all team spaces without counting personal spaces", () => {
     expect(render(<ConnectionShareEditor {...base} />)).toContain("Vous uniquement");
-    const html = render(<ConnectionShareEditor {...base} shareNewSpaces sharedSpaceIds={[HERE]} />);
-    expect(html).toContain(
-      i18n.t("settings:integration.connection.share.countFuture", { count: 1 }),
+    const props = {
+      ...base,
+      shareNewSpaces: true,
+      sharedSpaceIds: [HERE, "spc_other"],
+      targets: [...base.targets, { id: "personal", name: "Mon espace" }],
+    };
+    const html = render(<ConnectionShareEditor {...props} />);
+    expect(html).toContain("Tous les espaces");
+    expect(html).not.toContain("+ futurs");
+    expect(propsOf(treeOf(props), "share-all-" + CONN)?.checked).toBe(true);
+  });
+
+  it("marks exclusions as a partial selection and restores all spaces when checked", () => {
+    const changes: boolean[] = [];
+    const props = {
+      ...base,
+      shareNewSpaces: true,
+      sharedSpaceIds: [HERE],
+      onFutureSharingChange: (value: boolean) => changes.push(value),
+    };
+    expect(render(<ConnectionShareEditor {...props} />)).toContain("Personnalisé");
+    const control = propsOf(treeOf(props), "share-all-" + CONN)!;
+    expect(control.checked).toBe("indeterminate");
+    (control.onCheckedChange as (checked: boolean) => void)(true);
+    expect(changes).toEqual([true]);
+  });
+
+  it("does not claim all-space consent before the team list loads or when future sharing is off", () => {
+    const props = { ...base, shareNewSpaces: true, sharedSpaceIds: [HERE, "spc_other"] };
+    expect(render(<ConnectionShareEditor {...props} teamSpaceIds={undefined} />)).toContain(
+      "Personnalisé",
+    );
+    expect(render(<ConnectionShareEditor {...props} shareNewSpaces={false} />)).toContain(
+      "2 espaces",
+    );
+    expect(propsOf(treeOf({ ...props, shareNewSpaces: false }), "share-all-" + CONN)?.checked).toBe(
+      false,
     );
   });
 
