@@ -41,26 +41,26 @@ export function SaveBar({
         }
       >
         <Button
-          size={compact ? "icon-sm" : "default"}
+          size={compact ? "icon" : "default"}
           aria-label={t("editor.discardChanges")}
           title={compact ? t("editor.discardChanges") : undefined}
           variant="outline"
           type="button"
           disabled={pending}
           onClick={onDiscard}
-          className={compact ? undefined : "max-lg:flex-auto"}
+          className={compact ? "size-7" : "max-lg:flex-auto"}
         >
           {compact ? <Undo2 /> : t("editor.discardChanges")}
         </Button>
         <PendingButton
-          size={compact ? "icon-sm" : "default"}
+          size={compact ? "icon" : "default"}
           aria-label={t("btn.save", { ns: "common" })}
           title={compact ? t("btn.save", { ns: "common" }) : undefined}
           type="button"
           pending={pending}
           disabled={saveDisabled}
           onClick={onSave}
-          className={compact ? undefined : "max-lg:flex-auto"}
+          className={compact ? "size-7" : "max-lg:flex-auto"}
         >
           {compact ? !pending && <Check /> : t("btn.save", { ns: "common" })}
         </PendingButton>
