@@ -21,7 +21,14 @@ for (const type of ["skill", "integration"] as const) {
     await dialog.getByLabel("Description").fill("Created from the short dialog");
     if (type === "skill")
       await dialog.getByLabel("Instructions de la skill").fill("Review each file.");
-    else await dialog.getByLabel("URL du serveur distant").fill("https://example.com/mcp");
+    else {
+      await dialog.getByRole("button", { name: "Méthodes d’authentification" }).click();
+      await dialog.getByLabel("URL du serveur distant").fill("https://old.example.com/mcp");
+      await dialog.getByLabel("Préfixe", { exact: true }).fill("Token ");
+      await dialog.getByLabel("URL du serveur distant").fill("https://example.com/mcp");
+      await expect(dialog.getByLabel("Préfixe", { exact: true })).toHaveValue("Token ");
+      await dialog.getByLabel("Nom de l'en-tête").fill("X-API-Key");
+    }
     const writes: Record<string, unknown>[] = [];
     await page.route(`**/api/packages/${type}s`, async (route) => {
       if (route.request().method() !== "POST") return route.continue();
@@ -55,9 +62,9 @@ for (const type of ["skill", "integration"] as const) {
     } else {
       const response = await apiClient.get(`/packages/integrations/${id}`);
       expect(response.status()).toBe(200);
-      expect((await response.json()).manifest.auths.primary.authorized_uris).toEqual([
-        "https://example.com/**",
-      ]);
+      const auth = (await response.json()).manifest.auths.primary;
+      expect(auth.authorized_uris).toEqual(["https://example.com/**"]);
+      expect(auth.delivery.http).toMatchObject({ name: "X-API-Key", prefix: "Token " });
     }
     expect(errors).toEqual([]);
   });

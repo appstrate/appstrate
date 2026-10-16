@@ -135,7 +135,11 @@ export function CreatePackageModal({
             open={authsOpen}
             onOpenChange={setAuthsOpen}
           >
-            <AuthsSection manifest={integration} onChange={setIntegration} />
+            <AuthsSection
+              key={JSON.stringify(integration.source)}
+              manifest={integration}
+              onChange={setIntegration}
+            />
           </AdvancedSection>
         </>
       ) : (

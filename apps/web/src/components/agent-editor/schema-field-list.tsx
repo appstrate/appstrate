@@ -207,6 +207,12 @@ function FieldRow({
           menuLabel={t("editor.rowActions", { name: field.key })}
           actions={[
             {
+              id: "edit",
+              label: t("btn.edit", { ns: "common" }),
+              icon: Pencil,
+              onSelect: onEdit,
+            },
+            {
               id: "up",
               label: t("editor.fieldMoveUp"),
               icon: ArrowUp,
@@ -219,12 +225,6 @@ function FieldRow({
               icon: ArrowDown,
               onSelect: onMoveDown,
               disabled: !onMoveDown,
-            },
-            {
-              id: "edit",
-              label: t("btn.edit", { ns: "common" }),
-              icon: Pencil,
-              onSelect: onEdit,
             },
             {
               id: "remove",

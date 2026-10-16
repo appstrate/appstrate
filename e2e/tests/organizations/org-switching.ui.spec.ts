@@ -12,6 +12,37 @@ import { Sidebar } from "../../pages/sidebar.ts";
 import { WebhooksPage } from "../../pages/webhooks-page.ts";
 
 test.describe("Org switching in UI", () => {
+  test("keyboard exploration changes context only when a workspace is chosen", async ({
+    authedPage: page,
+    orgA,
+    orgB,
+  }) => {
+    await page.goto("/agents");
+    const sidebar = new Sidebar(page);
+    await sidebar.openSwitcher();
+    const search = page.getByRole("combobox");
+    await search.fill(orgB.orgName);
+    await search.press("ArrowDown");
+    await search.press("Enter");
+    await expect(page.getByTestId(`space-item-${orgB.defaultSpaceId}`)).toBeVisible();
+    await expect(page.getByTestId("org-switcher-button")).toContainText(orgA.orgName);
+    await expect(page).toHaveURL("/agents");
+    await search.press("Escape");
+    await expect(page.getByTestId("org-switcher-button")).toContainText(orgA.orgName);
+
+    await sidebar.openSwitcher();
+    await search.fill(orgB.orgName);
+    await search.press("ArrowDown");
+    await search.press("Enter");
+    const space = page.getByTestId(`space-item-${orgB.defaultSpaceId}`);
+    await expect(space).toBeVisible();
+    await search.fill((await space.innerText()).trim());
+    await search.press("ArrowDown");
+    await search.press("Enter");
+    await expect(page.getByTestId("org-switcher-button")).toContainText(orgB.orgName);
+    await expect(search).toHaveCount(0);
+  });
+
   test("Org switcher dropdown shows both orgs @smoke", async ({ authedPage: page, orgA, orgB }) => {
     const agents = new AgentsPage(page);
     await agents.goto();
