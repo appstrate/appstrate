@@ -41,14 +41,15 @@ describeRequiresPostgres("future connection sharing serializes with space creati
     connectionId = row!.id;
   });
 
-  async function waitsForOrgLock() {
+  async function waitsForOrgLock(blockerPid: number) {
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
       const rows = toRows<{ waiting: boolean }>(
         await db.execute(
-          sql.raw(
-            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%organizations%') AS waiting",
-          ),
+          sql`SELECT EXISTS (
+            SELECT 1 FROM pg_locks
+            WHERE NOT granted AND ${blockerPid} = ANY(pg_blocking_pids(pid))
+          ) AS waiting`,
         ),
       );
       if (rows[0]!.waiting) return;
@@ -58,18 +59,20 @@ describeRequiresPostgres("future connection sharing serializes with space creati
   }
 
   it("a new space sees the policy that commits while its creation is waiting", async () => {
-    const locked = Promise.withResolvers<void>();
+    const locked = Promise.withResolvers<number>();
     const release = Promise.withResolvers<void>();
     const policy = db.transaction(async (tx) => {
       await lockConnectionSharingOrg(tx, ctx.orgId);
       await tx.update(c).set({ shareNewSpaces: true }).where(eq(c.id, connectionId));
-      locked.resolve();
+      locked.resolve(
+        toRows<{ pid: number }>(await tx.execute(sql`SELECT pg_backend_pid() AS pid`))[0]!.pid,
+      );
       await release.promise;
     });
-    await locked.promise;
+    const blockerPid = await locked.promise;
     const creating = createSpace(ctx.orgId, { name: "Concurrent" });
     try {
-      await waitsForOrgLock();
+      await waitsForOrgLock(blockerPid);
     } finally {
       release.resolve();
       await policy;
@@ -81,27 +84,29 @@ describeRequiresPostgres("future connection sharing serializes with space creati
   });
 
   it("enabling the policy sees a space that commits while consent is waiting", async () => {
-    const locked = Promise.withResolvers<void>();
+    const locked = Promise.withResolvers<number>();
     const release = Promise.withResolvers<void>();
     const spaceId = prefixedId("spc");
     const creating = db.transaction(async (tx) => {
       await lockConnectionSharingOrg(tx, ctx.orgId);
       await tx.insert(spaces).values({ id: spaceId, orgId: ctx.orgId, name: "Concurrent" });
-      locked.resolve();
+      locked.resolve(
+        toRows<{ pid: number }>(await tx.execute(sql`SELECT pg_backend_pid() AS pid`))[0]!.pid,
+      );
       await release.promise;
     });
-    await locked.promise;
+    const blockerPid = await locked.promise;
     const policy = setConnectionFutureSharing({
       connectionId,
       integrationId: "@future-lock/svc",
       enabled: true,
       caller: testCaller(
         { kind: "person", actor: { type: "user", id: ctx.user.id } },
-        { canShareAll: true },
+        { canShareAll: () => true },
       ),
     });
     try {
-      await waitsForOrgLock();
+      await waitsForOrgLock(blockerPid);
     } finally {
       release.resolve();
       await creating;

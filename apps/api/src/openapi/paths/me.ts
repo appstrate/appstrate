@@ -9,6 +9,7 @@ import {
   connectionFutureSharingOperation,
   connectionIdSetJsonSchema,
   connectionScopeSchema,
+  shareNewSpacesSchema,
   connectionSetRefusals,
   connectionShareDeleteConflicts,
   connectionShareEndpoints,
@@ -73,10 +74,7 @@ const meConnectionEntrySchema = {
     },
     auth_key: { type: "string" },
     scope: connectionScopeSchema,
-    share_new_spaces: {
-      type: "boolean",
-      description: "Automatically share with future team spaces.",
-    },
+    share_new_spaces: shareNewSpacesSchema,
     shared_spaces: {
       type: "array",
       items: namedSpaceSchema,

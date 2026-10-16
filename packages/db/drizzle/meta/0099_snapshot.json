@@ -5691,8 +5691,8 @@
           "name": "integration_connections_origin_is_org",
           "value": "origin_space_id IS NULL OR space_id IS NULL"
         },
-        "integration_connections_future_share_is_org_member": {
-          "name": "integration_connections_future_share_is_org_member",
+        "integration_connections_future_share_org_scoped_user": {
+          "name": "integration_connections_future_share_org_scoped_user",
           "value": "NOT share_new_spaces OR (user_id IS NOT NULL AND space_id IS NULL)"
         },
         "integration_connections_space_shares_own": {

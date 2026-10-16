@@ -129,7 +129,7 @@ export interface ConnectionCaller {
   /** Holds `integrations:connect` where the credential acts. */
   canConnect: boolean;
   /** The credential permits org-wide consent; role and ownership are checked per row. */
-  canShareAll?: boolean;
+  canShareAll?: (orgId: string) => boolean;
   /** Holds `integrations:configure` in `spaceId`. */
   governs: boolean;
   /** The caller's permissions in one space of `orgId` (empty outside it). */
@@ -164,7 +164,7 @@ export function shareableIn(t: ShareTargets): SQL<string[]> {
  * into it. Sharing is the owner's consent: a governor never shares.
  */
 export function connectionActions(
-  row: { userId: string | null; endUserId: string | null; spaceId: string | null },
+  row: { orgId: string; userId: string | null; endUserId: string | null; spaceId: string | null },
   caller: ConnectionCaller,
   sharedHere: boolean,
   orgRole?: OrgRole | null,
@@ -178,7 +178,7 @@ export function connectionActions(
       actions.push("share");
       if (
         row.spaceId === null &&
-        caller.canShareAll &&
+        caller.canShareAll?.(row.orgId) &&
         caller.principal.kind === "person" &&
         (orgRole === "owner" || orgRole === "admin")
       )

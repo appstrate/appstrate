@@ -98,7 +98,7 @@ import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
-import { canReadRuns } from "@appstrate/core/permissions";
+import { VIEW_AS_HEADER, canReadRuns } from "@appstrate/core/permissions";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { forbidden, unauthorized } from "../lib/errors.ts";
@@ -204,6 +204,8 @@ router.get("/orgs", async (c) => {
  * package) in both cases.
  */
 router.get("/connections", requireCeiling("integrations", "read"), async (c) => {
+  if (c.req.header(VIEW_AS_HEADER) !== undefined)
+    await resolveListingViewAs(c, await getUserOrganizations(c.get("user").id));
   const groups = await listMeConnections(connectionCaller(c, null));
   return c.json(listResponse(groups));
 });

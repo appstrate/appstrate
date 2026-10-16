@@ -18,8 +18,13 @@ const COLLEAGUE = "user_2";
 const HERE = "spc_here";
 const ELSEWHERE = "spc_elsewhere";
 
-const orgRow = (userId = OWNER) => ({ userId, endUserId: null, spaceId: null });
-const spaceRow = (userId = OWNER, spaceId = HERE) => ({ userId, endUserId: null, spaceId });
+const orgRow = (userId = OWNER) => ({ orgId: "org_1", userId, endUserId: null, spaceId: null });
+const spaceRow = (userId = OWNER, spaceId = HERE) => ({
+  orgId: "org_1",
+  userId,
+  endUserId: null,
+  spaceId,
+});
 
 function reader(overrides: Partial<ConnectionCaller> = {}): ConnectionCaller {
   return testCaller(
@@ -33,23 +38,30 @@ function reader(overrides: Partial<ConnectionCaller> = {}): ConnectionCaller {
 
 describe("connectionActions", () => {
   it("offers future-space consent only to its org-admin owner with the credential grant", () => {
-    expect(connectionActions(orgRow(), reader({ canShareAll: true }), false, "admin")).toContain(
-      "share_all",
-    );
+    expect(
+      connectionActions(orgRow(), reader({ canShareAll: () => true }), false, "admin"),
+    ).toContain("share_all");
     for (const role of ["member", "guest"] as const) {
-      expect(connectionActions(orgRow(), reader({ canShareAll: true }), false, role)).not.toContain(
-        "share_all",
-      );
+      expect(
+        connectionActions(orgRow(), reader({ canShareAll: () => true }), false, role),
+      ).not.toContain("share_all");
     }
     expect(
-      connectionActions(orgRow(), reader({ canShareAll: false }), false, "owner"),
+      connectionActions(orgRow(), reader({ canShareAll: () => false }), false, "owner"),
     ).not.toContain("share_all");
     expect(
-      connectionActions(spaceRow(), reader({ canShareAll: true }), false, "owner"),
+      connectionActions(spaceRow(), reader({ canShareAll: () => true }), false, "owner"),
     ).not.toContain("share_all");
     expect(
-      connectionActions(orgRow(COLLEAGUE), reader({ canShareAll: true }), false, "owner"),
+      connectionActions(orgRow(COLLEAGUE), reader({ canShareAll: () => true }), false, "owner"),
     ).not.toContain("share_all");
+  });
+  it("evaluates all-space consent in the connection's organization", () => {
+    const caller = reader({ canShareAll: (orgId) => orgId !== "previewed" });
+    expect(
+      connectionActions({ ...orgRow(), orgId: "previewed" }, caller, false, "owner"),
+    ).not.toContain("share_all");
+    expect(connectionActions(orgRow(), caller, false, "owner")).toContain("share_all");
   });
   it("gives the owner rename and share, never the governor's withdrawal", () => {
     expect(connectionActions(orgRow(), reader(), true)).toEqual(["rename", "share"]);
@@ -104,7 +116,7 @@ describe("connectionActions", () => {
 
   it("never offers share on an end user's row", () => {
     const endUser = { type: "end_user" as const, id: "eu_1" };
-    const row = { userId: null, endUserId: "eu_1", spaceId: HERE };
+    const row = { orgId: "org_1", userId: null, endUserId: "eu_1", spaceId: HERE };
     const bound = reader({
       principal: { kind: "delegated", actor: endUser, orgId: "org_1", spaceId: HERE },
     });

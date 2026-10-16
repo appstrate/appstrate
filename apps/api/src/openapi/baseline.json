@@ -1724,7 +1724,7 @@
         "operationId": "exportAgentBundle",
         "tags": ["Agents"],
         "summary": "Export an agent as an .afps-bundle",
-        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the `latest` dist-tag, or the version `?version=` pins; `?source=draft` bundles the agent's current draft state as the bundle ROOT — its dependencies are still the PUBLISHED versions the manifest pins select, exactly as a server-side `version=draft` run resolves them, so the archive carries the bytes that run would execute and a dependency with no satisfying published version answers the same `422 dependency_unresolved`. `?source=draft` is reserved to callers who may WRITE the agent (`403 draft_not_writable` otherwise) — handing over the working copy IS running it, once `--local` is in the picture. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses. This route hands over a COPY of the agent and of every dependency's files, so an organization that sets `restrict_package_copy` narrows it to callers holding the agent's `agents:share` in its HOME space: `403 package_copy_restricted` otherwise, exactly as on `fork` and `download`. That is what the setting means — `appstrate run --local` downloads a bundle, so it is refused there too, while a server-side run is unaffected. Skills and system packages are exempt.",
+        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies: its skills, and its integrations at the version a run resolves (the published version the pin selects, or the system version). The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the `latest` dist-tag, or the version `?version=` pins; `?source=draft` bundles the agent's current draft state as the bundle ROOT — its dependencies are still the PUBLISHED versions the manifest pins select, exactly as a server-side `version=draft` run resolves them, so the archive carries the bytes that run would execute and a dependency with no satisfying published version answers the same `422 dependency_unresolved`. `?source=draft` is reserved to callers who may WRITE the agent (`403 draft_not_writable` otherwise) — handing over the working copy IS running it, once `--local` is in the picture. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses. This route hands over a COPY of the agent and of every dependency's files, so an organization that sets `restrict_package_copy` narrows it to callers holding the agent's `agents:share` in its HOME space: `403 package_copy_restricted` otherwise, exactly as on `fork` and `download`. That is what the setting means — `appstrate run --local` downloads a bundle, so it is refused there too, while a server-side run is unaffected. Skills and system packages are exempt.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1804,14 +1804,14 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden",
-            "description": "Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, or `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent."
+            "description": "Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent, or the caller lacks the read scope of a dependency type the bundle carries (`skills:read`, `integrations:read`)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound",
             "description": "`agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`."
           },
           "422": {
-            "description": "The bundle cannot be assembled from stored artifacts. `version_artifact_unavailable`: the selected published version of the agent itself exists but its archive is gone from storage — nothing is substituted for it. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
+            "description": "The bundle cannot be assembled from stored artifacts. `version_artifact_unavailable`: the selected published version of the agent itself exists but its archive is gone from storage — nothing is substituted for it. `dependency_unresolved`: a declared dependency resolves to no published version (an integration pin included, exactly as a run refuses it), or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6048,6 +6048,10 @@
                                   },
                                   "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                                 },
+                                "share_new_spaces": {
+                                  "type": "boolean",
+                                  "description": "Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again."
+                                },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
                                   "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -6056,7 +6060,7 @@
                                   "type": "array",
                                   "items": {
                                     "type": "string",
-                                    "enum": ["rename", "share", "unshare_here"]
+                                    "enum": ["rename", "share", "share_all", "unshare_here"]
                                   },
                                   "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                                 },
@@ -7130,6 +7134,10 @@
                       },
                       "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                     },
+                    "share_new_spaces": {
+                      "type": "boolean",
+                      "description": "Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again."
+                    },
                     "origin_space_id": {
                       "type": ["string", "null"],
                       "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -7138,7 +7146,7 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["rename", "share", "unshare_here"]
+                        "enum": ["rename", "share", "share_all", "unshare_here"]
                       },
                       "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
@@ -7793,6 +7801,10 @@
                           },
                           "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                         },
+                        "share_new_spaces": {
+                          "type": "boolean",
+                          "description": "Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again."
+                        },
                         "origin_space_id": {
                           "type": ["string", "null"],
                           "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -7801,7 +7813,7 @@
                           "type": "array",
                           "items": {
                             "type": "string",
-                            "enum": ["rename", "share", "unshare_here"]
+                            "enum": ["rename", "share", "share_all", "unshare_here"]
                           },
                           "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                         },
@@ -8081,6 +8093,10 @@
                             },
                             "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                           },
+                          "share_new_spaces": {
+                            "type": "boolean",
+                            "description": "Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again."
+                          },
                           "origin_space_id": {
                             "type": ["string", "null"],
                             "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -8089,7 +8105,7 @@
                             "type": "array",
                             "items": {
                               "type": "string",
-                              "enum": ["rename", "share", "unshare_here"]
+                              "enum": ["rename", "share", "share_all", "unshare_here"]
                             },
                             "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                           },
@@ -8305,6 +8321,10 @@
                       },
                       "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                     },
+                    "share_new_spaces": {
+                      "type": "boolean",
+                      "description": "Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again."
+                    },
                     "origin_space_id": {
                       "type": ["string", "null"],
                       "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -8313,7 +8333,7 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["rename", "share", "unshare_here"]
+                        "enum": ["rename", "share", "share_all", "unshare_here"]
                       },
                       "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
@@ -8388,6 +8408,81 @@
             }
           }
         }
+      }
+    },
+    "/api/integrations/{packageId}/connections/{connectionId}/shares": {
+      "put": {
+        "description": "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False disables future sharing and keeps existing shares; individual withdrawals still use the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["include_future_spaces"],
+                "properties": {
+                  "include_future_spaces": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Future-space sharing policy saved",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "operationId": "setIntegrationConnectionFutureSharing",
+        "tags": ["Integrations"],
+        "summary": "Share a connection with current and future team spaces",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "description": "Integration connection id (UUID).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
       }
     },
     "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}": {
@@ -8769,6 +8864,10 @@
                                   },
                                   "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                                 },
+                                "share_new_spaces": {
+                                  "type": "boolean",
+                                  "description": "Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again."
+                                },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
                                   "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -8777,7 +8876,7 @@
                                   "type": "array",
                                   "items": {
                                     "type": "string",
-                                    "enum": ["rename", "share", "unshare_here"]
+                                    "enum": ["rename", "share", "share_all", "unshare_here"]
                                   },
                                   "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                                 },
@@ -14811,6 +14910,10 @@
                                   "enum": ["org", "space"],
                                   "description": "Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org. `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space."
                                 },
+                                "share_new_spaces": {
+                                  "type": "boolean",
+                                  "description": "Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again."
+                                },
                                 "shared_spaces": {
                                   "type": "array",
                                   "items": {
@@ -14831,7 +14934,7 @@
                                   "type": "array",
                                   "items": {
                                     "type": "string",
-                                    "enum": ["rename", "share", "unshare_here"]
+                                    "enum": ["rename", "share", "share_all", "unshare_here"]
                                   },
                                   "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space)."
                                 },
@@ -14926,6 +15029,64 @@
             "$ref": "#/components/responses/Unauthorized"
           }
         }
+      }
+    },
+    "/api/me/connections/{connectionId}/shares": {
+      "put": {
+        "description": "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False disables future sharing and keeps existing shares; individual withdrawals still use the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["include_future_spaces"],
+                "properties": {
+                  "include_future_spaces": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Future-space sharing policy saved",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "operationId": "setMeConnectionFutureSharing",
+        "tags": ["Me"],
+        "summary": "Share an owned connection with current and future team spaces",
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
       }
     },
     "/api/me/connections/{connectionId}/shares/{spaceId}": {
@@ -15577,6 +15738,10 @@
                       },
                       "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                     },
+                    "share_new_spaces": {
+                      "type": "boolean",
+                      "description": "Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again."
+                    },
                     "origin_space_id": {
                       "type": ["string", "null"],
                       "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -15585,7 +15750,7 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["rename", "share", "unshare_here"]
+                        "enum": ["rename", "share", "share_all", "unshare_here"]
                       },
                       "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
@@ -34466,6 +34631,10 @@
                     "type": "string"
                   },
                   "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
+                },
+                "share_new_spaces": {
+                  "type": "boolean",
+                  "description": "Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again."
                 },
                 "origin_space_id": {
                   "type": ["string", "null"],

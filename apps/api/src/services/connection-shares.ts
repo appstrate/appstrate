@@ -269,12 +269,14 @@ export async function setConnectionFutureSharing(input: EditInput & { enabled: b
     if (actor.type !== "user") throw forbidden("Only a member can share a connection");
     const member = await lockOrgMember(tx, read.orgId, actor.id);
     // Org administrators reach all team spaces; personal spaces are always isolated.
-    const targets = await tx
-      .select({ id: spaces.id })
-      .from(spaces)
-      .where(and(eq(spaces.orgId, read.orgId), isNull(spaces.ownerUserId)))
-      .orderBy(asc(spaces.id))
-      .for("share");
+    const targets = input.enabled
+      ? await tx
+          .select({ id: spaces.id })
+          .from(spaces)
+          .where(and(eq(spaces.orgId, read.orgId), isNull(spaces.ownerUserId)))
+          .orderBy(asc(spaces.id))
+          .for("share")
+      : [];
     const row = await lockVisible(tx, input);
     if (!connectionActions(row, input.caller, false, member?.role).includes("share_all")) {
       throw forbidden(
@@ -291,11 +293,13 @@ export async function setConnectionFutureSharing(input: EditInput & { enabled: b
             .onConflictDoNothing()
             .returning({ spaceId: shares.spaceId })
         : [];
-    await tx
-      .update(c)
-      .set({ shareNewSpaces: input.enabled, updatedAt: new Date() })
-      .where(eq(c.id, row.id));
-    return { orgId: row.orgId, addedSpaceIds: added.map((s) => s.spaceId) };
+    const policyChanged = row.shareNewSpaces !== input.enabled;
+    if (policyChanged || added.length > 0)
+      await tx
+        .update(c)
+        .set({ shareNewSpaces: input.enabled, updatedAt: new Date() })
+        .where(eq(c.id, row.id));
+    return { orgId: row.orgId, policyChanged, addedSpaceIds: added.map((s) => s.spaceId) };
   });
 }
 

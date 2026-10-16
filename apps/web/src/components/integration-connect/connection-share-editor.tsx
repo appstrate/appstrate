@@ -95,7 +95,7 @@ export function ConnectionShareEditor({
           <Button
             variant="outline"
             size="sm"
-            className="h-7 max-w-[16rem] justify-between gap-1.5 text-xs font-normal"
+            className="h-7 max-w-full min-w-0 justify-between gap-1 px-1.5 text-xs font-normal"
             disabled={pending}
             title={names.join(", ") || t("integration.connection.share.help")}
             data-testid={`share-editor-${connectionId}`}

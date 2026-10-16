@@ -1787,7 +1787,7 @@ export interface paths {
         get?: never;
         /**
          * Share a connection with current and future team spaces
-         * @description Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. False disables future sharing and keeps existing shares; individual withdrawals still use the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.
+         * @description Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False disables future sharing and keeps existing shares; individual withdrawals still use the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.
          */
         put: operations["setIntegrationConnectionFutureSharing"];
         post?: never;
@@ -2247,7 +2247,7 @@ export interface paths {
         get?: never;
         /**
          * Share an owned connection with current and future team spaces
-         * @description Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. False disables future sharing and keeps existing shares; individual withdrawals still use the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.
+         * @description Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False disables future sharing and keeps existing shares; individual withdrawals still use the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.
          */
         put: operations["setMeConnectionFutureSharing"];
         post?: never;
@@ -6110,6 +6110,8 @@ export interface components {
                 shared_here: boolean;
                 /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                 shared_space_ids?: string[];
+                /** @description Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again. */
+                share_new_spaces?: boolean;
                 /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                 origin_space_id?: string | null;
                 needs_reconnection: boolean;
@@ -13469,7 +13471,7 @@ export interface operations {
                             shared_here: boolean;
                             /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                             shared_space_ids?: string[];
-                            /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                            /** @description Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again. */
                             share_new_spaces?: boolean;
                             /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                             origin_space_id?: string | null;
@@ -13644,7 +13646,7 @@ export interface operations {
                                 shared_here: boolean;
                                 /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                                 shared_space_ids?: string[];
-                                /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                                /** @description Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again. */
                                 share_new_spaces?: boolean;
                                 /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                                 origin_space_id?: string | null;
@@ -13844,7 +13846,7 @@ export interface operations {
                         shared_here: boolean;
                         /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                         shared_space_ids?: string[];
-                        /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                        /** @description Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again. */
                         share_new_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
@@ -14240,7 +14242,7 @@ export interface operations {
                             shared_here: boolean;
                             /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                             shared_space_ids?: string[];
-                            /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                            /** @description Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again. */
                             share_new_spaces?: boolean;
                             /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                             origin_space_id?: string | null;
@@ -14339,7 +14341,7 @@ export interface operations {
                         shared_here: boolean;
                         /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                         shared_space_ids?: string[];
-                        /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                        /** @description Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again. */
                         share_new_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
@@ -15078,7 +15080,7 @@ export interface operations {
                                 shared_here: boolean;
                                 /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                                 shared_space_ids?: string[];
-                                /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                                /** @description Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again. */
                                 share_new_spaces?: boolean;
                                 /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                                 origin_space_id?: string | null;
@@ -16257,7 +16259,7 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 scope: "org" | "space";
-                                /** @description Automatically share with future team spaces. */
+                                /** @description Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again. */
                                 share_new_spaces?: boolean;
                                 /** @description The spaces whose members may use it. */
                                 shared_spaces: {
@@ -16395,7 +16397,7 @@ export interface operations {
                         shared_here: boolean;
                         /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                         shared_space_ids?: string[];
-                        /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                        /** @description Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again. */
                         share_new_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;

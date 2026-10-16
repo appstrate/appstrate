@@ -203,7 +203,7 @@ export const integrationConnections = pgTable(
       sql`origin_space_id IS NULL OR space_id IS NULL`,
     ),
     check(
-      "integration_connections_future_share_is_org_member",
+      "integration_connections_future_share_org_scoped_user",
       sql`NOT share_new_spaces OR (user_id IS NOT NULL AND space_id IS NULL)`,
     ),
     // A space-scoped row is shared with its own space or nowhere.

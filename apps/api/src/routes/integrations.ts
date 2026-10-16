@@ -1769,8 +1769,10 @@ export function connectionCaller(c: Context<AppEnv>, spaceId: string | null): Co
         ? ceilingAllows(c, "integrations:connect")
         : (c.get("permissions")?.has("integrations:connect") ?? false),
     governs: spaceId !== null && canConfigureIntegrations(c),
-    canShareAll:
-      ceilingAllows(c, "integrations:configure") && ceilingAllows(c, "integrations:connect"),
+    canShareAll: (orgId) =>
+      !personaFor(c, orgId) &&
+      ceilingAllows(c, "integrations:configure") &&
+      ceilingAllows(c, "integrations:connect"),
     permissionsIn: (target, orgId) => callerPermissionsInSpace(c, target, orgId),
     spacesSeen: (orgId, orgRole) => callerSpacesSeen(c, orgId, orgRole),
   };
@@ -1826,13 +1828,14 @@ export async function applyConnectionFutureSharing(
   enabled: boolean,
 ): Promise<void> {
   const result = await setConnectionFutureSharing({ ...edit, connectionId, enabled });
-  await recordAuditFromContext(c, {
-    action: "integration.connection.sharing.updated",
-    resourceType: "integration_connection",
-    resourceId: connectionId,
-    orgIdOverride: result.orgId,
-    after: { includeFutureSpaces: enabled },
-  });
+  if (result.policyChanged)
+    await recordAuditFromContext(c, {
+      action: "integration.connection.sharing.updated",
+      resourceType: "integration_connection",
+      resourceId: connectionId,
+      orgIdOverride: result.orgId,
+      after: { includeFutureSpaces: enabled },
+    });
   for (const spaceId of result.addedSpaceIds)
     await recordAuditFromContext(c, {
       action: "integration.connection.share_added",

@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
@@ -15,6 +16,7 @@ import {
   addOrgMember,
   authHeaders,
   createTestContext,
+  createTestOrg,
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -26,6 +28,7 @@ import {
   seedSpace,
 } from "../../helpers/seed.ts";
 import {
+  auditEvents,
   integrationConnectionShares,
   organizationMembers,
   integrationConnections,
@@ -128,7 +131,7 @@ describe("connection shares", () => {
     testCaller(
       { kind: "person", actor: person(ctx.user.id) },
       {
-        canShareAll: true,
+        canShareAll: () => true,
         permissionsIn: async () => GOVERN,
       },
     );
@@ -157,21 +160,144 @@ describe("connection shares", () => {
     expect((await sharesOf(id)).some((s) => s.spaceId === excludedFuture.id)).toBe(false);
   });
 
+  it("explicitly re-enabling all-space sharing restores individual withdrawals", async () => {
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
+    const input = { connectionId: id, integrationId: INTEGRATION, caller: orgOwner() };
+    await setConnectionFutureSharing({ ...input, enabled: true });
+    await unshareConnection({ ...input, spaceId: other });
+    await setConnectionFutureSharing({ ...input, enabled: false });
+    expect((await sharesOf(id)).map((s) => s.spaceId)).toEqual([here]);
+    await setConnectionFutureSharing({ ...input, enabled: true });
+    expect((await sharesOf(id)).map((s) => s.spaceId).sort()).toEqual([here, other].sort());
+  });
+
+  it("unchanged policy requests do not touch the row or add audit events", async () => {
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
+    const app = await getTestApp();
+    const put = (enabled: boolean) =>
+      app.request(`/api/me/connections/${id}/shares`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ include_future_spaces: enabled }),
+      });
+    for (const enabled of [true, false]) {
+      expect((await put(enabled)).status).toBe(204);
+      const [before] = await db
+        .select()
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, id));
+      const auditsBefore = await db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.resourceId, id));
+      expect((await put(enabled)).status).toBe(204);
+      const [after] = await db
+        .select()
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, id));
+      expect(after!.updatedAt).toEqual(before!.updatedAt);
+      expect(await db.select().from(auditEvents).where(eq(auditEvents.resourceId, id))).toEqual(
+        auditsBefore,
+      );
+    }
+  });
+
+  it("role preview refuses global consent on both doors and hides the offered action", async () => {
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
+    const app = await getTestApp();
+    await seedSpace({ orgId: ctx.orgId, name: "Private team", visibility: "private" });
+    for (const role of ["member", "guest"]) {
+      const headers = {
+        ...authHeaders(ctx),
+        "Content-Type": "application/json",
+        "X-View-As": `org_role=${role}`,
+      };
+      for (const path of [
+        `/api/me/connections/${id}/shares`,
+        `/api/integrations/${INTEGRATION}/connections/${id}/shares`,
+      ]) {
+        const response = await app.request(path, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ include_future_spaces: true }),
+        });
+        expect(response.status).toBe(403);
+        expect(response.headers.get("X-View-As-Active")).toBe("1");
+      }
+      for (const path of ["/api/me/connections", `/api/integrations/${INTEGRATION}/connections`]) {
+        const response = await app.request(path, { headers });
+        expect(response.status).toBe(
+          role === "guest" && path !== "/api/me/connections" ? 403 : 200,
+        );
+        expect(await response.text()).not.toContain('"share_all"');
+      }
+    }
+    expect(await sharesOf(id)).toEqual([]);
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, id));
+    expect(row!.shareNewSpaces).toBe(false);
+    const response = await app.request(`/api/me/connections/${id}/shares`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ include_future_spaces: true }),
+    });
+    expect(response.status).toBe(204);
+  });
+
+  it("account listing applies preview only to its selected organization", async () => {
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
+    const elsewhere = await createTestOrg(ctx.user.id);
+    const otherId = await seedConnection({
+      spaceId: elsewhere.defaultSpaceId,
+      orgScope: true,
+      userId: ctx.user.id,
+    });
+    const app = await getTestApp();
+    const response = await app.request("/api/me/connections", {
+      headers: { ...authHeaders(ctx), "X-View-As": "org_role=member" },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-View-As-Active")).toBe("1");
+    const body = z
+      .object({
+        data: z.array(
+          z.object({
+            connections: z.array(
+              z.object({ connection_id: z.string(), allowed_actions: z.array(z.string()) }),
+            ),
+          }),
+        ),
+      })
+      .parse(await response.json());
+    const rows = body.data.flatMap((group) => group.connections);
+    expect(rows.find((row) => row.connection_id === id)!.allowed_actions).not.toContain(
+      "share_all",
+    );
+    expect(rows.find((row) => row.connection_id === otherId)!.allowed_actions).toContain(
+      "share_all",
+    );
+  });
+
   it("refuses a member, another owner, a space-scoped row and a delegated credential", async () => {
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
-    for (const caller of [
-      owner(GOVERN),
-      orgOwner(),
-      testCaller(
-        {
-          kind: "delegated",
-          actor: person(memberId),
-          orgId: ctx.orgId,
-          spaceId: null,
-        },
-        { canShareAll: true },
-      ),
-    ]) {
+    for (const [caller, status] of [
+      [owner(GOVERN), 403],
+      [orgOwner(), 404],
+      [
+        testCaller(
+          {
+            kind: "delegated",
+            actor: person(memberId),
+            orgId: ctx.orgId,
+            spaceId: null,
+          },
+          { canShareAll: () => true },
+        ),
+        403,
+      ],
+    ] as const) {
       await expect(
         setConnectionFutureSharing({
           connectionId: id,
@@ -179,7 +305,7 @@ describe("connection shares", () => {
           caller,
           enabled: true,
         }),
-      ).rejects.toMatchObject({ status: expect.any(Number) });
+      ).rejects.toMatchObject({ status });
     }
     const scoped = await seedConnection({ spaceId: here, userId: ctx.user.id });
     await expect(
@@ -226,7 +352,7 @@ describe("connection shares", () => {
     await setConnectionFutureSharing({
       connectionId: id,
       integrationId: INTEGRATION,
-      caller: { ...owner(GOVERN), canShareAll: true },
+      caller: { ...owner(GOVERN), canShareAll: () => true },
       enabled: true,
     });
     await updateMemberRole(ctx.orgId, memberId, "member", {
@@ -253,7 +379,7 @@ describe("connection shares", () => {
     await setConnectionFutureSharing({
       connectionId: id,
       integrationId: INTEGRATION,
-      caller: { ...owner(GOVERN), canShareAll: true },
+      caller: { ...owner(GOVERN), canShareAll: () => true },
       enabled: true,
     });
     await removeMember(ctx.orgId, memberId, { userId: ctx.user.id, firstPartySession: true });

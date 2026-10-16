@@ -15,10 +15,9 @@ import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
  * client routes (`paths/org-integrations.ts`) reuse the exported shapes.
  */
 
-/** `GET /connect/start` answers every refusal with a rendered HTML page (`popupHtmlError`). */
 export const connectionFutureSharingOperation = {
   description:
-    "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. False disables future sharing and keeps existing shares; individual withdrawals still use the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
+    "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False disables future sharing and keeps existing shares; individual withdrawals still use the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
   requestBody: {
     required: true,
     content: {
@@ -40,6 +39,7 @@ export const connectionFutureSharingOperation = {
   },
 } as const;
 
+/** `GET /connect/start` answers every refusal with a rendered HTML page (`popupHtmlError`). */
 const htmlErrorPage = { "text/html": { schema: { type: "string" } } } as const;
 
 const oauthCallbackQueryParameters = [
@@ -253,6 +253,13 @@ export const sharedHereSchema = {
     "Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses).",
 } as const;
 
+/** The owner only, when the credential is not bound to one space. */
+export const shareNewSpacesSchema = {
+  type: "boolean",
+  description:
+    "Owner only, unbound credential: share automatically with future team spaces. Individual withdrawals remain effective until the owner explicitly shares with all current and future spaces again.",
+} as const;
+
 /** The owner only (absent otherwise): the spaces the connection is shared into. */
 export const sharedSpaceIdsSchema = {
   type: "array",
@@ -336,11 +343,7 @@ export const integrationConnectionSchema = {
     spaceId: spaceIdSchema,
     shared_here: sharedHereSchema,
     shared_space_ids: sharedSpaceIdsSchema,
-    share_new_spaces: {
-      type: "boolean",
-      description:
-        "Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective.",
-    },
+    share_new_spaces: shareNewSpacesSchema,
     origin_space_id: originSpaceIdSchema,
     allowed_actions: {
       ...connectionActionsSchema,
