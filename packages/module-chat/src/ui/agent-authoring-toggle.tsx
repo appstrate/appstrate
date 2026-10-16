@@ -10,6 +10,9 @@
  * the turn's authority and can never widen it.
  */
 
+import { useState } from "react";
+import { Switch } from "@appstrate/ui/components/switch";
+import { Popover, PopoverTrigger, PopoverContent } from "@appstrate/ui/components/popover";
 import { BotIcon, BotOffIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
@@ -20,32 +23,72 @@ import { useChatHost } from "./runtime-context.ts";
 export function AgentAuthoringToggle() {
   const { t } = useChatHost();
   const enabled = useAgentAuthoringEnabled();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<boolean | null>(null);
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-pressed={enabled}
-          aria-label={t("agentAuthoring.label")}
-          onClick={() => setAgentAuthoringEnabled(!enabled)}
-          className={cn(
-            "size-8 shrink-0 rounded-lg",
-            enabled ? "text-primary hover:text-primary" : "text-muted-foreground",
-          )}
-        >
-          {enabled ? <BotIcon /> : <BotOffIcon />}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-72 text-xs">
-        <p className="font-medium">
-          {t(enabled ? "agentAuthoring.onTitle" : "agentAuthoring.offTitle")}
-        </p>
-        <p className="text-muted-foreground mt-0.5">
-          {t(enabled ? "agentAuthoring.onHint" : "agentAuthoring.offHint")}
-        </p>
-      </TooltipContent>
-    </Tooltip>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setDraft(null);
+        setOpen(next);
+      }}
+    >
+      <Tooltip>
+        <PopoverTrigger asChild>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-pressed={enabled}
+              aria-label={t("agentAuthoring.label")}
+              className={cn(
+                "size-8 shrink-0 rounded-lg",
+                enabled ? "text-primary hover:text-primary" : "text-muted-foreground",
+              )}
+            >
+              {enabled ? <BotIcon /> : <BotOffIcon />}
+            </Button>
+          </TooltipTrigger>
+        </PopoverTrigger>
+        <TooltipContent side="top" className="max-w-72 text-xs">
+          <p className="font-medium">
+            {t(enabled ? "agentAuthoring.onTitle" : "agentAuthoring.offTitle")}
+          </p>
+          <p className="text-muted-foreground mt-0.5">
+            {t(enabled ? "agentAuthoring.onHint" : "agentAuthoring.offHint")}
+          </p>
+        </TooltipContent>
+      </Tooltip>
+      <PopoverContent side="top" className="flex flex-col gap-3">
+        <label className="flex items-center justify-between gap-3">
+          <span>{t("agentAuthoring.label")}</span>
+          <Switch checked={draft ?? enabled} onCheckedChange={setDraft} />
+        </label>
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setDraft(null);
+              setOpen(false);
+            }}
+          >
+            {t("common:btn.cancel")}
+          </Button>
+          <Button
+            type="button"
+            disabled={draft === null || draft === enabled}
+            onClick={() => {
+              setAgentAuthoringEnabled(draft ?? enabled);
+              setDraft(null);
+              setOpen(false);
+            }}
+          >
+            {t("common:btn.save")}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { leavesEditor, type EditorPlace } from "../lib/editor-place";
+import { createNavigationApprovals } from "../lib/navigation-approvals";
 
 export interface UnsavedBlocker {
   state: "blocked" | "unblocked";
@@ -10,24 +11,23 @@ export interface UnsavedBlocker {
   reset: () => void;
 }
 
-/**
- * Provided by a view whose query names the section (or file) it mounts: a
- * navigation that changes it unmounts the editor as surely as a new page.
- */
 export const EditorPlaceContext = createContext<EditorPlace>(() => "");
-
-let originals: { push: History["pushState"]; replace: History["replaceState"] } | null = null;
-
-/** The real push/replaceState, captured before the first patch (not at import: no DOM there). */
-function originalHistory() {
-  originals ??= {
-    push: history.pushState.bind(history),
-    replace: history.replaceState.bind(history),
+type PendingNavigation = { to: string; replace: boolean; state: unknown };
+interface Guard {
+  current: () => {
+    path: string;
+    state: unknown;
+    place: EditorPlace;
+    dirty: boolean;
+    skip: boolean;
   };
-  return originals;
+  block: (pending: PendingNavigation) => void;
 }
+const guards = new Map<symbol, Guard>();
+const approvals = createNavigationApprovals<symbol>();
+let uninstall: (() => void) | null = null;
 
-/** A Back/Forward already moved the address to `href`. When that leaves the editor, push the left entry back (with its state) and answer the requested path; otherwise `null`. */
+/** Undo one Back/Forward before asking whether to leave the mounted editor. */
 export function undoLeavingPop(
   entry: { path: string; state: unknown },
   href: string,
@@ -40,136 +40,145 @@ export function undoLeavingPop(
   return `${to.pathname}${to.search}${to.hash}`;
 }
 
-/**
- * Blocks navigation that would unmount the editor while `isDirty` (new pathname, tab hash or
- * `EditorPlaceContext` place). Works with BrowserRouter (no data router). Monkey-patches
- * `history.pushState`/`replaceState` so every SPA navigation is intercepted; removed on cleanup
- * or when `isDirty` turns false.
- */
-export function useUnsavedChanges(isDirty: boolean) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const skipRef = useRef(false);
-  const [blocked, setBlocked] = useState(false);
-  const pending = useRef<{ to: string; replace: boolean; state: unknown } | null>(null);
-  const place = useContext(EditorPlaceContext);
-  const current = `${location.pathname}${location.search}${location.hash}`;
-  // The router's own state for the entry on screen (`idx`, `key`, `usr`): an
-  // undone Back must restore it, or the overlays that read it lose their place.
-  const entryState = useRef<unknown>(null);
-  useEffect(() => {
-    entryState.current = history.state;
-  }, [current]);
-
-  // Refs, so the patched pushState reads the latest values without re-patching.
-  const dirtyRef = useRef(isDirty);
-  const placeRef = useRef(place);
-
-  useEffect(() => {
-    dirtyRef.current = isDirty;
-    skipRef.current = false;
-  }, [isDirty]);
-  useEffect(() => {
-    placeRef.current = place;
-  }, [place]);
-
-  // Both are patched: `navigate(..., { replace: true })`, redirects and tab switches use replaceState.
-  useEffect(() => {
-    if (!isDirty) return;
-
-    const patch =
-      (original: typeof history.pushState, replace: boolean) =>
-      (data: unknown, unused: string, url?: string | URL | null) => {
-        if (skipRef.current || !dirtyRef.current || !url) {
-          original(data, unused, url);
-          return;
-        }
+/** All dirty forms share one history interceptor; mounting another cannot overwrite its guard. */
+function install() {
+  if (uninstall) return;
+  const push = history.pushState.bind(history);
+  const replace = history.replaceState.bind(history);
+  const findGuard = (from: URL, to: URL) => {
+    const target = `${to.pathname}${to.search}${to.hash}`;
+    for (const [id, guard] of guards) {
+      const current = guard.current();
+      if (
+        current.dirty &&
+        !current.skip &&
+        !approvals.has(id, target) &&
+        leavesEditor(from, to, current.place)
+      ) {
+        return { id, guard };
+      }
+    }
+    return null;
+  };
+  const patch =
+    (original: History["pushState"], replacing: boolean): History["pushState"] =>
+    (data, unused, url) => {
+      if (url) {
         const from = new URL(window.location.href);
         const to = new URL(url.toString(), from);
-        if (leavesEditor(from, to, placeRef.current)) {
-          // React Router keeps its navigation state under `usr`.
-          const state = (data as { usr?: unknown } | null)?.usr;
-          pending.current = { to: `${to.pathname}${to.search}${to.hash}`, replace, state };
-          setBlocked(true);
-          return; // navigation blocked
+        const blocked = findGuard(from, to);
+        if (blocked) {
+          blocked.guard.block({
+            to: `${to.pathname}${to.search}${to.hash}`,
+            replace: replacing,
+            state: data?.usr ?? null,
+          });
+          return;
         }
-        // A modal opening or closing over the editor — let through.
-        original(data, unused, url);
-      };
-
-    const { push, replace } = originalHistory();
-    history.pushState = patch(push, false);
-    history.replaceState = patch(replace, true);
-
-    return () => {
-      history.pushState = push;
-      history.replaceState = replace;
+      }
+      approvals.clear();
+      original(data, unused, url);
     };
-  }, [isDirty]);
-
-  useEffect(() => {
-    if (!isDirty) return;
-
-    const handler = () => {
-      if (skipRef.current) return;
-      const to = undoLeavingPop(
-        { path: current, state: entryState.current },
-        window.location.href,
-        placeRef.current,
-        originalHistory().push,
+  history.pushState = patch(push, false);
+  history.replaceState = patch(replace, true);
+  const pop = () => {
+    const to = new URL(window.location.href);
+    for (const guard of guards.values()) {
+      const current = guard.current();
+      const blocked = findGuard(new URL(current.path, to), to);
+      if (!blocked) continue;
+      const target = undoLeavingPop(
+        { path: current.path, state: current.state },
+        to.href,
+        current.place,
+        push,
       );
-      if (to === null) return;
-      pending.current = { to, replace: false, state: null };
-      setBlocked(true);
-    };
+      if (target) blocked.guard.block({ to: target, replace: false, state: null });
+      return;
+    }
+    approvals.clear();
+  };
+  const unload = (event: BeforeUnloadEvent) => {
+    if (
+      ![...guards.values()].some((guard) => {
+        const state = guard.current();
+        return state.dirty && !state.skip;
+      })
+    )
+      return;
+    event.preventDefault();
+    event.returnValue = "";
+  };
+  window.addEventListener("popstate", pop);
+  window.addEventListener("beforeunload", unload);
+  uninstall = () => {
+    history.pushState = push;
+    history.replaceState = replace;
+    window.removeEventListener("popstate", pop);
+    window.removeEventListener("beforeunload", unload);
+    approvals.clear();
+    uninstall = null;
+  };
+}
 
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
-  }, [isDirty, current]);
-
+export function useUnsavedChanges(isDirty: boolean): {
+  blocker: UnsavedBlocker;
+  allowNavigation: (allowed?: boolean) => void;
+} {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const place = useContext(EditorPlaceContext);
+  const [id] = useState(() => Symbol());
+  const [blocked, setBlocked] = useState(false);
+  const pending = useRef<PendingNavigation | null>(null);
+  const skip = useRef(false);
+  const current = useRef<{
+    path: string;
+    state: unknown;
+    place: EditorPlace;
+    dirty: boolean;
+    skip: boolean;
+  }>({ path: "", state: null, place, dirty: isDirty, skip: false });
+  const path = `${location.pathname}${location.search}${location.hash}`;
   useEffect(() => {
-    if (!isDirty) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      // Legacy browsers and some Chromium versions need `returnValue` set to show the prompt.
-      e.returnValue = "";
+    current.current = { path, state: history.state, place, dirty: isDirty, skip: skip.current };
+  }, [path, place, isDirty]);
+  useEffect(() => {
+    if (!isDirty) {
+      skip.current = false;
+      return;
+    }
+    guards.set(id, {
+      current: () => ({ ...current.current, skip: skip.current }),
+      block: (target) => {
+        pending.current = target;
+        setBlocked(true);
+      },
+    });
+    install();
+    return () => {
+      guards.delete(id);
+      if (guards.size === 0) uninstall?.();
     };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [isDirty]);
-
-  /**
-   * Let through a navigation the editor itself is about to make (a submit's redirect). Re-arm
-   * with `allowNavigation(false)` when the save fails: the flag otherwise stays open until
-   * `isDirty` changes, which a failed save does not do.
-   */
+  }, [id, isDirty]);
   const allowNavigation = useCallback((allowed = true) => {
-    skipRef.current = allowed;
+    skip.current = allowed;
   }, []);
-
   const proceed = useCallback(() => {
-    setBlocked(false);
     const target = pending.current;
     pending.current = null;
-    if (target) {
-      // The push happens synchronously; an editor the target keeps mounted
-      // stays guarded.
-      skipRef.current = true;
-      navigate(target.to, { replace: target.replace, state: target.state });
-      skipRef.current = false;
-    }
-  }, [navigate]);
-
-  const reset = useCallback(() => {
     setBlocked(false);
+    if (!target) return;
+    approvals.approve(id, target.to);
+    navigate(target.to, { replace: target.replace, state: target.state });
+  }, [id, navigate]);
+  const reset = useCallback(() => {
     pending.current = null;
+    approvals.clear();
+    setBlocked(false);
   }, []);
-
-  const blocker: UnsavedBlocker = {
-    state: blocked ? "blocked" : "unblocked",
-    proceed,
-    reset,
+  return {
+    blocker: { state: blocked ? "blocked" : "unblocked", proceed, reset },
+    allowNavigation,
   };
-
-  return { blocker, allowNavigation };
 }

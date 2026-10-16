@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Globe, Plus } from "lucide-react";
@@ -25,7 +24,8 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveInputSettings } from "../../hooks/use-mutations";
-import { useSaveAfterPause } from "../../hooks/use-save-after-pause";
+import { useSettingDraft } from "../../hooks/use-setting-draft";
+import { ManualSave, ManualSetting } from "../settings/manual-save";
 import { authorDefaults, getOrderedKeys, type SchemaWrapper } from "@appstrate/core/form";
 import { formatInputValue, hasInputFields } from "../../lib/agent-input";
 import {
@@ -35,7 +35,6 @@ import {
 import { JsonView } from "../json-view";
 import { SettingsSkeleton } from "../loading-skeletons";
 import { SettingRow } from "../settings/setting-row";
-import { SaveFeedback } from "../settings/save-feedback";
 import { InputFieldRow } from "../settings/input-field-row";
 import { ModelGenerationFields } from "../model-generation-fields";
 
@@ -56,8 +55,7 @@ import { ModelGenerationFields } from "../model-generation-fields";
  * nothing behind it is the one refused combination (400
  * `locked_required_field_empty`), surfaced as a toast naming the field.
  *
- * It saves itself, like the rest of the settings: a pause after the
- * last change sends the whole pair, and the line under the form says so.
+ * Save sends the values and locks together after explicit confirmation.
  */
 function InputSettingsSection({
   packageId,
@@ -75,29 +73,27 @@ function InputSettingsSection({
   const mutation = useSaveInputSettings(packageId);
   const labels = useSchemaFormLabels();
   const upload = useUploadClient();
-  const [values, setValues] = useState<Record<string, unknown>>(initialValues);
-  const [locked, setLocked] = useState<string[]>(initialLocked);
-
-  const settings = useMemo(() => ({ values, locked_fields: locked }), [values, locked]);
-  const markEdited = useSaveAfterPause(settings, (next) => mutation.mutate(next), !isHistorical);
+  const draft = useSettingDraft({ values: initialValues, locked_fields: initialLocked });
+  const { values, locked_fields: locked } = draft.value;
 
   const defaults = authorDefaults(wrapper.schema);
   const keys = getOrderedKeys(wrapper.schema, wrapper.property_order);
 
   const setFieldValue = (key: string, next: unknown) => {
-    setValues((prev) => {
-      const out = { ...prev };
-      if (next === undefined) delete out[key];
-      else out[key] = next;
-      return out;
+    draft.set((previous) => {
+      const values = { ...previous.values };
+      if (next === undefined) delete values[key];
+      else values[key] = next;
+      return { ...previous, values };
     });
-    markEdited();
   };
-
-  const toggleLock = (key: string, on: boolean) => {
-    setLocked((prev) => (on ? [...prev, key] : prev.filter((k) => k !== key)));
-    markEdited();
-  };
+  const toggleLock = (key: string, on: boolean) =>
+    draft.set((previous) => ({
+      ...previous,
+      locked_fields: on
+        ? [...previous.locked_fields, key]
+        : previous.locked_fields.filter((field) => field !== key),
+    }));
 
   return (
     <div className="flex flex-col gap-3 py-4">
@@ -110,7 +106,7 @@ function InputSettingsSection({
             value={values[key]}
             authorDefault={defaults[key]}
             locked={locked.includes(key)}
-            disabled={isHistorical}
+            disabled={isHistorical || mutation.isPending}
             labels={labels}
             upload={upload}
             onValueChange={(next) => setFieldValue(key, next)}
@@ -118,10 +114,15 @@ function InputSettingsSection({
           />
         ))}
       </div>
-      <SaveFeedback
+      <ManualSave
+        dirty={draft.dirty}
         pending={mutation.isPending}
-        success={mutation.isSuccess}
-        error={mutation.isError}
+        onDiscard={draft.reset}
+        onSave={async () => {
+          const sent = draft.value;
+          await mutation.mutateAsync(sent);
+          draft.accept(sent);
+        }}
       />
     </div>
   );
@@ -195,15 +196,9 @@ function ModelSection({ packageId }: { packageId: string }) {
   if (!orgModels || orgModels.length === 0 || !agentModel) return null;
 
   const generation = agentModel.generation ?? {};
-  const editorKey = [
-    agentModel.modelId ?? "inherit",
-    generation.temperature ?? "inherit",
-    generation.reasoning_level ?? "inherit",
-  ].join(":");
 
   return (
     <ModelSectionEditor
-      key={editorKey}
       packageId={packageId}
       orgModels={orgModels}
       initialModelId={agentModel.modelId}
@@ -225,19 +220,13 @@ function ModelSectionEditor({
 }) {
   const { t } = useTranslation(["settings", "agents"]);
   const setAgentModel = useSetAgentModel(packageId);
-  const [modelId, setModelId] = useState<string | null>(initialModelId);
-  const [generation, setGeneration] = useState<ModelGenerationSettings>(initialGeneration);
+  const draft = useSettingDraft({ modelId: initialModelId, generation: initialGeneration });
+  const { modelId, generation } = draft.value;
 
   // Unfiltered on purpose — see the same call in `run-overrides-panel.tsx`:
   // the inherited default must be named even when it is unusable.
   const orgDefaultModel = orgModels.find((m) => m.is_default);
   const resolvedModel = modelId ? orgModels.find((m) => m.id === modelId) : orgDefaultModel;
-  const save = (nextModelId: string | null, nextGeneration: ModelGenerationSettings) => {
-    setAgentModel.mutate({
-      modelId: nextModelId,
-      generation: Object.keys(nextGeneration).length > 0 ? nextGeneration : null,
-    });
-  };
 
   return (
     <>
@@ -271,9 +260,7 @@ function ModelSectionEditor({
               generation,
               nextModel?.generation,
             );
-            setModelId(nextModelId);
-            setGeneration(nextGeneration);
-            save(nextModelId, nextGeneration);
+            draft.set({ modelId: nextModelId, generation: nextGeneration });
           }}
           disabled={setAgentModel.isPending}
         />
@@ -284,14 +271,21 @@ function ModelSectionEditor({
         value={generation}
         disabled={setAgentModel.isPending}
         onChange={(nextGeneration) => {
-          setGeneration(nextGeneration);
-          save(modelId, nextGeneration);
+          draft.set({ modelId, generation: nextGeneration });
         }}
       />
-      <SaveFeedback
+      <ManualSave
+        dirty={draft.dirty}
         pending={setAgentModel.isPending}
-        success={setAgentModel.isSuccess}
-        error={setAgentModel.isError}
+        onDiscard={draft.reset}
+        onSave={async () => {
+          const sent = draft.value;
+          await setAgentModel.mutateAsync({
+            modelId: sent.modelId,
+            generation: Object.keys(sent.generation).length ? sent.generation : null,
+          });
+          draft.accept(sent);
+        }}
       />
     </>
   );
@@ -341,28 +335,32 @@ function ProxySection({ packageId }: { packageId: string }) {
         label={t("detail.configuration.proxyRoute")}
         description={t("detail.configuration.proxyDescription")}
       >
-        <OptionSelect
-          value={agentProxyId ?? "__inherit__"}
-          onValueChange={(v) => setAgentProxy.mutate(v === "__inherit__" ? null : v)}
-          disabled={setAgentProxy.isPending}
-          leading={
-            <>
-              <SelectItem value="__inherit__">
-                {orgDefaultProxy
-                  ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
-                  : t("models.default", { ns: "settings" })}
-              </SelectItem>
-              <SelectItem value="none">{t("proxies.agent.none", { ns: "settings" })}</SelectItem>
-            </>
-          }
-          options={orgProxies.map((p) => ({ value: p.id, label: p.label }))}
-        />
+        <ManualSetting
+          value={agentProxyId ?? null}
+          onSave={(value) => setAgentProxy.mutateAsync(value)}
+        >
+          {(value, onChange, pending) => (
+            <OptionSelect
+              value={value ?? "__inherit__"}
+              onValueChange={(v) => onChange(v === "__inherit__" ? null : v)}
+              disabled={pending}
+              leading={
+                <>
+                  <SelectItem value="__inherit__">
+                    {orgDefaultProxy
+                      ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
+                      : t("models.default", { ns: "settings" })}
+                  </SelectItem>
+                  <SelectItem value="none">
+                    {t("proxies.agent.none", { ns: "settings" })}
+                  </SelectItem>
+                </>
+              }
+              options={orgProxies.map((p) => ({ value: p.id, label: p.label }))}
+            />
+          )}
+        </ManualSetting>
       </SettingRow>
-      <SaveFeedback
-        pending={setAgentProxy.isPending}
-        success={setAgentProxy.isSuccess}
-        error={setAgentProxy.isError}
-      />
     </>
   );
 }

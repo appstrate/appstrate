@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ManualSetting } from "./settings/manual-save";
 import { useTranslation } from "react-i18next";
 import { Sun, Moon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -27,13 +28,25 @@ export function ThemeToggle() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {themeOptions.map(({ value, labelKey, icon: Icon }) => (
-          <DropdownMenuItem key={value} onClick={() => setTheme(value)}>
-            <Icon className="mr-2" />
-            {t(labelKey)}
-            {theme === value && <span className="ml-auto">✓</span>}
-          </DropdownMenuItem>
-        ))}
+        <ManualSetting value={theme} onSave={async (next) => setTheme(next)}>
+          {(draft, onChange) => (
+            <>
+              {themeOptions.map(({ value, labelKey, icon: Icon }) => (
+                <DropdownMenuItem
+                  key={value}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    onChange(value);
+                  }}
+                >
+                  <Icon className="mr-2" />
+                  {t(labelKey)}
+                  {draft === value && <span className="ml-auto">✓</span>}
+                </DropdownMenuItem>
+              ))}
+            </>
+          )}
+        </ManualSetting>
       </DropdownMenuContent>
     </DropdownMenu>
   );

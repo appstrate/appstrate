@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
+import { useSettingDraft } from "../../hooks/use-setting-draft";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -115,6 +116,9 @@ export function useConnectionPicker(
   const integrationPath = packageDetailPath("integration", integrationId);
   const canOpenIntegration = useCanReach()(integrationPath);
 
+  const memberDraft = useSettingDraft<ConnectionSet>(
+    entry?.resolution.member_pinned_connection_ids ?? null,
+  );
   const overrideMode = persistence.mode === "override";
   const auths = manifest.auths ?? {};
   const connectable = connectableAuthKeys(manifest, authStatuses);
@@ -160,12 +164,16 @@ export function useConnectionPicker(
         )}`
       : ids.map((id) => byId(id)!.label).join(" · ");
 
-  const explicitIds: ConnectionSet = overrideMode ? persistence.value : memberPinnedConnectionIds;
+  const explicitIds: ConnectionSet = overrideMode ? persistence.value : memberDraft.value;
   const shownPick = shownConnectionPick({
     explicitIds,
-    memberPinIds: memberPinnedConnectionIds,
-    softDefaultIds,
-    resolvedIds: resolvedConnectionIds,
+    memberPinIds: overrideMode ? memberPinnedConnectionIds : null,
+    softDefaultIds:
+      !overrideMode && memberDraft.dirty && explicitIds === null
+        ? (resolution.org_default_connection_ids ?? [])
+        : softDefaultIds,
+    resolvedIds:
+      !overrideMode && memberDraft.dirty && explicitIds === null ? [] : resolvedConnectionIds,
   });
   const shownIds = shownPick ?? [];
   const pickedNone = explicitIds?.length === 0;
@@ -185,7 +193,7 @@ export function useConnectionPicker(
   // Turns the picker amber. The server's `run_blocking` judges the cascade but not a set
   // override, judged here on the pick itself.
   const gatesRun =
-    overrideMode && explicitIds !== null
+    (overrideMode || memberDraft.dirty) && explicitIds !== null
       ? shown.underScoped.length > 0 ||
         shown.dead.length > 0 ||
         unavailableIds.length > 0 ||
@@ -200,11 +208,11 @@ export function useConnectionPicker(
   // verdict is the pin, so only the soft space default can be named.
   const orgDefaultIds = resolution.org_default_connection_ids ?? [];
   const inheritedConns =
-    overrideMode || explicitIds === null
+    overrideMode || memberPinnedConnectionIds === null
       ? resolvedConnectionIds.map(byId).filter((c): c is IntegrationCandidate => !!c)
       : orgDefaultIds.map(byId).filter((c): c is IntegrationCandidate => !!c);
   const inheritedSource =
-    overrideMode || explicitIds === null
+    overrideMode || memberPinnedConnectionIds === null
       ? resolution.source
       : orgDefaultIds.length > 0
         ? ("org_default" as const)
@@ -215,24 +223,19 @@ export function useConnectionPicker(
   const busy = upsertPin.isPending || deletePin.isPending;
   const canApply = canApplyConnectionSet(ticked.conns, explicitIds, draft !== null) && !busy;
 
-  // `null` clears the pick, `[]` stores "no connection". False = refused; the mutation toasted why.
+  // Choosing only edits the form. A member pin is persisted by the explicit Save bar.
   const persist = async (connectionIds: ConnectionSet): Promise<boolean> => {
     if (overrideMode) persistence.onChange(connectionIds);
-    else {
-      try {
-        if (connectionIds !== null) {
-          await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionIds });
-        } else {
-          await deletePin.mutateAsync({ agentPackageId, integrationId });
-        }
-      } catch {
-        return false;
-      }
-      // A pin write moves the server's verdict; an override is a form value and moves nothing.
-      await invalidateIntegrationQueries(qc);
-    }
+    else memberDraft.set(connectionIds);
     setDraft(null);
     return true;
+  };
+  const saveMember = async () => {
+    const sent = memberDraft.value;
+    if (sent === null) await deletePin.mutateAsync({ agentPackageId, integrationId });
+    else await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionIds: sent });
+    await invalidateIntegrationQueries(qc);
+    memberDraft.accept(sent);
   };
 
   const toggle = (connectionId: string) => setDraft(toggleCapped(checkedIds, connectionId));
@@ -290,6 +293,8 @@ export function useConnectionPicker(
     });
 
   return {
+    memberDraft,
+    saveMember,
     gatesRun,
     required,
     candidates,

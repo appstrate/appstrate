@@ -10,10 +10,11 @@
  * `chat_enforced` switch.
  */
 import { Alert } from "@appstrate/ui/components/alert";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
+import { ManualSetting } from "./settings/manual-save";
 import { useTranslation } from "react-i18next";
 import {
   Boxes,
@@ -71,7 +72,6 @@ import {
 } from "../lib/catalogue-sheet";
 import { formatDateField } from "../lib/format-date";
 import { packageKeys } from "../lib/query-keys";
-import { ConfirmModal } from "./confirm-modal";
 import { SettingsGroup } from "./settings/setting-row";
 import { SettingsHeading } from "./settings/settings-heading";
 
@@ -287,7 +287,6 @@ export function CataloguePreview({
   );
   // ── Imposed on the chat (skills only, `lib/catalogue-sheet`) ──
   const setChatEnforced = useSetChatEnforced();
-  const [confirmEnforce, setConfirmEnforce] = useState<SheetSpaceRow | null>(null);
   const enforceable = type === "skill";
   const chatEnforcedIn = (spaceId: string) =>
     item.placements.some((entry) => entry.space_id === spaceId && entry.chat_enforced);
@@ -309,31 +308,47 @@ export function CataloguePreview({
       setChatEnforced.variables?.packageId === item.id &&
       setChatEnforced.variables.spaceId === row.id;
     return (
-      <Switch
-        checked={verdict.checked}
+      <ManualSetting
+        value={verdict.checked}
         disabled={verdict.disabled || pending}
-        aria-label={t("library.chatEnforce.toggle", {
-          ns: "common",
-          package: item.name || item.id,
-          space: row.name,
-        })}
-        title={
-          verdict.refusal === "configure"
-            ? t("library.chatEnforce.cannot", { ns: "common" })
-            : verdict.refusal === "publishFirst"
-              ? t("library.chatEnforce.publishFirst", { ns: "common" })
-              : undefined
+        onSave={(next) =>
+          setChatEnforced.mutateAsync(
+            { spaceId: row.id, packageId: item.id, enforced: next },
+            { onError: notifyEnforceError },
+          )
         }
-        onCheckedChange={(next) => {
-          // Imposing discloses the content to every member who chats there: confirm first.
-          if (next) setConfirmEnforce(row);
-          else
-            setChatEnforced.mutate(
-              { spaceId: row.id, packageId: item.id, enforced: false },
-              { onError: notifyEnforceError },
-            );
-        }}
-      />
+      >
+        {(value, onChange, busy) => (
+          <div>
+            {value && (
+              <p className="text-muted-foreground mb-2 text-xs">
+                {t("library.chatEnforce.confirmDescription", {
+                  ns: "common",
+                  package: item.name || item.id,
+                  space: row.name,
+                })}
+              </p>
+            )}
+            <Switch
+              checked={value}
+              disabled={busy}
+              aria-label={t("library.chatEnforce.toggle", {
+                ns: "common",
+                package: item.name || item.id,
+                space: row.name,
+              })}
+              title={
+                verdict.refusal === "configure"
+                  ? t("library.chatEnforce.cannot", { ns: "common" })
+                  : verdict.refusal === "publishFirst"
+                    ? t("library.chatEnforce.publishFirst", { ns: "common" })
+                    : undefined
+              }
+              onCheckedChange={onChange}
+            />
+          </div>
+        )}
+      </ManualSetting>
     );
   };
 
@@ -606,29 +621,6 @@ export function CataloguePreview({
           </div>
         )}
       </SettingsGroup>
-
-      {enforceable && (
-        <ConfirmModal
-          open={confirmEnforce !== null}
-          onClose={() => setConfirmEnforce(null)}
-          title={t("library.chatEnforce.confirmTitle", { ns: "common" })}
-          description={t("library.chatEnforce.confirmDescription", {
-            ns: "common",
-            package: item.name || item.id,
-            space: confirmEnforce?.name ?? "",
-          })}
-          confirmLabel={t("library.chatEnforce.confirm", { ns: "common" })}
-          variant="default"
-          isPending={setChatEnforced.isPending}
-          onConfirm={() => {
-            if (!confirmEnforce) return;
-            setChatEnforced.mutate(
-              { spaceId: confirmEnforce.id, packageId: item.id, enforced: true },
-              { onError: notifyEnforceError, onSettled: () => setConfirmEnforce(null) },
-            );
-          }}
-        />
-      )}
     </div>
   );
 }

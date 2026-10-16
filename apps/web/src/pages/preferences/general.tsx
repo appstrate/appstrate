@@ -225,7 +225,7 @@ function DisplayNameRow() {
         disabled={updateDisplayName.isPending}
         maxLength={100}
         aria-label={t("preferences.displayName")}
-        onCommit={(displayName) => updateDisplayName.mutate({ body: { displayName } })}
+        onCommit={(displayName) => updateDisplayName.mutateAsync({ body: { displayName } })}
       />
     </SettingRow>
   );

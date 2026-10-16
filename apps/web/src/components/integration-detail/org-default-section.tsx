@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Alert } from "@appstrate/ui/components/alert";
-import { useState } from "react";
+import { useSettingDraft } from "../../hooks/use-setting-draft";
+import { ManualSave } from "../settings/manual-save";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -15,7 +16,6 @@ import {
   useDeleteIntegrationOrgDefault,
 } from "../../hooks/use-integrations";
 import { SettingsSkeleton } from "../loading-skeletons";
-import { SaveFeedback } from "../settings/save-feedback";
 import { ConnectionSetPicker } from "../integration-connect/connection-choice-menu";
 import { connectionSetOption } from "../integration-connect/connection-set-option";
 
@@ -26,8 +26,7 @@ import { connectionSetOption } from "../integration-connect/connection-set-optio
  * member can still override with their own pick.
  *
  * The default is a SET (up to `MAX_CONNECTIONS_PER_INTEGRATION`), and
- * every subset is a valid default on its own, so each tick commits alone —
- * the rule for a list of independently valid values.
+ * the mode and set are saved together after explicit confirmation.
  */
 export function OrgDefaultSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
@@ -43,41 +42,28 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   // them is refused. Until the list loads, every member would read as unavailable.
   const unavailableIds = connections ? unavailableConnectionIds(storedIds, sharedIds) : [];
 
-  const [pendingValue, setPendingValue] = useState<{
-    connection_ids: string[];
-    enforce: boolean;
-  } | null>(null);
-  // Only what is still shared is ticked, so the next write is what the list shows.
-  const connectionIds = pendingValue?.connection_ids ?? keepAvailable(storedIds, sharedIds);
-  const enforce = pendingValue?.enforce ?? orgDefault?.enforce ?? false;
-  const hasDefault = pendingValue ? pendingValue.connection_ids.length > 0 : !!orgDefault;
-  const [draftMode, setDraftMode] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<"success" | "error" | null>(null);
-  const mode = draftMode ?? (hasDefault ? (enforce ? "forced" : "default") : "choice");
-  // A stored default whose members are all unshared has nothing to write a mode change with (the
-  // server refuses them): its connections are picked, or dropped, first.
-  const modeLocked = !!orgDefault && pendingValue === null && connectionIds.length === 0;
-  /** An empty set removes the default; `keepMode` holds the mode while the list is empty. */
-  const save = async (nextIds: string[], nextEnforce: boolean, keepMode: string | null = null) => {
-    setPendingValue({ connection_ids: nextIds, enforce: nextEnforce });
-    setOutcome(null);
-    if (nextIds.length === 0) setDraftMode(keepMode);
-    try {
-      if (nextIds.length > 0)
-        await upsert.mutateAsync({
-          params: { path: { packageId } },
-          body: { connection_ids: nextIds, enforce: nextEnforce },
-        });
-      else await remove.mutateAsync({ params: { path: { packageId } } });
-      await refetch();
-      setOutcome("success");
-    } catch {
-      // The mutation's own `onError` has already said why.
-      setOutcome("error");
-    } finally {
-      setPendingValue(null);
-      if (nextIds.length > 0) setDraftMode(null);
+  const draft = useSettingDraft({
+    connection_ids: storedIds,
+    mode: orgDefault ? (orgDefault.enforce ? "forced" : "default") : "choice",
+  });
+  const connectionIds = keepAvailable(draft.value.connection_ids, sharedIds);
+  const mode = draft.value.mode;
+  const pending = upsert.isPending || remove.isPending;
+  const modeLocked = !!orgDefault && connectionIds.length === 0;
+  const edit = (nextIds: string[], nextMode: string) =>
+    draft.set({ connection_ids: nextIds, mode: nextMode });
+  const save = async () => {
+    const sent = draft.value;
+    if (sent.mode !== "choice" && sent.connection_ids.length > 0) {
+      await upsert.mutateAsync({
+        params: { path: { packageId } },
+        body: { connection_ids: sent.connection_ids, enforce: sent.mode === "forced" },
+      });
+    } else {
+      await remove.mutateAsync({ params: { path: { packageId } } });
     }
+    await refetch();
+    draft.accept(sent);
   };
   const connectionsLabel = t(
     `integration.admin.orgDefault.connection.${mode === "forced" ? "forced" : "default"}`,
@@ -98,8 +84,8 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
               size="sm"
               variant="outline"
               className="-my-1.5"
-              disabled={pendingValue !== null}
-              onClick={() => void save(connectionIds, enforce)}
+              disabled={pending}
+              onClick={() => edit(connectionIds, mode)}
               data-testid="org-default-drop-unavailable"
             >
               {t("integration.admin.orgDefault.dropUnavailable", {
@@ -120,14 +106,8 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
 
             <OptionSelect
               value={mode}
-              disabled={isLoading || isError || pendingValue !== null}
-              onValueChange={(value) => {
-                if (value === "choice") {
-                  setDraftMode(null);
-                  if (orgDefault) void save([], false);
-                } else if (connectionIds.length > 0) void save(connectionIds, value === "forced");
-                else setDraftMode(value);
-              }}
+              disabled={isLoading || isError || pending}
+              onValueChange={(value) => edit(value === "choice" ? [] : connectionIds, value)}
               aria-label={t("integration.admin.usage.title")}
               options={(["choice", "default", "forced"] as const).map((value) => ({
                 value,
@@ -155,21 +135,17 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
               <ConnectionSetPicker
                 options={shared.map(connectionSetOption)}
                 value={connectionIds.length > 0 ? connectionIds : null}
-                onChange={(next) => void save(next ?? [], mode === "forced", mode)}
+                onChange={(next) => edit(next ?? [], mode)}
                 testPrefix="org-default-pick"
                 testKey="connections"
                 unavailableIds={unavailableIds}
-                disabled={isLoading || isError || pendingValue !== null}
+                disabled={isLoading || isError || pending}
               />
             </div>
           ) : null}
         </div>
       )}
-      <SaveFeedback
-        pending={pendingValue !== null}
-        success={outcome === "success"}
-        error={outcome === "error"}
-      />
+      <ManualSave dirty={draft.dirty} pending={pending} onSave={save} onDiscard={draft.reset} />
     </div>
   );
 }

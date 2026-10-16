@@ -150,10 +150,10 @@ export function setModelCatalog(
   orgDefaultModelId = (live.find((m) => m.is_default) ?? live[0])?.id ?? null;
 
   if (activeModelId !== null && !liveModelIds.has(activeModelId)) activeModelId = null;
-  if (cache !== null && !liveModelIds.has(cache)) storePick(null);
+  if (cache !== null && !liveModelIds.has(cache)) cache = null;
 
   const reconciled = reconcileModelGenerationSettings(generationCache, defaultCapabilities());
-  if (reconciled !== generationCache) setGenerationSettings(reconciled);
+  if (reconciled !== generationCache) setGenerationSettings(reconciled, false);
   notifyModel();
 }
 
@@ -192,11 +192,13 @@ export function editGenerationSettings(value: ModelGenerationSettings): void {
   setGenerationSettings({ ...hidden, ...value });
 }
 
-function setGenerationSettings(value: ModelGenerationSettings): void {
+function setGenerationSettings(value: ModelGenerationSettings, persist = true): void {
   generationCache = value;
   try {
-    if (Object.keys(value).length === 0) localStorage.removeItem(GENERATION_KEY);
-    else localStorage.setItem(GENERATION_KEY, JSON.stringify(value));
+    if (persist) {
+      if (Object.keys(value).length === 0) localStorage.removeItem(GENERATION_KEY);
+      else localStorage.setItem(GENERATION_KEY, JSON.stringify(value));
+    }
   } catch {
     // The settings remain available for this page even if persistence is unavailable.
   }

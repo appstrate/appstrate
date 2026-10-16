@@ -9,9 +9,10 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { isValidElement, type ReactNode } from "react";
+import { cloneElement, isValidElement, type ReactNode } from "react";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
+import { ManualSetting } from "../../settings/manual-save.tsx";
 import { ConnectionShareEditor } from "../connection-share-editor.tsx";
 import { ConnectionScopeBadge } from "../connection-scope-badge.tsx";
 
@@ -38,17 +39,51 @@ const base: Props = {
   canUnshareHere: false,
   lockHint: null,
   pending: false,
-  onShare: () => {},
-  onUnshare: () => {},
+  onShare: async () => {},
+  onUnshare: async () => {},
 };
 
+const pendingSaves = new Map<string, () => Promise<unknown>>();
+
+/** Expose a controlled form's content, as its menu portal is absent in static markup. */
+function expandForms(node: ReactNode): ReactNode {
+  if (Array.isArray(node)) return node.map(expandForms);
+  if (!isValidElement<{ children?: ReactNode }>(node)) return node;
+  if (node.type === ManualSetting) {
+    const props = node.props as unknown as {
+      value: boolean;
+      disabled?: boolean;
+      children: (value: boolean, onChange: (value: boolean) => void, pending: boolean) => ReactNode;
+      onSave: (value: boolean) => Promise<unknown>;
+    };
+    let value = props.value;
+    const content = props.children(
+      value,
+      (next) => {
+        value = next;
+      },
+      props.disabled ?? false,
+    );
+    const register = (child: ReactNode): void => {
+      if (Array.isArray(child)) return child.forEach(register);
+      if (!isValidElement<Record<string, unknown>>(child)) return;
+      const id = child.props["data-testid"];
+      if (typeof id === "string") pendingSaves.set(id, () => props.onSave(value));
+      register(child.props.children as ReactNode);
+    };
+    register(content);
+    return expandForms(content);
+  }
+  return cloneElement(node, {}, expandForms(node.props.children));
+}
 function EditorProbe({ props, onTree }: { props: Props; onTree: (tree: ReactNode) => void }) {
-  onTree(ConnectionShareEditor(props));
+  onTree(expandForms(ConnectionShareEditor(props)));
   return null;
 }
 
 /** The editor's element tree: the popover's items live in its children, which a static render drops. */
 function treeOf(props: Props): ReactNode {
+  pendingSaves.clear();
   const trees: ReactNode[] = [];
   render(<EditorProbe props={props} onTree={(t) => trees.push(t)} />);
   return trees[0];
@@ -89,13 +124,21 @@ function actOn(props: Partial<Props>, testId: string, fire: (p: Record<string, u
     treeOf({
       ...base,
       ...props,
-      onShare: (id) => shared.push(id),
-      onUnshare: (id) => unshared.push(id),
+      onShare: async (id) => {
+        shared.push(id);
+      },
+      onUnshare: async (id) => {
+        unshared.push(id);
+      },
     }),
     testId,
   );
   if (!control) throw new Error(`no control ${testId}`);
   fire(control);
+  if (pendingSaves.has(testId)) {
+    expect({ shared, unshared }).toEqual({ shared: [], unshared: [] });
+    void pendingSaves.get(testId)!();
+  }
   return { shared, unshared };
 }
 

@@ -186,23 +186,27 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   beside the label) or `action` (button opposite its explanation). Groups:
   `SettingsGroup` (same file); headings: `SettingsHeading`
   (`components/settings/settings-heading.tsx`, `level` `page` or `group`).
-- **No Edit button, no edit mode, no Save button.** A control saves itself (a
-  schedule's Paramètres is the exception: its sections edit one draft that a
-  `SaveBar` sends as one write, since a move of the actor or the version is judged
-  with the connections of the state it moves to): a
-  select, switch or toggle on change; a text on blur or Enter, Escape reverts
-  (`InlineTextSetting`, `components/settings/inline-text-setting.tsx`); typing or
-  a slider after a 650 ms pause. A rename in a table is `InlineEditableLabel`
-  (`components/inline-editable-label.tsx`), the one rename affordance, and it is
-  **opened by the row's menu only**: a click on the name does nothing and no pencil
-  appears on hover (both are noise next to the « … »). The row's « Edit » never
-  renames, it edits what the name does not (a provider's key), in a modal with no
-  name field; « Rename » is its own menu entry that puts the name in edit. A name
-  outside a table (a page title) is renamed in its own settings, as a text
-  setting (`InlineTextSetting`, « Général »), never in the header.
-- **Several values valid only together** are assembled in a modal that commits
-  once (model, proxy, OAuth client, webhook). **A list of independently valid
-  values** commits each entry on its own.
+- **Every editable setting is saved manually.** Typing, selecting, checking a box,
+  leaving a field, waiting, hiding the page or unmounting never persists an edit.
+  `ManualSave` reuses `SaveBar`: show Save / Cancel while the form is dirty.
+  `ManualSetting` and `useSettingDraft` hold independent settings; related values
+  (input values and locks, model and generation, schedule and connections) share
+  one form and one write. Keep API and permission boundaries explicit.
+- Clean forms follow refreshed data. Dirty forms preserve their edits on refetch
+  and failure. Save accepts the sent values only after success; Cancel restores
+  the latest stored values. Disable editing during a write.
+- `useUnsavedChanges` guards page/section navigation and reload. Multiple dirty
+  forms share one history interceptor. Saving before leaving waits for success;
+  failure keeps the form open. Menus and popovers keep choices local until Save;
+  closing them can abandon their draft, never save it.
+- Renaming a table row uses `InlineEditableLabel`, opened by the row's menu only,
+  with explicit Save / Cancel (Enter submits, Escape cancels); blur never writes.
+- The rule also applies to browser-persisted preferences (theme, language, chat
+  model/generation, column widths/visibility and cards/table choice). Operational
+  state and navigation history (auth, selected org/space, sidebar open state,
+  pairing recovery, sent messages, runs and logs) are not editable form drafts.
+  Explicit deeds such as Send, Run, Delete, Connect and Set as default commit
+  their named action. They do not need an additional Save.
 - **One return of a write, everywhere** (agent, schedule, organisation,
   workspace, preferences, integration rules): `SaveFeedback`
   (`components/settings/save-feedback.tsx`: Enregistrement… / Enregistré / Erreur
@@ -214,14 +218,10 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   The one exception is a write whose answer is not « saved » (an email change
   that sends a confirmation): its toast says so and the row shows only the
   pending line.
-- Two writes are exceptions to the no-Save rule, each with one explicit button.
-  A write the server cannot take in parts (a schedule's new actor that must name
-  its connections in the same write): the extra fields appear under the control.
-  The account's login email (`EmailChangeField`, `pages/preferences/general.tsx`):
-  without SMTP it changes at once, so a half-typed address never commits on blur;
-  the button waits for another valid address, and an invalid one is said under
-  the field. A package's files and definition are drafts with an explicit save
-  (`useUnsavedChanges`, section 12).
+- Package files and definitions keep their existing draft saves; publication is
+  a separate action. The account's login email keeps its explicit submission
+  and verification flow. Several settings backed by different endpoints are not
+  silently combined into a partial global save.
 - **Under a field: a note on the left, a control on the right.** A note is text
   (where the value comes from, why it is locked, with its `Lock` icon); a
   control acts (Verrouiller). `InputFieldRow`

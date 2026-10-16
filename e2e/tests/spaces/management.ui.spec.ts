@@ -98,9 +98,7 @@ test.describe("Space management in UI", () => {
     await page.goto("/workspace-settings/general");
     const sidebar = new Sidebar(page);
     const name = page.getByRole("textbox", { name: "Nom", exact: true });
-    // Prime B's detail cache, then change A. Every setting commits at once (no
-    // draft, no save button), so the return to B must show B's own values and
-    // A's pick must have reached A only.
+    // Prime B's cache, then save A. Returning to B must show B's own settings.
     await sidebar.switchSpaceInSettings(target.name);
     await expect(name).toHaveValue(target.name);
     await sidebar.switchSpaceInSettings(source.name);
@@ -113,6 +111,7 @@ test.describe("Space management in UI", () => {
     );
     await page.locator("#space-default-role").click();
     await page.getByRole("option", { name: /^(Administrateur de l'espace|Space admin)$/ }).click();
+    await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
     expect((await sourceSaved).status()).toBe(200);
 
     await sidebar.switchSpaceInSettings(target.name);
@@ -127,7 +126,7 @@ test.describe("Space management in UI", () => {
         response.url().endsWith(`/api/spaces/${target.id}`),
     );
     await name.fill(renamed);
-    await name.press("Enter");
+    await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
     expect((await saved).status()).toBe(200);
     const persisted = await orgOnlyClient.get(`/spaces/${target.id}`);
     expect(await persisted.json()).toMatchObject({

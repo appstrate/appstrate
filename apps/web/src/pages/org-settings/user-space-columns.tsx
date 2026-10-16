@@ -32,7 +32,7 @@ export function useUserSpaceColumns({
   roles: RoleObject[] | undefined;
   roleOptions: SpaceRoleOption[];
   isChangingRole: boolean;
-  onChangeRole: (space: OrgMemberSpace, value: string) => void;
+  onChangeRole: (space: OrgMemberSpace, value: string) => Promise<unknown>;
 }): DataColumn<OrgMemberSpace>[] {
   const { t } = useTranslation(["settings", "common"]);
   const seatColumns = useSpaceSeatColumns<OrgMemberSpace>({

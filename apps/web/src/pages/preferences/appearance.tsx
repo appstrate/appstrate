@@ -5,6 +5,7 @@ import { OptionSelect } from "@/components/app-ui/option-select";
 import { useTheme } from "../../stores/theme-store";
 import { useUpdateLanguage } from "../../hooks/use-profile";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
+import { ManualSetting } from "../../components/settings/manual-save";
 import { SaveFeedback } from "../../components/settings/save-feedback";
 
 export function PreferencesAppearancePage() {
@@ -16,16 +17,21 @@ export function PreferencesAppearancePage() {
     <SettingsGroup title={t("preferences.interface")}>
       <SettingRow variant="field" label={t("common:userMenu.theme")}>
         {(labelId) => (
-          <OptionSelect
-            value={theme}
-            onValueChange={(v) => setTheme(v as "light" | "dark" | "system")}
-            aria-labelledby={labelId}
-            options={[
-              { value: "light", label: t("common:userMenu.themeLight") },
-              { value: "dark", label: t("common:userMenu.themeDark") },
-              { value: "system", label: t("common:userMenu.themeSystem") },
-            ]}
-          />
+          <ManualSetting value={theme} onSave={async (value) => setTheme(value)}>
+            {(value, onChange, pending) => (
+              <OptionSelect
+                value={value}
+                onValueChange={(v) => onChange(v as "light" | "dark" | "system")}
+                disabled={pending}
+                aria-labelledby={labelId}
+                options={[
+                  { value: "light", label: t("common:userMenu.themeLight") },
+                  { value: "dark", label: t("common:userMenu.themeDark") },
+                  { value: "system", label: t("common:userMenu.themeSystem") },
+                ]}
+              />
+            )}
+          </ManualSetting>
         )}
       </SettingRow>
 
@@ -41,18 +47,23 @@ export function PreferencesAppearancePage() {
         }
       >
         {(labelId) => (
-          <OptionSelect
-            value={i18n.language}
-            onValueChange={(lng) =>
-              updateLanguage.mutate({ body: { language: lng as "fr" | "en" } })
-            }
-            disabled={updateLanguage.isPending}
-            aria-labelledby={labelId}
-            options={[
-              { value: "fr", label: t("preferences.langFr") },
-              { value: "en", label: t("preferences.langEn") },
-            ]}
-          />
+          <ManualSetting
+            value={i18n.language === "en" ? ("en" as const) : ("fr" as const)}
+            onSave={(language) => updateLanguage.mutateAsync({ body: { language } })}
+          >
+            {(value, onChange, pending) => (
+              <OptionSelect
+                value={value}
+                onValueChange={(next) => onChange(next as "fr" | "en")}
+                disabled={pending}
+                aria-labelledby={labelId}
+                options={[
+                  { value: "fr", label: t("preferences.langFr") },
+                  { value: "en", label: t("preferences.langEn") },
+                ]}
+              />
+            )}
+          </ManualSetting>
         )}
       </SettingRow>
     </SettingsGroup>

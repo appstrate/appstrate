@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ManualSave } from "../settings/manual-save";
 import { useTranslation } from "react-i18next";
 import {
   useConnectionPicker,
@@ -114,6 +115,14 @@ function LoadedPicker({ persistence = DEFAULT_PERSISTENCE, ...options }: LoadedP
   return (
     <div data-testid={`member-picker-${integrationId}`}>
       <PickerMenu integrationId={integrationId} picker={picker} />
+      {persistence.mode === "pin" && (
+        <ManualSave
+          dirty={picker.memberDraft.dirty}
+          pending={picker.busy}
+          onSave={picker.saveMember}
+          onDiscard={picker.memberDraft.reset}
+        />
+      )}
       {unavailableIds.length > 0 && (
         <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
           {t(

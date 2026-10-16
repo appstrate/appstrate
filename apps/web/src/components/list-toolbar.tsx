@@ -61,6 +61,9 @@ export interface ColumnMenuSpec {
   options: Array<{ id: string; label: string; required?: boolean }>;
   hidden: string[];
   onToggle: (id: string) => void;
+  dirty?: boolean;
+  onSave?: () => void;
+  onDiscard?: () => void;
 }
 
 export interface SearchSpec {
@@ -186,7 +189,11 @@ function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
   const visibleCount = columns.options.filter((option) => !hidden.has(option.id)).length;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (!open) columns.onDiscard?.();
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
@@ -217,6 +224,16 @@ function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
             </DropdownMenuCheckboxItem>
           );
         })}
+        {columns.dirty && (
+          <div className="flex justify-end gap-2 border-t p-2">
+            <Button type="button" size="sm" variant="ghost" onClick={columns.onDiscard}>
+              {t("btn.cancel")}
+            </Button>
+            <Button type="button" size="sm" onClick={columns.onSave}>
+              {t("btn.save")}
+            </Button>
+          </div>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

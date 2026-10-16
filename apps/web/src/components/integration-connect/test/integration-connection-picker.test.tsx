@@ -973,24 +973,15 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     mounted.unsubscribe();
   });
 
-  it("writes the fallback's set with the created connection as the member's pin", async () => {
+  it("stages a newly connected account without persisting a member pin", async () => {
     const put = spyOn(client, "PUT").mockResolvedValue({ data: {} });
     try {
-      const { mounted, picker } = await mount(
-        [fallbackBefore, fallbackAfter, fallbackAfter],
-        settles,
-        { mode: "pin" },
-      );
+      const { mounted, picker } = await mount([fallbackBefore, fallbackAfter], settles, {
+        mode: "pin",
+      });
       await picker.triggerConnect("primary");
-      const calls = put.mock.calls as unknown as Array<[string, { body: unknown }]>;
-      expect(calls.map(([path, init]) => [path, init.body])).toEqual([
-        [
-          "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
-          { connection_ids: [WEB, ADDED] },
-        ],
-      ]);
-      // The pin write moved the verdict: it is read again.
-      expect(mounted.asked()).toBe(3);
+      expect(put).not.toHaveBeenCalled();
+      expect(mounted.asked()).toBe(2);
       mounted.unsubscribe();
     } finally {
       put.mockRestore();
@@ -1121,8 +1112,14 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
   it("reports a refused pin write, and reads no verdict it did not move", async () => {
     const put = spyOn(client, "PUT").mockRejectedValue(new ApiError("forbidden", "no", 403));
     try {
-      const { mounted, picker } = await mount([before], settles, { mode: "pin" });
-      expect(await picker.persist([WEB])).toBe(false);
+      const { mounted, picker } = await mount(
+        [answer({ member_pinned_connection_ids: [WEB] })],
+        settles,
+        { mode: "pin" },
+      );
+      expect(await picker.persist([WEB])).toBe(true);
+      expect(put).not.toHaveBeenCalled();
+      await expect(picker.saveMember()).rejects.toBeInstanceOf(ApiError);
       expect(put).toHaveBeenCalledTimes(1);
       expect(mounted.asked()).toBe(1);
       mounted.unsubscribe();
@@ -1131,7 +1128,7 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     }
   });
 
-  it("a connect whose pin write is refused settles without a second write or read", async () => {
+  it("connecting never attempts a pin write, even when that write would be refused", async () => {
     const warned = spyOn(toast, "warning").mockImplementation(() => 0);
     const put = spyOn(client, "PUT").mockRejectedValue(new ApiError("forbidden", "no", 403));
     try {
@@ -1140,7 +1137,7 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
       });
       await expect(picker.triggerConnect("primary")).resolves.toBeUndefined();
       const calls = put.mock.calls as unknown as Array<[string, { body: unknown }]>;
-      expect(calls.map(([, init]) => init.body)).toEqual([{ connection_ids: [WEB, ADDED] }]);
+      expect(calls).toEqual([]);
       // The mount, then the popup's refetch: the refused write moved no verdict.
       expect(mounted.asked()).toBe(2);
       expect(warned).not.toHaveBeenCalled();

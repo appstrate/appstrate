@@ -197,10 +197,10 @@ export function ScopeCell({
         lockHint={lockText}
         pending={shareConnection.isPending || unshareConnection.isPending}
         onShare={(targetSpaceId) =>
-          shareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
+          shareConnection.mutateAsync({ connectionId: connection.id, spaceId: targetSpaceId })
         }
         onUnshare={(targetSpaceId) =>
-          unshareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
+          unshareConnection.mutateAsync({ connectionId: connection.id, spaceId: targetSpaceId })
         }
       />
     </div>
