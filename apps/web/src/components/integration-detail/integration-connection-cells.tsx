@@ -27,6 +27,7 @@ import { connectionLockHintKey } from "../integration-connect/connection-ownersh
 import {
   useRenameIntegrationConnection,
   useConnectionShare,
+  useConnectionFutureSharing,
   type IntegrationAuthType,
   type IntegrationConnection,
   useAgentsConsumingIntegration,
@@ -167,6 +168,7 @@ export function ScopeCell({
   isAdmin: boolean;
 }) {
   const shareConnection = useConnectionShare("share", packageId);
+  const futureSharing = useConnectionFutureSharing(packageId);
   const unshareConnection = useConnectionShare("unshare", packageId);
   const orgId = useCurrentOrgId();
   const { spaceId, canShare, canUnshareHere, lockKey } = useRowGrants(connection, isAdmin);
@@ -195,9 +197,16 @@ export function ScopeCell({
         canShare={canShare}
         canUnshareHere={canUnshareHere}
         lockHint={lockText}
-        pending={shareConnection.isPending || unshareConnection.isPending}
+        pending={
+          shareConnection.isPending || unshareConnection.isPending || futureSharing.isPending
+        }
         onShare={(targetSpaceId) =>
           shareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
+        }
+        canShareAll={connection.allowed_actions?.includes("share_all") ?? false}
+        shareNewSpaces={connection.share_new_spaces ?? false}
+        onFutureSharingChange={(enabled) =>
+          futureSharing.mutate({ connectionId: connection.id, enabled })
         }
         onUnshare={(targetSpaceId) =>
           unshareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })

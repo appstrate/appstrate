@@ -39,6 +39,9 @@ const base: Props = {
   lockHint: null,
   pending: false,
   onShare: () => {},
+  canShareAll: true,
+  shareNewSpaces: false,
+  onFutureSharingChange: () => {},
   onUnshare: () => {},
 };
 
@@ -113,6 +116,35 @@ describe("ConnectionShareEditor — the owner's org-scoped row", () => {
       sharedSpaceIds: ["s2"],
     });
     expect(targetTestIds(tree)).toEqual([target("s1"), target("s2")]);
+  });
+
+  it("toggles future sharing as one server policy, even when no space exists yet", () => {
+    for (const enabled of [false, true]) {
+      const changes: boolean[] = [];
+      const tree = treeOf({
+        ...base,
+        targets: [],
+        shareNewSpaces: enabled,
+        onFutureSharingChange: (value) => changes.push(value),
+      });
+      const control = propsOf(tree, "share-all-" + CONN)!;
+      expect(control.disabled).toBe(false);
+      (control.onClick as () => void)();
+      expect(changes).toEqual([!enabled]);
+    }
+  });
+
+  it("only offers organization consent when the server allows it", () => {
+    expect(propsOf(treeOf({ ...base, canShareAll: false }), "share-all-" + CONN)).toBeUndefined();
+    expect(propsOf(treeOf({ ...base, pending: true }), "share-all-" + CONN)?.disabled).toBe(true);
+  });
+
+  it("names private access and future sharing in the trigger", () => {
+    expect(render(<ConnectionShareEditor {...base} />)).toContain("Vous uniquement");
+    const html = render(<ConnectionShareEditor {...base} shareNewSpaces sharedSpaceIds={[HERE]} />);
+    expect(html).toContain(
+      i18n.t("settings:integration.connection.share.countFuture", { count: 1 }),
+    );
   });
 
   it("shares into a space that is not yet in the set", () => {
@@ -219,10 +251,10 @@ describe("ConnectionShareEditor — a plain member", () => {
 describe("ConnectionScopeBadge", () => {
   it("names the scope and carries its explanation for a screen reader", () => {
     const org = render(<ConnectionScopeBadge scope="org" />);
-    expect(org).toContain("Toute l'organisation");
+    expect(org).toContain("Usage multi-espace");
     expect(org).toContain(i18n.t("settings:integration.connection.scope.orgHelp"));
     const space = render(<ConnectionScopeBadge scope="space" />);
-    expect(space).toContain("Cet espace uniquement");
+    expect(space).toContain("Usage limité à un espace");
     expect(space).toContain(i18n.t("settings:integration.connection.scope.spaceHelp"));
   });
 });

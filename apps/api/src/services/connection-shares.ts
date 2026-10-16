@@ -9,11 +9,12 @@
  */
 
 import type { Context } from "hono";
-import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   integrationConnectionShares as shares,
   integrationConnections as c,
+  spaces,
   type IntegrationConnectionRow as ConnectionRow,
 } from "@appstrate/db/schema";
 import type { OrgRole } from "@appstrate/core/permissions";
@@ -32,6 +33,7 @@ import {
 } from "./connection-reach.ts";
 import {
   assertConnectionShareable,
+  lockOrgMember,
   invalidShareTarget,
   type ConnectionShare,
 } from "./space-members.ts";
@@ -39,6 +41,7 @@ import { assertConnectionsUnpinned, lockLabelKeys } from "./integration-connecti
 import { disableForeignSchedules } from "./schedules-naming-connection.ts";
 import { isUserConnectionCreationBlocked } from "./integration-connection-resolver.ts";
 import { recordAudit, recordAuditFromContext } from "./audit.ts";
+import { lockConnectionSharingOrg } from "./connection-future-shares.ts";
 
 interface EditInput {
   connectionId: string;
@@ -250,6 +253,49 @@ export async function unshareConnection(input: ShareInput): Promise<{
       "connection_unshared",
     );
     return { connection, removed: true, disabledScheduleIds };
+  });
+}
+
+/**
+ * Share with all current team spaces and opt into future ones. Turning the policy off keeps
+ * existing shares: withdrawing one still uses the ordinary pin/schedule-aware door.
+ */
+export async function setConnectionFutureSharing(input: EditInput & { enabled: boolean }) {
+  const [read] = await db.select({ orgId: c.orgId }).from(c).where(visibleTo(input)).limit(1);
+  if (!read) throw connectionNotFound(input.connectionId);
+  return db.transaction(async (tx) => {
+    await lockConnectionSharingOrg(tx, read.orgId);
+    const actor = input.caller.principal.actor;
+    if (actor.type !== "user") throw forbidden("Only a member can share a connection");
+    const member = await lockOrgMember(tx, read.orgId, actor.id);
+    // Org administrators reach all team spaces; personal spaces are always isolated.
+    const targets = await tx
+      .select({ id: spaces.id })
+      .from(spaces)
+      .where(and(eq(spaces.orgId, read.orgId), isNull(spaces.ownerUserId)))
+      .orderBy(asc(spaces.id))
+      .for("share");
+    const row = await lockVisible(tx, input);
+    if (!connectionActions(row, input.caller, false, member?.role).includes("share_all")) {
+      throw forbidden(
+        "Sharing with current and future spaces requires the connection owner to administer the organization with integrations:configure",
+      );
+    }
+    const added =
+      input.enabled && targets.length > 0
+        ? await tx
+            .insert(shares)
+            .values(
+              targets.map(({ id }) => ({ connectionId: row.id, orgId: row.orgId, spaceId: id })),
+            )
+            .onConflictDoNothing()
+            .returning({ spaceId: shares.spaceId })
+        : [];
+    await tx
+      .update(c)
+      .set({ shareNewSpaces: input.enabled, updatedAt: new Date() })
+      .where(eq(c.id, row.id));
+    return { orgId: row.orgId, addedSpaceIds: added.map((s) => s.spaceId) };
   });
 }
 

@@ -10,7 +10,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useMyConnections, useRenameMeConnection } from "../../hooks/use-me-connections";
-import { useConnectionShare } from "../../hooks/use-integrations";
+import { useConnectionFutureSharing, useConnectionShare } from "../../hooks/use-integrations";
 import { formatDateField } from "../../lib/format-date";
 import { EmptyState } from "../../components/page-states";
 import { ItemList } from "../../components/item-list";
@@ -34,12 +34,14 @@ function ConnectionRow({
   conn,
   onRename,
   onShare,
+  onFutureSharingChange,
   onUnshare,
   sharing,
 }: {
   conn: MeConnectionEntry;
   onRename: (label: string) => Promise<unknown>;
   onShare: (spaceId: string) => void;
+  onFutureSharingChange: (enabled: boolean) => void;
   onUnshare: (spaceId: string) => void;
   sharing: boolean;
 }) {
@@ -163,6 +165,9 @@ function ConnectionRow({
             lockHint={null}
             pending={sharing}
             onShare={onShare}
+            canShareAll={conn.allowed_actions.includes("share_all")}
+            shareNewSpaces={conn.share_new_spaces ?? false}
+            onFutureSharingChange={onFutureSharingChange}
             onUnshare={onUnshare}
           />
           {lockHint && <span className="text-muted-foreground text-[0.65rem]">{lockHint}</span>}
@@ -272,6 +277,7 @@ export function PreferencesConnectionsPage() {
 
   const renameIntegration = useRenameMeConnection();
   const shareIntegration = useConnectionShare("share");
+  const futureSharing = useConnectionFutureSharing();
   const unshareIntegration = useConnectionShare("unshare");
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -349,7 +355,11 @@ export function PreferencesConnectionsPage() {
               renderRow={(conn) => (
                 <ConnectionRow
                   conn={conn}
-                  sharing={shareIntegration.isPending || unshareIntegration.isPending}
+                  sharing={
+                    shareIntegration.isPending ||
+                    unshareIntegration.isPending ||
+                    futureSharing.isPending
+                  }
                   onRename={(label) =>
                     renameIntegration.mutateAsync({
                       connectionId: conn.connection_id,
@@ -358,6 +368,9 @@ export function PreferencesConnectionsPage() {
                   }
                   onShare={(spaceId) =>
                     shareIntegration.mutate({ connectionId: conn.connection_id, spaceId })
+                  }
+                  onFutureSharingChange={(enabled) =>
+                    futureSharing.mutate({ connectionId: conn.connection_id, enabled })
                   }
                   onUnshare={(spaceId) =>
                     unshareIntegration.mutate({ connectionId: conn.connection_id, spaceId })

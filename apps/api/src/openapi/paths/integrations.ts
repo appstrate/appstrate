@@ -16,6 +16,30 @@ import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
  */
 
 /** `GET /connect/start` answers every refusal with a rendered HTML page (`popupHtmlError`). */
+export const connectionFutureSharingOperation = {
+  description:
+    "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. False disables future sharing and keeps existing shares; individual withdrawals still use the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
+  requestBody: {
+    required: true,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["include_future_spaces"],
+          properties: { include_future_spaces: { type: "boolean" } },
+        },
+      },
+    },
+  },
+  responses: {
+    "204": { description: "Future-space sharing policy saved", headers: STD_RESPONSE_HEADERS },
+    "400": { $ref: "#/components/responses/ValidationError" },
+    "403": { $ref: "#/components/responses/Forbidden" },
+    "404": { $ref: "#/components/responses/NotFound" },
+  },
+} as const;
+
 const htmlErrorPage = { "text/html": { schema: { type: "string" } } } as const;
 
 const oauthCallbackQueryParameters = [
@@ -312,6 +336,11 @@ export const integrationConnectionSchema = {
     spaceId: spaceIdSchema,
     shared_here: sharedHereSchema,
     shared_space_ids: sharedSpaceIdsSchema,
+    share_new_spaces: {
+      type: "boolean",
+      description:
+        "Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective.",
+    },
     origin_space_id: originSpaceIdSchema,
     allowed_actions: {
       ...connectionActionsSchema,
@@ -1612,6 +1641,20 @@ export const integrationsPaths = {
         },
         "409": connectionUpdateConflicts,
       },
+    },
+  },
+  "/api/integrations/{packageId}/connections/{connectionId}/shares": {
+    put: {
+      ...connectionFutureSharingOperation,
+      operationId: "setIntegrationConnectionFutureSharing",
+      tags: ["Integrations"],
+      summary: "Share a connection with current and future team spaces",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+        connectionIdParam,
+      ],
     },
   },
   "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}": {

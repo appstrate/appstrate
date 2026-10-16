@@ -129,6 +129,8 @@ export const integrationConnections = pgTable(
     // gymnastics. Never empty and unique per owner (`idx_integration_conn_owner_label`);
     // the resolver disambiguates a bound set holding two owners' equal labels.
     label: text("label").notNull(),
+    /** Explicit consent to share with future team spaces, while the owner administers the org. */
+    shareNewSpaces: boolean("share_new_spaces").notNull().default(false),
     // Read only by scripts/migration/0044 and the boot guard `assertConnectionSharesCopied`
     // (apps/api/src/lib/boot.ts); no code writes it. Dropped with its CHECKs and the guard in the
     // next release. Shares live in `integration_connection_shares`.
@@ -199,6 +201,10 @@ export const integrationConnections = pgTable(
     check(
       "integration_connections_origin_is_org",
       sql`origin_space_id IS NULL OR space_id IS NULL`,
+    ),
+    check(
+      "integration_connections_future_share_is_org_member",
+      sql`NOT share_new_spaces OR (user_id IS NOT NULL AND space_id IS NULL)`,
     ),
     // A space-scoped row is shared with its own space or nowhere.
     check(

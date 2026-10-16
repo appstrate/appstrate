@@ -43,6 +43,12 @@ import {
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
 
+import {
+  lockConnectionSharingOrg,
+  shareConnectionsWithNewSpace,
+  recordFutureConnectionShares,
+} from "./connection-future-shares.ts";
+
 type SpaceRow = InferSelectModel<typeof spaces>;
 
 // `.strictObject`, not `.object`: `settings` is written as a TOTAL replacement
@@ -117,19 +123,25 @@ export async function createSpace(
   createdBy?: string,
 ) {
   const id = prefixedId("spc");
-  const [space] = await db
-    .insert(spaces)
-    .values({
-      id,
-      orgId,
-      name: params.name,
-      isDefault: params.isDefault ?? false,
-      settings: params.settings ?? {},
-      createdBy: createdBy ?? null,
-    })
-    .returning();
+  const result = await db.transaction(async (tx) => {
+    await lockConnectionSharingOrg(tx, orgId);
+    const [space] = await tx
+      .insert(spaces)
+      .values({
+        id,
+        orgId,
+        name: params.name,
+        isDefault: params.isDefault ?? false,
+        settings: params.settings ?? {},
+        createdBy: createdBy ?? null,
+      })
+      .returning();
 
-  return space!;
+    const added = await shareConnectionsWithNewSpace(tx, orgId, id);
+    return { space: space!, added };
+  });
+  await recordFutureConnectionShares(orgId, id, result.added);
+  return result.space;
 }
 
 /**
@@ -676,7 +688,8 @@ export async function convertPersonalSpaceToTeam(
   orgId: string,
   spaceId: string,
 ): Promise<SpaceRow> {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
+    await lockConnectionSharingOrg(tx, orgId);
     const [current] = await tx
       .select({
         id: spaces.id,
@@ -703,8 +716,11 @@ export async function convertPersonalSpaceToTeam(
       .set({ ownerUserId: null, orphanedAt: null, updatedAt: new Date() })
       .where(eq(spaces.id, spaceId))
       .returning();
-    return space!;
+    const added = await shareConnectionsWithNewSpace(tx, orgId, spaceId);
+    return { space: space!, added };
   });
+  await recordFutureConnectionShares(orgId, spaceId, result.added);
+  return result.space;
 }
 
 /** How long an orphaned personal space is kept before the sweeper empties it. */

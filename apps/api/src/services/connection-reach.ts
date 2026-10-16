@@ -128,6 +128,8 @@ export interface ConnectionCaller {
   spaceId: string | null;
   /** Holds `integrations:connect` where the credential acts. */
   canConnect: boolean;
+  /** The credential permits org-wide consent; role and ownership are checked per row. */
+  canShareAll?: boolean;
   /** Holds `integrations:configure` in `spaceId`. */
   governs: boolean;
   /** The caller's permissions in one space of `orgId` (empty outside it). */
@@ -165,13 +167,23 @@ export function connectionActions(
   row: { userId: string | null; endUserId: string | null; spaceId: string | null },
   caller: ConnectionCaller,
   sharedHere: boolean,
+  orgRole?: OrgRole | null,
 ): ConnectionAction[] {
   if (!caller.canConnect) return [];
   const actions: ConnectionAction[] = [];
   if (actorOwns(caller.principal.actor, row)) {
     const bound = boundSpaceOf(caller.principal);
     if (bound === null || row.spaceId === bound) actions.push("rename");
-    if (row.userId !== null) actions.push("share");
+    if (row.userId !== null) {
+      actions.push("share");
+      if (
+        row.spaceId === null &&
+        caller.canShareAll &&
+        caller.principal.kind === "person" &&
+        (orgRole === "owner" || orgRole === "admin")
+      )
+        actions.push("share_all");
+    }
     return actions;
   }
   if (!caller.governs || caller.spaceId === null) return actions;

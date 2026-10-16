@@ -1777,6 +1777,26 @@ export interface paths {
         patch: operations["updateIntegrationConnectionMetadata"];
         trace?: never;
     };
+    "/api/integrations/{packageId}/connections/{connectionId}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Share a connection with current and future team spaces
+         * @description Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. False disables future sharing and keeps existing shares; individual withdrawals still use the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.
+         */
+        put: operations["setIntegrationConnectionFutureSharing"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}": {
         parameters: {
             query?: never;
@@ -2210,6 +2230,26 @@ export interface paths {
          */
         get: operations["getMyConnectionHandoff"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/connections/{connectionId}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Share an owned connection with current and future team spaces
+         * @description Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. False disables future sharing and keeps existing shares; individual withdrawals still use the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.
+         */
+        put: operations["setMeConnectionFutureSharing"];
         post?: never;
         delete?: never;
         options?: never;
@@ -13429,10 +13469,12 @@ export interface operations {
                             shared_here: boolean;
                             /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                             shared_space_ids?: string[];
+                            /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                            share_new_spaces?: boolean;
                             /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                             origin_space_id?: string | null;
                             /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                            allowed_actions?: ("rename" | "share" | "unshare_here")[];
+                            allowed_actions?: ("rename" | "share" | "share_all" | "unshare_here")[];
                             /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                             shareable_spaces?: {
                                 id: string;
@@ -13602,10 +13644,12 @@ export interface operations {
                                 shared_here: boolean;
                                 /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                                 shared_space_ids?: string[];
+                                /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                                share_new_spaces?: boolean;
                                 /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                                 origin_space_id?: string | null;
                                 /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                                allowed_actions?: ("rename" | "share" | "unshare_here")[];
+                                allowed_actions?: ("rename" | "share" | "share_all" | "unshare_here")[];
                                 /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                                 shareable_spaces?: {
                                     id: string;
@@ -13800,10 +13844,12 @@ export interface operations {
                         shared_here: boolean;
                         /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                         shared_space_ids?: string[];
+                        /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                        share_new_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
                         /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                        allowed_actions?: ("rename" | "share" | "unshare_here")[];
+                        allowed_actions?: ("rename" | "share" | "share_all" | "unshare_here")[];
                         /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                         shareable_spaces?: {
                             id: string;
@@ -14194,10 +14240,12 @@ export interface operations {
                             shared_here: boolean;
                             /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                             shared_space_ids?: string[];
+                            /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                            share_new_spaces?: boolean;
                             /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                             origin_space_id?: string | null;
                             /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                            allowed_actions?: ("rename" | "share" | "unshare_here")[];
+                            allowed_actions?: ("rename" | "share" | "share_all" | "unshare_here")[];
                             /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                             shareable_spaces?: {
                                 id: string;
@@ -14291,10 +14339,12 @@ export interface operations {
                         shared_here: boolean;
                         /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                         shared_space_ids?: string[];
+                        /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                        share_new_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
                         /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                        allowed_actions?: ("rename" | "share" | "unshare_here")[];
+                        allowed_actions?: ("rename" | "share" | "share_all" | "unshare_here")[];
                         /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                         shareable_spaces?: {
                             id: string;
@@ -14330,6 +14380,45 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    setIntegrationConnectionFutureSharing: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Integration connection id (UUID). */
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    include_future_spaces: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Future-space sharing policy saved */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     shareIntegrationConnection: {
@@ -14989,10 +15078,12 @@ export interface operations {
                                 shared_here: boolean;
                                 /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                                 shared_space_ids?: string[];
+                                /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                                share_new_spaces?: boolean;
                                 /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                                 origin_space_id?: string | null;
                                 /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                                allowed_actions?: ("rename" | "share" | "unshare_here")[];
+                                allowed_actions?: ("rename" | "share" | "share_all" | "unshare_here")[];
                                 /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                                 shareable_spaces?: {
                                     id: string;
@@ -16166,13 +16257,15 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 scope: "org" | "space";
+                                /** @description Automatically share with future team spaces. */
+                                share_new_spaces?: boolean;
                                 /** @description The spaces whose members may use it. */
                                 shared_spaces: {
                                     id: string;
                                     name: string;
                                 }[];
                                 /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). */
-                                allowed_actions: ("rename" | "share" | "unshare_here")[];
+                                allowed_actions: ("rename" | "share" | "share_all" | "unshare_here")[];
                                 /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. */
                                 shareable_spaces: {
                                     id: string;
@@ -16302,10 +16395,12 @@ export interface operations {
                         shared_here: boolean;
                         /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                         shared_space_ids?: string[];
+                        /** @description Owner only, unbound credential: share automatically with future team spaces. Individual current-space withdrawals remain effective. */
+                        share_new_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
                         /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                        allowed_actions?: ("rename" | "share" | "unshare_here")[];
+                        allowed_actions?: ("rename" | "share" | "share_all" | "unshare_here")[];
                         /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                         shareable_spaces?: {
                             id: string;
@@ -16508,6 +16603,37 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    setMeConnectionFutureSharing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    include_future_spaces: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Future-space sharing policy saved */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     shareMyConnection: {

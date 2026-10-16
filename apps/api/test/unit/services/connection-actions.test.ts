@@ -32,6 +32,25 @@ function reader(overrides: Partial<ConnectionCaller> = {}): ConnectionCaller {
 }
 
 describe("connectionActions", () => {
+  it("offers future-space consent only to its org-admin owner with the credential grant", () => {
+    expect(connectionActions(orgRow(), reader({ canShareAll: true }), false, "admin")).toContain(
+      "share_all",
+    );
+    for (const role of ["member", "guest"] as const) {
+      expect(connectionActions(orgRow(), reader({ canShareAll: true }), false, role)).not.toContain(
+        "share_all",
+      );
+    }
+    expect(
+      connectionActions(orgRow(), reader({ canShareAll: false }), false, "owner"),
+    ).not.toContain("share_all");
+    expect(
+      connectionActions(spaceRow(), reader({ canShareAll: true }), false, "owner"),
+    ).not.toContain("share_all");
+    expect(
+      connectionActions(orgRow(COLLEAGUE), reader({ canShareAll: true }), false, "owner"),
+    ).not.toContain("share_all");
+  });
   it("gives the owner rename and share, never the governor's withdrawal", () => {
     expect(connectionActions(orgRow(), reader(), true)).toEqual(["rename", "share"]);
   });

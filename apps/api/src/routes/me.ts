@@ -80,6 +80,8 @@ import {
 } from "../services/integration-connections.ts";
 import {
   applyConnectionRename,
+  applyConnectionFutureSharing,
+  connectionFutureSharingSchema,
   applyConnectionShare,
   applyConnectionUnshare,
   connectionCaller,
@@ -362,6 +364,21 @@ router.patch("/connections/:connectionId", requireCeiling("integrations", "conne
   const body = await readJsonBody(c, updateConnectionSchema);
   return c.json(await applyConnectionRename(c, meEdit(c), connectionId, body.label));
 });
+
+router.put(
+  "/connections/:connectionId/shares",
+  requireCeiling("integrations", "connect"),
+  async (c) => {
+    const body = await readJsonBody(c, connectionFutureSharingSchema);
+    await applyConnectionFutureSharing(
+      c,
+      meEdit(c),
+      readConnectionId(c),
+      body.include_future_spaces,
+    );
+    return c.body(null, 204);
+  },
+);
 
 router.put(
   "/connections/:connectionId/shares/:spaceId",

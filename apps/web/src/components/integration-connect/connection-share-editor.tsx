@@ -35,6 +35,9 @@ export function ConnectionShareEditor({
   lockHint,
   pending,
   onShare,
+  canShareAll,
+  shareNewSpaces,
+  onFutureSharingChange,
   onUnshare,
 }: {
   connectionId: string;
@@ -55,6 +58,9 @@ export function ConnectionShareEditor({
   lockHint: string | null;
   pending: boolean;
   onShare: (spaceId: string) => void;
+  canShareAll: boolean;
+  shareNewSpaces: boolean;
+  onFutureSharingChange: (enabled: boolean) => void;
   onUnshare: (spaceId: string) => void;
 }) {
   const { t } = useTranslation("settings");
@@ -95,19 +101,44 @@ export function ConnectionShareEditor({
             data-testid={`share-editor-${connectionId}`}
           >
             <span className="truncate">
-              {sharedSpaceIds.length === 0
-                ? t("integration.connection.share.none")
-                : t("integration.connection.share.count", { count: sharedSpaceIds.length })}
+              {shareNewSpaces
+                ? t("integration.connection.share.countFuture", { count: sharedSpaceIds.length })
+                : sharedSpaceIds.length === 0
+                  ? t("integration.connection.share.none")
+                  : t("integration.connection.share.count", { count: sharedSpaceIds.length })}
             </span>
             <ChevronsUpDown className="shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-72 p-0" align="start">
+        <PopoverContent className="w-80 p-0" align="start">
+          <div className="flex flex-col gap-2 p-3">
+            <p className="text-muted-foreground text-xs">
+              {t("integration.connection.share.help")}
+            </p>
+            {canShareAll && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => onFutureSharingChange(!shareNewSpaces)}
+                  data-testid={`share-all-${connectionId}`}
+                >
+                  {shareNewSpaces
+                    ? t("integration.connection.share.currentOnly")
+                    : t("integration.connection.share.all")}
+                </Button>
+                <p className="text-muted-foreground text-xs">
+                  {t("integration.connection.share.allHelp")}
+                </p>
+              </>
+            )}
+          </div>
           <Command>
             <CommandInput placeholder={t("integration.connection.share.search")} />
             <CommandList>
               <CommandEmpty>{t("viewAs.noSpace")}</CommandEmpty>
-              <CommandGroup heading={t("integration.connection.share.help")}>
+              <CommandGroup>
                 {targets.map((space) => {
                   const selected = sharedSpaceIds.includes(space.id);
                   return (

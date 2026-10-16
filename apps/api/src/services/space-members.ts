@@ -425,7 +425,7 @@ export async function deleteSpaceMembershipsInOrg(
  */
 export async function unshareConnectionsOfOwnersWithoutAccess(
   tx: Tx,
-  scope: { orgId: string; userId?: string; spaceId?: string },
+  scope: { orgId: string; userId?: string; spaceId?: string; stopFutureSharing?: boolean },
   alsoLockSchedules?: SQL,
 ): Promise<ConnectionsUnshared> {
   const c = integrationConnections;
@@ -442,13 +442,27 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
       scope.spaceId === undefined ? undefined : sharedInto(scope.spaceId),
     ),
   );
+  const stopFuture = scope.stopFutureSharing
+    ? and(
+        eq(c.orgId, scope.orgId),
+        scope.userId ? eq(c.userId, scope.userId) : undefined,
+        eq(c.shareNewSpaces, true),
+      )
+    : undefined;
   const locked =
-    lost.length === 0
+    lost.length === 0 && !stopFuture
       ? []
       : await tx
-          .select({ id: c.id, userId: c.userId, endUserId: c.endUserId })
+          .select({
+            id: c.id,
+            userId: c.userId,
+            endUserId: c.endUserId,
+            shareNewSpaces: c.shareNewSpaces,
+          })
           .from(c)
-          .where(inArray(c.id, [...new Set(lost.map((share) => share.connectionId))]))
+          .where(
+            or(inArray(c.id, [...new Set(lost.map((share) => share.connectionId))]), stopFuture),
+          )
           .orderBy(asc(c.id))
           .for("update");
   const withdrawn: ConnectionShare[] = [];
@@ -461,8 +475,11 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
       .delete(s)
       .where(and(eq(s.connectionId, row.id), inArray(s.spaceId, targets)))
       .returning({ spaceId: s.spaceId });
-    if (gone.length === 0) continue;
-    await tx.update(c).set({ updatedAt: new Date() }).where(eq(c.id, row.id));
+    if (gone.length === 0 && !(scope.stopFutureSharing && row.shareNewSpaces)) continue;
+    await tx
+      .update(c)
+      .set({ updatedAt: new Date(), ...(scope.stopFutureSharing ? { shareNewSpaces: false } : {}) })
+      .where(eq(c.id, row.id));
     for (const { spaceId } of gone) withdrawn.push({ connectionId: row.id, spaceId });
   }
   const ownerOf = new Map(locked.map((row) => [row.id, actorFromIds(row.userId, row.endUserId)!]));

@@ -280,6 +280,13 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   without its own pick for the refused integrations, and « Relancer » waits for the live verdict
   of each of them (`retryDecision`).
 
+- **Connection use and sharing** are distinct: the scope badge names multi-space or single-space
+  use by the owner, while the share picker names the members who get access ("Only you" or
+  "Members of N spaces"). Its explanation is visible in the popover. Sharing with all listed
+  team spaces also enables automatic sharing with future team spaces. Only an organization
+  administrator owning an org-scoped connection may consent; personal spaces stay private.
+  Current-space withdrawals remain effective, and stopping future sharing keeps existing shares.
+
 ## 5. Choosing a value
 
 | Need                                                                 | Component                                                                                                                                                                                                                                                                                                                                                                                   |

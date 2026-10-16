@@ -580,7 +580,7 @@ async function removeMemberInTx(
   // cover the member's schedules too, in the same id-ordered statement.
   const unshared = await unshareConnectionsOfOwnersWithoutAccess(
     tx,
-    { orgId, userId },
+    { orgId, userId, stopFutureSharing: true },
     departedSchedules,
   );
   const disabled = await tx
@@ -704,9 +704,11 @@ export async function updateMemberRole(
     // A demotion drops the implicit reach of the org role (admin → member,
     // member → guest on open spaces). Member row (above), then the spaces: see `lockSpaceRow`.
     await lockSpacesOfSharedConnections(tx, orgId, targetUserId);
+
     const unshared = await unshareConnectionsOfOwnersWithoutAccess(tx, {
       orgId,
       userId: targetUserId,
+      stopFutureSharing: role !== "owner" && role !== "admin",
     });
     return {
       previousRole: target.role,

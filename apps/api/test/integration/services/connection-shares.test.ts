@@ -8,11 +8,12 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 import {
   addOrgMember,
+  authHeaders,
   createTestContext,
   createTestUser,
   type TestContext,
@@ -26,14 +27,23 @@ import {
 } from "../../helpers/seed.ts";
 import {
   integrationConnectionShares,
+  organizationMembers,
   integrationConnections,
   integrationPins,
   schedules,
 } from "@appstrate/db/schema";
 import type { Permission } from "../../../src/lib/permissions.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
-import { shareConnection, unshareConnection } from "../../../src/services/connection-shares.ts";
+import {
+  setConnectionFutureSharing,
+  shareConnection,
+  unshareConnection,
+} from "../../../src/services/connection-shares.ts";
 import type { ConnectionCaller } from "../../../src/services/connection-reach.ts";
+
+import { createSpace } from "../../../src/services/spaces.ts";
+import { getTestApp } from "../../helpers/app.ts";
+import { removeMember, updateMemberRole } from "../../../src/services/organizations.ts";
 
 const INTEGRATION = "@official/gmail";
 
@@ -113,6 +123,149 @@ describe("connection shares", () => {
       { kind: "person", actor: person(ctx.user.id) },
       { spaceId: here, governs: true, permissionsIn: async () => GOVERN },
     );
+
+  const orgOwner = () =>
+    testCaller(
+      { kind: "person", actor: person(ctx.user.id) },
+      {
+        canShareAll: true,
+        permissionsIn: async () => GOVERN,
+      },
+    );
+
+  it("shares current and future team spaces, with durable exceptions and an off switch", async () => {
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
+    const input = { connectionId: id, integrationId: INTEGRATION, caller: orgOwner() };
+    const app = await getTestApp();
+    const response = await app.request("/api/me/connections/" + id + "/shares", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ include_future_spaces: true }),
+    });
+    expect(response.status).toBe(204);
+    expect((await sharesOf(id)).map((s) => s.spaceId).sort()).toEqual([here, other].sort());
+    const future = await createSpace(ctx.orgId, { name: "Future team" }, ctx.user.id);
+    expect((await sharesOf(id)).some((s) => s.spaceId === future.id)).toBe(true);
+    // Existing unshare/pin/schedule behavior stays the authority, also with future sharing on.
+    await unshareConnection({ ...input, spaceId: other });
+    await createSpace(ctx.orgId, { name: "Another team" });
+    expect((await sharesOf(id)).some((s) => s.spaceId === other)).toBe(false);
+    const before = await sharesOf(id);
+    await setConnectionFutureSharing({ ...input, enabled: false });
+    const excludedFuture = await createSpace(ctx.orgId, { name: "Not auto-shared" });
+    expect(await sharesOf(id)).toEqual(before);
+    expect((await sharesOf(id)).some((s) => s.spaceId === excludedFuture.id)).toBe(false);
+  });
+
+  it("refuses a member, another owner, a space-scoped row and a delegated credential", async () => {
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
+    for (const caller of [
+      owner(GOVERN),
+      orgOwner(),
+      testCaller(
+        {
+          kind: "delegated",
+          actor: person(memberId),
+          orgId: ctx.orgId,
+          spaceId: null,
+        },
+        { canShareAll: true },
+      ),
+    ]) {
+      await expect(
+        setConnectionFutureSharing({
+          connectionId: id,
+          integrationId: INTEGRATION,
+          caller,
+          enabled: true,
+        }),
+      ).rejects.toMatchObject({ status: expect.any(Number) });
+    }
+    const scoped = await seedConnection({ spaceId: here, userId: ctx.user.id });
+    await expect(
+      setConnectionFutureSharing({
+        connectionId: scoped,
+        integrationId: INTEGRATION,
+        caller: orgOwner(),
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(await sharesOf(id)).toEqual([]);
+  });
+
+  it("never shares another organization's new spaces or personal spaces", async () => {
+    const personal = await seedSpace({
+      orgId: ctx.orgId,
+      name: "Private",
+      ownerUserId: memberId,
+      visibility: "private",
+    });
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
+    await setConnectionFutureSharing({
+      connectionId: id,
+      integrationId: INTEGRATION,
+      caller: orgOwner(),
+      enabled: true,
+    });
+    const elsewhere = await createTestContext({ orgSlug: "elsewhere" });
+    const foreign = await createSpace(elsewhere.orgId, { name: "Foreign" });
+    expect((await sharesOf(id)).map((s) => s.spaceId).sort()).toEqual([here, other].sort());
+    expect(
+      (await sharesOf(id)).some((s) => s.spaceId === personal.id || s.spaceId === foreign.id),
+    ).toBe(false);
+  });
+
+  it("revokes future sharing when the owner loses org administration", async () => {
+    await db
+      .update(organizationMembers)
+      .set({ role: "admin" })
+      .where(
+        and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, memberId)),
+      );
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
+    await setConnectionFutureSharing({
+      connectionId: id,
+      integrationId: INTEGRATION,
+      caller: { ...owner(GOVERN), canShareAll: true },
+      enabled: true,
+    });
+    await updateMemberRole(ctx.orgId, memberId, "member", {
+      userId: ctx.user.id,
+      firstPartySession: true,
+    });
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, id));
+    expect(row!.shareNewSpaces).toBe(false);
+    const future = await createSpace(ctx.orgId, { name: "After demotion" });
+    expect((await sharesOf(id)).some((s) => s.spaceId === future.id)).toBe(false);
+  });
+
+  it("clears future consent on departure so reinviting an admin cannot silently restore it", async () => {
+    await db
+      .update(organizationMembers)
+      .set({ role: "admin" })
+      .where(
+        and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, memberId)),
+      );
+    const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
+    await setConnectionFutureSharing({
+      connectionId: id,
+      integrationId: INTEGRATION,
+      caller: { ...owner(GOVERN), canShareAll: true },
+      enabled: true,
+    });
+    await removeMember(ctx.orgId, memberId, { userId: ctx.user.id, firstPartySession: true });
+    await addOrgMember(ctx.orgId, memberId, "admin");
+    await createSpace(ctx.orgId, { name: "After re-invite" });
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, id));
+    expect(row!.shareNewSpaces).toBe(false);
+    expect(await sharesOf(id)).toEqual([]);
+  });
 
   it("the owner shares once: added, then idempotent, one row", async () => {
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
