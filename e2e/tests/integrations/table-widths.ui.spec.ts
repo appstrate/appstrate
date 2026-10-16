@@ -10,6 +10,7 @@ test("a resized column survives a language change and resets on double-click", a
 }) => {
   await createIntegration(apiClient, `@${browserCtx.org.orgSlug}`, `widths-${Date.now()}`);
   await page.goto("/integrations?execution=local");
+  await page.getByRole("tab", { name: "Vue tableau", exact: true }).click();
   const table = page.getByRole("table", { name: "Intégrations de l'organisation", exact: true });
   const head = table.locator('th[data-column="name"]');
   await expect(head).toBeVisible();

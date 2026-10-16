@@ -14,8 +14,8 @@
  */
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { LayoutGrid, Rows3, type LucideIcon } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import type { LucideIcon } from "lucide-react";
+import { ListViewTabs } from "./list-view-tabs";
 import type { PackageType } from "@appstrate/core/validation";
 import type { DataColumn } from "./data-table";
 import { CardGrid } from "./card-grid";
@@ -203,18 +203,7 @@ export function PackageCollection({
         columns={view === "table" ? columnMenu : undefined}
         actions={
           <>
-            {onViewChange && (
-              <Tabs value={view} onValueChange={(next) => onViewChange(next as ListView)}>
-                <TabsList className="h-9">
-                  <TabsTrigger value="table" aria-label={t("toolbar.viewTable", { ns: "common" })}>
-                    <Rows3 className="size-4" />
-                  </TabsTrigger>
-                  <TabsTrigger value="cards" aria-label={t("toolbar.viewCards", { ns: "common" })}>
-                    <LayoutGrid className="size-4" />
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-            )}
+            {onViewChange && <ListViewTabs view={view} onChange={onViewChange} />}
             {actions}
           </>
         }

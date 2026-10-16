@@ -11,6 +11,11 @@ import { useTranslation } from "react-i18next";
 import { Boxes, LibraryBig, Plus } from "lucide-react";
 import { PageHeader } from "../components/page-header";
 import { CollectionTabs } from "../components/detail-tabs";
+import { CardGrid } from "../components/card-grid";
+import { PackageCard } from "../components/package-card";
+import { ListViewTabs } from "../components/list-view-tabs";
+import { packageCardItem } from "../lib/package-card-item";
+import { useListView } from "../stores/list-view-store";
 import { DataTable } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
@@ -44,6 +49,7 @@ export function IntegrationsPage() {
   // type page asks, not the management listing.
   const { data: active = [], isLoading, error } = usePackageList("integration");
   const connectionCounts = useConnectionCounts();
+  const [view, setView] = useListView("integrations");
   const list = useListParams(["origin", "protocol"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
   const canCreate = can("integrations:write");
@@ -175,21 +181,43 @@ export function IntegrationsPage() {
             : []),
         ]}
         onReset={list.reset}
-        columns={menu}
+        columns={view === "table" ? menu : undefined}
+        actions={<ListViewTabs view={view} onChange={setView} />}
       />
 
-      <DataTable
-        tableId="integrations"
-        label={t("integrations.tableLabel")}
-        columns={columns}
-        rows={shown}
-        rowKey={(integration) => integration.id}
-        rowHref={(integration) => `/integrations/${integration.id}`}
-        rowLabel={(integration) => integration.name}
-        isLoading={isLoading}
-        failure={error}
-        empty={empty}
-      />
+      {view === "table" ? (
+        <DataTable
+          tableId="integrations"
+          label={t("integrations.tableLabel")}
+          columns={columns}
+          rows={shown}
+          rowKey={(integration) => integration.id}
+          rowHref={(integration) => `/integrations/${integration.id}`}
+          rowLabel={(integration) => integration.name}
+          isLoading={isLoading}
+          failure={error}
+          empty={empty}
+        />
+      ) : (
+        <CardGrid
+          items={shown}
+          itemKey={(integration) => integration.id}
+          renderCard={(integration) => (
+            <PackageCard
+              {...packageCardItem(integration, "integration")}
+              meta={
+                connectionCounts &&
+                t("connections.connectionCount", {
+                  count: connectionCounts.get(integration.id) ?? 0,
+                })
+              }
+            />
+          )}
+          isLoading={isLoading}
+          failure={error}
+          empty={empty}
+        />
+      )}
       <ListFooter
         count={isLoading || error ? undefined : t("integrations.count", { count: shown.length })}
       />
