@@ -49,7 +49,6 @@ import {
 import { PackageDetailBar } from "../components/package-detail/package-detail-bar";
 import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
-import { CatalogueLink } from "../components/package-detail/catalogue-link";
 import { HeaderActionButton } from "../components/header-action-button";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { PackageCommonSection } from "../components/package-detail/package-common-section";
@@ -422,8 +421,6 @@ export function IntegrationDetailPage() {
         }
         actions={
           <>
-            {/* No version route here: the sheet opens on the integration as read. */}
-            <CatalogueLink type="integration" packageId={packageId} />
             {!active && activation.mayActivate && (
               <HeaderActionButton
                 primary

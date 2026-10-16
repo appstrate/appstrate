@@ -216,79 +216,76 @@ export function ShellHeader() {
   const collapsed = !isMobile && state === "collapsed";
 
   return (
-    // One band, up to three rows. A grid so the title block, which the phone
-    // draws under the navigation row and the desktop beside it, is ONE element:
-    // the left cell is `display: contents` on a phone, and its children
-    // place themselves. `group/header` lets the cells below ask whether a page has
-    // filled the lead slot (`has-[[data-header-lead]:not(:empty)]`). Its rule is
-    // an inset shadow, not a border: a border would add a pixel to rows that
-    // are exactly `--spacing-header`, the height the sidebar's brand cell shares.
-    // A phone draws one row (burger, trail, controls, bell); a page with a title
-    // block adds that block and its tabs under it, in the same band.
+    // One band, up to three rows, on a three-column grid. Row one is the same on
+    // every page: the burger, the trail, the page's controls and the bell. A page
+    // with a title block (a detail page) adds its identity in row two, takes its
+    // controls down there (right end), and adds its tabs in row three.
+    // `group/header` lets the cells ask whether a page has filled the lead slot
+    // (`has-[[data-header-lead]:not(:empty)]`). The band's rule is an inset
+    // shadow, not a border: a border would add a pixel to rows that are exactly
+    // `--spacing-header`, the height the sidebar's brand cell shares.
     <header
       className={cn(
-        "bg-canvas group/header sticky top-0 z-20 grid shrink-0 grid-cols-[minmax(0,1fr)_auto] shadow-[inset_0_-1px_0_0_var(--color-border)]",
+        "bg-canvas group/header sticky top-0 z-20 grid shrink-0 grid-cols-[minmax(0,1fr)_auto_auto] shadow-[inset_0_-1px_0_0_var(--color-border)]",
         isMobile && openMobile && "invisible",
       )}
     >
       {/* Edge to edge, never centred on the page width: the header belongs to
-          the shell, not to the page column, so its two ends sit at the shell's
-          two edges whatever the screen's width. Collapsed, the left inset is
-          the sidebar's own (`px-2`), so the burger stands where the brand cell
+          the shell, not to the page column. With a title block, the trail runs
+          over the controls' column too: they are in row two, and must not
+          squeeze it. Collapsed, the left inset is the
+          sidebar's own (`px-2`), so the burger stands where the brand cell
           stood and its icon over the navigation's icons. */}
       <div
         className={cn(
-          "pl-gutter md:min-h-header col-start-1 row-start-1 max-md:contents md:flex md:min-w-0 md:items-center md:gap-2 md:group-has-[[data-header-lead]:not(:empty)]/header:min-h-16.5 md:group-has-[[data-header-lead]:not(:empty)]/header:pt-5",
+          "h-header pl-gutter col-start-1 row-start-1 flex min-w-0 items-center gap-2 group-has-[[data-header-lead]:not(:empty)]/header:col-span-2",
           collapsed && "md:pl-2",
         )}
       >
-        <div className="h-header pl-gutter col-start-1 row-start-1 flex min-w-0 items-center gap-2 max-md:group-has-[[data-header-lead]:not(:empty)]/header:h-12 md:contents">
-          {/* Mobile-only trigger: on desktop the collapse lives in the sidebar */}
-          <SidebarTrigger className="-ml-5 size-11 shrink-0 rounded-l-none md:hidden">
+        {/* Mobile-only trigger: on desktop the collapse lives in the sidebar */}
+        <SidebarTrigger className="-ml-5 size-11 shrink-0 rounded-l-none md:hidden">
+          <Menu className="size-4" />
+        </SidebarTrigger>
+        {/* Desktop, collapsed: nothing of the sidebar is left on screen, so its
+            way back is here. A click pins it open again. It carries the unread
+            dot the hidden Runs entry cannot show. */}
+        {collapsed && (
+          <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
             <Menu className="size-4" />
+            {(unreadCount ?? 0) > 0 && (
+              <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />
+            )}
           </SidebarTrigger>
-          {/* Desktop, collapsed: nothing of the sidebar is left on screen, so its
-              way back is here. A click pins it open again. It carries the unread
-              dot the hidden Runs entry cannot show. */}
-          {collapsed && (
-            <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
-              <Menu className="size-4" />
-              {(unreadCount ?? 0) > 0 && (
-                <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />
-              )}
-            </SidebarTrigger>
-          )}
-          {/* The phone's one row holds the burger, then EITHER the page's trail
-              OR (where there is none) the organization, then the controls and
-              the bell. A detail page's title block is drawn under it
-              instead, so both yield: the sidebar still holds the organization. */}
-          <div className="flex min-w-0 flex-1 group-has-[[data-header-lead]:not(:empty)]/header:hidden group-has-[[data-trail]:not(:empty)]/header:hidden md:hidden">
-            <OrgSwitcher variant="mobile" />
-          </div>
-          <div className="flex min-w-0 flex-1 items-center group-has-[[data-header-lead]:not(:empty)]/header:hidden">
-            <ShellBreadcrumb />
-          </div>
+        )}
+        {/* On a phone, the page's trail, or (where there is none) the
+            organization: the sidebar is closed, so the header names it. */}
+        <div className="flex min-w-0 flex-1 group-has-[[data-trail]:not(:empty)]/header:hidden md:hidden">
+          <OrgSwitcher variant="mobile" />
         </div>
-        {/* The title block of a page that draws one (a detail page), else the
-            trail. Both sit in the same cell and only one is ever shown: the
-            trail yields as soon as the slot holds something. */}
-        <HeaderSlotOutlet
-          slot="lead"
-          data-header-lead
-          className="px-gutter flex min-w-0 items-center py-1.5 empty:hidden max-md:col-span-2 max-md:row-start-2 max-md:py-1 md:flex-1 md:px-0 md:py-0"
-        />
+        <div className="flex min-w-0 flex-1 items-center">
+          <ShellBreadcrumb />
+        </div>
       </div>
-      {/* The page's own actions, then the one utility that is global but not
-          personal: notifications. It sits here rather than in the sidebar
-          because the sidebar answers "where am I" and this answers "what is
-          new" — and because a header holding only a trail is a header holding
-          nothing. */}
-      <div className="px-gutter h-header md:min-h-header col-start-2 row-start-1 flex shrink-0 items-center gap-1 max-md:group-has-[[data-header-lead]:not(:empty)]/header:h-12 md:h-auto md:pl-2 md:group-has-[[data-header-lead]:not(:empty)]/header:pt-5">
-        <HeaderSlotOutlet slot="actions" className="flex items-center gap-1 empty:hidden" />
+      {/* The page's title block, under the trail. */}
+      <HeaderSlotOutlet
+        slot="lead"
+        data-header-lead
+        className="px-gutter col-start-1 row-start-2 flex min-w-0 items-center py-2 empty:hidden"
+      />
+      {/* The page's own actions: in row one, left of the bell, and for a page
+          with a title block in row two, at its right end, level with the title. */}
+      <HeaderSlotOutlet
+        slot="actions"
+        className="group-has-[[data-header-lead]:not(:empty)]/header:pr-gutter col-start-2 row-start-1 flex items-center gap-1 pl-2 group-has-[[data-header-lead]:not(:empty)]/header:col-span-2 group-has-[[data-header-lead]:not(:empty)]/header:row-start-2 group-has-[[data-header-lead]:not(:empty)]/header:justify-self-end empty:hidden"
+      />
+      {/* The one utility that is global but not personal: notifications. It
+          sits here rather than in the sidebar because the sidebar answers
+          "where am I" and this answers "what is new". Same place on every page. */}
+      <div className="px-gutter h-header col-start-3 row-start-1 flex shrink-0 items-center md:pl-2">
         <NotificationBell />
       </div>
       {/* The page's tabs: the same band, closed by the header's own rule. */}
-      <HeaderSlotOutlet slot="tabs" className="px-gutter col-span-2 empty:hidden" />
+      <HeaderSlotOutlet slot="tabs" className="px-gutter col-span-3 empty:hidden" />
     </header>
   );
 }

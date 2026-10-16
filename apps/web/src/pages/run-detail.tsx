@@ -5,6 +5,7 @@ import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePackageDetail } from "../hooks/use-packages";
+import { usePackageListCrumb } from "../hooks/use-package-list-crumb";
 import { agentLaunchRefusal } from "../hooks/use-agent-readiness";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunLauncher, useCancelRun } from "../hooks/use-mutations";
@@ -63,6 +64,7 @@ export function RunDetailPage() {
 
 function RunDetailBody() {
   const { t } = useTranslation(["agents", "common"]);
+  const listCrumb = usePackageListCrumb("agent");
   const { scope, name, runId } = useParams<{ scope: string; name: string; runId: string }>();
   const packageId = `${scope}/${name}`;
   // Skip the agent detail fetch for inline shadow packages — the shadow is
@@ -255,17 +257,20 @@ function RunDetailBody() {
   const rerunOpen = rerunRequested && canRerun && !rerunRefusal;
   const inlineName = inlineRunDisplayName(enrichedRun.agent_name, t("runs.inlineBadge"));
 
-  // The list this run belongs to, in the header's small line: its agent's runs,
-  // or the runs list for an inline run, which has no agent page.
-  const parent = isInline
-    ? { label: t("runs.title"), href: "/runs" }
-    : {
-        // The name the agents list already holds stands in while the detail
-        // loads; the id is the fallback for an agent with no name, never a
-        // placeholder for one whose name is still on its way.
-        label: agent?.display_name || knownAgentName || packageId,
-        href: `/agents/${packageId}#runs`,
-      };
+  // Where this run sits in the header trail: under its agent's runs, or under
+  // the runs list for an inline run, which has no agent page.
+  const trail = isInline
+    ? [{ label: t("runs.title"), href: "/runs" }]
+    : [
+        listCrumb,
+        {
+          // The name the agents list already holds stands in while the detail
+          // loads; the id is the fallback for an agent with no name, never a
+          // placeholder for one whose name is still on its way.
+          label: agent?.display_name || knownAgentName || packageId,
+          href: `/agents/${packageId}#runs`,
+        },
+      ];
 
   const runCrumbLabel = runNumber
     ? t("run.breadcrumb", { number: runNumber })
@@ -286,7 +291,7 @@ function RunDetailBody() {
       <DetailBar
         icon={<PackageIcon type="agent" icon={identity?.icon} color={identity?.color} />}
         title={title}
-        parent={parent}
+        trail={trail}
         tabs={tabs}
         badge={
           <>

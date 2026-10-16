@@ -93,14 +93,14 @@ they start with `packages/` or `e2e/`.
   integration pages, and the skill and tool pages, through `DetailBar`,
   `components/detail-bar.tsx`) fills three slots the header
   exposes (`components/shell-header-slots.tsx`): the **lead** (identity tile,
-  title, version pill, then the parent list and the id), the **actions** (left of
-  the bell) and the **tabs** (`HeaderTabBar`, underlined, on the band's rule).
+  title, version pill, then the id), the **actions** (the right end of the lead's
+  row) and the **tabs** (`HeaderTabBar`, underlined, on the band's rule).
   The slots are portals: the page keeps its context, so the tab bar still answers
   the page's own `<DetailTabs>`, which therefore wraps the whole page, header
-  included. The lead takes the breadcrumb's place; a detail page needs only its
-  parent, the tab being already underlined. On a phone the lead is a row under
-  the navigation row, and the organisation switcher yields (the sidebar still
-  holds it).
+  included. The header's first row is the same on every page, a detail page
+  included: burger, trail, bell. `DetailBar` publishes the trail (its `trail`
+  ancestors, then its title) like any page, and the lead, its actions and the
+  tabs are rows under it.
 - Outside that, the header's right end stays personal (notification bell, profile).
   A page's controls reach it only through a slot, never by drawing in it.
 
@@ -115,13 +115,14 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    duration (`RunHeaderSummary`). A settings overlay's sub-page (a webhook) has no shell header behind its panel: it keeps the section heading and draws its tabs with `UnderlineTabList`.
 1. **`DetailBar`** (`components/detail-bar.tsx`): the identity tile in `icon`
    (`PackageIcon`), the `title`, the status and version pills in `badge`, the
-   parent list and the object's id in `parent` / `meta`, the `tabs`, and in
+   object's id in `meta`, the page's ancestors in `trail`, the `tabs`, and in
    `actions` the page's controls. `DetailBar` lays `actions` out (one row, `gap-2`),
-   so a caller passes siblings and never wraps them. They come in one order: links
-   (`CatalogueLink`), the page's deed (Lancer, Relancer, Annuler, Activer), then the
-   Actions menu. Every one is `TOOLBAR_ACTION` (`lib/toolbar-button.ts`: outline,
-   32 px, `bg-card`) — a `HeaderActionButton` (`components/header-action-button.tsx`),
-   `CatalogueLink`, `RunAgentButton` given that class, or the menu's own trigger.
+   so a caller passes siblings and never wraps them. They come in one order: the
+   page's deed (Lancer, Relancer, Annuler, Activer), then the Actions menu (which
+   holds « Voir dans le catalogue », `useCatalogueEntry`). Every one is
+   `TOOLBAR_ACTION` (`lib/toolbar-button.ts`: outline, 32 px, `bg-card`) — a
+   `HeaderActionButton` (`components/header-action-button.tsx`), `RunAgentButton`
+   given that class, or the menu's own trigger.
    Never a bare `<Button size="sm">`, which is 36 px. The bar's one filled button
    (Activer) is `<HeaderActionButton primary>`; a deed's icon takes its colour from its own
    `className` (`text-primary`, `text-destructive`). A link that loses its label

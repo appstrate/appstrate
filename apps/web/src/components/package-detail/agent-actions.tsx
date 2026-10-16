@@ -38,6 +38,7 @@ export function AgentActions({
   downloadBundle,
   onCreateVersion,
   unsavedReason,
+  catalogueVersion,
 }: {
   packageId: string;
   isHistoricalVersion: boolean;
@@ -48,6 +49,8 @@ export function AgentActions({
   onCreateVersion: () => void;
   /** Set while the page holds unsaved definition edits a version or run would not carry. */
   unsavedReason?: string;
+  /** The published version the catalogue sheet opens on (`catalogueVersionFor`). */
+  catalogueVersion?: string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const { can } = usePermissions();
@@ -92,6 +95,7 @@ export function AgentActions({
         isActiveHere={detail.active}
         onCreateVersion={onCreateVersion}
         createVersionBlockedReason={unsavedReason}
+        catalogueVersion={catalogueVersion}
         agent={{
           hasMemories: !!memories && memories.length > 0,
           onDownloadBundle: downloadBundle,

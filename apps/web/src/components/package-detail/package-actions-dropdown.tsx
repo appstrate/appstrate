@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import {
   Download,
   Package,
@@ -14,6 +15,7 @@ import {
   SlidersHorizontal,
   FolderInput,
   Share2,
+  Library,
 } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -36,6 +38,7 @@ import { isOwnedSource } from "./owned-source";
 import { MoveHomeSpaceDialog } from "./move-home-space-dialog";
 import { SharePackageDialog, SHARE_PARAM } from "./share-package-dialog";
 import { useUrlModal } from "../../hooks/use-url-modal";
+import { useCatalogueEntry } from "./catalogue-link";
 import { menuSections, type PackageMenuEntry, type PackageMenuGroup } from "./package-menu";
 
 const GROUP_LABELS: Record<PackageMenuGroup, string> = {
@@ -89,6 +92,8 @@ interface PackageActionsDropdownProps {
   onCreateVersion?: () => void;
   /** Why « Créer une version » is held back, already translated; `undefined` when it is not. */
   createVersionBlockedReason?: string;
+  /** The published version the catalogue sheet opens on; absent, the package as the reader sees it. */
+  catalogueVersion?: string;
   agent?: AgentMenu;
 }
 
@@ -113,6 +118,7 @@ export function PackageActionsDropdown({
   isActiveHere,
   onCreateVersion,
   createVersionBlockedReason,
+  catalogueVersion,
   agent,
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
@@ -122,6 +128,8 @@ export function PackageActionsDropdown({
   const [movingHome, setMovingHome] = useState(false);
   const [forking, setForking] = useState(false);
   const share = useUrlModal(SHARE_PARAM);
+  const navigate = useNavigate();
+  const catalogue = useCatalogueEntry(type, packageId, catalogueVersion);
   // `confirm` keeps its value while the dialog fades out, so the wording does not change under it.
   const [confirm, setConfirm] = useState<"delete" | "deactivate">("delete");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -154,6 +162,14 @@ export function PackageActionsDropdown({
   const published = (detail?.version_count ?? 0) > 0;
 
   const entries: PackageMenuEntry[] = [
+    {
+      id: "catalogue",
+      group: "build",
+      icon: Library,
+      label: catalogue?.label ?? "",
+      hidden: !catalogue,
+      onSelect: () => catalogue && navigate(catalogue.to, { state: catalogue.state }),
+    },
     {
       id: "download",
       group: agent ? "export" : "build",

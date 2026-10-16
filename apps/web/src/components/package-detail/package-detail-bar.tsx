@@ -28,7 +28,7 @@ interface PackageDetailBarDetail {
 
 /**
  * The page header of every package type but the agent, whose is `AgentDetailBar`:
- * title, version and state pills, parent list and id, actions and tabs, in the
+ * title, version and state pills, trail and id, actions and tabs, in the
  * shell header. The package's description is in its overview tab.
  */
 export function PackageDetailBar<T extends string>({
@@ -74,7 +74,7 @@ export function PackageDetailBar<T extends string>({
           {status}
         </>
       }
-      parent={listCrumb}
+      trail={[listCrumb]}
       meta={
         <>
           <DetailBarId id={detail.id} />
