@@ -18,6 +18,7 @@ import { Modal } from "../components/modal";
 import { PageHeader } from "../components/page-header";
 import { ScheduleStateBadges } from "../components/schedule-status-badge";
 import { PackageCard } from "../components/package-card";
+import { CardList } from "../components/card-list";
 import { RunRow } from "../components/run-row";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem } from "../lib/package-card-item";
@@ -198,17 +199,16 @@ function RecentRuns({
   limit?: number;
 }) {
   return (
-    <Card className="divide-border divide-y rounded-xl shadow-sm">
+    <CardList>
       {runs.slice(0, limit).map((run) => (
         <RunRow
           key={run.id}
           run={run}
           agentName={agentName(run)}
           agent={run.packageId ? agentById.get(run.packageId) : undefined}
-          className="first:rounded-t-xl last:rounded-b-xl"
         />
       ))}
-    </Card>
+    </CardList>
   );
 }
 
@@ -224,7 +224,7 @@ function DashboardScheduleRow({
   return (
     <Link
       to={scheduleDetailPath(schedule.id)}
-      className="hover:bg-muted/40 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors first:rounded-t-xl last:rounded-b-xl"
+      className="hover:bg-muted/40 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors"
     >
       <PackageIcon
         type="agent"
@@ -256,7 +256,7 @@ function UpcomingSchedules({
   agentById: Map<string, AgentListItem>;
 }) {
   return (
-    <Card className="divide-border divide-y rounded-xl shadow-sm">
+    <CardList>
       {schedules.map((schedule) => (
         <DashboardScheduleRow
           key={schedule.id}
@@ -264,7 +264,7 @@ function UpcomingSchedules({
           agent={agentById.get(schedule.packageId)}
         />
       ))}
-    </Card>
+    </CardList>
   );
 }
 
