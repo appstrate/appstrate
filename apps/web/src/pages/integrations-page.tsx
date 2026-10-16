@@ -133,9 +133,7 @@ export function IntegrationsPage() {
             />
           )
         }
-      >
-        <p className="text-muted-foreground mt-1 text-sm">{t("integrations.subtitle")}</p>
-      </PageHeader>
+      />
 
       <ListToolbar
         tabs={

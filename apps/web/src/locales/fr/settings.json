@@ -782,7 +782,6 @@
   "webhooks.yearsAgo_other": "Il y a {{count}} ans",
   "webhooks.eventsRequired": "Veuillez sélectionner au moins un événement.",
   "integrations.title": "Intégrations",
-  "integrations.subtitle": "Les intégrations actives dans cet espace : connectez des services tiers à vos agents.",
   "integrations.create": "Nouvelle intégration",
   "creation.title.agent": "Créer un nouvel agent",
   "creation.title.skill": "Créer un nouveau skill",

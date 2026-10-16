@@ -127,7 +127,9 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    (Activer) is `<HeaderActionButton primary>`; a deed's icon takes its colour from its own
    `className` (`text-primary`, `text-destructive`). A link that loses its label
    under `lg` becomes a square icon (`max-lg:w-8 max-lg:px-0`).
-   `PageHeader` with `variant="collection"` is for level-one list pages only.
+   `PageHeader` with `variant="collection"` is for level-one list pages only:
+   title and actions, no descriptive subtitle, followed by the toolbar at the
+   same spacing on every list. Explanations belong in the content or empty state.
 2. **The Actions menu** is one trigger at every width, labelled « Actions »,
    outline `sm` with a chevron (`TOOLBAR_ACTION` from `lib/toolbar-button.ts`).
    List, settings and detail pages use `PageActionsMenu`
