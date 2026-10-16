@@ -475,7 +475,7 @@ function schemaToFields(
   const requiredSet = new Set(schema.required || []);
   return getOrderedKeys(schema, wrapper?.property_order).map((key) => {
     const prop = schema.properties[key]!;
-    const base = { _id: crypto.randomUUID(), key, required: requiredSet.has(key), prop };
+    const base = { key, required: requiredSet.has(key), prop };
     if (mode !== "input") return base;
     if (isFileField(prop)) {
       const constraint = wrapper?.file_constraints?.[key];

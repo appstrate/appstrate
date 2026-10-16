@@ -9,13 +9,8 @@ import { splitPackageRef } from "../../lib/package-paths";
  *
  * Every reader of the index goes through here so they all sit on the
  * generated `[method, path, init]` key that `invalidatePackageFiles` reaches.
- * `fresh` is for an authoring surface: it must not seed from a cached index.
  */
-export function usePackageFileIndex(
-  packageId: string | undefined,
-  version?: string,
-  fresh = false,
-) {
+export function usePackageFileIndex(packageId: string | undefined, version?: string) {
   const scope = useOrgScope();
   return $api.useQuery(
     "get",
@@ -29,7 +24,6 @@ export function usePackageFileIndex(
     },
     {
       enabled: scope.enabled && !!packageId,
-      ...(fresh ? { staleTime: 0, gcTime: 0, refetchOnMount: "always" as const } : {}),
     },
   );
 }

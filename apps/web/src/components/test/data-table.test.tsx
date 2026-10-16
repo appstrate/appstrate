@@ -159,12 +159,14 @@ describe("controls and the row's end", () => {
       control: true,
       cell: () => <button type="button">Choisir</button>,
     },
-    { id: "actions", header: "", width: 80, align: "end", cell: () => <span>…</span> },
+    { id: "actions", header: "", width: 80, align: "end", tier: 3, cell: () => <span>…</span> },
   ];
   const html = table({ columns, tiered: true });
 
   it("never hides a control: it has no tier class and counts in the narrowest floor", () => {
     expect(html).toContain("--dt-floor:340px");
+    expect(html).toContain("--dt-floor-2:436px");
+    expect(html).toContain("--dt-floor-3:436px");
     expect(html).not.toMatch(/<t[hd][^>]*data-column="role"[^>]*class="[^"]*hidden/);
     expect(html).not.toMatch(/<t[hd][^>]*data-column="actions"[^>]*class="[^"]*hidden/);
   });

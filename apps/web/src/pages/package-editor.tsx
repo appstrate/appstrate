@@ -74,19 +74,12 @@ function AgentEditorInner({
 }) {
   const { t } = useTranslation(["agents", "common"]);
 
-  // Schema fields are stored in local state to preserve fields being edited (empty key).
-  // Only complete fields are persisted to the manifest via fieldsToSchema.
-  const [schemaFields, setSchemaFields] = useState<Record<string, SchemaField[]>>(() =>
-    manifestToSchemaFields(initialState.manifest),
-  );
-
   const editor = usePackageEditor({
     type: "agent",
     initialState,
     packageId,
     tab,
     onTabRequest,
-    onManifestReplace: (manifest) => setSchemaFields(manifestToSchemaFields(manifest)),
   });
   const { state, setState, updateManifest, activeTab } = editor;
 
@@ -109,10 +102,10 @@ function AgentEditorInner({
       ? knownCeiling
       : undefined;
 
+  const schemaFields = manifestToSchemaFields(state.manifest);
   const getSchemaFields = (key: "input" | "output") => schemaFields[key] ?? [];
 
   const onSchemaChange = (key: "input" | "output") => (fields: SchemaField[]) => {
-    setSchemaFields((prev) => ({ ...prev, [key]: fields }));
     const wrapper = fieldsToSchema(fields, key, manifestSchemaWrapper(state.manifest, key)?.schema);
     if (wrapper) {
       setState((s) => {

@@ -61,8 +61,7 @@ interface DataColumnBase<T> {
 
 /**
  * What a column IS decides whether it may leave: a READ column (text, a badge,
- * a date) may wait for room, a CONTROL column may not. `column-tiers.test.tsx`
- * checks every real column set.
+ * a date) may wait for room, a CONTROL column may not.
  */
 type DataColumnNature =
   | {
@@ -140,7 +139,7 @@ function heldColumns<T>(columns: DataColumn<T>[]): Map<string, Hold> {
     }
   }
   const end = columns[columns.length - 1];
-  if (end && isRowEnd(end) && !end.tier) held.set(end.id, { side: "end" });
+  if (end && isRowEnd(end)) held.set(end.id, { side: "end" });
   return held;
 }
 
@@ -250,7 +249,11 @@ export function DataTable<T>({
   const [dragged, setDragged] = useState<{ id: string; width: number } | null>(null);
   const columns = declared.map((column) => {
     const width = dragged?.id === column.id ? dragged.width : stored.widths[column.id];
-    return width ? { ...column, width: Math.max(width, column.width), elastic: false } : column;
+    const sized = width
+      ? { ...column, width: Math.max(width, column.width), elastic: false }
+      : column;
+    // Actions remain reachable even if a caller assigns them a read-column tier.
+    return column.control || isRowEnd(column) ? { ...sized, tier: undefined } : sized;
   });
   const open = (row: T, href: string | undefined) => {
     if (href) navigate(href, { state: rowState?.(row) });

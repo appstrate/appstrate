@@ -3,7 +3,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { ORG_LOGO_MAX_BYTES } from "@appstrate/core/validation";
 import { downloadFile } from "@appstrate/db/storage";
-import { ORG_LOGO_BUCKET, orgLogoKey } from "../../../src/services/org-logo.ts";
+import { ORG_LOGO_BUCKET, orgLogoKey, logoImageVersion } from "../../../src/services/org-logo.ts";
+import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import { eq, and } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -521,8 +522,17 @@ describe("Organizations API", () => {
           headers: { ...headers, "Content-Type": type },
           body: image,
         });
-      const storedLogo = (orgId: string) =>
-        downloadFile(ORG_LOGO_BUCKET, orgLogoKey(orgId)).then((b) => (b ? [...b] : null));
+      const storedLogo = async (orgId: string) => {
+        const [org] = await db
+          .select({ logo: organizations.logo })
+          .from(organizations)
+          .where(eq(organizations.id, orgId));
+        const version = logoImageVersion(org?.logo ?? null);
+        const bytes = version
+          ? await downloadFile(ORG_LOGO_BUCKET, orgLogoKey(orgId, version))
+          : null;
+        return bytes ? [...bytes] : null;
+      };
 
       it("stores an uploaded image in object storage and only its version in the row", async () => {
         const ctx = await createTestContext({ orgSlug: "image-logo-org" });
@@ -532,7 +542,7 @@ describe("Organizations API", () => {
         const { logo } = (await res.json()) as { logo: { kind: string; url: string } };
         expect(logo).toEqual({
           kind: "image",
-          url: expect.stringMatching(new RegExp(`^/api/orgs/${ctx.orgId}/logo\\?v=[0-9a-f]{16}$`)),
+          url: expect.stringMatching(new RegExp(`^/api/orgs/${ctx.orgId}/logo\\?v=[0-9a-f-]{36}$`)),
         });
         expect(await storedLogo(ctx.orgId)).toEqual([...webp]);
       });
@@ -580,11 +590,16 @@ describe("Organizations API", () => {
         ).toBe(404);
       });
 
-      it("deletes the stored image when an emoji or null replaces it", async () => {
+      it("queues the stored image for deletion when an emoji or null replaces it", async () => {
         const ctx = await createTestContext({ orgSlug: "replace-logo-org" });
         const owner = authHeaders(ctx);
 
         expect((await putLogo(owner, ctx.orgId, webp)).status).toBe(200);
+        const [uploaded] = await db
+          .select({ logo: organizations.logo })
+          .from(organizations)
+          .where(eq(organizations.id, ctx.orgId));
+        const oldKey = orgLogoKey(ctx.orgId, logoImageVersion(uploaded!.logo)!);
         const emoji = await patchLogo(owner, ctx.orgId, { kind: "emoji", emoji: "🧠" });
         expect(emoji.status, await emoji.clone().text()).toBe(200);
         expect(((await emoji.json()) as { logo: unknown }).logo).toEqual({
@@ -592,6 +607,8 @@ describe("Organizations API", () => {
           emoji: "🧠",
         });
         expect(await storedLogo(ctx.orgId)).toBeNull();
+        await processStorageDeletionJobs();
+        expect(await downloadFile(ORG_LOGO_BUCKET, oldKey)).toBeNull();
 
         expect((await putLogo(owner, ctx.orgId, webp)).status).toBe(200);
         const cleared = await patchLogo(owner, ctx.orgId, null);
@@ -660,7 +677,7 @@ describe("Organizations API", () => {
           .where(and(eq(auditEvents.orgId, ctx.orgId), eq(auditEvents.action, "org.updated")));
         expect(rows).toHaveLength(1);
         expect(rows[0]!.after).toEqual({
-          logo: { kind: "image", version: expect.stringMatching(/^[0-9a-f]{16}$/) },
+          logo: { kind: "image", version: expect.stringMatching(/^[0-9a-f-]{36}$/) },
         });
       });
     });

@@ -65,7 +65,7 @@ export function PackageEditorFrame({
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const navigate = useNavigate();
-  const { type, packageId, isEdit, state, setState, activeTab, setActiveTab, isPending } = editor;
+  const { type, isEdit, state, setState, activeTab, setActiveTab, isPending } = editor;
   const visibleTabs = tabs.filter((tab) => !tab.createOnly || !isEdit);
   const schema = { uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type] };
 
@@ -96,7 +96,6 @@ export function PackageEditorFrame({
             />
           )}
           <PackageFilesEditor
-            packageId={packageId}
             type={type}
             active={activeTab === "files"}
             operations={state.operations ?? []}

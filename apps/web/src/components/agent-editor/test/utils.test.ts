@@ -313,7 +313,6 @@ const fieldOf = (
   prop: JSONSchema7,
   extra: Partial<SchemaField> = {},
 ): SchemaField => ({
-  _id: key,
   key,
   required: false,
   prop,

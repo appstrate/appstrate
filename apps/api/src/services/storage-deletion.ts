@@ -40,6 +40,7 @@ import {
   runWorkspaceFileKey,
 } from "./run-workspace-manifest.ts";
 import { deleteUnlessReclaimed } from "./package-storage-deletion.ts";
+import { ORG_LOGO_BUCKET, deleteOrgLogoUnlessReferenced } from "./org-logo.ts";
 
 /** One object to purge. `storageKey` is the IN-BUCKET path (no `bucket/` prefix). */
 export interface StorageDeletionJobInput {
@@ -284,9 +285,11 @@ export async function processStorageDeletionJobs(
     );
     try {
       // A package key a live row has taken back is closed without deleting.
-      const outcome = await deleteUnlessReclaimed(job.bucket, job.storageKey, () =>
-        deleteStorageTarget(job.bucket, job.storageKey, del, download),
-      );
+      const purge = () => deleteStorageTarget(job.bucket, job.storageKey, del, download);
+      const outcome =
+        job.bucket === ORG_LOGO_BUCKET
+          ? await deleteOrgLogoUnlessReferenced(job.storageKey, purge)
+          : await deleteUnlessReclaimed(job.bucket, job.storageKey, purge);
       if (outcome === "reclaimed") {
         reclaimed += 1;
         logger.info("storage deletion job skipped: key reclaimed by a live row", {

@@ -406,7 +406,7 @@ router.get("/:orgId/logo", async (c) => {
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
   const version = logoImageVersion((await getOrgById(orgId))?.logo ?? null);
-  const bytes = version ? await readOrgLogoImage(orgId) : null;
+  const bytes = version ? await readOrgLogoImage(orgId, version) : null;
   if (!version || !bytes) throw notFound("Organization has no logo image");
 
   const etag = `"${version}"`;

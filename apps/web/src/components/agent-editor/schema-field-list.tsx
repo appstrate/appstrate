@@ -32,6 +32,7 @@ import {
   useSortable,
   verticalListSortingStrategy,
   arrayMove,
+  sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -112,13 +113,13 @@ export function SchemaFieldList({
   const target = editing.target;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const from = fields.findIndex((f) => f._id === active.id);
-    const to = fields.findIndex((f) => f._id === over.id);
+    const from = fields.findIndex((f) => f.key === active.id);
+    const to = fields.findIndex((f) => f.key === over.id);
     onChange(arrayMove(fields, from, to));
   };
 
@@ -161,16 +162,16 @@ export function SchemaFieldList({
               </TableHeader>
               <TableBody>
                 <SortableContext
-                  items={fields.map((f) => f._id)}
+                  items={fields.map((f) => f.key)}
                   strategy={verticalListSortingStrategy}
                 >
                   {fields.map((field) => (
                     <FieldRow
-                      key={field._id}
+                      key={field.key}
                       field={field}
                       mode={mode}
                       onEdit={() => editing.open(field.key)}
-                      onRemove={() => onChange(fields.filter((f) => f._id !== field._id))}
+                      onRemove={() => onChange(fields.filter((f) => f.key !== field.key))}
                     />
                   ))}
                 </SortableContext>
@@ -193,13 +194,13 @@ export function SchemaFieldList({
       ) : (
         target && (
           <FieldModal
-            key={target._id}
+            key={target.key}
             mode={mode}
             field={target}
-            takenKeys={fields.filter((f) => f._id !== target._id).map((f) => f.key)}
+            takenKeys={fields.filter((f) => f.key !== target.key).map((f) => f.key)}
             onClose={editing.close}
             onSave={(next) => {
-              onChange(fields.map((f) => (f._id === next._id ? next : f)));
+              onChange(fields.map((f) => (f.key === target.key ? next : f)));
               editing.close();
             }}
           />
@@ -210,7 +211,7 @@ export function SchemaFieldList({
 }
 
 function blankField(): SchemaField {
-  return { _id: crypto.randomUUID(), key: "", required: false, prop: { type: "string" } };
+  return { key: "", required: false, prop: { type: "string" } };
 }
 
 function FieldRow({
@@ -226,7 +227,7 @@ function FieldRow({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
-    id: field._id,
+    id: field.key,
   });
   return (
     <TableRow ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}>

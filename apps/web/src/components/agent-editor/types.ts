@@ -5,7 +5,6 @@ import type { JSONSchema7 } from "@appstrate/core/form";
 export type { ResourceEntry } from "@appstrate/shared-types";
 
 export interface SchemaField {
-  _id: string;
   key: string;
   required: boolean;
   /** The JSON-Schema property itself: the single source of truth for every keyword. */
