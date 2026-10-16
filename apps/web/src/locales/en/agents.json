@@ -722,7 +722,6 @@
   "ownership.systemAgent": "System agent",
   "ownership.systemAgentTooltip": "Definition supplied and maintained by Appstrate. You can run this agent and configure its installation, but its bundle remains read-only.",
   "ownership.forkedFrom": "Forked from ",
-  "detail.inputSettings.hint": "Values used when the caller supplies none. A parameter left empty is asked at launch; a locked parameter is imposed and can no longer be supplied at launch.",
   "detail.inputSettings.lock": "Lock",
   "detail.inputSettings.lockHint": "The parameter is no longer asked at launch, and a call that sets it is refused.",
   "detail.inputSettings.authorDefault": "Author default: {{value}}",

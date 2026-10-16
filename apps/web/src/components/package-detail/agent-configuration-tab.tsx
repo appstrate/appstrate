@@ -65,16 +65,13 @@ function InputSettingsSection({
   initialValues,
   initialLocked,
   isHistorical,
-  showDescription = true,
 }: {
   packageId: string;
   wrapper: SchemaWrapper;
   initialValues: Record<string, unknown>;
   initialLocked: string[];
   isHistorical?: boolean;
-  showDescription?: boolean;
 }) {
-  const { t } = useTranslation(["agents", "common"]);
   const mutation = useSaveInputSettings(packageId);
   const labels = useSchemaFormLabels();
   const upload = useUploadClient();
@@ -104,9 +101,6 @@ function InputSettingsSection({
 
   return (
     <div className="flex flex-col gap-3 py-4">
-      {showDescription && (
-        <p className="text-muted-foreground text-sm">{t("detail.inputSettings.hint")}</p>
-      )}
       <div className="flex flex-col gap-4">
         {keys.map((key) => (
           <InputSettingRow
@@ -380,7 +374,6 @@ export function AgentConfigurationTab({
   inputWrapperOverride,
   isHistorical,
   section,
-  showSectionDescription = true,
 }: {
   packageId: string;
   /** The pinned version's input wrapper — the schema a historical view edits against. */
@@ -388,7 +381,6 @@ export function AgentConfigurationTab({
   isHistorical?: boolean;
   /** One section per settings entry: the rail decides which, this renders it. */
   section: "model" | "proxy" | "inputs";
-  showSectionDescription?: boolean;
 }) {
   const { t } = useTranslation(["agents"]);
   const { data: detail } = usePackageDetail("agent", packageId);
@@ -432,7 +424,6 @@ export function AgentConfigurationTab({
       initialValues={detail.input.values}
       initialLocked={detail.input.locked_fields}
       isHistorical={isHistorical}
-      showDescription={showSectionDescription}
     />
   );
 }
