@@ -110,4 +110,28 @@ describe("IntegrationToolPicker — inferred scopes", () => {
     }
     expect(renderOver({ tools: ["search"] })).not.toContain(WILDCARD_NOTICE);
   });
+
+  it("keeps the wildcard choice and its scope notice available without any catalog", () => {
+    for (const selected of [false, true]) {
+      const qc = new QueryClient();
+      qc.setQueryData(DETAIL_KEY, {
+        manifest: { auths: {} },
+        auths: [],
+        active: true,
+        allow_undeclared_tools: true,
+        tool_catalog: [],
+      });
+      const html = render(
+        <IntegrationToolPicker
+          packageId={ID}
+          entry={{ id: ID, version: "*", tools: selected ? "*" : [] }}
+          onChange={() => {}}
+        />,
+        { queryClient: qc },
+      );
+      expect(html).toContain(`integ-wildcard-${ID}`);
+      expect(html.includes(WILDCARD_NOTICE)).toBe(selected);
+      expect(html.includes('data-state="checked"')).toBe(selected);
+    }
+  });
 });

@@ -114,6 +114,13 @@ export function useEditorState({
   );
   const bumpJsonKey = useCallback(() => setJsonEditorKey((key) => key + 1), []);
 
+  const reportFailure = (failure: Error) => {
+    const key = packageFilesErrorKey(failure);
+    setError(
+      key ? t(key, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) }) : errorMessage(failure),
+    );
+  };
+
   const saveDraft = async () => {
     if (!isEdit || !packageId) return;
     if (saving.current || preparingFiles)
@@ -134,11 +141,7 @@ export function useEditorState({
       setState((current) => settleSavedState(current, sent, updated.etag));
       setInitialSnapshot(settleSavedState(sent, sent, updated.etag));
     } catch (cause) {
-      const failure = cause as Error;
-      const key = packageFilesErrorKey(failure);
-      setError(
-        key ? t(key, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) }) : errorMessage(failure),
-      );
+      reportFailure(cause as Error);
       throw cause;
     } finally {
       saving.current = false;
@@ -176,14 +179,7 @@ export function useEditorState({
           allowNavigation();
           navigate(packageDetailPath(packageType, data.id));
         },
-        onError: (failure) => {
-          const key = packageFilesErrorKey(failure);
-          setError(
-            key
-              ? t(key, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) })
-              : errorMessage(failure),
-          );
-        },
+        onError: reportFailure,
       });
     }
   };

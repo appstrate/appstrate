@@ -717,7 +717,6 @@
   "ownership.systemAgent": "Agent système",
   "ownership.systemAgentTooltip": "Définition fournie et maintenue par Appstrate. Vous pouvez exécuter cet agent et configurer son installation, mais son bundle reste en lecture seule.",
   "ownership.forkedFrom": "Dupliqué depuis ",
-  "detail.inputSettings.hint": "Valeurs utilisées quand l'appelant n'en fournit pas. Un paramètre laissé vide est demandé au lancement ; un paramètre verrouillé est imposé et ne peut plus être fourni au lancement.",
   "detail.inputSettings.lock": "Verrouiller",
   "detail.inputSettings.lockHint": "Le paramètre n'est plus demandé au lancement et un appel qui le fournit est refusé.",
   "detail.inputSettings.authorDefault": "Défaut de l'auteur : {{value}}",

@@ -247,37 +247,41 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
       ),
     });
 
+  const wildcardControl = wildcardEnabled && (
+    <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
+      <label
+        className="flex cursor-pointer items-start gap-2"
+        data-testid={`integ-wildcard-${packageId}`}
+      >
+        <Checkbox
+          checked={wildcardSelected}
+          onCheckedChange={(v) => onWildcardChange(v === true)}
+          className="mt-0.5"
+        />
+        <span className="flex min-w-0 flex-col">
+          <span className="text-xs font-semibold">
+            {t("agentEditor.integrations.wildcard.label")}
+          </span>
+          <span className="text-muted-foreground text-[11px]">
+            {t("agentEditor.integrations.wildcard.description")}
+          </span>
+        </span>
+      </label>
+      {wildcardSelected && (
+        <p className="text-muted-foreground mt-2 text-[11px]">
+          {t("agentEditor.integrations.wildcard.scopesNotice")}
+        </p>
+      )}
+    </div>
+  );
+
   // Nothing to pick: render an explicit notice rather than `null` so an empty panel is explained.
   // Exception: `allow_undeclared_tools: true` with no catalog still needs the wildcard toggle.
   if (!hasToolCatalog && !hasScopeCatalog && !isApiCall && !hasMultipleAuths) {
     if (wildcardEnabled) {
       return (
         <div className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3">
-          <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
-            <label
-              className="flex cursor-pointer items-start gap-2"
-              data-testid={`integ-wildcard-${packageId}`}
-            >
-              <Checkbox
-                checked={wildcardSelected}
-                onCheckedChange={(v) => onWildcardChange(v === true)}
-                className="mt-0.5"
-              />
-              <span className="flex min-w-0 flex-col">
-                <span className="text-xs font-semibold">
-                  {t("agentEditor.integrations.wildcard.label")}
-                </span>
-                <span className="text-muted-foreground text-[11px]">
-                  {t("agentEditor.integrations.wildcard.description")}
-                </span>
-              </span>
-            </label>
-            {wildcardSelected && (
-              <p className="text-muted-foreground mt-2 text-[11px]">
-                {t("agentEditor.integrations.wildcard.scopesNotice")}
-              </p>
-            )}
-          </div>
+          {wildcardControl}
         </div>
       );
     }
@@ -322,33 +326,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
           </label>
         </div>
       )}
-      {wildcardEnabled && (
-        <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
-          <label
-            className="flex cursor-pointer items-start gap-2"
-            data-testid={`integ-wildcard-${packageId}`}
-          >
-            <Checkbox
-              checked={wildcardSelected}
-              onCheckedChange={(v) => onWildcardChange(v === true)}
-              className="mt-0.5"
-            />
-            <span className="flex min-w-0 flex-col">
-              <span className="text-xs font-semibold">
-                {t("agentEditor.integrations.wildcard.label")}
-              </span>
-              <span className="text-muted-foreground text-[11px]">
-                {t("agentEditor.integrations.wildcard.description")}
-              </span>
-            </span>
-          </label>
-          {wildcardSelected && (
-            <p className="text-muted-foreground mt-2 text-[11px]">
-              {t("agentEditor.integrations.wildcard.scopesNotice")}
-            </p>
-          )}
-        </div>
-      )}
+      {wildcardControl}
       {!wildcardSelected &&
         isApiCall &&
         apiCallEntries.map((tool) => {
