@@ -1,39 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * An agent's input or output fields, as the Définition shows them: one line
- * per field, and a modal to change one.
- *
- * The page editor puts every option of every field on screen at once — a
- * dozen inputs per field, most of them empty for most fields — which buried
- * the three facts a field is mostly about (its name, its type, whether it is
- * required). Here those are a table's columns; everything else is in the
- * modal, the essentials first and the options for the field's type folded
- * under them.
- *
- * Stock parts only: shadcn's `Table`, with `@dnd-kit` sortable rows the way
- * shadcn's own `dashboard-01` block drags them, and the row's deeds behind the
- * standard "…" menu — the row itself is not a button.
- */
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Braces, ChevronDown, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy,
-  arrayMove,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { ArrowDown, ArrowUp, Braces, ChevronDown, Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { CheckboxField } from "@/components/app-ui/checkbox-field";
@@ -110,16 +79,10 @@ export function SchemaFieldList({
   // A field's edit has an address: its key, which survives a reload.
   const editing = useUrlModalTarget(EDIT_PARAMS[mode], fields, (field) => field.key);
   const target = editing.target;
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor),
-  );
-  const onDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const from = fields.findIndex((f) => f._id === active.id);
-    const to = fields.findIndex((f) => f._id === over.id);
-    onChange(arrayMove(fields, from, to));
+  const move = (from: number, to: number) => {
+    const next = [...fields];
+    [next[from], next[to]] = [next[to]!, next[from]!];
+    onChange(next);
   };
 
   return (
@@ -146,37 +109,31 @@ export function SchemaFieldList({
         </EmptyState>
       ) : (
         <div className="border-border overflow-hidden rounded-lg border">
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-            {/* Fixed layout: the input and output tables stack on one page and their columns line up. */}
-            <Table className="table-fixed">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-8" />
-                  <TableHead className="w-[26%]">{t("editor.fieldKeyLabel")}</TableHead>
-                  <TableHead className="w-[16%]">{t("log.filterType")}</TableHead>
-                  <TableHead className="w-[12%]">{t("manifest.required")}</TableHead>
-                  <TableHead>{t("editor.fieldDescLabel")}</TableHead>
-                  <TableHead className="w-12" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <SortableContext
-                  items={fields.map((f) => f._id)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {fields.map((field) => (
-                    <FieldRow
-                      key={field._id}
-                      field={field}
-                      mode={mode}
-                      onEdit={() => editing.open(field.key)}
-                      onRemove={() => onChange(fields.filter((f) => f._id !== field._id))}
-                    />
-                  ))}
-                </SortableContext>
-              </TableBody>
-            </Table>
-          </DndContext>
+          {/* Fixed layout: the input and output tables stack on one page and their columns line up. */}
+          <Table className="table-fixed">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[26%]">{t("editor.fieldKeyLabel")}</TableHead>
+                <TableHead className="w-[16%]">{t("log.filterType")}</TableHead>
+                <TableHead className="w-[12%]">{t("manifest.required")}</TableHead>
+                <TableHead>{t("editor.fieldDescLabel")}</TableHead>
+                <TableHead className="w-12" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {fields.map((field, index) => (
+                <FieldRow
+                  key={field._id}
+                  field={field}
+                  mode={mode}
+                  onEdit={() => editing.open(field.key)}
+                  onRemove={() => onChange(fields.filter((f) => f._id !== field._id))}
+                  onMoveUp={index > 0 ? () => move(index, index - 1) : undefined}
+                  onMoveDown={index < fields.length - 1 ? () => move(index, index + 1) : undefined}
+                />
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
 
@@ -218,31 +175,19 @@ function FieldRow({
   mode,
   onEdit,
   onRemove,
+  onMoveUp,
+  onMoveDown,
 }: {
   field: SchemaField;
   mode: SchemaMode;
   onEdit: () => void;
   onRemove: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
-    id: field._id,
-  });
   return (
-    <TableRow ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}>
-      <TableCell>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="text-muted-foreground size-7 cursor-grab active:cursor-grabbing"
-          aria-label={t("editor.fieldReorder", { name: field.key })}
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical />
-        </Button>
-      </TableCell>
+    <TableRow>
       <TableCell className="text-sm">{field.key || "—"}</TableCell>
       <TableCell>
         <Badge variant="outline" className="font-normal">
@@ -261,6 +206,20 @@ function FieldRow({
         <TableRowActions
           menuLabel={t("editor.rowActions", { name: field.key })}
           actions={[
+            {
+              id: "up",
+              label: t("editor.fieldMoveUp"),
+              icon: ArrowUp,
+              onSelect: onMoveUp,
+              disabled: !onMoveUp,
+            },
+            {
+              id: "down",
+              label: t("editor.fieldMoveDown"),
+              icon: ArrowDown,
+              onSelect: onMoveDown,
+              disabled: !onMoveDown,
+            },
             {
               id: "edit",
               label: t("btn.edit", { ns: "common" }),

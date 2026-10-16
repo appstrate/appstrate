@@ -16,6 +16,13 @@ import {
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
 import { SettingsHeading } from "./settings-heading";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldTitle,
+} from "@appstrate/ui/components/field";
 
 /** Read-only counterpart of a setting field. Render inside a description list. */
 export function SettingValue({ label, children }: { label: ReactNode; children: ReactNode }) {
@@ -39,7 +46,7 @@ export function SettingsGroup({
   return (
     <section className={cn("mb-8", className)}>
       {title && <SettingsHeading level="group" title={title} />}
-      <div>{children}</div>
+      <FieldGroup className="gap-0">{children}</FieldGroup>
     </section>
   );
 }
@@ -66,39 +73,35 @@ export function SettingRow({
 }) {
   const labelId = useId();
   const control = typeof children === "function" ? children(labelId) : children;
-  const labelText = (
-    <div id={labelId} className="text-sm font-medium">
-      {label}
-    </div>
-  );
+  const labelText = <FieldTitle id={labelId}>{label}</FieldTitle>;
   const explanation = (description || details) && (
     <RowExplanation description={description} details={details} />
   );
   const copy = (
-    <div className="min-w-0">
+    <FieldContent className="min-w-0 gap-1">
       {labelText}
       {explanation}
-    </div>
+    </FieldContent>
   );
 
   if (variant === "field") {
     return (
-      <div
+      <Field
         data-slot="setting-row"
         data-variant="field"
         // The write's line takes part of the gap to the next row.
         className={cn(status ? "pb-5" : "pb-8", "last:pb-0", className)}
       >
         {copy}
-        <div className="mt-3 flex w-full items-center gap-2">{control}</div>
-        {status && <div className="mt-1.5">{status}</div>}
-      </div>
+        <div className="flex w-full items-center gap-2">{control}</div>
+        {status}
+      </Field>
     );
   }
 
   if (variant === "toggle") {
     return (
-      <div
+      <Field
         data-slot="setting-row"
         data-variant="toggle"
         className={cn("pb-8 last:pb-0", className)}
@@ -109,22 +112,23 @@ export function SettingRow({
           {status}
         </div>
         {explanation}
-      </div>
+      </Field>
     );
   }
 
   return (
-    <div
+    <Field
+      orientation="responsive"
       data-slot="setting-row"
       data-variant="action"
-      className={cn("flex items-center justify-between gap-6 pb-8 last:pb-0", className)}
+      className={cn("justify-between gap-6 pb-8 last:pb-0", className)}
     >
       {copy}
       <div className="flex shrink-0 items-center gap-2">
         {control}
         {status}
       </div>
-    </div>
+    </Field>
   );
 }
 
@@ -137,7 +141,7 @@ function RowExplanation({
 }) {
   const { t } = useTranslation("common");
   if (!details) {
-    return <div className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</div>;
+    return <FieldDescription className="text-xs">{description}</FieldDescription>;
   }
   return (
     <Collapsible className="group/details">

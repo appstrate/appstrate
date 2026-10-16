@@ -4,6 +4,7 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { SidebarGroup, SidebarGroupLabel } from "@appstrate/ui/components/sidebar";
 
 export function RailHeader({ icon: Icon, title }: { icon: LucideIcon; title: string }) {
   return (
@@ -26,14 +27,12 @@ export function RailGroup({
   children: ReactNode;
 } & Record<`data-${string}`, string | undefined>) {
   return (
-    <section className={cn("px-3 py-3", separated && "border-t-sidebar-border border-t")} {...rest}>
-      <div
-        // Same as the main navigation's group label (shadcn `SidebarGroupLabel`).
-        className="text-sidebar-foreground/70 mb-0.5 flex h-8 items-center px-2 text-xs font-medium"
-      >
-        {title}
-      </div>
+    <SidebarGroup
+      className={cn("px-3 py-3", separated && "border-t-sidebar-border border-t")}
+      {...rest}
+    >
+      <SidebarGroupLabel className="mb-0.5">{title}</SidebarGroupLabel>
       {children}
-    </section>
+    </SidebarGroup>
   );
 }

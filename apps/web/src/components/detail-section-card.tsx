@@ -4,6 +4,7 @@ import { useId, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { TargetArrow, TargetLink, type ActionTarget } from "./action-target";
+import { Card, CardContent, CardHeader } from "@appstrate/ui/components/card";
 
 const HEADER_CLASS = "bg-muted/35 flex min-h-5 w-full items-center gap-2 px-4 py-3";
 const TARGET_CLASS =
@@ -42,32 +43,32 @@ export function DetailSectionCard({
   );
 
   return (
-    <section
+    <Card
+      role="region"
       aria-labelledby={titleId}
-      className={cn(
-        "bg-muted/35 flex min-w-0 flex-col overflow-hidden rounded-lg border",
-        className,
-      )}
+      className={cn("bg-muted/35 flex min-w-0 flex-col overflow-hidden", className)}
     >
-      {headerAction ? (
-        <TargetLink
-          target={headerAction}
-          label={headerAction.label}
-          className={cn(HEADER_CLASS, TARGET_CLASS)}
-        >
-          {heading}
-        </TargetLink>
-      ) : (
-        <div className={HEADER_CLASS}>{heading}</div>
-      )}
-      <div
+      <CardHeader className="p-0">
+        {headerAction ? (
+          <TargetLink
+            target={headerAction}
+            label={headerAction.label}
+            className={cn(HEADER_CLASS, TARGET_CLASS)}
+          >
+            {heading}
+          </TargetLink>
+        ) : (
+          <div className={HEADER_CLASS}>{heading}</div>
+        )}
+      </CardHeader>
+      <CardContent
         className={cn(
-          "bg-card h-full overflow-hidden rounded-t-lg border-x-0 border-t border-b-0",
+          "bg-card h-full overflow-hidden rounded-t-lg border-x-0 border-t border-b-0 p-0",
           bodyClassName ?? "p-4",
         )}
       >
         {children}
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }

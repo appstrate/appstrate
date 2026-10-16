@@ -64,9 +64,14 @@ export function ProvidersTable({
       columns={columns}
       rows={rows}
       rowKey={(row) => row.id}
-      // A click on an organization key's row chooses the models it serves.
+      // An inline rename is its own control, never a descendant of the detail button.
       rowAction={(row) => row.credential && onChooseModels?.(row.credential)}
-      rowActionable={(row) => row.kind === "org-key" && row.credential !== null && canWriteModels}
+      rowActionable={(row) =>
+        row.kind === "org-key" &&
+        row.credential !== null &&
+        canWriteModels &&
+        renamingId !== row.credential.id
+      }
       rowLabel={(row) => row.label}
       isLoading={isLoading}
       failure={error}

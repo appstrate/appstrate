@@ -9,8 +9,7 @@ import { commitRename } from "../lib/inline-rename";
 /**
  * A table row's name, renamed in place — the app's ONE rename affordance. It opens only
  * when the row's « Renommer » entry sets `editing` (no click-to-edit, no hover pencil).
- * Raised above the row's cover in both states, so its `title` reads and the field takes
- * clicks. Saves on blur or Enter, cancels on Escape, and fires `onSave` only when the
+ * Saves on blur or Enter, cancels on Escape, and fires `onSave` only when the
  * trimmed value changed. It truncates: a long name must not eat the column's floor.
  */
 export function InlineEditableLabel({
@@ -65,7 +64,7 @@ export function InlineEditableLabel({
   if (!editable || !editing) {
     return (
       <span
-        className="relative z-10 block w-fit max-w-full min-w-0 truncate text-sm font-medium"
+        className="block w-fit max-w-full min-w-0 truncate text-sm font-medium"
         title={value}
         data-testid={testId}
       >
@@ -75,7 +74,7 @@ export function InlineEditableLabel({
   }
 
   return (
-    <div className="relative z-10 flex min-w-0 items-center gap-1" aria-busy={saving}>
+    <div className="flex min-w-0 items-center gap-1" aria-busy={saving}>
       <Input
         ref={inputRef}
         // Read by the dialogs: Escape here cancels the rename, not the overlay.

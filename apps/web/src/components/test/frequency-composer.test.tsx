@@ -21,6 +21,12 @@ const compose = (cron: string) =>
   );
 
 describe("FrequencyComposer", () => {
+  it("keeps the cron's hour and minute in a labelled native time field", () => {
+    const html = compose("5 17 * * *");
+    expect(html).toContain('type="time"');
+    expect(html).toMatch(/id="frequency-at"[^>]*value="17:05"/);
+    expect(html).toContain('for="frequency-at"');
+  });
   it("names the weekday group by its label", () => {
     const html = compose("0 9 * * 1,3");
     expect(html).toMatch(/id="frequency-days"/);

@@ -8,12 +8,7 @@ import type {
   IntegrationToolCatalogEntry,
   OrgPackageItemDetail,
 } from "@appstrate/shared-types";
-import { useAuth } from "../hooks/use-auth";
-import { useOrg } from "../hooks/use-org";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
-import { primaryDisplayFile } from "../lib/package-files";
-import { newPackageContent } from "../lib/package-file-drafts";
-import { skillFrontmatterError } from "../lib/skill-frontmatter";
 import { EditorDirtyReportContext, type EditorState } from "../hooks/use-editor-state";
 import { FormField } from "../components/form-field";
 import {
@@ -34,9 +29,6 @@ import { AuthsSection } from "../components/integration-editor/auths-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 
 import {
-  defaultSkillManifest,
-  defaultIntegrationManifest,
-  DEFAULT_SKILL_CONTENT,
   manifestToSchemaFields,
   manifestSchemaWrapper,
   getResourceEntries,
@@ -318,8 +310,7 @@ function PackageEditorInner({
 }: {
   type: "skill" | "mcp-server";
   initialState: EditorState;
-  /** Undefined on the creation page; set to edit the package in its Package AFPS (Identité). */
-  packageId: string | undefined;
+  packageId: string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const isEdit = packageId !== undefined;
@@ -327,29 +318,12 @@ function PackageEditorInner({
     type,
     initialState,
     packageId,
-    validate: (s) => {
-      if (isEdit || type !== "skill") return null;
-      const content = newPackageContent(type, s.operations ?? []);
-      if (!content.trim()) {
-        return { error: t("editor.errorContent"), tab: "files" };
-      }
-      // The same checker the write routes run — fixed here, not via a 400.
-      const frontmatter = skillFrontmatterError(content);
-      if (frontmatter) {
-        return { error: t(frontmatter.key, frontmatter.params), tab: "files" };
-      }
-      return null;
-    },
   });
 
   return (
     <PackageEditorFrame
       editor={editor}
-      tabs={[
-        { id: "general", label: t("editor.tabGeneral") },
-        { id: "files", label: t("files.tabLabel"), createOnly: true },
-        { id: "json", label: t("editor.tabJson"), createOnly: true },
-      ]}
+      tabs={[{ id: "general", label: t("editor.tabGeneral") }]}
       descriptions={
         type === "mcp-server" ? { general: t("mcpServerEditor.description.general") } : undefined
       }
@@ -375,8 +349,7 @@ function IntegrationEditorInner({
   toolCatalog,
 }: {
   initialState: EditorState;
-  /** Undefined on the creation page; set to edit the integration in its Package AFPS. */
-  packageId: string | undefined;
+  packageId: string;
   tab?: PackageEditorTab;
   onTabRequest?: (tab: PackageEditorTab) => void;
   /** Editing: the saved package's tool catalog, shown with the draft's policy. */
@@ -409,8 +382,6 @@ function IntegrationEditorInner({
         { id: "source", label: t("integrationEditor.tabSource") },
         { id: "auths", label: t("integrationEditor.tabAuthMethods") },
         { id: "tools", label: t("integrationEditor.tabTools") },
-        { id: "files", label: t("files.tabLabel"), createOnly: true },
-        { id: "json", label: t("editor.tabJson"), createOnly: true },
       ]}
       descriptions={{
         general: t("integrationEditor.description.general"),
@@ -494,35 +465,5 @@ export function PackageDefinitionEditor({
         packageId={detail.id}
       />
     </DraftEditorMount>
-  );
-}
-
-// ─── Page Wrapper ───────────────────────────────────────────────────
-
-/** The creation route of a skill or an integration: an existing package is edited in its settings; an agent is created from a dialog. */
-export function PackageEditorPage({ type }: { type: "skill" | "integration" }) {
-  const { user } = useAuth();
-  const { currentOrg } = useOrg();
-
-  if (type === "integration") {
-    return (
-      <IntegrationEditorInner
-        initialState={{ manifest: defaultIntegrationManifest(currentOrg?.slug, user?.email) }}
-        packageId={undefined}
-      />
-    );
-  }
-
-  return (
-    <PackageEditorInner
-      type={type}
-      initialState={{
-        manifest: defaultSkillManifest(currentOrg?.slug, user?.email),
-        operations: [
-          { op: "write", path: primaryDisplayFile(type).name, text: DEFAULT_SKILL_CONTENT },
-        ],
-      }}
-      packageId={undefined}
-    />
   );
 }

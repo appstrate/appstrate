@@ -27,7 +27,6 @@ import {
 } from "../lib/cron-frequency";
 import { describeFrequency, frequencyFormats } from "../lib/frequency-summary";
 import { TimezoneSelect } from "./timezone-select";
-import { TimeField } from "./time-field";
 
 /** The rhythms offered, in the order of the select, with their labels. */
 const KIND_LABELS: Record<FrequencyKind, string> = {
@@ -277,7 +276,13 @@ export function FrequencyComposer({
         <Field>
           <Label htmlFor="frequency-at">{t("schedule.frequency.at")}</Label>
           <div>
-            <TimeField id="frequency-at" value={timeValue(frequency.at)} onChange={setAt} />
+            <Input
+              id="frequency-at"
+              type="time"
+              required
+              value={timeValue(frequency.at)}
+              onChange={(event) => setAt(event.target.value)}
+            />
           </div>
         </Field>
       )}

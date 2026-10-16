@@ -4,6 +4,7 @@ import { useId, type ReactNode } from "react";
 import { Activity, CircleX, TriangleAlert } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Link, type To } from "react-router-dom";
+import { Card, CardContent, CardHeader } from "@appstrate/ui/components/card";
 
 export function HealthIssueBadge({
   children,
@@ -61,15 +62,16 @@ export function HealthCard({
   const id = useId();
   const Icon = tone === "blocking" ? CircleX : tone === "warning" ? TriangleAlert : Activity;
   return (
-    <section
+    <Card
+      role="region"
       aria-labelledby={id}
       className={cn(
-        "border-border bg-muted/35 overflow-hidden rounded-lg border",
+        "bg-muted/35 overflow-hidden",
         tone === "blocking" && "border-destructive/30",
         tone === "warning" && "border-warning/30",
       )}
     >
-      <div className="bg-muted/35 flex flex-wrap items-center gap-2 px-4 py-3">
+      <CardHeader className="bg-muted/35 flex-row flex-wrap items-center gap-2 px-4 py-3">
         <Icon
           className={cn(
             "size-4 shrink-0",
@@ -85,9 +87,11 @@ export function HealthCard({
           {title}
         </h2>
         {badge}
-      </div>
-      <div className="bg-card overflow-hidden rounded-t-lg border-t">{children}</div>
-    </section>
+      </CardHeader>
+      <CardContent className="bg-card overflow-hidden rounded-t-lg border-t p-0">
+        {children}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -72,9 +72,6 @@ export function defaultSkillManifest(
   };
 }
 
-/** Deliberately not yet valid: a new skill has no package id to prefill `name` from. */
-export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
-
 // ─── Default manifest for integration ───────────────────────
 
 /** Minimal valid integration skeleton: a `remote` Streamable-HTTP source and one api_key auth sent as a Bearer header. */
