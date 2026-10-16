@@ -100,21 +100,21 @@ function CardBlocks({ count }: { count: number }) {
  * A resource's page: its identity, controls and tabs are in the shell header
  * (`DetailBar`), so the page waits with its panel alone. Each detail route draws
  * the same element as its fallback and as its page's loading state, so the two
- * waits share one shape. `title` is drawn as text when known; `parent` is the
- * part of the header's small line the address already tells.
+ * waits share one shape. `title` is drawn as text when known; `trail` is the
+ * part of the header's trail the address already tells.
  */
 export function DetailPageSkeleton({
   title,
-  parent,
+  trail,
   tabCount,
 }: {
   title?: string;
-  parent?: BreadcrumbEntry;
+  trail?: readonly BreadcrumbEntry[];
   tabCount: number;
 }) {
   return (
     <Waiting>
-      <DetailBarSkeleton title={title} parent={parent} tabCount={tabCount} />
+      <DetailBarSkeleton title={title} trail={trail} tabCount={tabCount} />
       <Card className="p-6">
         <CardBlocks count={3} />
       </Card>
@@ -152,7 +152,7 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   return (
     <DetailPageSkeleton
       title={title}
-      parent={listCrumb}
+      trail={[listCrumb]}
       // An agent offers four tabs, every other family three.
       tabCount={type === "agent" ? 4 : 3}
     />
@@ -162,9 +162,14 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
 /** A run's page, under its agent. */
 export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
   const { scope, name } = useParams();
+  const listCrumb = usePackageListCrumb("agent");
   return (
     <DetailPageSkeleton
-      parent={agentName ? { label: agentName, href: `/agents/${scope}/${name}#runs` } : undefined}
+      trail={
+        agentName
+          ? [listCrumb, { label: agentName, href: `/agents/${scope}/${name}#runs` }]
+          : [listCrumb]
+      }
       tabCount={3}
     />
   );
@@ -175,7 +180,7 @@ export function ScheduleDetailSkeleton() {
   const { t } = useTranslation("agents");
   return (
     <DetailPageSkeleton
-      parent={{ label: t("common:nav.schedules"), href: "/schedules" }}
+      trail={[{ label: t("common:nav.schedules"), href: "/schedules" }]}
       tabCount={3}
     />
   );

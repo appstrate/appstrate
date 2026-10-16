@@ -95,7 +95,7 @@ export function ScheduleDetailPage() {
             </span>
           }
           badge={<ScheduleStatusBadge schedule={schedule} />}
-          parent={{ label: t("common:nav.schedules"), href: "/schedules" }}
+          trail={[{ label: t("common:nav.schedules"), href: "/schedules" }]}
           tabs={tabs}
           actions={
             <>

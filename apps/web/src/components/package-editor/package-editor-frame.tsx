@@ -179,7 +179,7 @@ export function PackageEditorFrame({
     >
       <DetailBar
         title={t(page.title)}
-        parent={{ label: t(page.list.key, { ns: page.list.ns }), href: listPath }}
+        trail={[{ label: t(page.list.key, { ns: page.list.ns }), href: listPath }]}
         tabs={visibleTabs.map(({ id, label }) => ({ value: id, label }))}
       />
 

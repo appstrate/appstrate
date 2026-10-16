@@ -22,9 +22,10 @@ import { createPortal } from "react-dom";
  * content down to the header: it portals it into one of these slots, and it
  * leaves with the page.
  *
- * - `actions`: the controls at the header's right end, left of the notification
- *   bell (`ShellHeaderActions`).
- * - `lead`: the page's own title block, which takes the breadcrumb's place
+ * - `actions`: the page's controls, left of the notification bell, or at the
+ *   right end of the title block's row when the page draws one
+ *   (`ShellHeaderActions`).
+ * - `lead`: the page's own title block, in a row under the breadcrumb
  *   (`ShellHeaderLead`).
  * - `tabs`: the page's tab bar, a second row inside the same band
  *   (`ShellHeaderTabs`).
@@ -61,7 +62,7 @@ export function ShellHeaderActions({ children }: { children: ReactNode }) {
   return <HeaderPortal slot="actions">{children}</HeaderPortal>;
 }
 
-/** A page's title block: while one is drawn, it stands where the breadcrumb would. */
+/** A page's title block, in the row under the trail. */
 export function ShellHeaderLead({ children }: { children: ReactNode }) {
   return <HeaderPortal slot="lead">{children}</HeaderPortal>;
 }

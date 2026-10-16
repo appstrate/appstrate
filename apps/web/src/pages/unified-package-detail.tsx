@@ -33,7 +33,6 @@ import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { PackageDetailBar } from "../components/package-detail/package-detail-bar";
 import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
-import { CatalogueLink } from "../components/package-detail/catalogue-link";
 import { VersionBanners } from "../components/version-banners";
 import { PackageOverview } from "../components/package-detail/package-overview";
 import { isOwnedSource } from "../components/package-detail/owned-source";
@@ -312,18 +311,12 @@ function PackageDetailBody({ type }: { type: PackageType }) {
 
   const versionLabel = isHistoricalVersion ? versionDetail?.version : undefined;
 
-  // The sheet opens on the version the reader chose, and follows the current one otherwise.
-  const catalogueLink = (
-    <CatalogueLink
-      type={type}
-      packageId={packageId}
-      version={catalogueVersionFor({
-        isHistoricalVersion,
-        source,
-        version: versionDetail?.version,
-      })}
-    />
-  );
+  // The catalogue sheet opens on the version the reader chose, and follows the current one otherwise.
+  const catalogueVersion = catalogueVersionFor({
+    isHistoricalVersion,
+    source,
+    version: versionDetail?.version,
+  });
 
   const runButton = (
     // The page's one launch verdict, shared with the empty runs list.
@@ -353,7 +346,6 @@ function PackageDetailBody({ type }: { type: PackageType }) {
             tabs={tabDefs}
             actions={
               <>
-                {catalogueLink}
                 {runButton}
                 <AgentActions
                   packageId={packageId}
@@ -363,6 +355,7 @@ function PackageDetailBody({ type }: { type: PackageType }) {
                   downloadBundle={downloadBundle}
                   onCreateVersion={() => setCreatingVersion(true)}
                   unsavedReason={unsavedReason}
+                  catalogueVersion={catalogueVersion}
                 />
               </>
             }
@@ -377,7 +370,6 @@ function PackageDetailBody({ type }: { type: PackageType }) {
             tabs={tabDefs}
             actions={
               <>
-                {catalogueLink}
                 <PackageActionsDropdown
                   packageId={packageId}
                   type={type}
@@ -388,6 +380,7 @@ function PackageDetailBody({ type }: { type: PackageType }) {
                   onCreateVersion={() => setCreatingVersion(true)}
                   createVersionBlockedReason={unsavedReason}
                   isActiveHere={isActiveInCurrentSpace}
+                  catalogueVersion={catalogueVersion}
                 />
               </>
             }

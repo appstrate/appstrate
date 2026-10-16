@@ -64,7 +64,7 @@ export function AgentDetailBar<T extends string>({
           latestPublishedVersion={latestPublishedVersion}
         />
       }
-      parent={listCrumb}
+      trail={[listCrumb]}
       meta={<DetailBarId id={detail.id} />}
       actions={actions}
       tabs={tabs}

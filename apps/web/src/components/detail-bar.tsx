@@ -1,23 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A detail page's identity and controls, drawn in the shell header instead of
- * in the page: the title with its pill, the parent list and a line of meta
- * under it, the page's actions at the right end, and the tab bar (`HeaderTabBar`
- * in `detail-tabs.tsx`) on the band's own rule. One band, no breadcrumb: the
- * parent is the one trail entry a detail page needs, the page's own name is the
- * title and the active tab is already underlined.
+ * A detail page's identity and controls, drawn in the shell header under the
+ * trail: the title with its pill and a line of meta under it, the page's actions
+ * at the right end, and the tab bar (`HeaderTabBar` in `detail-tabs.tsx`) on the
+ * band's own rule. The trail and the bell stay in the header's first row, as on
+ * every other page: the bar publishes the page's trail (its ancestors, then its
+ * own title) like any page does.
  *
  * Like every piece of the shell's slots it is a portal, so what it renders keeps
  * the page's context and leaves with the page.
  */
 
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
 import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { useCanReach } from "@/hooks/use-can-reach";
+import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 import type { BreadcrumbEntry } from "@/stores/breadcrumb-store";
 import {
   ShellHeaderActions,
@@ -30,7 +28,6 @@ import { HeaderTabBar, type DetailTab } from "@/components/detail-tabs";
 export function DetailBarId({ id }: { id: string }) {
   return (
     <>
-      <span aria-hidden>·</span>
       <code className="truncate font-mono">{id}</code>
       <CopyButton value={id} className="size-5 shrink-0 [&_svg]:size-3" />
     </>
@@ -41,7 +38,7 @@ export function DetailBar<T extends string = string>({
   icon,
   title,
   badge,
-  parent,
+  trail,
   meta,
   actions,
   tabs,
@@ -52,9 +49,9 @@ export function DetailBar<T extends string = string>({
   title: string;
   /** Beside the title: a version, a status. */
   badge?: ReactNode;
-  /** The list this page belongs to; a link when the caller may open it. */
-  parent?: BreadcrumbEntry;
-  /** After the parent, in the small line under the title. */
+  /** The page's ancestors in the header trail, outermost first; the title closes it. */
+  trail?: readonly BreadcrumbEntry[];
+  /** In the small line under the title. */
   meta?: ReactNode;
   /**
    * The header's right end, left of the notification bell. The bar lays them out:
@@ -65,7 +62,7 @@ export function DetailBar<T extends string = string>({
   /** The tab bar, on the band's rule. Needs the page's `DetailTabs` above. */
   tabs?: readonly DetailTab<T>[];
 }) {
-  const canReach = useCanReach();
+  usePageBreadcrumb([...(trail ?? []), { label: title }]);
 
   return (
     <>
@@ -78,18 +75,6 @@ export function DetailBar<T extends string = string>({
               {badge}
             </div>
             <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs leading-5 md:mt-0.5">
-              {parent &&
-                (parent.href && canReach(parent.href) ? (
-                  <Link
-                    to={parent.href}
-                    className="hover:text-foreground inline-flex shrink-0 items-center transition-colors"
-                  >
-                    <ChevronLeft className="-ml-1 size-3.5" aria-hidden />
-                    {parent.label}
-                  </Link>
-                ) : (
-                  <span className="shrink-0">{parent.label}</span>
-                ))}
               {meta}
             </div>
           </div>
@@ -112,13 +97,15 @@ export function DetailBar<T extends string = string>({
  */
 export function DetailBarSkeleton({
   title,
-  parent,
+  trail,
   tabCount = 4,
 }: {
   title?: string;
-  parent?: BreadcrumbEntry;
+  trail?: readonly BreadcrumbEntry[];
   tabCount?: number;
 }) {
+  usePageBreadcrumb([...(trail ?? []), ...(title ? [{ label: title }] : [])]);
+
   return (
     <>
       <ShellHeaderLead>
@@ -131,7 +118,7 @@ export function DetailBarSkeleton({
               <Skeleton className="my-1 h-4 w-44" />
             )}
             <div className="text-muted-foreground flex items-center gap-1.5 text-xs leading-5 md:mt-0.5">
-              {parent ? <span>{parent.label}</span> : <Skeleton className="h-3 w-16" />}
+              <Skeleton className="h-3 w-16" />
             </div>
           </div>
         </div>
