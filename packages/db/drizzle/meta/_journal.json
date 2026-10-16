@@ -699,7 +699,7 @@
       "idx": 99,
       "version": "7",
       "when": 1792150175832,
-      "tag": "0099_connection_future_sharing",
+      "tag": "0099_connection_share_all_spaces",
       "breakpoints": true
     }
   ]

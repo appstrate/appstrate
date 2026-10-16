@@ -35,9 +35,9 @@ export function ConnectionShareEditor({
   lockHint,
   pending,
   onShare,
-  canShareAll,
-  shareNewSpaces,
-  onFutureSharingChange,
+  canShareAllSpaces,
+  shareAllSpaces,
+  onShareAllSpacesChange,
   onUnshare,
 }: {
   connectionId: string;
@@ -58,9 +58,9 @@ export function ConnectionShareEditor({
   lockHint: string | null;
   pending: boolean;
   onShare: (spaceId: string) => void;
-  canShareAll: boolean;
-  shareNewSpaces: boolean;
-  onFutureSharingChange: (enabled: boolean) => void;
+  canShareAllSpaces: boolean;
+  shareAllSpaces: boolean;
+  onShareAllSpacesChange: (enabled: boolean) => void;
   onUnshare: (spaceId: string) => void;
 }) {
   const { t } = useTranslation("settings");
@@ -107,7 +107,7 @@ export function ConnectionShareEditor({
             data-testid={`share-editor-${connectionId}`}
           >
             <span className="truncate">
-              {shareNewSpaces
+              {shareAllSpaces
                 ? t("integration.connection.share.all")
                 : sharedSpaceIds.length === 0
                   ? t("integration.connection.share.none")
@@ -121,13 +121,13 @@ export function ConnectionShareEditor({
             <p className="text-muted-foreground text-xs">
               {t("integration.connection.share.help")}
             </p>
-            {canShareAll && (
+            {canShareAllSpaces && (
               <>
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox
-                    checked={shareNewSpaces}
+                    checked={shareAllSpaces}
                     disabled={pending}
-                    onCheckedChange={(checked) => onFutureSharingChange(checked === true)}
+                    onCheckedChange={(checked) => onShareAllSpacesChange(checked === true)}
                     aria-describedby={`share-all-help-${connectionId}`}
                     data-testid={`share-all-${connectionId}`}
                   />
@@ -139,7 +139,7 @@ export function ConnectionShareEditor({
               </>
             )}
           </div>
-          {!shareNewSpaces && (
+          {!shareAllSpaces && (
             <Command>
               <CommandInput placeholder={t("integration.connection.share.search")} />
               <CommandList>

@@ -10,7 +10,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useMyConnections, useRenameMeConnection } from "../../hooks/use-me-connections";
-import { useConnectionFutureSharing, useConnectionShare } from "../../hooks/use-integrations";
+import { useConnectionShareAllSpaces, useConnectionShare } from "../../hooks/use-integrations";
 import { formatDateField } from "../../lib/format-date";
 import { EmptyState } from "../../components/page-states";
 import { ItemList } from "../../components/item-list";
@@ -34,14 +34,14 @@ function ConnectionRow({
   conn,
   onRename,
   onShare,
-  onFutureSharingChange,
+  onShareAllSpacesChange,
   onUnshare,
   sharing,
 }: {
   conn: MeConnectionEntry;
   onRename: (label: string) => Promise<unknown>;
   onShare: (spaceId: string) => void;
-  onFutureSharingChange: (enabled: boolean) => void;
+  onShareAllSpacesChange: (enabled: boolean) => void;
   onUnshare: (spaceId: string) => void;
   sharing: boolean;
 }) {
@@ -54,7 +54,7 @@ function ConnectionRow({
   const lockHint = lockKey ? t(lockKey) : null;
   const canRename = conn.allowed_actions.includes("rename");
   const canShare = conn.allowed_actions.includes("share");
-  const canShareAll = conn.allowed_actions.includes("share_all");
+  const canShareAllSpaces = conn.allowed_actions.includes("share_all_spaces");
   // Shareable spaces and the ones it is already shared into, one entry each.
   const shareTargets = [
     ...conn.shareable_spaces,
@@ -166,9 +166,9 @@ function ConnectionRow({
             lockHint={null}
             pending={sharing}
             onShare={onShare}
-            canShareAll={canShareAll}
-            shareNewSpaces={conn.share_new_spaces ?? false}
-            onFutureSharingChange={onFutureSharingChange}
+            canShareAllSpaces={canShareAllSpaces}
+            shareAllSpaces={conn.share_all_spaces ?? false}
+            onShareAllSpacesChange={onShareAllSpacesChange}
             onUnshare={onUnshare}
           />
           {lockHint && <span className="text-muted-foreground text-[0.65rem]">{lockHint}</span>}
@@ -278,7 +278,7 @@ export function PreferencesConnectionsPage() {
 
   const renameIntegration = useRenameMeConnection();
   const shareIntegration = useConnectionShare("share");
-  const futureSharing = useConnectionFutureSharing();
+  const allSpacesSharing = useConnectionShareAllSpaces();
   const unshareIntegration = useConnectionShare("unshare");
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -359,7 +359,7 @@ export function PreferencesConnectionsPage() {
                   sharing={
                     shareIntegration.isPending ||
                     unshareIntegration.isPending ||
-                    futureSharing.isPending
+                    allSpacesSharing.isPending
                   }
                   onRename={(label) =>
                     renameIntegration.mutateAsync({
@@ -370,8 +370,8 @@ export function PreferencesConnectionsPage() {
                   onShare={(spaceId) =>
                     shareIntegration.mutate({ connectionId: conn.connection_id, spaceId })
                   }
-                  onFutureSharingChange={(enabled) =>
-                    futureSharing.mutate({ connectionId: conn.connection_id, enabled })
+                  onShareAllSpacesChange={(enabled) =>
+                    allSpacesSharing.mutate({ connectionId: conn.connection_id, enabled })
                   }
                   onUnshare={(spaceId) =>
                     unshareIntegration.mutate({ connectionId: conn.connection_id, spaceId })

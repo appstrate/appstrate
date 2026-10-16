@@ -26,7 +26,7 @@ import { connectionLockHintKey } from "../integration-connect/connection-ownersh
 import {
   useRenameIntegrationConnection,
   useConnectionShare,
-  useConnectionFutureSharing,
+  useConnectionShareAllSpaces,
   type IntegrationAuthType,
   type IntegrationConnection,
   useAgentsConsumingIntegration,
@@ -164,7 +164,7 @@ export function SharingCell({
   isAdmin: boolean;
 }) {
   const shareConnection = useConnectionShare("share", packageId);
-  const futureSharing = useConnectionFutureSharing(packageId);
+  const allSpacesSharing = useConnectionShareAllSpaces(packageId);
   const unshareConnection = useConnectionShare("unshare", packageId);
   const orgId = useCurrentOrgId();
   const { spaceId, canShare, canUnshareHere, lockKey } = useRowGrants(connection, isAdmin);
@@ -193,15 +193,15 @@ export function SharingCell({
         canUnshareHere={canUnshareHere}
         lockHint={lockText}
         pending={
-          shareConnection.isPending || unshareConnection.isPending || futureSharing.isPending
+          shareConnection.isPending || unshareConnection.isPending || allSpacesSharing.isPending
         }
         onShare={(targetSpaceId) =>
           shareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
         }
-        canShareAll={connection.allowed_actions?.includes("share_all") ?? false}
-        shareNewSpaces={connection.share_new_spaces ?? false}
-        onFutureSharingChange={(enabled) =>
-          futureSharing.mutate({ connectionId: connection.id, enabled })
+        canShareAllSpaces={connection.allowed_actions?.includes("share_all_spaces") ?? false}
+        shareAllSpaces={connection.share_all_spaces ?? false}
+        onShareAllSpacesChange={(enabled) =>
+          allSpacesSharing.mutate({ connectionId: connection.id, enabled })
         }
         onUnshare={(targetSpaceId) =>
           unshareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })

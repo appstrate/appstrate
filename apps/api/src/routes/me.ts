@@ -80,8 +80,8 @@ import {
 } from "../services/integration-connections.ts";
 import {
   applyConnectionRename,
-  applyConnectionFutureSharing,
-  connectionFutureSharingSchema,
+  applyConnectionShareAllSpaces,
+  connectionShareAllSpacesSchema,
   applyConnectionShare,
   applyConnectionUnshare,
   connectionCaller,
@@ -371,13 +371,8 @@ router.put(
   "/connections/:connectionId/shares",
   requireCeiling("integrations", "connect"),
   async (c) => {
-    const body = await readJsonBody(c, connectionFutureSharingSchema);
-    await applyConnectionFutureSharing(
-      c,
-      meEdit(c),
-      readConnectionId(c),
-      body.include_future_spaces,
-    );
+    const body = await readJsonBody(c, connectionShareAllSpacesSchema);
+    await applyConnectionShareAllSpaces(c, meEdit(c), readConnectionId(c), body.share_all_spaces);
     return c.body(null, 204);
   },
 );

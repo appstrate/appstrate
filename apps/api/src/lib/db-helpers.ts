@@ -31,7 +31,7 @@ export type DbOrTx = typeof db | Tx;
 
 /**
  * Locks the organization row: the one lock that orders writes to the org's owner set and roles,
- * the creation or conversion of its team spaces, and future connection-sharing consent, so each
+ * the creation or conversion of its team spaces, and all-spaces sharing consent, so each
  * of these sees the others' committed rows. NO KEY UPDATE: child inserts take FOR KEY SHARE on
  * this row and must not queue behind it.
  */

@@ -150,7 +150,7 @@ column integration_connections.org_id uuid not null
 column integration_connections.origin_space_id text
 column integration_connections.refresh_failure_count integer not null default 0
 column integration_connections.scopes_granted text[] not null default '{}'::text[]
-column integration_connections.share_new_spaces boolean not null default false
+column integration_connections.share_all_spaces boolean not null default false
 column integration_connections.shared_space_ids text[] not null default '{}'::text[]
 column integration_connections.space_id text
 column integration_connections.updated_at timestamp with time zone not null default now()
@@ -733,7 +733,7 @@ constraint integration_connections integration_connections_auth_key_valid CHECK 
 constraint integration_connections integration_connections_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE CASCADE
 constraint integration_connections integration_connections_end_user_is_space CHECK (((end_user_id IS NULL) OR (space_id IS NOT NULL)))
 constraint integration_connections integration_connections_end_user_not_shared CHECK (((cardinality(shared_space_ids) = 0) OR (user_id IS NOT NULL)))
-constraint integration_connections integration_connections_future_share_org_scoped_user CHECK (((NOT share_new_spaces) OR ((user_id IS NOT NULL) AND (space_id IS NULL))))
+constraint integration_connections integration_connections_share_all_spaces_org_scoped_user CHECK (((NOT share_all_spaces) OR ((user_id IS NOT NULL) AND (space_id IS NULL))))
 constraint integration_connections integration_connections_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_connections integration_connections_label_normalized CHECK (((label <> ''::text) AND (label !~ '^[ \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]|[ \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]$'::text) AND (label !~ '[\u0001-\u001F\u007F-\u009F\u00AD\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0\U000E0000-\U000E007F]'::text) AND ((char_length(label) + regexp_count(label, '[\U00010000-\U0010FFFF]'::text)) <= 80)))
 constraint integration_connections integration_connections_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE

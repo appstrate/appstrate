@@ -425,7 +425,7 @@ export async function deleteSpaceMembershipsInOrg(
  */
 export async function unshareConnectionsOfOwnersWithoutAccess(
   tx: Tx,
-  scope: { orgId: string; userId?: string; spaceId?: string; stopFutureSharing?: boolean },
+  scope: { orgId: string; userId?: string; spaceId?: string; stopSharingAllSpaces?: boolean },
   alsoLockSchedules?: SQL,
 ): Promise<ConnectionsUnshared> {
   const c = integrationConnections;
@@ -442,26 +442,26 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
       scope.spaceId === undefined ? undefined : sharedInto(scope.spaceId),
     ),
   );
-  const stopFuture = scope.stopFutureSharing
+  const stopAllSpaces = scope.stopSharingAllSpaces
     ? and(
         eq(c.orgId, scope.orgId),
         scope.userId ? eq(c.userId, scope.userId) : undefined,
-        eq(c.shareNewSpaces, true),
+        eq(c.shareAllSpaces, true),
       )
     : undefined;
   const locked =
-    lost.length === 0 && !stopFuture
+    lost.length === 0 && !stopAllSpaces
       ? []
       : await tx
           .select({
             id: c.id,
             userId: c.userId,
             endUserId: c.endUserId,
-            shareNewSpaces: c.shareNewSpaces,
+            shareAllSpaces: c.shareAllSpaces,
           })
           .from(c)
           .where(
-            or(inArray(c.id, [...new Set(lost.map((share) => share.connectionId))]), stopFuture),
+            or(inArray(c.id, [...new Set(lost.map((share) => share.connectionId))]), stopAllSpaces),
           )
           .orderBy(asc(c.id))
           .for("update");
@@ -475,10 +475,10 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
       .delete(s)
       .where(and(eq(s.connectionId, row.id), inArray(s.spaceId, targets)))
       .returning({ spaceId: s.spaceId });
-    if (gone.length === 0 && !(scope.stopFutureSharing && row.shareNewSpaces)) continue;
+    if (gone.length === 0 && !(scope.stopSharingAllSpaces && row.shareAllSpaces)) continue;
     await tx
       .update(c)
-      .set({ updatedAt: new Date(), shareNewSpaces: false })
+      .set({ updatedAt: new Date(), shareAllSpaces: false })
       .where(eq(c.id, row.id));
     for (const { spaceId } of gone) withdrawn.push({ connectionId: row.id, spaceId });
   }

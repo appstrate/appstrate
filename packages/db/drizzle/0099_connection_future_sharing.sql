@@ -1,2 +1,0 @@
-ALTER TABLE "integration_connections" ADD COLUMN "share_new_spaces" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-ALTER TABLE "integration_connections" ADD CONSTRAINT "integration_connections_future_share_org_scoped_user" CHECK (NOT share_new_spaces OR (user_id IS NOT NULL AND space_id IS NULL));

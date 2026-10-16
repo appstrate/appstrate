@@ -572,7 +572,7 @@ async function removeMemberInTx(
   // cover the member's schedules too, in the same id-ordered statement.
   const unshared = await unshareConnectionsOfOwnersWithoutAccess(
     tx,
-    { orgId, userId, stopFutureSharing: true },
+    { orgId, userId, stopSharingAllSpaces: true },
     departedSchedules,
   );
   const disabled = await tx
@@ -700,7 +700,7 @@ export async function updateMemberRole(
     const unshared = await unshareConnectionsOfOwnersWithoutAccess(tx, {
       orgId,
       userId: targetUserId,
-      stopFutureSharing: role !== "owner" && role !== "admin",
+      stopSharingAllSpaces: role !== "owner" && role !== "admin",
     });
     return {
       previousRole: target.role,

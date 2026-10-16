@@ -129,7 +129,7 @@ export interface ConnectionCaller {
   /** Holds `integrations:connect` where the credential acts. */
   canConnect: boolean;
   /** The credential permits org-wide consent; role and ownership are checked per row. */
-  canShareAll?: (orgId: string) => boolean;
+  canShareAllSpaces?: (orgId: string) => boolean;
   /** Holds `integrations:configure` in `spaceId`. */
   governs: boolean;
   /** The caller's permissions in one space of `orgId` (empty outside it). */
@@ -179,11 +179,11 @@ export function connectionActions(
       actions.push("share");
       if (
         row.spaceId === null &&
-        caller.canShareAll?.(row.orgId) &&
+        caller.canShareAllSpaces?.(row.orgId) &&
         caller.principal.kind === "person" &&
         (orgRole === "owner" || orgRole === "admin")
       )
-        actions.push("share_all");
+        actions.push("share_all_spaces");
     }
     return actions;
   }

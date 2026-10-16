@@ -286,12 +286,12 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   the usage column waits for room. The member-access explanation is visible in the popover.
   Sharing with all team spaces uses an "All spaces" checkbox that includes future team spaces.
   While checked, it hides the individual-space list; unchecking reveals the current selection
-  for editing and stops future sharing. Any effective withdrawal switches the backend to
+  for editing and stops all-spaces sharing. Any effective withdrawal switches the backend to
   specific-space sharing in the same transaction;
   there is no intermediate mode or client-side comparison of space lists. Only an organization
   administrator owning an org-scoped connection may consent; personal spaces stay private.
   Sharing targets only team spaces; personal spaces are excluded from the picker and refused by
-  the backend. Stopping future sharing keeps existing shares.
+  the backend. Stopping all-spaces sharing keeps existing shares.
 
 ## 5. Choosing a value
 

@@ -47,7 +47,7 @@ export const CONNECTION_SCOPES = ["org", "space"] as const;
 export type ConnectionScope = (typeof CONNECTION_SCOPES)[number];
 
 /** Actions a caller may take on a connection, listed per row on the list surfaces. */
-export const CONNECTION_ACTIONS = ["rename", "share", "share_all", "unshare_here"] as const;
+export const CONNECTION_ACTIONS = ["rename", "share", "share_all_spaces", "unshare_here"] as const;
 export type ConnectionAction = (typeof CONNECTION_ACTIONS)[number];
 
 /** Where a connection reaches, as one reader sees it. */
@@ -60,7 +60,7 @@ export interface ConnectionReach {
   /** The owner only (absent otherwise): every space it is shared into, within its credential's binding. */
   shared_space_ids?: string[];
   /** Owner only: shared with every current team space and automatically with future ones. */
-  share_new_spaces?: boolean;
+  share_all_spaces?: boolean;
   /** The owner only (absent otherwise): where an org-scoped row was connected from, within that binding. */
   origin_space_id?: string | null;
 }

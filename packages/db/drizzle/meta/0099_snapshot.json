@@ -5406,8 +5406,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "share_new_spaces": {
-          "name": "share_new_spaces",
+        "share_all_spaces": {
+          "name": "share_all_spaces",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
@@ -5691,9 +5691,9 @@
           "name": "integration_connections_origin_is_org",
           "value": "origin_space_id IS NULL OR space_id IS NULL"
         },
-        "integration_connections_future_share_org_scoped_user": {
-          "name": "integration_connections_future_share_org_scoped_user",
-          "value": "NOT share_new_spaces OR (user_id IS NOT NULL AND space_id IS NULL)"
+        "integration_connections_share_all_spaces_org_scoped_user": {
+          "name": "integration_connections_share_all_spaces_org_scoped_user",
+          "value": "NOT share_all_spaces OR (user_id IS NOT NULL AND space_id IS NULL)"
         },
         "integration_connections_space_shares_own": {
           "name": "integration_connections_space_shares_own",

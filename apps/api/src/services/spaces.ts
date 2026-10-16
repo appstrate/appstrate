@@ -45,8 +45,8 @@ import {
 
 import {
   shareConnectionsWithNewSpace,
-  recordFutureConnectionShares,
-} from "./connection-future-shares.ts";
+  recordAllSpacesShares,
+} from "./connection-all-spaces-shares.ts";
 
 type SpaceRow = InferSelectModel<typeof spaces>;
 
@@ -139,7 +139,7 @@ export async function createSpace(
     const added = await shareConnectionsWithNewSpace(tx, orgId, id);
     return { space: space!, added };
   });
-  await recordFutureConnectionShares(orgId, id, result.added);
+  await recordAllSpacesShares(orgId, id, result.added);
   return result.space;
 }
 
@@ -718,7 +718,7 @@ export async function convertPersonalSpaceToTeam(
     const added = await shareConnectionsWithNewSpace(tx, orgId, spaceId);
     return { space: space!, added };
   });
-  await recordFutureConnectionShares(orgId, spaceId, result.added);
+  await recordAllSpacesShares(orgId, spaceId, result.added);
   return result.space;
 }
 

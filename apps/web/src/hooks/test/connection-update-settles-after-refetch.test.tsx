@@ -19,7 +19,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { $api, client } = await import("../../api/client.ts");
 const { render } = await import("../../test/render.tsx");
-const { useConnectionShare, useConnectionFutureSharing, useRenameIntegrationConnection } =
+const { useConnectionShare, useConnectionShareAllSpaces, useRenameIntegrationConnection } =
   await import("../use-integrations.ts");
 const { useRenameMeConnection } = await import("../use-me-connections.ts");
 
@@ -121,12 +121,12 @@ describe("connection update — settles after the list refetch", () => {
       route: "/api/integrations/{packageId}/connections/{connectionId}/shares",
     },
   ]) {
-    it("saves future sharing through " + policy.route + " and awaits its refetch", async () => {
+    it("saves all-spaces sharing through " + policy.route + " and awaits its refetch", async () => {
       const qc = new QueryClient();
       const list = slowList(qc, policy.key);
       const put = spyOn(client, "PUT");
       put.mockClear();
-      const done = capture(() => useConnectionFutureSharing(policy.packageId), qc).mutateAsync({
+      const done = capture(() => useConnectionShareAllSpaces(policy.packageId), qc).mutateAsync({
         connectionId: "conn_1",
         enabled: true,
       });
@@ -139,7 +139,7 @@ describe("connection update — settles after the list refetch", () => {
             connectionId: "conn_1",
           },
         },
-        body: { include_future_spaces: true },
+        body: { share_all_spaces: true },
       });
       list.release();
       await done;

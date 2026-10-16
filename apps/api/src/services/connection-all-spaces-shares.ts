@@ -4,27 +4,19 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import {
   integrationConnections as c,
   integrationConnectionShares as shares,
-  organizationMembers,
 } from "@appstrate/db/schema";
 import type { Tx } from "../lib/db-helpers.ts";
 import { recordAudit } from "./audit.ts";
 
-/** Caller holds `lockOrganizationRow`. Only team-space creation/conversion enters this path. */
+/**
+ * Caller holds `lockOrganizationRow`. Only team-space creation/conversion enters this path. A set
+ * flag means its owner administers the org: demotion and departure clear it under the same lock.
+ */
 export async function shareConnectionsWithNewSpace(tx: Tx, orgId: string, spaceId: string) {
   const rows = await tx
     .select({ id: c.id })
     .from(c)
-    .innerJoin(
-      organizationMembers,
-      and(eq(organizationMembers.orgId, c.orgId), eq(organizationMembers.userId, c.userId)),
-    )
-    .where(
-      and(
-        eq(c.orgId, orgId),
-        eq(c.shareNewSpaces, true),
-        inArray(organizationMembers.role, ["owner", "admin"]),
-      ),
-    )
+    .where(and(eq(c.orgId, orgId), eq(c.shareAllSpaces, true)))
     .orderBy(asc(c.id))
     .for("update", { of: c });
   if (rows.length === 0) return [];
@@ -47,7 +39,7 @@ export async function shareConnectionsWithNewSpace(tx: Tx, orgId: string, spaceI
 }
 
 /** After commit, record which consent opened the new team space. */
-export async function recordFutureConnectionShares(orgId: string, spaceId: string, ids: string[]) {
+export async function recordAllSpacesShares(orgId: string, spaceId: string, ids: string[]) {
   for (const id of ids)
     await recordAudit({
       orgId,
@@ -56,6 +48,6 @@ export async function recordFutureConnectionShares(orgId: string, spaceId: strin
       action: "integration.connection.share_added",
       resourceType: "integration_connection",
       resourceId: id,
-      after: { spaceId, reason: "future_space" },
+      after: { spaceId, reason: "all_spaces" },
     });
 }

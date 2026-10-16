@@ -1,7 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0
--- Run once with the app stopped, before starting the release carrying drizzle 0099.
+-- Run once after deploying the release carrying drizzle 0099; it refuses new personal shares,
+-- so the app may keep running.
 -- Back up the database first. psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f this-file.sql
--- For PGlite, execute this batch on the explicitly named PGLITE_DATA_DIR, app stopped.
+-- For PGlite (single process), execute this batch on the PGLITE_DATA_DIR with the app stopped.
 -- Re-running changes nothing.
 BEGIN;
 SET LOCAL lock_timeout = '5s';

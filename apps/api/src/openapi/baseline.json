@@ -6048,7 +6048,7 @@
                                   },
                                   "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                                 },
-                                "share_new_spaces": {
+                                "share_all_spaces": {
                                   "type": "boolean",
                                   "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
                                 },
@@ -6060,7 +6060,7 @@
                                   "type": "array",
                                   "items": {
                                     "type": "string",
-                                    "enum": ["rename", "share", "share_all", "unshare_here"]
+                                    "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                                   },
                                   "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                                 },
@@ -7134,7 +7134,7 @@
                       },
                       "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                     },
-                    "share_new_spaces": {
+                    "share_all_spaces": {
                       "type": "boolean",
                       "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
                     },
@@ -7146,7 +7146,7 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["rename", "share", "share_all", "unshare_here"]
+                        "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                       },
                       "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
@@ -7801,7 +7801,7 @@
                           },
                           "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                         },
-                        "share_new_spaces": {
+                        "share_all_spaces": {
                           "type": "boolean",
                           "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
                         },
@@ -7813,7 +7813,7 @@
                           "type": "array",
                           "items": {
                             "type": "string",
-                            "enum": ["rename", "share", "share_all", "unshare_here"]
+                            "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                           },
                           "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                         },
@@ -8093,7 +8093,7 @@
                             },
                             "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                           },
-                          "share_new_spaces": {
+                          "share_all_spaces": {
                             "type": "boolean",
                             "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
                           },
@@ -8105,7 +8105,7 @@
                             "type": "array",
                             "items": {
                               "type": "string",
-                              "enum": ["rename", "share", "share_all", "unshare_here"]
+                              "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                             },
                             "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                           },
@@ -8321,7 +8321,7 @@
                       },
                       "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                     },
-                    "share_new_spaces": {
+                    "share_all_spaces": {
                       "type": "boolean",
                       "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
                     },
@@ -8333,7 +8333,7 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["rename", "share", "share_all", "unshare_here"]
+                        "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                       },
                       "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
@@ -8412,7 +8412,7 @@
     },
     "/api/integrations/{packageId}/connections/{connectionId}/shares": {
       "put": {
-        "description": "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False selects specific-space sharing and keeps existing shares. Every effective individual withdrawal also selects specific-space sharing atomically, through the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
+        "description": "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With share_all_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False selects specific-space sharing and keeps existing shares. Every effective individual withdrawal also selects specific-space sharing atomically, through the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
         "requestBody": {
           "required": true,
           "content": {
@@ -8420,9 +8420,9 @@
               "schema": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["include_future_spaces"],
+                "required": ["share_all_spaces"],
                 "properties": {
-                  "include_future_spaces": {
+                  "share_all_spaces": {
                     "type": "boolean"
                   }
                 }
@@ -8432,7 +8432,7 @@
         },
         "responses": {
           "204": {
-            "description": "Future-space sharing policy saved",
+            "description": "All-spaces sharing policy saved",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8452,7 +8452,7 @@
             "$ref": "#/components/responses/NotFound"
           }
         },
-        "operationId": "setIntegrationConnectionFutureSharing",
+        "operationId": "setIntegrationConnectionShareAllSpaces",
         "tags": ["Integrations"],
         "summary": "Share a connection with current and future team spaces",
         "parameters": [
@@ -8577,7 +8577,7 @@
         "operationId": "unshareIntegrationConnection",
         "tags": ["Integrations"],
         "summary": "Withdraw one of the caller's connections from a space",
-        "description": "Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. An effective withdrawal atomically selects specific-space mode by clearing share_new_spaces; a no-op preserves the current mode. A withdrawal and a concurrent team-space creation are ordered on the connection row. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.",
+        "description": "Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. An effective withdrawal atomically selects specific-space mode by clearing share_all_spaces; a no-op preserves the current mode. A withdrawal and a concurrent team-space creation are ordered on the connection row. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8864,7 +8864,7 @@
                                   },
                                   "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                                 },
-                                "share_new_spaces": {
+                                "share_all_spaces": {
                                   "type": "boolean",
                                   "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
                                 },
@@ -8876,7 +8876,7 @@
                                   "type": "array",
                                   "items": {
                                     "type": "string",
-                                    "enum": ["rename", "share", "share_all", "unshare_here"]
+                                    "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                                   },
                                   "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                                 },
@@ -14910,7 +14910,7 @@
                                   "enum": ["org", "space"],
                                   "description": "Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org. `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space."
                                 },
-                                "share_new_spaces": {
+                                "share_all_spaces": {
                                   "type": "boolean",
                                   "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
                                 },
@@ -14934,7 +14934,7 @@
                                   "type": "array",
                                   "items": {
                                     "type": "string",
-                                    "enum": ["rename", "share", "share_all", "unshare_here"]
+                                    "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                                   },
                                   "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space)."
                                 },
@@ -15033,7 +15033,7 @@
     },
     "/api/me/connections/{connectionId}/shares": {
       "put": {
-        "description": "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False selects specific-space sharing and keeps existing shares. Every effective individual withdrawal also selects specific-space sharing atomically, through the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
+        "description": "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With share_all_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False selects specific-space sharing and keeps existing shares. Every effective individual withdrawal also selects specific-space sharing atomically, through the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
         "requestBody": {
           "required": true,
           "content": {
@@ -15041,9 +15041,9 @@
               "schema": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["include_future_spaces"],
+                "required": ["share_all_spaces"],
                 "properties": {
-                  "include_future_spaces": {
+                  "share_all_spaces": {
                     "type": "boolean"
                   }
                 }
@@ -15053,7 +15053,7 @@
         },
         "responses": {
           "204": {
-            "description": "Future-space sharing policy saved",
+            "description": "All-spaces sharing policy saved",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -15073,7 +15073,7 @@
             "$ref": "#/components/responses/NotFound"
           }
         },
-        "operationId": "setMeConnectionFutureSharing",
+        "operationId": "setMeConnectionShareAllSpaces",
         "tags": ["Me"],
         "summary": "Share an owned connection with current and future team spaces",
         "parameters": [
@@ -15167,7 +15167,7 @@
         "operationId": "unshareMyConnection",
         "tags": ["Profile"],
         "summary": "Withdraw one of the caller's connections from a space",
-        "description": "The owner's door to the withdrawal `DELETE /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` makes, wherever the connection lives. With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) are reachable. Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. An effective withdrawal atomically selects specific-space mode by clearing share_new_spaces; a no-op preserves the current mode. A withdrawal and a concurrent team-space creation are ordered on the connection row. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.",
+        "description": "The owner's door to the withdrawal `DELETE /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` makes, wherever the connection lives. With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) are reachable. Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. An effective withdrawal atomically selects specific-space mode by clearing share_all_spaces; a no-op preserves the current mode. A withdrawal and a concurrent team-space creation are ordered on the connection row. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.",
         "parameters": [
           {
             "name": "connectionId",
@@ -15738,7 +15738,7 @@
                       },
                       "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                     },
-                    "share_new_spaces": {
+                    "share_all_spaces": {
                       "type": "boolean",
                       "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
                     },
@@ -15750,7 +15750,7 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["rename", "share", "share_all", "unshare_here"]
+                        "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                       },
                       "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
@@ -34632,7 +34632,7 @@
                   },
                   "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                 },
-                "share_new_spaces": {
+                "share_all_spaces": {
                   "type": "boolean",
                   "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
                 },

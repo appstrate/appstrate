@@ -38,7 +38,7 @@ import {
 import type { Permission } from "../../../src/lib/permissions.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 import {
-  setConnectionFutureSharing,
+  setConnectionShareAllSpaces,
   shareConnection,
   unshareConnection,
 } from "../../../src/services/connection-shares.ts";
@@ -131,7 +131,7 @@ describe("connection shares", () => {
     testCaller(
       { kind: "person", actor: person(ctx.user.id) },
       {
-        canShareAll: () => true,
+        canShareAllSpaces: () => true,
         permissionsIn: async () => GOVERN,
       },
     );
@@ -143,13 +143,13 @@ describe("connection shares", () => {
     const response = await app.request("/api/me/connections/" + id + "/shares", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ include_future_spaces: true }),
+      body: JSON.stringify({ share_all_spaces: true }),
     });
     expect(response.status).toBe(204);
     expect((await sharesOf(id)).map((s) => s.spaceId).sort()).toEqual([here, other].sort());
     const future = await createSpace(ctx.orgId, { name: "Future team" }, ctx.user.id);
     expect((await sharesOf(id)).some((s) => s.spaceId === future.id)).toBe(true);
-    // Existing unshare/pin/schedule behavior stays the authority, also with future sharing on.
+    // Existing unshare/pin/schedule behavior stays the authority, also with all-spaces sharing on.
     await unshareConnection({ ...input, spaceId: other });
     const specificFuture = await createSpace(ctx.orgId, { name: "Another team" });
     expect((await sharesOf(id)).some((s) => s.spaceId === other)).toBe(false);
@@ -158,9 +158,9 @@ describe("connection shares", () => {
       .select()
       .from(integrationConnections)
       .where(eq(integrationConnections.id, id));
-    expect(specific!.shareNewSpaces).toBe(false);
+    expect(specific!.shareAllSpaces).toBe(false);
     const before = await sharesOf(id);
-    await setConnectionFutureSharing({ ...input, enabled: false });
+    await setConnectionShareAllSpaces({ ...input, enabled: false });
     const excludedFuture = await createSpace(ctx.orgId, { name: "Not auto-shared" });
     expect(await sharesOf(id)).toEqual(before);
     expect((await sharesOf(id)).some((s) => s.spaceId === excludedFuture.id)).toBe(false);
@@ -174,10 +174,10 @@ describe("connection shares", () => {
       .where(
         and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, memberId)),
       );
-    await setConnectionFutureSharing({
+    await setConnectionShareAllSpaces({
       connectionId: id,
       integrationId: INTEGRATION,
-      caller: { ...owner(GOVERN), canShareAll: () => true },
+      caller: { ...owner(GOVERN), canShareAllSpaces: () => true },
       enabled: true,
     });
     const { connection, removed } = await unshareConnection({
@@ -187,7 +187,7 @@ describe("connection shares", () => {
       spaceId: here,
     });
     expect(removed).toBe(true);
-    expect(connection.shareNewSpaces).toBe(false);
+    expect(connection.shareAllSpaces).toBe(false);
     expect((await sharesOf(id)).map((s) => s.spaceId)).toEqual([other]);
     const future = await createSpace(ctx.orgId, { name: "Unselected future" });
     expect((await sharesOf(id)).some((s) => s.spaceId === future.id)).toBe(false);
@@ -221,7 +221,7 @@ describe("connection shares", () => {
   it("a withdrawal with nothing to remove preserves all-space mode", async () => {
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
     const input = { connectionId: id, integrationId: INTEGRATION, caller: orgOwner() };
-    await setConnectionFutureSharing({ ...input, enabled: true });
+    await setConnectionShareAllSpaces({ ...input, enabled: true });
     const personal = await seedSpace({
       orgId: ctx.orgId,
       ownerUserId: ctx.user.id,
@@ -232,18 +232,18 @@ describe("connection shares", () => {
     )[0]!;
     const result = await unshareConnection({ ...input, spaceId: personal.id });
     expect(result.removed).toBe(false);
-    expect(result.connection.shareNewSpaces).toBe(true);
+    expect(result.connection.shareAllSpaces).toBe(true);
     expect(result.connection.updatedAt).toEqual(before.updatedAt);
   });
 
   it("explicitly re-enabling all-space sharing restores individual withdrawals", async () => {
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
     const input = { connectionId: id, integrationId: INTEGRATION, caller: orgOwner() };
-    await setConnectionFutureSharing({ ...input, enabled: true });
+    await setConnectionShareAllSpaces({ ...input, enabled: true });
     await unshareConnection({ ...input, spaceId: other });
-    await setConnectionFutureSharing({ ...input, enabled: false });
+    await setConnectionShareAllSpaces({ ...input, enabled: false });
     expect((await sharesOf(id)).map((s) => s.spaceId)).toEqual([here]);
-    await setConnectionFutureSharing({ ...input, enabled: true });
+    await setConnectionShareAllSpaces({ ...input, enabled: true });
     expect((await sharesOf(id)).map((s) => s.spaceId).sort()).toEqual([here, other].sort());
   });
 
@@ -254,7 +254,7 @@ describe("connection shares", () => {
       app.request(`/api/me/connections/${id}/shares`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ include_future_spaces: enabled }),
+        body: JSON.stringify({ share_all_spaces: enabled }),
       });
     for (const enabled of [true, false]) {
       expect((await put(enabled)).status).toBe(204);
@@ -295,7 +295,7 @@ describe("connection shares", () => {
         const response = await app.request(path, {
           method: "PUT",
           headers,
-          body: JSON.stringify({ include_future_spaces: true }),
+          body: JSON.stringify({ share_all_spaces: true }),
         });
         expect(response.status).toBe(403);
         expect(response.headers.get("X-View-As-Active")).toBe("1");
@@ -305,7 +305,8 @@ describe("connection shares", () => {
         expect(response.status).toBe(
           role === "guest" && path !== "/api/me/connections" ? 403 : 200,
         );
-        expect(await response.text()).not.toContain('"share_all"');
+        // The action, not the `share_all_spaces` field every owner row carries.
+        expect(await response.text()).not.toMatch(/"allowed_actions":\[[^\]]*"share_all_spaces"/);
       }
     }
     expect(await sharesOf(id)).toEqual([]);
@@ -313,11 +314,11 @@ describe("connection shares", () => {
       .select()
       .from(integrationConnections)
       .where(eq(integrationConnections.id, id));
-    expect(row!.shareNewSpaces).toBe(false);
+    expect(row!.shareAllSpaces).toBe(false);
     const response = await app.request(`/api/me/connections/${id}/shares`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ include_future_spaces: true }),
+      body: JSON.stringify({ share_all_spaces: true }),
     });
     expect(response.status).toBe(204);
   });
@@ -349,10 +350,10 @@ describe("connection shares", () => {
       .parse(await response.json());
     const rows = body.data.flatMap((group) => group.connections);
     expect(rows.find((row) => row.connection_id === id)!.allowed_actions).not.toContain(
-      "share_all",
+      "share_all_spaces",
     );
     expect(rows.find((row) => row.connection_id === otherId)!.allowed_actions).toContain(
-      "share_all",
+      "share_all_spaces",
     );
   });
 
@@ -369,13 +370,13 @@ describe("connection shares", () => {
             orgId: ctx.orgId,
             spaceId: null,
           },
-          { canShareAll: () => true },
+          { canShareAllSpaces: () => true },
         ),
         403,
       ],
     ] as const) {
       await expect(
-        setConnectionFutureSharing({
+        setConnectionShareAllSpaces({
           connectionId: id,
           integrationId: INTEGRATION,
           caller,
@@ -385,7 +386,7 @@ describe("connection shares", () => {
     }
     const scoped = await seedConnection({ spaceId: here, userId: ctx.user.id });
     await expect(
-      setConnectionFutureSharing({
+      setConnectionShareAllSpaces({
         connectionId: scoped,
         integrationId: INTEGRATION,
         caller: orgOwner(),
@@ -403,7 +404,7 @@ describe("connection shares", () => {
       visibility: "private",
     });
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: ctx.user.id });
-    await setConnectionFutureSharing({
+    await setConnectionShareAllSpaces({
       connectionId: id,
       integrationId: INTEGRATION,
       caller: orgOwner(),
@@ -417,7 +418,7 @@ describe("connection shares", () => {
     ).toBe(false);
   });
 
-  it("revokes future sharing when the owner loses org administration", async () => {
+  it("revokes all-spaces sharing when the owner loses org administration", async () => {
     await db
       .update(organizationMembers)
       .set({ role: "admin" })
@@ -425,10 +426,10 @@ describe("connection shares", () => {
         and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, memberId)),
       );
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
-    await setConnectionFutureSharing({
+    await setConnectionShareAllSpaces({
       connectionId: id,
       integrationId: INTEGRATION,
-      caller: { ...owner(GOVERN), canShareAll: () => true },
+      caller: { ...owner(GOVERN), canShareAllSpaces: () => true },
       enabled: true,
     });
     await updateMemberRole(ctx.orgId, memberId, "member", {
@@ -439,12 +440,12 @@ describe("connection shares", () => {
       .select()
       .from(integrationConnections)
       .where(eq(integrationConnections.id, id));
-    expect(row!.shareNewSpaces).toBe(false);
+    expect(row!.shareAllSpaces).toBe(false);
     const future = await createSpace(ctx.orgId, { name: "After demotion" });
     expect((await sharesOf(id)).some((s) => s.spaceId === future.id)).toBe(false);
   });
 
-  it("clears future consent on departure so reinviting an admin cannot silently restore it", async () => {
+  it("clears all-spaces consent on departure so reinviting an admin cannot silently restore it", async () => {
     await db
       .update(organizationMembers)
       .set({ role: "admin" })
@@ -452,10 +453,10 @@ describe("connection shares", () => {
         and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, memberId)),
       );
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
-    await setConnectionFutureSharing({
+    await setConnectionShareAllSpaces({
       connectionId: id,
       integrationId: INTEGRATION,
-      caller: { ...owner(GOVERN), canShareAll: () => true },
+      caller: { ...owner(GOVERN), canShareAllSpaces: () => true },
       enabled: true,
     });
     await removeMember(ctx.orgId, memberId, { userId: ctx.user.id, firstPartySession: true });
@@ -465,7 +466,7 @@ describe("connection shares", () => {
       .select()
       .from(integrationConnections)
       .where(eq(integrationConnections.id, id));
-    expect(row!.shareNewSpaces).toBe(false);
+    expect(row!.shareAllSpaces).toBe(false);
     expect(await sharesOf(id)).toEqual([]);
   });
 
@@ -600,7 +601,7 @@ describe("connection shares", () => {
     });
     await db
       .update(integrationConnections)
-      .set({ shareNewSpaces: true })
+      .set({ shareAllSpaces: true })
       .where(eq(integrationConnections.id, id));
     await seedShare(id, other);
     await expect(
@@ -616,7 +617,7 @@ describe("connection shares", () => {
       .select()
       .from(integrationConnections)
       .where(eq(integrationConnections.id, id));
-    expect(row!.shareNewSpaces).toBe(true);
+    expect(row!.shareAllSpaces).toBe(true);
   });
 
   it("withdrawing a share that does not exist reports removed: false", async () => {

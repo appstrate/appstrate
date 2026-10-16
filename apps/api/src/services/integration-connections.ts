@@ -3910,7 +3910,7 @@ export function connectionViewOf(
 export function connectionReach(
   row: Pick<
     typeof integrationConnections.$inferSelect,
-    "spaceId" | "originSpaceId" | "shareNewSpaces"
+    "spaceId" | "originSpaceId" | "shareAllSpaces"
   >,
   view: ConnectionView,
 ): ConnectionReach {
@@ -3924,7 +3924,7 @@ export function connectionReach(
     ...(view.owner
       ? {
           shared_space_ids: seen(view.shares),
-          ...(bound === null ? { share_new_spaces: row.shareNewSpaces } : {}),
+          ...(bound === null ? { share_all_spaces: row.shareAllSpaces } : {}),
           origin_space_id: seen([row.originSpaceId])[0] ?? null,
         }
       : {}),

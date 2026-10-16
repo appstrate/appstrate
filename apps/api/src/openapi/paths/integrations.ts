@@ -15,9 +15,9 @@ import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
  * client routes (`paths/org-integrations.ts`) reuse the exported shapes.
  */
 
-export const connectionFutureSharingOperation = {
+export const connectionShareAllSpacesOperation = {
   description:
-    "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With include_future_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False selects specific-space sharing and keeps existing shares. Every effective individual withdrawal also selects specific-space sharing atomically, through the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
+    "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With share_all_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False selects specific-space sharing and keeps existing shares. Every effective individual withdrawal also selects specific-space sharing atomically, through the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
   requestBody: {
     required: true,
     content: {
@@ -25,14 +25,14 @@ export const connectionFutureSharingOperation = {
         schema: {
           type: "object",
           additionalProperties: false,
-          required: ["include_future_spaces"],
-          properties: { include_future_spaces: { type: "boolean" } },
+          required: ["share_all_spaces"],
+          properties: { share_all_spaces: { type: "boolean" } },
         },
       },
     },
   },
   responses: {
-    "204": { description: "Future-space sharing policy saved", headers: STD_RESPONSE_HEADERS },
+    "204": { description: "All-spaces sharing policy saved", headers: STD_RESPONSE_HEADERS },
     "400": { $ref: "#/components/responses/ValidationError" },
     "403": { $ref: "#/components/responses/Forbidden" },
     "404": { $ref: "#/components/responses/NotFound" },
@@ -254,7 +254,7 @@ export const sharedHereSchema = {
 } as const;
 
 /** The owner only, when the credential is not bound to one space. */
-export const shareNewSpacesSchema = {
+export const shareAllSpacesSchema = {
   type: "boolean",
   description:
     "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically.",
@@ -343,7 +343,7 @@ export const integrationConnectionSchema = {
     spaceId: spaceIdSchema,
     shared_here: sharedHereSchema,
     shared_space_ids: sharedSpaceIdsSchema,
-    share_new_spaces: shareNewSpacesSchema,
+    share_all_spaces: shareAllSpacesSchema,
     origin_space_id: originSpaceIdSchema,
     allowed_actions: {
       ...connectionActionsSchema,
@@ -788,7 +788,7 @@ const connectionSharePutDescription =
   "Shares the connection into `spaceId`. Owner only. The target must be a team space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any team space of its org, a space-scoped one only into its own team space. Personal spaces are refused. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.";
 
 const connectionShareDeleteDescription =
-  "Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. An effective withdrawal atomically selects specific-space mode by clearing share_new_spaces; a no-op preserves the current mode. A withdrawal and a concurrent team-space creation are ordered on the connection row. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.";
+  "Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. An effective withdrawal atomically selects specific-space mode by clearing share_all_spaces; a no-op preserves the current mode. A withdrawal and a concurrent team-space creation are ordered on the connection row. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.";
 
 export const connectionSharePutConflicts = {
   description:
@@ -1648,8 +1648,8 @@ export const integrationsPaths = {
   },
   "/api/integrations/{packageId}/connections/{connectionId}/shares": {
     put: {
-      ...connectionFutureSharingOperation,
-      operationId: "setIntegrationConnectionFutureSharing",
+      ...connectionShareAllSpacesOperation,
+      operationId: "setIntegrationConnectionShareAllSpaces",
       tags: ["Integrations"],
       summary: "Share a connection with current and future team spaces",
       parameters: [

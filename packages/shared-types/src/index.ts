@@ -515,7 +515,7 @@ export interface MeConnectionEntry {
   scope: ConnectionScope;
   /** Spaces whose members may use it. */
   shared_spaces: { id: string; name: string }[];
-  share_new_spaces?: boolean;
+  share_all_spaces?: boolean;
   /** Actions the caller may take on this connection. */
   allowed_actions: ConnectionAction[];
   /** Spaces the caller may share this connection into. */
