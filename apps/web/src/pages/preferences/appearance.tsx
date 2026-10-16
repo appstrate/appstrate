@@ -5,7 +5,6 @@ import { OptionSelect } from "@/components/app-ui/option-select";
 import { useTheme } from "../../stores/theme-store";
 import { useUpdateLanguage } from "../../hooks/use-profile";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
-import { ManualSetting } from "../../components/settings/manual-save";
 import { SaveFeedback } from "../../components/settings/save-feedback";
 
 export function PreferencesAppearancePage() {
@@ -42,23 +41,18 @@ export function PreferencesAppearancePage() {
         }
       >
         {(labelId) => (
-          <ManualSetting
-            value={i18n.language === "en" ? ("en" as const) : ("fr" as const)}
-            onSave={(language) => updateLanguage.mutateAsync({ body: { language } })}
-          >
-            {(value, onChange, pending) => (
-              <OptionSelect
-                value={value}
-                onValueChange={(next) => onChange(next as "fr" | "en")}
-                disabled={pending}
-                aria-labelledby={labelId}
-                options={[
-                  { value: "fr", label: t("preferences.langFr") },
-                  { value: "en", label: t("preferences.langEn") },
-                ]}
-              />
-            )}
-          </ManualSetting>
+          <OptionSelect
+            value={i18n.language}
+            onValueChange={(lng) =>
+              updateLanguage.mutate({ body: { language: lng as "fr" | "en" } })
+            }
+            disabled={updateLanguage.isPending}
+            aria-labelledby={labelId}
+            options={[
+              { value: "fr", label: t("preferences.langFr") },
+              { value: "en", label: t("preferences.langEn") },
+            ]}
+          />
         )}
       </SettingRow>
     </SettingsGroup>

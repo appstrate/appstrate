@@ -20,7 +20,7 @@
  * fill as Studio's, or the two products would not read as one app.
  */
 
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { relativeAge } from "@appstrate/core/format";
@@ -112,23 +112,14 @@ function useNowTick(): number {
  * `t` and `can` arrive as props, not from `useChatHost()`: the shell mounts
  * this list outside `ChatPage`, where the host bag is published.
  */
-export interface RenameGuardProps {
-  dirty: boolean;
-  onSave?: () => Promise<void>;
-}
-
-type RenameGuard = ComponentType<RenameGuardProps>;
-
 export function ChatConversationList({
   activeId,
   t,
   can,
-  RenameGuard,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
-  RenameGuard?: RenameGuard;
 }) {
   const select = useSelectConversation();
   const {
@@ -177,7 +168,6 @@ export function ChatConversationList({
               now={now}
               t={t}
               canWrite={canWrite}
-              RenameGuard={RenameGuard}
             />
           ))}
           {/* A plain button, not a menu row: a menu row closes the phone's
@@ -237,7 +227,6 @@ function ConversationRow({
   now,
   t,
   canWrite,
-  RenameGuard,
 }: {
   session: SessionSummary;
   active: boolean;
@@ -245,7 +234,6 @@ function ConversationRow({
   now: number;
   t: ChatTranslate;
   canWrite: boolean;
-  RenameGuard?: RenameGuard;
 }) {
   const getHeaders = useChatHeaders();
   const select = useSelectConversation();
@@ -276,7 +264,6 @@ function ConversationRow({
           current={session.title ?? ""}
           onDone={() => setEditing(false)}
           onSave={save}
-          RenameGuard={RenameGuard}
         />
       </SidebarMenuItem>
     );
@@ -378,7 +365,6 @@ export function ChatConversationTitle(props: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
-  RenameGuard?: RenameGuard;
 }) {
   return <ConversationTitle key={props.activeId} {...props} />;
 }
@@ -387,12 +373,10 @@ function ConversationTitle({
   activeId,
   t,
   can,
-  RenameGuard,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
-  RenameGuard?: RenameGuard;
 }) {
   const { editing, setEditing, save } = useInlineRename(activeId ?? "");
   const { data: sessions } = useSessions();
@@ -415,7 +399,6 @@ function ConversationTitle({
         current={session.title ?? ""}
         onDone={() => setEditing(false)}
         onSave={save}
-        RenameGuard={RenameGuard}
       />
     );
   }
@@ -438,12 +421,10 @@ function RenameInput({
   onDone,
   onSave,
   t,
-  RenameGuard,
 }: {
   current: string;
   onDone: () => void;
   onSave: (title: string) => Promise<void>;
-  RenameGuard?: RenameGuard;
   t: ChatTranslate;
 }) {
   const [value, setValue] = useState(current);
@@ -490,12 +471,6 @@ function RenameInput({
       <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={onDone}>
         {t("common:btn.cancel")}
       </Button>
-      {RenameGuard && (
-        <RenameGuard
-          dirty={value !== current || saving}
-          onSave={!saving && next && next !== current ? finish : undefined}
-        />
-      )}
       {failed && (
         <p role="alert" className="text-destructive w-full text-xs">
           {t("common:saveFeedback.error")}

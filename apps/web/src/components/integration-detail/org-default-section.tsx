@@ -54,8 +54,6 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
     draft.set({ connection_ids: nextIds, mode: nextMode });
   const save = async () => {
     const sent = draft.value;
-    if (sent.mode !== "choice" && connectionIds.length === 0)
-      throw new Error("connection_required");
     if (sent.mode !== "choice" && sent.connection_ids.length > 0) {
       await upsert.mutateAsync({
         params: { path: { packageId } },

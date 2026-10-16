@@ -6,12 +6,20 @@ import { leavesEditor, type EditorPlace } from "../lib/editor-place";
 
 export interface UnsavedBlocker {
   state: "blocked" | "unblocked";
+  /** Other forms are dirty too: leaving discards them all, so "save and leave" is not offered. */
+  othersDirty: boolean;
   proceed: () => void;
   reset: () => void;
 }
 
 export const EditorPlaceContext = createContext<EditorPlace>(() => "");
-type PendingNavigation = { to: string; replace: boolean; state: unknown; action?: () => void };
+type PendingNavigation = {
+  to: string;
+  replace: boolean;
+  state: unknown;
+  action?: () => void;
+  othersDirty?: boolean;
+};
 interface Guard {
   current: () => {
     path: string;
@@ -23,42 +31,32 @@ interface Guard {
   block: (pending: PendingNavigation) => void;
 }
 const guards = new Map<symbol, Guard>();
-let approvedDestination: string | null = null;
-const approvedGuards = new Set<symbol>();
-/** A leave confirmation applies to one destination and one form, never a later navigation. */
-export const approvals = {
-  select(target: string) {
-    if (approvedDestination !== target) {
-      approvedGuards.clear();
-      approvedDestination = target;
-    }
-  },
-  approve(id: symbol, target: string) {
-    approvals.select(target);
-    approvedGuards.add(id);
-  },
-  has(id: symbol, target: string) {
-    approvals.select(target);
-    return approvedGuards.has(id);
-  },
-  clear() {
-    approvedDestination = null;
-    approvedGuards.clear();
-  },
-};
+/** The destination the user agreed to leave for: one decision covers every dirty form. */
+let approved: string | null = null;
 let installed = false;
 let changingScope = false;
+const SCOPE_CHANGE = "\0scope-change";
+
+const isDirty = (guard: Guard) => {
+  const state = guard.current();
+  return state.dirty && !state.skip;
+};
+
+/** Ask the first dirty form; it tells whether others would be discarded with it. */
+function block(guard: Guard, pending: PendingNavigation) {
+  guard.block({ ...pending, othersDirty: [...guards.values()].filter(isDirty).length > 1 });
+}
 
 /** Store scope changes can unmount editors without changing the URL. Guard before mutating stores. */
-export function requestScopeChange(key: string, action: () => void): void {
-  for (const [id, guard] of guards) {
-    const state = guard.current();
-    if (state.dirty && !state.skip && !approvals.has(id, key)) {
-      guard.block({
-        to: key,
+export function requestScopeChange(action: () => void): void {
+  if (approved !== SCOPE_CHANGE) {
+    const guard = [...guards.values()].find(isDirty);
+    if (guard) {
+      block(guard, {
+        to: SCOPE_CHANGE,
         replace: false,
         state: null,
-        action: () => requestScopeChange(key, action),
+        action: () => requestScopeChange(action),
       });
       return;
     }
@@ -68,7 +66,7 @@ export function requestScopeChange(key: string, action: () => void): void {
     action();
   } finally {
     changingScope = false;
-    approvals.clear();
+    approved = null;
   }
 }
 
@@ -92,18 +90,9 @@ export function installUnsavedChangesGuard() {
   const push = history.pushState.bind(history);
   const replace = history.replaceState.bind(history);
   const findGuard = (from: URL, to: URL) => {
-    if (changingScope) return null;
-    const target = `${to.pathname}${to.search}${to.hash}`;
-    for (const [id, guard] of guards) {
-      const current = guard.current();
-      if (
-        current.dirty &&
-        !current.skip &&
-        !approvals.has(id, target) &&
-        leavesEditor(from, to, current.place)
-      ) {
-        return { id, guard };
-      }
+    if (changingScope || approved === `${to.pathname}${to.search}${to.hash}`) return null;
+    for (const guard of guards.values()) {
+      if (isDirty(guard) && leavesEditor(from, to, guard.current().place)) return guard;
     }
     return null;
   };
@@ -115,7 +104,7 @@ export function installUnsavedChangesGuard() {
         const to = new URL(url.toString(), from);
         const blocked = findGuard(from, to);
         if (blocked) {
-          blocked.guard.block({
+          block(blocked, {
             to: `${to.pathname}${to.search}${to.hash}`,
             replace: replacing,
             state: data?.usr ?? null,
@@ -123,7 +112,7 @@ export function installUnsavedChangesGuard() {
           return;
         }
       }
-      approvals.clear();
+      approved = null;
       original(data, unused, url);
     };
   history.pushState = patch(push, false);
@@ -142,20 +131,14 @@ export function installUnsavedChangesGuard() {
       );
       if (target) {
         event.stopImmediatePropagation();
-        blocked.guard.block({ to: target, replace: false, state: event.state?.usr ?? null });
+        block(blocked, { to: target, replace: false, state: event.state?.usr ?? null });
       }
       return;
     }
-    approvals.clear();
+    approved = null;
   };
   const unload = (event: BeforeUnloadEvent) => {
-    if (
-      ![...guards.values()].some((guard) => {
-        const state = guard.current();
-        return state.dirty && !state.skip;
-      })
-    )
-      return;
+    if (![...guards.values()].some(isDirty)) return;
     event.preventDefault();
     event.returnValue = "";
   };
@@ -171,7 +154,7 @@ export function useUnsavedChanges(isDirty: boolean): {
   const location = useLocation();
   const place = useContext(EditorPlaceContext);
   const [id] = useState(() => Symbol());
-  const [blocked, setBlocked] = useState(false);
+  const [blocked, setBlocked] = useState<PendingNavigation | null>(null);
   const pending = useRef<PendingNavigation | null>(null);
   const skip = useRef(false);
   const current = useRef<{
@@ -194,12 +177,12 @@ export function useUnsavedChanges(isDirty: boolean): {
       current: () => ({ ...current.current, skip: skip.current }),
       block: (target) => {
         pending.current = target;
-        setBlocked(true);
+        setBlocked(target);
       },
     });
     return () => {
       guards.delete(id);
-      if (guards.size === 0) approvals.clear();
+      if (guards.size === 0) approved = null;
     };
   }, [id, isDirty]);
   const allowNavigation = useCallback((allowed = true) => {
@@ -208,19 +191,24 @@ export function useUnsavedChanges(isDirty: boolean): {
   const proceed = useCallback(() => {
     const target = pending.current;
     pending.current = null;
-    setBlocked(false);
+    setBlocked(null);
     if (!target) return;
-    approvals.approve(id, target.to);
+    approved = target.to;
     if (target.action) target.action();
     else navigate(target.to, { replace: target.replace, state: target.state });
-  }, [id, navigate]);
+  }, [navigate]);
   const reset = useCallback(() => {
     pending.current = null;
-    approvals.clear();
-    setBlocked(false);
+    approved = null;
+    setBlocked(null);
   }, []);
   return {
-    blocker: { state: blocked ? "blocked" : "unblocked", proceed, reset },
+    blocker: {
+      state: blocked ? "blocked" : "unblocked",
+      othersDirty: blocked?.othersDirty ?? false,
+      proceed,
+      reset,
+    },
     allowNavigation,
   };
 }

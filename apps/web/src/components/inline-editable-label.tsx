@@ -5,8 +5,6 @@ import { useTranslation } from "react-i18next";
 import { Input } from "@appstrate/ui/components/input";
 import { Button } from "@appstrate/ui/components/button";
 import { commitRename } from "../lib/inline-rename";
-import { useUnsavedChanges } from "../hooks/use-unsaved-changes";
-import { UnsavedChangesModal } from "./unsaved-changes-modal";
 
 /**
  * A table row's name, renamed in place — the app's ONE rename affordance. It opens only
@@ -44,7 +42,6 @@ export function InlineEditableLabel({
   const inputRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
-  const { blocker } = useUnsavedChanges(editing && (draft !== value || saving));
 
   // Entering edit mode, from the menu, lands in the field with its text selected.
   useEffect(() => {
@@ -61,8 +58,8 @@ export function InlineEditableLabel({
     const outcome = await commitRename(draft, value, onSave);
     savingRef.current = false;
     setSaving(false);
-    if (outcome === "failed") throw new Error(t("saveFeedback.error"));
-    setEditing(false);
+    // A failed save keeps the editor open; the mutation's own toast reports it.
+    if (outcome !== "failed") setEditing(false);
   };
 
   if (!editable || !editing) {
@@ -90,7 +87,7 @@ export function InlineEditableLabel({
         placeholder={placeholder}
         onChange={(e) => setTyped(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") void commit().catch(() => {});
+          if (e.key === "Enter") void commit();
           if (e.key === "Escape" && !savingRef.current) setEditing(false);
         }}
         // `min-w-0`, not `min-w-40`: in a 132px column a 10rem minimum is an
@@ -98,12 +95,7 @@ export function InlineEditableLabel({
         className="h-7 w-full min-w-0 text-sm font-medium"
         data-testid={testId}
       />
-      <Button
-        type="button"
-        size="sm"
-        disabled={saving}
-        onClick={() => void commit().catch(() => {})}
-      >
+      <Button type="button" size="sm" disabled={saving} onClick={() => void commit()}>
         {t("btn.save")}
       </Button>
       <Button
@@ -115,11 +107,6 @@ export function InlineEditableLabel({
       >
         {t("btn.cancel")}
       </Button>
-      <UnsavedChangesModal
-        blocker={blocker}
-        onSaveDraft={saving ? undefined : commit}
-        saveLabel={t("btn.save")}
-      />
     </div>
   );
 }

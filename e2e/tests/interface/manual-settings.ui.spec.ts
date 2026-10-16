@@ -60,63 +60,48 @@ test("settings never write on typing, blur, delay or cancel; a refused save keep
   await expect(name).toHaveValue("Manual name");
 });
 
-test("the theme applies at once, the language waits for Save and a failed save prevents navigation", async ({
+test("single choices apply at once, and a failed save from the leave dialog keeps the form", async ({
   authedPage: page,
+  browserCtx,
 }) => {
+  await page.goto("/preferences/appearance");
+  // A single choice is the command: no save bar.
+  await page.getByRole("combobox", { name: "Thème", exact: true }).click();
+  await page.getByRole("option", { name: "Sombre", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("appstrate-theme")))
+    .toContain("dark");
+  await expect(page.getByRole("button", { name: "Enregistrer", exact: true })).toHaveCount(0);
+
+  const path = `/api/spaces/${browserCtx.org.defaultSpaceId}`;
   let writes = 0;
   let refuse = true;
-  await page.route("**/api/profile", async (route) => {
+  await page.route(`**${path}`, async (route) => {
     if (route.request().method() !== "PATCH") return route.continue();
     writes++;
     if (refuse)
       return route.fulfill({
         status: 500,
         contentType: "application/problem+json",
-        body: JSON.stringify({
-          type: "about:blank",
-          title: "Unavailable",
-          detail: "Retry",
-          status: 500,
-        }),
+        body: JSON.stringify({ type: "about:blank", title: "Unavailable", status: 500 }),
       });
     return route.continue();
   });
-  await page.goto("/preferences/appearance");
-  const theme = page.getByRole("combobox", { name: "Thème", exact: true });
-  const language = page.getByRole("combobox", { name: "Langue", exact: true });
-  await theme.click();
-  await page.getByRole("option", { name: "Sombre", exact: true }).click();
-  // A display preference: applied and stored at once, no save bar.
-  await expect
-    .poll(() => page.evaluate(() => localStorage.getItem("appstrate-theme")))
-    .toContain("dark");
-  await expect(page.getByRole("button", { name: "Enregistrer", exact: true })).toHaveCount(0);
-  await language.click();
-  await page.getByRole("option", { name: "English", exact: true }).click();
-  expect(writes).toBe(0);
+  await page.goto("/workspace-settings/general");
+  await page.getByRole("textbox", { name: "Nom", exact: true }).fill("Saved on leave");
+  const leave = () =>
+    page
+      .getByRole("navigation", { name: "Compte", exact: true })
+      .getByRole("link", { name: "Général", exact: true })
+      .click();
   const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
-  await page
-    .getByRole("navigation", { name: "Compte", exact: true })
-    .getByRole("link", { name: "Général", exact: true })
-    .click();
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "Annuler", exact: true }).click();
-  await expect(page).toHaveURL(/preferences\/appearance/);
-  expect(writes).toBe(0);
-  await page
-    .getByRole("navigation", { name: "Compte", exact: true })
-    .getByRole("link", { name: "Général", exact: true })
-    .click();
+  await leave();
   await dialog.getByRole("button", { name: "Enregistrer", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page).toHaveURL(/preferences\/appearance/);
+  await expect(page).toHaveURL(/workspace-settings\/general/);
   expect(writes).toBe(1);
-  await expect(language).toHaveText("English");
   refuse = false;
-  await page
-    .getByRole("navigation", { name: "Compte", exact: true })
-    .getByRole("link", { name: "Général", exact: true })
-    .click();
+  await leave();
   await dialog.getByRole("button", { name: "Enregistrer", exact: true }).click();
   await expect(page).toHaveURL(/preferences\/general/);
   expect(writes).toBe(2);
@@ -180,27 +165,27 @@ test("switching spaces under a mounted agent page drops its draft instead of sav
 test("browser Back can be cancelled without unmounting the edited form", async ({
   authedPage: page,
 }) => {
-  await page.goto("/preferences/general");
+  await page.goto("/preferences/appearance");
   await page
     .getByRole("navigation", { name: "Compte", exact: true })
-    .getByRole("link", { name: "Apparence", exact: true })
+    .getByRole("link", { name: "Général", exact: true })
     .click();
-  await page.getByRole("combobox", { name: "Langue", exact: true }).click();
-  await page.getByRole("option", { name: "English", exact: true }).click();
+  const name = page.getByRole("textbox", { name: "Nom d'affichage", exact: true });
+  await name.fill("Unsaved display name");
   await expect(page.getByRole("button", { name: "Enregistrer", exact: true })).toBeVisible();
   await page.goBack();
   const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Annuler", exact: true }).click();
-  await expect(page).toHaveURL(/preferences\/appearance/);
-  await expect(page.getByRole("combobox", { name: "Langue", exact: true })).toHaveText("English");
+  await expect(page).toHaveURL(/preferences\/general/);
+  await expect(name).toHaveValue("Unsaved display name");
   await page.goBack();
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
-  await expect(page).toHaveURL(/preferences\/general/);
+  await expect(page).toHaveURL(/preferences\/appearance/);
 });
 
-test("a conversation rename stays with its target across guarded navigation", async ({
+test("leaving a conversation cancels its rename without asking, and a rename saves to its own target", async ({
   authedPage: page,
   apiClient,
 }) => {
@@ -225,14 +210,9 @@ test("a conversation rename stays with its target across guarded navigation", as
   await trail.getByRole("button", { name: "Rename A", exact: true }).click();
   const name = trail.getByRole("textbox");
   await name.fill("Pending A");
+  // A rename is a named action: leaving cancels it, no dialog, no write.
   await page.getByRole("button", { name: "Rename B", exact: true }).click();
-  const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "Annuler", exact: true }).click();
-  await expect(name).toHaveValue("Pending A");
-  expect(writes).toEqual([]);
-  await page.getByRole("button", { name: "Rename B", exact: true }).click();
-  await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
   await expect(page).toHaveURL(new RegExp(`/chat/${b}$`));
   await expect(trail.getByRole("textbox")).toHaveCount(0);
   await trail.getByRole("button", { name: "Rename B", exact: true }).click();

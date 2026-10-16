@@ -117,7 +117,7 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
       // Committing a preview the user already left would persist it, with nothing to undo it.
       if (abandoned.current) return;
       setEntering(false);
-      requestScopeChange(`persona:${orgId}`, () => {
+      requestScopeChange(() => {
         const moves = !!space && !!roleOption && space.id !== currentSpaceId;
         enterViewAs(persona, orgs, moves ? currentSpaceId : null);
         if (space && roleOption) switchSpace(space.id);

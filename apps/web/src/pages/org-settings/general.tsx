@@ -2,7 +2,7 @@
 
 import { Card } from "@appstrate/ui/components/card";
 import { Alert } from "@appstrate/ui/components/alert";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Building, HardDrive, Smile, Trash2, Upload } from "lucide-react";
@@ -12,8 +12,6 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
-import { useSettingDraft } from "../../hooks/use-setting-draft";
-import { ManualSave } from "../../components/settings/manual-save";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { useOrg, useOrgDetail } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -138,56 +136,20 @@ export function OrgSettingsGeneralPage() {
     },
   });
 
-  // The logo has its own patch so that saving the name never shows as a logo write.
-  const patchLogoMutation = $api.useMutation("patch", "/api/orgs/{orgId}", {
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: orgKeys.all });
-    },
-  });
-
-  const logoDraft = useSettingDraft<{ logo: OrgLogo | null; image: Blob | null }>({
-    logo: currentOrg?.logo ?? null,
-    image: null,
-  });
   // The logo is written by two requests: an image upload, or an emoji / removal patch.
   // Each starts by clearing the other's state, so the feedback is the latest write's.
   const logoWrite = uploadLogoMutation.isIdle
-    ? fieldWriteState(patchLogoMutation, "logo")
+    ? fieldWriteState(updateNameMutation, "logo")
     : {
         pending: uploadLogoMutation.isPending,
         success: uploadLogoMutation.isSuccess,
         error: uploadLogoMutation.isError,
       };
-  const previewUrl =
-    logoDraft.value.image && logoDraft.value.logo?.kind === "image"
-      ? logoDraft.value.logo.url
-      : null;
-  useEffect(
-    () => () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    },
-    [previewUrl],
-  );
-  const logoBusy = logoWrite.pending || processingLogo;
-  const patchLogo = (logo: Extract<OrgLogo, { kind: "emoji" }> | null) =>
-    logoDraft.set({ logo, image: null });
-  const saveLogo = async () => {
-    if (!orgId) throw new Error("org_missing");
-    const sent = logoDraft.value;
-    if (sent.image) {
-      patchLogoMutation.reset();
-      await uploadLogoMutation.mutateAsync({
-        params: { path: { orgId } },
-        body: sent.image,
-        headers: { "Content-Type": "image/webp" },
-        bodySerializer: (body) => body,
-      });
-    } else {
-      const logo = sent.logo?.kind === "emoji" ? sent.logo : null;
-      uploadLogoMutation.reset();
-      await patchLogoMutation.mutateAsync({ params: { path: { orgId } }, body: { logo } });
-    }
-    logoDraft.accept(sent);
+  const logoBusy = updateNameMutation.isPending || uploadLogoMutation.isPending || processingLogo;
+  const patchLogo = (logo: Extract<OrgLogo, { kind: "emoji" }> | null) => {
+    if (!orgId) return;
+    uploadLogoMutation.reset();
+    updateNameMutation.mutate({ params: { path: { orgId } }, body: { logo } });
   };
   const nameWrite = fieldWriteState(updateNameMutation, "name");
 
@@ -219,10 +181,7 @@ export function OrgSettingsGeneralPage() {
           status={<SaveFeedback {...logoWrite} pending={logoWrite.pending || processingLogo} />}
         >
           <div className="flex items-center gap-3">
-            <OrganizationAvatar
-              org={{ ...currentOrg, logo: logoDraft.value.logo }}
-              className="size-16 rounded-xl text-2xl"
-            />
+            <OrganizationAvatar org={currentOrg} className="size-16 rounded-xl text-2xl" />
             {canUpdateOrg && (
               <div className="flex flex-wrap gap-2">
                 <input
@@ -237,9 +196,11 @@ export function OrgSettingsGeneralPage() {
                     setProcessingLogo(true);
                     try {
                       const logo = await normalizeOrganizationLogo(file);
-                      logoDraft.set({
-                        logo: { kind: "image", url: URL.createObjectURL(logo) },
-                        image: logo,
+                      uploadLogoMutation.mutate({
+                        params: { path: { orgId } },
+                        body: logo,
+                        headers: { "Content-Type": "image/webp" },
+                        bodySerializer: (body) => body,
                       });
                     } catch {
                       toast.error(t("orgSettings.logoError"));
@@ -298,12 +259,6 @@ export function OrgSettingsGeneralPage() {
               </div>
             )}
           </div>
-          <ManualSave
-            dirty={logoDraft.dirty}
-            pending={logoBusy}
-            onSave={saveLogo}
-            onDiscard={logoDraft.reset}
-          />
         </SettingRow>
         <SettingRow
           variant="field"

@@ -5,13 +5,15 @@
  * An empty value cannot be saved. `data-inline-editing` keeps Escape from closing the
  * surrounding dialog (`keepOpenWhileRenaming`).
  */
-import { ManualSetting } from "./manual-save";
 import { Input } from "@appstrate/ui/components/input";
+import { useSettingDraft } from "../../hooks/use-setting-draft";
+import { useSaveAction } from "../../hooks/use-save-action";
+import { SaveControls } from "./manual-save";
 
 export function InlineTextSetting({
   value,
   onCommit,
-  disabled,
+  disabled = false,
   placeholder,
   maxLength,
   className,
@@ -25,32 +27,39 @@ export function InlineTextSetting({
   className?: string;
   "aria-label"?: string;
 }) {
+  const draft = useSettingDraft(value);
+  const action = useSaveAction(async () => {
+    const sent = draft.value;
+    await onCommit(sent.trim());
+    draft.accept(sent);
+  });
+  const next = draft.value.trim();
+  const saveDisabled = disabled || next === "" || next === value;
   return (
-    <ManualSetting
-      value={value}
-      onSave={(next) => onCommit(next.trim())}
-      disabled={disabled}
-      canSave={(next) => next.trim() !== "" && next.trim() !== value}
-    >
-      {(draft, setDraft, pending, { submit, discard }) => (
-        <Input
-          value={draft}
-          disabled={pending}
-          placeholder={placeholder}
-          maxLength={maxLength}
-          aria-label={ariaLabel}
-          className={className}
-          data-inline-editing=""
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              submit();
-            }
-            if (event.key === "Escape") discard();
-          }}
-        />
-      )}
-    </ManualSetting>
+    <div className="w-full min-w-0">
+      <Input
+        value={draft.value}
+        disabled={action.saving || disabled}
+        placeholder={placeholder}
+        maxLength={maxLength}
+        aria-label={ariaLabel}
+        className={className}
+        data-inline-editing=""
+        onChange={(event) => draft.set(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            if (draft.dirty && !saveDisabled) void action.save().catch(() => {});
+          }
+          if (event.key === "Escape") draft.reset();
+        }}
+      />
+      <SaveControls
+        dirty={draft.dirty}
+        saveDisabled={saveDisabled}
+        onDiscard={draft.reset}
+        action={action}
+      />
+    </div>
   );
 }

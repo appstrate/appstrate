@@ -25,7 +25,7 @@ import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveInputSettings } from "../../hooks/use-mutations";
 import { useSettingDraft } from "../../hooks/use-setting-draft";
-import { ManualSave, ManualSetting } from "../settings/manual-save";
+import { ManualSave } from "../settings/manual-save";
 import { authorDefaults, getOrderedKeys, type SchemaWrapper } from "@appstrate/core/form";
 import { formatInputValue, hasInputFields } from "../../lib/agent-input";
 import {
@@ -35,6 +35,7 @@ import {
 import { JsonView } from "../json-view";
 import { SettingsSkeleton } from "../loading-skeletons";
 import { SettingRow } from "../settings/setting-row";
+import { SaveFeedback } from "../settings/save-feedback";
 import { InputFieldRow } from "../settings/input-field-row";
 import { ModelGenerationFields } from "../model-generation-fields";
 
@@ -333,32 +334,28 @@ function ProxySection({ packageId }: { packageId: string }) {
         label={t("detail.configuration.proxyRoute")}
         description={t("detail.configuration.proxyDescription")}
       >
-        <ManualSetting
-          value={agentProxyId ?? null}
-          onSave={(value) => setAgentProxy.mutateAsync(value)}
-        >
-          {(value, onChange, pending) => (
-            <OptionSelect
-              value={value ?? "__inherit__"}
-              onValueChange={(v) => onChange(v === "__inherit__" ? null : v)}
-              disabled={pending}
-              leading={
-                <>
-                  <SelectItem value="__inherit__">
-                    {orgDefaultProxy
-                      ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
-                      : t("models.default", { ns: "settings" })}
-                  </SelectItem>
-                  <SelectItem value="none">
-                    {t("proxies.agent.none", { ns: "settings" })}
-                  </SelectItem>
-                </>
-              }
-              options={orgProxies.map((p) => ({ value: p.id, label: p.label }))}
-            />
-          )}
-        </ManualSetting>
+        <OptionSelect
+          value={agentProxyId ?? "__inherit__"}
+          onValueChange={(v) => setAgentProxy.mutate(v === "__inherit__" ? null : v)}
+          disabled={setAgentProxy.isPending}
+          leading={
+            <>
+              <SelectItem value="__inherit__">
+                {orgDefaultProxy
+                  ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
+                  : t("models.default", { ns: "settings" })}
+              </SelectItem>
+              <SelectItem value="none">{t("proxies.agent.none", { ns: "settings" })}</SelectItem>
+            </>
+          }
+          options={orgProxies.map((p) => ({ value: p.id, label: p.label }))}
+        />
       </SettingRow>
+      <SaveFeedback
+        pending={setAgentProxy.isPending}
+        success={setAgentProxy.isSuccess}
+        error={setAgentProxy.isError}
+      />
     </>
   );
 }

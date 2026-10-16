@@ -68,12 +68,16 @@ export function OrgSettingsMembersPage() {
   };
 
   const handleRoleChange = (member: OrgMember, newRole: OrgRole) => {
-    setRoleChange({
-      label: memberLabel(member),
-      id: member.userId,
-      role: newRole,
-      from: member.role,
-    });
+    if (newRole === "owner" || member.role === "owner" || revokesAccess(member.role, newRole)) {
+      setRoleChange({
+        label: memberLabel(member),
+        id: member.userId,
+        role: newRole,
+        from: member.role,
+      });
+      return;
+    }
+    changeRole(member.userId, newRole);
   };
 
   // Which spaces a person reaches, and as what, comes with the member itself:

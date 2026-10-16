@@ -14,7 +14,6 @@ import {
   SelectConversationProvider,
 } from "@appstrate/module-chat/ui";
 import { usePermissions } from "../../hooks/use-permissions";
-import { ChatRenameGuard } from "./rename-guard";
 import { ChatTitleCrumb } from "./chat-title-crumb";
 import { useChatGetHeaders, useChatTranslate } from "./use-chat-runtime";
 
@@ -35,12 +34,7 @@ export function ChatSidebar() {
     <ChatHeadersProvider value={getHeaders}>
       <SelectConversationProvider value={select}>
         <ChatTitleCrumb conversationId={conversationId} t={t} can={can} />
-        <ChatConversationList
-          activeId={conversationId}
-          t={t}
-          can={can}
-          RenameGuard={ChatRenameGuard}
-        />
+        <ChatConversationList activeId={conversationId} t={t} can={can} />
       </SelectConversationProvider>
     </ChatHeadersProvider>
   );

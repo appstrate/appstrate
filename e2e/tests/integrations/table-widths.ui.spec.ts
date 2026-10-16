@@ -40,7 +40,6 @@ test("a resized column survives a language change and resets on double-click", a
       new URL(response.url()).pathname === "/api/profile",
   );
   await page.getByRole("option", { name: "English", exact: true }).click();
-  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   expect((await savedLanguage).status()).toBe(200);
   await page.goto("/integrations?execution=local");
   const englishHead = page

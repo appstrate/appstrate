@@ -55,7 +55,7 @@ export function UnsavedChangesModal({ blocker, onSaveDraft, saveLabel }: Unsaved
           <Button variant="ghost" onClick={() => blocker.proceed()} disabled={isSaving}>
             {t("unsaved.discard")}
           </Button>
-          {onSaveDraft && (
+          {onSaveDraft && !blocker.othersDirty && (
             <PendingButton onClick={handleSave} pending={isSaving}>
               {saveLabel ?? t("unsaved.saveDraft")}
             </PendingButton>

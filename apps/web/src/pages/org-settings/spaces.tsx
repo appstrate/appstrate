@@ -39,7 +39,7 @@ export function OrgSettingsSpacesPage() {
   const busy = convert.isPending || sweep.isPending;
 
   const handleSpaceClick = (spaceId: string) => {
-    requestScopeChange(`space:${spaceId}`, () => {
+    requestScopeChange(() => {
       switchSpace(spaceId);
       navigate("/workspace-settings/general");
     });

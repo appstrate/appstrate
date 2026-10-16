@@ -158,7 +158,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
    * current page may not exist there, so `useLandAfterOrgSwitch` moves it.
    */
   const applyContext = (orgId: string, spaceId: string) =>
-    requestScopeChange(`context:${orgId}:${spaceId}`, () => {
+    requestScopeChange(() => {
       if (orgId !== currentOrg.id) {
         spaceStore.getState().remember(orgId, spaceId);
         switchOrg(orgId);

@@ -129,7 +129,7 @@ export function UnifiedSettingsLayout() {
       label={label("unifiedSettings.organizationSelector")}
       options={orgs}
       onValueChange={(id) => {
-        requestScopeChange(`org:${id}`, () => {
+        requestScopeChange(() => {
           switchOrg(id);
           landAfterOrgSwitch();
         });
@@ -147,7 +147,7 @@ export function UnifiedSettingsLayout() {
         name: spaceLabel(space, t),
         disabled: !isSpaceEnterable(space),
       }))}
-      onValueChange={(id) => requestScopeChange(`space:${id}`, () => switchSpace(id))}
+      onValueChange={(id) => requestScopeChange(() => switchSpace(id))}
     />
   );
   const selectors: Partial<Record<SettingsScope, ReactNode>> = {

@@ -72,7 +72,7 @@ export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}
 
   // Back to the space the preview moved the admin out of, then home (as on the way in).
   const exit = () =>
-    requestScopeChange("persona:exit", () => {
+    requestScopeChange(() => {
       const back = exitViewAs();
       if (!back || back === currentSpaceId) return;
       switchSpace(back);
