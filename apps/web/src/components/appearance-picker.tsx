@@ -160,9 +160,10 @@ function Swatch({ color, children }: { color: AppearanceColor; children?: ReactN
 }
 
 /**
- * The identity editor of an agent, a space or an organization: a preview tile,
- * the icon in the forms `allow` lists, and the colour (one of the palette, or
- * « Automatique » — derived from `seed`, the entity id). `onChange` receives
+ * The identity editor of an agent, a space or an organization: a preview tile
+ * (with the icon's removal), the colour (one of the palette, or « Automatique »
+ * — derived from `seed`, the entity id), then the icon in the forms `allow`
+ * lists. It draws no heading of its own: the row that holds it names it. `onChange` receives
  * only the field that changed. `fallbackIcon` is the preview's, as the
  * entity's own tiles draw it (`IdentityTile`).
  */
@@ -184,8 +185,6 @@ export function AppearancePicker({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
-  const iconLabelId = useId();
-  const colorLabelId = useId();
   const parsed = parseIcon(value.icon);
   const [picked, setPicked] = useState<IconForm | null>(null);
   const storedForm = formOf(parsed);
@@ -199,7 +198,6 @@ export function AppearancePicker({
       case "lucide":
         return (
           <LucideIconField
-            labelId={iconLabelId}
             picked={parsed?.kind === "lucide" && isLucideName(parsed.name) ? parsed.name : null}
             disabled={disabled}
             onPick={(name) => onChange({ icon: `${LUCIDE_ICON_PREFIX}${name}` })}
@@ -219,7 +217,7 @@ export function AppearancePicker({
   };
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-4">
       <div className="border-border bg-muted/20 flex items-center gap-3 rounded-lg border p-3">
         <IdentityTile
           icon={value.icon}
@@ -230,72 +228,23 @@ export function AppearancePicker({
           className="size-11"
         />
         <p className="min-w-0 truncate text-sm font-medium">{label}</p>
+        {value.icon !== null && !disabled && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="ml-auto shrink-0"
+            onClick={() => onChange({ icon: null })}
+          >
+            <X />
+            {t("appearance.remove")}
+          </Button>
+        )}
       </div>
 
-      {form && (
-        <div role="group" aria-labelledby={iconLabelId} className="flex flex-col gap-2">
-          <div className="flex min-h-8 items-center justify-between gap-2">
-            <Label id={iconLabelId} className="mb-0">
-              {t("appearance.icon")}
-            </Label>
-            {value.icon !== null && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={disabled}
-                onClick={() => onChange({ icon: null })}
-              >
-                <X />
-                {t("appearance.remove")}
-              </Button>
-            )}
-          </div>
-          {allow.length > 1 ? (
-            <Tabs
-              value={form}
-              onValueChange={(next) => {
-                const nextForm = allow.find((candidate) => candidate === next);
-                if (nextForm) setPicked(nextForm);
-              }}
-            >
-              <TabsList
-                aria-label={t("appearance.formLabel")}
-                className="h-auto w-fit flex-wrap justify-start max-sm:grid max-sm:w-full max-sm:auto-cols-fr max-sm:grid-flow-col"
-              >
-                {allow.map((candidate) => {
-                  const FormIcon = FORM_ICONS[candidate];
-                  return (
-                    <TabsTrigger
-                      key={candidate}
-                      value={candidate}
-                      disabled={disabled}
-                      className="gap-1.5"
-                    >
-                      <FormIcon className="size-4" />
-                      {t(FORM_LABEL_KEYS[candidate])}
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
-              {allow.map((candidate) => (
-                <TabsContent key={candidate} value={candidate}>
-                  {formField(candidate)}
-                </TabsContent>
-              ))}
-            </Tabs>
-          ) : (
-            formField(form)
-          )}
-        </div>
-      )}
-
       <div className="flex flex-col gap-2">
-        <Label id={colorLabelId} className="mb-0">
-          {t("appearance.color")}
-        </Label>
         <RadioGroup
-          aria-labelledby={colorLabelId}
+          aria-label={t("appearance.color")}
           disabled={disabled}
           value={isAppearanceColor(value.color) ? value.color : AUTO_COLOR}
           onValueChange={(next) => onChange(colorChange(next))}
@@ -320,18 +269,53 @@ export function AppearancePicker({
           <p className="text-muted-foreground text-xs">{t("appearance.colorBehindImage")}</p>
         )}
       </div>
+
+      {form &&
+        (allow.length > 1 ? (
+          <Tabs
+            value={form}
+            onValueChange={(next) => {
+              const nextForm = allow.find((candidate) => candidate === next);
+              if (nextForm) setPicked(nextForm);
+            }}
+          >
+            <TabsList
+              aria-label={t("appearance.formLabel")}
+              className="h-auto w-fit flex-wrap justify-start max-sm:grid max-sm:w-full max-sm:auto-cols-fr max-sm:grid-flow-col"
+            >
+              {allow.map((candidate) => {
+                const FormIcon = FORM_ICONS[candidate];
+                return (
+                  <TabsTrigger
+                    key={candidate}
+                    value={candidate}
+                    disabled={disabled}
+                    className="gap-1.5"
+                  >
+                    <FormIcon className="size-4" />
+                    {t(FORM_LABEL_KEYS[candidate])}
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+            {allow.map((candidate) => (
+              <TabsContent key={candidate} value={candidate}>
+                {formField(candidate)}
+              </TabsContent>
+            ))}
+          </Tabs>
+        ) : (
+          formField(form)
+        ))}
     </div>
   );
 }
 
 function LucideIconField({
-  labelId,
   picked,
   disabled,
   onPick,
 }: {
-  /** The « Icône » label: a combobox takes no name from its content. */
-  labelId: string;
   picked: IconName | null;
   disabled: boolean;
   onPick: (name: IconName) => void;
@@ -339,7 +323,6 @@ function LucideIconField({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const valueId = useId();
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return FEATURED_ICONS;
@@ -355,14 +338,14 @@ function LucideIconField({
             type="button"
             variant="outline"
             role="combobox"
-            aria-labelledby={`${labelId} ${valueId}`}
+            aria-label={`${t("appearance.icon")} ${picked ? iconLabel(picked) : t("appearance.iconPick")}`}
             aria-expanded={open}
             disabled={disabled}
             className="w-full justify-between font-normal"
           >
             <span className="flex min-w-0 items-center gap-2">
               {picked && <DynamicIcon name={picked} className="size-4 shrink-0" />}
-              <span id={valueId} className={cn("truncate", !picked && "text-muted-foreground")}>
+              <span className={cn("truncate", !picked && "text-muted-foreground")}>
                 {picked ? iconLabel(picked) : t("appearance.iconPick")}
               </span>
             </span>

@@ -60,22 +60,55 @@ describe("AppearancePicker", () => {
     expect(html).toContain("Retirer l’icône");
   });
 
-  it("names the icon group by its label and the form tabs by theirs", () => {
+  it("draws no « Icône » or « Couleur » heading, and names the palette and the tabs", () => {
     const html = picker(["lucide", "emoji"]);
-    const labelId = html.match(/<label[^>]*id="([^"]+)"[^>]*>Icône</)?.[1];
-    expect(labelId).toBeDefined();
-    expect(html).toContain(`role="group" aria-labelledby="${labelId}"`);
+    // The only « Couleur » / « Icône » texts are the accessible names and the tab.
+    expect(html).not.toMatch(/>\s*Couleur\s*</);
+    expect(html.match(/>Icône</g)).toHaveLength(1);
+    expect(html).not.toContain('role="group"');
+    expect(html).toMatch(/role="radiogroup"[^>]*aria-label="Couleur"/);
     expect(html).toMatch(/role="tablist"[^>]*aria-label="Type d’icône"/);
   });
 
-  it("names the Lucide combobox by the Icône label and its current value", () => {
+  it("stacks the preview, the palette, then the icon forms", () => {
+    const html = picker(["lucide", "emoji"], { icon: "lucide:bot", color: null });
+    const preview = html.indexOf("Équipe Produit");
+    const palette = html.indexOf('role="radiogroup"');
+    const tablist = html.indexOf('role="tablist"');
+    const field = html.indexOf('role="combobox"');
+    expect(preview).toBeGreaterThan(-1);
+    expect(palette).toBeGreaterThan(preview);
+    expect(tablist).toBeGreaterThan(palette);
+    expect(field).toBeGreaterThan(tablist);
+    // Single form: the field sits directly under the palette.
+    const single = picker(["lucide"]);
+    expect(single.indexOf('role="combobox"')).toBeGreaterThan(single.indexOf('role="radiogroup"'));
+  });
+
+  it("draws the removal inside the preview card, only for a set icon the viewer can change", () => {
+    const withIcon = picker(["lucide"], { icon: "lucide:bot", color: null });
+    const removal = withIcon.indexOf("Retirer l’icône");
+    expect(removal).toBeGreaterThan(withIcon.indexOf("Équipe Produit"));
+    expect(removal).toBeLessThan(withIcon.indexOf('role="radiogroup"'));
+    expect(picker(["lucide"])).not.toContain("Retirer l’icône");
+    const locked = render(
+      <AppearancePicker
+        value={{ icon: "lucide:bot", color: null }}
+        onChange={() => {}}
+        allow={["lucide"]}
+        seed="spc_0123456789"
+        label="Équipe Produit"
+        disabled
+      />,
+    );
+    expect(locked).not.toContain("Retirer l’icône");
+  });
+
+  it("names the Lucide combobox by « Icône » and its current value", () => {
     const html = picker(["lucide"], { icon: "lucide:calendar-clock", color: null });
-    const labelId = html.match(/<label[^>]*id="([^"]+)"[^>]*>Icône</)?.[1];
     const combobox = html.match(/<button[^>]*role="combobox"[^>]*>/)?.[0] ?? "";
-    const labelledBy = combobox.match(/aria-labelledby="([^"]+)"/)?.[1]?.split(" ") ?? [];
-    expect(labelledBy).toHaveLength(2);
-    expect(labelledBy[0]).toBe(labelId);
-    expect(html).toContain(`id="${labelledBy[1]}" class="truncate">Calendar Clock<`);
+    expect(combobox).toContain('aria-label="Icône Calendar Clock"');
+    expect(picker(["lucide"])).toContain('aria-label="Icône Choisir une icône"');
   });
 
   it("names the emoji trigger by the current emoji", () => {

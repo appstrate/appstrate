@@ -24,9 +24,8 @@ test("a team space's icon and colour, set in its settings, show in the switcher"
   const settings = page.getByRole("dialog", { name: "Paramètres", exact: true });
 
   await page.goto("/workspace-settings/general");
-  // The Lucide trigger is a combobox in the « Icône » group; it carries no name of its own.
-  const iconGroup = settings.getByRole("group", { name: "Icône", exact: true });
-  const iconPicker = iconGroup.getByRole("combobox");
+  // The Lucide trigger is a combobox named « Icône » and its current value (the picker draws no heading).
+  const iconPicker = settings.getByRole("combobox", { name: /^Icône /u });
   await expect(iconPicker).toHaveText("Choisir une icône");
   await iconPicker.click();
   await page.getByPlaceholder("Rechercher une icône Lucide…", { exact: true }).fill("rocket");
