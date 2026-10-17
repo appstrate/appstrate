@@ -53,6 +53,14 @@ function makeTool() {
 // ─── Schema parse tests ───────────────────────────────────────────────────────
 
 describe("apiCallRequestSchema — valid inputs", () => {
+  it("accepts a templated port, as the published JSON schema does", () => {
+    const result = apiCallRequestSchema.safeParse({
+      method: "GET",
+      target: "https://a.com:{{port}}/x",
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("parses a minimal request (method + target only)", () => {
     const result = apiCallRequestSchema.safeParse({
       method: "GET",
