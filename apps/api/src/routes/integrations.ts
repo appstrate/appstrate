@@ -161,6 +161,7 @@ import {
 } from "../services/integration-pins-service.ts";
 import {
   renameConnection,
+  setConnectionShareAllSpaces,
   shareConnection,
   unshareConnection,
 } from "../services/connection-shares.ts";
@@ -277,6 +278,8 @@ export const setOrgDefaultSchema = z
     enforce: z.boolean().default(false),
   })
   .strict();
+
+export const connectionShareAllSpacesSchema = z.object({ share_all_spaces: z.boolean() }).strict();
 
 export const updateConnectionSchema = z
   .object({
@@ -1678,6 +1681,21 @@ export function createIntegrationsRouter() {
   );
 
   router.put(
+    "/:packageId{@[^/]+/[^/]+}/connections/:connectionId/shares",
+    requirePermission("integrations", "connect"),
+    async (c) => {
+      const body = await readJsonBody(c, connectionShareAllSpacesSchema);
+      await applyConnectionShareAllSpaces(
+        c,
+        spaceEdit(c),
+        readConnectionId(c),
+        body.share_all_spaces,
+      );
+      return c.body(null, 204);
+    },
+  );
+
+  router.put(
     "/:packageId{@[^/]+/[^/]+}/connections/:connectionId/shares/:spaceId",
     requirePermission("integrations", "connect"),
     async (c) => {
@@ -1749,6 +1767,9 @@ export function connectionCaller(c: Context<AppEnv>, spaceId: string | null): Co
         ? ceilingAllows(c, "integrations:connect")
         : (c.get("permissions")?.has("integrations:connect") ?? false),
     governs: spaceId !== null && canConfigureIntegrations(c),
+    // `integrations:connect` is already `canConnect`, which `connectionActions` requires first.
+    canShareAllSpaces: (orgId) =>
+      !personaFor(c, orgId) && ceilingAllows(c, "integrations:configure"),
     permissionsIn: (target, orgId) => callerPermissionsInSpace(c, target, orgId),
     spacesSeen: (orgId, orgRole) => callerSpacesSeen(c, orgId, orgRole),
   };
@@ -1794,6 +1815,33 @@ export async function applyConnectionRename(
     connection,
     connectionViewOf(edit.caller.principal, connection, edit.caller.spaceId, shares),
   );
+}
+
+/** Both policy doors: explicit consent plus one audit per newly opened current space. */
+export async function applyConnectionShareAllSpaces(
+  c: Context<AppEnv>,
+  edit: ConnectionEdit,
+  connectionId: string,
+  enabled: boolean,
+): Promise<void> {
+  const result = await setConnectionShareAllSpaces({ ...edit, connectionId, enabled });
+  if (result.policyChanged)
+    await recordAuditFromContext(c, {
+      action: "integration.connection.sharing.updated",
+      resourceType: "integration_connection",
+      resourceId: connectionId,
+      orgIdOverride: result.orgId,
+      after: { shareAllSpaces: enabled },
+    });
+  for (const spaceId of result.addedSpaceIds)
+    await recordAuditFromContext(c, {
+      action: "integration.connection.share_added",
+      resourceType: "integration_connection",
+      resourceId: connectionId,
+      orgIdOverride: result.orgId,
+      spaceIdOverride: spaceId,
+      after: { spaceId },
+    });
 }
 
 /** Both share doors; the share is recorded in the space it opens. */

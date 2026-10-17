@@ -24,10 +24,9 @@ import {
 import {
   seedApiKey,
   seedPackage,
-  seedPlacedPackage,
+  seedSpacePackage,
   seedSpace,
   seedSpaceMember,
-  seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
@@ -555,16 +554,16 @@ describe("Me API (/api/me)", () => {
         });
         await seedSpacePackage(ctx.defaultSpaceId, id, { enabled });
       }
-      // ORPHAN: a row here, homed elsewhere, offered to nobody.
+      // Homed elsewhere and placed there only: it runs nowhere this connection serves.
       const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
       await seedPackage({
-        id: "@reuse/orphan",
+        id: "@reuse/elsewhere",
         orgId: ctx.orgId,
         type: "agent",
         homeSpaceId: elsewhere.id,
-        draftManifest: declaring("@reuse/orphan"),
+        draftManifest: declaring("@reuse/elsewhere"),
       });
-      await seedSpacePackage(ctx.defaultSpaceId, "@reuse/orphan");
+      await seedSpacePackage(elsewhere.id, "@reuse/elsewhere");
 
       const res = await app.request("/api/me/connections", { headers: { Cookie: ctx.cookie } });
       expect(res.status).toBe(200);
@@ -721,6 +720,33 @@ describe("Me API (/api/me)", () => {
         .where(eq(integrationConnectionShares.connectionId, connectionId));
       return rows.map((row) => row.spaceId).toSorted();
     }
+
+    it("lets the owner share with all spaces without an org header, preview still explicit", async () => {
+      const ctx = await createTestContext({ orgSlug: "meall-org" });
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
+      const id = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
+        integrationId: "@meall/gmail",
+        userId: ctx.user.id,
+      });
+      const shareAll = (headers: Record<string, string>) =>
+        app.request(`/api/me/connections/${id}/shares`, {
+          method: "PUT",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ share_all_spaces: true }),
+        });
+
+      // A role preview cannot ride the missing org context: it must name its org.
+      const preview = await shareAll({ Cookie: ctx.cookie, "X-View-As": "org_role=member" });
+      expect(preview.status).toBe(400);
+      expect(((await preview.json()) as { code: string }).code).toBe("invalid_view_as");
+      expect(await sharesOf(id)).toEqual([]);
+
+      expect((await shareAll({ Cookie: ctx.cookie })).status).toBe(204);
+      expect(await sharesOf(id)).toEqual([ctx.defaultSpaceId, spaceB.id].toSorted());
+    });
 
     it("lets the owner rename an org-scoped connection and share it, without a space header", async () => {
       const ctx = await createTestContext({ orgSlug: "mepatch-org" });
@@ -885,7 +911,7 @@ describe("Me API (/api/me)", () => {
         integrationId,
         userId: member.id,
       });
-      await seedPlacedPackage(blocked.id, integrationId, { blockUserConnections: true });
+      await seedSpacePackage(blocked.id, integrationId, { blockUserConnections: true });
       const [governorRow] = await db
         .insert(integrationConnections)
         .values({

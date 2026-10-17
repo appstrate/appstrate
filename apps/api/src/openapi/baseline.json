@@ -797,7 +797,7 @@
         "operationId": "listAgents",
         "tags": ["Agents"],
         "summary": "List all agents",
-        "description": "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed or offered) and switched on. An agent placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
+        "description": "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1724,7 +1724,7 @@
         "operationId": "exportAgentBundle",
         "tags": ["Agents"],
         "summary": "Export an agent as an .afps-bundle",
-        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the `latest` dist-tag, or the version `?version=` pins; `?source=draft` bundles the agent's current draft state as the bundle ROOT — its dependencies are still the PUBLISHED versions the manifest pins select, exactly as a server-side `version=draft` run resolves them, so the archive carries the bytes that run would execute and a dependency with no satisfying published version answers the same `422 dependency_unresolved`. `?source=draft` is reserved to callers who may WRITE the agent (`403 draft_not_writable` otherwise) — handing over the working copy IS running it, once `--local` is in the picture. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses. This route hands over a COPY of the agent and of every dependency's files, so an organization that sets `restrict_package_copy` narrows it to callers holding the agent's `agents:share` in its HOME space: `403 package_copy_restricted` otherwise, exactly as on `fork` and `download`. That is what the setting means — `appstrate run --local` downloads a bundle, so it is refused there too, while a server-side run is unaffected. Skills and system packages are exempt.",
+        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies: its skills, and its integrations at the version a run resolves (the published version the pin selects, or the system version). The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the `latest` dist-tag, or the version `?version=` pins; `?source=draft` bundles the agent's current draft state as the bundle ROOT — its dependencies are still the PUBLISHED versions the manifest pins select, exactly as a server-side `version=draft` run resolves them, so the archive carries the bytes that run would execute and a dependency with no satisfying published version answers the same `422 dependency_unresolved`. `?source=draft` is reserved to callers who may WRITE the agent (`403 draft_not_writable` otherwise) — handing over the working copy IS running it, once `--local` is in the picture. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses. This route hands over a COPY of the agent and of every dependency's files, so an organization that sets `restrict_package_copy` narrows it to callers holding the agent's `agents:share` in its HOME space: `403 package_copy_restricted` otherwise, exactly as on `fork` and `download`. That is what the setting means — `appstrate run --local` downloads a bundle, so it is refused there too, while a server-side run is unaffected. Skills and system packages are exempt.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1804,14 +1804,14 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden",
-            "description": "Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, or `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent."
+            "description": "Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent, or the caller lacks the read scope of a dependency type the bundle carries (`skills:read`, `integrations:read`)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound",
-            "description": "`agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`."
+            "description": "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`."
           },
           "422": {
-            "description": "The bundle cannot be assembled from stored artifacts. `version_artifact_unavailable`: the selected published version of the agent itself exists but its archive is gone from storage — nothing is substituted for it. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
+            "description": "The bundle cannot be assembled from stored artifacts. `version_artifact_unavailable`: the selected published version of the agent itself exists but its archive is gone from storage — nothing is substituted for it. `dependency_unresolved`: a declared dependency resolves to no published version (an integration pin included, exactly as a run refuses it), or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -2070,7 +2070,7 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound",
-            "description": "`agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`."
+            "description": "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`."
           },
           "409": {
             "description": "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration blocks the launch (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`; what does not block is a 201 `warnings[]` item, see LaunchWarnings), or `model_credential_required` (the model has no organization credential and the caller holds no personal credential that serves it)",
@@ -5603,7 +5603,7 @@
         "operationId": "listIntegrations",
         "tags": ["Integrations"],
         "summary": "List available integrations",
-        "description": "List every AFPS integration PLACED in the current space — homed there, offered there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an offer the space has not taken up and an integration switched off are both listed, with `active: false`. An integration homed in another space of the organization and offered to nobody is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Rows are sorted by `id`, so offset pagination (`limit`/`offset`) walks a stable order. Supports a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
+        "description": "List every AFPS integration PLACED in the current space — homed there, holding a row there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an integration placed here and switched off is listed, with `active: false`. An integration homed in another space of the organization and placed nowhere else is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Rows are sorted by `id`, so offset pagination (`limit`/`offset`) walks a stable order. Supports a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5866,7 +5866,7 @@
         "operationId": "getIntegration",
         "tags": ["Integrations"],
         "summary": "Get integration detail + per-auth status",
-        "description": "Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, offered there, or shipped with the deployment. An integration homed elsewhere and offered to nobody answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space.",
+        "description": "Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6048,6 +6048,10 @@
                                   },
                                   "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                                 },
+                                "share_all_spaces": {
+                                  "type": "boolean",
+                                  "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
+                                },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
                                   "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -6056,7 +6060,7 @@
                                   "type": "array",
                                   "items": {
                                     "type": "string",
-                                    "enum": ["rename", "share", "unshare_here"]
+                                    "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                                   },
                                   "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                                 },
@@ -6074,7 +6078,7 @@
                                       }
                                     }
                                   },
-                                  "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
+                                  "description": "The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                                 },
                                 "client_ref": {
                                   "type": ["string", "null"],
@@ -7130,6 +7134,10 @@
                       },
                       "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                     },
+                    "share_all_spaces": {
+                      "type": "boolean",
+                      "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
+                    },
                     "origin_space_id": {
                       "type": ["string", "null"],
                       "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -7138,7 +7146,7 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["rename", "share", "unshare_here"]
+                        "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                       },
                       "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
@@ -7156,7 +7164,7 @@
                           }
                         }
                       },
-                      "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
+                      "description": "The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                     },
                     "client_ref": {
                       "type": ["string", "null"],
@@ -7793,6 +7801,10 @@
                           },
                           "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                         },
+                        "share_all_spaces": {
+                          "type": "boolean",
+                          "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
+                        },
                         "origin_space_id": {
                           "type": ["string", "null"],
                           "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -7801,7 +7813,7 @@
                           "type": "array",
                           "items": {
                             "type": "string",
-                            "enum": ["rename", "share", "unshare_here"]
+                            "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                           },
                           "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                         },
@@ -7819,7 +7831,7 @@
                               }
                             }
                           },
-                          "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
+                          "description": "The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                         },
                         "client_ref": {
                           "type": ["string", "null"],
@@ -8081,6 +8093,10 @@
                             },
                             "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                           },
+                          "share_all_spaces": {
+                            "type": "boolean",
+                            "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
+                          },
                           "origin_space_id": {
                             "type": ["string", "null"],
                             "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -8089,7 +8105,7 @@
                             "type": "array",
                             "items": {
                               "type": "string",
-                              "enum": ["rename", "share", "unshare_here"]
+                              "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                             },
                             "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                           },
@@ -8107,7 +8123,7 @@
                                 }
                               }
                             },
-                            "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
+                            "description": "The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                           },
                           "client_ref": {
                             "type": ["string", "null"],
@@ -8305,6 +8321,10 @@
                       },
                       "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                     },
+                    "share_all_spaces": {
+                      "type": "boolean",
+                      "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
+                    },
                     "origin_space_id": {
                       "type": ["string", "null"],
                       "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -8313,7 +8333,7 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["rename", "share", "unshare_here"]
+                        "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                       },
                       "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
@@ -8331,7 +8351,7 @@
                           }
                         }
                       },
-                      "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
+                      "description": "The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                     },
                     "client_ref": {
                       "type": ["string", "null"],
@@ -8390,12 +8410,87 @@
         }
       }
     },
+    "/api/integrations/{packageId}/connections/{connectionId}/shares": {
+      "put": {
+        "description": "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With share_all_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False selects specific-space sharing and keeps existing shares. Every effective individual withdrawal also selects specific-space sharing atomically, through the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["share_all_spaces"],
+                "properties": {
+                  "share_all_spaces": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "All-spaces sharing policy saved",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "operationId": "setIntegrationConnectionShareAllSpaces",
+        "tags": ["Integrations"],
+        "summary": "Share a connection with current and future team spaces",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "description": "Integration connection id (UUID).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
     "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}": {
       "put": {
         "operationId": "shareIntegrationConnection",
         "tags": ["Integrations"],
         "summary": "Share one of the caller's connections into a space",
-        "description": "Shares the connection into `spaceId`. Owner only. The target must be a space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any space of its org, a space-scoped one only into its own space. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.",
+        "description": "Shares the connection into `spaceId`. Owner only. The target must be a team space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any team space of its org, a space-scoped one only into its own team space. Personal spaces are refused. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8448,7 +8543,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A malformed `spaceId` (`invalid_request`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`)."
+            "description": "A malformed `spaceId` (`invalid_request`), or a personal-space target, a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`)."
           },
           "403": {
             "$ref": "#/components/responses/Forbidden",
@@ -8482,7 +8577,7 @@
         "operationId": "unshareIntegrationConnection",
         "tags": ["Integrations"],
         "summary": "Withdraw one of the caller's connections from a space",
-        "description": "Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.",
+        "description": "Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. An effective withdrawal atomically selects specific-space mode by clearing share_all_spaces; a no-op preserves the current mode. A withdrawal and a concurrent team-space creation are ordered on the connection row. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8769,6 +8864,10 @@
                                   },
                                   "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                                 },
+                                "share_all_spaces": {
+                                  "type": "boolean",
+                                  "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
+                                },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
                                   "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -8777,7 +8876,7 @@
                                   "type": "array",
                                   "items": {
                                     "type": "string",
-                                    "enum": ["rename", "share", "unshare_here"]
+                                    "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                                   },
                                   "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                                 },
@@ -8795,7 +8894,7 @@
                                       }
                                     }
                                   },
-                                  "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
+                                  "description": "The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                                 },
                                 "client_ref": {
                                   "type": ["string", "null"],
@@ -14811,6 +14910,10 @@
                                   "enum": ["org", "space"],
                                   "description": "Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org. `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space."
                                 },
+                                "share_all_spaces": {
+                                  "type": "boolean",
+                                  "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
+                                },
                                 "shared_spaces": {
                                   "type": "array",
                                   "items": {
@@ -14831,7 +14934,7 @@
                                   "type": "array",
                                   "items": {
                                     "type": "string",
-                                    "enum": ["rename", "share", "unshare_here"]
+                                    "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                                   },
                                   "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space)."
                                 },
@@ -14849,7 +14952,7 @@
                                       }
                                     }
                                   },
-                                  "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only."
+                                  "description": "The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only."
                                 },
                                 "locked_by": {
                                   "type": ["string", "null"],
@@ -14928,12 +15031,70 @@
         }
       }
     },
+    "/api/me/connections/{connectionId}/shares": {
+      "put": {
+        "description": "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With share_all_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False selects specific-space sharing and keeps existing shares. Every effective individual withdrawal also selects specific-space sharing atomically, through the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["share_all_spaces"],
+                "properties": {
+                  "share_all_spaces": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "All-spaces sharing policy saved",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "operationId": "setMeConnectionShareAllSpaces",
+        "tags": ["Me"],
+        "summary": "Share an owned connection with current and future team spaces",
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
     "/api/me/connections/{connectionId}/shares/{spaceId}": {
       "put": {
         "operationId": "shareMyConnection",
         "tags": ["Profile"],
         "summary": "Share one of the caller's connections into a space",
-        "description": "The owner's door to the share `PUT /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` makes, wherever the connection lives. With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) are reachable. Shares the connection into `spaceId`. Owner only. The target must be a space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any space of its org, a space-scoped one only into its own space. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.",
+        "description": "The owner's door to the share `PUT /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` makes, wherever the connection lives. With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) are reachable. Shares the connection into `spaceId`. Owner only. The target must be a team space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any team space of its org, a space-scoped one only into its own team space. Personal spaces are refused. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.",
         "parameters": [
           {
             "name": "connectionId",
@@ -14969,7 +15130,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A malformed `spaceId` (`invalid_request`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`)."
+            "description": "A malformed `spaceId` (`invalid_request`), or a personal-space target, a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -15006,7 +15167,7 @@
         "operationId": "unshareMyConnection",
         "tags": ["Profile"],
         "summary": "Withdraw one of the caller's connections from a space",
-        "description": "The owner's door to the withdrawal `DELETE /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` makes, wherever the connection lives. With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) are reachable. Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.",
+        "description": "The owner's door to the withdrawal `DELETE /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` makes, wherever the connection lives. With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) are reachable. Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. An effective withdrawal atomically selects specific-space mode by clearing share_all_spaces; a no-op preserves the current mode. A withdrawal and a concurrent team-space creation are ordered on the connection row. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.",
         "parameters": [
           {
             "name": "connectionId",
@@ -15577,6 +15738,10 @@
                       },
                       "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                     },
+                    "share_all_spaces": {
+                      "type": "boolean",
+                      "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
+                    },
                     "origin_space_id": {
                       "type": ["string", "null"],
                       "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
@@ -15585,7 +15750,7 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["rename", "share", "unshare_here"]
+                        "enum": ["rename", "share", "share_all_spaces", "unshare_here"]
                       },
                       "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
@@ -15603,7 +15768,7 @@
                           }
                         }
                       },
-                      "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
+                      "description": "The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                     },
                     "client_ref": {
                       "type": ["string", "null"],
@@ -17960,7 +18125,7 @@
                     },
                     "root_active": {
                       "type": "boolean",
-                      "description": "Whether the root package is ACTIVE in the calling space after the import. False when the root lives in another space and the caller may not offer it out of that home — the import still landed every package it carried."
+                      "description": "Whether the root package is ACTIVE in the calling space after the import. False when the root lives in another space and the caller may not place it outside that home — the import still landed every package it carried."
                     },
                     "root_package_id": {
                       "type": "string"
@@ -18747,7 +18912,7 @@
         "operationId": "listSkills",
         "tags": ["Packages"],
         "summary": "List skills",
-        "description": "List the skills ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed or offered) and switched on. A package placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.",
+        "description": "List the skills ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19555,7 +19720,7 @@
         "operationId": "listAgentPackages",
         "tags": ["Packages"],
         "summary": "List agent packages",
-        "description": "List the agent packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed or offered) and switched on. A package placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.",
+        "description": "List the agent packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -20342,7 +20507,7 @@
         "operationId": "getPackageHome",
         "tags": ["Packages"],
         "summary": "Locate a package: its type, its home and the spaces you read it from",
-        "description": "Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and offered nowhere is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when an offer makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's read and the placement (home or offer) grants it — a system package is readable wherever that read is held. Read-only.",
+        "description": "Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and placed nowhere else is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when a placement elsewhere makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's read and the placement (home or row) grants it — a system package is readable wherever that read is held. Read-only.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -20392,7 +20557,7 @@
         "operationId": "movePackageHome",
         "tags": ["Packages"],
         "summary": "Move a package to another home space",
-        "description": "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.",
+        "description": "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -20422,7 +20587,7 @@
                   "keep_in_previous_home": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Does the space being LEFT keep the package? `true` (the default) leaves it the authorless `package_shares` offer described above, so it goes on reading and running it and nothing it had scheduled stops. `false` completes the move: that offer and that space's `space_packages` row are removed together, in the same transaction — together, because withdrawing the offer alone would leave a placement row nothing places, which no page shows and no execution door honours. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. It governs a space that was RUNNING the package: a space that held no `space_packages` row is left behind whatever the flag says, because the backfill exists to preserve what was running and an offer written to a space that never switched the package on would widen what it sees. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`."
+                    "description": "Does the space being LEFT keep the package? `true` (the default) leaves its `space_packages` row in place, so it goes on reading and running the package and nothing it had scheduled stops. `false` completes the move: that row is removed, settings and all, and every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed), in the same transaction. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. An old home that held no row is left behind whatever the flag says: nothing places the package there once the home has moved, so its schedules there are disabled all the same. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`."
                   }
                 },
                 "additionalProperties": false
@@ -20513,7 +20678,7 @@
         "operationId": "listPackageShares",
         "tags": ["Packages"],
         "summary": "List the spaces a package is shared with",
-        "description": "The package's AUDIENCE — the spaces it is offered to. Requires the package type's `share` permission in its home space; a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.",
+        "description": "The package's AUDIENCE — the spaces it is placed in outside its home, each with its `enabled` state there. Requires the package type's `share` permission in its home space; a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -20579,7 +20744,7 @@
         "operationId": "sharePackage",
         "tags": ["Packages"],
         "summary": "Share a package with a person or a space",
-        "description": "Offer the package to a space — its AUDIENCE, never its activation, which stays the recipient's own act (`POST /api/spaces/{spaceId}/packages`). Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so an offer with nothing published is an offer of nothing. Idempotent: sharing the same pair twice answers 200 with the same entry.",
+        "description": "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{spaceId}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{spaceId}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: an mcp-server whose `latest` archive does not parse is refused (`422 bundle_invalid`), and the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -20613,7 +20778,7 @@
         },
         "responses": {
           "200": {
-            "description": "The share, new or already present.",
+            "description": "The placement, new or already present.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -20643,7 +20808,22 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The target space is the package's own home (`share_target_is_home`), or the package has no published version to offer (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
+            "description": "The target space is the package's own home (`share_target_is_home`), or the package has no published version to place (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The share would land ON and the package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). RFC 9457 problem+json.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20660,7 +20840,7 @@
         "operationId": "revokePackageShare",
         "tags": ["Packages"],
         "summary": "Withdraw a package share",
-        "description": "Remove the offer AND the placement it backs, in one transaction: a package left running in a space that may no longer see it is the failure the two-table split exists to prevent. Same authority as sharing — the package type's `share` in its home space. 404 when the package is not shared with that target.",
+        "description": "Remove the placement: the target's `space_packages` row is deleted, its settings with it, and the package is no longer readable or runnable there. In the same transaction, every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed). Either side may withdraw: the home side, holding the package type's `share` in its home space, or the recipient side, holding the type's deactivation permission in the target space (waived in the caller's own personal space). 404 when the package is not placed in that target outside its home, or when the target is another member's personal space addressed by its space id. Audited as `package.unshared`, with `authority` (`home` or `recipient`) naming the side that withdrew it.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -20681,12 +20861,12 @@
             "schema": {
               "type": "string"
             },
-            "description": "The share's target exactly as `GET …/shares` published it: a space id (`spc_…`) for a `space` target, or the member's user id for a `user` target. The two are told apart by the space-id shape. There is no third spelling: the id of another member's personal space is never on the wire, so it cannot be the handle here."
+            "description": "The share's target exactly as `GET …/shares` published it: a space id (`spc_…`) for a `space` target, or the member's user id for a `user` target. A recipient names the space they act in: a team space by its id, their own personal space by its id or by their user id. The two are told apart by the space-id shape. The id of another member's personal space is never on the wire, so it is not a handle here: it answers 404."
           }
         ],
         "responses": {
           "204": {
-            "description": "Share (and any placement behind it) removed."
+            "description": "Placement removed, with its settings; the package's schedules in that space are disabled (`package_removed`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -20821,7 +21001,7 @@
         "operationId": "listIntegrationPackages",
         "tags": ["Packages"],
         "summary": "List integration packages",
-        "description": "List the integration packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed or offered) and switched on. A package placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.",
+        "description": "List the integration packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -21597,7 +21777,7 @@
         "operationId": "listMcpServerPackages",
         "tags": ["Packages"],
         "summary": "List MCP-server packages",
-        "description": "List the MCP-server packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed or offered) and switched on. A package placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.",
+        "description": "List the MCP-server packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -22961,7 +23141,7 @@
         "operationId": "activatePackage",
         "tags": ["Space Packages"],
         "summary": "Activate a package in this space",
-        "description": "Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. A package must be PLACED here first: homed in this space, or shared with it (`POST /api/packages/{scope}/{name}/shares`); system packages are placed everywhere. If it is not, this call can create the share itself, but only for a caller holding the package type's `share` permission in the package's HOME space — `403` otherwise, `404` when the package id is not reachable at all. An API key never carries `share`, so it activates only what is already placed. In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest takes up a package offered to them. The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it.",
+        "description": "Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. Where the package is PLACED here — homed in this space, holding a row here (`POST /api/packages/{scope}/{name}/shares` creates one), or a system package, placed everywhere — the row is switched on. Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest switches on a package placed there for them. The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23120,7 +23300,7 @@
         "operationId": "updateSpacePackage",
         "tags": ["Space Packages"],
         "summary": "Configure how this space runs a placed package",
-        "description": "Update the model/proxy overrides and generation settings of a package PLACED in this space, and — for a skill — whether the space enforces it in its chat. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
+        "description": "Update the model/proxy overrides and generation settings of a package PLACED in this space, and — for a skill — whether the space enforces it in its chat. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the placement that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23231,7 +23411,7 @@
         "operationId": "deactivatePackage",
         "tags": ["Space Packages"],
         "summary": "Deactivate a package in this space",
-        "description": "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only revoking the share that placed the package removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row and is not a system package: an offer nobody has taken up is not on, so there is nothing to switch off, and it stays an offer rather than becoming a refusal its recipient never made.",
+        "description": "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -30502,7 +30682,7 @@
         "operationId": "getLibrary",
         "tags": ["Library"],
         "summary": "Organization library — the placement map, graded by caller",
-        "description": "Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Graded by the caller: the spaces list and the placements include only the spaces whose own library (`GET /api/spaces/{spaceId}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — and each package type also requires that type's read permission in the space. So the response is the union of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package with no placement the caller reads is listed, with empty `placements`, when its home grants the caller `<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one space) receive 403. Ephemeral packages are excluded. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` activates a package in a space — creating the offer that places it when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.",
+        "description": "Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Graded by the caller: the spaces list and the placements include only the spaces whose own library (`GET /api/spaces/{spaceId}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — and each package type also requires that type's read permission in the space. So the response is the union of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package with no placement the caller reads is listed, with empty `placements`, when its home grants the caller `<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one space) receive 403. Ephemeral packages are excluded. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` activates a package in a space — placing it there when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -30608,7 +30788,7 @@
                           {
                             "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                             "via": "shared",
-                            "state": "none",
+                            "state": "inactive",
                             "chat_enforced": false,
                             "shared_by": {
                               "user_id": "usr_1",
@@ -30693,7 +30873,7 @@
         "operationId": "getSpaceLibrary",
         "tags": ["Library"],
         "summary": "One space's placements, and what the caller could still place there",
-        "description": "Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, offered here, or shipped with the platform, with `state` saying whether the space runs it — `none` is exactly a pending offer, taken up with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then creates the offer); for a PERSONAL destination, nothing beyond what is already placed — an offer into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.",
+        "description": "Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, holding a `space_packages` row here, or shipped with the platform, with `state` saying whether the space runs it — a placement switched off reads `inactive` and is switched on with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then places it); for a PERSONAL destination, nothing beyond what is already placed — placing into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -30807,7 +30987,7 @@
                           {
                             "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                             "via": "shared",
-                            "state": "none",
+                            "state": "inactive",
                             "chat_enforced": false,
                             "shared_by": {
                               "user_id": "usr_1",
@@ -32625,7 +32805,7 @@
           },
           "home_shareable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "has_unarchived_changes": {
             "type": "boolean",
@@ -33416,9 +33596,10 @@
               "connection_unshared",
               "connection_set_unnamed",
               "connection_choice_invalid",
+              "package_removed",
               null
             ],
-            "description": "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin or an enforced org default (`override_outranked`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. Cleared by re-enabling."
+            "description": "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin or an enforced org default (`override_outranked`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. `package_removed`: the agent's placement in the space was withdrawn (`DELETE /api/packages/{scope}/{name}/shares/{target}`, or a home move leaving the space); re-enabling it fails every fire until the agent is placed there again. Cleared by re-enabling."
           },
           "cron_expression": {
             "type": "string"
@@ -33651,7 +33832,7 @@
           },
           "home_shareable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "createdAt": {
             "type": "string",
@@ -33749,7 +33930,7 @@
           },
           "home_shareable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "createdAt": {
             "type": "string",
@@ -33873,7 +34054,7 @@
           },
           "home_shareable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "agents": {
             "type": "array",
@@ -34466,6 +34647,10 @@
                     "type": "string"
                   },
                   "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
+                },
+                "share_all_spaces": {
+                  "type": "boolean",
+                  "description": "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically."
                 },
                 "origin_space_id": {
                   "type": ["string", "null"],
@@ -35208,7 +35393,7 @@
             },
             "home_shareable": {
               "type": "boolean",
-              "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+              "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
             },
             "published": {
               "type": "boolean",
@@ -35216,7 +35401,7 @@
             },
             "activation": {
               "type": "array",
-              "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the offer; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
+              "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
               "items": {
                 "type": "object",
                 "required": ["spaceId", "activate", "deactivate"],
@@ -35257,12 +35442,12 @@
           "via": {
             "type": "string",
             "enum": ["home", "shared", "system"],
-            "description": "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (it was offered to this space), `system` (a built-in package, readable in every space)."
+            "description": "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `system` (a built-in package, readable in every space)."
           },
           "state": {
             "type": "string",
             "enum": ["active", "inactive", "none"],
-            "description": "Whether the space RUNS it. `active`: yes. `inactive`: it was switched off here, and its per-space model, proxy and input settings are kept. `none`: nothing has switched it on yet — a pending offer is exactly this. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`."
+            "description": "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`."
           },
           "chat_enforced": {
             "type": "boolean",
@@ -35270,7 +35455,7 @@
           },
           "shared_by": {
             "type": ["object", "null"],
-            "description": "Who offered it — on `via: \"shared\"` placements only. `null` there when the offer came from a home move rather than from a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.",
+            "description": "Who placed it here — on `via: \"shared\"` placements only. `null` there when the row was left by a home move rather than placed by a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.",
             "required": ["user_id", "name"],
             "properties": {
               "user_id": {
@@ -35285,7 +35470,7 @@
       },
       "ShareTarget": {
         "type": "object",
-        "description": "Who a package is offered to. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
+        "description": "Where a package is placed outside its home. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
         "required": ["kind"],
         "oneOf": [
           {
@@ -35345,8 +35530,8 @@
       },
       "PackageShare": {
         "type": "object",
-        "description": "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it.",
-        "required": ["object", "target", "shared_by", "createdAt"],
+        "description": "One entry of a package's AUDIENCE: a space the package is placed in outside its home — its `space_packages` row there. The placement grants READ; whether the space RUNS the package is the row's `enabled`.",
+        "required": ["object", "target", "shared_by", "enabled", "createdAt"],
         "properties": {
           "object": {
             "type": "string",
@@ -35357,7 +35542,7 @@
           },
           "shared_by": {
             "type": ["object", "null"],
-            "description": "Who shared it. `null` once that account is gone, and `null` once they have left this organization.",
+            "description": "Who placed it there. `null` once that account is gone, once they have left this organization, and on a row a home move left behind.",
             "required": ["user_id", "name"],
             "properties": {
               "user_id": {
@@ -35368,9 +35553,14 @@
               }
             }
           },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the package is switched on in the target space (`space_packages.enabled`). A placement lands on when the sharer may activate in the target, and off otherwise, for the target's members to switch on."
+          },
           "createdAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "When the placement row was created (`space_packages.installed_at`)."
           }
         }
       },
@@ -35409,14 +35599,14 @@
           },
           "home_shareable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "read_space_ids": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space it is offered to; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404."
+            "description": "Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space holding a `space_packages` row for it; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404."
           }
         }
       }

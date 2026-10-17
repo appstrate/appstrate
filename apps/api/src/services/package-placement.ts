@@ -1,95 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * WHERE a package is — PLACEMENT, the axis that is neither authority (who may
- * write it) nor activation (does this space run it).
- *
- * Two placements and no third (RBAC spec §6.9, §6.10): a package is placed in
- * the space that HOMES it and in every space it is SHARED with, plus — by
- * construction — in every space of every organization when the deployment
- * ships it. This module states that rule in SQL ({@link placementReadFilter}),
- * owns the two ON clauses it is read through, and owns the ONE act that has to
- * repair it ({@link reconcilePlacementsAfterRehome}).
+ * PLACEMENT: where a package is, distinct from authority and activation
+ * (RBAC spec §6.9, §6.10). Placed = homed here, holding a `space_packages` row
+ * here, or shipped with the deployment.
  */
 
-import { and, eq, isNotNull, ne, or } from "drizzle-orm";
+import { and, asc, eq, isNotNull, ne, or } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { packages, packageShares, spacePackages, spaces } from "@appstrate/db/schema";
-import type { DbOrTx } from "../lib/db-helpers.ts";
+import { packages, schedules, spacePackages } from "@appstrate/db/schema";
+import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
+import { disableSchedules } from "./schedules-naming-connection.ts";
 
 /**
- * Drizzle filter: is the package PLACED in `spaceId`? — homed here, offered
- * here, or shipped with the deployment, each a read grant on its own.
- *
- * A `space_packages` row is NOT a fourth disjunct: a row is a placement's
- * consequence, never its source, so `activeHereSql` conjoins this filter rather
- * than trusting the row alone. Without that, a builder of B who can read A's
- * package could switch it on in B and give B a placement A granted to nobody.
- *
- * Reads its share half off a LEFT JOIN of `packageShares`, whose ON clause is
- * {@link placementShareJoin}. The org boundary (`orgOrSystemFilter`) and the
- * shadow filter (`notEphemeralFilter`) are the caller's, as everywhere else.
+ * Drizzle filter: is the package placed in `spaceId`? Needs a LEFT JOIN of
+ * `spacePackages` on {@link placementRowJoin}; org and shadow filters are the caller's.
  */
 export function placementReadFilter(spaceId: string) {
   return or(
     eq(packages.source, "system"),
-    isNotNull(packageShares.packageId),
+    isNotNull(spacePackages.packageId),
     eq(packages.homeSpaceId, spaceId),
   );
 }
 
 /**
- * The ON clause every reader of {@link placementReadFilter} joins
- * `packageShares` with — `(this package, THIS space)`.
- *
- * The space narrowing is the whole function. Dropping it widens "offered to
- * THIS space" into "offered to any space at all", in every reader at once, and
- * raises nothing — so `spaceId` is a required argument and
- * `package-placement-parity.test.ts` pins the widening with a package offered
- * elsewhere. (Dropping the JOIN instead is loud: Postgres 42P01.)
- *
- * `packageIdColumn` is the left-hand side because the readers join from two
- * different tables — `packages.id` on the catalogue reads, and
- * `spacePackages.packageId` on the ones that start from the placement row.
- */
-export function placementShareJoin(packageIdColumn: AnyPgColumn, spaceId: string) {
-  return and(eq(packageShares.packageId, packageIdColumn), eq(packageShares.spaceId, spaceId));
-}
-
-/**
- * The twin ON clause, for `spacePackages` — `(this package, THIS space)`.
- *
- * A row is not a placement, so this join does not answer "is it placed here".
- * It is the other half of the pair every placement-aware query carries:
- * `activeHereSql` (`services/package-activation.ts`) reads the space's decision
- * off it, and the listings project `enabled` and the per-space overrides.
- *
- * Owned here, and narrowed on the space, for the reason
- * {@link placementShareJoin} is — drop that narrowing and `activeHereSql` reads
- * another space's `enabled` while a listing projects its model and proxy
- * overrides, silently. `spaceId` is a column when each left row names its own
- * space (a schedule's).
+ * The ON clause every placement-aware query joins `spacePackages` with:
+ * `(this package, THIS space)`. Dropping the space narrowing silently widens
+ * "placed here" to "placed anywhere" (pinned by `package-placement-parity.test.ts`).
+ * `spaceId` may be a column when each left row names its own space.
  */
 export function placementRowJoin(packageIdColumn: AnyPgColumn, spaceId: string | AnyPgColumn) {
   return and(eq(spacePackages.packageId, packageIdColumn), eq(spacePackages.spaceId, spaceId));
 }
 
 /**
- * Is the package placed in ANY space of the organization other than
- * `exceptSpaceId`? — the rule above, asked as an existence question.
- *
- * The caller is the offboarding sweeper (`emptyAndDeletePersonalSpace`,
- * `services/spaces.ts`), deciding whether a package homed in a departing
- * member's personal space is re-homed or deleted. `exceptSpaceId` is that
- * space: its home placement is the one leaving, so neither it nor a row or
- * offer sitting in it may answer for itself.
- *
- * Both tables are asked: the row half cannot be inferred from the offer half
- * while the orphans `scripts/migration/0016` repairs still exist.
- *
- * The org boundary is the caller's. An inherited cross-org row would answer
- * "placed" and get the package re-homed rather than deleted — the conservative
- * direction.
+ * Is the package placed in any space other than `exceptSpaceId`? Used by the
+ * personal-space sweeper (`services/spaces.ts`) to choose re-home over delete.
+ * The org boundary is the caller's.
  */
 export async function isPlacedElsewhere(
   tx: DbOrTx,
@@ -97,121 +45,81 @@ export async function isPlacedElsewhere(
 ): Promise<boolean> {
   const { packageId, exceptSpaceId } = params;
   const [row] = await tx
-    .select({ id: packages.id })
-    .from(packages)
-    .leftJoin(
-      spacePackages,
-      and(eq(spacePackages.packageId, packages.id), ne(spacePackages.spaceId, exceptSpaceId)),
-    )
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, packages.id), ne(packageShares.spaceId, exceptSpaceId)),
-    )
-    .where(
-      and(
-        eq(packages.id, packageId),
-        or(isNotNull(spacePackages.spaceId), isNotNull(packageShares.spaceId)),
-      ),
-    )
+    .select({ spaceId: spacePackages.spaceId })
+    .from(spacePackages)
+    .where(and(eq(spacePackages.packageId, packageId), ne(spacePackages.spaceId, exceptSpaceId)))
     .limit(1);
   return !!row;
 }
 
 /**
- * Re-home a package and leave no placement behind — the ONE reconciliation,
- * called by everything that rewrites `packages.home_space_id`.
+ * What a home move (`PUT …/home`) does to the placement it leaves; only the
+ * home being left is a choice. Runs inside the caller's transaction.
  *
- * Moving the home OUT of a space that still holds a `space_packages` row leaves
- * a placement nothing places: invisible on every page of the space that runs
- * it, absent from its own index, and still firing from a cron. That is the
- * state `scripts/migration/0016` repairs on inherited data, and no live code
- * path may create another one.
- *
- * So every space of the organization holding a row, other than the NEW home,
- * gets the share that now places it — `shared_by` NULL, because the home placed
- * it until this call and no person offered it. The destination's own share is
- * dropped: a package is not offered to the space it lives in, the same rule
- * `POST …/shares` states as `share_target_is_home`. The only space whose answer
- * is a CHOICE is the home being left (`previousHome` below).
- *
- * Two callers: `PUT /api/packages/{scope}/{name}/home` moves a home
- * deliberately, and `emptyAndDeletePersonalSpace` (`services/spaces.ts`) moves
- * one because the author left, re-homing to the organization's DEFAULT space.
- *
- * Runs INSIDE the caller's transaction: the move and the placements it
- * invalidates commit together or not at all. Call it AFTER the
- * `packages.home_space_id` write, so a concurrent activation waiting on that
- * row's lock re-reads the home it will be judged against.
+ * @returns the schedules {@link withdrawPlacement} disabled, whose jobs the
+ *   caller removes once committed.
  */
 export async function reconcilePlacementsAfterRehome(
-  tx: DbOrTx,
+  tx: Tx,
   params: {
     packageId: string;
-    orgId: string;
     newHomeSpaceId: string;
     /**
-     * The home being LEFT, and what becomes of its placement — the one space
-     * whose answer is a choice rather than an invariant. `PUT …/home` passes a
-     * human's answer for it.
-     *
-     * `keep: true` backfills that space only when it holds a placement ROW: the
-     * backfill exists to keep RUNNING what was running, so a space that had
-     * switched the package off has nothing to rescue and writing it an offer
-     * would widen what it sees.
-     *
-     * `keep: false` withdraws the offer AND the placement row together — the
-     * pair {@link revokePackageShare} withdraws — since dropping only the offer
-     * leaves an orphan carrying the space's model, proxy and input values.
-     *
-     * OMITTED by the personal-space sweeper, which re-homes on nobody's request
-     * and so has no answer to give: every space that was running the package
-     * goes on running it.
+     * The home being left. `keep: true` keeps its row; `keep: false` withdraws
+     * it. A space with no row is withdrawn either way (its schedules go off).
      */
-    previousHome?: { spaceId: string; keep: boolean };
+    previousHome: { spaceId: string; keep: boolean };
   },
-): Promise<void> {
-  const { packageId, orgId, newHomeSpaceId, previousHome } = params;
-  const releasing =
-    previousHome && !previousHome.keep && previousHome.spaceId !== newHomeSpaceId
-      ? previousHome.spaceId
-      : null;
+): Promise<string[]> {
+  const { packageId, newHomeSpaceId, previousHome } = params;
+  if (previousHome.spaceId === newHomeSpaceId) return [];
+  if (previousHome.keep) {
+    const [row] = await tx
+      .select({ packageId: spacePackages.packageId })
+      .from(spacePackages)
+      .where(
+        and(
+          eq(spacePackages.packageId, packageId),
+          eq(spacePackages.spaceId, previousHome.spaceId),
+        ),
+      )
+      .limit(1);
+    if (row) return [];
+  }
+  return (await withdrawPlacement(tx, packageId, previousHome.spaceId)).disabledScheduleIds;
+}
 
-  // The `spaces` join is the org boundary: `space_packages` carries no
-  // `org_id`, and an offer must never be written for a space another
-  // organization owns.
-  const orphaned = await tx
-    .select({ spaceId: spacePackages.spaceId })
-    .from(spacePackages)
-    .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
+/**
+ * Withdraw `packageId` from `spaceId`: the one delete of a `space_packages` row
+ * (settings included). Every schedule of the package there is disabled with
+ * `package_removed` in the same transaction; re-placing does not re-arm them.
+ * The org boundary is the caller's.
+ *
+ * @returns whether a row went, and the disabled schedules, whose jobs the
+ *   caller removes once committed.
+ */
+export async function withdrawPlacement(
+  tx: Tx,
+  packageId: string,
+  spaceId: string,
+): Promise<{ removed: boolean; disabledScheduleIds: string[] }> {
+  const removed = await tx
+    .delete(spacePackages)
+    .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, spaceId)))
+    .returning({ packageId: spacePackages.packageId });
+  const armed = await tx
+    .select({ id: schedules.id })
+    .from(schedules)
     .where(
       and(
-        eq(spacePackages.packageId, packageId),
-        eq(spaces.orgId, orgId),
-        ne(spacePackages.spaceId, newHomeSpaceId),
-        // A released old home is not backfilled — it is emptied below.
-        releasing ? ne(spacePackages.spaceId, releasing) : undefined,
+        eq(schedules.packageId, packageId),
+        eq(schedules.spaceId, spaceId),
+        eq(schedules.enabled, true),
       ),
-    );
-
-  if (orphaned.length > 0) {
-    await tx
-      .insert(packageShares)
-      .values(orphaned.map((row) => ({ packageId, spaceId: row.spaceId, sharedBy: null })))
-      .onConflictDoNothing();
-  }
-
-  // Both halves, together: an offer withdrawn while its row stands is the
-  // orphan this function exists to prevent.
-  if (releasing) {
-    await tx
-      .delete(packageShares)
-      .where(and(eq(packageShares.packageId, packageId), eq(packageShares.spaceId, releasing)));
-    await tx
-      .delete(spacePackages)
-      .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, releasing)));
-  }
-
-  await tx
-    .delete(packageShares)
-    .where(and(eq(packageShares.packageId, packageId), eq(packageShares.spaceId, newHomeSpaceId)));
+    )
+    .orderBy(asc(schedules.id))
+    .for("update");
+  const disabledScheduleIds = armed.map((row) => row.id);
+  await disableSchedules(tx, disabledScheduleIds, "package_removed");
+  return { removed: removed.length > 0, disabledScheduleIds };
 }

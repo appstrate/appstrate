@@ -35,7 +35,7 @@ import { resolveIntegrationSpawns } from "../../../src/services/integration-spaw
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -140,7 +140,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("1.0.0"),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
@@ -180,7 +180,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("3.0.0"),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
@@ -202,7 +202,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("1.0.0"),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
@@ -227,7 +227,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("1.0.0"),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,

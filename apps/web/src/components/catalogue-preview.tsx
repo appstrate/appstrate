@@ -22,14 +22,12 @@ import {
   Hash,
   History,
   House,
-  Inbox,
   Layers,
   Plug,
   ShieldCheck,
   TextCursorInput,
   Wrench,
 } from "lucide-react";
-import { cn } from "@appstrate/ui/cn";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { AlertTitle } from "@appstrate/ui/components/alert";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -64,7 +62,6 @@ import { CATALOGUE_TYPE_LABEL_KEY } from "../lib/catalogue-link";
 import {
   pinnedVersionState,
   sheetChatEnforce,
-  sheetOffers,
   sheetSpaceMode,
   sheetSpaceRows,
   type SheetSpaceRow,
@@ -242,7 +239,6 @@ export function CataloguePreview({
 
   const rows = sheetSpaceRows(placement, spaces, gateOf, currentSpaceId);
   const mode = sheetSpaceMode(rows);
-  const offers = sheetOffers(rows);
   const home = spaces.find((space) => space.id === placement.homeSpaceId);
   const integrationName = (id: string) => integrations.find((row) => row.id === id)?.name || id;
   /** What this space would still have to switch on for the agent to start. */
@@ -268,12 +264,13 @@ export function CataloguePreview({
       row.state === "active"
         ? t("catalogue.filter.active")
         : row.state === "inactive"
-          ? t("catalogue.filter.inactive")
-          : row.state === "offered"
-            ? row.offeredBy
-              ? t("catalogue.sheet.offeredBy", { name: row.offeredBy })
-              : t("catalogue.offeredHere")
-            : t("catalogue.sheet.absent");
+          ? [
+              t("catalogue.filter.inactive"),
+              row.sharedBy && t("catalogue.sheet.sharedBy", { name: row.sharedBy }),
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          : t("catalogue.sheet.absent");
     return row.home ? t("catalogue.sheet.atHome", { state: base }) : base;
   };
   const switchFor = (row: SheetSpaceRow) => (
@@ -281,7 +278,13 @@ export function CataloguePreview({
       checked={row.state === "active"}
       disabled={busy || !row.mayToggle}
       aria-label={t("catalogue.spaceSwitch", { package: item.name || item.id, space: row.name })}
-      title={row.refusal ? t(ACTIVATION_REFUSAL_KEY[row.refusal], { ns: "common" }) : undefined}
+      title={
+        row.refusal
+          ? t(ACTIVATION_REFUSAL_KEY[row.refusal], { ns: "common" })
+          : row.shared
+            ? t("catalogue.sheet.offerCredentials")
+            : undefined
+      }
       onCheckedChange={(next) => onSetActive(row.id, next === true)}
     />
   );
@@ -356,28 +359,6 @@ export function CataloguePreview({
 
   return (
     <div>
-      {offers.map((offer) => (
-        <BannerAlert
-          key={offer.id}
-          variant="info"
-          className="mb-5"
-          icon={<Inbox className="size-4" />}
-          title={
-            offer.offeredBy
-              ? t("catalogue.sheet.offerBy", { name: offer.offeredBy, space: offer.name })
-              : t("catalogue.sheet.offer", { space: offer.name })
-          }
-          body={missingText(offer.id) ?? t("catalogue.sheet.offerCredentials")}
-          action={
-            offer.mayToggle && (
-              <Button size="sm" disabled={busy} onClick={() => onSetActive(offer.id, true)}>
-                {t("catalogue.sheet.activateIn", { space: offer.name })}
-              </Button>
-            )
-          }
-        />
-      ))}
-
       <div className="flex items-start justify-between gap-4">
         <SettingsHeading className="mb-2" title={item.name || item.id} />
         <div className="flex shrink-0 items-center gap-3">{actionsMenu}</div>
@@ -534,12 +515,7 @@ export function CataloguePreview({
           </p>
         )}
         {mode === "single" && rows[0] && (
-          <div
-            className={cn(
-              "border-border flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm",
-              rows[0].state === "offered" && "bg-primary/5",
-            )}
-          >
+          <div className="border-border flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
             <div className="min-w-0">
               <p>
                 <span className="font-medium">{rows[0].name}</span>
@@ -578,7 +554,7 @@ export function CataloguePreview({
               </TableHeader>
               <TableBody>
                 {rows.map((row) => (
-                  <TableRow key={row.id} className={row.state === "offered" ? "bg-primary/5" : ""}>
+                  <TableRow key={row.id}>
                     <TableCell className="font-medium">
                       <span className="flex min-w-0 items-center gap-1.5">
                         <span className="truncate">{row.name}</span>

@@ -15,6 +15,30 @@ import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
  * client routes (`paths/org-integrations.ts`) reuse the exported shapes.
  */
 
+export const connectionShareAllSpacesOperation = {
+  description:
+    "Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With share_all_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False selects specific-space sharing and keeps existing shares. Every effective individual withdrawal also selects specific-space sharing atomically, through the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.",
+  requestBody: {
+    required: true,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["share_all_spaces"],
+          properties: { share_all_spaces: { type: "boolean" } },
+        },
+      },
+    },
+  },
+  responses: {
+    "204": { description: "All-spaces sharing policy saved", headers: STD_RESPONSE_HEADERS },
+    "400": { $ref: "#/components/responses/ValidationError" },
+    "403": { $ref: "#/components/responses/Forbidden" },
+    "404": { $ref: "#/components/responses/NotFound" },
+  },
+} as const;
+
 /** `GET /connect/start` answers every refusal with a rendered HTML page (`popupHtmlError`). */
 const htmlErrorPage = { "text/html": { schema: { type: "string" } } } as const;
 
@@ -229,6 +253,13 @@ export const sharedHereSchema = {
     "Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses).",
 } as const;
 
+/** The owner only, when the credential is not bound to one space. */
+export const shareAllSpacesSchema = {
+  type: "boolean",
+  description:
+    "Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically.",
+} as const;
+
 /** The owner only (absent otherwise): the spaces the connection is shared into. */
 export const sharedSpaceIdsSchema = {
   type: "array",
@@ -258,7 +289,7 @@ export const shareableSpacesSchema = {
   type: "array",
   items: namedSpaceSchema,
   description:
-    "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only.",
+    "The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only.",
 } as const;
 
 export const integrationConnectionSchema = {
@@ -312,6 +343,7 @@ export const integrationConnectionSchema = {
     spaceId: spaceIdSchema,
     shared_here: sharedHereSchema,
     shared_space_ids: sharedSpaceIdsSchema,
+    share_all_spaces: shareAllSpacesSchema,
     origin_space_id: originSpaceIdSchema,
     allowed_actions: {
       ...connectionActionsSchema,
@@ -753,10 +785,10 @@ export const connectionUpdateConflicts = {
 } as const;
 
 const connectionSharePutDescription =
-  "Shares the connection into `spaceId`. Owner only. The target must be a space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any space of its org, a space-scoped one only into its own space. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.";
+  "Shares the connection into `spaceId`. Owner only. The target must be a team space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any team space of its org, a space-scoped one only into its own team space. Personal spaces are refused. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.";
 
 const connectionShareDeleteDescription =
-  "Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.";
+  "Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. An effective withdrawal atomically selects specific-space mode by clearing share_all_spaces; a no-op preserves the current mode. A withdrawal and a concurrent team-space creation are ordered on the connection row. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.";
 
 export const connectionSharePutConflicts = {
   description:
@@ -784,7 +816,7 @@ export const connectionShareEndpoints = {
   put: {
     description: connectionSharePutDescription,
     refusals400:
-      "A malformed `spaceId` (`invalid_request`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`).",
+      "A malformed `spaceId` (`invalid_request`), or a personal-space target, a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`).",
   },
   delete: {
     description: connectionShareDeleteDescription,
@@ -799,7 +831,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List available integrations",
       description:
-        "List every AFPS integration PLACED in the current space — homed there, offered there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an offer the space has not taken up and an integration switched off are both listed, with `active: false`. An integration homed in another space of the organization and offered to nobody is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Rows are sorted by `id`, so offset pagination (`limit`/`offset`) walks a stable order. Supports a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
+        "List every AFPS integration PLACED in the current space — homed there, holding a row there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an integration placed here and switched off is listed, with `active: false`. An integration homed in another space of the organization and placed nowhere else is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Rows are sorted by `id`, so offset pagination (`limit`/`offset`) walks a stable order. Supports a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -908,7 +940,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Get integration detail + per-auth status",
       description:
-        "Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, offered there, or shipped with the deployment. An integration homed elsewhere and offered to nobody answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space.",
+        "Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1612,6 +1644,20 @@ export const integrationsPaths = {
         },
         "409": connectionUpdateConflicts,
       },
+    },
+  },
+  "/api/integrations/{packageId}/connections/{connectionId}/shares": {
+    put: {
+      ...connectionShareAllSpacesOperation,
+      operationId: "setIntegrationConnectionShareAllSpaces",
+      tags: ["Integrations"],
+      summary: "Share a connection with current and future team spaces",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+        connectionIdParam,
+      ],
     },
   },
   "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}": {

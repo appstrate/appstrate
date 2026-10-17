@@ -6,8 +6,8 @@
  * One row per package, one `placements` entry per space the package is placed
  * in and the caller reads, saying WHY it is there (`via`) and whether that
  * space runs it (`state`). There is no `shared` section in either shape: a
- * pending offer is a placement with `state: "none"`, on the package's own row
- * and behind the same switch as every other space.
+ * package placed and not switched on is a placement with `state: "inactive"`,
+ * on the package's own row and behind the same switch as every other space.
  *
  * The fixture is the shape the three axes are hardest to tell apart in: one
  * agent homed in Alpha, offered to Beta and taken up there, offered to Gamma
@@ -145,8 +145,8 @@ describe("GET /api/library — the organization map", () => {
     });
     expect(placementOf(row, betaId)).toMatchObject({ via: "shared", state: "active" });
     expect(placementOf(row, betaId)?.shared_by?.user_id).toBe(ctx.user.id);
-    // The pending offer: placed, and nothing has switched it on.
-    expect(placementOf(row, gammaId)).toMatchObject({ via: "shared", state: "none" });
+    // Placed, and nothing has switched it on: a row saying `false`.
+    expect(placementOf(row, gammaId)).toMatchObject({ via: "shared", state: "inactive" });
     // Taken up and put back down — the row and its settings survive, which is
     // exactly what `inactive` reports and `none` does not.
     expect(placementOf(row, deltaId)).toMatchObject({ via: "shared", state: "inactive" });
@@ -281,15 +281,15 @@ describe("GET /api/spaces/{id}/library — one space's page", () => {
     expect(placementOf(row, betaId)).toMatchObject({ via: "shared", state: "active" });
   });
 
-  it("shows a pending offer as a placement of the row, with its sharer", async () => {
+  it("shows a placement switched off as a placement of the row, with its sharer", async () => {
     const row = rowOf(await spaceLibrary(owner(gammaId), gammaId), "agent", AGENT);
     expect(row?.placements).toHaveLength(1);
-    expect(placementOf(row, gammaId)).toMatchObject({ via: "shared", state: "none" });
+    expect(placementOf(row, gammaId)).toMatchObject({ via: "shared", state: "inactive" });
     expect(placementOf(row, gammaId)?.shared_by?.user_id).toBe(ctx.user.id);
   });
 
   it("stops naming a sharer who has LEFT the organization", async () => {
-    // `package_shares.shared_by` is `ON DELETE SET NULL` on `user`, so deleting
+    // `space_packages.shared_by` is `ON DELETE SET NULL` on `user`, so deleting
     // the ACCOUNT clears it — but leaving the ORG clears nothing, and this map
     // is served to every owner and admin, on every row. The membership is part
     // of the join, so the name never leaves the database rather than being
@@ -310,8 +310,8 @@ describe("GET /api/spaces/{id}/library — one space's page", () => {
       );
 
     const anonymous = rowOf(await spaceLibrary(owner(gammaId), gammaId), "agent", shared);
-    // The offer still stands — only the name behind it is withheld.
-    expect(placementOf(anonymous, gammaId)).toMatchObject({ via: "shared", state: "none" });
+    // The placement still stands — only the name behind it is withheld.
+    expect(placementOf(anonymous, gammaId)).toMatchObject({ via: "shared", state: "inactive" });
     expect(placementOf(anonymous, gammaId)?.shared_by).toBeNull();
   });
 

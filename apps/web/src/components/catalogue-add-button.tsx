@@ -36,8 +36,6 @@ export interface AddableSpace {
   name: string;
   /** Already running there: shown ticked, not offered again. */
   active: boolean;
-  /** A share already waits there: adding it is taking that share up. */
-  pending: boolean;
 }
 
 export function CatalogueAddButton({
@@ -98,14 +96,10 @@ export function CatalogueAddButton({
                 </span>
               )}
             </span>
-            {space.active ? (
+            {space.active && (
               <span className="text-muted-foreground shrink-0 text-xs">
                 {t("catalogue.filter.active")}
               </span>
-            ) : (
-              space.pending && (
-                <span className="text-primary shrink-0 text-xs">{t("catalogue.pendingHere")}</span>
-              )
             )}
           </DropdownMenuItem>
         ))}

@@ -6,8 +6,10 @@ import { ORG_LOGO_PROPERTY } from "../schemas.ts";
 import {
   agentPackageIdParam,
   connectionActionsSchema,
+  connectionShareAllSpacesOperation,
   connectionIdSetJsonSchema,
   connectionScopeSchema,
+  shareAllSpacesSchema,
   connectionSetRefusals,
   connectionShareDeleteConflicts,
   connectionShareEndpoints,
@@ -72,6 +74,7 @@ const meConnectionEntrySchema = {
     },
     auth_key: { type: "string" },
     scope: connectionScopeSchema,
+    share_all_spaces: shareAllSpacesSchema,
     shared_spaces: {
       type: "array",
       items: namedSpaceSchema,
@@ -246,6 +249,22 @@ export const mePaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
       },
+    },
+  },
+  "/api/me/connections/{connectionId}/shares": {
+    put: {
+      ...connectionShareAllSpacesOperation,
+      operationId: "setMeConnectionShareAllSpaces",
+      tags: ["Me"],
+      summary: "Share an owned connection with current and future team spaces",
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
     },
   },
   "/api/me/connections/{connectionId}/shares/{spaceId}": {

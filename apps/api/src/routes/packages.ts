@@ -7,6 +7,7 @@ import {
   PACKAGE_WRITE_PERMISSIONS,
   packagePermission,
   reportPermissionDenial,
+  spacePackagePermission,
 } from "@appstrate/core/permissions";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
@@ -21,10 +22,12 @@ import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle
 import {
   activatePackage,
   activatePackageWithin,
+  assertHasPublishedVersion,
   assertMcpServerActivatable,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
 import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
+import { removeScheduleJobs } from "../services/scheduler.ts";
 import { ensurePersonalSpaceFor, findPersonalSpace } from "../services/spaces.ts";
 import { createPackageShareNotification } from "../services/state/notifications.ts";
 import { getOrgMember } from "../services/organizations.ts";
@@ -70,7 +73,6 @@ import {
   getMatchingDistTags,
   listPackageVersions,
   getVersionInfo,
-  getLatestVersionId,
   getLatestVersionCreatedAt,
   computeHasUnpublishedChanges,
   createVersionFromDraft,
@@ -93,7 +95,9 @@ import {
   assertExistingPackageActivationAccess,
   assertPackageMutationAccess,
   assertPackageShareAccess,
-  holdsPackageShareAuthority,
+  assertPlacementRemovalAccess,
+  callerPlacementAuthority,
+  heldPlacementAuthority,
   homeWireForCaller,
   isPackageReadableInSpace,
   packageAccessSpaces,
@@ -102,6 +106,7 @@ import {
   resolvePackageHome,
 } from "../lib/package-access.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
+import { callerPersonalOwnerId } from "../lib/view-as.ts";
 import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
@@ -418,46 +423,19 @@ export const packageHomeSpaceSchema = z
       message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
     }),
     /**
-     * Does the space the package is LEAVING keep it? Default `true`, which is
-     * the move as it has always behaved: the old home keeps reading and
-     * running the package through the authorless offer
-     * `reconcilePlacementsAfterRehome` writes, so nothing it had scheduled
-     * stops.
-     *
-     * `false` completes the move instead — the old home's offer AND its
-     * placement row go, in the same transaction. It is a field rather than a
-     * second route because it is one act with one modifier.
-     *
-     * The flag governs a space that was RUNNING the package. A space that held
-     * no `space_packages` row is LEFT either way, whatever the flag says
-     * (`reconcilePlacementsAfterRehome` backfills from `space_packages`): the
-     * backfill exists to keep running what was running, and writing an offer to
-     * a space that never switched the package on would widen what that space
-     * sees rather than preserve it.
-     *
-     * Asking it costs no authority beyond the move's own `<type>:write` in
-     * BOTH homes. Requiring `<type>:share` as well — the permission
-     * `DELETE …/shares/{target}` asks — would mean a builder holding `write`
-     * and not `share` could never move a package cleanly, only ever leave a
-     * copy behind; and withdrawing an access is the safe direction, which
-     * §6.9 already says when it calls revoking the lighter act.
+     * Does the space being left keep the package? Default `true`: its row stays.
+     * `false` withdraws it and disables its schedules there, in the same
+     * transaction (`reconcilePlacementsAfterRehome`). Needs no authority beyond
+     * the move's own `<type>:write` in both homes (§6.9).
      */
     keep_in_previous_home: z.boolean().optional().default(true),
   })
   .strict();
 
 /**
- * Body of `POST /api/packages/{scope}/{name}/shares` — WHO the package is
- * offered to (RBAC spec §6.10).
- *
- * Two kinds, and a person is not a space: a `user` target is resolved
- * server-side to that member's personal space, so the sharer never handles
- * (nor learns) the id of a space §3.6 says does not exist for them. A `space`
- * target must be one the sharer can already reach, and is SHAPE-CHECKED like
- * every other space id in a body (`lib/space-role-assignment.ts`) so a
- * malformed one is a 400 rather than the 404 an unreachable space answers.
- * `.strict()` on both arms — a typo'd key is a 400, not a share to the wrong
- * subject.
+ * Body of `POST /api/packages/{scope}/{name}/shares` (RBAC spec §6.10). A `user`
+ * target is resolved server-side to that member's personal space, whose id the
+ * sharer never learns (§3.6); a `space` target must be one the sharer reaches.
  */
 export const shareTargetSchema = z
   .object({
@@ -691,7 +669,7 @@ function makeListHandler(rcfg: PackageRouteConfig) {
     // the env-backed system integrations active without a row included, so no
     // type needs a correction pass behind this listing.
     //
-    // What is merely PLACED here — a pending offer, a package switched off —
+    // What is merely PLACED here — a package switched off —
     // belongs to the space library (`GET /api/spaces/{spaceId}/library`), which
     // carries the per-placement state and the switch that repairs it.
     const items = await listOrgItems(orgId, rcfg.cfg, spaceId);
@@ -1039,7 +1017,7 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     const spaceId = c.get("spaceId");
     const itemId = getItemId(c);
 
-    // Space-level visibility: offered here, homed here, or a system package.
+    // Space-level visibility: placed here, homed here, or a system package.
     if (!(await isPackageReadableInSpace(spaceId, itemId))) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
@@ -1577,7 +1555,7 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  * Two gates that answer different questions, both required:
  *
  * - `isPackageReadableInSpace` is VISIBILITY: "is this a system package,
- *   offered to THIS space, or homed here?" (it also excludes ephemeral
+ *   placed in THIS space, or homed here?" (it also excludes ephemeral
  *   shadows). It says nothing about what the caller is ALLOWED to do — a
  *   credential with `scopes: []` passes it. It is not an authorization.
  * - `requirePackageReadPermission` is AUTHORIZATION: the resolved row's
@@ -1626,8 +1604,8 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<FileExplorer
  * reason — it still allows the 304 round-trip, it only forbids serving without
  * one, and that round-trip is what keeps authorization live. Any fresh window,
  * however short, is served by the browser with ZERO server contact: revoke
- * `<type>:read`, remove the member from the org, or revoke the offer that
- * places the package in the space, and the cached 200 keeps being handed out
+ * `<type>:read`, remove the member from the org, or withdraw the placement
+ * of the package in the space, and the cached 200 keeps being handed out
  * until it expires.
  * `Vary` cannot rescue that — revocation changes no request header. Forcing the
  * round-trip re-enters `loadFileExplorerPackage`, so `isPackageReadableInSpace`
@@ -2012,23 +1990,12 @@ export function createPackagesRouter() {
       // (`computeHasUnpublishedChanges`). Moving the home changes no bytes, so
       // touching it would report a fully-published package as dirty.
       //
-      // The move and the PLACEMENTS it invalidates travel in ONE transaction,
-      // through `reconcilePlacementsAfterRehome`, whose docstring carries the
-      // reasoning.
-      //
-      // An mcp-server whose `latest` archive does not parse is refused
-      // activation by the door; the move must not be the way in. Run outside
-      // the transaction, exactly as `activatePackage` runs it, because it reads
-      // object storage — a 422 here fails the whole move, which is the point.
+      // The move must not be a way past the mcp-server activation check; it
+      // reads object storage, so it runs outside the transaction.
       await assertMcpServerActivatable({ orgId, spaceId: target }, packageId);
       const activation = await db.transaction(async (tx) => {
-        // The SOURCE authority, re-asked against the home this transaction
-        // HOLDS — the discipline `sharePackage` applies, for a heavier stake.
-        // The assert above judged the home as it stood when the request
-        // arrived; a concurrent move committing in between would leave this
-        // caller carrying the package OUT of a space whose write they never
-        // held. `FOR UPDATE`, not `FOR SHARE`: this transaction rewrites that
-        // column, so two moves racing must serialize.
+        // Source authority re-asked against the locked home (a concurrent move
+        // may have changed it). `FOR UPDATE`: racing moves must serialize.
         const [locked] = await tx
           .select({ homeSpaceId: packages.homeSpaceId })
           .from(packages)
@@ -2037,82 +2004,54 @@ export function createPackagesRouter() {
           .for("update");
         if (!locked) throw notFound(`Package '${packageId}' not found`);
         if (locked.homeSpaceId !== pkg.homeSpaceId) {
-          // It moved under us. Re-ask the rule rather than re-deriving it, and
-          // refuse plainly: the caller's own next read shows the new home, and
-          // retrying from there is one request.
           if (!holdsHomeAuthority(locked, accessible, packagePermission(pkg.type, "write"))) {
             throw forbidden(
               `Moving '${packageId}' requires '${packagePermission(pkg.type, "write")}' in its home space — the package moved home while this request was in flight.`,
             );
           }
-          // No special case for "a concurrent move already put it on `target`":
-          // the UPDATE, the reconciliation and the activation below are each
-          // idempotent, so the loser of that race commits the same state the
-          // winner did rather than a refusal the caller cannot act on.
+          // No special case for a concurrent move onto `target`: the steps below are idempotent.
         }
         await tx
           .update(packages)
           .set({ homeSpaceId: target })
           .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
-        await reconcilePlacementsAfterRehome(tx, {
-          packageId,
-          orgId,
-          newHomeSpaceId: target,
-          // The one placement this act gets to decide. `locked.homeSpaceId`
-          // rather than `pkg.homeSpaceId`: a concurrent move may have changed
-          // the home under us and the branch above re-authorized against THAT
-          // row, so the space being left is the one this transaction holds.
-          ...(locked.homeSpaceId
-            ? { previousHome: { spaceId: locked.homeSpaceId, keep: body.keep_in_previous_home } }
-            : {}),
-        });
-        // The new home ACTIVATES it, exactly as creation does — arriving in a
-        // space that cannot run it would make the move a two-step act with no
-        // second button. Through the activation door itself, in THIS
-        // transaction, so `space_packages` keeps a single writer.
-        // `keepExistingDecision`: a space that deliberately switched the package
-        // off keeps that decision — the move is about authority, not about what
-        // this space runs.
-        return activatePackageWithin(tx, { orgId, spaceId: target }, packageId, {
+        // `locked`, not `pkg`: the space left is the one this transaction holds.
+        const disabledScheduleIds = locked.homeSpaceId
+          ? await reconcilePlacementsAfterRehome(tx, {
+              packageId,
+              newHomeSpaceId: target,
+              previousHome: { spaceId: locked.homeSpaceId, keep: body.keep_in_previous_home },
+            })
+          : [];
+        // The new home activates it, keeping a deliberate "off" (the move transfers authority, not what a space runs).
+        const activation = await activatePackageWithin(tx, { orgId, spaceId: target }, packageId, {
           keepExistingDecision: true,
         });
+        return { ...activation, disabledScheduleIds };
       });
-      // The OLD home can be a personal space — its owner moving a package out
-      // to a team. Its id is withheld from the trail exactly as
-      // `package.shared` withholds it (§3.6), and the owner is recorded
-      // instead: that is the audited subject, and the space is its
-      // implementation. `after` needs no such care, a personal destination
-      // being refused above. The old home is necessarily in `accessible` —
-      // nothing else could have authorized the move.
+      await removeScheduleJobs(activation.disabledScheduleIds);
+      // A personal old home is audited as its owner, never by space id (§3.6).
       const previousHomeOwnerId =
         accessible.find((space) => space.id === pkg.homeSpaceId)?.ownerUserId ?? null;
       await recordAuditFromContext(c, {
         action: "package.home_space_changed",
         resourceType: "package",
         resourceId: packageId,
-        // CAMELCASE, like every other audit payload in this file and like the
-        // `package.activated` entry twelve lines below: carve-out 4m
-        // (`docs/CASING_CONVENTIONS.md`) — a SIEM indexes these keys, so they
-        // are named here on purpose and never copied from the snake_case
-        // request body. `keptInPreviousHome` is the body's
-        // `keep_in_previous_home` re-spelled for that reason.
+        // camelCase audit keys: carve-out 4m (`docs/CASING_CONVENTIONS.md`).
         before:
           previousHomeOwnerId === null
             ? { homeSpaceId: pkg.homeSpaceId }
             : { homeSpaceId: null, homeOwnerUserId: previousHomeOwnerId },
-        // `keptInPreviousHome` is the half of this act that is NOT the home
-        // column: `false` means the space being left lost the package — its
-        // offer and its placement row both — which is a withdrawal of access
-        // and belongs in the trail beside the move that performed it. It rides
-        // on THIS event rather than a second `package.unshared`, because one
-        // act is one entry and the entry should name what did it.
-        after: { homeSpaceId: target, keptInPreviousHome: body.keep_in_previous_home },
+        // `keptInPreviousHome: false` is a withdrawal of access; it rides on this event (one act, one entry).
+        after: {
+          homeSpaceId: target,
+          keptInPreviousHome: body.keep_in_previous_home,
+          ...(activation.disabledScheduleIds.length > 0
+            ? { disabledScheduleIds: activation.disabledScheduleIds }
+            : {}),
+        },
       });
-      // Symmetric with the HTTP door: recorded only when the destination
-      // actually started running the package, and naming the act that did it —
-      // the move, not a click on a switch that nobody pressed. A destination
-      // that kept an `enabled = false` row changed nothing and is audited as
-      // nothing.
+      // Recorded only when the destination actually started running the package.
       if (activation.placement.enabled && !activation.wasActive) {
         await recordAuditFromContext(c, {
           action: "package.activated",
@@ -2237,103 +2176,81 @@ export function createPackagesRouter() {
 
   // --- Sharing: a package's AUDIENCE (RBAC spec §6.10) ---
   //
-  // All three routes — offer, list, revoke — are authorized by `<type>:share`
-  // in the package's HOME space, the same authority helper the write routes
-  // use, so they have no route-level permission guard either. `share` is in no
-  // API key's allowlist, so all three are session-borne in effect without a
-  // transport check of their own.
-  //
-  // There is no ACCEPT route: taking up an offer is ACTIVATING, and activating
-  // has one door, `POST /api/spaces/{spaceId}/packages` — for a personal space
-  // exactly as for a team one, with ownership standing in for the activation grant
-  // there (§3.6).
-  //
+  // Authorized by `<type>:share` in the home (no route-level guard); withdraw
+  // accepts either side (`assertPlacementRemovalAccess`). No ACCEPT route:
+  // switching a placement on is activation, via `POST /api/spaces/{spaceId}/packages`.
 
   router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const accessible = await packageAccessSpaces(c);
-    // Authority first, before the body is read: a caller who may not share this
-    // package learns nothing about the body's shape (or the package's existence).
+    // Authority before the body is read.
     const pkg = await assertPackageShareAccess(c, packageId);
     const { target } = await readJsonBody(c, shareTargetSchema);
-
-    // Outside its home a package runs the LATEST PUBLISHED version, always, so
-    // an offer of a package with nothing published is an offer of nothing: the
-    // recipient activates it and every launch answers `404 no_published_version`.
-    // Refusing HERE puts the refusal on the only principal who can clear it —
-    // the author, in the act they are performing. Every target, person or space,
-    // receives the package under the same rule, and this runs BEFORE the target
-    // is resolved, so THIS refusal provisions no personal space.
-    //
-    // It is the only one of the three refusals that can promise that: the other
-    // two are re-asked inside `sharePackage`, against the home it has LOCKED,
-    // which is necessarily after `ensurePersonalSpaceFor` has run. A `user`
-    // target that loses a race against `PUT …/home` therefore leaves the
-    // recipient's personal space created and no offer in it — inert, since that
-    // space is provisioned on their first space-scoped request anyway.
-    if ((await getLatestVersionId(packageId)) === null) {
-      throw conflict(
-        "package_has_no_version",
-        `Package '${packageId}' has no published version to offer — publish one first, since a package runs its latest published version outside the space that owns it.`,
-      );
-    }
 
     let spaceId: string;
     let recipientUserId: string | null = null;
     if (target.kind === "user") {
-      // Naming a person means reading the org directory — the same permission
-      // the member picker needs. A `guest` does not hold it, which is why a
-      // guest shares to a space they reach and not to a colleague.
+      // Naming a person reads the org directory (a `guest` lacks this).
       await makePermissionGuard("members:read")(c, async () => {});
       const membership = await getOrgMember(orgId, target.userId);
       if (!membership) throw notFound(`User '${target.userId}' not found in this organization`);
-      const space = await ensurePersonalSpaceFor(orgId, target.userId);
+      // A refused share provisions nothing: ask `package_has_no_version` before creating the space.
+      let space = await findPersonalSpace(orgId, target.userId);
+      if (!space) {
+        await assertHasPublishedVersion(packageId);
+        space = await ensurePersonalSpaceFor(orgId, target.userId);
+      }
       spaceId = space.id;
       recipientUserId = target.userId;
     } else {
-      // A space the caller cannot reach must not be confirmed to exist. Since
-      // `packageAccessSpaces` never loads somebody else's personal space, this
-      // is also what makes such a space untargetable by a guessed id.
+      // An unreachable space (someone else's personal space included) is a 404.
       const destination = accessible.find((space) => space.id === target.spaceId);
       if (!destination) throw notFound(`Space '${target.spaceId}' not found`);
       spaceId = destination.id;
     }
 
-    // BOTH the authority and `share_target_is_home` are decided by
-    // `sharePackage`, under the lock that holds the home still for the length of
-    // the insert. `assertPackageShareAccess` above judged the home as it stood
-    // when this request arrived; a `PUT …/{scope}/{name}/home` committing in
-    // between moves the package to a home this caller may govern not at all, and
-    // the offer would land carrying an authority nobody holds. The predicate is
-    // the SAME rule that guard enforces, re-asked against the locked row.
-    const sharePermission = packagePermission(pkg.type, "share");
+    // `sharePackage` re-decides authority under the locked home. The row lands
+    // ON when the caller may activate in the target, OFF otherwise.
+    const ownerId = callerPersonalOwnerId(c, orgId);
+    const destination = accessible.find((space) => space.id === spaceId);
+    const enabled = recipientUserId
+      ? recipientUserId === ownerId
+      : (ownerId !== null && destination?.ownerUserId === ownerId) ||
+        (destination?.permissions.has(spacePackagePermission(pkg.type, "activate")) ?? false);
+    // Landing ON is an activation: run its bundle check first, after the
+    // version refusal the dialog knows how to answer.
+    if (enabled) {
+      await assertHasPublishedVersion(packageId);
+      await assertMcpServerActivatable({ orgId, spaceId }, packageId);
+    }
     const { created } = await sharePackage({
       packageId,
       spaceId,
       orgId,
-      sharedBy: c.get("user").id,
-      authorizeHome: (homeSpaceId) =>
-        holdsHomeAuthority({ homeSpaceId }, accessible, sharePermission),
+      placeAs: await callerPlacementAuthority(c, pkg.type),
+      enabled,
     });
     if (created) {
       await recordAuditFromContext(c, {
         action: "package.shared",
         resourceType: "package",
         resourceId: packageId,
-        // The SUBJECT as the sharer named it. A `user` target records the
-        // person, never the personal space it resolved to: that id is withheld
-        // from the sharer on the wire (plan decision 5b), so writing it into
-        // the trail would publish through the audit log what §3.6 withholds
-        // everywhere else — and it names the wrong thing besides, since the
-        // space is an implementation of "Bob" and not the audited act.
+        // A `user` target is audited as the person, never the personal space id (§3.6).
         after: recipientUserId
           ? { recipientUserId, targetKind: "user" }
           : { spaceId, targetKind: "space" },
       });
+      if (enabled) {
+        await recordAuditFromContext(c, {
+          action: "package.activated",
+          resourceType: "package",
+          resourceId: packageId,
+          after: { spaceId },
+        });
+      }
       if (recipientUserId) {
-        // Best-effort: the share is committed, and a notification row that
-        // will not write must not report it as failed.
+        // Best-effort: the share is already committed.
         try {
           await createPackageShareNotification({
             orgId,
@@ -2353,9 +2270,7 @@ export function createPackagesRouter() {
       }
     }
 
-    // 200 either way — sharing the same pair twice is the same state, not a
-    // conflict. Rendered through the SAME projection as the listing, so a
-    // personal-space target comes back as its owner here too.
+    // 200 either way (idempotent), rendered through the listing's projection.
     const [view] = await listPackageShares(packageId, orgId, spaceId);
     if (!view) {
       logger.error("Share could not be re-read", { packageId, spaceId, orgId });
@@ -2372,67 +2287,58 @@ export function createPackagesRouter() {
     return c.json(listResponse(shares.map((share) => ({ object: "package_share", ...share }))));
   });
 
-  // The path segment is the target as the LISTING published it: a space id for
-  // a space share, a member's user id for a share made to a person. There is
-  // deliberately no third spelling — the id of somebody else's personal space
-  // is never on the wire (plan decision 5b), so it cannot be the handle here.
+  // The target is as the listing published it: a space id, or a user id for a
+  // person. Somebody else's personal space id is no handle here (404, §3.6).
   router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:target`, async (c) => {
     const packageId = getItemId(c);
     const target = c.req.param("target")!;
     const orgId = c.get("orgId");
-    const revokeSpaces = await packageAccessSpaces(c);
-    const revokePkg = await assertPackageShareAccess(c, packageId);
+    const ownerId = callerPersonalOwnerId(c, orgId);
 
     let spaceId: string;
     let recipientUserId: string | null = null;
-    // The `spc_` prefix DISCRIMINATES; the full shape is then asserted. Testing
-    // the whole shape as the discriminator instead sends a malformed space id
-    // down the user-id branch, where it reports "not a member of this
-    // organization" — a wrong reason for a malformed id, and the 400 this
-    // asserts is the right one. A user id never starts with `spc_`
-    // (Better Auth mints unprefixed ids), so the prefix is unambiguous.
+    // The `spc_` prefix discriminates (user ids are unprefixed); the full shape is then asserted, so a malformed space id is a 400.
     if (target.startsWith("spc_")) {
       assertSpaceId(target, "target");
       spaceId = target;
+      // The caller's own personal space is audited as its owner, like a `user` target.
+      const own = (await packageAccessSpaces(c)).find(
+        (space) => space.id === target && space.ownerUserId !== null,
+      );
+      if (own) recipientUserId = own.ownerUserId;
     } else {
+      // Home authority is asked before the directory read: no membership leak.
+      if (target !== ownerId) await assertPackageShareAccess(c, packageId);
       const membership = await getOrgMember(orgId, target);
       if (!membership) throw notFound(`User '${target}' not found in this organization`);
-      // READ-ONLY, unlike the offer route: a revoke must not be the act that
-      // brings the recipient's personal space into existence. No space means no
-      // share to withdraw, which is the same 404 the missing row answers.
+      // Read-only: a revoke must not create the personal space.
       const space = await findPersonalSpace(orgId, target);
       if (!space) throw notFound(`Package '${packageId}' is not shared with '${target}'`);
       spaceId = space.id;
       recipientUserId = target;
     }
 
-    // Withdrawing the offer withdraws the placement it backs, in one
-    // transaction (plan decision 3) — otherwise the package keeps running in a
-    // space that is no longer allowed to see it.
-    const revoked = await revokePackageShare({
+    const { authorityFor } = await assertPlacementRemovalAccess(c, packageId, spaceId);
+    const { authority, disabledScheduleIds } = await revokePackageShare({
       packageId,
       spaceId,
       orgId,
-      authorizeHome: (homeSpaceId) =>
-        holdsHomeAuthority(
-          { homeSpaceId },
-          revokeSpaces,
-          packagePermission(revokePkg.type, "share"),
-        ),
+      personalOwnerId: recipientUserId ?? ownerId,
+      authorityFor,
     });
-    if (!revoked) throw notFound(`Package '${packageId}' is not shared with '${target}'`);
+    await removeScheduleJobs(disabledScheduleIds);
     await recordAuditFromContext(c, {
       action: "package.unshared",
       resourceType: "package",
       resourceId: packageId,
-      // The subject as the caller named it — a person for a `user` target, and
-      // never the personal space it resolved to, for the reason `package.shared`
-      // states. `placementRemoved` is the other half of what this act did: the
-      // offer went, and the placement row it backed went with it. CamelCase
-      // throughout, carve-out 4m (`docs/CASING_CONVENTIONS.md`).
-      after: recipientUserId
-        ? { recipientUserId, targetKind: "user", placementRemoved: revoked.placementRemoved }
-        : { spaceId, targetKind: "space", placementRemoved: revoked.placementRemoved },
+      // Subject as `package.shared` records it; `authority` says which side withdrew.
+      after: {
+        ...(recipientUserId
+          ? { recipientUserId, targetKind: "user" }
+          : { spaceId, targetKind: "space" }),
+        authority,
+        ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+      },
     });
     return c.body(null, 204);
   });
@@ -2739,8 +2645,9 @@ export function createPackagesRouter() {
         userId,
         (bundle) => authorizeBundlePackages(c, bundle),
         // A root that already lives in another space is placed here by the same
-        // rule as any activation: the offer, when this caller may make one.
-        (packageId) => holdsPackageShareAuthority(c, packageId),
+        // rule as any activation: through the placement door, when this caller
+        // holds the share authority.
+        (packageId) => heldPlacementAuthority(c, packageId),
       );
     } catch (err) {
       // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
@@ -2930,7 +2837,7 @@ export function createPackagesRouter() {
     const spaceId = c.get("spaceId");
     const versionSpec = c.req.param("version")!;
 
-    // Visibility first — "system package, offered to THIS space, or homed
+    // Visibility first — "system package, placed in THIS space, or homed
     // here", the same gate the rest of the package read surface applies.
     // Without it this route served the artifact bytes of packages that are
     // merely owned by the org and placed nowhere the caller can reach.

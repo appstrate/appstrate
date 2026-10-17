@@ -2,7 +2,6 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  CATALOGUE_SHARED_HREF,
   catalogueHref,
   catalogueKindAddress,
   catalogueSheetAddress,
@@ -60,7 +59,6 @@ describe("catalogueSheetAddress", () => {
 
   it("leaves the address alone when no package is named", () => {
     expect(catalogueSheetAddress("discover", "agent", undefined, from)).toBeNull();
-    expect(catalogueSheetAddress("shared", "agent", undefined, from)).toBeNull();
   });
 
   it("leaves the address alone when the package is of the kind shown", () => {
@@ -74,15 +72,6 @@ describe("catalogueSheetAddress", () => {
     );
     expect(catalogueSheetAddress("placed", "agent", "integration", from)).toBe(
       "/catalogue/placed/integration?package=%40acme%2Fredactor&version=1.2.0#notes",
-    );
-  });
-
-  it("moves a package named under shared to Découvrir, even on its own kind", () => {
-    expect(catalogueSheetAddress("shared", "skill", "skill", from)).toBe(
-      "/catalogue/discover/skill?package=%40acme%2Fredactor&version=1.2.0#notes",
-    );
-    expect(catalogueSheetAddress("shared", "agent", "mcp-server", from)).toBe(
-      "/catalogue/discover/mcp-server?package=%40acme%2Fredactor&version=1.2.0#notes",
     );
   });
 });
@@ -109,14 +98,14 @@ describe("catalogueVersionFor", () => {
 });
 
 describe("catalogue addresses", () => {
-  it("name a reading and a kind, the shares list included", () => {
-    expect(CATALOGUE_SHARED_HREF).toBe("/catalogue/shared/agent");
-    expect(isCatalogueReading("shared")).toBe(true);
+  it("name a reading and a kind", () => {
+    expect(isCatalogueReading("placed")).toBe(true);
     expect(isCatalogueKind("mcp-server")).toBe(true);
   });
 
   it("refuse a reading or a kind the catalogue does not have", () => {
     expect(isCatalogueReading("origin")).toBe(false);
+    expect(isCatalogueReading("shared")).toBe(false);
     expect(isCatalogueKind("all")).toBe(false);
     expect(isCatalogueKind("agents")).toBe(false);
   });
