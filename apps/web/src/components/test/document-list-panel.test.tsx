@@ -116,3 +116,49 @@ it("keeps the same empty and error states in the grid", () => {
   expect(failed).not.toContain("private server detail");
   expect(failed).toContain("Une erreur est survenue.");
 });
+
+describe("the grid excerpt", () => {
+  const scope = { "X-Org-Id": undefined, "X-Space-Id": undefined };
+  const seeded = (id: string, excerpt: string | null) => {
+    const qc = new QueryClient();
+    qc.setQueryData(
+      ["get", "/api/files/{id}/excerpt", { params: { path: { id }, header: scope } }],
+      { excerpt },
+    );
+    return qc;
+  };
+  const grid = (doc: ReturnType<typeof fileFixture>, qc: QueryClient) =>
+    render(
+      <DocumentListPanel
+        documents={[doc]}
+        display="cards"
+        isLoading={false}
+        error={null}
+        empty={{ message: "Vide" }}
+      />,
+      { queryClient: qc },
+    );
+
+  it("shows the excerpt as escaped text", () => {
+    const doc = fileFixture({ name: "note.txt", mime: "text/plain" });
+    const html = grid(doc, seeded(doc.id, "Bonjour\n<b>x</b>"));
+    expect(html).toContain("Bonjour");
+    expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
+    expect(html).not.toContain("<b>x</b>");
+  });
+
+  it("keeps the icon when there is no excerpt", () => {
+    const doc = fileFixture({ name: "note.txt", mime: "text/plain" });
+    expect(grid(doc, seeded(doc.id, null))).not.toContain("whitespace-pre-line");
+    expect(grid(doc, new QueryClient())).not.toContain("whitespace-pre-line");
+  });
+
+  it("never asks for an excerpt the caller cannot download", () => {
+    const doc = fileFixture({
+      name: "note.txt",
+      mime: "text/plain",
+      capabilities: { ...file.capabilities, download: false, preview: false },
+    });
+    expect(grid(doc, seeded(doc.id, "secret"))).not.toContain("secret");
+  });
+});

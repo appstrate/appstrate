@@ -1435,6 +1435,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/files/{id}/excerpt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a text excerpt of a file
+         * @description A plain-text excerpt (about 400 characters at most) of the file's first bytes, for gallery tiles. Same gate as `/content`: the `files:read` permission, the per-file container ACL (404), then the `downloadable` flag (403). Only the first 64 KiB of HTML and 8 KiB of other types are read, never the whole file. `text/markdown` (or any `text/*` named `.md`) loses its syntax, `text/html` gives its `<title>` and visible text (scripts, styles, templates and `noscript` dropped, nothing rendered or executed), `text/plain`, `text/csv` and `application/json` give their first lines. Any other type answers `excerpt: null` without reading storage.
+         */
+        get: operations["getFileExcerpt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/files/{id}/keep": {
         parameters: {
             query?: never;
@@ -12956,6 +12976,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getFileExcerpt: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The excerpt. Cacheable privately for a day (`Cache-Control: private, max-age=86400`, `Vary: Cookie, Authorization, X-Org-Id, X-Space-Id, X-View-As, Appstrate-User`) — file content never changes, only the caller's access. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Plain text, one block per line (`\n`), ending with `…` when cut. Null for a type with no excerpt, or when the file's head holds no text. */
+                        excerpt: string | null;
+                    };
+                };
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];

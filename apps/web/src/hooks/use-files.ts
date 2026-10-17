@@ -161,12 +161,13 @@ export function useFileTextCopy(context?: FileContext) {
  * Authenticated image preview: a stored file's bytes → an object URL for an `<img src>`, revoked
  * on unmount / id change. `undefined` while loading, `null` when there is no preview (no grant,
  * failed read). THE single implementation for image thumbnails; chat gets it via `ChatPage`'s injection seam.
+ * Nothing is read until `enabled` (a grid tile waits to be visible).
  */
-export function useFileImageSrc(id: string): string | null | undefined {
+export function useFileImageSrc(id: string, enabled = true): string | null | undefined {
   const [loaded, setLoaded] = useState<{ id: string; src: string | null } | null>(null);
   const readsFiles = usePermissions().can("files:read");
   useEffect(() => {
-    if (!readsFiles) return;
+    if (!readsFiles || !enabled) return;
     let cancelled = false;
     let objectUrl: string | null = null;
     void (async () => {
@@ -192,7 +193,18 @@ export function useFileImageSrc(id: string): string | null | undefined {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [id, readsFiles]);
+  }, [id, readsFiles, enabled]);
   if (!readsFiles) return null;
   return loaded?.id === id ? loaded.src : undefined;
+}
+
+/** A text excerpt of a stored file (grid tile preview); `null` when the type has none. Content is immutable, so it is fetched once. */
+export function useFileExcerpt(id: string, enabled: boolean) {
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/files/{id}/excerpt",
+    { params: { path: { id }, header: scope.header } },
+    { enabled: enabled && scope.enabled, staleTime: Infinity, select: (d) => d.excerpt },
+  );
 }
