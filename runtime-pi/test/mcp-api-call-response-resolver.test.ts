@@ -9,7 +9,7 @@
  */
 
 import { afterEach, describe, it, expect } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { API_CALL_ERROR_META_KEY, UPSTREAM_META_KEY } from "@appstrate/mcp-transport";
@@ -149,6 +149,25 @@ describe("shapeApiCallResponse — toFile under a symlinked workspace root", () 
       /target directory escapes the workspace/,
     );
     expect(() => readFileSync(join(dir, "f.txt"))).toThrow();
+  });
+
+  it("refuses before creating any directory outside the workspace", async () => {
+    const { workspace, base } = linkedWorkspace();
+    const dir = (outside = mkdtempSync("/tmp/apicall-outside-"));
+    symlinkSync(dir, join(base, "real", "out"));
+    const result = withStatus([{ type: "text", text: "x" }], 200);
+    await expect(
+      shapeApiCallResponse(result, baseOpts(workspace, "out/sub/deeper/f.txt")),
+    ).rejects.toThrow(/symlink/);
+    expect(existsSync(join(dir, "sub"))).toBe(false);
+  });
+
+  it("creates a deep new path under the linked root", async () => {
+    const { base, workspace } = linkedWorkspace();
+    const result = withStatus([{ type: "text", text: "deep" }], 200);
+    const out = await shapeApiCallResponse(result, baseOpts(workspace, "a/b/c/f.txt"));
+    expect(out.isError).toBeUndefined();
+    expect(readFileSync(join(base, "real", "a", "b", "c", "f.txt"), "utf8")).toBe("deep");
   });
 });
 

@@ -136,30 +136,49 @@ async function extractBodyBytes(
  * write outside the sandbox — `writeFile` follows symlinks. Two floors close
  * that hole:
  *
- *   1. After creating the parent, `realpath` it and confirm the resolved path
- *      is still inside the workspace root. This catches a symlinked
+ *   1. Before creating anything, `realpath` the nearest existing ancestor of
+ *      the parent and confirm it is inside the workspace root, so a symlinked
  *      intermediate directory (e.g. `/workspace/out -> /etc`) that
- *      `resolveSafePath` accepted on its logical name.
+ *      `resolveSafePath` accepted on its logical name is refused with no
+ *      directory created outside. The parent is re-checked after `mkdir`.
  *   2. Open the final path with `O_NOFOLLOW`, so the open fails with `ELOOP`
- *      when the final component is itself a symlink — closing the TOCTOU
- *      window between the check and the write. An `lstat` pre-check gives a
- *      clearer error for the common already-exists case.
+ *      when the final component is itself a symlink. An `lstat` pre-check
+ *      gives a clearer error for the common already-exists case.
+ *
+ * `O_NOFOLLOW` covers the final component only: an intermediate directory
+ * swapped for a symlink between the check and the open stays out of reach
+ * without `openat2(RESOLVE_BENEATH)`, which Bun does not expose.
  */
 async function writeBodyConfined(workspace: string, abs: string, bytes: Uint8Array): Promise<void> {
   const parent = dirname(abs);
-  await mkdir(parent, { recursive: true });
-  // Realpath, like `realParent`: a workspace under a symlink (macOS `/var`) is no escape.
+  // Realpath both sides: a workspace under a symlink (macOS `/var`) is no escape.
   const root = await realpath(workspace);
   const rootPrefix = root.endsWith(sep) ? root : root + sep;
+  const assertInside = (real: string) => {
+    if (real !== root && !real.startsWith(rootPrefix)) {
+      throw new Error(
+        "api_call responseMode.toFile: refusing to write — target directory escapes the workspace via a symlink",
+      );
+    }
+  };
 
-  // Floor 1 — the parent dir must not resolve (through any symlink) outside
-  // the workspace. `realpath` follows every link in the chain.
-  const realParent = await realpath(parent);
-  if (realParent !== root && !realParent.startsWith(rootPrefix)) {
-    throw new Error(
-      "api_call responseMode.toFile: refusing to write — target directory escapes the workspace via a symlink",
-    );
+  // Floor 1 — the nearest existing ancestor must not resolve (through any
+  // symlink) outside the workspace, checked before `mkdir` creates anything.
+  let existing = parent;
+  for (;;) {
+    try {
+      assertInside(await realpath(existing));
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT" || dirname(existing) === existing) {
+        throw err;
+      }
+      existing = dirname(existing);
+    }
   }
+  await mkdir(parent, { recursive: true });
+  // Re-check: a directory swapped for a symlink during `mkdir` would otherwise pass.
+  assertInside(await realpath(parent));
 
   // Floor 2a — refuse a pre-existing symlink at the final path. `lstat` does
   // not follow the link, so a symlinked target is caught before we open it.
