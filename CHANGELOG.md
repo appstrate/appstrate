@@ -159,10 +159,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   refused `{` and `}`, so `https://share.garmin.com/feed/share/{{mapshare_id}}`
   (or Twilio's `/Accounts/{{account_sid}}/…`) never reached the sidecar,
   although the sidecar renders such a field as one percent-encoded component.
-  The schema is now a pattern on `http(s)://` (still checked as a parsable
-  URL), and the validator also refuses `ftp:` or `javascript:` targets it used
-  to let through. A base-URL field may now be followed by a query or fragment
-  (`{{base_url}}?d1=…`), not only a path.
+  The schema is now a pattern on `http(s)://`, shared by `api_upload` (which
+  published the same `format: "uri"`); the rendered URL is still parsed and
+  matched against the allowlist. The validator also refuses `ftp:` or
+  `javascript:` targets it used to let through. A base-URL field may now be
+  followed by a query or fragment (`{{base_url}}?d1=…`), not only a path.
 - **`responseMode.toFile` writes under a workspace reached through a symlink**
   (#2063). The escape check compared the real path of the target directory to
   the workspace path as given, so under `RUN_ADAPTER=process` on macOS (the
@@ -170,6 +171,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the workspace via a symlink". The workspace root is now resolved the same
   way; a symlinked subdirectory pointing outside is still refused. A refused
   `toFile` no longer creates directories outside the workspace before refusing.
+- **`api_upload` no longer sends back a server-supplied session URL holding
+  `{{`** (#2063). A tus or Google `Location`, or a Microsoft `uploadUrl`,
+  becomes the target of the next call, and the sidecar would have rendered its
+  `{{field}}` as a credential placeholder. A relative tus `Location` under a
+  templated target resolves only where rendering cannot change the result,
+  otherwise it is refused.
 
 - **A link to a catalogue sheet opens it from the package id alone** (#2013).
   `/catalogue?package=<id>[&version=…]`, or a link naming the wrong kind,

@@ -27,6 +27,7 @@
 
 import {
   UploadError,
+  serverSessionUrl,
   type AdapterContext,
   type ChunkInfo,
   type SessionState,
@@ -118,7 +119,7 @@ export const msResumableAdapter: UploadAdapter = {
       );
     }
     return {
-      uploadUrl,
+      uploadUrl: serverSessionUrl(uploadUrl, "ms-resumable: uploadUrl", res),
       lastStatus: res.status,
       lastHeaders: res.headers,
       lastBody: res.body,

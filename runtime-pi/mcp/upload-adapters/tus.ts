@@ -24,8 +24,11 @@
  * default to stay well within the sidecar envelope.
  */
 
+import { placeholderKeys, urlTemplateAuthority } from "@appstrate/afps-shared/request-template";
 import {
   UploadError,
+  serverSessionUrl,
+  type AdapterApiCallResponse,
   type AdapterContext,
   type ChunkInfo,
   type SessionState,
@@ -35,6 +38,7 @@ import {
 
 const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
 const TUS_VERSION = "1.0.0";
+const ABSOLUTE_URL = /^[a-z][a-z\d+.-]*:/i;
 
 interface TusSessionState {
   sessionUrl: string;
@@ -92,7 +96,11 @@ export const tusAdapter: UploadAdapter = {
       );
     }
     return {
-      sessionUrl: resolveLocation(ctx.target, sessionUrl),
+      sessionUrl: resolveLocation(
+        ctx.target,
+        serverSessionUrl(sessionUrl, "tus: Location header", res),
+        res,
+      ),
       serverOffset: 0,
       lastStatus: res.status,
       lastHeaders: res.headers,
@@ -214,14 +222,22 @@ function encodeTusMetadata(metadata: Record<string, unknown> | undefined): strin
 }
 
 /**
- * tus servers may return a relative `Location:` (e.g. `/files/abc`).
- * Resolve it against the request target. Absolute URLs pass through
- * unchanged.
+ * A relative `Location:` (e.g. `/files/abc`) resolves against the request target. A target holding
+ * `{{field}}` is a template the sidecar renders per call: a reference is resolved only where the
+ * rendering cannot change the result — absolute, or path-absolute under a literal origin. A base-URL
+ * placeholder may carry a path, a path-relative reference depends on a templated path.
  */
-function resolveLocation(base: string, location: string): string {
-  try {
-    return new URL(location, base).toString();
-  } catch {
-    return location;
+function resolveLocation(target: string, location: string, res: AdapterApiCallResponse): string {
+  if (ABSOLUTE_URL.test(location)) return new URL(location).toString();
+  if (placeholderKeys(target).length === 0) return new URL(location, target).toString();
+  const origin = urlTemplateAuthority(target);
+  if (/^[/\\]/.test(location) && placeholderKeys(origin).length === 0) {
+    return new URL(location, origin).toString();
   }
+  throw new UploadError(
+    `tus: relative Location '${location}' cannot be resolved against target '${target}' before its {{field}} placeholders are rendered`,
+    res.status,
+    res.headers,
+    res.body,
+  );
 }

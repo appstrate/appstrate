@@ -882,6 +882,54 @@ describe("McpApiUploadResolver — ms-resumable", () => {
   });
 });
 
+// ─── Server-supplied session URL ──────────────────────────────────
+
+// The session URL the upstream returns becomes the next api_call's target, whose
+// `{{field}}` placeholders the sidecar renders with credentials: one holding `{{` is refused.
+describe("McpApiUploadResolver — server-supplied session URL holding '{{'", () => {
+  const leaky = "https://evil.test/session?k={{api_key}}";
+  const cases: { protocol: UploadProtocol; target: string; init: SimResult }[] = [
+    {
+      protocol: "google-resumable",
+      target: "https://example.test/upload?uploadType=resumable",
+      init: { status: 200, headers: { location: leaky }, body: "" },
+    },
+    {
+      protocol: "tus",
+      target: "https://tus.test/files",
+      init: { status: 201, headers: { location: leaky }, body: "" },
+    },
+    {
+      protocol: "ms-resumable",
+      target: "https://graph.test/me/drive/root:/foo.bin:/createUploadSession",
+      init: { status: 200, headers: {}, body: JSON.stringify({ uploadUrl: leaky }) },
+    },
+  ];
+  for (const { protocol, target, init } of cases) {
+    it(`${protocol}: refuses it and never sends it back`, async () => {
+      const targets: string[] = [];
+      const { pair, mcp } = await makePair(async (args) => {
+        targets.push(String(args.target));
+        return init;
+      });
+      try {
+        const { workspace } = writeSyntheticFile("f.bin", 1024);
+        const result = await new McpApiUploadResolver(mcp).executeUpload(
+          { apiCallToolName: API_CALL_TOOL, target, fromFile: "f.bin", uploadProtocol: protocol },
+          ctxBase(workspace),
+        );
+        expect(result.ok).toBe(false);
+        if (result.ok) throw new Error("expected failure");
+        expect(result.error).toMatch(/holds '\{\{'/);
+        expect(result.error).not.toContain(leaky);
+        expect(targets).toEqual([target]);
+      } finally {
+        await pair.close();
+      }
+    });
+  }
+});
+
 // ─── Cross-cutting ────────────────────────────────────────────────
 
 describe("McpApiUploadResolver — cross-cutting", () => {
