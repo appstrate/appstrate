@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context } from "hono";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   packages,
@@ -276,12 +276,15 @@ export async function isPackageReadableInSpace(
 
 /**
  * True when `packageId` is an ephemeral inline shadow of this org with a run in
- * this space — the one way a shadow, which no placement reaches, is readable.
+ * this space that `visibility` admits — the one way a shadow, which no
+ * placement reaches, is readable. A shadow is 1:1 with its run, so its read
+ * rule is the run's: pass `runVisibilityFilter(c)` (`lib/run-visibility.ts`).
  */
-export async function isInlineShadowRunInSpace(
+export async function isInlineShadowRunReadable(
   orgId: string,
   spaceId: string,
   packageId: string,
+  visibility: SQL | undefined,
 ): Promise<boolean> {
   const [row] = await db
     .select({ id: runs.id })
@@ -294,6 +297,7 @@ export async function isInlineShadowRunInSpace(
         eq(runs.spaceId, spaceId),
         eq(packages.orgId, orgId),
         eq(packages.ephemeral, true),
+        visibility,
       ),
     )
     .limit(1);

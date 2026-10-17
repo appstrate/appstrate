@@ -7,10 +7,11 @@ import { isInlineShadowPackageId } from "../services/inline-run.ts";
 import {
   agentExecutionBlock,
   assertPackageMutationAccess,
-  isInlineShadowRunInSpace,
+  isInlineShadowRunReadable,
   isPackageReadableInSpace,
 } from "../lib/package-access.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
+import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 import { PERMISSION_GUARD } from "./require-permission.ts";
 
@@ -24,8 +25,8 @@ const AGENT_LOOKUP = Symbol.for("appstrate.agentLookup");
  *  contract, and it is three. */
 const ACTIVE_AGENT_GATE = Symbol.for("appstrate.activeAgentGate");
 
-/** True when `handler` is a middleware produced by {@link requireAgent} — i.e.
- *  it can 404 on an unreachable agent. */
+/** True when `handler` is a middleware produced by {@link requireAgent} or
+ *  {@link requireAgentOrInlineRun} — i.e. it can 404 on an unreachable agent. */
 export function isAgentLookup(handler: unknown): boolean {
   return hasHandlerMarker(handler, AGENT_LOOKUP);
 }
@@ -72,10 +73,10 @@ async function loadPlacedAgent(packageId: string, orgId: string, spaceId: string
 
 /**
  * Middleware: {@link requireAgent}, widened to an inline run's shadow
- * (`@inline/r-<uuid>`) when a run of it lives in this space
- * ({@link isInlineShadowRunInSpace}). The shadow is never placed, yet its run
- * files `note` / `pin` rows under its id. Mounted on ONE route: the persistence
- * read of the run page.
+ * (`@inline/r-<uuid>`) when the caller may read a run of it in this space
+ * ({@link isInlineShadowRunReadable}, under the run read rule). The shadow is
+ * never placed, yet its run files `note` / `pin` rows under its id. Mounted on
+ * ONE route: the persistence read of the run page.
  */
 export function requireAgentOrInlineRun() {
   return markHandler(async (c: Context<AppEnv>, next: Next) => {
@@ -86,7 +87,7 @@ export function requireAgentOrInlineRun() {
     const agent =
       (await loadPlacedAgent(packageId, orgId, spaceId)) ??
       (isInlineShadowPackageId(packageId) &&
-      (await isInlineShadowRunInSpace(orgId, spaceId, packageId))
+      (await isInlineShadowRunReadable(orgId, spaceId, packageId, runVisibilityFilter(c)))
         ? await getPackage(packageId, orgId, { includeEphemeral: true })
         : null);
     if (!agent) throw agentNotFound(packageId);
