@@ -2,6 +2,7 @@
 
 import { filePurposeValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { EXCERPT_READ_BYTES } from "../../services/file-excerpt.ts";
 
 // Shared File object schema (mirrors FileDto in services/files.ts).
 // Field casing follows CASING_CONVENTIONS.md carve-out 4b: `spaceId`, `runId`,
@@ -422,6 +423,56 @@ export const filesPaths = {
               description:
                 "RFC 9530 representation digest of the bytes, `sha-256=:<base64>:` (carried on the " +
                 "redirect; present only when the caller has the `metadata` capability).",
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        ...pipelineResponses,
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
+  "/api/files/{id}/excerpt": {
+    get: {
+      operationId: "getFileExcerpt",
+      tags: ["Files"],
+      summary: "Get a text excerpt of a file",
+      description:
+        "A plain-text excerpt (about 400 characters at most) of the file's first bytes, for " +
+        "gallery tiles. Same gate as `/content`: the `files:read` permission, the per-file " +
+        "container ACL (404), then the `downloadable` flag (403). Only the first " +
+        `${EXCERPT_READ_BYTES.html / 1024} KiB of HTML and ${EXCERPT_READ_BYTES.text / 1024} KiB ` +
+        "of other types are read, never the whole file. `text/markdown` (or any `text/*` " +
+        "named `.md`) loses its syntax, `text/html` gives its " +
+        "`<title>` and visible text (scripts, styles, templates and `noscript` dropped, nothing " +
+        "rendered or executed), `text/plain`, `text/csv` and `application/json` give their first " +
+        "lines. Any other type answers `excerpt: null` without reading storage.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description:
+            "The excerpt. Cacheable privately for a day (`Cache-Control: private, " +
+            "max-age=86400`, `Vary: Cookie, Authorization, X-Org-Id, X-Space-Id, X-View-As, " +
+            "Appstrate-User`) — file content never changes, only the caller's access.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["excerpt"],
+                properties: {
+                  excerpt: {
+                    type: ["string", "null"],
+                    description:
+                      "Plain text, one block per line (`\\n`), ending with `…` when cut. Null " +
+                      "for a type with no excerpt, or when the file's head holds no text.",
+                  },
+                },
+              },
             },
           },
         },

@@ -165,6 +165,7 @@ A run opened with no hash, or with any hash outside those three, lands on `overv
 | `GET /api/files`                     | `files:read` + actor filter                   | Gallery listing, keyset-paginated                       |
 | `GET /api/files/{id}`                | `files:read` + container ACL                  | Metadata DTO; the only surface that mints `preview_url` |
 | `GET /api/files/{id}/content`        | `files:read` + `download` capability          | 307 → presigned GET, or proxy-stream                    |
+| `GET /api/files/{id}/excerpt`        | `files:read` + `download` capability          | Plain-text excerpt of the first 64 KiB (gallery tiles)  |
 | `DELETE /api/files/{id}`             | `capabilities.delete` (see capability matrix) | Delete; 409 `file_in_use` on a linked file              |
 | `POST /api/files/{id}/keep`          | `capabilities.keep`                           | Clear `expires_at`                                      |
 | `GET /preview/files/{id}?t=…`        | signed token only, no auth pipeline           | Hardened preview bytes — contract below                 |

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The file reader page (`/files/:fileId?org=…&space=…`) (#2056).
+ * The file reader page (`/files/:fileId?org=…&space=…`) and the grid excerpt (#2056).
  *
  * Files are not creatable through a public endpoint (they come from agent runs and chat uploads),
  * so, like `grid.ui.spec.ts`, the file routes are answered by `context.route`. The
@@ -58,6 +58,7 @@ const HTML_BODY = `<!doctype html><html><head><title>Rapport</title></head><body
 
 interface StubOptions {
   files: StubFile[];
+  excerpts?: Record<string, string | null>;
   /** Receives the `X-Space-Id` header of every single-file read. */
   onFileRead?: (id: string, spaceId: string | undefined) => void;
 }
@@ -74,6 +75,9 @@ async function stubFiles(context: BrowserContext, opts: StubOptions) {
     const [, , , id, sub] = url.pathname.split("/");
     const found = opts.files.find((f) => f.id === id);
     if (!found) return route.fulfill({ status: 404, json: { code: "not_found" } });
+    if (sub === "excerpt") {
+      return route.fulfill({ json: { excerpt: opts.excerpts?.[id!] ?? null } });
+    }
     if (sub === undefined) {
       opts.onFileRead?.(id!, route.request().headers()["x-space-id"]);
       return route.fulfill({ json: { ...found, preview_url: `/preview/files/${id}?token=e2e` } });
@@ -183,5 +187,19 @@ test.describe("file reader page", () => {
     } finally {
       await context.close();
     }
+  });
+});
+
+test.describe("file grid excerpt", () => {
+  test("a markdown tile shows its text excerpt", async ({ authedPage: page, browserCtx }) => {
+    const md = file("file_md", "notes.md", browserCtx.org.defaultSpaceId, "text/markdown", "text");
+    await stubFiles(page.context(), {
+      files: [md],
+      excerpts: { file_md: "Compte rendu de la réunion du lundi" },
+    });
+    await page.goto("/files");
+    const tile = page.getByRole("button", { name: "Aperçu: notes.md", exact: true });
+    await expect(tile).toBeVisible();
+    await expect(tile.getByText("Compte rendu de la réunion du lundi")).toBeVisible();
   });
 });

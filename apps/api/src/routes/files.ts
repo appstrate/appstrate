@@ -6,6 +6,7 @@
  *   GET    /api/files             → list (files:read, actor-filtered)
  *   GET    /api/files/:id         → metadata DTO (+ derived `downloadable`)
  *   GET    /api/files/:id/content → 307 → presigned GET, or proxy-stream
+ *   GET    /api/files/:id/excerpt → `{ excerpt }` plain text of the first bytes
  *   DELETE /api/files/:id         → delete (files:delete perm OR creator)
  *
  * Authorization is TWO layers, and both are load-bearing:
@@ -63,6 +64,12 @@ import {
   mayServeActiveHtml,
   PREVIEW_MAX_BYTES,
 } from "../services/file-preview.ts";
+import {
+  excerptKind,
+  extractExcerpt,
+  readPrefix,
+  EXCERPT_READ_BYTES,
+} from "../services/file-excerpt.ts";
 
 /**
  * The lifecycle half of the file ACL for THIS request. Every file resolution in
@@ -73,6 +80,22 @@ function fileLifecycleCeiling(c: Context<AppEnv>): { creatorCanManage: boolean }
   // Ownership is not a role grant, so `permissions` cannot cap it — the
   // credential's own scope ceiling does (RBAC spec §7.1).
   return { creatorCanManage: ceilingAllows(c, "files:delete") };
+}
+
+/** The file of `:id` when the caller may read its bytes: 404 unreadable, 403 not downloadable. */
+async function resolveDownloadableFile(c: Context<AppEnv>) {
+  const resolved = await getFileForActor(
+    getSpaceScope(c),
+    getActor(c),
+    c.req.param("id")!,
+    callerPermissions(c),
+    fileLifecycleCeiling(c),
+  );
+  if (!resolved) throw notFound("File not found");
+  if (!resolved.capabilities.download) {
+    throw forbidden("This file is not downloadable by the current actor");
+  }
+  return resolved;
 }
 
 const listFilesQuerySchema = z
@@ -153,19 +176,7 @@ export function createFilesRouter() {
     rateLimit(120),
     requirePermission("files", "read"),
     async (c) => {
-      const scope = getSpaceScope(c);
-      const actor = getActor(c);
-      const resolved = await getFileForActor(
-        scope,
-        actor,
-        c.req.param("id")!,
-        callerPermissions(c),
-        fileLifecycleCeiling(c),
-      );
-      if (!resolved) throw notFound("File not found");
-      if (!resolved.capabilities.download) {
-        throw forbidden("This file is not downloadable by the current actor");
-      }
+      const resolved = await resolveDownloadableFile(c);
       const { row } = resolved;
 
       // RFC 9530 representation digest of the stored bytes — exposed only when
@@ -206,6 +217,35 @@ export function createFilesRouter() {
           ...(reprDigest ? { "Repr-Digest": reprDigest } : {}),
         },
       });
+    },
+  );
+
+  // GET /api/files/:id/excerpt — a plain-text excerpt of the first bytes, for
+  // the gallery tiles. The excerpt IS content, so it sits behind the same gate
+  // as `/content`. A mime with no excerpt answers null without touching storage.
+  // One tile = one request, read bounded to a prefix: a gallery scrolled past a
+  // few hundred cards must not 429 itself.
+  router.get(
+    "/files/:id/excerpt",
+    rateLimit(600),
+    requirePermission("files", "read"),
+    async (c) => {
+      const { row } = await resolveDownloadableFile(c);
+      const kind = excerptKind(row.mime, row.name);
+      let excerpt: string | null = null;
+      if (kind) {
+        const stream = await streamFileContent(row.storageKey);
+        if (!stream) throw notFound("File content not found");
+        const bytes = await readPrefix(stream, EXCERPT_READ_BYTES[kind]);
+        excerpt = await extractExcerpt(kind, bytes, row.size > bytes.byteLength);
+      }
+      // File bytes are immutable, so the answer only changes with the caller:
+      // `Vary` keeps one browser's cache from serving it across sign-ins.
+      c.header("Cache-Control", "private, max-age=86400");
+      c.header("Vary", "Cookie, Authorization, X-Org-Id, X-Space-Id, X-View-As, Appstrate-User", {
+        append: true,
+      });
+      return c.json({ excerpt });
     },
   );
 

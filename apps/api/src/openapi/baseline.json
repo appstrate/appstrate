@@ -25805,6 +25805,72 @@
         }
       }
     },
+    "/api/files/{id}/excerpt": {
+      "get": {
+        "operationId": "getFileExcerpt",
+        "tags": ["Files"],
+        "summary": "Get a text excerpt of a file",
+        "description": "A plain-text excerpt (about 400 characters at most) of the file's first bytes, for gallery tiles. Same gate as `/content`: the `files:read` permission, the per-file container ACL (404), then the `downloadable` flag (403). Only the first 64 KiB of HTML and 8 KiB of other types are read, never the whole file. `text/markdown` (or any `text/*` named `.md`) loses its syntax, `text/html` gives its `<title>` and visible text (scripts, styles, templates and `noscript` dropped, nothing rendered or executed), `text/plain`, `text/csv` and `application/json` give their first lines. Any other type answers `excerpt: null` without reading storage.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The excerpt. Cacheable privately for a day (`Cache-Control: private, max-age=86400`, `Vary: Cookie, Authorization, X-Org-Id, X-Space-Id, X-View-As, Appstrate-User`) — file content never changes, only the caller's access.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["excerpt"],
+                  "properties": {
+                    "excerpt": {
+                      "type": ["string", "null"],
+                      "description": "Plain text, one block per line (`\\n`), ending with `…` when cut. Null for a type with no excerpt, or when the file's head holds no text."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
     "/api/admin/storage-deletion-jobs": {
       "get": {
         "operationId": "listStorageDeletionJobs",
