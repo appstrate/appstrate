@@ -184,6 +184,7 @@ describe("GET /api/integrations", () => {
   it("decorates `active: true` when the integration is activated in the space", async () => {
     const pkg = await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"), ctx.defaultSpaceId);
     await db.insert(spacePackages).values({
+      enabled: true,
       spaceId: ctx.defaultSpaceId,
       packageId: pkg.id,
     });

@@ -14,7 +14,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedSpace } from "../../helpers/seed.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { buildIntegrationOAuthRefreshContext } from "../../../src/services/integration-token-refresh.ts";
@@ -485,7 +485,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
 
   it("registers a server's client once for the org: another space reuses it", async () => {
     const spaceB = await seedSpace({ orgId: ctx.orgId, name: "B" });
-    await seedPlacedPackage(spaceB.id, "@myorg/forge");
+    await seedSpacePackage(spaceB.id, "@myorg/forge");
     const connect = (spaceId: string) =>
       app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
         method: "POST",

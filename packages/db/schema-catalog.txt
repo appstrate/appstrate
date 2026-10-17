@@ -574,13 +574,14 @@ column space_members.space_id text not null
 column space_members.user_id text not null
 column space_packages.block_user_connections boolean not null default false
 column space_packages.chat_enforced boolean not null default false
-column space_packages.enabled boolean not null default true
+column space_packages.enabled boolean not null
 column space_packages.generation_config jsonb
 column space_packages.input_settings jsonb not null default '{"locked": [], "values": {}}'::jsonb
 column space_packages.installed_at timestamp with time zone not null default now()
 column space_packages.model_id text
 column space_packages.package_id text not null
 column space_packages.proxy_id text
+column space_packages.shared_by text
 column space_packages.space_id text not null
 column space_packages.updated_at timestamp with time zone not null default now()
 column space_roles.created_at timestamp with time zone not null default now()
@@ -922,6 +923,7 @@ constraint space_members space_members_space_id_spaces_id_fk FOREIGN KEY (space_
 constraint space_members space_members_space_id_user_id_pk PRIMARY KEY (space_id, user_id)
 constraint space_members space_members_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint space_packages space_packages_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint space_packages space_packages_shared_by_user_id_fk FOREIGN KEY (shared_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint space_packages space_packages_space_id_package_id_pk PRIMARY KEY (space_id, package_id)
 constraint space_packages space_packages_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint space_roles space_roles_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
@@ -975,7 +977,7 @@ enum package_source local,system
 enum package_type agent,skill,integration,mcp-server
 enum run_origin platform,remote
 enum run_status pending,running,success,failed,timeout,cancelled
-enum schedule_disabled_reason actor_invalid,actor_left_org,connection_deleted,connection_unshared,connection_set_unnamed,connection_choice_invalid
+enum schedule_disabled_reason actor_invalid,actor_left_org,connection_deleted,connection_unshared,connection_set_unnamed,connection_choice_invalid,package_removed
 index CREATE INDEX account_user_id_idx ON public.account USING btree (user_id)
 index CREATE INDEX idx_api_keys_created_by ON public.api_keys USING btree (created_by)
 index CREATE INDEX idx_api_keys_org_id ON public.api_keys USING btree (org_id)
@@ -1086,6 +1088,7 @@ index CREATE INDEX idx_space_members_added_by ON public.space_members USING btre
 index CREATE INDEX idx_space_members_custom_role_id ON public.space_members USING btree (custom_role_id)
 index CREATE INDEX idx_space_members_user_id ON public.space_members USING btree (user_id)
 index CREATE INDEX idx_space_packages_package_id ON public.space_packages USING btree (package_id)
+index CREATE INDEX idx_space_packages_shared_by ON public.space_packages USING btree (shared_by)
 index CREATE INDEX idx_space_roles_created_by ON public.space_roles USING btree (created_by)
 index CREATE INDEX idx_spaces_org_id ON public.spaces USING btree (org_id)
 index CREATE INDEX idx_storage_deletion_jobs_due ON public.storage_deletion_jobs USING btree (next_attempt_at) WHERE (completed_at IS NULL)

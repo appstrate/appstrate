@@ -116,7 +116,9 @@ async function setup(
       },
     }),
   });
-  await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: INTEGRATION });
+  await db
+    .insert(spacePackages)
+    .values({ enabled: true, spaceId: ctx.defaultSpaceId, packageId: INTEGRATION });
 
   // A secret-less registration must DECLARE itself public: the route refuses a
   // missing/blank `client_secret` under any other method rather than inferring

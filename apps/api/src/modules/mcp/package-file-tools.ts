@@ -31,10 +31,10 @@ interface PackageFileToolContext {
    */
   authorizeBundle: NonNullable<Parameters<typeof preflightBundleImport>[2]>;
   /**
-   * Whether a root re-imported from ANOTHER home space is placed here with its
-   * offer, as `POST /api/packages/import-bundle` decides; `false` → `root_active: false`.
+   * Who places a root re-imported from ANOTHER home space here, as
+   * `POST /api/packages/import-bundle` decides; `null` → `root_active: false`.
    */
-  mayShareRoot: (packageId: string) => Promise<boolean>;
+  placeRootAs: Parameters<typeof handleImportBundle>[4];
 }
 
 interface PackageFileBytes {
@@ -230,7 +230,7 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
         ctx.scope,
         ctx.actor.id,
         ctx.authorizeBundle,
-        ctx.mayShareRoot,
+        ctx.placeRootAs,
       );
       for (const audit of bundleImportAuditRecords(result, {
         via: "import:file",

@@ -35,11 +35,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its own. An agent's is its manifest `icon` and `_meta["dev.appstrate/ui"].color`,
   on the list and the detail, `null` when absent or, for the colour, not a
   palette key. Migrations `0097_org_logo` (a nullable `organizations.logo`), then
-  `0100_identity_appearance` (renames it `icon`; adds `color` to organizations,
+  `0101_identity_appearance` (renames it `icon`; adds `color` to organizations,
   `icon` and `color` to spaces; caps each `icon` at 16 384 bytes with a CHECK).
   **Operators:** only where `0097` was applied before this release (staging, never
   production), run `scripts/migration/0049-org-icon-images.ts --apply` in the
-  same window as `0100`, right after it: it clears the organization icons `0097`
+  same window as `0101`, right after it: it clears the organization icons `0097`
   left as `image:<version>` and empties the `orgs` bucket. See
   `scripts/migration/README.md`.
 

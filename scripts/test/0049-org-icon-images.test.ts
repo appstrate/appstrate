@@ -5,7 +5,7 @@
  * whose `icon` is a `0097` image pointer (`image:<version>`) are listed with the objects of the
  * `orgs` bucket in a dry run, which writes nothing; `--apply` clears those icons, keeps every other
  * one (an `emoji:` logo included) and empties the bucket; a second run finds nothing. It refuses to
- * run before drizzle `0100` has renamed the column.
+ * run before drizzle `0101` has renamed the column.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -28,7 +28,7 @@ async function bucketKeys(): Promise<string[]> {
   return keys.sort();
 }
 
-/** An organization whose `icon` is `icon`, as `0097` or `0100` left it. */
+/** An organization whose `icon` is `icon`, as `0097` or `0101` left it. */
 async function orgWithIcon(userId: string, slug: string, icon: string | null): Promise<string> {
   const { org } = await createTestOrg(userId, { slug });
   await db.update(organizations).set({ icon }).where(eq(organizations.id, org.id));
@@ -97,12 +97,12 @@ describe("0049 — organization image icons cleared with their bytes", () => {
     expect(await bucketKeys()).toEqual([]);
   });
 
-  it("refuses before drizzle 0100 has renamed the column, writing nothing", async () => {
+  it("refuses before drizzle 0101 has renamed the column, writing nothing", async () => {
     const pointer = await orgWithIcon(userId, "mig0049-early", `image:${crypto.randomUUID()}`);
     await uploadFile(BUCKET, `${pointer}/logo`, new TextEncoder().encode("a"));
     await db.execute('ALTER TABLE "organizations" RENAME COLUMN "icon" TO "logo"');
     try {
-      await expect(run(true)).rejects.toThrow("apply drizzle 0100 first");
+      await expect(run(true)).rejects.toThrow("apply drizzle 0101 first");
     } finally {
       await db.execute('ALTER TABLE "organizations" RENAME COLUMN "logo" TO "icon"');
     }

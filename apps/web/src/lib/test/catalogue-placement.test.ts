@@ -3,7 +3,7 @@
 /**
  * The catalogue's reading of the placement model — the rule the whole screen
  * hangs on, pinned here because the wire and the interface use different words
- * for the same state (`none` is what an OFFER looks like on the wire).
+ * for the same state (`none` is "no row", read like `inactive`).
  */
 
 import { describe, it, expect } from "bun:test";
@@ -11,7 +11,6 @@ import {
   cataloguePlacement,
   detailSpace,
   inPlacedTab,
-  pendingShares,
   placementIn,
 } from "../catalogue-placement.ts";
 import type { LibraryPackageItem } from "../../hooks/use-library.ts";
@@ -43,7 +42,7 @@ function pkg(
 }
 
 describe("cataloguePlacement", () => {
-  it("names the three states apart, and calls `none` an offer", () => {
+  it("names the two states apart, and reads `none` like `inactive`", () => {
     const placement = cataloguePlacement(
       pkg([
         { space_id: "spc_home", state: "active", via: "home" },
@@ -52,10 +51,41 @@ describe("cataloguePlacement", () => {
       ]),
       "spc_c",
     );
-    expect(placement.here).toBe("offered");
+    expect(placement.here).toBe("inactive");
     expect(placement.activeIn).toEqual(["spc_home"]);
-    expect(placement.inactiveIn).toEqual(["spc_b"]);
-    expect(placement.offeredIn).toEqual(["spc_c"]);
+    expect(placement.inactiveIn).toEqual(["spc_b", "spc_c"]);
+  });
+
+  it("keeps who shared a placement that is switched off, and only that", () => {
+    const row = pkg([
+      { space_id: "spc_home", state: "active", via: "home" },
+      { space_id: "spc_on", state: "active" },
+      { space_id: "spc_off", state: "inactive" },
+      { space_id: "spc_sys", state: "inactive", via: "system" },
+    ]);
+    const named = {
+      ...row,
+      placements: row.placements.map((p) =>
+        p.space_id === "spc_off" ? { ...p, shared_by: { user_id: "u1", name: "Bob" } } : p,
+      ),
+    };
+    expect(cataloguePlacement(named, "spc_off").sharedBy).toEqual({ spc_off: "Bob" });
+  });
+
+  it("keys the sharer by space, so a card reads only the placement of the space on screen", () => {
+    const row = pkg([
+      { space_id: "spc_here", state: "active" },
+      { space_id: "spc_off", state: "inactive" },
+    ]);
+    const named = {
+      ...row,
+      placements: row.placements.map((p) =>
+        p.space_id === "spc_off" ? { ...p, shared_by: { user_id: "u1", name: "Olivia" } } : p,
+      ),
+    };
+    const { sharedBy } = cataloguePlacement(named, "spc_here");
+    expect(sharedBy["spc_here"]).toBeUndefined();
+    expect(sharedBy["spc_off"]).toBe("Olivia");
   });
 
   it("answers null for a space the package does not reach, without calling it unplaced", () => {
@@ -93,19 +123,18 @@ describe("cataloguePlacement", () => {
   });
 });
 
-describe("what is an offer, and what is merely off", () => {
-  it("does not call a system integration nobody switched on an offer", () => {
-    // `none` on the wire is "no row here", whatever put it there. Reading it as
-    // an offer counted one per Appstrate integration per space.
+describe("what is merely off", () => {
+  it("reads a system integration nobody switched on as inactive, not shared", () => {
+    // `none` on the wire is "no row here", whatever put it there.
     const placement = cataloguePlacement(
       pkg([{ space_id: "spc_a", state: "none", via: "system" }], null),
       "spc_a",
     );
     expect(placement.here).toBe("inactive");
-    expect(placement.offeredIn).toEqual([]);
+    expect(placement.sharedBy).toEqual({});
   });
 
-  it("does not call a package at home nobody enabled an offer either", () => {
+  it("reads a package at home nobody enabled as inactive", () => {
     const placement = cataloguePlacement(
       pkg([{ space_id: "spc_home", state: "none", via: "home" }]),
       "spc_home",
@@ -153,43 +182,9 @@ describe("placementIn", () => {
       "spc_home",
     );
     expect(placementIn(placement, "spc_home")).toBe("active");
-    expect(placementIn(placement, "spc_a")).toBe("offered");
+    expect(placementIn(placement, "spc_a")).toBe("inactive");
     expect(placementIn(placement, "spc_b")).toBe("inactive");
     expect(placementIn(placement, "spc_c")).toBeNull();
-  });
-});
-
-describe("pendingShares", () => {
-  it("lists one decision per space a package was shared with, across kinds", () => {
-    const agent = pkg([
-      { space_id: "spc_a", state: "none" },
-      { space_id: "spc_b", state: "none" },
-      { space_id: "spc_home", state: "active", via: "home" },
-    ]);
-    const skill = {
-      ...pkg([{ space_id: "spc_c", state: "none" }]),
-      id: "@org/skill",
-      type: "skill" as const,
-    };
-    const shares = pendingShares([agent, skill]);
-    expect(shares.map((share) => [share.pkg.id, share.spaceId])).toEqual([
-      ["@org/thing", "spc_a"],
-      ["@org/thing", "spc_b"],
-      ["@org/skill", "spc_c"],
-    ]);
-  });
-
-  it("leaves out what is already switched on, off, or not a share", () => {
-    expect(
-      pendingShares([
-        pkg([
-          { space_id: "spc_a", state: "active" },
-          { space_id: "spc_b", state: "inactive" },
-          { space_id: "spc_c", state: "none", via: "system" },
-        ]),
-        pkg([{ space_id: "spc_home", state: "none", via: "home" }]),
-      ]),
-    ).toEqual([]);
   });
 });
 

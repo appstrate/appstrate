@@ -13,9 +13,10 @@
  * So the four acts below have to work, on one screen:
  *
  *   - switching a package ON in a space it never reached shares it there and
- *     activates it in one click, and the chip under "Partagé avec" appears;
- *   - removing that chip revokes the share, and the switch falls with it,
- *     because a revocation takes the placement away;
+ *     activates it in one click;
+ *   - withdrawing it from that space (the row's menu, behind a confirmation)
+ *     revokes the share, and the switch falls with it, because a revocation
+ *     takes the placement away;
  *   - switching a package OFF at home keeps the row and everything on it — the
  *     model chosen for that space is still there afterwards — a switch moves,
  *     the row does not;
@@ -102,7 +103,11 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
   );
   await row.getByRole("button", { name: `Actions pour ${displayName}`, exact: true }).click();
   await page.getByRole("menuitem", { name: `Retirer de ${target.name}`, exact: true }).click();
+  // Removal takes the space's settings and schedules with it, so it is asked first.
+  const confirm = page.getByRole("alertdialog", { name: `Retirer de ${target.name} ?` });
+  await confirm.getByRole("button", { name: "Retirer", exact: true }).click();
   expect((await revoked).status()).toBe(204);
+  await expect(confirm).toHaveCount(0);
   await expect(targetSwitch).not.toBeChecked();
   expect((await packagesIn(target.id)).map((p) => p.packageId)).not.toContain(`${scope}/${name}`);
 

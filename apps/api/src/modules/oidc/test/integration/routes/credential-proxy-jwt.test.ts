@@ -43,12 +43,7 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
-import {
-  seedPackage,
-  seedPackageShare,
-  seedRun,
-  seedSpace,
-} from "../../../../../../test/helpers/seed.ts";
+import { seedPackage, seedRun, seedSpace } from "../../../../../../test/helpers/seed.ts";
 import { expectProblem } from "../../../../../../test/helpers/assertions.ts";
 import { seedShares } from "../../../../../../test/helpers/connection-shares.ts";
 import {
@@ -401,8 +396,9 @@ describe("POST /api/credential-proxy/proxy — the permission of each path, thro
       ownerUserId: owner.user.id,
       visibility: "private",
     });
-    await seedPackageShare(personal.id, INTEGRATION_ID);
-    await db.insert(spacePackages).values({ spaceId: personal.id, packageId: INTEGRATION_ID });
+    await db
+      .insert(spacePackages)
+      .values({ enabled: true, spaceId: personal.id, packageId: INTEGRATION_ID });
     await seedProxyConnection(
       { ...owner, defaultSpaceId: personal.id },
       INTEGRATION_ID,

@@ -372,6 +372,7 @@ describe("schedule disabled reasons", () => {
       connection_unshared: true,
       connection_set_unnamed: true,
       connection_choice_invalid: true,
+      package_removed: true,
     } satisfies Record<NonNullable<ScheduleWireDto["disabled_reason"]>, true>);
 
     expect(reasons.filter((reason) => !allKeys.has(`schedule.disabledReason.${reason}`))).toEqual(

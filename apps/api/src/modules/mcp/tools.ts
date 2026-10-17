@@ -174,7 +174,7 @@ export interface McpToolContext {
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
-  mayShareRoot: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
+  placeRootAs: Parameters<typeof buildPackageFileTools>[0]["placeRootAs"];
   /** `read_skill`'s read, bound to the caller and space (`skillReaderFor`). */
   readSkill: SkillToolContext["readSkill"];
   /** The inbound request's id, for the problem bodies a tool builds itself. */

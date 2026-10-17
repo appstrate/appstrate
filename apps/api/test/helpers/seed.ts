@@ -14,7 +14,6 @@ import { db } from "./db.ts";
 import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   packages,
-  packageShares,
   spacePackages,
   runs,
   runLogs,
@@ -102,9 +101,10 @@ export async function seedPackage(
 export const seedAgent = seedPackage;
 
 /**
- * Install (activate) a package in a space — creates the
- * `space_packages` row the runtime gate requires for a package to be
- * usable in that space. Idempotent.
+ * Place a package in a space, switched ON unless `overrides` says otherwise —
+ * the `space_packages` row the runtime gate requires for a package to be usable
+ * in that space. Idempotent: on an existing row it switches it on and applies
+ * the overrides.
  */
 export async function seedSpacePackage(
   spaceId: string,
@@ -113,54 +113,29 @@ export async function seedSpacePackage(
 ): Promise<void> {
   await db
     .insert(spacePackages)
-    .values({ spaceId, packageId, ...overrides })
+    .values({ spaceId, packageId, enabled: true, ...overrides })
     .onConflictDoUpdate({
       target: [spacePackages.spaceId, spacePackages.packageId],
-      // Apply overrides on conflict so callers can flip e.g. `enabled` on a
-      // package the space already holds a row for; no-op write when there are
-      // none.
-      set: overrides && Object.keys(overrides).length > 0 ? overrides : { spaceId },
+      set: { enabled: true, ...overrides },
     });
 }
 
 /**
- * The state the activation door leaves behind for a package the space does NOT
- * home: the OFFER that places it, plus the `space_packages` row that switches
- * it on. Two writes, because they are two facts — and a row without the offer
- * behind it is an ORPHAN, which the platform reads as nothing at all
- * (`services/package-activation.ts`).
+ * Place a package in a space switched OFF — what `POST …/shares` leaves behind
+ * when the sharer may not activate in the target (RBAC spec §6.9, §6.10).
  *
- * Reach for this whenever a fixture means "this space runs that package" and
- * the package lives somewhere else. {@link seedSpacePackage} stays the raw row,
- * for the cases that assert what an orphan gets — and for a package the space
- * already homes, where the home IS the placement.
- */
-export async function seedPlacedPackage(
-  spaceId: string,
-  packageId: string,
-  overrides?: Partial<InferInsertModel<typeof spacePackages>>,
-): Promise<void> {
-  await seedPackageShare(spaceId, packageId);
-  await seedSpacePackage(spaceId, packageId, overrides);
-}
-
-/**
- * Offer a package to a space (`package_shares`) — the PLACEMENT that makes it
- * readable and installable there (RBAC spec §6.9, §6.10).
- *
- * A fixture for the sharer's act, not for the recipient's: it writes the offer
- * and nothing else, so a test can set up "this space was offered the package"
- * without going through `POST …/shares` and its authority checks. Pair it with
- * {@link seedSpacePackage} when the space should also have taken it up.
- * `sharedBy` is nullable for the same reason `scripts/migration/0016` leaves it
- * null: nobody in particular made this offer.
+ * A fixture for the sharer's act, without going through `POST …/shares` and its
+ * authority checks. An existing row is left as it stands.
  */
 export async function seedPackageShare(
   spaceId: string,
   packageId: string,
   sharedBy: string | null = null,
 ): Promise<void> {
-  await db.insert(packageShares).values({ spaceId, packageId, sharedBy }).onConflictDoNothing();
+  await db
+    .insert(spacePackages)
+    .values({ spaceId, packageId, enabled: false, sharedBy })
+    .onConflictDoNothing();
 }
 
 /**

@@ -8,12 +8,12 @@
  *     bun scripts/migration/0049-org-icon-images.ts [--apply]
  *
  * Drizzle `0097` stored an uploaded organization logo as `image:<version>`, its bytes in the `orgs`
- * bucket; `0100` renames the column `icon`, whose grammar holds an image inline
+ * bucket; `0101` renames the column `icon`, whose grammar holds an image inline
  * (`data:image/webp;base64,…` or `data:image/png;base64,…`), and the platform reads neither the
- * pointer nor the bucket any more. Only a database that applied `0097` before `0100` holds such a
+ * pointer nor the bucket any more. Only a database that applied `0097` before `0101` holds such a
  * row; production never had the column.
  *
- * Run in the same window as `0100`, right after it (it refuses before): a leftover `image:<uuid>` has
+ * Run in the same window as `0101`, right after it (it refuses before): a leftover `image:<uuid>` has
  * the shape of an Iconify id, which every viewer would fetch from `api.iconify.design`. With `--apply`, every `icon` reading
  * `image:<version>` is set to NULL (the organization renders its initial), `updated_at` bumped, in
  * one transaction; then every object of the `orgs` bucket is deleted. Dry run by default: prints
@@ -61,7 +61,7 @@ export async function runOrgIconImages(options: {
       "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'organizations' AND column_name = 'icon') AS present",
     ),
   );
-  if (!column?.present) throw new Error("organizations.icon is missing — apply drizzle 0100 first");
+  if (!column?.present) throw new Error("organizations.icon is missing — apply drizzle 0101 first");
 
   const imagePointers = () =>
     db.select({ id: organizations.id }).from(organizations).where(IMAGE_POINTER);

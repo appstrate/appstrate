@@ -1,5 +1,5 @@
 {
-  "id": "6b213971-28bc-4240-9297-ace03e2c89f6",
+  "id": "a8a6f48c-7954-4813-b692-1a5318b120e0",
   "prevId": "b3c290ef-d56d-408f-88a4-40ab7ec9f573",
   "version": "7",
   "dialect": "postgresql",
@@ -1579,14 +1579,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "icon": {
-          "name": "icon",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "color": {
-          "name": "color",
+        "logo": {
+          "name": "logo",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1687,12 +1681,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "organizations_icon_length": {
-          "name": "organizations_icon_length",
-          "value": "octet_length(icon) <= 16384"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.end_users": {
@@ -2158,18 +2147,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "icon": {
-          "name": "icon",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "color": {
-          "name": "color",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "is_default": {
           "name": "is_default",
           "type": "boolean",
@@ -2363,10 +2340,6 @@
         "spaces_orphaned_is_personal": {
           "name": "spaces_orphaned_is_personal",
           "value": "orphaned_at IS NULL OR owner_user_id IS NOT NULL"
-        },
-        "spaces_icon_length": {
-          "name": "spaces_icon_length",
-          "value": "octet_length(icon) <= 16384"
         }
       },
       "isRLSEnabled": false
@@ -3113,8 +3086,13 @@
           "name": "enabled",
           "type": "boolean",
           "primaryKey": false,
-          "notNull": true,
-          "default": true
+          "notNull": true
+        },
+        "shared_by": {
+          "name": "shared_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "installed_at": {
           "name": "installed_at",
@@ -3146,6 +3124,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_space_packages_shared_by": {
+          "name": "idx_space_packages_shared_by",
+          "columns": [
+            {
+              "expression": "shared_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3165,6 +3158,15 @@
           "columnsFrom": ["package_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "space_packages_shared_by_user_id_fk": {
+          "name": "space_packages_shared_by_user_id_fk",
+          "tableFrom": "space_packages",
+          "tableTo": "user",
+          "columnsFrom": ["shared_by"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -9857,7 +9859,8 @@
         "connection_deleted",
         "connection_unshared",
         "connection_set_unnamed",
-        "connection_choice_invalid"
+        "connection_choice_invalid",
+        "package_removed"
       ]
     }
   },

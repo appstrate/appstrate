@@ -2034,7 +2034,7 @@ describe("POST /api/credential-proxy/proxy — a remote run lends what it bound 
       draftContent: "Brief the team.",
     });
     await seedPublishedVersion(AGENT, "1.0.0");
-    await db.insert(spacePackages).values({ spaceId, packageId: AGENT });
+    await db.insert(spacePackages).values({ enabled: true, spaceId, packageId: AGENT });
 
     const upstreamAuth: string[] = [];
     mockUpstream(async (_input, init) => {

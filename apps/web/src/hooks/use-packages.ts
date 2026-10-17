@@ -147,7 +147,7 @@ type PackageIndexItem<T extends PackageType> = T extends "integration"
   ? IntegrationIndexItem
   : OrgPackageItem;
 
-/** One type's INDEX for the current space: the active set (placed and switched on, the launch routes' rule). Placed-but-off and offered packages live in the catalogue's placed view (`/catalogue/placed/:type`). */
+/** One type's INDEX for the current space: the active set (placed and switched on, the launch routes' rule). Packages placed here but switched off (or never switched on) live in the catalogue's placed view (`/catalogue/placed/:type`). */
 function usePackageList<T extends PackageType>(type: T) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -259,7 +259,7 @@ function useMovePackageHome(type: PackageType) {
     onSuccess: () => {
       invalidatePackageCaches(qc);
       void invalidateLibraries(qc);
-      // `keepInPreviousHome: false` drops the old space's offer AND placement, so its own listing is stale too.
+      // `keepInPreviousHome: false` withdraws the old space's placement, so its own listing is stale too.
       void invalidatePaths(qc, ["/api/spaces/{spaceId}/packages"]);
       if (type === "integration") void invalidateIntegrationQueries(qc);
     },
