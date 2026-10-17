@@ -355,6 +355,11 @@ describe("apiCallRequestSchema — target", () => {
     }
   });
 
+  it("rejects a backslash in the authority: WHATWG reads it as a path delimiter", () => {
+    expect(accepts("https://api.x.com\\{{seg}}")).toBe(false);
+    expect(accepts("https://api.x.com/a\\b")).toBe(true);
+  });
+
   it("publishes no `format: uri`, which refuses `{` and `}`", () => {
     expect(JSON.stringify(apiCallTargetJsonSchema)).not.toContain('"format"');
   });

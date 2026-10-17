@@ -32,6 +32,7 @@
  */
 
 import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
+import { apiCallTargetJsonSchema } from "@appstrate/afps-runtime/resolvers";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { piToolResultOrThrow, type RuntimeEventEmitter } from "@appstrate/runner-pi";
 import { McpApiUploadResolver } from "./api-upload-resolver.ts";
@@ -107,7 +108,7 @@ function makeExtension(
           additionalProperties: false,
           required: ["target", "fromFile", "uploadProtocol"],
           properties: {
-            target: { type: "string", format: "uri" },
+            target: apiCallTargetJsonSchema,
             fromFile: { type: "string" },
             uploadProtocol: { type: "string", enum: protocols },
             metadata: { type: "object", additionalProperties: true },

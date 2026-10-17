@@ -879,8 +879,7 @@ function buildSidecarTools(options: MountMcpOptions): {
           required: ["target", "fromFile", "uploadProtocol"],
           properties: {
             target: {
-              type: "string",
-              format: "uri",
+              ...apiCallTargetJsonSchema,
               description:
                 "Initial upload endpoint (Drive: `…?uploadType=resumable`; S3: object URL; " +
                 "tus: tus endpoint; MS: `…:/createUploadSession`). Must match the integration " +

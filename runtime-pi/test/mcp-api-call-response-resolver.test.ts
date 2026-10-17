@@ -8,8 +8,8 @@
  *   - without `toFile`, the upstream status is prepended so the LLM sees it.
  */
 
-import { describe, it, expect } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
+import { afterEach, describe, it, expect } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { API_CALL_ERROR_META_KEY, UPSTREAM_META_KEY } from "@appstrate/mcp-transport";
@@ -132,15 +132,23 @@ describe("shapeApiCallResponse — toFile under a symlinked workspace root", () 
     expect(readFileSync(join(base, "real", "garmin", "last.kml"), "utf8")).toBe("<kml/>");
   });
 
+  // `/tmp` is an allowed root for resolveSafePath on every OS, so only writeBodyConfined's
+  // Floor 1 can refuse here (a tmpdir `outside` is refused earlier on macOS).
+  let outside: string | undefined;
+  afterEach(() => {
+    if (outside) rmSync(outside, { recursive: true, force: true });
+    outside = undefined;
+  });
+
   it("still refuses a symlinked subdirectory that points outside", async () => {
-    const { base, workspace } = linkedWorkspace();
-    mkdirSync(join(base, "outside"));
-    symlinkSync(join(base, "outside"), join(base, "real", "out"));
+    const { workspace, base } = linkedWorkspace();
+    const dir = (outside = mkdtempSync("/tmp/apicall-outside-"));
+    symlinkSync(dir, join(base, "real", "out"));
     const result = withStatus([{ type: "text", text: "x" }], 200);
     await expect(shapeApiCallResponse(result, baseOpts(workspace, "out/f.txt"))).rejects.toThrow(
-      /symlink/,
+      /target directory escapes the workspace/,
     );
-    expect(() => readFileSync(join(base, "outside", "f.txt"))).toThrow();
+    expect(() => readFileSync(join(dir, "f.txt"))).toThrow();
   });
 });
 
