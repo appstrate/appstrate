@@ -147,7 +147,7 @@ type PackageIndexItem<T extends PackageType> = T extends "integration"
   ? IntegrationIndexItem
   : OrgPackageItem;
 
-/** One type's INDEX for the current space: the active set (placed and switched on, the launch routes' rule). Packages placed here but switched off (or never switched on) live in the catalogue's placed view (`/catalogue/placed/:type`). */
+/** One type's INDEX for the current space: the active set (placed and switched on, the launch routes' rule). Packages placed here but switched off (or never switched on) live in the catalogue's per-space view (`/catalogue/:type?view=spaces`). */
 function usePackageList<T extends PackageType>(type: T) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();

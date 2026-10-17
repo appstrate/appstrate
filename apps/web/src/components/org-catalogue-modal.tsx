@@ -31,9 +31,11 @@ import { RemoveFromSpaceConfirm, type RemovalTarget } from "./remove-from-space-
 import { packageDetailPath } from "../lib/package-paths";
 import {
   CATALOGUE_KINDS,
+  CATALOGUE_PACKAGE_PARAM,
   CATALOGUE_VERSION_PARAM,
+  catalogueListAddress,
   catalogueSheetAddress,
-  type CatalogueReading,
+  type CatalogueView,
 } from "../lib/catalogue-link";
 import { searchOf } from "../lib/url-search";
 import { useOrg } from "../hooks/use-org";
@@ -115,15 +117,12 @@ interface Closure {
 }
 
 export function OrgCatalogueModal({
-  reading,
+  view,
   type: active,
-  hrefOf,
 }: {
   /** Both from the URL, so a link opens exactly one view. */
-  reading: CatalogueReading;
+  view: CatalogueView;
   type: PackageType;
-  /** The address of another reading or kind of the catalogue. */
-  hrefOf: (reading: CatalogueReading, type: PackageType) => string;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const spaceId = useCurrentSpaceId();
@@ -132,10 +131,10 @@ export function OrgCatalogueModal({
   const { data: library, isLoading, error } = useCatalogueLibrary();
   const activate = useSetPackageActive();
   const list = useListParams(["state", "origin"]);
-  // Découvrir is BROWSING (cards); Vos espaces is MANAGING (a table of per-space state). No toggle.
+  // Découvrir is BROWSING (cards); Par espace is MANAGING (a table of per-space state). No toggle.
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // A tick belongs to one list: another reading or kind starts with none.
-  const listKey = `${reading}/${active}`;
+  // A tick belongs to one list: another view or kind starts with none.
+  const listKey = `${view}/${active}`;
   const [selectedIn, setSelectedIn] = useState(listKey);
   if (selectedIn !== listKey) {
     setSelectedIn(listKey);
@@ -143,8 +142,8 @@ export function OrgCatalogueModal({
   }
   const qc = useQueryClient();
 
-  const discovering = reading === "discover";
-  const view: "cards" | "table" = discovering ? "cards" : "table";
+  const discovering = view === "discover";
+  const layout: "cards" | "table" = discovering ? "cards" : "table";
   const titleKey = TITLE_KEY[active];
   const orgName = currentOrg?.name ?? "";
 
@@ -187,13 +186,13 @@ export function OrgCatalogueModal({
   // to a package (a share notification) opens its sheet whatever the list shows, the other
   // execution's integrations included. An id the library does not hold drops from the address.
   const preview = useUrlModalTarget(
-    "package",
+    CATALOGUE_PACKAGE_PARAM,
     library ? CATALOGUE_KINDS.flatMap((kind) => library.packages[kind]) : undefined,
     { companions: SHEET_COMPANIONS },
   );
   // A package of another kind moves the address to its kind; the sheet renders only once the
   // address is its own (`previewed`).
-  const sheetAddress = catalogueSheetAddress(reading, active, preview.target?.type, location);
+  const sheetAddress = catalogueSheetAddress(active, preview.target?.type, location);
   useEffect(() => {
     if (sheetAddress !== null) navigate(sheetAddress, { replace: true, state: location.state });
   }, [sheetAddress, navigate, location.state]);
@@ -243,7 +242,7 @@ export function OrgCatalogueModal({
       targetLabel: spaceNameOf(targetSpaceId),
     });
 
-  // The STATE filter is for the matrix only; `pages/catalogue.tsx` drops the key when the reading changes.
+  // The STATE filter is for the matrix only; `catalogueListAddress` drops the key when the view changes.
   const states: PlacementState[] = discovering
     ? []
     : list.values("state", ["active", "inactive"] as const);
@@ -276,7 +275,7 @@ export function OrgCatalogueModal({
       ...(active === "agent" && { identity: { icon: look?.icon, color: look?.color } }),
       ...(active === "integration" && { logo: integrationById.get(item.id)?.manifest.icon }),
     };
-    if (view !== "cards") return row;
+    if (layout !== "cards") return row;
     const placement = placementById.get(item.id);
     const activeHere = placement?.here === "active";
     const iconPending =
@@ -442,27 +441,27 @@ export function OrgCatalogueModal({
     onRevoke: revokeFrom,
   });
 
-  // The two READINGS are one set seen two ways, so they sit in the bar with search and
+  // The two VIEWS are one set seen two ways, so they sit in the bar with search and
   // filters; the rail keeps the one axis that IS a partition: the kinds.
-  const readings: { id: CatalogueReading; label: string }[] = [
-    { id: "discover", label: t("catalogue.readingDiscover") },
-    { id: "placed", label: t("catalogue.readingPlaced") },
+  const views: { id: CatalogueView; label: string }[] = [
+    { id: "discover", label: t("catalogue.viewDiscover") },
+    { id: "spaces", label: t("catalogue.viewSpaces") },
   ];
-  const readingSwitcher = (
+  const viewSwitcher = (
     <div
       role="tablist"
-      aria-label={t("webhooks.levelLabel")}
+      aria-label={t("catalogue.viewLabel")}
       className="bg-sidebar-accent/40 flex h-8 shrink-0 gap-0.5 rounded-lg p-0.5"
     >
-      {readings.map((option) => (
+      {views.map((option) => (
         <Link
           key={option.id}
-          to={hrefOf(option.id, active)}
+          to={catalogueListAddress(active, option.id, location.search)}
           role="tab"
-          aria-selected={reading === option.id}
+          aria-selected={view === option.id}
           className={cn(
             "focus-visible:ring-ring flex items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2",
-            reading === option.id
+            view === option.id
               ? "bg-card text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
           )}
@@ -475,7 +474,10 @@ export function OrgCatalogueModal({
   const kindRows = CATALOGUE_KINDS.map((type) => (
     <RailLink
       key={type}
-      item={{ to: hrefOf(reading, type), icon: PACKAGE_TYPE_ICON[type] }}
+      item={{
+        to: catalogueListAddress(type, view, location.search),
+        icon: PACKAGE_TYPE_ICON[type],
+      }}
       label={t(TITLE_KEY[type])}
       count={library?.packages[type]?.length}
       active={type === active}
@@ -601,7 +603,7 @@ export function OrgCatalogueModal({
           emptyHint={t(discovering ? "catalogue.emptyDiscoverHint" : "catalogue.emptyPlacedHint")}
           emptyIcon={PACKAGE_TYPE_ICON[active]}
           list={list}
-          view={view}
+          view={layout}
           header={<SettingsHeading className="mb-4" title={t(titleKey)} />}
           tabs={
             active === "integration" ? (
@@ -657,8 +659,8 @@ export function OrgCatalogueModal({
           }
           actions={
             <>
-              {readingSwitcher}
-              {view === "table" && picked.length > 0 ? (
+              {viewSwitcher}
+              {layout === "table" && picked.length > 0 ? (
                 <PendingButton
                   type="button"
                   size="sm"

@@ -66,7 +66,6 @@ describe("route declarations", () => {
       "/agents",
       "/agents/:scope/:name/runs/:runId",
       "/catalogue",
-      "/catalogue/:reading/:type",
       "/chat",
       "/files",
       "/integrations",
@@ -171,7 +170,13 @@ describe("overlay paths", () => {
 
   it("answer an unknown address under every overlay inside that overlay", () => {
     for (const prefix of OVERLAY_PREFIXES) {
-      expect(matched(`${prefix}/no-such-page`)).toBe(`${prefix}/*`);
+      // One segment under a page that takes a parameter there (`/catalogue/:type`) is that
+      // page's to answer; anywhere else, and any deeper, it is the catch-all's.
+      const param = Object.keys(ROUTE_ACCESS).find((path) =>
+        new RegExp(`^${prefix}/:[^/]+$`).test(path),
+      );
+      expect(matched(`${prefix}/no-such-page`)).toBe(param ?? `${prefix}/*`);
+      expect(matched(`${prefix}/no-such/page`)).toBe(`${prefix}/*`);
     }
     // Below a declared page too: no prefix of it stands in.
     expect(matched("/org-settings/general/no-such-page")).toBe("/org-settings/*");
@@ -182,7 +187,7 @@ describe("overlay paths", () => {
   it("leave every declared overlay page ahead of the not-found catch-all", () => {
     expect(matched("/org-settings/general")).toBe("/org-settings/general");
     expect(matched("/workspace-settings/webhooks/wh_1")).toBe("/workspace-settings/webhooks/:id");
-    expect(matched("/catalogue/discover/agent")).toBe("/catalogue/:reading/:type");
+    expect(matched("/catalogue/agent")).toBe("/catalogue/:type");
     expect(matched("/preferences/x")).toBe("/preferences/*");
   });
 });

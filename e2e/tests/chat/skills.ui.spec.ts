@@ -74,7 +74,7 @@ test("a skill imposed from the space library is locked in the picker, after a co
 
   // The catalogue's « Par espace » view lists what is placed here; the skill's
   // sheet carries one « Imposé dans le chat » switch per space.
-  await page.goto("/catalogue/placed/skill");
+  await page.goto("/catalogue/skill?view=spaces");
   await openRow(page, `Test Skill ${name}`);
   const enforce = page.getByRole("switch", { name: /dans le chat|in the chat/ });
   await expect(enforce).not.toBeChecked();

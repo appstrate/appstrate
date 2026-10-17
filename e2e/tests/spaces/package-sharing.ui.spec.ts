@@ -538,7 +538,7 @@ test("a non-admin builder switches a team placement off and on from the space pa
   ).toBe(200);
   const page = await (await createAuthedContext(browser, member, orgId, spaceId)).newPage();
   try {
-    await page.goto("/catalogue/placed/agent");
+    await page.goto("/catalogue/agent?view=spaces");
     // One row, one switch: a placement shared here sits in the same list as the
     // packages authored here. The author holds the activation grant in this
     // space, so the share landed ON.

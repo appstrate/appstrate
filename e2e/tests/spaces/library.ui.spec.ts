@@ -4,7 +4,7 @@
  * The organization catalogue's « Par espace » view as a MAP of placements,
  * driven from the browser (RBAC spec §6.8).
  *
- * `/catalogue/placed/agent` renders the three axes the model has — home, share,
+ * `/catalogue/agent?view=spaces` renders the three axes the model has — home, share,
  * activation — and every one of them is actionable from the row: a Provenance
  * column for the home, one activation switch per space, and the row's « … » menu
  * for moving, sharing and withdrawing a share. A single cell meaning "a
@@ -70,7 +70,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
     }>;
   };
 
-  await page.goto("/catalogue/placed/agent");
+  await page.goto("/catalogue/agent?view=spaces");
   const row = rowFor(page, displayName);
   await expect(row).toBeVisible();
   const targetSwitch = spaceSwitch(row, displayName, target.name);
@@ -246,7 +246,7 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
   // Two questions, two pages. The catalogue is the placement map, so the row is
   // there, with its switch off; the index is the ACTIVE set, so the row is gone
   // — not greyed, gone.
-  await page.goto("/catalogue/placed/agent");
+  await page.goto("/catalogue/agent?view=spaces");
   const libraryRow = rowFor(page, `Test Agent ${name}`);
   await expect(libraryRow).toBeVisible();
   await expect(spaceSwitch(libraryRow, `Test Agent ${name}`, "Default")).not.toBeChecked();
