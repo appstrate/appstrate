@@ -56,18 +56,26 @@ export function keepAvailable(ids: string[], availableIds: string[]): string[] {
   return ids.filter((id) => availableIds.includes(id));
 }
 
-/** "Valider" writes a non-empty set differing from the stored pick; never the set an unset pick shows. */
-export function canApplyConnectionSet(
-  checked: readonly { id: string }[],
-  explicitIds: ConnectionSet,
-  touched: boolean,
-): boolean {
-  if (checked.length === 0) return false;
-  if (!touched && explicitIds === null) return false;
-  return !sameSet(
-    checked.map((c) => c.id),
-    explicitIds ?? [],
-  );
+/**
+ * What « Enregistrer » writes for the ticked set, `undefined` when it writes nothing. `ticked` and
+ * `stored` hold what is CHOSEN (under an imposed set, the additions alone); `initial` is what the
+ * list opened with. Nothing is written while the ticks still show an unset choice untouched (that
+ * would pin what the cascade already gives), nor when it equals the stored choice. An empty tick is
+ * `emptyValue`: « no addition » under an imposed set, `undefined` elsewhere (« Aucune connexion »
+ * is its own action).
+ */
+export function connectionSetToSave(input: {
+  ticked: readonly string[];
+  initial: readonly string[];
+  stored: ConnectionSet;
+  emptyValue: ConnectionSet | undefined;
+}): ConnectionSet | undefined {
+  const { ticked, initial, stored, emptyValue } = input;
+  if (stored === null && sameSet(ticked, initial)) return undefined;
+  const value = ticked.length > 0 ? [...ticked] : emptyValue;
+  if (value === undefined) return undefined;
+  const unchanged = value === null ? stored === null : stored !== null && sameSet(value, stored);
+  return unchanged ? undefined : value;
 }
 
 /**
@@ -84,16 +92,6 @@ export function shownConnectionPick(input: {
   if (chosen !== null) return chosen;
   const bound = input.softDefaultIds.length > 0 ? input.softDefaultIds : input.resolvedIds;
   return bound.length > 0 ? bound : null;
-}
-
-/** What is CHOSEN, never what the cascade would bind ("Hériter" is the ticked row while nothing is chosen). */
-export function checkedConnectionIds(input: {
-  draft: string[] | null;
-  explicitIds: ConnectionSet;
-  candidateIds: string[];
-}): string[] {
-  const base = input.draft ?? input.explicitIds ?? [];
-  return keepAvailable(base, input.candidateIds);
 }
 
 /** The resolver refuses such a set rather than bind what is left, so the picker names them. */

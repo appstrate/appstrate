@@ -3,8 +3,8 @@
 /**
  * A schedule that runs as someone else: the viewer's pickers are not shown, and
  * a refused save offers the refusal's own candidates — the actor's connections —
- * as the pick. Why each was refused is the form-level list's to say, not repeated here.
- * "No connection" names none of the actor's connections, so it is offered for every
+ * as boxes. Why each was refused is the form-level list's to say, not repeated here.
+ * "No connection" names none of the actor's connections, so it is a box of its own for every
  * integration the agent does not require.
  */
 
@@ -13,7 +13,7 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import type { ConnectionChoice } from "../../lib/connection-choice.ts";
 import { ScheduleActorConnectionChoice } from "../schedule-actor-connection-choice.tsx";
-import { menuItems, textsOf, type MenuItem } from "../../test/connection-menu-tree.tsx";
+import { menuItems, type MenuItem } from "../../test/connection-menu-tree.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -67,7 +67,7 @@ function Choice({
   return null;
 }
 
-/** The items of every connection menu of the section. */
+/** The boxes of the section, by test id, with their props. */
 function itemsOf(
   value: Record<string, string[]>,
   integrations: { id: string; required?: boolean }[] = REQUIRED,
@@ -127,12 +127,16 @@ describe("ScheduleActorConnectionChoice", () => {
     const items = itemsOf({ [NOTION]: ["gone"] });
     expect(items.has("sched-choice-pick-option-c_work")).toBe(true);
     expect(items.has("sched-choice-pick-option-c_team")).toBe(true);
-    const texts = textsOf(items.get("sched-choice-pick-option-c_work")?.children).join("|");
-    expect(texts).toContain("Travail");
-    expect(texts).toContain("bob@acme.test");
-    const team = textsOf(items.get("sched-choice-pick-option-c_team")?.children).join("|");
-    expect(team).toContain(i18n.t("agents:schedule.connectionOverrides.sharedByOther"));
-    expect(team).toContain(i18n.t("agents:schedule.connectionOverrides.needsReconnection"));
+    const html = renderChoice({});
+    expect(html).toContain("Travail");
+    expect(html).toContain("bob@acme.test");
+    expect(html).toContain(
+      [
+        "team@acme.test",
+        i18n.t("agents:schedule.connectionOverrides.sharedByOther"),
+        i18n.t("agents:schedule.connectionOverrides.needsReconnection"),
+      ].join(" · "),
+    );
     // No candidates travel with an unreachable pick: the way out is clearing it.
     expect(renderChoice({ [NOTION]: ["gone"] })).toContain(
       i18n.t("agents:connectionOverrides.clearChoice"),
@@ -183,20 +187,56 @@ describe("ScheduleActorConnectionChoice", () => {
 
   it("offers 'no connection' for each integration the agent does not require, refused or not", () => {
     const items = itemsOf({}, [{ id: GMAIL }, { id: NOTION, required: true }, { id: SLACK }]);
-    // A mode of the refused menu of an optional integration, and of its own row otherwise.
+    // Under the candidates of a refused optional integration, and on its own row otherwise.
     expect(items.has(`sched-choice-pick-none-${GMAIL}`)).toBe(true);
     expect(items.has(`sched-choice-pick-none-${SLACK}`)).toBe(true);
     // Control: never for one the agent requires.
     expect(items.has(`sched-choice-pick-none-${NOTION}`)).toBe(false);
   });
 
-  it("offers « Hériter » only where nothing was refused: a refusal says inheriting decides nothing", () => {
-    const items = itemsOf({}, [{ id: GMAIL }, { id: SLACK }]);
-    expect(items.has(`sched-choice-pick-reset-${SLACK}`)).toBe(true);
-    expect(items.has(`sched-choice-pick-reset-${GMAIL}`)).toBe(false);
+  it("says no choice is the actor's resolution only where nothing was refused", () => {
+    // A refusal says that resolution decides nothing: there no choice is no answer.
+    const inherit = i18n.t("agents:schedule.connectionOverrides.inheritActor");
+    const html = renderChoice({}, [{ id: GMAIL }, { id: SLACK }]);
+    expect(html.split(inherit).length - 1).toBe(1);
+    expect(html.indexOf(inherit)).toBeGreaterThan(html.indexOf(`schedule-actor-none-${SLACK}`));
+    // Once « Aucune connexion » is ticked, it is the choice.
+    expect(renderChoice({ [SLACK]: [] }, [{ id: SLACK }])).not.toContain(inherit);
   });
 
-  it("shows a stored 'no connection' as the chosen mode", () => {
+  it("writes « Aucune connexion » as [] and unticks it back to no choice", () => {
+    const written: Array<[string, string[] | null]> = [];
+    let items = new Map<string, MenuItem>();
+    const probe = (value: Record<string, string[]>) =>
+      render(
+        <Choice
+          props={{
+            choices: CHOICES,
+            integrations: [{ id: GMAIL }, { id: SLACK }],
+            value,
+            onChange: (id, next) => written.push([id, next]),
+          }}
+          onItems={(found) => (items = found)}
+        />,
+      );
+    const toggle = (id: string, checked: boolean) =>
+      (items.get(id)?.onCheckedChange as (checked: boolean) => void)(checked);
+    probe({});
+    toggle(`sched-choice-pick-none-${SLACK}`, true);
+    toggle("sched-choice-pick-option-c_work", true);
+    probe({ [SLACK]: [], [GMAIL]: ["c_work"] });
+    toggle(`sched-choice-pick-none-${SLACK}`, false);
+    // Unticking the last box is no choice at this layer, never « no connection ».
+    toggle("sched-choice-pick-option-c_work", false);
+    expect(written).toEqual([
+      [SLACK, []],
+      [GMAIL, ["c_work"]],
+      [SLACK, null],
+      [GMAIL, null],
+    ]);
+  });
+
+  it("shows a stored 'no connection' as ticked", () => {
     const none = (value: Record<string, string[]>) =>
       itemsOf(value, [{ id: SLACK }]).get(`sched-choice-pick-none-${SLACK}`);
     expect(none({ [SLACK]: [] })).toMatchObject({ checked: true });

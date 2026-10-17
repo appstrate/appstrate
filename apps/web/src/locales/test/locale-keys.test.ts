@@ -258,7 +258,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.admin.creation.", // components/integration-detail/access-rules-section.tsx
   "integration.admin.orgDefault.connection.", // components/integration-detail/org-default-section.tsx — forced / default
   "integration.admin.usage.", // components/integration-detail/org-default-section.tsx — t(`integration.admin.usage.${mode}Help`)
-  "integration.auth.type.", // components/integration-connect/connection-picker-menu.tsx
+  "integration.auth.type.", // components/integration-connect/connection-picker-modal.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
   "integration.structure.type.", // components/package-detail/integration-structure.tsx

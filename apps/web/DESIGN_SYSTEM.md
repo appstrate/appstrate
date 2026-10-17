@@ -237,51 +237,46 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   reason (section 11), not for a setting the object cannot have.
 - "Inherit" is always an explicit option and names what it inherits
   (« Hériter (Mistral Medium) »).
-- **Choosing connections: one component, everywhere** (`ConnectionChoiceMenu`,
-  `components/integration-connect/connection-choice-menu.tsx`). A trigger that reads the
-  current choice like a select (« Hériter (12****oken) », the same form as the model and proxy
-  « Hériter (Mistral Medium) », the name, « 2 connexions », « Aucune connexion »; never a « + »,
-  which means add and belongs to the « Ajouter une connexion » entry), and a menu in **three
-  exclusive modes, first-level radios** so that « Hériter » reads as an alternative to the
-  choice below it, not a row of it: ( ) **Hériter** / « Utilise 12****oken, la connexion par
-  défaut de l'espace » (the layer in the server's words, `run.connSource.*`), ( ) **Choisir des
-  connexions** / « Cochez celles à utiliser », with the connections indented under it as
-  **checkboxes** (one connection is still a box; capped at `MAX_CONNECTIONS_PER_INTEGRATION`;
-  ticking one moves the mode to « Choisir »), ( ) **Aucune connexion** / « L'agent s'exécute
-  sans cette intégration » (absent for a required integration); then « Ajouter une
-  connexion » and « Gérer les connexions ». Each connection row is a name and one line of the
-  same form (« Clé API · connectée depuis Default »), listed in the order the SERVER ranked them (`scope_fit`
-  then least privilege: the client never sorts them again). What is ticked is what is CHOSEN, never a
-  second tick for what the cascade would give. A mode a usage cannot answer is left out; with
-  the list alone the menu shows the boxes without a radio. Where it serves, and how it writes:
-  - the **agent's** and a **schedule's** Connexions (`PickerMenu`, fed by the readiness verdict):
-    all three modes, « Valider » writes the ticked set, « Hériter » and « Aucune connexion »
-    write at once, a lone connection writes when ticked (unticking it goes back to « Hériter »);
-  - the **organisation default** of an integration page (`OrgDefaultSection`): the list alone
-    (an empty set is « no default », which its own select says), each tick commits alone;
-  - **pins** of an integration page (`NewPinForm`): « Choisir » and « Aucune connexion », no
-    « Hériter » (a pin is the exception, its absence is the delete button), a form value. Beside
-    it, the pin's mode is a `Select` of two effects, « Exactement ces connexions » (the default)
-    or « Ces connexions, plus celles de l'utilisateur » (`allow_additional_connections`), the same
-    select in the pins table's Mode column, where a change is confirmed;
+- **Choosing connections: text plus a modal, two lists of boxes.** No menu of modes.
+  - the **agent's** and a **schedule's** Connexions (`IntegrationConnectionPicker`, fed by the
+    readiness verdict, rules in `use-connection-picker.ts`): the cell reads what binds as text
+    (« web · db », « Hériter (web) », « Aucune connexion », imposed connections first behind a
+    padlock), one amber line per problem, and « Modifier » opens `ConnectionPickerModal`
+    (`integration-connect/connection-picker-modal.tsx`, a `FormModal`): the candidates as
+    `CheckboxField`s in the order the SERVER ranked them (`scope_fit` then least privilege; the
+    client never sorts them again), imposed ones ticked and disabled (« Imposée par un admin »),
+    the cap (`MAX_CONNECTIONS_PER_INTEGRATION`), one line per problem with its way out (renew,
+    upgrade behind a `ConfirmModal`, connect a new account). « Enregistrer » writes the ticks
+    (`connectionSetToSave`), « Revenir au choix par défaut » writes `null`, « Aucune connexion »
+    writes `[]` (optional integration, no lock). A closed imposed set (an admin pin in « Exactement
+    ces connexions », an enforced space default) is read-only with its reason, no « Modifier ».
+    Under « Ces connexions, plus celles de l'utilisateur » (`additional_connections_allowed`) the UI
+    writes the additions only: an imposed id is never part of an override or a member pin, and
+    unticking every addition means « no addition » (`null` for the member's pin, `[]` in an
+    override), never « no connection »;
+  - the sets an admin imposes on an integration page (the space default and the agents' pins):
+    `ConnectionCheckboxList` (`integration-detail/connection-checkbox-list.tsx`, the shared
+    connections, capped, a stored member no longer shared listed as « Connexion indisponible »:
+    ticked it can be unticked, never ticked again). The space default (`OrgDefaultSection`) lists it
+    beside its usage select (an empty set is « no default », which the select says). The **pins**
+    (`PinManagementSection`) are a read-only `DataTable` (Agent, Connexions imposées, Mode in
+    words) whose « … » holds « Modifier » and « Supprimer »; « Ajouter » and « Modifier » open one
+    `FormModal`: Agent (an `OptionSelect` of the agents without a pin, fixed when editing), the
+    boxes (none ticked pins « Aucune connexion »), Mode (an `OptionSelect`, « Exactement ces
+    connexions » by default, « Ces connexions, plus celles de l'utilisateur » disabled with its
+    reason under the field, `additionsRefusal`), then the one sentence saying whom saving
+    affects (`pinDraftVerdict`), and one PUT (`adminPinBody`). « Supprimer » only opens its
+    `ConfirmModal`, which says what the members and the schedules lose;
   - the **identity of a schedule** (`ScheduleActorConnectionChoice`, in Identité, Connexions and
-    the creation modal): after a 409 the candidates and « Aucune connexion » when optional, no
-    « Hériter » (the server just said the actor's own resolution cannot decide); an optional
-    integration nothing refused keeps « Hériter » (the absence of a pick) and « Aucune connexion ».
-  - Usages over a plain list go through `ConnectionSetPicker` (same file, a controlled value:
-    `null` no choice, `[]` none, each tick handed to `onChange`).
-  - **An imposed set makes the picker partially locked.** Under an admin pin or an enforced org
-    default the imposed connections are shown with a padlock and cannot be unticked; when the admin
-    pin is in « Ces connexions, plus celles de l'utilisateur » (`additional_connections_allowed`)
-    the other connections stay tickable and the UI writes the additions only (the imposed ones are
-    never part of an override or a member pin, and `[]` means no addition, not no connection); in
-    « Exactement ces connexions », no other connection is offered.
+    the creation modal): after a 409 the refused candidates as boxes and « Aucune connexion » as a
+    box of its own when optional; where nothing was refused, a line says the identity's usual
+    resolution applies.
 
-  What turns a trigger amber is `gatesRun` (`use-connection-picker.ts`): the server's `run_blocking`
+  What turns the cell amber is `gatesRun` (`use-connection-picker.ts`): the server's `run_blocking`
   while nothing is chosen (an unset override included, which inherits the cascade), the pick itself
   once a set is chosen (an under-scoped, dead or unavailable member, or « Aucune connexion » for a
   required integration). An override reaching outside a closed imposed set says so under the
-  locked picker (`override_outranked`). **A schedule takes no fallback**: the server refuses to arm one
+  read-only cell (`override_outranked`). **A schedule takes no fallback**: the server refuses to arm one
   whose connections nobody named. When the caller arms a schedule that runs as themself and holds
   a single connection for an integration, the server names that connection on the write
   (`withScheduleFallback`); the SPA sends only the user's picks (`savedScheduleOverrides`) and
@@ -313,7 +308,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 | On / off                                                             | `Switch` (a `SettingRow` `toggle`)                                                                                                                                                                                                                                                                                                                                                          |
 | Several of a long set (scopes, permissions)                          | `ScopeMultiSelect` (`components/scope-multi-select.tsx`, a searchable multi combobox grouped by resource, with a count and an all / none shortcut)                                                                                                                                                                                                                                          |
 | A model (agent, schedule, run with options, chat)                    | `ModelSelect` (`components/model-select.tsx`, over `ModelPicker` of `packages/ui/src/components/model-picker.tsx`): the one list, in a Popover + Command, grouped by who pays (see below). Never a `Select` of models, never a flat list. The groups are `groupModelsForPicker` (`packages/ui/src/components/model-picker-groups.ts`), the chat's composer draws the same `ModelPickerList` |
-| Which connections of one integration                                 | `ConnectionChoiceMenu` / `ConnectionSetPicker` (`integration-connect/connection-choice-menu.tsx`): the one component, section 4 lists where it serves. Never a bare list of checkboxes                                                                                                                                                                                                      |
+| Which connections of one integration                                 | The connections cell and `ConnectionPickerModal` (`integration-connect/`), or `ConnectionCheckboxList` for a set an admin imposes: section 4. Never a menu of modes                                                                                                                                                                                                                         |
 | A time                                                               | `TimeField` (`components/time-field.tsx`): hour and minute selects, a period select only where the app's language counts in 12 hours. Never `Input type="time"`: the browser draws it in ITS locale, not the app's                                                                                                                                                                          |
 | A schedule's rhythm                                                  | `FrequencyComposer` (`components/frequency-composer.tsx`; the cron model is `lib/cron-frequency.ts`), never raw presets                                                                                                                                                                                                                                                                     |
 | A value to copy exactly (endpoint, redirect URI)                     | `CopyBlock` (`components/copy-block.tsx`); programmatic copies go through `useCopyToClipboard`                                                                                                                                                                                                                                                                                              |
@@ -699,7 +694,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   cannot decide (« Choisissez la connexion Telegram pour e2e-C Membre » / « e2e-C
   Membre a plusieurs connexions Telegram. Une planification se lance seule : elle ne peut pas
   demander laquelle utiliser au moment de l'exécution. »); the choice is the
-  `ConnectionChoiceMenu` under it. A refusal that is a fault (a connection the
+  connections cell under it. A refusal that is a fault (a connection the
   identity no longer reaches) is the one destructive list. Any other refusal puts
   the control back on the stored value and is toasted, with no inline error under
   it (`ActorSelect` in a schedule's identity).
