@@ -23,11 +23,7 @@ import { callerPersonalOwnerId } from "../lib/view-as.ts";
 
 const PACKAGE_TYPES = ["agent", "skill", "mcp-server", "integration"] as const;
 
-/**
- * How a package reaches a space: its home, a `space_packages` row outside the
- * home (`shared`), or the system escape (`placementGrantsRead`, RBAC spec
- * §6.9) — nothing else puts a package on this list.
- */
+/** How a package reaches a space: its home, a row outside it (`shared`), or `system` (RBAC spec §6.9). */
 type PlacementVia = "home" | "shared" | "system";
 
 /** Whether the space RUNS what it was placed. */
@@ -40,20 +36,15 @@ interface Placement {
   state: PlacementState;
   /** Whether this space enforces the skill in its chat; `false` with no row. */
   chat_enforced: boolean;
-  /**
-   * Who placed it — on `shared` placements only, and `null` there when the row
-   * was left by a home MOVE rather than placed by a person (`shared_by` is NULL
-   * on those rows) or when that account is gone.
-   */
+  /** Who placed it (`shared` only); `null` for a row a home move left or a gone account. */
   shared_by: { user_id: string; name: string } | null;
 }
 
 /**
- * Whether the caller may switch a package on (or off) in one space, as
- * `POST /api/spaces/{id}/packages` and `DELETE …/packages/{scope}/{name}` judge it:
- * `allowed`; `not_shareable` — not placed there, and its home grants no `<type>:share`, which
- * the activation needs to place it; `forbidden` — the type's
- * `activate`/`deactivate` grant is missing there (the owner of a personal space needs none).
+ * Whether the caller may switch a package on/off in one space, as the
+ * `…/packages` routes judge it: `not_shareable` = not placed there and no
+ * `<type>:share` in its home; `forbidden` = the `activate`/`deactivate` grant is
+ * missing (a personal space's owner needs none).
  */
 type ActivationVerdict = "allowed" | "not_shareable" | "forbidden";
 
@@ -81,30 +72,13 @@ interface LibraryPackage {
 }
 
 /**
- * The library — a map of PLACEMENTS, in its two shapes.
- *
- * A package sits in ONE home and reaches other spaces through their
- * `space_packages` rows, whose `enabled` says whether the space runs it. The
- * library projects exactly those axes, one row per package and one
- * `placements` entry per space the package is placed in and the caller reads:
- *
- *   - `via` — WHY the package is there: its `home`, a row outside the home
- *     (`shared`), or because it is a `system` package, readable everywhere by
- *     construction.
- *   - `state` — whether the space RUNS it: `active` (a row saying `enabled`,
- *     or the deployment's default with no row), `inactive` (a row saying
- *     `false` — switched off, or placed by someone who could not switch it on
- *     there), `none` (no row at all, and the default is off).
- *
- * `GET /api/library` returns every space whose library the caller reads, so it
- * is the union of the space forms: an administrator's whole map, a member's
- * spaces. `GET /api/spaces/{id}/library` narrows to the requested space, which
- * is what makes it a space's own page rather than an organization map. A
- * package with NO placement there is still listed when the caller could PLACE
- * it — a system package, or one whose home grants them `<type>:share` — since
- * `POST /api/spaces/{id}/packages` would place it with the activation. Never
- * into a PERSONAL destination: placing into somebody's own space from here is
- * somebody else's act.
+ * The library: a map of placements, one row per package and one `placements`
+ * entry per readable space it is placed in. `via` says why it is there, `state`
+ * whether the space runs it (`active`, `inactive` = row off, `none` = no row and
+ * default off). `GET /api/library` spans every readable space;
+ * `GET /api/spaces/{id}/library` narrows to one. A package with no placement is
+ * still listed when the caller could place it (`<type>:share` in its home), but
+ * never into a personal destination.
  */
 export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   const orgId = c.get("orgId");
@@ -169,17 +143,8 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     ]),
   );
 
-  // ONE read for the whole map: the catalogue joined to its placement rows and
-  // the names behind them.
-  //
-  // The sharer is named only while they are still a MEMBER of this
-  // organization. `space_packages.shared_by` is `ON DELETE SET NULL` on `user`,
-  // so deleting the ACCOUNT clears it — but leaving the ORG clears nothing, and
-  // this map is served to every owner and admin, on every row. The membership
-  // join is therefore the filter, not a post-pass: a former member's name never
-  // leaves the database. The projection off these columns is `sharerView`
-  // (`services/package-shares.ts`), shared with `GET …/shares` so the rule has
-  // one statement and not two.
+  // One read for the map. The sharer is named only while still an org member:
+  // the membership join is the filter (see `sharerView`).
   const rows = await db
     .select({
       id: packages.id,
@@ -288,22 +253,13 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
         via,
         state: placementState({ id: row.id, type, source: row.source }, placementRow?.enabled),
         chat_enforced: placementRow?.chatEnforced ?? false,
-        // Only a placement outside the home names an author. A home places the
-        // package by owning it, and a system package by being shipped.
         shared_by: via === "shared" ? (placementRow?.sharedBy ?? null) : null,
       });
     }
     placements.sort((a, b) => a.space_id.localeCompare(b.space_id));
 
-    // A package with no placement the caller reads is listed in ONE case: it is
-    // a candidate the caller could put in one of the spaces read here in one
-    // click — a package whose home grants them `<type>:share`, since
-    // `POST /api/spaces/{id}/packages` places it with the activation — and
-    // never for a PERSONAL destination alone, where placing is somebody else's
-    // act. Nothing else earns a row: every package of the organization
-    // is homed in one of its spaces (`packages_org_package_has_home`), so a
-    // package with no placement here is one placed in spaces this caller does
-    // not read.
+    // Unplaced packages are listed only as candidates the caller could place
+    // (`<type>:share` in the home), never into a personal destination alone.
     const proposable = [...readable].some((space) => !personalSpaceIds.has(space));
     if (placements.length === 0 && !(proposable && home.home_shareable)) continue;
 

@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A package's AUDIENCE — the spaces it is placed in outside its home
- * (RBAC spec §6.10).
- *
- * A placement is a `space_packages` row; this module places a package through
- * the one door that may (`placePackage`, `services/space-packages.ts`), lists
- * the placements outside the home, and withdraws one. A placement lands
- * switched on when the sharer may activate in the target, and off otherwise:
- * a package runs with the RECIPIENT's credentials, so switching it on there is
- * the recipient's own decision.
+ * A package's audience: its placements outside its home (RBAC spec §6.10).
+ * Places through `placePackage`, lists the placements, withdraws one.
  */
 
 import { and, eq, ne, or, isNull } from "drizzle-orm";
@@ -21,20 +14,12 @@ import { loadPlaceablePackage, placePackage, type PlacementAuthority } from "./s
 import { withdrawPlacement } from "./package-placement.ts";
 import type { PlacementRemovalAuthority } from "../lib/package-access.ts";
 
-/**
- * The `user` row of the person who shared, joined ALONGSIDE the personal-space
- * owner's — two different people, one table, so the sharer needs an alias.
- */
+/** Alias: the sharer and the personal-space owner are two `user` rows in one query. */
 const sharer = alias(user, "sharer");
 
 /** One entry of `GET /api/packages/{scope}/{name}/shares`. */
 export interface PackageShareView {
-  /**
-   * WHO the package is placed with. A personal space is rendered as its OWNER
-   * and never as a space id: the sharer picked a person, the server resolved
-   * their space, and handing that id back would publish the one thing §3.6
-   * withholds — that a given id is somebody's private workspace.
-   */
+  /** A personal space is rendered as its owner, never as a space id (§3.6). */
   target:
     | { kind: "user"; userId: string; name: string }
     | { kind: "space"; spaceId: string; name: string };
@@ -46,15 +31,9 @@ export interface PackageShareView {
 }
 
 /**
- * The sharer, as the WIRE names them. `null` once the account is gone — and
- * `null` too once they have left the ORGANIZATION: `shared_by` cascades to NULL
- * on account deletion but nothing clears it on a membership revocation, and
- * this view is read by everyone the package is visible to.
- *
- * Exported because the space library projects the same placements
- * (`services/package-library.ts`) off its own `organizationMembers` join: two
- * copies of this ternary is two places for "a former member is never named" to
- * stop being true, and only one of them serves the page an owner reads.
+ * The sharer as the wire names them; `null` once the account is gone or the
+ * sharer left the organization (a membership revocation does not clear
+ * `shared_by`). Shared with `package-library.ts`.
  */
 export function sharerView(row: {
   sharedBy: string | null;
@@ -64,16 +43,10 @@ export function sharerView(row: {
 }
 
 /**
- * Place `packageId` in `spaceId`, outside its home. Idempotent — a second share
- * of the same pair is a no-op that leaves the existing row as it stands, and
- * `created` says which happened so the caller can skip the notification and
- * the audit event on a repeat.
- *
- * Every precondition is `placePackage`'s, decided against the home it reads
- * `FOR SHARE` in this transaction: `PUT …/home` rewrites `home_space_id` in a
- * transaction of its own, so the route can read home A while the insert lands
- * against home B. `enabled` is the route's answer to "may the caller activate
- * in the target?".
+ * Place `packageId` in `spaceId`, outside its home. Idempotent: a repeat leaves
+ * the row as is and returns `created: false`. Preconditions are `placePackage`'s,
+ * decided against the home it locks. `enabled` is the route's answer to "may the
+ * caller activate in the target?".
  *
  * @throws 403 when the caller holds no share authority in the LOCKED home; 409
  *   `share_target_is_home` or `package_has_no_version`; 404 if the target
@@ -87,9 +60,7 @@ export async function sharePackage(params: {
   enabled: boolean;
 }): Promise<{ created: boolean }> {
   const { packageId, spaceId, orgId, placeAs, enabled } = params;
-  // The org boundary is asserted HERE, in the service, where {@link
-  // revokePackageShare} asserts it too: `space_packages` carries no `org_id`,
-  // so nothing below would stop a row naming another tenant's space.
+  // `space_packages` has no `org_id`: the org boundary is asserted here.
   return db.transaction(async (tx) => {
     const [target] = await tx
       .select({ id: spaces.id })
@@ -104,38 +75,27 @@ export async function sharePackage(params: {
 }
 
 /**
- * Withdraw a placement outside the package's home — {@link withdrawPlacement}:
- * its `space_packages` row, settings and all, and the package's schedules in
- * that space, in one transaction. Deactivating deletes nothing: it keeps the
- * row. The other act that withdraws one is the `keep: false` branch of
- * `reconcilePlacementsAfterRehome` (`services/package-placement.ts`).
+ * Withdraw a placement outside the home ({@link withdrawPlacement}).
  *
- * @returns which side's authority withdrew it, and the disabled schedules,
- *   whose jobs the caller removes once committed.
- * @throws 404 when the space holds no placement outside the home this
- *   transaction holds, or is a personal space other than `personalOwnerId`'s;
- *   403 when `authorityFor` refuses against that home.
+ * @returns the authority that withdrew it and the disabled schedules, whose
+ *   jobs the caller removes once committed.
+ * @throws 404 when the space holds no such placement or is a personal space
+ *   other than `personalOwnerId`'s; 403 when `authorityFor` refuses.
  */
 export async function revokePackageShare(params: {
   packageId: string;
   spaceId: string;
   orgId: string;
-  /**
-   * The one personal space the withdrawal may name — the recipient's a `user`
-   * target resolved to, else the caller's own. Somebody else's, named by id,
-   * answers the 404 a missing row answers, so that id stays opaque (§3.6).
-   */
+  /** The one personal space the withdrawal may name; any other answers 404 (§3.6). */
   personalOwnerId: string | null;
-  /** The route's rule (`assertPlacementRemovalAccess`), asked against the home this transaction holds. */
+  /** The route's rule, asked against the locked home. */
   authorityFor: (homeSpaceId: string | null) => PlacementRemovalAuthority | null;
 }): Promise<{ authority: PlacementRemovalAuthority; disabledScheduleIds: string[] }> {
   const { packageId, spaceId, orgId, personalOwnerId, authorityFor } = params;
   const notPlaced = () => notFound(`Package '${packageId}' is not placed in that space`);
   return db.transaction(async (tx) => {
-    // The authority, against the LOCKED home, for the reason `sharePackage`
-    // states: a `PUT …/{scope}/{name}/home` committing between the route's
-    // check and this delete moves the package to a home this caller may govern
-    // not at all. The lock order is the doors' — `packages`, then the row.
+    // Authority is judged against the locked home: a concurrent re-home
+    // between the route's check and this delete must not slip through.
     const [pkg] = await tx
       .select({ homeSpaceId: packages.homeSpaceId })
       .from(packages)
@@ -150,9 +110,7 @@ export async function revokePackageShare(params: {
       );
     }
     if (pkg.homeSpaceId === spaceId) throw notPlaced();
-    // The org boundary is asserted here: `space_packages` carries no `org_id`,
-    // so `(space_id, package_id)` alone would act on a row pointing at a space
-    // this organization does not own.
+    // Org boundary (`space_packages` has no `org_id`).
     const [target] = await tx
       .select({ id: spaces.id })
       .from(spaces)
@@ -168,8 +126,7 @@ export async function revokePackageShare(params: {
       .limit(1);
     if (!target) throw notPlaced();
     const { removed, disabledScheduleIds } = await withdrawPlacement(tx, packageId, spaceId);
-    // Thrown rather than returned so the schedules' disable rolls back with it:
-    // a space that held no row had nothing withdrawn.
+    // Thrown so the schedules' disable rolls back too.
     if (!removed) throw notPlaced();
     return { authority, disabledScheduleIds };
   });
@@ -201,8 +158,7 @@ export async function listPackageShares(
     .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
     .leftJoin(user, eq(user.id, spaces.ownerUserId))
-    // The membership is the join, not a filter applied afterwards: the sharer's
-    // name is loaded only for someone who is still in this organization.
+    // Membership is the join so a former member's name is never loaded.
     .leftJoin(
       organizationMembers,
       and(

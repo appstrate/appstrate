@@ -7,24 +7,20 @@
  *   set -a && . ./.env && set +a && \
  *     bun scripts/migration/0046-fold-package-shares.ts [--apply]
  *
- * Drizzle `0099` gives `space_packages` a `shared_by` column and leaves `package_shares` in place,
- * read only by this script and the boot guard `assertPackageSharesFolded`. Each share becomes the
- * `space_packages` row of its (space, package), `enabled = false` and `shared_by` copied,
- * `ON CONFLICT DO NOTHING`: a space that had already activated the package keeps its row, which
- * then gains the `shared_by` it lacks. A share whose space belongs to another organization than
- * the package is skipped and printed. An org package's row outside its home with no same-org share
- * placed it nowhere under the old rule but would place it under the new one: each such ORPHAN
- * (cross-org rows included) is printed with its `enabled` and deleted. Per space, the placements
- * before (old rule: system ∨ home ∨ same-org share) and after (new rule: system ∨ home ∨ row) are
- * printed and must be equal, or the transaction rolls back. Then the table is emptied, skipped
- * shares included. With `package_shares` empty the script writes and checks nothing: once folded, a
- * row with no share IS a placement, so orphans are only told apart while shares remain — a
- * database that never shared anything keeps its orphan rows, now live. Run after the
- * migrations have applied `0099` and BEFORE the app starts, `pg_dump` first: an app serving `0099`
- * before it runs no longer sees the packages shared but never activated, and the platform refuses
- * to boot until it has. Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither
- * (`lib/database-target.ts`). One transaction; dry run by default (rolled back), `--apply` commits.
- * A second `--apply` finds the table empty and writes nothing.
+ * Run after drizzle `0099` has applied and BEFORE the app starts (`pg_dump`
+ * first): the platform refuses to boot while `package_shares` holds a row
+ * (`assertPackageSharesFolded`). Dry run by default (rolled back); `--apply`
+ * commits; a second `--apply` writes nothing. Targets `DATABASE_URL` or
+ * `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`).
+ *
+ * Per share: insert its (space, package) row `enabled = false` with `shared_by`
+ * (`ON CONFLICT DO NOTHING`; an existing row only gains `shared_by`). A share
+ * across organizations is skipped and printed. An org package's row outside its
+ * home with no same-org share is an ORPHAN: printed and deleted, since the new
+ * rule would place the package there. Per-space placements before and after must
+ * be equal or the transaction rolls back; then `package_shares` is emptied.
+ * With it already empty nothing is checked, so orphans are only told apart
+ * while shares remain.
  */
 
 import { parseArgs } from "node:util";

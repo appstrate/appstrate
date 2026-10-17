@@ -718,21 +718,11 @@ export async function uncopiedShareConnectionCount(
 }
 
 /**
- * Refuse to boot while `package_shares` holds a row — i.e. while
- * `scripts/migration/0046-fold-package-shares.ts` has not been run on this database.
- *
- * Drizzle `0099` leaves `package_shares` standing, read only by `0046` and this guard: a package
- * is placed outside its home by its `space_packages` row alone, so until `0046` folds the shares
- * into rows every package shared but never activated is gone from the space it was shared with.
- *
- * Refusing rather than warning, for the reason {@link assertOAuthResourceColumnsPresent} does.
- *
- * `0046` empties the table once folded, skipped shares included, and no code writes it any more,
- * so "any row" is exactly "not folded yet".
- *
- * §4: delete this and its tests in the release that drops `package_shares`.
- *
- * `pendingFolds` is injected for tests — production reads the live database.
+ * Refuse to boot while `package_shares` holds a row, i.e. until
+ * `scripts/migration/0046-fold-package-shares.ts` has run: unfolded shares would
+ * vanish from the spaces they were shared with. Refuses rather than warns, like
+ * {@link assertOAuthResourceColumnsPresent}. Delete with the release that drops
+ * `package_shares` (§4). `pendingFolds` is injected for tests.
  */
 export async function assertPackageSharesFolded(
   embeddedDataDir: string | null,
