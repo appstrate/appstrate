@@ -15,8 +15,12 @@ const ICON_SOURCE_TYPE_LIST = ["image/png", "image/jpeg", "image/webp", "image/g
 /** The file input's `accept`. */
 export const ICON_SOURCE_TYPES = ICON_SOURCE_TYPE_LIST.join(",");
 
-/** Edge lengths tried in turn; the first encoding that `isIconImage` accepts wins. */
-const ICON_SIZES = [128, 96, 64] as const;
+/**
+ * Edge lengths tried in turn; the first encoding that `isIconImage` accepts
+ * wins. The ladder goes down to 32 px for WebKit, which encodes no WebP: a
+ * photographic PNG is still 7–13 KB at 64 px.
+ */
+const ICON_SIZES = [128, 96, 64, 48, 32] as const;
 
 type IconImageType = (typeof ICON_IMAGE_TYPES)[number];
 

@@ -23,7 +23,9 @@ function Glyph({ icon, fallback }: { icon: AppearanceIcon; fallback: ReactNode }
  * from `seed` when none is chosen). An image covers the tile; a glyph sits
  * centred on the colour. With no drawable icon the tile shows `fallbackIcon`
  * when given, the initials of `label` otherwise — and the same stands in for an
- * image or a glyph that fails to load.
+ * unknown Lucide name, a failed Iconify fetch or a broken image (not for a
+ * Lucide chunk that fails to load: that is our own bundle, and the glyph is
+ * simply absent while it loads).
  *
  * Decorative: every caller writes the name next to it.
  */

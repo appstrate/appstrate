@@ -121,6 +121,13 @@ const PACKAGE_HOME_PROPERTIES = {
 } as const;
 
 /**
+ * What a write does to an `emoji:` icon (`normalizeEmoji`, `@appstrate/core/appearance`),
+ * stated once for the identity component and every write body.
+ */
+export const EMOJI_ICON_WRITE_RULE =
+  "An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`).";
+
+/**
  * The visual identity of an agent, a space or an organization — one `icon`
  * and one `color`, both always present, both nullable. The one definition every
  * resource carrying an identity spreads.
@@ -128,7 +135,7 @@ const PACKAGE_HOME_PROPERTIES = {
 export const APPEARANCE_PROPERTIES = {
   icon: {
     type: ["string", "null"],
-    description: `The icon, \`null\` when none is set. Written as \`lucide:<name>\` (a Lucide icon, e.g. \`lucide:bot\`), \`emoji:<one emoji>\`, or — on an organization only — an uploaded image as a base64 data URI, ${ICON_IMAGE_TYPES.map((type) => `\`data:${type};base64,…\``).join(" or ")} (at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest \`icon\`, read as written: it may also be another Iconify id (\`<prefix>:<name>\`) or an image URL, and a client draws nothing for a value it cannot parse.`,
+    description: `The icon, \`null\` when none is set. Written as \`lucide:<name>\` (a Lucide icon, e.g. \`lucide:bot\`), \`emoji:<one emoji>\`, or — on an organization only — an uploaded image as a base64 data URI, ${ICON_IMAGE_TYPES.map((type) => `\`data:${type};base64,…\``).join(" or ")} (at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px). ${EMOJI_ICON_WRITE_RULE} An agent's is its manifest \`icon\`, read as written: it may also be another Iconify id (\`<prefix>:<name>\`) or an image URL, and a client draws nothing for a value it cannot parse.`,
   },
   color: {
     type: ["string", "null"],

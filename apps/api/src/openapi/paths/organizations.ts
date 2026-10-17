@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { APPEARANCE_PROPERTIES, ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
+import {
+  APPEARANCE_PROPERTIES,
+  EMOJI_ICON_WRITE_RULE,
+  ORG_SETTINGS_PROPERTIES,
+} from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
@@ -10,6 +14,7 @@ import {
   ICON_IMAGE_MAX_BYTES,
   ICON_IMAGE_MAX_SIZE,
   ICON_IMAGE_TYPES,
+  ICON_MAX_LENGTH,
 } from "@appstrate/core/appearance";
 
 /** Request-body shape of one space assignment — mirrors the `SpaceAssignment` component. */
@@ -214,7 +219,8 @@ export const organizationsPaths = {
                 slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
                 icon: {
                   type: ["string", "null"],
-                  description: `\`lucide:<name>\`, \`emoji:<one emoji>\` (stored in its RGI form), or ${ICON_IMAGE_TYPES.map((type) => `\`data:${type};base64,…\``).join(" or ")} (at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px); \`null\` clears it.`,
+                  maxLength: ICON_MAX_LENGTH,
+                  description: `\`lucide:<name>\`, \`emoji:<one emoji>\`, or ${ICON_IMAGE_TYPES.map((type) => `\`data:${type};base64,…\``).join(" or ")} (at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px); \`null\` clears it. ${EMOJI_ICON_WRITE_RULE}`,
                 },
                 color: {
                   type: ["string", "null"],

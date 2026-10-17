@@ -3,7 +3,7 @@
 /**
  * An organization's appearance, end to end: each pick in the settings'
  * `AppearancePicker` is read back from the wire, then from the switcher's tile
- * after a reload — the tile every member sees.
+ * on a fresh load of the shell — the tile every member sees.
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
@@ -25,10 +25,30 @@ for (const width of [1440, 390]) {
       return { icon: org.icon as string | null, color: org.color as string | null };
     };
     const settings = page.getByRole("dialog", { name: "Paramètres", exact: true });
-    // The org's tile is the trigger's first; the current space's follows it.
-    const tile = new Sidebar(page).switcherButton.locator('[class*="@container"]').first();
+    const openSettings = async () => {
+      await page.goto("/org-settings/general");
+      await expect(settings).toBeVisible();
+    };
+    /**
+     * The org's tile in the shell, on a fresh load. On a phone the header names
+     * the page's trail, not the organization, so the switcher is the sidebar's,
+     * behind the menu button. The org's tile is the trigger's first; the
+     * current space's follows it.
+     */
+    const shellTile = async () => {
+      await page.goto("/");
+      if (width === 390) {
+        await page.getByRole("button", { name: "Afficher ou masquer le menu latéral" }).click();
+        await expect(page.getByRole("dialog", { name: "Menu latéral", exact: true })).toBeVisible();
+      }
+      return new Sidebar(page).switcherButton.locator('[class*="@container"]').first();
+    };
+    const colourNote = settings.getByText(
+      "La couleur s’affiche derrière une icône ou un emoji, pas sous une image.",
+      { exact: true },
+    );
 
-    await page.goto("/org-settings/general");
+    await openSettings();
 
     // Image: drawn by the canvas the old logo spec used, encoded to WebP by the picker.
     await settings.getByRole("radio", { name: "Image", exact: true }).click();
@@ -47,36 +67,44 @@ for (const width of [1440, 390]) {
     });
     await expect.poll(async () => (await stored()).icon).toMatch(/^data:image\/webp;base64,/);
     const image = (await stored()).icon!;
-    await page.reload();
+    // An image covers the tile: the picker says the colour is not drawn under it.
+    await expect(colourNote).toBeVisible();
+    let tile = await shellTile();
+    // The avatar mounts its <img> only once the image has loaded, so its presence is the load.
     await expect(tile.locator("img")).toHaveAttribute("src", image);
     await expect
       .poll(() => tile.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth > 0))
       .toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`organization-appearance-${width}.png`) });
 
-    // Emoji: the first one the picker lists, whichever it is, read back as written.
+    // Emoji: picked by its French name. Emojibase writes 👍 with U+FE0F; the
+    // server stores the RGI form, which this emoji takes without it.
+    await openSettings();
     await settings.getByRole("radio", { name: "Emoji", exact: true }).click();
-    await settings.getByRole("button", { name: "Choisir un emoji" }).click();
-    const firstEmoji = page.locator("[frimousse-emoji]").first();
-    await expect(firstEmoji).toBeVisible();
-    const emoji = (await firstEmoji.textContent())!;
-    await firstEmoji.click();
-    await expect.poll(async () => (await stored()).icon).toBe(`emoji:${emoji}`);
-    await page.reload();
-    await expect(tile).toHaveText(emoji);
+    await settings.getByRole("button", { name: "Choisir un emoji", exact: true }).click();
+    await page.getByPlaceholder("Rechercher un emoji…", { exact: true }).fill("pouce");
+    await page.getByRole("gridcell", { name: /^pouce vers le haut$/i }).click();
+    await expect.poll(async () => (await stored()).icon).toBe("emoji:\u{1F44D}");
+    await expect(settings.getByRole("button", { name: /Changer d’emoji/ })).toBeVisible();
+    await expect(colourNote).toHaveCount(0);
+    tile = await shellTile();
+    await expect(tile).toHaveText("\u{1F44D}");
 
     // Colour: a palette key, drawn as the tile's tint.
+    await openSettings();
     await settings.getByTitle("Violet", { exact: true }).click();
     await expect.poll(async () => (await stored()).color).toBe("violet");
-    await page.reload();
+    tile = await shellTile();
     await expect(tile).toHaveClass(/text-identity-violet/);
 
     // Removing the icon leaves the initials on the chosen colour.
+    await openSettings();
     await settings.getByRole("button", { name: "Retirer l’icône", exact: true }).click();
     await expect.poll(stored).toEqual({ icon: null, color: "violet" });
-    await page.reload();
+    tile = await shellTile();
+    // The first letters of the first and the last word (`E2E Org <tag>`).
     const words = orgName.split(/\s+/);
-    await expect(tile).toHaveText(`${words[0]![0]}${words[1]![0]}`.toUpperCase());
+    await expect(tile).toHaveText(`${words[0]![0]}${words.at(-1)![0]}`.toUpperCase());
     await expect(tile).toHaveClass(/text-identity-violet/);
   });
 }

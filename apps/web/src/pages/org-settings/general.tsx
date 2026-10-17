@@ -14,6 +14,7 @@ import { $api } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { useOrg, useOrgDetail } from "../../hooks/use-org";
+import { useLatestWrite } from "../../hooks/use-latest-write";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useCanCreateOrg } from "../../hooks/use-auth";
 import { useOrgStorage } from "../../hooks/use-org-storage";
@@ -90,6 +91,14 @@ export function OrgSettingsGeneralPage() {
     if (!orgId) return;
     updateOrgMutation.mutate({ params: { path: { orgId } }, body: orgUpdateBody(change) });
   };
+  // The picker fires a write per arrow key: one in flight, the newest value after it.
+  const writeAppearance = useLatestWrite();
+  const saveAppearance = (change: OrgSettingChange) => {
+    if (!orgId) return;
+    writeAppearance(change.field, change.value, () =>
+      updateOrgMutation.mutateAsync({ params: { path: { orgId } }, body: orgUpdateBody(change) }),
+    );
+  };
   const nameWrite = fieldWriteState(updateOrgMutation, "name");
   const appearanceWrite = fieldWriteState(updateOrgMutation, ["icon", "color"]);
 
@@ -123,7 +132,7 @@ export function OrgSettingsGeneralPage() {
           <div className="w-full min-w-0">
             {/* Keyed: no tab or upload error carries over to another org. Never disabled by a
                 pending write — each arrow key on the colours is a PATCH, and disabling would
-                drop the focus; the last write wins. */}
+                drop the focus; the writes are serialised, the last pick wins. */}
             <AppearancePicker
               key={currentOrg.id}
               value={{ icon: currentOrg.icon, color: currentOrg.color }}
@@ -132,8 +141,8 @@ export function OrgSettingsGeneralPage() {
               label={currentOrg.name}
               disabled={!canUpdateOrg}
               onChange={(next) => {
-                if (next.icon !== undefined) save({ field: "icon", value: next.icon });
-                if (next.color !== undefined) save({ field: "color", value: next.color });
+                if (next.icon !== undefined) saveAppearance({ field: "icon", value: next.icon });
+                if (next.color !== undefined) saveAppearance({ field: "color", value: next.color });
               }}
             />
           </div>

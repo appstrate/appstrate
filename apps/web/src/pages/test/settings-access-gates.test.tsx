@@ -169,7 +169,7 @@ describe("the organization's general settings", () => {
       permissions: ["org:read", "org:update", "org:settings", "org:delete"],
       role: "owner",
     });
-    expect(html).toContain("Apparence");
+    expect(html).toContain("Icône et couleur");
     expect(iconFieldDisabled(html)).toBe(false);
     expect(html).toContain("Distribution");
     expect(html).toContain('data-testid="delete-org-button"');

@@ -48,7 +48,8 @@ describe("AppearancePicker", () => {
   it("opens on the form of the stored icon", () => {
     const html = picker(["lucide", "emoji"], { icon: "emoji:🚜", color: null });
     expect(html).toMatch(/data-state="on"[^>]*>Emoji</);
-    expect(html).toContain("Choisir un emoji");
+    expect(html).toContain("Changer d’emoji");
+    expect(html).not.toContain("Choisir un emoji");
     expect(html).toContain("Retirer l’icône");
   });
 
@@ -60,9 +61,33 @@ describe("AppearancePicker", () => {
     expect(html).toMatch(/role="radiogroup"[^>]*aria-label="Type d’icône"/);
   });
 
+  it("names the Lucide combobox by the Icône label and its current value", () => {
+    const html = picker(["lucide"], { icon: "lucide:calendar-clock", color: null });
+    const labelId = html.match(/<label[^>]*id="([^"]+)"[^>]*>Icône</)?.[1];
+    const combobox = html.match(/<button[^>]*role="combobox"[^>]*>/)?.[0] ?? "";
+    const labelledBy = combobox.match(/aria-labelledby="([^"]+)"/)?.[1]?.split(" ") ?? [];
+    expect(labelledBy).toHaveLength(2);
+    expect(labelledBy[0]).toBe(labelId);
+    expect(html).toContain(`id="${labelledBy[1]}" class="truncate">Calendar Clock<`);
+  });
+
   it("names the emoji trigger by the current emoji", () => {
     const html = picker(["emoji"], { icon: "emoji:🚜", color: null });
     expect(html).toContain('<span class="text-base leading-none">🚜</span>');
+  });
+
+  it("offers to choose an emoji while none is set", () => {
+    expect(picker(["emoji"])).toContain("Choisir un emoji");
+  });
+
+  it("says the colour is not drawn under an image, and only then", () => {
+    const note = "pas sous une image";
+    expect(picker(["image"], { icon: "data:image/webp;base64,AAAA", color: "amber" })).toContain(
+      note,
+    );
+    expect(picker(["lucide"], { icon: "lucide:bot", color: "amber" })).not.toContain(note);
+    expect(picker(["emoji"], { icon: "emoji:🚜", color: null })).not.toContain(note);
+    expect(picker(["image"])).not.toContain(note);
   });
 
   it("offers the nine colours and the automatic one", () => {

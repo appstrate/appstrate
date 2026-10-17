@@ -41,6 +41,7 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@appstrate/ui/components/toggle-group";
 import { I18N_FALLBACK_LANGUAGE, I18N_SUPPORTED_LANGUAGES } from "../i18n-config";
+import { AUTO_COLOR, colorChange } from "../lib/appearance-change";
 import {
   ICON_SOURCE_TYPES,
   encodeIconImage,
@@ -52,6 +53,12 @@ import {
 export interface AppearanceValue {
   icon: string | null;
   color: string | null;
+}
+
+/** What the picker emits: only the field that changed. */
+interface AppearanceChange {
+  icon?: string | null;
+  color?: AppearanceColor | null;
 }
 
 const FORM_LABEL_KEYS: Record<IconForm, string> = {
@@ -77,9 +84,6 @@ const ICON_ERROR_KEYS: Record<IconImageError, string> = {
   icon_file_size: "appearance.error.icon_file_size",
   icon_processing: "appearance.error.icon_processing",
 };
-
-/** The colour radio's value for `color: null`. */
-const AUTO_COLOR = "auto";
 
 const FEATURED_ICONS: IconName[] = [
   "bot",
@@ -156,7 +160,7 @@ export function AppearancePicker({
   disabled = false,
 }: {
   value: AppearanceValue;
-  onChange: (next: { icon?: string | null; color?: AppearanceColor | null }) => void;
+  onChange: (next: AppearanceChange) => void;
   allow: readonly IconForm[];
   seed: string;
   label: string;
@@ -230,6 +234,7 @@ export function AppearancePicker({
           )}
           {form === "lucide" && (
             <LucideIconField
+              labelId={iconLabelId}
               picked={parsed?.kind === "lucide" && isLucideName(parsed.name) ? parsed.name : null}
               disabled={disabled}
               onPick={(name) => onChange({ icon: `${LUCIDE_ICON_PREFIX}${name}` })}
@@ -256,9 +261,7 @@ export function AppearancePicker({
           aria-labelledby={colorLabelId}
           disabled={disabled}
           value={isAppearanceColor(value.color) ? value.color : AUTO_COLOR}
-          onValueChange={(next) =>
-            onChange({ color: APPEARANCE_COLORS.find((color) => color === next) ?? null })
-          }
+          onValueChange={(next) => onChange(colorChange(next))}
           className="flex flex-wrap items-center gap-2"
         >
           <Label className="flex cursor-pointer items-center gap-2 pr-1">
@@ -276,16 +279,22 @@ export function AppearancePicker({
             </Label>
           ))}
         </RadioGroup>
+        {parsed?.kind === "url" && (
+          <p className="text-muted-foreground text-xs">{t("appearance.colorBehindImage")}</p>
+        )}
       </div>
     </div>
   );
 }
 
 function LucideIconField({
+  labelId,
   picked,
   disabled,
   onPick,
 }: {
+  /** The « Icône » label: a combobox takes no name from its content. */
+  labelId: string;
   picked: IconName | null;
   disabled: boolean;
   onPick: (name: IconName) => void;
@@ -293,6 +302,7 @@ function LucideIconField({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const valueId = useId();
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return FEATURED_ICONS;
@@ -308,13 +318,14 @@ function LucideIconField({
             type="button"
             variant="outline"
             role="combobox"
+            aria-labelledby={`${labelId} ${valueId}`}
             aria-expanded={open}
             disabled={disabled}
             className="w-full justify-between font-normal"
           >
             <span className="flex min-w-0 items-center gap-2">
               {picked && <DynamicIcon name={picked} className="size-4 shrink-0" />}
-              <span className={cn("truncate", !picked && "text-muted-foreground")}>
+              <span id={valueId} className={cn("truncate", !picked && "text-muted-foreground")}>
                 {picked ? iconLabel(picked) : t("appearance.iconPick")}
               </span>
             </span>
@@ -406,7 +417,7 @@ function EmojiField({
           <span className="flex min-w-0 items-center gap-2">
             {picked && <span className="text-base leading-none">{picked}</span>}
             <span className={cn("truncate", !picked && "text-muted-foreground")}>
-              {t("appearance.emojiPick")}
+              {t(picked ? "appearance.emojiChange" : "appearance.emojiPick")}
             </span>
           </span>
           <ChevronsUpDown className="text-muted-foreground shrink-0" />
@@ -506,6 +517,7 @@ function ImageField({ disabled, onPick }: { disabled: boolean; onPick: (icon: st
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<IconImageError | null>(null);
+  const errorId = useId();
 
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
@@ -541,6 +553,7 @@ function ImageField({ disabled, onPick }: { disabled: boolean; onPick: (icon: st
         className="w-fit"
         disabled={disabled}
         aria-busy={busy}
+        aria-describedby={error ? errorId : undefined}
         onClick={() => {
           if (!busy) input.current?.click();
         }}
@@ -549,7 +562,9 @@ function ImageField({ disabled, onPick }: { disabled: boolean; onPick: (icon: st
         {t("appearance.upload")}
       </Button>
       {error ? (
-        <p className="text-destructive text-xs">{t(ICON_ERROR_KEYS[error])}</p>
+        <p id={errorId} role="alert" className="text-destructive text-xs">
+          {t(ICON_ERROR_KEYS[error])}
+        </p>
       ) : (
         <p className="text-muted-foreground text-xs">{t("appearance.uploadHint")}</p>
       )}

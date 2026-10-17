@@ -56,8 +56,9 @@ const ICON_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ICONIFY_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*:[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
- * Longest `emoji:` text a reader draws, in UTF-16 code units. The longest RGI
- * emoji (a skin-toned couple sequence) is 15; anything far past that is not one.
+ * Longest emoji text read or written, in UTF-16 code units, checked before any
+ * other work on it. The longest RGI emoji (a skin-toned couple sequence) is 15;
+ * anything far past that is not one.
  */
 const EMOJI_MAX_LENGTH = 32;
 
@@ -71,6 +72,16 @@ const PICTOGRAPH = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u;
 /** U+FE0F VARIATION SELECTOR-16, which asks for the emoji presentation. */
 const EMOJI_PRESENTATION = "\uFE0F";
 const EMOJI_PRESENTATIONS = /\uFE0F/g;
+
+/**
+ * A code point that takes U+FE0F in a fully-qualified emoji: a pictograph that
+ * is text by default (not `Emoji_Presentation`) and not followed by a skin-tone
+ * modifier (U+1F3FB–1F3FF), or a keycap base (`[0-9#*]` before U+20E3). Run on
+ * the stripped form (every U+FE0F removed), so none already follows a match.
+ * `u`-flag properties only (ES2018).
+ */
+const NEEDS_PRESENTATION =
+  /(?!\p{Emoji_Presentation})\p{Extended_Pictographic}(?![\u{1F3FB}-\u{1F3FF}])|[0-9#*](?=\u20E3)/gu;
 
 let rgiEmoji: RegExp | undefined;
 
@@ -88,20 +99,20 @@ function isRgiEmoji(value: string): boolean {
 }
 
 /**
- * The RGI form of one emoji, or `null` when `value` is not one. Pickers and
- * keyboards emit near misses Unicode does not list: a U+FE0F after a code point
- * that is an emoji by default (Emojibase's `👍️`, `☕️`), or none after one
- * that needs it (`❤`). Tried in order, the first RGI candidate wins: `value`
- * as is; `value` with every U+FE0F removed; that, when it is one code point,
- * with U+FE0F appended.
+ * The RGI form of one emoji, or `null` when `value` is not one (or is longer
+ * than `EMOJI_MAX_LENGTH`). Pickers and keyboards emit near misses Unicode does
+ * not list: a U+FE0F after a code point that is an emoji by default
+ * (Emojibase's `👍️`, `☕️`), or none where one is needed (`❤`, `1⃣`, `🏳‍🌈`,
+ * `👁‍🗨`). Tried in order, the first RGI candidate wins: `value` as is; `value`
+ * with every U+FE0F removed; that with a U+FE0F inserted after each code point
+ * `NEEDS_PRESENTATION` matches (the fully-qualified form).
  */
 export function normalizeEmoji(value: string): string | null {
-  if (value === "") return null;
+  if (value === "" || value.length > EMOJI_MAX_LENGTH) return null;
   // `replace` with a global expression, not `replaceAll`: consumers type-check at ES2020.
   const bare = value.replace(EMOJI_PRESENTATIONS, "");
-  const candidates = [value, bare];
-  if ([...bare].length === 1) candidates.push(`${bare}${EMOJI_PRESENTATION}`);
-  return candidates.find(isRgiEmoji) ?? null;
+  const qualified = bare.replace(NEEDS_PRESENTATION, `$&${EMOJI_PRESENTATION}`);
+  return [value, bare, qualified].find(isRgiEmoji) ?? null;
 }
 
 /**
@@ -281,6 +292,15 @@ export function isIconImage(value: string): boolean {
   );
 }
 
+/**
+ * Longest icon written, the `octet_length(icon) <= 16384` CHECK on organizations
+ * and spaces. `z.string().max` counts UTF-16 code units, not bytes, and is still
+ * a safe bound: an image is a base64 data URI, ASCII, one byte per unit; a
+ * `lucide:` id is ASCII too; an emoji is at most `EMOJI_MAX_LENGTH` units of at
+ * most 3 bytes each. Checked first, so no form ever scans a longer string.
+ */
+export const ICON_MAX_LENGTH = 16_384;
+
 /** The icon forms an editor can write. */
 export type IconForm = "lucide" | "emoji" | "image";
 
@@ -320,14 +340,17 @@ export function appearanceIconSchema(forms: readonly IconForm[]) {
   const labels = forms.map((form) => ICON_FORMS[form].label);
   const last = labels.pop() ?? "";
   const allowed = labels.length > 0 ? `${labels.join(", ")} or ${last}` : last;
-  return z.string().transform((value, ctx) => {
-    for (const form of forms) {
-      const canonical = ICON_FORMS[form].canonical(value);
-      if (canonical !== null) return canonical;
-    }
-    ctx.addIssue({ code: "custom", message: `Icon must be ${allowed}` });
-    return z.NEVER;
-  });
+  return z
+    .string()
+    .max(ICON_MAX_LENGTH)
+    .transform((value, ctx) => {
+      for (const form of forms) {
+        const canonical = ICON_FORMS[form].canonical(value);
+        if (canonical !== null) return canonical;
+      }
+      ctx.addIssue({ code: "custom", message: `Icon must be ${allowed}` });
+      return z.NEVER;
+    });
 }
 
 export const appearanceColorSchema = z.enum(APPEARANCE_COLORS);

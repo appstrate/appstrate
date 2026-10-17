@@ -24,10 +24,15 @@ test("a team space's icon and colour, set in its settings, show in the switcher"
   const settings = page.getByRole("dialog", { name: "Paramètres", exact: true });
 
   await page.goto("/workspace-settings/general");
-  await settings.getByRole("combobox", { name: "Choisir une icône" }).click();
-  await page.getByPlaceholder("Rechercher une icône Lucide…").fill("rocket");
+  // The Lucide trigger is a combobox in the « Icône » group; it carries no name of its own.
+  const iconGroup = settings.getByRole("group", { name: "Icône", exact: true });
+  const iconPicker = iconGroup.getByRole("combobox");
+  await expect(iconPicker).toHaveText("Choisir une icône");
+  await iconPicker.click();
+  await page.getByPlaceholder("Rechercher une icône Lucide…", { exact: true }).fill("rocket");
   await page.getByRole("option", { name: "Rocket", exact: true }).click();
   await expect.poll(async () => (await stored()).icon).toBe("lucide:rocket");
+  await expect(iconPicker).toHaveText("Rocket");
   await settings.getByTitle("Émeraude", { exact: true }).click();
   await expect.poll(stored).toEqual({ icon: "lucide:rocket", color: "emerald" });
 

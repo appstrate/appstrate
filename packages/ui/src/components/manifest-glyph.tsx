@@ -74,7 +74,8 @@ function UrlGlyph({
  * An icon (`parseIcon`): Lucide from the bundle, any other Iconify id from the
  * API, an URL as an image, an emoji as text. `fallback` stands in when the
  * glyph cannot be drawn: an unknown Lucide name, a failed Iconify fetch, a
- * broken image.
+ * broken image. Not passed to `DynamicIcon`: it would show it while the Lucide
+ * chunk loads, a flash of initials on every tile.
  */
 export function ManifestGlyph({
   icon,

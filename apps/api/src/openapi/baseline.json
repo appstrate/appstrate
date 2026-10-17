@@ -13331,7 +13331,7 @@
                     },
                     "icon": {
                       "type": ["string", "null"],
-                      "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+                      "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
                     },
                     "color": {
                       "type": ["string", "null"],
@@ -13498,7 +13498,8 @@
                   },
                   "icon": {
                     "type": ["string", "null"],
-                    "description": "`lucide:<name>`, `emoji:<one emoji>` (stored in its RGI form), or `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px); `null` clears it."
+                    "maxLength": 16384,
+                    "description": "`lucide:<name>`, `emoji:<one emoji>`, or `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px); `null` clears it. An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`)."
                   },
                   "color": {
                     "type": ["string", "null"],
@@ -14507,7 +14508,7 @@
                           },
                           "icon": {
                             "type": ["string", "null"],
-                            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+                            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
                           },
                           "color": {
                             "type": ["string", "null"],
@@ -22607,7 +22608,8 @@
                   },
                   "icon": {
                     "type": ["string", "null"],
-                    "description": "`lucide:<name>` or `emoji:<one emoji>` (stored in its RGI form); `null` clears it."
+                    "maxLength": 16384,
+                    "description": "`lucide:<name>` or `emoji:<one emoji>`; `null` clears it. An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`)."
                   },
                   "color": {
                     "type": ["string", "null"],
@@ -31962,7 +31964,7 @@
           },
           "icon": {
             "type": ["string", "null"],
-            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
           },
           "color": {
             "type": ["string", "null"],
@@ -32130,7 +32132,7 @@
           },
           "icon": {
             "type": ["string", "null"],
-            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
           },
           "color": {
             "type": ["string", "null"],
@@ -32222,7 +32224,7 @@
           },
           "icon": {
             "type": ["string", "null"],
-            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
           },
           "color": {
             "type": ["string", "null"],
@@ -32341,7 +32343,7 @@
           },
           "icon": {
             "type": ["string", "null"],
-            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
           },
           "color": {
             "type": ["string", "null"],
@@ -34721,7 +34723,7 @@
           },
           "icon": {
             "type": ["string", "null"],
-            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
           },
           "color": {
             "type": ["string", "null"],

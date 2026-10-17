@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Plus, X } from "lucide-react";
+import { useLatestWrite } from "../../hooks/use-latest-write";
 import { usePermissions } from "../../hooks/use-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
@@ -78,6 +79,18 @@ function GeneralForm({
   const [confirmOpen, setConfirmOpen] = useState(false);
   // A visibility leaving `open`, held until its consequence is confirmed.
   const [pendingClose, setPendingClose] = useState<SpaceVisibility | null>(null);
+  // The picker fires a write per arrow key: one in flight, the newest value after it.
+  const writeAppearance = useLatestWrite();
+  const saveAppearance = (change: Extract<SpaceSettingChange, { field: "icon" | "color" }>) => {
+    writeAppearance(change.field, change.value, () =>
+      updateMutation
+        .mutateAsync({ params: { path: { id: spaceId } }, body: spaceUpdateBody(change) })
+        .catch((error: unknown) => {
+          toastError(error);
+          throw error;
+        }),
+    );
+  };
   const nameWrite = fieldWriteState(updateMutation, "name");
   const appearanceWrite = fieldWriteState(updateMutation, ["icon", "color"]);
   const activeDomains = editedDomains ?? domains;
@@ -174,7 +187,7 @@ function GeneralForm({
               <div className="w-full min-w-0">
                 {/* Keyed: no tab carries over to another space. Never disabled by a pending
                     write — each arrow key on the colours is a PATCH, and disabling would drop
-                    the focus; the last write wins. */}
+                    the focus; the writes are serialised, the last pick wins. */}
                 <AppearancePicker
                   key={spaceId}
                   value={{ icon: space.icon, color: space.color }}
@@ -182,8 +195,10 @@ function GeneralForm({
                   seed={spaceId}
                   label={space.name}
                   onChange={(next) => {
-                    if (next.icon !== undefined) save({ field: "icon", value: next.icon });
-                    if (next.color !== undefined) save({ field: "color", value: next.color });
+                    if (next.icon !== undefined)
+                      saveAppearance({ field: "icon", value: next.icon });
+                    if (next.color !== undefined)
+                      saveAppearance({ field: "color", value: next.color });
                   }}
                 />
               </div>

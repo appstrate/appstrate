@@ -2,9 +2,9 @@
 
 import { packageTypeValues } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
-import { APPEARANCE_COLORS } from "@appstrate/core/appearance";
+import { APPEARANCE_COLORS, ICON_MAX_LENGTH } from "@appstrate/core/appearance";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
-import { SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
+import { EMOJI_ICON_WRITE_RULE, SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
 
 export const spacesPaths = {
   "/api/spaces": {
@@ -222,8 +222,8 @@ export const spacesPaths = {
                 },
                 icon: {
                   type: ["string", "null"],
-                  description:
-                    "`lucide:<name>` or `emoji:<one emoji>` (stored in its RGI form); `null` clears it.",
+                  maxLength: ICON_MAX_LENGTH,
+                  description: `\`lucide:<name>\` or \`emoji:<one emoji>\`; \`null\` clears it. ${EMOJI_ICON_WRITE_RULE}`,
                 },
                 color: {
                   type: ["string", "null"],

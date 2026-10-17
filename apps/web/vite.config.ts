@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
   I18N_BOOT_NAMESPACES,
@@ -101,8 +102,9 @@ const EMOJIBASE_DIR = "emojibase";
  * places it under this workspace's `node_modules`, not the root's.
  */
 function emojibaseData(): Plugin {
+  // `createRequire`, not `import.meta.resolve`: Vite's runner config loader has no such hook.
   const packageDir = path.dirname(
-    fileURLToPath(import.meta.resolve("emojibase-data/package.json")),
+    createRequire(import.meta.url).resolve("emojibase-data/package.json"),
   );
   const files = I18N_SUPPORTED_LANGUAGES.flatMap((language) =>
     ["data.json", "messages.json"].map((file) => `${language}/${file}`),
@@ -155,7 +157,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(path.dirname(fileURLToPath(import.meta.url)), "./src"),
     },
   },
   build: {

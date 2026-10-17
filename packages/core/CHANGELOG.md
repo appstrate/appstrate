@@ -36,9 +36,11 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
   expressions only, so the module loads and reads on browsers that cannot
   compile a `v`-flag one. The prefixes
   **`LUCIDE_ICON_PREFIX`** and **`EMOJI_ICON_PREFIX`**;
-  **`normalizeEmoji(value)`**, the RGI form of one emoji or `null` (a
-  superfluous U+FE0F dropped, a missing one added: `👍️` → `👍`, `❤` → `❤️`),
-  its `\p{RGI_Emoji}` expression compiled on first call. The palette
+  **`normalizeEmoji(value)`**, the RGI form of one emoji or `null` (beyond 32
+  UTF-16 units, before any work), only U+FE0F added or removed: a superfluous
+  one dropped, a missing one inserted after each text-default pictograph or
+  keycap base (`👍️` → `👍`, `❤` → `❤️`, `1⃣` → `1️⃣`, `👁‍🗨` → `👁️‍🗨️`), its
+  `\p{RGI_Emoji}` expression compiled on first call. The palette
   **`APPEARANCE_COLORS`** / **`AppearanceColor`** with **`isAppearanceColor`**,
   **`derivedColor(seed)`** (a stable hue from an entity id, never `neutral`)
   and **`resolveColor(color, seed)`** (`null` means derived). An uploaded icon
@@ -48,7 +50,8 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
   (256 px), its type and size read by **`imageSize(bytes)`** (a WebP's first
   chunk, a PNG's `IHDR`). The write-side Zod schemas
   **`appearanceIconSchema(forms)`** (one of the **`IconForm`**s `lucide`,
-  `emoji`, `image`; it parses an emoji to its RGI form) and
+  `emoji`, `image`, at most **`ICON_MAX_LENGTH`** (16 384) characters; it
+  parses an emoji to its RGI form) and
   **`appearanceColorSchema`**.
 - **`unwrapMcpResult(value)`** (`@appstrate/core/mcp-result`): the payload inside
   an MCP tool result — a `CallToolResult`, a bare content array or a JSON

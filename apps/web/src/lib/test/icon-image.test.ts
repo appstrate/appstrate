@@ -104,13 +104,25 @@ describe("pickIconEncoding", () => {
     expect(sizes).toEqual([128, 96, 64]);
   });
 
+  it("goes down to 32 px for a photographic PNG that only fits there", async () => {
+    const oversized = new Uint8Array(20_000);
+    oversized.set(PNG_1X1);
+    const { encode, sizes } = recordingEncoder((size) =>
+      size === 32
+        ? new Blob([PNG_1X1], { type: "image/png" })
+        : new Blob([oversized], { type: "image/png" }),
+    );
+    expect(await pickIconEncoding(encode)).toBe(`data:image/png;base64,${PNG_1X1_BASE64}`);
+    expect(sizes).toEqual([128, 96, 64, 48, 32]);
+  });
+
   it("fails as a processing error on a foreign type at every size", async () => {
     const { encode, sizes } = recordingEncoder(
       () => new Blob([new Uint8Array([0xff, 0xd8])], { type: "image/jpeg" }),
     );
     const failure = await pickIconEncoding(encode).catch((error: unknown) => error);
     expect(iconImageErrorCode(failure)).toBe("icon_processing");
-    expect(sizes).toEqual([128, 96, 64]);
+    expect(sizes).toEqual([128, 96, 64, 48, 32]);
   });
 
   it("fails as a processing error when no size encodes at all", async () => {

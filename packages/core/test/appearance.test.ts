@@ -169,10 +169,36 @@ describe("normalizeEmoji", () => {
     expect(normalizeEmoji("\u263A")).toBe("\u263A\uFE0F"); // ☺ → ☺️
   });
 
+  it("qualifies a minimally-qualified sequence", () => {
+    for (const [value, rgi] of [
+      ["1\u20E3", "1\uFE0F\u20E3"], // 1⃣ → 1️⃣
+      ["#\u20E3", "#\uFE0F\u20E3"], // #⃣ → #️⃣
+      ["\u{1F3F3}\u200D\u{1F308}", "\u{1F3F3}\uFE0F\u200D\u{1F308}"], // 🏳‍🌈 → 🏳️‍🌈
+      ["\u2764\u200D\u{1F525}", "\u2764\uFE0F\u200D\u{1F525}"], // ❤‍🔥 → ❤️‍🔥
+      ["\u{1F441}\u200D\u{1F5E8}", "\u{1F441}\uFE0F\u200D\u{1F5E8}\uFE0F"], // 👁‍🗨 → 👁️‍🗨️
+      ["\u{1F642}\u200D\u2194", "\u{1F642}\u200D\u2194\uFE0F"], // 🙂‍↔ → 🙂‍↔️
+      ["\u{1F441}\uFE0F\u200D\u{1F5E8}", "\u{1F441}\uFE0F\u200D\u{1F5E8}\uFE0F"], // half-qualified
+    ]) {
+      expect(normalizeEmoji(value!)).toBe(rgi!);
+    }
+  });
+
+  it("adds no U+FE0F before a skin-tone modifier", () => {
+    expect(normalizeEmoji("\u261D\u{1F3FD}")).toBe("\u261D\u{1F3FD}"); // ☝🏽
+    expect(normalizeEmoji("\u{1F575}\u{1F3FD}\u200D\u2642")).toBe(
+      "\u{1F575}\u{1F3FD}\u200D\u2642\uFE0F", // 🕵🏽‍♂ → 🕵🏽‍♂️
+    );
+  });
+
   it("refuses text, several emojis, nothing, and a bare digit", () => {
-    for (const value of ["a", "😀😀", "", "1", "tractor", "\uFE0F", "👍 "]) {
+    for (const value of ["a", "😀😀", "", "1", "1\uFE0F", "tractor", "\uFE0F", "👍 "]) {
       expect(normalizeEmoji(value)).toBeNull();
     }
+  });
+
+  it("refuses a value longer than any emoji before looking at it", () => {
+    expect(normalizeEmoji("\u2764".repeat(33))).toBeNull();
+    expect(normalizeEmoji("\uFE0F".repeat(31) + "\u2764")).toBe("\u2764\uFE0F");
   });
 });
 
@@ -357,6 +383,7 @@ describe("appearanceIconSchema", () => {
     expect(schema.parse("emoji:\u{1F44D}\uFE0F")).toBe("emoji:\u{1F44D}"); // 👍️ → 👍
     expect(schema.parse("emoji:\u2615\uFE0F")).toBe("emoji:\u2615"); // ☕️ → ☕
     expect(schema.parse("emoji:\u2764")).toBe("emoji:\u2764\uFE0F"); // ❤ → ❤️
+    expect(schema.parse("emoji:1\u20E3")).toBe("emoji:1\uFE0F\u20E3"); // 1⃣ → 1️⃣
   });
 
   it("refuses what is not one of the editable forms", () => {
@@ -388,6 +415,14 @@ describe("appearanceIconSchema", () => {
     expect(imageOnly.safeParse(pngImage).success).toBe(true);
     expect(imageOnly.safeParse("lucide:bot").success).toBe(false);
     expect(imageOnly.safeParse("emoji:🚜").success).toBe(false);
+  });
+
+  it("refuses a value longer than the database allows, whatever its form", () => {
+    const schema = appearanceIconSchema(["lucide", "emoji", "image"]);
+    expect(schema.safeParse(`lucide:${"a".repeat(16_384)}`).success).toBe(false);
+    // Refused by the length, before the image check scans it.
+    const image = schema.safeParse(`${WEBP_PREFIX}${"A".repeat(16_384)}`);
+    expect(image.error?.issues.map((issue) => issue.code)).toEqual(["too_big"]);
   });
 
   it("names the allowed forms in its error", () => {
