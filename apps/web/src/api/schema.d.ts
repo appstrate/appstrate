@@ -6717,6 +6717,8 @@ export interface components {
                 user_id: string;
                 name: string;
             } | null;
+            /** @description Whether the package is switched on in the target space (`space_packages.enabled`); false when the target holds no row for it. */
+            enabled: boolean;
             /** Format: date-time */
             createdAt: string;
         };

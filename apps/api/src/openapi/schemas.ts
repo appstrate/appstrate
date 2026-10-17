@@ -3119,7 +3119,7 @@ export const schemas = {
     type: "object",
     description:
       "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it.",
-    required: ["object", "target", "shared_by", "createdAt"],
+    required: ["object", "target", "shared_by", "enabled", "createdAt"],
     properties: {
       object: { type: "string", enum: ["package_share"] },
       target: { $ref: "#/components/schemas/ShareTargetView" },
@@ -3132,6 +3132,11 @@ export const schemas = {
           user_id: { type: "string" },
           name: { type: "string" },
         },
+      },
+      enabled: {
+        type: "boolean",
+        description:
+          "Whether the package is switched on in the target space (`space_packages.enabled`); false when the target holds no row for it.",
       },
       createdAt: { type: "string", format: "date-time" },
     },

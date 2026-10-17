@@ -51,6 +51,8 @@ export interface PackageShareView {
     | { kind: "space"; spaceId: string; name: string };
   /** `user_id`, not `userId`: one of the enumerated counter-exceptions of CASING_CONVENTIONS. */
   shared_by: { user_id: string; name: string } | null;
+  /** `space_packages.enabled` of the target's row; `false` when the target has none. */
+  enabled: boolean;
   createdAt: string;
 }
 
@@ -260,11 +262,19 @@ export async function listPackageShares(
       ownerUserId: spaces.ownerUserId,
       sharedBy: packageShares.sharedBy,
       createdAt: packageShares.createdAt,
+      enabled: spacePackages.enabled,
       ownerName: user.name,
       sharerName: sharer.name,
     })
     .from(packageShares)
     .innerJoin(spaces, eq(spaces.id, packageShares.spaceId))
+    .leftJoin(
+      spacePackages,
+      and(
+        eq(spacePackages.packageId, packageShares.packageId),
+        eq(spacePackages.spaceId, packageShares.spaceId),
+      ),
+    )
     .leftJoin(user, eq(user.id, spaces.ownerUserId))
     // The membership is the join, not a filter applied afterwards: the sharer's
     // name is loaded only for someone who is still in this organization.
@@ -294,6 +304,7 @@ export async function listPackageShares(
         }
       : { kind: "space" as const, spaceId: row.spaceId, name: row.spaceName },
     shared_by: sharerView(row),
+    enabled: row.enabled ?? false,
     createdAt: row.createdAt.toISOString(),
   }));
 }

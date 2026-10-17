@@ -497,6 +497,23 @@ describe("authority — `<type>:share` in the home space", () => {
     expect(entry!.shared_by?.user_id).toBe(author.userId);
   });
 
+  it("reports whether each target has switched the package on", async () => {
+    await shareWithUser(author.headers(homeId), AGENT, recipient.userId);
+    const enabledOf = async () =>
+      (
+        (await (await listShares(author.headers(homeId), AGENT)).json()) as {
+          data: { enabled: boolean }[];
+        }
+      ).data.map((entry) => entry.enabled);
+
+    // Offered, not taken up: no `space_packages` row yet.
+    expect(await enabledOf()).toEqual([false]);
+
+    const activated = await takeUpOffer(recipient.headers(), AGENT);
+    expect(activated.status, await activated.clone().text()).toBe(201);
+    expect(await enabledOf()).toEqual([true]);
+  });
+
   it("stops naming a sharer who has LEFT the organization", async () => {
     // Same rule as the library map, same reason: the account survives a
     // membership revocation (a `user` row is multi-org), so nothing clears

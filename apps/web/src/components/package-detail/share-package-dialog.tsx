@@ -3,6 +3,7 @@
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
 import {
@@ -14,30 +15,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { OptionSelect } from "@/components/app-ui/option-select";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../../api/errors";
 import { Modal } from "../modal";
-import { SpaceRoleSelect } from "../space-role-select";
 import { splitPackageRef } from "../../lib/package-paths";
 import { useOrgDetail } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useSpaceGrant } from "../../hooks/use-permissions";
-import { coeditVerdict } from "../../lib/package-permissions";
-import { useAddSpaceMember, useSpaceMembers } from "../../hooks/use-space-members";
-import {
-  DEFAULT_SPACE_ROLE_VALUE,
-  spaceRoleAssignment,
-  useSpaceRoleOptions,
-} from "../../hooks/use-roles";
+import { isSpaceEnterable, useSpaceSwitcher } from "../../hooks/use-current-space";
 import { useCreateVersion, usePackageDetail } from "../../hooks/use-packages";
 import { useIntegrationsById } from "../../hooks/use-integrations";
 import {
   shareTargetHandle,
+  type PackageShare,
   usePackageShares,
   useRevokePackageShare,
   useSharePackage,
@@ -69,11 +63,10 @@ function parseTargetValue(value: string): ShareTarget | null {
 export const SHARE_PARAM = "share";
 
 /**
- * Two tabs, because "sharing" means two different acts. DISTRIBUTION ("Utiliser", RBAC §6.10): the
- * package is placed in the recipient's space and runs with THEIR credentials on its latest
- * published version. COLLABORATION ("Co-éditer"): a role in the package's HOME space, refused when
- * the home is personal. Distribution uses one picker over people AND spaces (kind is a property of
- * the target, not a second intent).
+ * Distribution only (RBAC §6.10): the package is placed in the recipient's space and runs with
+ * THEIR credentials on its latest published version. One picker over people AND spaces (kind is a
+ * property of the target, not a second intent). Co-editing is membership of the HOME space, so the
+ * dialog only points there.
  */
 export function SharePackageDialog({
   onClose,
@@ -109,6 +102,8 @@ export function SharePackageDialog({
   const share = useSharePackage();
   const revoke = useRevokePackageShare();
   const publish = useCreateVersion(type, packageId);
+  const home = useSpaceGrant(homeSpaceId);
+  const { switchSpace } = useSpaceSwitcher();
   const [target, setTarget] = useState("");
   /** The offer the server refused for want of a version, kept to replay it. */
   const [needsVersion, setNeedsVersion] = useState<ShareTarget | null>(null);
@@ -129,6 +124,9 @@ export function SharePackageDialog({
   );
 
   const selected = parseTargetValue(target);
+  // The members page edits the CURRENT space, so reaching the home's means standing in it.
+  const manageMembers =
+    homeSpaceId && home && isSpaceEnterable(home) ? () => switchSpace(homeSpaceId) : undefined;
 
   const close = () => {
     setTarget("");
@@ -185,279 +183,222 @@ export function SharePackageDialog({
         </Button>
       }
     >
-      <Tabs defaultValue="use">
-        <TabsList>
-          <TabsTrigger value="use">{t("packages.shareTabUse")}</TabsTrigger>
-          <TabsTrigger value="coedit">{t("packages.shareTabCoedit")}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="use" className="flex flex-col gap-2">
-          <Label htmlFor="share-target" className="mb-0">
-            {t("packages.shareUseLabel")}
-          </Label>
-          <div className="flex gap-2">
-            <Select value={target || undefined} onValueChange={setTarget}>
-              <SelectTrigger id="share-target" className="w-full">
-                <SelectValue placeholder={t("packages.shareUsePlaceholder")} />
-              </SelectTrigger>
-              <SelectContent>
-                {members.length > 0 && (
-                  <SelectGroup>
-                    <SelectLabel>{t("packages.shareGroupPeople")}</SelectLabel>
-                    {members.map((member) => (
-                      <SelectItem
-                        key={member.userId}
-                        value={targetValue({ kind: "user", userId: member.userId })}
-                      >
-                        {memberLabel(member)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                )}
-                {destinations.length > 0 && (
-                  <SelectGroup>
-                    <SelectLabel>{t("orgSettings.inviteSpacesLabel")}</SelectLabel>
-                    {destinations.map((candidate) => (
-                      <SelectItem
-                        key={candidate.id}
-                        value={targetValue({ kind: "space", spaceId: candidate.id })}
-                      >
-                        {candidate.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                )}
-              </SelectContent>
-            </Select>
-            <PendingButton
-              type="button"
-              pending={share.isPending}
-              disabled={!selected}
-              onClick={() => selected && submit(selected)}
-            >
-              {t("packages.shareSubmit")}
-            </PendingButton>
-          </div>
-          <p className="text-muted-foreground text-sm">
-            {selected?.kind === "user"
-              ? t("packages.shareUserHint")
-              : selected?.kind === "space"
-                ? t("packages.shareSpaceHint")
-                : t("packages.shareUseHint")}
-          </p>
-          {/* Said BEFORE the offer: integrations are judged where the run starts, so a recipient without them gets an unexplained `integration_not_active`. */}
-          {declaredIntegrations.length > 0 && (
-            <p className="text-muted-foreground text-sm">
-              {t("packages.shareIntegrationsHint", {
-                count: declaredIntegrations.length,
-                list: declaredIntegrations.join(", "),
-              })}
-            </p>
-          )}
-
-          {needsVersion && (
-            <Alert
-              variant="warning"
-              data-testid="share-needs-version"
-              className="bg-warning/10 mt-2 rounded-md p-3"
-            >
-              <AlertDescription className="flex flex-col items-start gap-2">
-                <p>{t("packages.shareNeedsVersion")}</p>
-                {canPublish ? (
-                  <PendingButton
-                    type="button"
-                    size="sm"
-                    pending={publish.isPending}
-                    disabled={share.isPending}
-                    onClick={() => void publishAndShare()}
-                  >
-                    {t("packages.sharePublishAndShare")}
-                  </PendingButton>
-                ) : (
-                  <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <div className="mt-2 flex flex-col gap-1 border-t pt-4">
-            <p className="text-sm font-medium">{t("packages.shareCurrent")}</p>
-            {isLoading ? (
-              <TextSkeleton lines={2} className="py-1.5" />
-            ) : (shares ?? []).length === 0 ? (
-              <p className="text-muted-foreground text-sm">{t("packages.shareEmpty")}</p>
-            ) : (
-              <ul className="divide-y">
-                {(shares ?? []).map((entry) => (
-                  <li
-                    key={`${entry.target.kind}:${shareTargetHandle(entry)}`}
-                    className="flex items-center justify-between gap-2 py-1.5"
-                  >
-                    <span className="truncate text-sm">
-                      {entry.target.kind === "user"
-                        ? t("packages.shareWithPerson", { name: entry.target.name })
-                        : t("packages.shareWithSpace", { name: entry.target.name })}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      type="button"
-                      title={t("packages.shareRevokeHint")}
-                      disabled={revoke.isPending}
-                      onClick={() =>
-                        revoke.mutate(
-                          {
-                            params: {
-                              path: {
-                                ...splitPackageRef(packageId),
-                                target: shareTargetHandle(entry),
-                              },
-                            },
-                          },
-                          {
-                            onSuccess: () => toast.success(t("packages.shareRevoked")),
-                          },
-                        )
-                      }
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="share-target" className="mb-0">
+          {t("packages.shareUseLabel")}
+        </Label>
+        <div className="flex gap-2">
+          <Select value={target || undefined} onValueChange={setTarget}>
+            <SelectTrigger id="share-target" className="w-full">
+              <SelectValue placeholder={t("packages.shareUsePlaceholder")} />
+            </SelectTrigger>
+            <SelectContent>
+              {members.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>{t("packages.shareGroupPeople")}</SelectLabel>
+                  {members.map((member) => (
+                    <SelectItem
+                      key={member.userId}
+                      value={targetValue({ kind: "user", userId: member.userId })}
                     >
-                      <Trash2 />
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </TabsContent>
-        <TabsContent value="coedit">
-          <CoeditTab
-            homeSpaceId={homeSpaceId}
-            orgMembers={org?.members ?? []}
+                      {memberLabel(member)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+              {destinations.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>{t("orgSettings.inviteSpacesLabel")}</SelectLabel>
+                  {destinations.map((candidate) => (
+                    <SelectItem
+                      key={candidate.id}
+                      value={targetValue({ kind: "space", spaceId: candidate.id })}
+                    >
+                      {candidate.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+            </SelectContent>
+          </Select>
+          <PendingButton
+            type="button"
+            pending={share.isPending}
+            disabled={!selected}
+            onClick={() => selected && submit(selected)}
+          >
+            {t("packages.shareSubmit")}
+          </PendingButton>
+        </div>
+        <p className="text-muted-foreground text-sm">
+          {selected?.kind === "user"
+            ? t("packages.shareUserHint")
+            : selected?.kind === "space"
+              ? t("packages.shareSpaceHint")
+              : t("packages.shareUseHint")}
+        </p>
+        {/* Said BEFORE the offer: integrations are judged where the run starts, so a recipient without them gets an unexplained `integration_not_active`. */}
+        {declaredIntegrations.length > 0 && (
+          <p className="text-muted-foreground text-sm">
+            {t("packages.shareIntegrationsHint", {
+              count: declaredIntegrations.length,
+              list: declaredIntegrations.join(", "),
+            })}
+          </p>
+        )}
+
+        {needsVersion && (
+          <Alert
+            variant="warning"
+            data-testid="share-needs-version"
+            className="bg-warning/10 mt-2 rounded-md p-3"
+          >
+            <AlertDescription className="flex flex-col items-start gap-2">
+              <p>{t("packages.shareNeedsVersion")}</p>
+              {canPublish ? (
+                <PendingButton
+                  type="button"
+                  size="sm"
+                  pending={publish.isPending}
+                  disabled={share.isPending}
+                  onClick={() => void publishAndShare()}
+                >
+                  {t("packages.sharePublishAndShare")}
+                </PendingButton>
+              ) : (
+                <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <ShareList
+          shares={shares}
+          isLoading={isLoading}
+          revoking={revoke.isPending}
+          onRevoke={(entry) =>
+            revoke.mutate(
+              {
+                params: {
+                  path: { ...splitPackageRef(packageId), target: shareTargetHandle(entry) },
+                },
+              },
+              { onSuccess: () => toast.success(t("packages.shareRevoked")) },
+            )
+          }
+        />
+
+        {home && (
+          <HomeSpaceNote
+            personal={home.personal}
             onMoveHome={onMoveHome}
+            onManageMembers={manageMembers}
           />
-        </TabsContent>
-      </Tabs>
+        )}
+      </div>
     </Modal>
   );
 }
 
-/**
- * Co-authoring: a role in the package's HOME space. Always rendered; a caller who cannot perform it
- * is told why. The verdict is read off the home space's own grant, not `can` (which answers for the current space).
- */
-function CoeditTab({
-  homeSpaceId,
-  orgMembers,
-  onMoveHome,
+/** The audience, each target with the state the package has THERE. */
+export function ShareList({
+  shares,
+  isLoading,
+  revoking,
+  onRevoke,
 }: {
-  homeSpaceId: string | null | undefined;
-  orgMembers: Array<{ userId: string; displayName?: string | null; email?: string | null }>;
-  onMoveHome?: () => void;
+  shares: PackageShare[] | undefined;
+  isLoading: boolean;
+  revoking: boolean;
+  onRevoke: (entry: PackageShare) => void;
 }) {
-  const { t } = useTranslation(["settings", "common"]);
-  const home = useSpaceGrant(homeSpaceId);
-  const homeName = (useSpaces().data ?? []).find((space) => space.id === homeSpaceId)?.name;
-  const verdict = coeditVerdict(home);
-  const mayInvite = verdict === "invite";
-  const mayRead = home?.permissions.includes("space-members:read") ?? false;
-  // Only narrows candidates; `space-members:read` is separate from `invite`, and without it the 409 does the talking.
-  const { data: existing } = useSpaceMembers(homeSpaceId ?? "", mayInvite && mayRead);
-  const roles = useSpaceRoleOptions(homeSpaceId ?? undefined, mayInvite);
-  const addMember = useAddSpaceMember({ errorHandledByCaller: true });
-  const [member, setMember] = useState("");
-  const [role, setRole] = useState(DEFAULT_SPACE_ROLE_VALUE);
+  const { t } = useTranslation("settings");
+  return (
+    <div className="mt-2 flex flex-col gap-1 border-t pt-4">
+      <p className="text-sm font-medium">{t("packages.shareCurrent")}</p>
+      {isLoading ? (
+        <TextSkeleton lines={2} className="py-1.5" />
+      ) : (shares ?? []).length === 0 ? (
+        <p className="text-muted-foreground text-sm">{t("packages.shareEmpty")}</p>
+      ) : (
+        <ul className="divide-y">
+          {(shares ?? []).map((entry) => (
+            <li
+              key={`${entry.target.kind}:${shareTargetHandle(entry)}`}
+              className="flex items-center justify-between gap-2 py-1.5"
+            >
+              <span className="flex min-w-0 items-center gap-2 text-sm">
+                <span className="truncate">
+                  {entry.target.kind === "user"
+                    ? t("packages.shareWithPerson", { name: entry.target.name })
+                    : t("packages.shareWithSpace", { name: entry.target.name })}
+                </span>
+                <Badge variant={entry.enabled ? "success" : "pending"}>
+                  {entry.enabled
+                    ? t("packages.shareStateActive")
+                    : t("packages.shareStateInactive")}
+                </Badge>
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                title={t("packages.shareRevokeHint")}
+                disabled={revoking}
+                onClick={() => onRevoke(entry)}
+              >
+                <Trash2 />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
-  // Everyone already in the home space, the CALLER included (`<type>:share` there implies a role).
-  const reached = useMemo(() => new Set((existing ?? []).map((row) => row.userId)), [existing]);
-  const candidates = orgMembers.filter((candidate) => !reached.has(candidate.userId));
-
-  if (verdict === "unknown") return <TextSkeleton lines={2} />;
-
-  // A personal space takes no other members (`personal_space_has_no_members`) and is never
-  // converted (`personal_space_not_orphaned`): the gesture is to move the PACKAGE out (`PUT …/home`).
-  if (verdict === "personal") {
+/**
+ * Where co-editing happens: membership of the HOME space. A personal home takes no other member
+ * (`personal_space_has_no_members`), so the gesture there is to move the PACKAGE (`PUT …/home`).
+ */
+export function HomeSpaceNote({
+  personal,
+  onMoveHome,
+  onManageMembers,
+}: {
+  personal: boolean;
+  onMoveHome?: () => void;
+  /** Stands in the home space; absent when the caller cannot enter it. */
+  onManageMembers?: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  if (personal) {
     return (
-      <div className="flex flex-col items-start gap-3" data-testid="coedit-personal">
-        <p className="text-muted-foreground text-sm">{t("packages.coeditPersonal")}</p>
+      <div
+        className="mt-2 flex flex-col items-start gap-2 border-t pt-4"
+        data-testid="home-personal"
+      >
+        <p className="text-muted-foreground text-sm">{t("packages.homePersonal")}</p>
         {onMoveHome && (
           <Button type="button" size="sm" variant="outline" onClick={onMoveHome}>
-            {t("packages.coeditPersonalMove")}
+            {t("packages.homePersonalMove")}
           </Button>
         )}
       </div>
     );
   }
-
-  if (verdict === "no_authority") {
-    return (
-      <p className="text-muted-foreground text-sm" data-testid="coedit-no-authority">
-        {t("packages.coeditNoAuthority", { space: homeName ?? "" })}
-      </p>
-    );
-  }
-
-  const submit = () => {
-    if (!member || !homeSpaceId) return;
-    addMember.mutate(
-      {
-        params: { path: { id: homeSpaceId } },
-        body: { userId: member, ...spaceRoleAssignment(role) },
-      },
-      {
-        onSuccess: () => {
-          toast.success(t("packages.coeditDone", { space: homeName ?? "" }));
-          setMember("");
-        },
-        onError: (error) => {
-          // The picker cannot narrow this away without `space-members:read`.
-          if (error instanceof ApiError && error.code === "space_member_exists") {
-            toast.error(t("packages.coeditMemberExists"));
-            return;
-          }
-          toastError(error);
-        },
-      },
-    );
-  };
-
   return (
-    <div className="flex flex-col gap-2" data-testid="coedit-invite">
-      <Label htmlFor="coedit-member" className="mb-0">
-        {t("packages.coeditLabel")}
-      </Label>
-      <div className="flex gap-2">
-        <OptionSelect
-          id="coedit-member"
-          value={member || undefined}
-          onValueChange={setMember}
-          placeholder={t("packages.coeditPlaceholder")}
-          className="w-full"
-          options={candidates.map((candidate) => ({
-            value: candidate.userId,
-            label: memberLabel(candidate),
-          }))}
-        />
-        <SpaceRoleSelect
-          id="coedit-role"
-          value={role}
-          options={roles.options}
-          fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
-          className="w-48"
-          ariaLabel={t("packages.coeditRoleLabel")}
-          onValueChange={setRole}
-        />
-        <PendingButton
-          type="button"
-          pending={addMember.isPending}
-          disabled={!member}
-          onClick={submit}
+    <div className="mt-2 flex flex-col items-start gap-2 border-t pt-4" data-testid="home-team">
+      <p className="text-muted-foreground text-sm">{t("packages.homeTeam")}</p>
+      {onManageMembers && (
+        <Link
+          to="/workspace-settings/members"
+          onClick={onManageMembers}
+          className="text-sm underline"
         >
-          {t("packages.coeditSubmit")}
-        </PendingButton>
-      </div>
-      <p className="text-muted-foreground text-sm">
-        {candidates.length === 0
-          ? t("packages.coeditEmpty", { space: homeName ?? "" })
-          : t("packages.coeditHint", { space: homeName ?? "" })}
-      </p>
+          {t("packages.homeManageMembers")}
+        </Link>
+      )}
     </div>
   );
 }
