@@ -330,7 +330,8 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   },
   revokePackageShare: {
     category: "handler-guarded",
-    reason: "assertPackageShareAccess: <type>:share in home space",
+    reason:
+      "assertPlacementRemovalAccess: <type>:share in home space, or the type's deactivation permission in the target space",
   },
   rotateWebhookSecret: {
     category: "handler-guarded",
@@ -387,10 +388,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   getOrganization: {
     category: "self",
     reason: "bound org's own non-secret identity; members/invitations gated in-handler",
-  },
-  getOrganizationLogo: {
-    category: "self",
-    reason: "bound org's own logo image, the identity getOrganization already exposes",
   },
   listOrgRoles: {
     category: "self",

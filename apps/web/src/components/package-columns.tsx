@@ -35,10 +35,11 @@ export function usePackageNameColumn(): DataColumn<CardItem> {
         {item.identity && (
           <PackageIcon
             type="agent"
+            id={item.id}
+            name={item.displayName}
             icon={item.identity.icon}
             color={item.identity.color}
             className="size-8 rounded-md"
-            iconClassName="size-4"
           />
         )}
         {item.type === "integration" && (

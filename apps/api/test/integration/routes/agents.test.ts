@@ -142,6 +142,57 @@ describe("Agents API", () => {
     });
   });
 
+  describe("agent identity (icon, color) on the list and the detail", () => {
+    /** Seeds an active agent with `extra` merged into its manifest, returns its list item and detail. */
+    async function readIdentity(name: string, extra: Record<string, unknown>) {
+      await seedActiveAgent({
+        id: `@myorg/${name}`,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        spaceId: ctx.defaultSpaceId,
+        draftManifest: {
+          name: `@myorg/${name}`,
+          version: "0.1.0",
+          type: "agent",
+          description: "Test agent",
+          ...extra,
+        },
+      });
+      const list = await app.request("/api/agents", { headers: authHeaders(ctx) });
+      expect(list.status).toBe(200);
+      const item = ((await list.json()) as any).data.find(
+        (a: { id: string }) => a.id === `@myorg/${name}`,
+      );
+      const detail = await app.request(`/api/packages/agents/@myorg/${name}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(detail.status).toBe(200);
+      return [item, await detail.json()] as any[];
+    }
+
+    it("always carries icon and color, null when the manifest declares none", async () => {
+      for (const body of await readIdentity("plain-agent", {})) {
+        expect(body).toHaveProperty("icon", null);
+        expect(body).toHaveProperty("color", null);
+      }
+    });
+
+    it("reads the manifest icon and a palette color", async () => {
+      const manifest = { icon: "lucide:tractor", _meta: { "dev.appstrate/ui": { color: "rose" } } };
+      for (const body of await readIdentity("rose-agent", manifest)) {
+        expect(body.icon).toBe("lucide:tractor");
+        expect(body.color).toBe("rose");
+      }
+    });
+
+    it("reads a color outside the palette as null", async () => {
+      const manifest = { _meta: { "dev.appstrate/ui": { color: "#ff0000" } } };
+      for (const body of await readIdentity("hex-agent", manifest)) {
+        expect(body).toHaveProperty("color", null);
+      }
+    });
+  });
+
   describe("GET /api/packages/agents/:scope/:name (agent detail)", () => {
     it("returns agent detail when installed", async () => {
       await seedActiveAgent({

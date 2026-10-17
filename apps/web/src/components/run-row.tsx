@@ -37,6 +37,8 @@ export function RunRow({
     <>
       <PackageIcon
         type="agent"
+        id={run.packageId ?? agentName}
+        name={agentName}
         icon={agent?.icon}
         color={agent?.color}
         className="size-8 rounded-lg"

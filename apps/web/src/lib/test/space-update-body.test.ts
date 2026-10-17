@@ -3,6 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   domainsChanged,
+  spaceAppearanceBody,
   spaceSettingsUpdate,
   visibilityChangeNeedsConfirmation,
 } from "../space-update-body.ts";
@@ -51,5 +52,16 @@ describe("spaceSettingsUpdate", () => {
   });
   it("sends nothing for an added empty domain row", () => {
     expect(spaceSettingsUpdate(baseline, { ...baseline, domains: ["old.test", ""] })).toEqual({});
+  });
+});
+
+describe("spaceAppearanceBody", () => {
+  it("sends the icon and the colour each on its own, null clearing it", () => {
+    expect(spaceAppearanceBody({ field: "icon", value: "lucide:rocket" })).toEqual({
+      icon: "lucide:rocket",
+    });
+    expect(spaceAppearanceBody({ field: "icon", value: null })).toEqual({ icon: null });
+    expect(spaceAppearanceBody({ field: "color", value: "violet" })).toEqual({ color: "violet" });
+    expect(spaceAppearanceBody({ field: "color", value: null })).toEqual({ color: null });
   });
 });

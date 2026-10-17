@@ -19,16 +19,17 @@ import { useOrgSpaces, useSpaces } from "../hooks/use-spaces";
 import { spaceRoleLabel } from "../hooks/use-roles";
 import { usePermissions } from "../hooks/use-permissions";
 import { spaceLabel } from "../lib/space-label";
+import { orgTile, spaceTile } from "../lib/identity-tile-props";
 import { matchesSearch } from "../lib/strings";
 import { isSpaceEnterable, useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
-import { useCanCreateOrg } from "../hooks/use-auth";
+import { useCanCreateOrg, useViewer } from "../hooks/use-auth";
 import { spaceStore } from "../stores/space-store";
 import { Command, CommandInput } from "@appstrate/ui/components/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useSidebar } from "@appstrate/ui/components/sidebar";
 import { cn } from "@appstrate/ui/cn";
-import { OrganizationAvatar } from "./organization-avatar";
+import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { NEW_SPACE_PARAM } from "./space-create-modal";
 
 function ColumnHeader({
@@ -116,6 +117,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const { can } = usePermissions();
   const canCreateOrg = useCanCreateOrg();
+  const viewer = useViewer();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   // The organization whose workspaces column two shows; null = the one you are in (the panel always reopens there).
@@ -168,7 +170,13 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     });
 
   const spaceName: ReactNode = currentSpace ? (
-    <span className="text-muted-foreground">{spaceLabel(currentSpace, t)}</span>
+    <span className="text-muted-foreground">
+      <IdentityTile
+        {...spaceTile(currentSpace, viewer)}
+        className="mr-1.5 inline-flex size-4 rounded-sm align-text-bottom"
+      />
+      {spaceLabel(currentSpace, t)}
+    </span>
   ) : (
     spacesPending && <Skeleton className="inline-block h-3.5 w-16 align-middle" />
   );
@@ -201,10 +209,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
               : "hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent",
           )}
         >
-          <OrganizationAvatar
-            org={currentOrg}
-            className="size-6 shrink-0 rounded-md text-[0.7rem]"
-          />
+          <IdentityTile {...orgTile(currentOrg)} className="size-6 rounded-md" />
           <span className="min-w-0 flex-1 truncate text-left">
             <span className="font-semibold">{currentOrg.name}</span>
             {spaceName && (
@@ -279,7 +284,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                     }
                     onNavigate={closeSwitcherAndSidebar}
                   >
-                    <OrganizationAvatar org={org} className="size-[30px] text-[0.82rem]" />
+                    <IdentityTile {...orgTile(org)} className="size-[30px]" />
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate text-sm font-medium">{org.name}</span>
                       <span className="text-muted-foreground text-xs">
@@ -365,6 +370,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                         }
                         onNavigate={closeSwitcherAndSidebar}
                       >
+                        <IdentityTile {...spaceTile(space, viewer)} className="size-[30px]" />
                         <span className="flex min-w-0 flex-col">
                           <span className="flex items-center gap-1.5 truncate text-sm font-medium">
                             {spaceLabel(space, t)}

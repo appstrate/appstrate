@@ -150,6 +150,7 @@ column integration_connections.org_id uuid not null
 column integration_connections.origin_space_id text
 column integration_connections.refresh_failure_count integer not null default 0
 column integration_connections.scopes_granted text[] not null default '{}'::text[]
+column integration_connections.share_all_spaces boolean not null default false
 column integration_connections.shared_space_ids text[] not null default '{}'::text[]
 column integration_connections.space_id text
 column integration_connections.updated_at timestamp with time zone not null default now()
@@ -401,6 +402,7 @@ column org_proxies.org_id uuid not null
 column org_proxies.source text not null default 'custom'::text
 column org_proxies.updated_at timestamp with time zone not null default now()
 column org_proxies.url_encrypted text not null
+column organizations.color text
 column organizations.created_at timestamp with time zone not null default now()
 column organizations.created_by text
 column organizations.default_model_id text
@@ -408,8 +410,8 @@ column organizations.default_proxy_id text
 column organizations.deleting_at timestamp with time zone
 column organizations.files_bytes_limit bigint
 column organizations.files_bytes_used bigint not null default 0
+column organizations.icon text
 column organizations.id uuid not null default gen_random_uuid()
-column organizations.logo text
 column organizations.name text not null
 column organizations.org_settings jsonb not null default '{}'::jsonb
 column organizations.slug text not null
@@ -572,13 +574,14 @@ column space_members.space_id text not null
 column space_members.user_id text not null
 column space_packages.block_user_connections boolean not null default false
 column space_packages.chat_enforced boolean not null default false
-column space_packages.enabled boolean not null default true
+column space_packages.enabled boolean not null
 column space_packages.generation_config jsonb
 column space_packages.input_settings jsonb not null default '{"locked": [], "values": {}}'::jsonb
 column space_packages.installed_at timestamp with time zone not null default now()
 column space_packages.model_id text
 column space_packages.package_id text not null
 column space_packages.proxy_id text
+column space_packages.shared_by text
 column space_packages.space_id text not null
 column space_packages.updated_at timestamp with time zone not null default now()
 column space_roles.created_at timestamp with time zone not null default now()
@@ -607,9 +610,11 @@ column space_social_providers.provider text not null
 column space_social_providers.scopes text[]
 column space_social_providers.space_id text not null
 column space_social_providers.updated_at timestamp with time zone not null default now()
+column spaces.color text
 column spaces.created_at timestamp with time zone not null default now()
 column spaces.created_by text
 column spaces.default_role text not null default 'operator'::text
+column spaces.icon text
 column spaces.id text not null
 column spaces.is_default boolean not null default false
 column spaces.name text not null
@@ -738,6 +743,7 @@ constraint integration_connections integration_connections_org_id_organizations_
 constraint integration_connections integration_connections_origin_is_org CHECK (((origin_space_id IS NULL) OR (space_id IS NULL)))
 constraint integration_connections integration_connections_origin_space_org_fk FOREIGN KEY (origin_space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE SET NULL (origin_space_id)
 constraint integration_connections integration_connections_pkey PRIMARY KEY (id)
+constraint integration_connections integration_connections_share_all_spaces_org_scoped_user CHECK (((NOT share_all_spaces) OR ((user_id IS NOT NULL) AND (space_id IS NULL))))
 constraint integration_connections integration_connections_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint integration_connections integration_connections_space_shares_own CHECK (((space_id IS NULL) OR (shared_space_ids <@ ARRAY[space_id])))
 constraint integration_connections integration_connections_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
@@ -841,6 +847,7 @@ constraint org_proxies org_proxies_org_id_organizations_id_fk FOREIGN KEY (org_i
 constraint org_proxies org_proxies_pkey PRIMARY KEY (id)
 constraint org_proxies org_proxies_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
 constraint organizations organizations_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint organizations organizations_icon_length CHECK ((octet_length(icon) <= 16384))
 constraint organizations organizations_pkey PRIMARY KEY (id)
 constraint organizations organizations_slug_unique UNIQUE (slug)
 constraint package_dist_tags package_dist_tags_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
@@ -916,6 +923,7 @@ constraint space_members space_members_space_id_spaces_id_fk FOREIGN KEY (space_
 constraint space_members space_members_space_id_user_id_pk PRIMARY KEY (space_id, user_id)
 constraint space_members space_members_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint space_packages space_packages_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint space_packages space_packages_shared_by_user_id_fk FOREIGN KEY (shared_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint space_packages space_packages_space_id_package_id_pk PRIMARY KEY (space_id, package_id)
 constraint space_packages space_packages_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint space_roles space_roles_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
@@ -931,6 +939,7 @@ constraint space_social_providers space_social_providers_space_id_spaces_id_fk F
 constraint spaces spaces_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint spaces spaces_default_is_open CHECK (((NOT is_default) OR (visibility = 'open'::text)))
 constraint spaces spaces_default_role_valid CHECK ((default_role = ANY (ARRAY['admin'::text, 'builder'::text, 'operator'::text, 'runner'::text, 'viewer'::text])))
+constraint spaces spaces_icon_length CHECK ((octet_length(icon) <= 16384))
 constraint spaces spaces_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint spaces spaces_orphaned_is_personal CHECK (((orphaned_at IS NULL) OR (owner_user_id IS NOT NULL)))
 constraint spaces spaces_owner_user_id_user_id_fk FOREIGN KEY (owner_user_id) REFERENCES "user"(id) ON DELETE RESTRICT
@@ -968,7 +977,7 @@ enum package_source local,system
 enum package_type agent,skill,integration,mcp-server
 enum run_origin platform,remote
 enum run_status pending,running,success,failed,timeout,cancelled
-enum schedule_disabled_reason actor_invalid,actor_left_org,connection_deleted,connection_unshared,connection_set_unnamed,connection_choice_invalid
+enum schedule_disabled_reason actor_invalid,actor_left_org,connection_deleted,connection_unshared,connection_set_unnamed,connection_choice_invalid,package_removed
 index CREATE INDEX account_user_id_idx ON public.account USING btree (user_id)
 index CREATE INDEX idx_api_keys_created_by ON public.api_keys USING btree (created_by)
 index CREATE INDEX idx_api_keys_org_id ON public.api_keys USING btree (org_id)
@@ -1079,6 +1088,7 @@ index CREATE INDEX idx_space_members_added_by ON public.space_members USING btre
 index CREATE INDEX idx_space_members_custom_role_id ON public.space_members USING btree (custom_role_id)
 index CREATE INDEX idx_space_members_user_id ON public.space_members USING btree (user_id)
 index CREATE INDEX idx_space_packages_package_id ON public.space_packages USING btree (package_id)
+index CREATE INDEX idx_space_packages_shared_by ON public.space_packages USING btree (shared_by)
 index CREATE INDEX idx_space_roles_created_by ON public.space_roles USING btree (created_by)
 index CREATE INDEX idx_spaces_org_id ON public.spaces USING btree (org_id)
 index CREATE INDEX idx_storage_deletion_jobs_due ON public.storage_deletion_jobs USING btree (next_attempt_at) WHERE (completed_at IS NULL)

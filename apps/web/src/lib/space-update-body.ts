@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The space form's `PATCH /api/spaces/{id}` body: its text fields, only the edited ones.
- * Visibility and default role are single choices written on their own.
+ * `PATCH /api/spaces/{id}` bodies. The space form sends its text fields, only the edited
+ * ones; visibility, default role, icon and colour are single choices written on their own.
+ * The route refuses all four on a personal space (409 `personal_space_immutable`), so a
+ * rename never carries them.
  */
 
+import type { AppearanceColor } from "@appstrate/core/appearance";
 import type { components, paths } from "../api/client";
 
 type SpaceUpdateBody = NonNullable<
@@ -49,4 +52,12 @@ export function spaceSettingsUpdate(
       ? { settings: { allowedRedirectDomains: cleanDomains(next.domains) } }
       : {}),
   };
+}
+
+export type SpaceAppearanceChange =
+  { field: "icon"; value: string | null } | { field: "color"; value: AppearanceColor | null };
+
+/** The icon or the colour alone; `null` clears it. */
+export function spaceAppearanceBody(change: SpaceAppearanceChange): SpaceUpdateBody {
+  return change.field === "icon" ? { icon: change.value } : { color: change.value };
 }

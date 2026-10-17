@@ -39,13 +39,18 @@ import {
   asc,
 } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
-import { isUuid, scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
+import {
+  isUuid,
+  lockOrganizationRow,
+  scopedWhere,
+  type DbOrTx,
+  type Tx,
+} from "../lib/db-helpers.ts";
 import { countInProgressRuns, orgRunConcurrencyLockKey } from "./state/runs.ts";
 import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
-import { orgLogoDeletionJob, logoImageVersion } from "./org-logo.ts";
 import { orgApiVersionCache } from "./org-settings-cache.ts";
 import { clearResolvedModelCache } from "./resolved-model-cache.ts";
 import {
@@ -65,7 +70,8 @@ interface OrgResult {
   id: string;
   name: string;
   slug: string;
-  logo: string | null;
+  icon: string | null;
+  color: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -92,7 +98,8 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     id: row.id,
     name: row.name,
     slug: row.slug,
-    logo: row.logo,
+    icon: row.icon,
+    color: row.color,
     createdBy: row.createdBy ?? "",
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
@@ -162,7 +169,7 @@ export async function getOrgById(orgId: string): Promise<OrgResult | null> {
 
 export async function updateOrganization(
   orgId: string,
-  updates: { name?: string; slug?: string },
+  updates: { name?: string; slug?: string; icon?: string | null; color?: string | null },
 ): Promise<OrgResult> {
   const [row] = await db
     .update(organizations)
@@ -427,21 +434,7 @@ interface MemberExitResult {
   deletedModelCredentialIds: string[];
 }
 
-/**
- * Serialises every write to the org's owner set. NO KEY UPDATE: child inserts
- * take FOR KEY SHARE on this row and must not queue behind a membership change.
- */
-async function lockOrgOwnership(tx: Tx, orgId: string): Promise<void> {
-  const [org] = await tx
-    .select({ id: organizations.id })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .limit(1)
-    .for("no key update");
-  if (!org) throw notFound("Organization not found");
-}
-
-/** Under {@link lockOrgOwnership}, which all role writers take — not the request's role. */
+/** Under {@link lockOrganizationRow}, which all role writers take — not the request's role. */
 async function lockedActorRole(tx: Tx, orgId: string, actor: MemberActor): Promise<OrgRole> {
   const row = await getOrgMember(orgId, actor.userId, tx);
   if (!row) throw forbidden("Not a member of this organization");
@@ -580,7 +573,7 @@ async function removeMemberInTx(
   // cover the member's schedules too, in the same id-ordered statement.
   const unshared = await unshareConnectionsOfOwnersWithoutAccess(
     tx,
-    { orgId, userId },
+    { orgId, userId, stopSharingAllSpaces: true },
     departedSchedules,
   );
   const disabled = await tx
@@ -610,7 +603,7 @@ async function exitOrg(
   authorize: (tx: Tx, role: OrgRole) => Promise<void>,
 ): Promise<MemberExitResult> {
   const { disabledScheduleIds, ...result } = await db.transaction(async (tx) => {
-    await lockOrgOwnership(tx, orgId);
+    await lockOrganizationRow(tx, orgId);
     const member = await lockOrgMember(tx, orgId, userId);
     if (!member) throw notFound("Member not found");
     await authorize(tx, member.role);
@@ -673,7 +666,7 @@ export async function updateMemberRole(
   unsharedShares: ConnectionShare[];
 }> {
   const { disabledScheduleIds, ...result } = await db.transaction(async (tx) => {
-    await lockOrgOwnership(tx, orgId);
+    await lockOrganizationRow(tx, orgId);
     const target = await lockOrgMember(tx, orgId, targetUserId);
     if (!target) throw notFound("Member not found");
     const assignable = assignableRolesForMember({
@@ -704,9 +697,11 @@ export async function updateMemberRole(
     // A demotion drops the implicit reach of the org role (admin → member,
     // member → guest on open spaces). Member row (above), then the spaces: see `lockSpaceRow`.
     await lockSpacesOfSharedConnections(tx, orgId, targetUserId);
+
     const unshared = await unshareConnectionsOfOwnersWithoutAccess(tx, {
       orgId,
       userId: targetUserId,
+      stopSharingAllSpaces: role !== "owner" && role !== "admin",
     });
     return {
       previousRole: target.role,
@@ -794,7 +789,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // FK inserts then either commit before this snapshot or wait until the
     // organization is gone; no child can disappear without an outbox job.
     const [lockedOrg] = await tx
-      .select({ id: organizations.id, logo: organizations.logo })
+      .select({ id: organizations.id })
       .from(organizations)
       .where(eq(organizations.id, orgId))
       .limit(1)
@@ -836,8 +831,6 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // cannot purge another org's or the system catalog's artifacts even though
     // `agent-packages` keys are not org-prefixed (see the module doc).
     storageJobs.push(...(await orgPackageStorageDeletionJobs(tx, orgId, "org_deleted")));
-    const logoVersion = logoImageVersion(lockedOrg.logo);
-    if (logoVersion) storageJobs.push(orgLogoDeletionJob(orgId, logoVersion, "org_deleted"));
     await enqueueStorageDeletion(tx, storageJobs);
 
     // run_logs → runs (cascade exists, but org_id FK needs manual delete)

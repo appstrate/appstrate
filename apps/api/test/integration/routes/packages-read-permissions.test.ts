@@ -31,7 +31,7 @@
 
 import { describe, it, expect, beforeEach, beforeAll } from "bun:test";
 import { eq } from "drizzle-orm";
-import { packageShares, spacePackages } from "@appstrate/db/schema";
+import { spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import {
@@ -448,11 +448,9 @@ describe("packages file explorer — read permission", () => {
   it("still 404s (not 403s) a package the calling space cannot see", async () => {
     // Visibility is settled first and deliberately: the RBAC resource comes
     // from the row, so the placement check has to run before the type is known.
-    // Same order as `/{version}/download` — permission is held here. BOTH rows
-    // go: a package is placed in a space by its home or by a share, so leaving
-    // the offer behind would keep it visible and the 404 would never be tested.
+    // Same order as `/{version}/download` — permission is held here. The row
+    // goes: it is what places the package in a space other than its home.
     await db.delete(spacePackages).where(eq(spacePackages.packageId, SKILL_ID));
-    await db.delete(packageShares).where(eq(packageShares.packageId, SKILL_ID));
 
     const res = await app.request(`/api/packages/${SKILL_ID}/files`, {
       headers: authHeaders(ctx),

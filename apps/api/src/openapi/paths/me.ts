@@ -2,12 +2,14 @@
 
 import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { ORG_LOGO_PROPERTY } from "../schemas.ts";
+import { APPEARANCE_PROPERTIES } from "../schemas.ts";
 import {
   agentPackageIdParam,
   connectionActionsSchema,
+  connectionShareAllSpacesOperation,
   connectionIdSetJsonSchema,
   connectionScopeSchema,
+  shareAllSpacesSchema,
   connectionSetRefusals,
   connectionShareDeleteConflicts,
   connectionShareEndpoints,
@@ -72,6 +74,7 @@ const meConnectionEntrySchema = {
     },
     auth_key: { type: "string" },
     scope: connectionScopeSchema,
+    share_all_spaces: shareAllSpacesSchema,
     shared_spaces: {
       type: "array",
       items: namedSpaceSchema,
@@ -140,12 +143,12 @@ export const mePaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["id", "name", "slug", "logo", "role", "createdAt"],
+                      required: ["id", "name", "slug", "icon", "color", "role", "createdAt"],
                       properties: {
                         id: { type: "string" },
                         name: { type: "string" },
                         slug: { type: "string" },
-                        logo: ORG_LOGO_PROPERTY,
+                        ...APPEARANCE_PROPERTIES,
                         role: {
                           type: "string",
                           enum: ["owner", "admin", "member", "guest", "end_user"],
@@ -173,7 +176,8 @@ export const mePaths = {
                     id: "org_abc123",
                     name: "Acme Corp",
                     slug: "acme",
-                    logo: null,
+                    icon: null,
+                    color: null,
                     role: "owner",
                     permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
@@ -246,6 +250,22 @@ export const mePaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
       },
+    },
+  },
+  "/api/me/connections/{connectionId}/shares": {
+    put: {
+      ...connectionShareAllSpacesOperation,
+      operationId: "setMeConnectionShareAllSpaces",
+      tags: ["Me"],
+      summary: "Share an owned connection with current and future team spaces",
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
     },
   },
   "/api/me/connections/{connectionId}/shares/{spaceId}": {

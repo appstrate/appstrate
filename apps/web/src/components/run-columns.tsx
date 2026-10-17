@@ -78,9 +78,10 @@ export function useRunColumns({
         <>
           <PackageIcon
             type="agent"
+            id={run.packageId ?? agentName(run)}
+            name={agentName(run)}
             size="sm"
             className="size-6 rounded-md"
-            iconClassName="size-3.5"
             {...agentIdentity(run)}
           />
           <span className="truncate font-medium">{agentName(run)}</span>

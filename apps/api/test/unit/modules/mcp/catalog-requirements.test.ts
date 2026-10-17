@@ -237,11 +237,6 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   },
   { path: "/api/orgs/{orgId}/settings", why: "membership (`orgRole`) is the gate, every role" },
   {
-    methods: ["GET"],
-    path: "/api/orgs/{orgId}/logo",
-    why: "membership (`orgRole`) is the gate, every role reads",
-  },
-  {
     path: "/api/orgs/{orgId}/leave",
     why: "the person's own membership, dashboard session only (`orgRole`); last owner decided under lock",
   },

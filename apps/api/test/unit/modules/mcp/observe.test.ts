@@ -48,7 +48,7 @@ function makeTools(permissions: string[], status = 200) {
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
-    mayShareRoot: async () => false,
+    placeRootAs: async () => null,
     readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
     requestId: "req_test",
   };

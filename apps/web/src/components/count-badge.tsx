@@ -9,7 +9,7 @@ const TONE = {
 } as const;
 
 /**
- * A small count bubble (unread runs, pending shares, notifications), capped at
+ * A small count bubble (unread runs, notifications), capped at
  * « 99+ ». Nothing at zero, so a caller never guards it. `label` is what a
  * screen reader hears instead of the bare number.
  */

@@ -466,6 +466,10 @@ export interface OrganizationWithRole {
   id: string;
   name: string;
   slug: string;
+  /** `lucide:<name>`, `emoji:<one emoji>` or a base64 WebP or PNG data URI; `null` when unset. */
+  icon: string | null;
+  /** A palette key (`@appstrate/core/appearance`); `null` = derived from the id. */
+  color: string | null;
   createdAt: string;
   role: OrgRole;
   /** Org-level effective set in this org, ceiling-applied (RBAC spec §6.5). */
@@ -515,6 +519,7 @@ export interface MeConnectionEntry {
   scope: ConnectionScope;
   /** Spaces whose members may use it. */
   shared_spaces: { id: string; name: string }[];
+  share_all_spaces?: boolean;
   /** Actions the caller may take on this connection. */
   allowed_actions: ConnectionAction[];
   /** Spaces the caller may share this connection into. */
@@ -560,10 +565,10 @@ export interface BasePackageListItem {
 }
 
 export interface AgentListItem extends BasePackageListItem {
-  /** AFPS manifest `icon`, interpreted by the client icon catalogue. */
-  icon?: string;
-  /** Appstrate presentation token from `_meta["dev.appstrate/ui"].color`. */
-  color?: string;
+  /** AFPS manifest `icon`, read as written (the client parses it); `null` when absent. */
+  icon: string | null;
+  /** Palette key from `_meta["dev.appstrate/ui"].color`; `null` = derived from the id. */
+  color: string | null;
   display_name?: string;
   schema_version?: string;
   author?: string;
@@ -583,10 +588,10 @@ export interface AgentListItem extends BasePackageListItem {
 
 export interface AgentDetail {
   id: string;
-  /** AFPS manifest `icon`, interpreted by the client icon catalogue. */
-  icon?: string;
-  /** Appstrate presentation token from `_meta["dev.appstrate/ui"].color`. */
-  color?: string;
+  /** AFPS manifest `icon`, read as written (the client parses it); `null` when absent. */
+  icon: string | null;
+  /** Palette key from `_meta["dev.appstrate/ui"].color`; `null` = derived from the id. */
+  color: string | null;
   /** Manifest-derived; may be absent (the SPA falls back to the id). */
   display_name?: string;
   description?: string;
@@ -1231,6 +1236,10 @@ export interface ApiKeyInfo {
 export interface SpaceInfo {
   id: string;
   name: string;
+  /** `lucide:<name>` or `emoji:<one emoji>`; `null` when unset. */
+  icon: string | null;
+  /** A palette key (`@appstrate/core/appearance`); `null` = derived from the id. */
+  color: string | null;
   isDefault: boolean;
   settings: { allowedRedirectDomains?: string[] };
   /** Who reaches the space without an explicit membership row (RBAC spec §3.1). */

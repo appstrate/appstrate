@@ -2,12 +2,12 @@
 
 /**
  * Small integration brand icon for the chat. `src` is a manifest `icon`, read
- * by `@appstrate/core/manifest-icon`; a neutral puzzle glyph stands in when it
+ * by `@appstrate/core/appearance`; a neutral puzzle glyph stands in when it
  * is absent or cannot be drawn.
  */
 
 import { PuzzleIcon } from "lucide-react";
-import { parseManifestIcon } from "@appstrate/core/manifest-icon";
+import { parseIcon } from "@appstrate/core/appearance";
 import { ManifestGlyph } from "@appstrate/ui/components/manifest-glyph";
 
 export function IntegrationIcon({
@@ -18,7 +18,7 @@ export function IntegrationIcon({
   className?: string;
 }) {
   const placeholder = <PuzzleIcon className={className} />;
-  const icon = parseManifestIcon(src);
+  const icon = parseIcon(src);
   if (!icon) return placeholder;
   return <ManifestGlyph icon={icon} className={className} fallback={placeholder} />;
 }

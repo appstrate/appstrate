@@ -17,7 +17,7 @@ import { resolveIntegrationSpawns } from "../../../src/services/integration-spaw
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   remoteIntegrationManifest,
   localIntegrationManifest,
@@ -72,7 +72,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
       source: "local",
       draftManifest: manifest(withRemote),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     // An api_key connection so resolveDeliveries finds a row and the resolver
     // proceeds to the source-discriminant block.
     await db.insert(integrationConnections).values({
@@ -203,7 +203,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       source: "local",
       draftManifest: localManifest(MISSING_SERVER),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, LOCAL);
+    await seedSpacePackage(ctx.defaultSpaceId, LOCAL);
     await seedConnection();
 
     const { specs } = await resolveIntegrationSpawns({
@@ -242,7 +242,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       draftManifest: serverManifest,
     });
     await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: serverManifest });
-    await seedPlacedPackage(ctx.defaultSpaceId, LOCAL);
+    await seedSpacePackage(ctx.defaultSpaceId, LOCAL);
     await seedConnection();
 
     const { specs } = await resolveIntegrationSpawns({

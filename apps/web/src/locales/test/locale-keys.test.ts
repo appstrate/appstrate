@@ -253,7 +253,6 @@ describe("t() keys", () => {
 const DYNAMIC_KEY_PREFIXES = [
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
   "common:status.", // components/status-badge.tsx — t(`status.${status}`)
-  "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
   "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx: one per runtime tool id
   "files:type.", // components/document-columns.tsx, components/file-artifact.tsx — t(`type.${mimeKind(…)}`)
   "integration.admin.creation.", // components/integration-detail/access-rules-section.tsx
@@ -373,6 +372,7 @@ describe("schedule disabled reasons", () => {
       connection_unshared: true,
       connection_set_unnamed: true,
       connection_choice_invalid: true,
+      package_removed: true,
     } satisfies Record<NonNullable<ScheduleWireDto["disabled_reason"]>, true>);
 
     expect(reasons.filter((reason) => !allKeys.has(`schedule.disabledReason.${reason}`))).toEqual(

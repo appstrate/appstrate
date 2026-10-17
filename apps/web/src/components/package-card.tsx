@@ -70,6 +70,8 @@ export function PackageCard({
         {icon ?? (
           <PackageIcon
             type={type}
+            id={id}
+            name={displayName}
             icon={type === "agent" ? identity?.icon : logo}
             color={identity?.color}
           />

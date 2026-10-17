@@ -45,6 +45,15 @@ describe("fieldWriteState", () => {
     expect(fieldWriteState(write({ settings: {} }, "error"), "settings").error).toBe(true);
   });
 
+  it("reports a write to any of the fields a setting is written as", () => {
+    expect(fieldWriteState(write({ color: "blue" }, "pending"), ["icon", "color"]).pending).toBe(
+      true,
+    );
+    expect(fieldWriteState(write({ name: "Acme" }, "success"), ["icon", "color"]).success).toBe(
+      false,
+    );
+  });
+
   it("says nothing under another field, nor before any write", () => {
     const quiet = { pending: false, success: false, error: false };
     expect(fieldWriteState(write({ name: "Acme" }, "pending"), "visibility")).toEqual(quiet);

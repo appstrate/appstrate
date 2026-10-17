@@ -28,9 +28,9 @@ they start with `packages/` or `e2e/`.
   `bg-card` / `bg-background`. A field is white on the canvas and grey inside a
   dialog: `Input` does it by itself, never override its background.
 - **Icons**: `lucide-react`, `size-4` in rows and buttons. A package's manifest
-  `icon` follows one grammar for every type (`@appstrate/core/manifest-icon`):
+  `icon` follows one grammar for every type (`@appstrate/core/appearance`):
   an Iconify id (`logos:slack-icon`; an agent's is `lucide:<name>`, drawn from
-  the bundle) or an image URL. Always render it with `PackageIcon`
+  the bundle), an image URL, or `emoji:<one emoji>`. Always render it with `PackageIcon`
   (`components/package-icon.tsx`, sizes `sm` / `md`, skeleton while loading,
   placeholder on failure), never as an `<img src>`.
 - **Numbers that change in place** (durations, costs, counts, timers) use
@@ -198,9 +198,9 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
     Escape). Keep API and permission boundaries explicit.
   - At once: theme, language, cards/table choice, column widths and visibility, the
     chat's model/generation/authoring choices, an agent's proxy, a space's visibility
-    and default role, the organization logo, activating a package in a space, a space
-    member's role, sharing a connection, an organization policy switch, and the deeds
-    (Send, Run, Delete, Connect, Set as default). One whose effect reaches others asks first with a
+    and default role, the icon and colour of an organization or a space, activating a
+    package in a space, a space member's role, sharing a connection, an organization
+    policy switch, and the deeds (Send, Run, Delete, Connect, Set as default). One whose effect reaches others asks first with a
     `ConfirmModal`: imposing a skill on a space's chat, an organization member's
     owner or access-revoking role, closing an open space.
   - Operational state and navigation history (auth, selected org/space, sidebar,
@@ -291,6 +291,19 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   without its own pick for the refused integrations, and « Relancer » waits for the live verdict
   of each of them (`retryDecision`).
 
+- **Connection use and sharing** occupy separate table columns: Use is a read-only scope badge
+  naming multi-space or single-space use by the owner; Sharing holds the access picker ("Only you",
+  "N spaces" or "All spaces"). The sharing control stays visible on narrow tables;
+  the usage column waits for room. The member-access explanation is visible in the popover.
+  Sharing with all team spaces uses an "All spaces" checkbox that includes future team spaces.
+  While checked, it hides the individual-space list; unchecking reveals the current selection
+  for editing and stops all-spaces sharing. Any effective withdrawal switches the backend to
+  specific-space sharing in the same transaction;
+  there is no intermediate mode or client-side comparison of space lists. Only an organization
+  administrator owning an org-scoped connection may consent; personal spaces stay private.
+  Sharing targets only team spaces; personal spaces are excluded from the picker and refused by
+  the backend. Stopping all-spaces sharing keeps existing shares.
+
 ## 5. Choosing a value
 
 | Need                                                                 | Component                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -298,6 +311,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 | A handful of options                                                 | `Select`                                                                                                                                                                                                                                                                                                                                                                                    |
 | Many options, or options worth searching (time zones, people, icons) | combobox: `Popover` + `Command`: `TimezoneSelect`, `ActorSelect`, the icon picker in `agent-editor/agent-appearance-fields.tsx`                                                                                                                                                                                                                                                             |
 | Several of a small set (weekdays)                                    | `ToggleGroup type="multiple"` (in `FrequencyComposer`)                                                                                                                                                                                                                                                                                                                                      |
+| One value, alternative editors (an icon: Lucide, emoji, image)       | `Tabs`, one editor per tab (`AppearancePicker`); never a `ToggleGroup type="single"`, which does not switch panels                                                                                                                                                                                                                                                                          |
 | On / off                                                             | `Switch` (a `SettingRow` `toggle`)                                                                                                                                                                                                                                                                                                                                                          |
 | Several of a long set (scopes, permissions)                          | `ScopeMultiSelect` (`components/scope-multi-select.tsx`, a searchable multi combobox grouped by resource, with a count and an all / none shortcut)                                                                                                                                                                                                                                          |
 | A model (agent, schedule, run with options, chat)                    | `ModelSelect` (`components/model-select.tsx`, over `ModelPicker` of `packages/ui/src/components/model-picker.tsx`): the one list, in a Popover + Command, grouped by who pays (see below). Never a `Select` of models, never a flat list. The groups are `groupModelsForPicker` (`packages/ui/src/components/model-picker-groups.ts`), the chat's composer draws the same `ModelPickerList` |
@@ -579,10 +593,23 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   with `font-mono`; an agent whose working copy differs from its last published
   version (or has none) wears « Brouillon » in its place, and only then; a
   disabled reason hangs on `DisabledReasonTooltip`.
-- **Identity**: `PackageIcon` (`components/package-icon.tsx`), `OrganizationAvatar`, `EndUserAvatar`, `ActorLabel` (the
-  member or end-user a schedule runs as). An end-user's initials sit in one of
-  eight person colours hashed from their id (`--avatar-1..8` in `styles.css`),
-  never a raw Tailwind colour.
+- **Identity**: one tile draws every identity — an agent, an organization, a
+  space, a member, an end-user: `IdentityTile`
+  (`packages/ui/src/components/identity-tile.tsx`), sized by one `size-*`, an
+  image covering it, a glyph or the initials on its colour; `shape="round"` for a
+  person. `PackageIcon` (`components/package-icon.tsx`), `EndUserAvatar` and the
+  user menu's avatar are callers of it, `ActorLabel` names the member or end-user
+  a schedule runs as. An organization is drawn through `orgTile`, a space through
+  `spaceTile` (both `lib/identity-tile-props.ts`): a team space by its own icon and
+  colour, the viewer's own personal space as the viewer, an orphaned one as a
+  departed person. Its colours are the `APPEARANCE_COLORS` palette
+  (`--identity-<key>` for the tint and `--identity-<key>-foreground` for the glyph,
+  4.5:1 in both themes, in `styles.css`; tile classes in
+  `packages/ui/src/identity-colors.ts`), never a raw Tailwind colour;
+  no colour chosen means one hashed from the id (an end-user's and a person's
+  always is). `AppearancePicker` (`components/appearance-picker.tsx`) is every
+  identity editor — an agent's, an organization's, a team space's: the icon forms
+  the entity allows, a palette colour or « Automatique ».
 - **Cards**: a summary block on a detail page is `DetailSectionCard`; a titled
   pane is `SectionCard` (`components/section-card.tsx`, a real `<h3>`); a figure with a label is `OperationalStat` (a `dl` row) with
   `OverviewCardAction` as its quiet footer action; a label and value fact grid is

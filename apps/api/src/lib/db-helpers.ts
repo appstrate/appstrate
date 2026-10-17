@@ -30,6 +30,21 @@ export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type DbOrTx = typeof db | Tx;
 
 /**
+ * Locks the organization row: the one lock that orders writes to the org's owner set and roles,
+ * the creation or conversion of its team spaces, and all-spaces sharing consent, so each
+ * of these sees the others' committed rows. NO KEY UPDATE: child inserts take FOR KEY SHARE on
+ * this row and must not queue behind it.
+ */
+export async function lockOrganizationRow(tx: Tx, orgId: string): Promise<void> {
+  const [org] = await tx
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .for("no key update");
+  if (!org) throw notFound("Organization not found");
+}
+
+/**
  * Run `fn` in a transaction: its own on the root `db`, or a SAVEPOINT of the one `executor`
  * already is — so a service that needs its writes atomic stays atomic alone, and joins a
  * caller's transaction (committing or rolling back with it) when handed one. Drizzle's

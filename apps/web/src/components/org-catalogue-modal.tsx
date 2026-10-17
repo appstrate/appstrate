@@ -18,8 +18,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
-import { ArrowLeft, Check, ExternalLink, Inbox, LibraryBig } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, LibraryBig } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
@@ -28,11 +27,11 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SHARE_PARAM, SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ActivationClosureDialog } from "./catalogue-activation-dialog";
-import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import { RemoveFromSpaceConfirm, type RemovalTarget } from "./remove-from-space-confirm";
+import { packageDetailPath } from "../lib/package-paths";
 import {
   CATALOGUE_KINDS,
   CATALOGUE_VERSION_PARAM,
-  catalogueHref,
   type CatalogueReading,
 } from "../lib/catalogue-link";
 import { searchOf } from "../lib/url-search";
@@ -43,12 +42,10 @@ import { packageKeys } from "../lib/query-keys";
 import { missingIntegrations, type MissingDependency } from "../lib/activation-closure";
 import { mayConfigurePackage } from "../lib/package-permissions";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { useRevokePackageShare } from "../hooks/use-package-shares";
 import { useIntegrationsById } from "../hooks/use-integrations";
 import { PackageIcon } from "./package-icon";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 import {
-  invalidateLibraries,
   useCatalogueLibrary,
   useSetPackageActive,
   type LibraryPackageItem,
@@ -58,11 +55,10 @@ import {
   cataloguePlacement,
   detailSpace,
   inPlacedTab,
-  pendingShares,
   type CataloguePlacement,
   type PlacementState,
 } from "../lib/catalogue-placement";
-import { modalOpeningState, useUrlModal, useUrlModalTarget } from "../hooks/use-url-modal";
+import { useUrlModal, useUrlModalTarget } from "../hooks/use-url-modal";
 import { useListParams } from "../lib/list-params";
 import {
   INTEGRATION_EXECUTIONS,
@@ -74,7 +70,6 @@ import { CollectionTabs } from "./detail-tabs";
 import type { CardItem } from "../lib/package-card-item";
 import { CataloguePreview } from "./catalogue-preview";
 import { CatalogueMenuItems } from "./catalogue-row";
-import { CatalogueShared } from "./catalogue-shared";
 import { CatalogueAddButton } from "./catalogue-add-button";
 import { PageActionsMenu } from "./page-actions-menu";
 import { PanelLayout } from "./panel-layout";
@@ -223,7 +218,7 @@ export function OrgCatalogueModal({
   const writableOf = (item: Pick<CardItem, "id">) => rowOf(item)?.home_writable === true;
   const deedsOf = (item: Pick<CardItem, "id">) => {
     const row = rowOf(item);
-    return row ? catalogueDeeds(row) : undefined;
+    return row ? catalogueDeeds(row, spaceId) : undefined;
   };
   // Activations waiting on the missing-integrations question; a bulk activation queues several, asked one at a time.
   const [closures, setClosures] = useState<Closure[]>([]);
@@ -231,31 +226,23 @@ export function OrgCatalogueModal({
   const nextClosure = () => setClosures((queue) => queue.slice(1));
   const [movingHome, setMovingHome] = useState<string | null>(null);
   const share = useUrlModal(SHARE_PARAM);
-  const revoke = useRevokePackageShare();
-  // Targets the SPACE id; a share to a person publishes their user id instead, so that
-  // offer is withdrawn from the package's share dialog.
+  const [removing, setRemoving] = useState<RemovalTarget | null>(null);
   const revokeFrom = (item: CardItem, targetSpaceId: string) =>
-    revoke.mutate(
-      {
-        params: { path: { ...splitPackageRef(item.id), target: targetSpaceId } },
-      },
-      {
-        onSuccess: () => {
-          void invalidateLibraries(qc);
-          toast.success(t("catalogue.revoked", { space: spaceNameOf(targetSpaceId) }));
-        },
-      },
-    );
+    setRemoving({
+      packageId: item.id,
+      name: item.displayName,
+      target: targetSpaceId,
+      targetLabel: spaceNameOf(targetSpaceId),
+    });
 
   // The STATE filter is for the matrix only; `pages/catalogue.tsx` drops the key when the reading changes.
   const states: PlacementState[] = discovering
     ? []
-    : list.values("state", ["active", "inactive", "offered"] as const);
+    : list.values("state", ["active", "inactive"] as const);
   const statesIn = (placement: CataloguePlacement): PlacementState[] => {
     const out: PlacementState[] = [];
     if (placement.activeIn.length > 0) out.push("active");
     if (placement.inactiveIn.length > 0) out.push("inactive");
-    if (placement.offeredIn.length > 0) out.push("offered");
     return out;
   };
   const rows = all.filter((item) => {
@@ -271,7 +258,6 @@ export function OrgCatalogueModal({
     options: [
       { value: "active", label: t("catalogue.filter.active") },
       { value: "inactive", label: t("catalogue.filter.inactive") },
-      { value: "offered", label: t("catalogue.offeredHere") },
     ],
     onChange: list.setValues("state"),
   };
@@ -293,6 +279,8 @@ export function OrgCatalogueModal({
     ) : (
       <PackageIcon
         type={active}
+        id={item.id}
+        name={row.displayName}
         icon={active === "agent" ? look?.icon : integrationById.get(item.id)?.manifest.icon}
         color={look?.color}
       />
@@ -303,11 +291,10 @@ export function OrgCatalogueModal({
         id: space.id,
         name: space.name,
         active: placement?.activeIn.includes(space.id) ?? false,
-        pending: placement?.offeredIn.includes(space.id) ?? false,
       }))
       .filter((space) => space.active || mayActivateIn(item, space.id));
-    const sharer = placement ? Object.values(placement.offeredBy).find(Boolean) : undefined;
-    const shared = (placement?.offeredIn.length ?? 0) > 0;
+    // Only the placement in the space on screen: another space's share says nothing here.
+    const sharer = (spaceId && placement?.sharedBy[spaceId]) || undefined;
     return {
       ...row,
       icon,
@@ -329,11 +316,9 @@ export function OrgCatalogueModal({
           <span className="truncate">
             {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
           </span>
-          {shared && (
+          {sharer && (
             <span className="bg-primary/10 text-primary shrink-0 truncate rounded px-1.5 text-[11px] leading-5 font-medium">
-              {sharer
-                ? t("catalogue.sheet.offeredBy", { name: sharer })
-                : t("catalogue.offeredHere")}
+              {t("catalogue.sheet.sharedBy", { name: sharer })}
             </span>
           )}
         </>
@@ -439,9 +424,10 @@ export function OrgCatalogueModal({
     return row ? integrationProtocol(row.manifest.source.kind) : undefined;
   });
   const actionsColumn = useCatalogueActionsColumn({
-    isPending: activate.isPending || revoke.isPending,
+    isPending: activate.isPending,
     deedsOf,
     spaceNameOf,
+    currentSpaceId: spaceId,
     onOpen: (item) => preview.open(item.id),
     onMoveHome: (item) => setMovingHome(item.id),
     onShare: (item) => share.open(item.id),
@@ -481,33 +467,17 @@ export function OrgCatalogueModal({
   const kindRows = CATALOGUE_KINDS.map((type) => (
     <RailLink
       key={type}
-      item={{
-        to: hrefOf(reading === "shared" ? "discover" : reading, type),
-        icon: PACKAGE_TYPE_ICON[type],
-      }}
+      item={{ to: hrefOf(reading, type), icon: PACKAGE_TYPE_ICON[type] }}
       label={t(TITLE_KEY[type])}
       count={library?.packages[type]?.length}
-      active={reading !== "shared" && type === active}
+      active={type === active}
     />
   ));
-  // Shown while any share waits and while open, so the last activation leaves the reader on its empty state.
-  const shares = pendingShares(Object.values(library?.packages ?? {}).flat());
-  const showShared = shares.length > 0 || reading === "shared";
-  const sharedRow = showShared ? (
-    <RailLink
-      item={{ to: hrefOf("shared", active), icon: Inbox }}
-      label={t("catalogue.shared.title")}
-      count={shares.length}
-      active={reading === "shared"}
-    />
-  ) : null;
-
   const rail = (
     <div className="flex h-full flex-col">
       <RailHeader icon={LibraryBig} title={t("common:nav.catalogue")} />
       <div className="flex-1">
-        {sharedRow && <div className="px-3 py-3">{sharedRow}</div>}
-        <RailGroup title={t("catalogue.kinds")} separated={Boolean(sharedRow)}>
+        <RailGroup title={t("catalogue.kinds")}>
           <nav className="flex flex-col gap-0.5" aria-label={t("catalogue.kinds")}>
             {kindRows}
           </nav>
@@ -557,23 +527,7 @@ export function OrgCatalogueModal({
         )
       }
     >
-      {reading === "shared" ? (
-        <CatalogueShared
-          shares={shares}
-          spaceNameOf={spaceNameOf}
-          mayActivateIn={mayActivateIn}
-          busy={activate.isPending}
-          onActivate={(pkg, targetSpaceId) =>
-            void onSetActive(toCardItem(pkg), targetSpaceId, true)
-          }
-          // Opens in the package's own kind, pushed as the sheet's own opening so Back returns to this list.
-          onOpen={(pkg) =>
-            navigate(catalogueHref(pkg.type, { packageId: pkg.id }), {
-              state: modalOpeningState(location.state, "package"),
-            })
-          }
-        />
-      ) : previewed && previewedItem ? (
+      {previewed && previewedItem ? (
         <CataloguePreview
           item={previewed}
           type={active}
@@ -596,8 +550,9 @@ export function OrgCatalogueModal({
             <PageActionsMenu>
               <CatalogueMenuItems
                 item={previewedItem}
-                deeds={catalogueDeeds(previewed)}
+                deeds={catalogueDeeds(previewed, spaceId)}
                 spaceNameOf={spaceNameOf}
+                currentSpaceId={spaceId}
                 // The page lives in the current space: a package placed only elsewhere would 404.
                 open={
                   previewed.source === "system" || placementOf(previewed).here !== null
@@ -732,6 +687,7 @@ export function OrgCatalogueModal({
         />
       )}
 
+      <RemoveFromSpaceConfirm removal={removing} onClose={() => setRemoving(null)} />
       {/* The dialogs mount only when their deed is the reader's; a URL names the shared package. */}
       {movingHome && deedsOf({ id: movingHome })?.moveHome && (
         <MoveHomeSpaceDialog

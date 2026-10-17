@@ -69,11 +69,12 @@ export interface CoreResources {
   // Per-space configuration; `spaces` is the org-level catalog.
   "space-settings": "write";
   "space-members": "read" | "invite" | "remove" | "change-role";
-  // `share` offers the package to another space — its AUDIENCE (`package_shares`),
-  // never its activation, which is the recipient's own act. It is a session-only
-  // grant of the `admin` and `builder` presets: it decides who runs a package
-  // with whose credentials, so it is absent from the API-key allowlist for the
-  // same reason `integrations:configure` is.
+  // `share` places the package in another space — its AUDIENCE (a
+  // `space_packages` row outside its home), switched on only where the sharer
+  // may activate. It is a session-only grant of the `admin` and `builder`
+  // presets: it decides who runs a package with whose credentials, so it is
+  // absent from the API-key allowlist for the same reason
+  // `integrations:configure` is.
   //
   // Composing an inline agent (a manifest the request carries, declaring its
   // own dependencies) is not a grant of its own: it takes `write` — the caller

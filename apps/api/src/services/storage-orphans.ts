@@ -58,7 +58,6 @@ import { FILES_BUCKET } from "./files.ts";
 import { UPLOAD_BUCKET } from "./uploads.ts";
 import { RUN_WORKSPACE_BUCKET } from "./run-workspace-manifest.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
-import { ORG_LOGO_BUCKET, orgLogoStorageKeys, orgLogoStorageKey } from "./org-logo.ts";
 import {
   PACKAGE_ITEMS_BUCKET,
   packageItemKey,
@@ -191,12 +190,6 @@ export function orphanScanBuckets(): OrphanScanBucket[] {
         const rows = await db.select({ id: runs.id }).from(runs);
         return new Set(rows.map((r) => r.id));
       },
-    },
-    {
-      bucket: ORG_LOGO_BUCKET,
-      describes: "organizations.logo (current image version)",
-      identityOf: orgLogoStorageKey,
-      loadKnown: orgLogoStorageKeys,
     },
   ];
 }
