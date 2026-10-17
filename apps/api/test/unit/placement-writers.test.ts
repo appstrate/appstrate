@@ -57,6 +57,24 @@ describe("space_packages writers", () => {
       "updateSpacePackage",
     ]);
   });
+
+  it("each read the package FOR SHARE (loadPlaceablePackage) before deciding, or receive it read so", () => {
+    // A writer reading `home_space_id` without the lock races `PUT …/home`
+    // and can create a row in the OLD home after the move commits.
+    const source = readFileSync(join(REPO_ROOT, WRITER_FILE), "utf8");
+    const bodies = new Map<string, string>();
+    let current = "";
+    for (const line of source.split("\n")) {
+      const fn = /^(?:export )?(?:async )?function (\w+)/.exec(line);
+      if (fn) current = fn[1]!;
+      if (current) bodies.set(current, (bodies.get(current) ?? "") + line + "\n");
+    }
+    for (const writer of ["activatePackageWithin", "deactivatePackage", "updateSpacePackage"]) {
+      expect(bodies.get(writer), writer).toContain("loadPlaceablePackage(tx,");
+    }
+    // placePackage takes `pkg` from a caller that read it with the lock.
+    expect(bodies.get("placePackage")).not.toContain(".from(packages)");
+  });
 });
 
 describe("the retired package_shares table", () => {

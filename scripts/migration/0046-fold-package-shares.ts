@@ -12,10 +12,14 @@
  * `space_packages` row of its (space, package), `enabled = false` and `shared_by` copied,
  * `ON CONFLICT DO NOTHING`: a space that had already activated the package keeps its row, which
  * then gains the `shared_by` it lacks. A share whose space belongs to another organization than
- * the package is skipped and printed. Per space, the placements before (home ∨ share ∨ row) and
- * after (home ∨ row) are printed and must be equal, or the transaction rolls back. Then the table
- * is emptied, skipped shares included: nothing reads it, and a skipped share placed nothing under
- * the org boundary. Run after the
+ * the package is skipped and printed. An org package's row outside its home with no same-org share
+ * placed it nowhere under the old rule but would place it under the new one: each such ORPHAN
+ * (cross-org rows included) is printed with its `enabled` and deleted. Per space, the placements
+ * before (old rule: system ∨ home ∨ same-org share) and after (new rule: system ∨ home ∨ row) are
+ * printed and must be equal, or the transaction rolls back. Then the table is emptied, skipped
+ * shares included. With `package_shares` empty the script writes and checks nothing: once folded, a
+ * row with no share IS a placement, so orphans are only told apart while shares remain — a
+ * database that never shared anything keeps its orphan rows, now live. Run after the
  * migrations have applied `0099` and BEFORE the app starts, `pg_dump` first: an app serving `0099`
  * before it runs no longer sees the packages shared but never activated, and the platform refuses
  * to boot until it has. Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither
@@ -41,12 +45,22 @@ export interface SpacePlacements {
   after: number;
 }
 
+export interface OrphanPlacement {
+  packageId: string;
+  spaceId: string;
+  enabled: boolean;
+  /** The row's space belongs to another organization than the package. */
+  crossOrg: boolean;
+}
+
 export interface PackageSharesFold {
   inserted: number;
   /** Existing rows whose `shared_by` was copied from their share. */
   sharedByCopied: number;
   /** Shares naming a space of another organization than the package's — deleted, not folded. */
   skipped: SkippedPackageShare[];
+  /** Rows that placed their package nowhere under the old rule — deleted. */
+  orphans: OrphanPlacement[];
   /** `package_shares` rows deleted once folded. */
   emptied: number;
   placements: SpacePlacements[];
@@ -57,11 +71,22 @@ const FOLDABLE = sql`package_shares ps
   JOIN spaces s ON s.id = ps.space_id
   JOIN packages p ON p.id = ps.package_id AND p.org_id = s.org_id`;
 
+/** The old rule, read before the fold: system (its rows) ∨ home ∨ a same-org share. */
 const PLACEMENTS_BEFORE = sql`SELECT space_id, count(DISTINCT package_id)::int AS n FROM (
     SELECT home_space_id AS space_id, id AS package_id FROM packages WHERE home_space_id IS NOT NULL
     UNION SELECT ps.space_id, ps.package_id FROM ${FOLDABLE}
-    UNION SELECT space_id, package_id FROM space_packages
+    UNION SELECT sp.space_id, sp.package_id FROM space_packages sp
+      JOIN packages p ON p.id = sp.package_id WHERE p.org_id IS NULL
   ) placed GROUP BY space_id`;
+
+/** An org package's row outside its home with no same-org share. */
+const ORPHANS = sql`space_packages sp
+  JOIN packages p ON p.id = sp.package_id
+  JOIN spaces s ON s.id = sp.space_id
+  WHERE p.org_id IS NOT NULL
+    AND sp.space_id IS DISTINCT FROM p.home_space_id
+    AND NOT EXISTS (SELECT 1 FROM ${FOLDABLE}
+      WHERE ps.package_id = sp.package_id AND ps.space_id = sp.space_id)`;
 
 const PLACEMENTS_AFTER = sql`SELECT space_id, count(DISTINCT package_id)::int AS n FROM (
     SELECT home_space_id AS space_id, id AS package_id FROM packages WHERE home_space_id IS NOT NULL
@@ -86,6 +111,7 @@ export async function runFoldPackageShares(options: {
     inserted: 0,
     sharedByCopied: 0,
     skipped: [],
+    orphans: [],
     emptied: 0,
     placements: [],
   };
@@ -109,6 +135,11 @@ export async function runFoldPackageShares(options: {
               WHERE sp.package_id = ps.package_id AND sp.space_id = ps.space_id)) AS to_fold`),
       );
       out(`package_shares: ${total!.shares}, to fold: ${total!.to_fold}`);
+      // Folded already (or never shared): nothing left to tell an orphan from a placement.
+      if (total!.shares === 0) {
+        if (!apply) throw new DryRunRollback();
+        return;
+      }
 
       const foreign = toRows<{ package_id: string; space_id: string }>(
         await tx.execute(sql`SELECT ps.package_id, ps.space_id
@@ -124,6 +155,31 @@ export async function runFoldPackageShares(options: {
       }
 
       const before = await counts(PLACEMENTS_BEFORE);
+
+      const orphans = toRows<{
+        package_id: string;
+        space_id: string;
+        enabled: boolean;
+        cross_org: boolean;
+      }>(
+        await tx.execute(sql`SELECT sp.package_id, sp.space_id, sp.enabled,
+            s.org_id IS DISTINCT FROM p.org_id AS cross_org
+          FROM ${ORPHANS} ORDER BY sp.package_id, sp.space_id`),
+      );
+      for (const row of orphans) {
+        out(
+          `  orphan ${row.package_id} → ${row.space_id}: enabled=${row.enabled}${row.cross_org ? ", foreign space" : ""} — deleted`,
+        );
+        result.orphans.push({
+          packageId: row.package_id,
+          spaceId: row.space_id,
+          enabled: row.enabled,
+          crossOrg: row.cross_org,
+        });
+      }
+      await tx.execute(sql`DELETE FROM space_packages d USING (
+          SELECT sp.space_id, sp.package_id FROM ${ORPHANS}) o
+        WHERE d.space_id = o.space_id AND d.package_id = o.package_id`);
 
       const inserted = toRows<{ package_id: string }>(
         await tx.execute(sql`INSERT INTO space_packages (space_id, package_id, enabled, shared_by)
@@ -143,7 +199,7 @@ export async function runFoldPackageShares(options: {
       );
       result.sharedByCopied = copied.length;
       out(
-        `inserted: ${result.inserted}, shared_by copied: ${result.sharedByCopied}, skipped: ${result.skipped.length}`,
+        `inserted: ${result.inserted}, shared_by copied: ${result.sharedByCopied}, skipped: ${result.skipped.length}, orphans deleted: ${result.orphans.length}`,
       );
 
       const after = await counts(PLACEMENTS_AFTER);

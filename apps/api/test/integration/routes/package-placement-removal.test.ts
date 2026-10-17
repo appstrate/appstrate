@@ -222,6 +222,40 @@ describe("the recipient side may withdraw", () => {
   });
 });
 
+describe("the recipient side learns nothing about an unreachable package", () => {
+  const MISSING = "@withdraw/nope";
+  /** The 404 body, with the package id and the per-request fields taken out. */
+  const notFoundShape = async (res: Response, packageId: string) => {
+    const {
+      request_id: _r,
+      instance: _i,
+      ...body
+    } = (await expectProblem(res, 404)) as Record<string, unknown>;
+    return JSON.parse(JSON.stringify(body).replaceAll(packageId, "<id>"));
+  };
+  const withdrawPackage = (packageId: string, headers: Headers, target: string) =>
+    app.request(`/api/packages/${packageId}/shares/${target}`, { method: "DELETE", headers });
+
+  for (const [label, caller, target] of [
+    ["their own user id", () => recipient, () => recipient.userId],
+    ["their own personal space", () => recipient, () => recipient.personalSpaceId],
+    ["a space where they may deactivate", () => teamBuilder, () => teamId],
+  ] as const) {
+    it(`answers the nonexistent package's 404 by ${label}`, async () => {
+      const headers = caller().headers(target() === teamId ? teamId : undefined);
+      const unreachable = await notFoundShape(
+        await withdrawPackage(AGENT, headers, target()),
+        AGENT,
+      );
+      const missing = await notFoundShape(
+        await withdrawPackage(MISSING, headers, target()),
+        MISSING,
+      );
+      expect(unreachable).toEqual(missing);
+    });
+  }
+});
+
 describe("withdrawing disables the package's schedules in that space", () => {
   beforeEach(async () => {
     expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(200);

@@ -5,12 +5,13 @@
  * `space_packages` row of its (space, package), switched off, with `shared_by` copied; a space
  * that had already activated the package keeps its row and gains the `shared_by` it lacked; a dry
  * run writes nothing; `--apply` empties `package_shares`, so a second `--apply` writes nothing; a
- * share naming a space of another organization is skipped, reported and deleted; per-space
- * placements are equal before and after.
+ * share naming a space of another organization is skipped, reported and deleted; a row placing
+ * its package nowhere under the old rule (an orphan, cross-org included) is reported and deleted;
+ * per-space placements are equal before (old rule) and after (new rule), or nothing commits.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packageShares, spacePackages } from "@appstrate/db/schema";
 import { runFoldPackageShares } from "../migration/0046-fold-package-shares.ts";
@@ -84,7 +85,7 @@ describe("0046 — package shares folded into space_packages", () => {
     expect(applied).toMatchObject({ inserted: 1, sharedByCopied: 1, emptied: 2 });
     expect(lines).toContain("package_shares emptied: 2");
     expect(await db.select().from(packageShares)).toEqual([]);
-    expect(lines).toContain("inserted: 1, shared_by copied: 1, skipped: 0");
+    expect(lines).toContain("inserted: 1, shared_by copied: 1, skipped: 0, orphans deleted: 0");
     expect(lines.at(-1)).toBe("0046: APPLIED — committed.");
     expect(await rows()).toEqual(
       sorted([
@@ -105,6 +106,8 @@ describe("0046 — package shares folded into space_packages", () => {
     lines.length = 0;
     expect(await run(true)).toMatchObject({ inserted: 0, sharedByCopied: 0, emptied: 0 });
     expect(lines).toContain("package_shares: 0, to fold: 0");
+    // Folded rows have no share left, yet a re-run must not take them for orphans.
+    expect(await rows()).toHaveLength(3);
   });
 
   it("leaves a row's existing sharer alone", async () => {
@@ -134,5 +137,56 @@ describe("0046 — package shares folded into space_packages", () => {
     expect(await db.select().from(spacePackages).where(eq(spacePackages.packageId, AGENT))).toEqual(
       [],
     );
+  });
+
+  it("deletes an orphan row and a cross-org row, reporting each with its switch", async () => {
+    const team = (await seedSpace({ orgId: ctx.orgId, name: "Team" })).id;
+    const shared = (await seedSpace({ orgId: ctx.orgId, name: "Shared" })).id;
+    const stranger = await createTestContext({ orgSlug: "mig0046-orphan" });
+    await db
+      .insert(packageShares)
+      .values({ packageId: AGENT, spaceId: shared, sharedBy: ctx.user.id });
+    // Outside the home, no share: placed nowhere before, would be live after.
+    await seedSpacePackage(team, AGENT, { enabled: true });
+    await seedSpacePackage(stranger.defaultSpaceId, SKILL, { enabled: false });
+
+    const result = await run(true);
+    expect(result.orphans).toEqual([
+      { packageId: AGENT, spaceId: team, enabled: true, crossOrg: false },
+      { packageId: SKILL, spaceId: stranger.defaultSpaceId, enabled: false, crossOrg: true },
+    ]);
+    expect(lines).toContain(`  orphan ${AGENT} → ${team}: enabled=true — deleted`);
+    expect(lines).toContain(
+      `  orphan ${SKILL} → ${stranger.defaultSpaceId}: enabled=false, foreign space — deleted`,
+    );
+    expect(await rows()).toEqual([
+      { spaceId: shared, packageId: AGENT, enabled: false, sharedBy: ctx.user.id },
+    ]);
+    expect(result.placements.find((p) => p.spaceId === team)).toBeUndefined();
+    expect(result.placements.every((p) => p.before === p.after)).toBe(true);
+  });
+
+  it("rolls everything back when a space's placements differ", async () => {
+    const team = (await seedSpace({ orgId: ctx.orgId, name: "Team" })).id;
+    await db
+      .insert(packageShares)
+      .values({ packageId: AGENT, spaceId: team, sharedBy: ctx.user.id });
+    await seedSpacePackage(team, SKILL, { enabled: true });
+    // A fold that drops its insert: the share would place nothing after.
+    await db.execute(sql`CREATE FUNCTION mig0046_drop() RETURNS trigger LANGUAGE plpgsql
+      AS $$ BEGIN RETURN NULL; END $$`);
+    await db.execute(sql`CREATE TRIGGER mig0046_drop BEFORE INSERT ON space_packages
+      FOR EACH ROW EXECUTE FUNCTION mig0046_drop()`);
+    try {
+      await expect(run(true)).rejects.toThrow(/placements differ in 1 space\(s\): /);
+    } finally {
+      await db.execute(sql`DROP TRIGGER mig0046_drop ON space_packages`);
+      await db.execute(sql`DROP FUNCTION mig0046_drop()`);
+    }
+    expect(await db.select().from(packageShares)).toHaveLength(1);
+    // The orphan deletion rolled back with it.
+    expect(await rows()).toEqual([
+      { spaceId: team, packageId: SKILL, enabled: true, sharedBy: null },
+    ]);
   });
 });

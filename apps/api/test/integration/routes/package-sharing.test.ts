@@ -1697,6 +1697,56 @@ describe("who switches a placement on (R3)", () => {
     expect(await rowIn(teamId)).toMatchObject({ enabled: false, sharedBy: sharer.userId });
   });
 
+  /** The `package.activated` events of `AGENT`. */
+  const activations = () =>
+    db
+      .select({ after: auditEvents.after })
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "package.activated"), eq(auditEvents.resourceId, AGENT))!);
+
+  it("audits a share landing ON as an activation, as the activation door does", async () => {
+    const sharer = await sharerWith("builder");
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(200);
+    expect(await activations()).toEqual([{ after: { spaceId: teamId } }]);
+    // A repeat creates nothing and records nothing.
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(200);
+    expect(await activations()).toHaveLength(1);
+  });
+
+  it("records no activation for a share landing OFF", async () => {
+    const sharer = await sharerWith("operator");
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(200);
+    expect(await activations()).toEqual([]);
+  });
+
+  it("refuses an unexecutable mcp-server landing ON (422), as the activation door does", async () => {
+    const MCP = "@shares/unbuildable-mcp";
+    await seedPackage({
+      id: MCP,
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      homeSpaceId: homeId,
+      draftManifest: { name: MCP, version: "0.1.0", type: "mcp-server" },
+    });
+    await seedPublishedVersion(MCP, "0.1.0");
+    const mcpRowIn = (spaceId: string) =>
+      db
+        .select()
+        .from(spacePackages)
+        .where(and(eq(spacePackages.packageId, MCP), eq(spacePackages.spaceId, spaceId))!);
+
+    const builder = await sharerWith("builder");
+    await expectProblem(await shareWithSpace(builder.headers(homeId), MCP, teamId), 422, {
+      code: "bundle_invalid",
+    });
+    expect(await mcpRowIn(teamId)).toEqual([]);
+
+    // Landing OFF activates nothing, so it is not refused.
+    const operator = await sharerWith("operator");
+    expect((await shareWithSpace(operator.headers(homeId), MCP, teamId)).status).toBe(200);
+    expect(await mcpRowIn(teamId)).toMatchObject([{ enabled: false }]);
+  });
+
   it("lands ON in the sharer's own personal space", async () => {
     expect((await shareWithUser(author.headers(homeId), AGENT, author.userId)).status).toBe(200);
     expect(await rowIn(author.personalSpaceId)).toMatchObject({

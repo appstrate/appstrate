@@ -7,36 +7,40 @@ import { ConfirmModal } from "./confirm-modal";
 export interface RemovalTarget {
   packageId: string;
   name: string;
-  spaceId: string;
-  spaceName: string;
+  /** A `shareTargetHandle`: a space id, or a user id for a person's personal space. */
+  target: string;
+  /** What the dialog calls the target (a space name, or "l'espace personnel de X"). */
+  targetLabel: string;
 }
 
 /** Asks before taking a package out of a space: its settings there go, its schedules stop. */
 export function RemoveFromSpaceConfirm({
-  target,
+  removal,
   onClose,
   onRemoved,
 }: {
-  target: RemovalTarget | null;
+  removal: RemovalTarget | null;
   onClose: () => void;
   /** After the server removed it, once the dialog is closed. */
   onRemoved?: () => void;
 }) {
   const { t } = useTranslation("settings");
-  const removal = useRemovePackageFromSpace();
+  const removing = useRemovePackageFromSpace();
   return (
     <ConfirmModal
-      open={target !== null}
+      open={removal !== null}
       onClose={onClose}
-      title={target ? t("catalogue.revokeTitle", { space: target.spaceName }) : ""}
+      title={removal ? t("catalogue.revokeTitle", { space: removal.targetLabel }) : ""}
       description={
-        target ? t("catalogue.revokeConfirm", { name: target.name, space: target.spaceName }) : ""
+        removal
+          ? t("catalogue.revokeConfirm", { name: removal.name, space: removal.targetLabel })
+          : ""
       }
       confirmLabel={t("catalogue.revokeAction")}
-      isPending={removal.isPending}
+      isPending={removing.isPending}
       onConfirm={() =>
-        target &&
-        removal.remove(target, {
+        removal &&
+        removing.remove(removal, {
           onSuccess: () => {
             onClose();
             onRemoved?.();

@@ -227,14 +227,12 @@ export function OrgCatalogueModal({
   const [movingHome, setMovingHome] = useState<string | null>(null);
   const share = useUrlModal(SHARE_PARAM);
   const [removing, setRemoving] = useState<RemovalTarget | null>(null);
-  // Targets the SPACE id; a share to a person publishes their user id instead, so that
-  // share is withdrawn from the package's share dialog.
   const revokeFrom = (item: CardItem, targetSpaceId: string) =>
     setRemoving({
       packageId: item.id,
       name: item.displayName,
-      spaceId: targetSpaceId,
-      spaceName: spaceNameOf(targetSpaceId),
+      target: targetSpaceId,
+      targetLabel: spaceNameOf(targetSpaceId),
     });
 
   // The STATE filter is for the matrix only; `pages/catalogue.tsx` drops the key when the reading changes.
@@ -686,7 +684,7 @@ export function OrgCatalogueModal({
         />
       )}
 
-      <RemoveFromSpaceConfirm target={removing} onClose={() => setRemoving(null)} />
+      <RemoveFromSpaceConfirm removal={removing} onClose={() => setRemoving(null)} />
       {/* The dialogs mount only when their deed is the reader's; a URL names the shared package. */}
       {movingHome && deedsOf({ id: movingHome })?.moveHome && (
         <MoveHomeSpaceDialog

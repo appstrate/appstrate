@@ -80,6 +80,10 @@ async function inPre0040Schema(body: (tx: Tx) => Promise<void>): Promise<void> {
       await tx.execute(
         sql`ALTER TABLE "application_packages" ALTER COLUMN "config" SET DEFAULT '{}'::jsonb`,
       );
+      // 0099 dropped this default; 0040's schema still had it.
+      await tx.execute(
+        sql`ALTER TABLE "application_packages" ALTER COLUMN "enabled" SET DEFAULT true`,
+      );
       await tx.execute(sql`ALTER TABLE "package_schedules" ADD COLUMN "config_override" jsonb`);
       await tx.execute(sql`ALTER TABLE "runs" ADD COLUMN "config" jsonb`);
       await tx.execute(sql`ALTER TABLE "runs" ADD COLUMN "config_override" jsonb`);

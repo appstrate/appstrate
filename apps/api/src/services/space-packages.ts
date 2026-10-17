@@ -1070,21 +1070,8 @@ export async function updateSpacePackage(
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
 
   const work = async (tx: Tx) => {
-    // Tenant boundary, atomic with the write: the target package must be
-    // visible to the org (own or system) and not an ephemeral shadow row.
-    const [pkg] = await tx
-      .select({
-        id: packages.id,
-        type: packages.type,
-        source: packages.source,
-        homeSpaceId: packages.homeSpaceId,
-      })
-      .from(packages)
-      .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
-      .limit(1);
-    if (!pkg) {
-      throw notFound(`Package '${packageId}' not found in this organization`);
-    }
+    // `FOR SHARE`: the home read below decides whether a row may be created.
+    const pkg = await loadPlaceablePackage(tx, scope, packageId);
 
     if (opts?.requirePlacement) {
       const { chatEnforced } = updates;

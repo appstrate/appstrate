@@ -33,12 +33,12 @@ import {
   shareTargetHandle,
   type PackageShare,
   usePackageShares,
-  useRevokePackageShare,
   useSharePackage,
 } from "../../hooks/use-package-shares";
 import { memberLabel } from "../../lib/members";
 import { toastError } from "../../lib/mutation-error";
 import { TextSkeleton } from "../loading-skeletons";
+import { RemoveFromSpaceConfirm, type RemovalTarget } from "../remove-from-space-confirm";
 
 /** The subject of one share, as the picker encodes it. */
 type ShareTarget = { kind: "user"; userId: string } | { kind: "space"; spaceId: string };
@@ -100,13 +100,14 @@ export function SharePackageDialog({
     return row?.manifest.display_name ?? entry.id.split("/").pop() ?? entry.id;
   });
   const share = useSharePackage();
-  const revoke = useRevokePackageShare();
   const publish = useCreateVersion(type, packageId);
   const home = useSpaceGrant(homeSpaceId);
   const { switchSpace } = useSpaceSwitcher();
   const [target, setTarget] = useState("");
   /** The share the server refused for want of a version, kept to replay it. */
   const [needsVersion, setNeedsVersion] = useState<ShareTarget | null>(null);
+  /** The placement the user is about to withdraw, pending confirmation. */
+  const [removing, setRemoving] = useState<RemovalTarget | null>(null);
 
   /** Subjects already holding a placement, so the picker does not propose a no-op. */
   const placed = useMemo(() => new Set((shares ?? []).map(shareTargetHandle)), [shares]);
@@ -275,16 +276,16 @@ export function SharePackageDialog({
         <ShareList
           shares={shares}
           isLoading={isLoading}
-          revoking={revoke.isPending}
           onRevoke={(entry) =>
-            revoke.mutate(
-              {
-                params: {
-                  path: { ...splitPackageRef(packageId), target: shareTargetHandle(entry) },
-                },
-              },
-              { onSuccess: () => toast.success(t("packages.shareRevoked")) },
-            )
+            setRemoving({
+              packageId,
+              name: splitPackageRef(packageId).name,
+              target: shareTargetHandle(entry),
+              targetLabel:
+                entry.target.kind === "user"
+                  ? t("catalogue.personalSpaceOf", { name: entry.target.name })
+                  : entry.target.name,
+            })
           }
         />
 
@@ -296,6 +297,7 @@ export function SharePackageDialog({
           />
         )}
       </div>
+      <RemoveFromSpaceConfirm removal={removing} onClose={() => setRemoving(null)} />
     </Modal>
   );
 }
@@ -304,12 +306,10 @@ export function SharePackageDialog({
 export function ShareList({
   shares,
   isLoading,
-  revoking,
   onRevoke,
 }: {
   shares: PackageShare[] | undefined;
   isLoading: boolean;
-  revoking: boolean;
   onRevoke: (entry: PackageShare) => void;
 }) {
   const { t } = useTranslation("settings");
@@ -344,7 +344,6 @@ export function ShareList({
                 size="icon"
                 type="button"
                 title={t("packages.shareRevokeHint")}
-                disabled={revoking}
                 onClick={() => onRevoke(entry)}
               >
                 <Trash2 />

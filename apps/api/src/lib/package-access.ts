@@ -746,7 +746,17 @@ export async function assertPlacementRemovalAccess(
       : recipientSide
         ? "recipient"
         : null;
-  if (authorityFor(pkg.homeSpaceId) === null) {
+  const authority = authorityFor(pkg.homeSpaceId);
+  if (authority === "recipient") {
+    // The recipient side holds no home authority: an unreachable package must
+    // answer the 404 of a nonexistent one, not "not placed in that space".
+    assertPackageIsReachable(
+      packageId,
+      pkg,
+      await loadPlacementSpaces(packageId, c.get("orgId")),
+      accessible,
+    );
+  } else if (authority === null) {
     await refuseHomeAuthority(
       c,
       packageId,

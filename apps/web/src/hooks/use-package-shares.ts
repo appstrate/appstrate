@@ -44,27 +44,27 @@ export function useSharePackage() {
   });
 }
 
-export function useRevokePackageShare() {
+function useRevokePackageShare() {
   const invalidate = useInvalidateShares();
   return $api.useMutation("delete", "/api/packages/{scope}/{name}/shares/{target}", {
     onSuccess: invalidate,
   });
 }
 
-/** Removes a package from a space (the sharer withdrawing an audience, or the recipient leaving a placement): the server drops the row, its settings, and disables its schedules there. */
+/** Removes a package from one target (the sharer withdrawing an audience, or the recipient leaving a placement): the server drops the row, its settings, and disables its schedules there. `target` is a `shareTargetHandle`; `targetLabel` names it in the toast. */
 export function useRemovePackageFromSpace() {
   const revoke = useRevokePackageShare();
   return {
     isPending: revoke.isPending,
     remove: (
-      target: { packageId: string; spaceId: string; spaceName: string },
+      removal: { packageId: string; target: string; targetLabel: string },
       options?: { onSuccess?: () => void },
     ) =>
       revoke.mutate(
-        { params: { path: { ...splitPackageRef(target.packageId), target: target.spaceId } } },
+        { params: { path: { ...splitPackageRef(removal.packageId), target: removal.target } } },
         {
           onSuccess: () => {
-            toast.success(i18n.t("settings:catalogue.revoked", { space: target.spaceName }));
+            toast.success(i18n.t("settings:catalogue.revoked", { space: removal.targetLabel }));
             options?.onSuccess?.();
           },
         },

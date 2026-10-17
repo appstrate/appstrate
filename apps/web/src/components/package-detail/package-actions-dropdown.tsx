@@ -361,13 +361,13 @@ export function PackageActionsDropdown({
       )}
 
       <RemoveFromSpaceConfirm
-        target={
+        removal={
           removing && spaceId
             ? {
                 packageId,
                 name: displayName,
-                spaceId,
-                spaceName: spaceLabelOf(spaceId) ?? spaceId,
+                target: spaceId,
+                targetLabel: spaceLabelOf(spaceId) ?? spaceId,
               }
             : null
         }

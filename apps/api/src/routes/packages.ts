@@ -2312,6 +2312,8 @@ export function createPackagesRouter() {
       ? recipientUserId === ownerId
       : (ownerId !== null && destination?.ownerUserId === ownerId) ||
         (destination?.permissions.has(spacePackagePermission(pkg.type, "activate")) ?? false);
+    // Landing ON is an activation: the activation door's bundle check first.
+    if (enabled) await assertMcpServerActivatable({ orgId, spaceId }, packageId);
     const { created } = await sharePackage({
       packageId,
       spaceId,
@@ -2334,6 +2336,14 @@ export function createPackagesRouter() {
           ? { recipientUserId, targetKind: "user" }
           : { spaceId, targetKind: "space" },
       });
+      if (enabled) {
+        await recordAuditFromContext(c, {
+          action: "package.activated",
+          resourceType: "package",
+          resourceId: packageId,
+          after: { spaceId },
+        });
+      }
       if (recipientUserId) {
         // Best-effort: the share is committed, and a notification row that
         // will not write must not report it as failed.
