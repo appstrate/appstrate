@@ -52,6 +52,7 @@ export const ROUTE_ACCESS = {
   "/agents/:scope/:name/runs/:runId": { anyOf: RUNS_READ_PERMISSIONS, operations: ["getRun"] },
   "/runs": { anyOf: RUNS_READ_PERMISSIONS, operations: ["listRuns"] },
   "/files": { anyOf: ["files:read"], operations: ["listFiles"] },
+  "/files/:fileId": { open: "rights checked per file, in the space the link names" },
 
   "/schedules": { anyOf: ["schedules:read"], operations: ["listSchedules"] },
   "/schedules/:id": { anyOf: ["schedules:read"], operations: ["getSchedule"] },

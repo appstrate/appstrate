@@ -34,7 +34,8 @@ import { cn } from "@appstrate/ui/cn";
 import { Markdown } from "./markdown";
 import { ErrorState } from "./page-states";
 import { TextSkeleton } from "./loading-skeletons";
-import { isMarkdownFile } from "../lib/files";
+import { isMarkdownFile, pinPreviewUrl, type PinnedPreviewUrl } from "../lib/files";
+import { fileContextHeader, type FileContext } from "../lib/file-link";
 import { client } from "../api/client";
 
 /** The EXACT iframe sandbox token set; the server ships the same in its CSP `sandbox` directive — move both or neither. */
@@ -78,14 +79,28 @@ function useRemoteText(load: (signal: { cancelled: boolean }) => Promise<string 
   return state;
 }
 
-function MarkdownPreview({ id, unavailable }: { id: string; unavailable: string }) {
+function MarkdownPreview({
+  id,
+  context,
+  unavailable,
+}: {
+  id: string;
+  context?: FileContext;
+  unavailable: string;
+}) {
+  // By value: a context rebuilt each render must not re-read the file.
+  const orgId = context?.orgId;
+  const spaceId = context?.spaceId;
   const load = useCallback(async () => {
     const { data } = await client.GET("/api/files/{id}/content", {
-      params: { path: { id } },
+      params: {
+        path: { id },
+        header: fileContextHeader(orgId && spaceId ? { orgId, spaceId } : undefined),
+      },
       parseAs: "text",
     });
     return data;
-  }, [id]);
+  }, [id, orgId, spaceId]);
   const state = useRemoteText(load);
 
   if (state.failed) return <ErrorState message={unavailable} />;
@@ -114,6 +129,14 @@ function TextPreview({ url, unavailable }: { url: string; unavailable: string })
   );
 }
 
+/** {@link pinPreviewUrl} over the viewer's lifetime. */
+function usePinnedPreviewUrl(fileId: string, url: string | null | undefined) {
+  const [pinned, setPinned] = useState<PinnedPreviewUrl>({ fileId, url });
+  const next = pinPreviewUrl(pinned, fileId, url);
+  if (next !== pinned) setPinned(next);
+  return next.url;
+}
+
 function UnavailablePreview({ message, action }: { message: string; action?: ReactNode }) {
   return (
     <div className="text-muted-foreground flex h-full flex-col items-center justify-center p-6 text-center">
@@ -126,6 +149,7 @@ function UnavailablePreview({ message, action }: { message: string; action?: Rea
 export function FileViewer({
   fileId,
   file,
+  context,
   isLoading,
   error,
   unavailableAction,
@@ -133,25 +157,34 @@ export function FileViewer({
 }: {
   fileId: string;
   file?: ViewableFile;
+  /** The file's organization and space when not the current ones (the reader page). */
+  context?: FileContext;
   isLoading: boolean;
   error: unknown;
   unavailableAction?: ReactNode;
   className?: string;
 }) {
   const { t } = useTranslation("files");
+  const previewUrl = usePinnedPreviewUrl(fileId, file?.preview_url);
 
   function renderBody() {
     if (isLoading) return <TextSkeleton lines={6} />;
     if (error) return <ErrorState error={error} />;
-    if (!file?.preview_url) {
+    if (!file || !previewUrl) {
       return <UnavailablePreview message={t("preview.unavailable")} action={unavailableAction} />;
     }
 
-    const previewUrl = file.preview_url;
     const frameTitle = t("preview.frameTitle", { name: file.name });
 
     if (isMarkdownFile(file.mime, file.name) && file.size <= INLINE_MARKDOWN_MAX_BYTES) {
-      return <MarkdownPreview key={fileId} id={fileId} unavailable={t("preview.unavailable")} />;
+      return (
+        <MarkdownPreview
+          key={fileId}
+          id={fileId}
+          context={context}
+          unavailable={t("preview.unavailable")}
+        />
+      );
     }
 
     if (file.preview_kind === "image") {
@@ -175,9 +208,7 @@ export function FileViewer({
       );
     }
     if (file.preview_kind === "text") {
-      return (
-        <TextPreview key={previewUrl} url={previewUrl} unavailable={t("preview.unavailable")} />
-      );
+      return <TextPreview key={fileId} url={previewUrl} unavailable={t("preview.unavailable")} />;
     }
     return (
       <iframe

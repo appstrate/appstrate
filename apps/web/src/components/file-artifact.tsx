@@ -6,8 +6,8 @@
  * is opened.
  *
  * Header: type icon and kind, name, size, retention. Actions: copy (text kinds
- * only), download (when the caller may), open in a new tab (when the server
- * minted a preview URL), full screen. The body is `FileViewer`,
+ * only), download (when the caller may), open in a new tab (the reader page,
+ * `/files/:fileId`), copy its link, full screen. The body is `FileViewer`,
  * strict HTML sandbox included.
  *
  * Full screen is the browser's own (`requestFullscreen` on the frame), not a
@@ -22,6 +22,7 @@ import {
   CopyIcon,
   DownloadIcon,
   ExternalLinkIcon,
+  LinkIcon,
   Maximize2Icon,
   Minimize2Icon,
   XIcon,
@@ -36,40 +37,52 @@ import {
   ArtifactHeader,
   ArtifactTitle,
 } from "@appstrate/ui/components/artifact";
+import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { useFileDownload, useFileTextCopy } from "../hooks/use-files";
+import { useCurrentOrgId } from "../hooks/use-org";
 import { mimeKind } from "../lib/files";
+import { fileReaderPath, fileReaderUrl, type FileContext } from "../lib/file-link";
 import { ExpiryBadge, MimeIcon } from "./file-badges";
 import { FileViewer, type ViewableFile } from "./file-viewer";
 
 export function FileArtifact({
   fileId,
   file,
+  context,
   isLoading,
   error,
   fallbackName = "",
   showName = true,
+  openInNewTab = true,
   onClose,
   className,
 }: {
   fileId: string;
   file?: ViewableFile & {
+    spaceId: string;
     expiresAt: string | null;
     capabilities: { download: boolean };
   };
+  /** The file's organization and space when not the current ones (the reader page). */
+  context?: FileContext;
   isLoading: boolean;
   error: unknown;
   /** The name to show before (or without) the fetched DTO. */
   fallbackName?: string;
   /** Off where the container already titles the file (the preview modal). */
   showName?: boolean;
+  /** Off on the reader page, which that action opens. */
+  openInNewTab?: boolean;
   /** Where the frame IS the container (the chat's side panel): closing it closes that. */
   onClose?: { label: string; onClick: () => void };
   className?: string;
 }) {
   const { t } = useTranslation("files");
   const frameRef = useRef<HTMLDivElement>(null);
-  const download = useFileDownload();
-  const copyText = useFileTextCopy();
+  const download = useFileDownload(context);
+  const copyText = useFileTextCopy(context);
+  const copyLink = useCopyToClipboard();
+  const currentOrgId = useCurrentOrgId();
   const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
@@ -81,7 +94,8 @@ export function FileArtifact({
   const name = fallbackName || file?.name || "";
   const canDownload = file?.capabilities.download === true;
   const canCopy = canDownload && file?.preview_kind === "text";
-  const previewUrl = file?.preview_url;
+  const orgId = context?.orgId ?? currentOrgId;
+  const linkContext = file && orgId ? { orgId, spaceId: file.spaceId } : undefined;
 
   return (
     <Artifact ref={frameRef} className={className}>
@@ -114,13 +128,20 @@ export function FileArtifact({
               onClick={() => void download(fileId, name)}
             />
           )}
-          {previewUrl && (
+          {linkContext && openInNewTab && (
             <ArtifactAction
               icon={ExternalLinkIcon}
               label={t("artifact.openInNewTab")}
-              // The preview route carries its own CSP `sandbox`, so the page stays
-              // opaque-origin at top level too; no opener, no Referer (signed URL).
-              onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
+              onClick={() =>
+                window.open(fileReaderPath(fileId, linkContext), "_blank", "noopener,noreferrer")
+              }
+            />
+          )}
+          {linkContext && (
+            <ArtifactAction
+              icon={copyLink.copied ? CheckIcon : LinkIcon}
+              label={copyLink.copied ? t("artifact.copied") : t("common:btn.copyLink")}
+              onClick={() => void copyLink.copy(fileReaderUrl(fileId, linkContext))}
             />
           )}
           <ArtifactAction
@@ -139,6 +160,7 @@ export function FileArtifact({
         <FileViewer
           fileId={fileId}
           file={file}
+          context={context}
           isLoading={isLoading}
           error={error}
           className="rounded-none border-0"

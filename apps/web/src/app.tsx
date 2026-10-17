@@ -89,6 +89,7 @@ const PackageEditorPage = lazyPage(() => import("./pages/package-editor"), "Pack
 const RunDetailPage = lazyPage(() => import("./pages/run-detail"), "RunDetailPage");
 const RunsPage = lazyPage(() => import("./pages/runs-page"), "RunsPage");
 const FilesPage = lazyPage(() => import("./pages/files"), "FilesPage");
+const FileReaderPage = lazyPage(() => import("./pages/file-reader"), "FileReaderPage");
 const SchedulesListPage = lazyPage(() => import("./pages/schedules-list"), "SchedulesListPage");
 const ScheduleDetailPage = lazyPage(() => import("./pages/schedule-detail"), "ScheduleDetailPage");
 const SkillsPage = lazyPage(() => import("./pages/skills-page"), "SkillsPage");
@@ -265,6 +266,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/agents/:scope/:name/runs/:runId": <RunDetailPage />,
   "/runs": <RunsPage />,
   "/files": <FilesPage />,
+  "/files/:fileId": <FileReaderPage />,
   "/schedules": <SchedulesListPage />,
   "/schedules/:id": <ScheduleDetailPage />,
   "/skills": <SkillsPage />,

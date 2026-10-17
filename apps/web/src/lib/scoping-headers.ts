@@ -21,3 +21,18 @@ export function buildScopingHeaders(
   if (viewAs) headers[VIEW_AS_HEADER] = viewAs;
   return headers;
 }
+
+/**
+ * The scoping headers a request still lacks. One that names another org (a reader
+ * link) leaves the previewed context, so it carries no persona: the server judges
+ * the persona per org, so another space of the same org keeps it.
+ */
+export function missingScopingHeaders(
+  present: Headers,
+  scoping: Record<string, string> = buildScopingHeaders(),
+): Record<string, string> {
+  const otherOrg = present.has("X-Org-Id") && present.get("X-Org-Id") !== scoping["X-Org-Id"];
+  return Object.fromEntries(
+    Object.entries(scoping).filter(([k]) => !present.has(k) && !(otherOrg && k === VIEW_AS_HEADER)),
+  );
+}

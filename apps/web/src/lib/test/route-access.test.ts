@@ -151,6 +151,16 @@ describe("routeVerdict", () => {
   });
 });
 
+describe("file reader route", () => {
+  it("opens a reader link whatever the current space grants: the link's space judges the file", () => {
+    const none = () => false;
+    const reader = routeOf("/files/file_1?org=org_1&space=spc_1");
+    expect(reader).toBe("/files/:fileId");
+    expect(routeVerdict(reader!, none, {}, false)).toBe("granted");
+    expect(routeVerdict("/files", none, {}, false)).toBe("denied");
+  });
+});
+
 describe("overlay paths", () => {
   it("are the overlay prefixes, segment by segment", () => {
     expect(isOverlayPath("/org-settings")).toBe(true);
