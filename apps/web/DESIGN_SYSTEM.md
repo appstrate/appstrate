@@ -28,9 +28,9 @@ they start with `packages/` or `e2e/`.
   `bg-card` / `bg-background`. A field is white on the canvas and grey inside a
   dialog: `Input` does it by itself, never override its background.
 - **Icons**: `lucide-react`, `size-4` in rows and buttons. A package's manifest
-  `icon` follows one grammar for every type (`@appstrate/core/manifest-icon`):
+  `icon` follows one grammar for every type (`@appstrate/core/appearance`):
   an Iconify id (`logos:slack-icon`; an agent's is `lucide:<name>`, drawn from
-  the bundle) or an image URL. Always render it with `PackageIcon`
+  the bundle), an image URL, or `emoji:<one emoji>`. Always render it with `PackageIcon`
   (`components/package-icon.tsx`, sizes `sm` / `md`, skeleton while loading,
   placeholder on failure), never as an `<img src>`.
 - **Numbers that change in place** (durations, costs, counts, timers) use
@@ -569,9 +569,14 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   version (or has none) wears « Brouillon » in its place, and only then; a
   disabled reason hangs on `DisabledReasonTooltip`.
 - **Identity**: `PackageIcon` (`components/package-icon.tsx`), `OrganizationAvatar`, `EndUserAvatar`, `ActorLabel` (the
-  member or end-user a schedule runs as). An end-user's initials sit in one of
-  eight person colours hashed from their id (`--avatar-1..8` in `styles.css`),
-  never a raw Tailwind colour.
+  member or end-user a schedule runs as). One tile draws every `{ icon, color }`
+  identity: `IdentityTile` (`packages/ui/src/components/identity-tile.tsx`), sized
+  by one `size-*`, an image covering it, a glyph or the initials on its colour.
+  Its colours are the `APPEARANCE_COLORS` palette (`--identity-<key>` in
+  `styles.css`, tile classes in `packages/ui/src/identity-colors.ts`), never a raw
+  Tailwind colour; no colour chosen means one hashed from the id (an end-user's
+  always is). `AppearancePicker` (`components/appearance-picker.tsx`) edits an
+  identity: the icon forms the entity allows, a palette colour or « Automatique ».
 - **Cards**: a summary block on a detail page is `DetailSectionCard`; a titled
   pane is `SectionCard` (`components/section-card.tsx`, a real `<h3>`); a figure with a label is `OperationalStat` (a `dl` row) with
   `OverviewCardAction` as its quiet footer action; a label and value fact grid is

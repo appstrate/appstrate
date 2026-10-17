@@ -40,6 +40,8 @@
     "./components/model-picker-labels": "./src/components/model-picker-labels.ts",
     "./components/*": "./src/components/*.tsx",
     "./cn": "./src/cn.ts",
+    "./identity-colors": "./src/identity-colors.ts",
+    "./initials": "./src/initials.ts",
     "./use-copy-to-clipboard": "./src/use-copy-to-clipboard.ts",
     "./use-live-elapsed-ms": "./src/use-live-elapsed-ms.ts",
     "./use-mobile": "./src/use-mobile.ts"

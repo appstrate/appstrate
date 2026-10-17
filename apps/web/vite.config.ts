@@ -4,10 +4,13 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   I18N_BOOT_NAMESPACES,
   I18N_FALLBACK_LANGUAGE,
   I18N_LANGUAGE_STORAGE_KEY,
+  I18N_SUPPORTED_LANGUAGES,
 } from "./src/i18n-config.ts";
 
 /** `…/src/locales/<language>/<namespace>.json` */
@@ -81,8 +84,51 @@ function i18nBootPreload(): Plugin {
   };
 }
 
+/** Where the emoji picker reads its dataset: `<base>emojibase/<language>/<file>`. */
+const EMOJIBASE_DIR = "emojibase";
+
+/**
+ * Serve the Emojibase dataset the emoji picker (Frimousse, `emojibaseUrl`)
+ * reads from the app itself rather than from a third-party CDN: for each
+ * supported language, `data.json` and `messages.json` copied from the
+ * installed `emojibase-data`. The picker fetches them only when it opens and
+ * caches them in localStorage.
+ *
+ * Emitted into every build, so `vite build --watch` (the `dev` loop) writes
+ * them into `dist/` as well, and answered by the dev server under `vite dev`.
+ * The package directory comes from module resolution: bun's isolated linker
+ * places it under this workspace's `node_modules`, not the root's.
+ */
+function emojibaseData(): Plugin {
+  const packageDir = path.dirname(
+    fileURLToPath(import.meta.resolve("emojibase-data/package.json")),
+  );
+  const files = I18N_SUPPORTED_LANGUAGES.flatMap((language) =>
+    ["data.json", "messages.json"].map((file) => `${language}/${file}`),
+  );
+  const read = (file: string) => readFileSync(path.join(packageDir, file));
+  return {
+    name: "appstrate:emojibase-data",
+    generateBundle() {
+      for (const file of files) {
+        this.emitFile({ type: "asset", fileName: `${EMOJIBASE_DIR}/${file}`, source: read(file) });
+      }
+    },
+    configureServer(server) {
+      const prefix = `${server.config.base}${EMOJIBASE_DIR}/`;
+      server.middlewares.use((req, res, next) => {
+        const pathname = req.url?.split("?")[0] ?? "";
+        const file = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : null;
+        if (file === null || !files.includes(file)) return next();
+        res.setHeader("Content-Type", "application/json");
+        res.end(read(file));
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), i18nBootPreload()],
+  plugins: [react(), tailwindcss(), i18nBootPreload(), emojibaseData()],
   envDir: "../../",
   // Hot-reload dev server (`bun run dev:hmr`). `dev`/`build` emit into
   // `dist/`, which the API serves; this block only applies to `vite dev`,

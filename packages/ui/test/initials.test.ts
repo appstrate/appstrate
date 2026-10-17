@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { initials } from "../initials.ts";
+import { initials } from "../src/initials.ts";
 
 describe("initials", () => {
   it("takes the first letter of the first two words of the name", () => {

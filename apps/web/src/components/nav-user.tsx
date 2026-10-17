@@ -7,7 +7,7 @@ import { BookOpen, Check, FileText, LifeBuoy, LogOut, Palette, Settings } from "
 import { useAuth } from "../hooks/use-auth";
 import { useTheme } from "../stores/theme-store";
 import { themeOptions } from "../lib/theme";
-import { initials } from "../lib/initials";
+import { initials } from "@appstrate/ui/initials";
 import { Avatar, AvatarFallback } from "@appstrate/ui/components/avatar";
 import { Button } from "@appstrate/ui/components/button";
 import {
