@@ -103,9 +103,8 @@ const EMOJIBASE_DIR = "emojibase";
  */
 function emojibaseData(): Plugin {
   // `createRequire`, not `import.meta.resolve`: Vite's runner config loader has no such hook.
-  const packageDir = path.dirname(
-    createRequire(import.meta.url).resolve("emojibase-data/package.json"),
-  );
+  const require = createRequire(import.meta.url);
+  const packageDir = path.dirname(require.resolve("emojibase-data/package.json"));
   const files = I18N_SUPPORTED_LANGUAGES.flatMap((language) =>
     ["data.json", "messages.json"].map((file) => `${language}/${file}`),
   );
