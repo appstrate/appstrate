@@ -3,9 +3,11 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getPackage } from "../services/package-catalog.ts";
+import { isInlineShadowPackageId } from "../services/inline-run.ts";
 import {
   agentExecutionBlock,
   assertPackageMutationAccess,
+  isInlineShadowRunInSpace,
   isPackageReadableInSpace,
 } from "../lib/package-access.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
@@ -52,15 +54,42 @@ export function isActiveAgentGate(handler: unknown): boolean {
  */
 export function requireAgent() {
   return markHandler(async (c: Context<AppEnv>, next: Next) => {
-    const scope = c.req.param("scope");
-    const name = c.req.param("name");
-    const packageId = `${scope}/${name}`;
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const agent = await loadPlacedAgent(packageId, c.get("orgId"), c.get("spaceId"));
+    if (!agent) throw agentNotFound(packageId);
+    c.set("package", agent);
+    return next();
+  }, AGENT_LOOKUP);
+}
+
+/** The placement rule, written once: the agent of this org, readable in this
+ *  space ({@link isPackageReadableInSpace}) — or `null`. */
+async function loadPlacedAgent(packageId: string, orgId: string, spaceId: string) {
+  const agent = await getPackage(packageId, orgId);
+  if (!agent) return null;
+  return (await isPackageReadableInSpace(spaceId, packageId)) ? agent : null;
+}
+
+/**
+ * Middleware: {@link requireAgent}, widened to an inline run's shadow
+ * (`@inline/r-<uuid>`) when a run of it lives in this space
+ * ({@link isInlineShadowRunInSpace}). The shadow is never placed, yet its run
+ * files `note` / `pin` rows under its id. Mounted on ONE route: the persistence
+ * read of the run page.
+ */
+export function requireAgentOrInlineRun() {
+  return markHandler(async (c: Context<AppEnv>, next: Next) => {
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const orgId = c.get("orgId");
     const spaceId = c.get("spaceId");
 
-    const agent = await getPackage(packageId, orgId);
+    const agent =
+      (await loadPlacedAgent(packageId, orgId, spaceId)) ??
+      (isInlineShadowPackageId(packageId) &&
+      (await isInlineShadowRunInSpace(orgId, spaceId, packageId))
+        ? await getPackage(packageId, orgId, { includeEphemeral: true })
+        : null);
     if (!agent) throw agentNotFound(packageId);
-    if (!(await isPackageReadableInSpace(spaceId, packageId))) throw agentNotFound(packageId);
     c.set("package", agent);
     return next();
   }, AGENT_LOOKUP);

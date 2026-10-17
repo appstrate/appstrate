@@ -171,6 +171,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The run page of an inline run no longer gets two 404s** (#2068).
+  `GET …/persistence` answered `agent_not_found` for the run's shadow agent, so
+  the memories and pinned slots an inline run wrote with `note`/`pin` were
+  unreachable. The read route now serves them for a space holding one of its
+  runs; every other agent route is unchanged.
 - **A link to a catalogue sheet opens it from the package id alone** (#2013).
   `/catalogue?package=<id>[&version=…]`, or a link naming the wrong kind,
   lands on the package's own kind instead of closing the sheet. Interface only.
