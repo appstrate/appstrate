@@ -10,6 +10,8 @@ import { buildStoredManifest } from "./manifest.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { packageStorageDeletionJobs } from "../package-storage-deletion.ts";
 import { asRecord } from "@appstrate/core/safe-json";
+import { ApiError } from "@appstrate/core/api-errors";
+import { isReservedScope, parseScopedName } from "@appstrate/core/naming";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { getIntegrationSourceKind, getLocalServerRef } from "../integration-manifest-helpers.ts";
 import {
@@ -159,6 +161,27 @@ export interface CreateItemInput {
 }
 
 /**
+ * Refuse an organization package under a scope the platform owns
+ * (`isReservedScope`): `@appstrate/*` is the system packages' namespace, and
+ * `@inline/*` the inline runs' shadow packages, which every reader of that
+ * prefix takes for an ephemeral shadow. A package id is caller-chosen on the
+ * JSON create, the ZIP/GitHub imports and the bundle import, so the org slug
+ * being unreserved is not enough. Asked by {@link createOrgItem} and by the
+ * bundle import's own insert — the two writers of an organization package row.
+ */
+export function assertPackageScopeNotReserved(packageId: string): void {
+  const scope = parseScopedName(packageId)?.scope;
+  if (scope === undefined || !isReservedScope(scope)) return;
+  throw new ApiError({
+    status: 400,
+    code: "scope_reserved",
+    title: "Bad Request",
+    detail: `'${packageId}' uses the reserved scope '@${scope}', which the platform owns`,
+    param: "manifest.name",
+  });
+}
+
+/**
  * Insert a new package item. `item.id` must be the fully-scoped packageId (e.g. `@scope/name`).
  *
  * `manifest` is REQUIRED — every caller has a real one (author input already
@@ -181,6 +204,7 @@ export async function createOrgItem(
 ): Promise<Package> {
   const now = new Date();
   const packageId = item.id;
+  assertPackageScopeNotReserved(packageId);
 
   const finalManifest = buildStoredManifest(manifest, cfg, item);
 

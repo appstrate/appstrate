@@ -83,7 +83,8 @@ export const updateOrgSchema = z
   .strict();
 
 /**
- * An organization's slug is its package scope, so a slug must be neither one
+ * An organization's slug is the scope its uploads, forks and starter agent are
+ * created under (`@<slug>/…`), so a slug must be neither one
  * the platform owns (`isReservedScope`) nor another organization's. Checked on
  * create and on rename — the only two doors that write a slug.
  */

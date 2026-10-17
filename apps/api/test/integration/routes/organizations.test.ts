@@ -239,7 +239,7 @@ describe("Organizations API", () => {
       expect(body.code).toBe("slug_taken");
     });
 
-    // An org's slug is its package scope: `appstrate` would own every system
+    // An org's slug scopes its own uploads: `appstrate` would own every system
     // package (`isOwnedByOrg`), `inline` could publish into the namespace of
     // inline runs' shadow packages.
     for (const slug of ["appstrate", "inline"]) {

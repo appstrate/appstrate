@@ -98,8 +98,9 @@ export function requireAgentOrInlineRun() {
     const orgId = c.get("orgId");
     const spaceId = c.get("spaceId");
 
-    // An `@inline/` id is a shadow and nothing else: the scope is reserved, so no
-    // organization owns a placeable package under it (`isReservedScope`).
+    // An `@inline/` id is a shadow and nothing else: no organization package can
+    // be created under a reserved scope (`assertPackageScopeNotReserved`), so
+    // there is no placed `@inline/` agent to fall back to.
     const agent = isInlineShadowPackageId(packageId)
       ? await loadReadableShadow(c, packageId)
       : await loadPlacedAgent(packageId, orgId, spaceId);

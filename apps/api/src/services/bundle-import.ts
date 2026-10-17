@@ -56,6 +56,7 @@ import {
   assertNoManifestViolations,
 } from "./package-items/config.ts";
 import type { PackageType } from "@appstrate/core/validation";
+import { assertPackageScopeNotReserved } from "./package-items/crud.ts";
 import { postInstallPackage } from "./post-install-package.ts";
 import { lockPackageVersions } from "./package-locks.ts";
 import { assertVersionNotLower, findHigherPublishedVersion } from "./package-versions.ts";
@@ -343,6 +344,14 @@ export async function importBundle(
     throw invalidRequest("Bundle root identity is invalid");
   }
   await assertRootVersionForward({ identity: bundle.root, ...rootParsed }, scope.orgId);
+
+  // Before any write: a system package is reused, but any other id under a
+  // platform scope would become an org row, and refusing it mid-loop would
+  // leave the packages before it imported.
+  for (const identity of bundle.packages.keys()) {
+    const packageId = parsePackageIdentity(identity)?.packageId;
+    if (packageId && !isSystemPackage(packageId)) assertPackageScopeNotReserved(packageId);
+  }
 
   for (const [identity, pkg] of bundle.packages) {
     const parsedIdentity = parsePackageIdentity(identity);

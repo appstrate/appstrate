@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`isReservedScope(scope)`** and **`INLINE_SHADOW_SCOPE`** (`@appstrate/core/naming`):
   the package scopes the platform owns — `appstrate` (system packages) and `inline`
-  (inline runs' shadow packages, `@inline/r-<uuid>`). An organization's slug is its
-  package scope, so the platform refuses a reserved one as a slug.
+  (inline runs' shadow packages, `@inline/r-<uuid>`). The API refuses a reserved scope both as
+  an organization slug and as the scope of an organization package.
 - **`describeModelFailure`** and **`MODEL_ERROR_CATEGORIES`** (`@appstrate/core/model-error`):
   one failed model call's text read once into `{ category, retryable, status?,
 providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusal unwrapped

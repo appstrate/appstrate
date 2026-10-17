@@ -76,10 +76,10 @@ export const INLINE_SHADOW_SCOPE = "inline";
 const RESERVED_SCOPES: ReadonlySet<string> = new Set([SYSTEM_PACKAGE_SCOPE, INLINE_SHADOW_SCOPE]);
 
 /**
- * Whether `scope` (without `@`) belongs to the platform. An organization's slug
- * IS its package scope (`isOwnedByOrg`), so a reserved scope can never be an
- * organization slug: an org named `appstrate` would own every system package,
- * one named `inline` could publish into the shadow namespace.
+ * Whether `scope` (without `@`) belongs to the platform. The API refuses one
+ * both as an organization slug (the scope its ZIP/skill uploads, forks and demo
+ * agent are created under, and the one `isOwnedByOrg` compares) and as the
+ * scope of any organization package, whose id is otherwise caller-chosen.
  */
 export function isReservedScope(scope: string): boolean {
   return RESERVED_SCOPES.has(scope);
