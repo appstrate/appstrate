@@ -55,7 +55,6 @@ describe("the runs column set", () => {
     const heads = Object.entries(agentsFr)
       .filter(([key]) => key.startsWith("runs.column."))
       .map(([, label]) => label);
-    expect(heads).toHaveLength(8);
     for (const head of heads) expect(html).toContain(head);
   });
 
@@ -79,33 +78,16 @@ describe("the runs column set", () => {
     // identifiable out of context.
     expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');
   });
-});
 
-describe("the result column", () => {
-  it("shows what broke on a failed run", () => {
-    const message = "Connexion refusée : le code 2FA a expiré.";
-    const html = table([makeRun({ status: "failed", error: message })]);
-    expect(html).toContain(message);
-    // Truncated in place, so the full text stays reachable on hover — which
-    // costs a `relative z-10`: the row's link overlay paints over the cells,
-    // and an unraised `title` never fires. The tooltip IS the column's point.
-    expect(html).toMatch(/class="[^"]*relative z-10[^"]*"[^>]*title="Connexion refusée/);
-  });
-
-  it("says nothing rather than inventing a result on a run that worked", () => {
-    expect(table()).toContain("—");
-  });
-
-  it("reads a structured output as a line, never as JSON", () => {
-    const html = table([makeRun({ result: { output: { resume: "Trois points", n: 3 } } })]);
-    expect(html).toContain("Trois points");
-    expect(html).toContain('title="Trois points"');
-    expect(html).not.toContain('{"');
-  });
-
-  it("counts the fields of an output that holds no text", () => {
-    const html = table([makeRun({ result: { output: { a: 1, b: 2 } } })]);
-    expect(html).toContain("2 champs");
+  it("holds the run's identity and timing, not its outcome", () => {
+    // The outcome (error, output, files) lives on the run's own page: a list
+    // cell can only truncate it.
+    function Probe() {
+      return useRunColumns({ agentName, agentIdentity })
+        .map((column) => column.id)
+        .join(",");
+    }
+    expect(render(<Probe />)).toBe("num,agent,status,trigger,duration,date");
   });
 });
 

@@ -45,7 +45,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { ArrowRight, LayoutGrid, FileText, ScrollText } from "lucide-react";
 import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
 import { RunStatusBadge } from "../components/status-badge";
-import { RunProvenanceBadges } from "../components/run-cells";
+import { RunProvenanceBadges } from "../components/run-provenance-badges";
 import type { JournalOverviewFilter } from "../components/log-viewer";
 import { isQueryInFlight } from "../lib/query-state";
 import { findModelFallback } from "../lib/run-model-fallback";

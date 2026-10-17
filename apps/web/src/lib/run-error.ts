@@ -24,8 +24,3 @@ export function runErrorText(
   }
   return run.error ?? "";
 }
-
-// A cancelled run is a member's choice, not a failure: muted, never red.
-export function runErrorTone(run: { status: string }): string {
-  return run.status === "cancelled" ? "text-muted-foreground" : "text-destructive";
-}

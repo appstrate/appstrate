@@ -373,7 +373,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   Its required `tableId` is the stable key for column widths, independent of its
   translated accessible `label`; occurrences of the same table share that key.
   `PackageCollection` callers compose their columns and visibility menu directly,
-  sharing `usePackageNameColumn` for the identity column.
+  sharing `usePackageNameColumn` for the identity column (its second line is the
+  description, else the package id in mono, so every row keeps one height).
 - **Three rules for every table** (both live in `DataTable`, no caller opts in):
   1. **A column that can be acted on never disappears.** A column declares what it
      is in its definition: a READ column (text, badge, date) may carry a `tier`
@@ -408,11 +409,9 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   32 px, on a `bg-card` surface — the same in a detail page's header).
   `CollectionTabs` splits one collection into parts at the head of the bar; it is
   not a detail page's tabs.
-- **Runs** (`components/runs-table.tsx`): the Résultat column is what ended the run
-  (`runErrorText`), else one readable line of its structured output
-  (`lib/run-output-summary.ts`: the first text, else « N champs », never JSON),
-  truncated with a tooltip. Déclencheur names who or what launched it, and a dash
-  when nothing is recorded: no column is left blank.
+- **Runs** (`components/run-columns.tsx`): identity and timing columns only; the outcome (error,
+  output, files) lives on the run's own page. Déclencheur names who or what launched it, and a
+  dash when nothing is recorded: no column is left blank.
 - **The keys tables** (Settings › Models, two tabs; Preferences › Mes clés). The rule that reads
   the whole page: **a connected key makes its provider's models available.** A row is a key or a
   provider, never a model. **Vocabulary, everywhere (`apps/web`, `packages/ui`,

@@ -6,7 +6,7 @@ import type { AgentListItem, EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
 import { PackageIcon } from "./package-icon";
 import { RunStatusBadge } from "./status-badge";
-import { RunProvenanceBadges } from "./run-cells";
+import { RunProvenanceBadges } from "./run-provenance-badges";
 import { RunDuration } from "./run-duration";
 import { formatDateField } from "../lib/format-date";
 import { runDetailPath } from "../lib/package-paths";
