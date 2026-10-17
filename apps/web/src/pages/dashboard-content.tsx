@@ -177,7 +177,7 @@ function RecentAgents({
   unreadCounts: Record<string, number> | undefined;
 }) {
   return (
-    <div className="scroll-fade-x flex gap-3 overflow-x-auto pb-1">
+    <div className="no-scrollbar scroll-fade-x flex gap-3 overflow-x-auto pb-1">
       {agents.map((agent) => (
         <div key={agent.id} className="w-[19rem] shrink-0">
           <PackageCard {...agentCardItem(agent, unreadCounts?.[agent.id])} headingLevel={3} />
