@@ -195,6 +195,22 @@ export class UploadError extends Error {
   }
 }
 
+/**
+ * A session URL the upstream sends back becomes the target of later `api_call`s, whose `{{field}}`
+ * placeholders the sidecar renders with the connection's credentials: one holding `{{` is refused.
+ */
+export function serverSessionUrl(value: string, what: string, res: AdapterApiCallResponse): string {
+  if (value.includes("{{")) {
+    throw new UploadError(
+      `${what} holds '{{', which a target reads as a placeholder`,
+      res.status,
+      res.headers,
+      res.body,
+    );
+  }
+  return value;
+}
+
 export interface UploadAdapter {
   /** Stable protocol identifier — matches the Pi tool's enum. */
   readonly protocol: UploadProtocol;
