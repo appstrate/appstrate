@@ -10,6 +10,8 @@ import {
   isInlineShadowRunReadable,
   isPackageReadableInSpace,
 } from "../lib/package-access.ts";
+import { canReadRuns } from "@appstrate/core/permissions";
+import { callerPermissions } from "../lib/permissions.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
@@ -71,6 +73,18 @@ async function loadPlacedAgent(packageId: string, orgId: string, spaceId: string
   return (await isPackageReadableInSpace(spaceId, packageId)) ? agent : null;
 }
 
+/** The shadow of a run the caller may read: `GET /api/runs/:id`'s rule — the
+ *  runs permission, then ownership — or `null`. */
+async function loadReadableShadow(c: Context<AppEnv>, packageId: string) {
+  if (!canReadRuns((p) => callerPermissions(c).has(p))) return null;
+  const orgId = c.get("orgId");
+  if (
+    !(await isInlineShadowRunReadable(orgId, c.get("spaceId"), packageId, runVisibilityFilter(c)))
+  )
+    return null;
+  return getPackage(packageId, orgId, { includeEphemeral: true });
+}
+
 /**
  * Middleware: {@link requireAgent}, widened to an inline run's shadow
  * (`@inline/r-<uuid>`) when the caller may read a run of it in this space
@@ -84,12 +98,13 @@ export function requireAgentOrInlineRun() {
     const orgId = c.get("orgId");
     const spaceId = c.get("spaceId");
 
+    // Shadow first: `getPackage` never returns one without `includeEphemeral`, so
+    // placement is a wasted query for it. The scope is not reserved at org
+    // creation, though — an org slugged `inline` may own a real `@inline/x` — so
+    // placement stays the fallback.
     const agent =
-      (await loadPlacedAgent(packageId, orgId, spaceId)) ??
-      (isInlineShadowPackageId(packageId) &&
-      (await isInlineShadowRunReadable(orgId, spaceId, packageId, runVisibilityFilter(c)))
-        ? await getPackage(packageId, orgId, { includeEphemeral: true })
-        : null);
+      (isInlineShadowPackageId(packageId) ? await loadReadableShadow(c, packageId) : null) ??
+      (await loadPlacedAgent(packageId, orgId, spaceId));
     if (!agent) throw agentNotFound(packageId);
     c.set("package", agent);
     return next();

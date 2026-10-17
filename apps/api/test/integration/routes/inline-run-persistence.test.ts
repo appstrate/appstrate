@@ -179,6 +179,24 @@ describe("GET /api/agents/@inline/:name/persistence", () => {
       expect((await persistence(member)).status).toBe(404);
     });
 
+    it("404s the owner of the run who holds no runs permission (the run itself is 403)", async () => {
+      const member = await memberHolding(ctx, ["persistence:read"]);
+      const owned = await seedRun({
+        packageId: shadowId,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: member.user.id,
+        status: "success",
+      });
+      expect(
+        (await app.request(`/api/runs/${owned.id}`, { headers: authHeaders(member) })).status,
+      ).toBe(403);
+      const res = await app.request(`/api/agents/${shadowId}/persistence?runId=${owned.id}`, {
+        headers: authHeaders(member),
+      });
+      expect(res.status).toBe(404);
+    });
+
     it("serves a member holding runs:read-all", async () => {
       const member = await memberContext(ctx, "member", "builder");
       expect((await run(member)).status).toBe(200);
