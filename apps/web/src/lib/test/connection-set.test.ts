@@ -11,8 +11,8 @@ import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import {
   toggleCapped,
   keepAvailable,
-  canApplyConnectionSet,
-  checkedConnectionIds,
+  connectionSetToSave,
+  imposedThenAdded,
   placeCreatedConnection,
   shownConnectionPick,
   unavailableConnectionIds,
@@ -38,6 +38,21 @@ describe("toggleCapped", () => {
     expect(toggleCapped(full, "new")).toBe(full);
     expect(toggleCapped(belowCap, "new")).toEqual([...belowCap, "new"]);
   });
+
+  it("caps at what an imposed set leaves", () => {
+    expect(toggleCapped(["a"], "b", 1)).toEqual(["a"]);
+    expect(toggleCapped(["a"], "a", 1)).toEqual([]);
+    expect(toggleCapped([], "b", 0)).toEqual([]);
+  });
+});
+
+describe("imposedThenAdded", () => {
+  it("binds the imposed set whole, in its order, then the additions it lacks", () => {
+    expect(imposedThenAdded(["t1", "t2"], ["p", "t1", "q"])).toEqual(["t1", "t2", "p", "q"]);
+    expect(imposedThenAdded(["t1"], [])).toEqual(["t1"]);
+    // An addition is never cut to fit: the server refuses the union over the cap.
+    expect(imposedThenAdded(["t1"], ["t1"])).toEqual(["t1"]);
+  });
 });
 
 describe("keepAvailable", () => {
@@ -46,49 +61,53 @@ describe("keepAvailable", () => {
   });
 });
 
-describe("canApplyConnectionSet", () => {
-  const a = { id: "conn_a" };
-  const b = { id: "conn_b" };
-  const candidateIds = ["conn_a", "conn_b"];
-  const conns = (ids: string[]) => [a, b].filter((c) => ids.includes(c.id));
+describe("connectionSetToSave", () => {
+  const save = (
+    ticked: string[],
+    stored: string[] | null,
+    initial: string[] = stored ?? [],
+    emptyValue: string[] | null | undefined = undefined,
+  ) => connectionSetToSave({ ticked, initial, stored, emptyValue });
 
-  it("refuses the empty set and the stored pick, in any order", () => {
-    // Control: a touched set that differs from the stored pick is writable.
-    expect(canApplyConnectionSet([a, b], null, true)).toBe(true);
-    expect(canApplyConnectionSet([], null, true)).toBe(false);
-    expect(canApplyConnectionSet([b, a], ["conn_a", "conn_b"], true)).toBe(false);
+  it("writes a changed set, never the stored one again, in any order", () => {
+    expect(save(["a", "b"], ["a"])).toEqual(["a", "b"]);
+    expect(save(["b", "a"], ["a", "b"])).toBeUndefined();
   });
 
-  it("never writes [] — 'no connection' is its own entry — but replaces a stored one", () => {
-    expect(canApplyConnectionSet([], [], true)).toBe(false);
-    expect(canApplyConnectionSet([a], [], true)).toBe(true);
-    // Untouched over a stored "none", nothing is ticked: nothing to write.
-    const untouched = checkedConnectionIds({ draft: null, explicitIds: [], candidateIds });
-    expect(untouched).toEqual([]);
-    expect(canApplyConnectionSet(conns(untouched), [], false)).toBe(false);
+  it("never writes [] — « Aucune connexion » is its own action — but replaces a stored one", () => {
+    expect(save([], ["a"])).toBeUndefined();
+    expect(save([], [])).toBeUndefined();
+    expect(save(["a"], [])).toEqual(["a"]);
   });
 
-  it("ticks nothing while nothing is chosen: the cascade's default is not a choice", () => {
-    // "Hériter" is the ticked row; ticking its connection too would show two choices, and
-    // writing them would pin the default and detach the member from later changes.
-    const untouched = checkedConnectionIds({ explicitIds: null, candidateIds, draft: null });
-    expect(untouched).toEqual([]);
-    expect(canApplyConnectionSet(conns(untouched), null, false)).toBe(false);
-    // Control: ticks after an actual edit are writable.
-    expect(canApplyConnectionSet(conns(["conn_a"]), null, true)).toBe(true);
+  it("writes nothing while an unset choice is shown untouched: the default is not a choice", () => {
+    // The ticks show what the cascade binds; writing them would pin the default and detach the
+    // member from later changes.
+    expect(save(["a"], null, ["a"])).toBeUndefined();
+    // Control: ticks after an actual edit are writable, the cascade's own included.
+    expect(save(["a", "b"], null, ["a"])).toEqual(["a", "b"]);
+    expect(save(["b"], null, [])).toEqual(["b"]);
   });
 
   it("lets the actor rewrite a stored pick that names an unavailable connection", () => {
-    // Nothing was ticked or unticked, yet the stored set differs from what a
-    // write would send: without this the ghost id could never be dropped.
-    const explicitIds = ["conn_a", "conn_unshared"];
-    const cleaned = checkedConnectionIds({ draft: null, explicitIds, candidateIds });
-    expect(cleaned).toEqual(["conn_a"]);
-    expect(canApplyConnectionSet(conns(cleaned), explicitIds, false)).toBe(true);
+    // [a, gone] stored, `gone` deleted by its owner: untouched, the ticks are the survivors and
+    // « Enregistrer » writes [a], the change the unavailable line announces.
+    expect(save(["a"], ["a", "gone"], ["a"])).toEqual(["a"]);
     // Control: an untouched pick with no ghost has nothing to rewrite.
-    expect(canApplyConnectionSet([a], ["conn_a"], false)).toBe(false);
-    // No member survives: the set left to write is empty, which "Valider" never writes.
-    expect(canApplyConnectionSet([], ["conn_unshared"], false)).toBe(false);
+    expect(save(["a"], ["a"])).toBeUndefined();
+    // No member survives: the set left to write is empty, which is no answer.
+    expect(save([], ["gone"], [])).toBeUndefined();
+  });
+
+  it("writes « no addition » for an empty tick under an imposed set, as the caller encodes it", () => {
+    // An override: `[]`; the member's pin: no pin (`null`).
+    expect(save([], ["db"], ["db"], [])).toEqual([]);
+    expect(save([], ["db"], ["db"], null)).toBeNull();
+    // Already no addition: nothing to write.
+    expect(save([], [], [], [])).toBeUndefined();
+    expect(save([], null, [], null)).toBeUndefined();
+    // An unset override showing the member's additions, unticked: « no addition » is a change.
+    expect(save([], null, ["db"], [])).toEqual([]);
   });
 });
 
@@ -125,29 +144,6 @@ describe("shownConnectionPick", () => {
   });
 });
 
-describe("checkedConnectionIds", () => {
-  const candidateIds = ["conn_a", "conn_b"];
-
-  it("keeps only the candidates among the stored pick", () => {
-    expect(
-      checkedConnectionIds({
-        draft: null,
-        explicitIds: ["conn_a", "conn_unshared"],
-        candidateIds,
-      }),
-    ).toEqual(["conn_a"]);
-  });
-
-  it("prefers the draft, then the explicit pick, and ticks nothing under the cascade", () => {
-    const base = { explicitIds: ["conn_a"], candidateIds };
-    expect(checkedConnectionIds({ ...base, draft: ["conn_b"] })).toEqual(["conn_b"]);
-    expect(checkedConnectionIds({ ...base, draft: null })).toEqual(["conn_a"]);
-    expect(checkedConnectionIds({ ...base, draft: null, explicitIds: null })).toEqual([]);
-    // A stored "no connection" ticks nothing too.
-    expect(checkedConnectionIds({ ...base, draft: null, explicitIds: [] })).toEqual([]);
-  });
-});
-
 describe("placeCreatedConnection", () => {
   const full = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) => `c${i}`);
 
@@ -163,6 +159,17 @@ describe("placeCreatedConnection", () => {
 
   it("returns a full set unchanged: the cap refuses the addition", () => {
     expect(placeCreatedConnection({ boundIds: full, createdId: "conn_new" })).toBe(full);
+  });
+
+  it("caps the additions at what an imposed set leaves", () => {
+    const additions = ["conn_a"];
+    expect(placeCreatedConnection({ boundIds: additions, createdId: "conn_new", max: 1 })).toBe(
+      additions,
+    );
+    expect(placeCreatedConnection({ boundIds: additions, createdId: "conn_new", max: 2 })).toEqual([
+      "conn_a",
+      "conn_new",
+    ]);
   });
 
   describe("replacing an under-scoped member", () => {
@@ -218,19 +225,6 @@ describe("unavailableConnectionIds", () => {
   it("is empty while every stored member is a candidate, and with nothing stored", () => {
     expect(unavailableConnectionIds(["a", "b"], ["a", "b", "c"])).toEqual([]);
     expect(unavailableConnectionIds([], ["a"])).toEqual([]);
-  });
-
-  // The scenario the picker exists for: [a, gone] stored, `gone` deleted by its
-  // owner. Untouched, the ticks are the survivors and "Valider" is live: it
-  // writes [a], the change the unavailable row announces.
-  it("leaves 'Valider' live on the survivors, and dead once nothing survives", () => {
-    const explicitIds = ["a", "gone"];
-    const candidateIds = ["a", "b"];
-    const checked = checkedConnectionIds({ draft: null, explicitIds, candidateIds });
-    expect(checked).toEqual(["a"]);
-    expect(canApplyConnectionSet([{ id: "a" }], explicitIds, false)).toBe(true);
-    expect(checkedConnectionIds({ draft: null, explicitIds: ["gone"], candidateIds })).toEqual([]);
-    expect(canApplyConnectionSet([], ["gone"], false)).toBe(false);
   });
 });
 

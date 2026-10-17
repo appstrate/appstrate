@@ -290,8 +290,11 @@ describe("mcp run_and_wait — connection_overrides", () => {
       connection_overrides: { [INTEGRATION]: [] },
     });
 
+    // Not a static refusal: nothing imposes a set here, so resolution finds the required
+    // integration bound to none and refuses the launch.
     expect(result.isError).toBe(true);
-    expect(result.data.status).toBe(400);
+    expect(result.data.status).toBe(409);
+    expect(JSON.stringify(result.data.body)).toContain("required_integration_unbound");
     expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
     expect(await db.select().from(runs)).toHaveLength(0);
   });

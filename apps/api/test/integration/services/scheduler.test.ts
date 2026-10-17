@@ -23,6 +23,7 @@ import {
   schedules,
 } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { Queue, type ConnectionOptions } from "bullmq";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -1703,14 +1704,14 @@ describe("triggerScheduledRun — the schedule's own connection choice", () => {
   }
 
   const outranked = (by: "admin pin" | "enforced org default"): FireCase => ({
-    verdict: `overrides outside an ${by} placed above them (override_outranked)`,
+    verdict: `overrides adding to the set an ${by} imposes, closed to additions (override_outranked)`,
     arrange: async () => {
       const [governed, picked] = [await connect(SVC), await connect(SVC)];
       await nameSet(by, [governed]);
       return { [SVC]: [picked] };
     },
     disables: true,
-    error: new RegExp(`fall outside an ${by}`),
+    error: new RegExp(`add connections outside the set an ${by} imposes, which allows no addition`),
   });
 
   // The pin is what to fix, whoever set it: the schedule names nothing here.
@@ -1748,6 +1749,25 @@ describe("triggerScheduledRun — the schedule's own connection choice", () => {
     },
     outranked("admin pin"),
     outranked("enforced org default"),
+    {
+      verdict: "its own additions taking an open admin pin past the cap (connection_set_too_large)",
+      arrange: async () => {
+        const imposed = await connect(SVC);
+        await db.insert(integrationPins).values({
+          spaceId: ctx.defaultSpaceId,
+          packageId: AGENT,
+          integrationId: SVC,
+          userId: null,
+          connectionIds: [imposed],
+          allowAdditionalConnections: true,
+        });
+        const added: string[] = [];
+        for (let i = 0; i < MAX_CONNECTIONS_PER_INTEGRATION; i++) added.push(await connect(SVC));
+        return { [SVC]: added };
+      },
+      disables: true,
+      error: /past the cap of \d+: drop some additions/,
+    },
     {
       verdict: "its own empty set on a required integration (required_integration_unbound)",
       arrange: async () => ({ [SVC]: [] }),

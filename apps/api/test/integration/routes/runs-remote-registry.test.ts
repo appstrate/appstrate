@@ -884,7 +884,8 @@ describe("POST /api/runs/remote — kind: registry", () => {
   describe("a required integration with an emptied connection set", () => {
     const INTEG = "@acme/required-svc";
 
-    it("refuses `[]` on the required integration as a 400 validation_failed item", async () => {
+    // Resolution judges `[]`, not the write: nothing imposes a set here, so it leaves nothing.
+    it("refuses `[]` on the required integration as a 409 required_integration_unbound item", async () => {
       await seedConnectionTestIntegration(ctx, INTEG);
       await seedRegistryAgent(
         ctx,
@@ -908,11 +909,12 @@ describe("POST /api/runs/remote — kind: registry", () => {
         connection_overrides: { [INTEG]: [] },
       });
 
-      const problem = await expectProblem(res, 400, { code: "validation_failed" });
+      const problem = await expectProblem(res, 409, { code: "missing_integration_connection" });
       expect(problem.errors).toEqual([
         expect.objectContaining({
-          field: `connection_overrides.${INTEG}`,
+          field: `integrations.${INTEG}`,
           code: "required_integration_unbound",
+          source: "run_override",
         }),
       ]);
       expect(await db.select().from(runs)).toHaveLength(0);

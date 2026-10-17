@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Puzzle } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -13,10 +12,15 @@ import {
   type IntegrationCandidate,
   type IntegrationDetailWire,
 } from "../../hooks/use-integrations";
+import { usePermissions } from "../../hooks/use-permissions";
 import { ActivateIntegrationButton } from "../activate-integration-button";
 import { ApiError } from "../../api/errors";
 import { errorMessage } from "../../lib/mutation-error";
 import type { ConnectionSet } from "../../lib/connection-set";
+import { ItemList } from "../item-list";
+import { TableRowActions } from "../table-row-actions";
+import { usePinEditor } from "../integration-detail/use-pin-editor";
+import { pinRowActions } from "./pin-row-actions";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import {
   describeResolution,
@@ -32,12 +36,12 @@ interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
   /** The agent whose resolution each row reads and whose member pin its picker writes. */
   agentPackageId: string;
-  /** The rows for a schedule: "Compte utilisé" picks the connections frozen on it (`connection_overrides`) instead of the member's pin, and the readiness column goes. */
+  /** The rows for a schedule: "Compte utilisé" picks the connections frozen on it (`connection_overrides`) instead of the member's pin, and the readiness column and the admin's menu go. */
   scheduleOverrides?: ScheduleOverrides;
 }
 
 interface ScheduleOverrides {
-  /** The stored picks: a missing integration inherits, an empty set binds none. */
+  /** The stored picks: a missing integration inherits, an empty set binds none (under an imposed set: adds none). */
   value: Readonly<Record<string, string[]>>;
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
   version?: string;
@@ -50,22 +54,17 @@ interface DetailState {
   error: unknown;
 }
 
+/** One declared integration and its own detail read. */
+interface IntegrationRow {
+  entry: AgentIntegrationEntry;
+  state: DetailState;
+}
+
 /** 404: the integration is not placed in this space, which is what activating it fixes. */
 const isNotPlaced = (error: unknown) => error instanceof ApiError && error.status === 404;
 
-const TRACKS = "md:grid-cols-[minmax(160px,1.2fr)_minmax(120px,0.8fr)_minmax(200px,1.4fr)]";
-const TRACKS_WITH_STATUS =
-  "md:grid-cols-[minmax(160px,1.2fr)_minmax(120px,0.8fr)_minmax(200px,1.4fr)_130px]";
-
-/** A row's cell: its column name heads it on a phone, and is read out beside it everywhere else. */
-function Cell({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <span className="text-muted-foreground mb-1 block text-xs md:sr-only">{label}</span>
-      {children}
-    </div>
-  );
-}
+const displayNameOf = ({ entry, state }: IntegrationRow) =>
+  state.detail?.manifest.display_name ?? entry.id;
 
 /**
  * Connection status for every declared integration, driven by the server's
@@ -73,6 +72,11 @@ function Cell({ label, children }: { label: string; children: ReactNode }) {
  * launch badge and the run-kickoff 409). The picker shows for every integration, even inert ones;
  * whether one BLOCKS the run is the server's `run_blocking` flag. Activity comes from the
  * integration's own detail, never the paginated list.
+ *
+ * One self-contained block per integration, stacked, so a phone keeps every part without
+ * scrolling: name, id and access on the left, status and the admin's « … » on the right (the pin
+ * of the integration for this agent, `integrations:configure` only, edited in the same dialogs as
+ * the integration page's pins table), and the connections cell under them at full width.
  */
 export function AgentIntegrationsBlock({
   entries,
@@ -80,64 +84,108 @@ export function AgentIntegrationsBlock({
   scheduleOverrides,
 }: AgentIntegrationsBlockProps) {
   const { t } = useTranslation(["agents", "settings"]);
+  const { can } = usePermissions();
   const details = useIntegrationDetails(entries.map((entry) => entry.id));
-  const tracks = scheduleOverrides ? TRACKS : TRACKS_WITH_STATUS;
-  const rowClass = cn("flex flex-col gap-3 px-3 py-3 md:grid md:items-center md:gap-4", tracks);
+  // A pin binds the agent, whatever a schedule overrides: its rows offer none.
+  const canPin = !scheduleOverrides && can("integrations:configure");
+
+  const rows: IntegrationRow[] = entries.map((entry, index) => {
+    const query = details[index]!;
+    return {
+      entry,
+      state: { detail: query.data, isLoading: query.isLoading, error: query.error },
+    };
+  });
 
   return (
-    <ul aria-label={t("detail.connectionsTable.label")} className="divide-y rounded-lg border">
-      <li
-        aria-hidden
-        className={cn(
-          "text-muted-foreground hidden gap-4 px-3 py-2 text-xs font-medium md:grid",
-          tracks,
-        )}
-      >
-        <span>{t("detail.connectionsTable.integration")}</span>
-        <span>{t("detail.connectionsTable.access")}</span>
-        <span>{t("detail.connectionsTable.account")}</span>
-        {!scheduleOverrides && <span>{t("detail.connectionsTable.status")}</span>}
-      </li>
-      {entries.map((entry, index) => {
-        const query = details[index]!;
-        const state: DetailState = {
-          detail: query.data,
-          isLoading: query.isLoading,
-          error: query.error,
-        };
-        // Optimistic while the detail loads so the status does not flash inactive.
-        const spaceActive = state.detail ? state.detail.active : !isNotPlaced(state.error);
-        return (
-          <li key={entry.id} className={rowClass}>
-            <IntegrationIdentityCell
-              packageId={entry.id}
-              displayName={state.detail?.manifest.display_name ?? entry.id}
-              required={entry.required === true}
-            />
-            <Cell label={t("detail.connectionsTable.access")}>
-              <IntegrationAccessCell state={state} />
-            </Cell>
-            <Cell label={t("detail.connectionsTable.account")}>
+    <section aria-label={t("detail.connectionsTable.label")}>
+      <ItemList
+        items={rows}
+        itemKey={(row) => row.entry.id}
+        renderItem={(row) => (
+          <div
+            className="bg-card rounded-lg border p-3"
+            data-testid={`integration-row-${row.entry.id}`}
+          >
+            <div className="flex items-start gap-2">
+              <IntegrationIdentity
+                packageId={row.entry.id}
+                displayName={displayNameOf(row)}
+                required={row.entry.required === true}
+                state={row.state}
+              />
+              <div className="flex shrink-0 items-center gap-1">
+                {!scheduleOverrides && (
+                  <IntegrationStatusCell
+                    packageId={row.entry.id}
+                    // Optimistic while the detail loads so the status does not flash inactive.
+                    spaceActive={
+                      row.state.detail ? row.state.detail.active : !isNotPlaced(row.state.error)
+                    }
+                    agentPackageId={agentPackageId}
+                  />
+                )}
+                {canPin && (
+                  <IntegrationPinActions
+                    integrationId={row.entry.id}
+                    integrationName={displayNameOf(row)}
+                    agentPackageId={agentPackageId}
+                  />
+                )}
+              </div>
+            </div>
+            <div className="mt-3 min-w-0">
+              <p className="text-muted-foreground mb-1 text-xs">
+                {t("detail.connectionsTable.account")}
+              </p>
               <IntegrationConnectionCell
-                entry={entry}
-                state={state}
+                entry={row.entry}
+                state={row.state}
                 agentPackageId={agentPackageId}
                 scheduleOverrides={scheduleOverrides}
               />
-            </Cell>
-            {!scheduleOverrides && (
-              <Cell label={t("detail.connectionsTable.status")}>
-                <IntegrationStatusCell
-                  packageId={entry.id}
-                  spaceActive={spaceActive}
-                  agentPackageId={agentPackageId}
-                />
-              </Cell>
-            )}
-          </li>
-        );
-      })}
-    </ul>
+            </div>
+          </div>
+        )}
+      />
+    </section>
+  );
+}
+
+/**
+ * The admin pin of one integration for this agent, in the row's « … », through the integration
+ * page's own form and confirmation. Nothing until the pins and the agents using the integration
+ * are read.
+ */
+function IntegrationPinActions({
+  integrationId,
+  integrationName,
+  agentPackageId,
+}: {
+  integrationId: string;
+  integrationName: string;
+  agentPackageId: string;
+}) {
+  const { t } = useTranslation("agents");
+  const editor = usePinEditor(integrationId);
+  if (!editor.pins || !editor.consumingAgents) return null;
+  const pin = editor.pins.find((p) => p.agent_package_id === agentPackageId);
+  return (
+    <>
+      <TableRowActions
+        menuLabel={t("detail.connectionsTable.rowActions", { integration: integrationName })}
+        isPending={pin ? editor.isDeleting(pin) : false}
+        actions={pinRowActions({
+          t,
+          integrationId,
+          agentPackageId,
+          pin,
+          agentActive: editor.consumingAgents.some((a) => a.agent_package_id === agentPackageId),
+          editor,
+        })}
+      />
+      {editor.dialogs}
+    </>
   );
 }
 
@@ -245,12 +293,9 @@ function ManagedIntegration({
 function InactiveIntegration({ packageId, required }: { packageId: string; required: boolean }) {
   const { t } = useTranslation(["agents"]);
   return (
-    <span className="flex items-center justify-end gap-3">
+    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
       <span
-        className={cn(
-          required ? "text-destructive" : "text-muted-foreground",
-          "max-w-[18rem] text-xs sm:text-right",
-        )}
+        className={cn(required ? "text-destructive" : "text-muted-foreground", "min-w-0 text-xs")}
         data-testid={`integration-inactive-${packageId}`}
       >
         {t(required ? "detail.integrationInactive" : UNBOUND_LABEL_KEYS.integration_not_active)}
@@ -272,33 +317,41 @@ function buildReuseInfo(
   return t("detail.integrationReuseShared", { account, count: agentCount });
 }
 
-function IntegrationIdentityCell({
+function IntegrationIdentity({
   packageId,
   displayName,
   required,
+  state,
 }: {
   packageId: string;
   displayName: string;
   required: boolean;
+  state: DetailState;
 }) {
   const { t } = useTranslation("agents");
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <Puzzle className="text-muted-foreground size-4 shrink-0" />
-      <div className="min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="truncate text-sm font-medium">{displayName}</span>
-          {required && (
-            <Badge
-              variant="secondary"
-              className="text-[0.6rem]"
-              data-testid={`integration-required-${packageId}`}
-            >
-              {t("detail.integrationRequiredBadge")}
-            </Badge>
-          )}
-        </div>
-        <div className="text-muted-foreground truncate font-mono text-xs">{packageId}</div>
+    <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <Puzzle className="text-muted-foreground size-4 shrink-0" />
+        <span className="min-w-0 truncate text-sm font-medium" title={displayName}>
+          {displayName}
+        </span>
+        {required && (
+          <Badge
+            variant="secondary"
+            className="shrink-0 text-[0.6rem]"
+            data-testid={`integration-required-${packageId}`}
+          >
+            {t("detail.integrationRequiredBadge")}
+          </Badge>
+        )}
+      </div>
+      <div className="text-muted-foreground mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-xs">
+        <span className="min-w-0 truncate font-mono" title={packageId}>
+          {packageId}
+        </span>
+        <span aria-hidden>·</span>
+        <IntegrationAccessCell state={state} />
       </div>
     </div>
   );

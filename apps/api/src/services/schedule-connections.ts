@@ -25,11 +25,12 @@ import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 
 /**
- * The verdicts about the schedule's own connection choice: an open choice, an unreachable pick, a
- * set an admin pin or enforced default outranks, and — when the schedule's OWN set decided it — a
- * pick on an auth serving no selected tool or no pick at all for a required integration. The
- * write refuses them and a fire meeting one disables the schedule: it reads the resolver's error
- * (the write) and the 409 item translated from it (the fire) alike.
+ * The verdicts about the schedule's own connection choice: an open choice, an unreachable pick, an
+ * addition to an imposed set that allows none, and — when the schedule's OWN set decided it — a
+ * pick on an auth serving no selected tool, no pick at all for a required integration, or
+ * additions taking the imposed set past the cap. The write refuses them and a fire meeting one
+ * disables the schedule: it reads the resolver's error (the write) and the 409 item translated
+ * from it (the fire) alike.
  */
 export function isScheduleOwned(e: Pick<ResolutionFieldError, "code" | "source">): boolean {
   switch (e.code) {
@@ -39,6 +40,7 @@ export function isScheduleOwned(e: Pick<ResolutionFieldError, "code" | "source">
       return true;
     case "auth_serves_no_selected_tool":
     case "required_integration_unbound":
+    case "connection_set_too_large":
       return e.source === "schedule_override";
     default:
       return false;

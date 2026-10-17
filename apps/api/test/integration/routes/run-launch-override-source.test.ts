@@ -5,15 +5,18 @@
  * run, and the bound set records which: a run's `connection_overrides` bind as
  * `run_override`, a schedule fire's as `schedule_override`. Read off
  * `runs.resolved_connections`, the audit trail the credentials route and the
- * run's connections panel trust. An override naming what governance outranks or
- * the caller cannot reach is refused before any run row exists. An override
- * naming no connection (`[]`) binds none, and a non-required integration
- * nobody connected, or switched off in the space, starts the run with a warning.
+ * run's connections panel trust. An override adding to a set governance imposes
+ * and closes, or naming what the caller cannot reach, is refused before any run
+ * row exists; under an imposed set the override only adds, each bound row keeping
+ * its own source. Ungoverned, an override naming no connection (`[]`) binds none,
+ * and a non-required integration nobody connected, or switched off in the space,
+ * starts the run with a warning.
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
-import { eq } from "drizzle-orm";
-import { integrationPins, runs } from "@appstrate/db/schema";
+import { and, eq, isNotNull } from "drizzle-orm";
+import { integrationConnections, integrationPins, runs } from "@appstrate/db/schema";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
@@ -22,8 +25,10 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedSchedule } from "../../helpers/seed.ts";
+import { seedAgent, seedSchedule, seedSpace } from "../../helpers/seed.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
+import { setBlockUserConnections } from "../../../src/services/integration-pins-service.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
@@ -162,9 +167,212 @@ describe("launch override — the bound set names the launch it came from", () =
 
     expect((await refusal(await launch([other]))).code).toBe("override_outranked");
     expect(await db.select().from(runs)).toHaveLength(0);
-    // Control: an override inside the pin narrows it and launches.
-    expect((await launch([picked])).status).toBe(201);
+    // Control: an override inside the pin adds nothing and launches on the pin.
+    const res = await launch([picked]);
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db.select().from(runs).where(eq(runs.id, id));
+    expect(row!.resolvedConnections).toMatchObject({
+      [INTEGRATION]: [{ connectionId: picked, source: "admin_pin" }],
+    });
     await waitForRunPipelineSettled();
+  });
+
+  describe("an admin pin open to additions", () => {
+    beforeEach(async () => {
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: INTEGRATION,
+        userId: null,
+        connectionIds: [picked],
+        allowAdditionalConnections: true,
+      });
+    });
+
+    async function boundOf(res: Response): Promise<unknown> {
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      const [row] = await db.select().from(runs).where(eq(runs.id, id));
+      return row!.resolvedConnections;
+    }
+
+    it("a manual run binds the imposed connection and the member pin, each with its source", async () => {
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: INTEGRATION,
+        userId: ctx.user.id,
+        connectionIds: [other],
+      });
+      const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(await boundOf(res)).toEqual({
+        [INTEGRATION]: [
+          expect.objectContaining({ connectionId: picked, source: "admin_pin" }),
+          expect.objectContaining({ connectionId: other, source: "member_pin" }),
+        ],
+      });
+      await waitForRunPipelineSettled();
+    });
+
+    it("a run override adds to the imposed set and cannot remove it", async () => {
+      expect(await boundOf(await launch([other]))).toEqual({
+        [INTEGRATION]: [
+          expect.objectContaining({ connectionId: picked, source: "admin_pin" }),
+          expect.objectContaining({ connectionId: other, source: "run_override" }),
+        ],
+      });
+      // `[]` is "no addition", never "no connection".
+      expect(await boundOf(await launch([]))).toEqual({
+        [INTEGRATION]: [expect.objectContaining({ connectionId: picked, source: "admin_pin" })],
+      });
+      await waitForRunPipelineSettled();
+    });
+
+    it("a schedule fire binds the imposed connection, then its own additions as schedule_override", async () => {
+      const schedule = await seedSchedule({
+        packageId: AGENT,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        connectionOverrides: { [INTEGRATION]: [picked, other] },
+        versionOverride: "draft",
+      });
+
+      await triggerScheduledRun(schedule.id);
+
+      const [row] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(row!.status).not.toBe("failed");
+      expect(row!.resolvedConnections).toEqual({
+        [INTEGRATION]: [
+          expect.objectContaining({ connectionId: picked, source: "admin_pin" }),
+          expect.objectContaining({ connectionId: other, source: "schedule_override" }),
+        ],
+      });
+      await waitForRunPipelineSettled();
+    });
+
+    describe("block_user_connections still bounds the additions", () => {
+      let stray: string;
+      let strayShared: string;
+
+      /** The context user's ORG-scope connection, made in `originSpaceId`: it reaches every space. */
+      async function orgConnectionFrom(originSpaceId: string): Promise<string> {
+        const [row] = await db
+          .insert(integrationConnections)
+          .values({
+            integrationId: INTEGRATION,
+            authKey: "primary",
+            accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
+            orgId: ctx.orgId,
+            spaceId: null,
+            originSpaceId,
+            userId: ctx.user.id,
+            credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
+            scopesGranted: [],
+            label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
+          })
+          .returning({ id: integrationConnections.id });
+        return row!.id;
+      }
+
+      /** Replace the context user's member pin on (AGENT, INTEGRATION) with `connectionIds`. */
+      async function memberPin(connectionIds: string[]): Promise<void> {
+        await db
+          .delete(integrationPins)
+          .where(and(eq(integrationPins.packageId, AGENT), isNotNull(integrationPins.userId)));
+        await db.insert(integrationPins).values({
+          spaceId: ctx.defaultSpaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId: ctx.user.id,
+          connectionIds,
+        });
+      }
+
+      const manualRun = () =>
+        app.request(`/api/agents/${AGENT}/run?version=draft`, {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+      beforeEach(async () => {
+        const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+        stray = await orgConnectionFrom(elsewhere.id);
+        strayShared = await orgConnectionFrom(elsewhere.id);
+        await seedShares(strayShared, [ctx.defaultSpaceId]);
+      });
+
+      it("a run override: one made in another space, not shared, is refused; made here or shared, bound", async () => {
+        // Control: unblocked, the connection made elsewhere is a valid addition.
+        expect(await boundOf(await launch([stray]))).toEqual({
+          [INTEGRATION]: [
+            expect.objectContaining({ connectionId: picked, source: "admin_pin" }),
+            expect.objectContaining({ connectionId: stray, source: "run_override" }),
+          ],
+        });
+        await waitForRunPipelineSettled();
+        await setBlockUserConnections(
+          { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+          INTEGRATION,
+          true,
+        );
+        const before = (await db.select().from(runs)).length;
+
+        expect((await refusal(await launch([stray]))).code).toBe("override_connection_unavailable");
+        expect(await db.select().from(runs)).toHaveLength(before);
+        expect(await boundOf(await launch([strayShared, other]))).toEqual({
+          [INTEGRATION]: [
+            expect.objectContaining({ connectionId: picked, source: "admin_pin" }),
+            expect.objectContaining({ connectionId: strayShared, source: "run_override" }),
+            expect.objectContaining({ connectionId: other, source: "run_override" }),
+          ],
+        });
+        await waitForRunPipelineSettled();
+      });
+
+      it("a member pin: one made in another space, not shared, is refused; made here or shared, bound", async () => {
+        await memberPin([stray]);
+        // Control: unblocked, the member pin adds the connection made elsewhere.
+        expect(await boundOf(await manualRun())).toEqual({
+          [INTEGRATION]: [
+            expect.objectContaining({ connectionId: picked, source: "admin_pin" }),
+            expect.objectContaining({ connectionId: stray, source: "member_pin" }),
+          ],
+        });
+        await waitForRunPipelineSettled();
+        await setBlockUserConnections(
+          { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+          INTEGRATION,
+          true,
+        );
+
+        const { code, text } = await refusal(await manualRun());
+        expect(code).toBe("pinned_connection_unavailable");
+        expect(text).toContain("Your pinned connection");
+        await memberPin([strayShared, other]);
+        expect(await boundOf(await manualRun())).toEqual({
+          [INTEGRATION]: [
+            expect.objectContaining({ connectionId: picked, source: "admin_pin" }),
+            expect.objectContaining({ connectionId: strayShared, source: "member_pin" }),
+            expect.objectContaining({ connectionId: other, source: "member_pin" }),
+          ],
+        });
+        await waitForRunPipelineSettled();
+      });
+    });
+
+    it("an addition the actor cannot reach is refused, the imposed row never bound alone", async () => {
+      const colleague = await memberContext(ctx, "member");
+      const theirs = await seedIntegrationConnection(colleague, INTEGRATION);
+      expect((await refusal(await launch([theirs]))).code).toBe("override_connection_unavailable");
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
   });
 
   it("refuses a colleague's private connection like an unknown id, naming neither label nor account", async () => {
@@ -295,7 +503,7 @@ describe("launch override — the bound set names the launch it came from", () =
       await waitForRunPipelineSettled();
     });
 
-    it("an empty override narrows an admin pin to none on a non-required integration", async () => {
+    it("an empty override adds nothing to an admin pin: the pin binds", async () => {
       await db.insert(integrationPins).values({
         spaceId: ctx.defaultSpaceId,
         packageId: AGENT,
@@ -308,11 +516,13 @@ describe("launch override — the bound set names the launch it came from", () =
       expect(res.status).toBe(201);
       const { id } = (await res.json()) as { id: string };
       const [row] = await db.select().from(runs).where(eq(runs.id, id));
-      expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+      expect(row!.resolvedConnections).toMatchObject({
+        [INTEGRATION]: [{ connectionId: picked, source: "admin_pin" }],
+      });
       await waitForRunPipelineSettled();
     });
 
-    it("refuses an empty override on a required integration (400) and creates no run", async () => {
+    it("an empty override on a required integration: 409 ungoverned, the imposed set when governed", async () => {
       const required = "@launchorg/required-agent";
       await seedAgent({
         id: required,
@@ -329,19 +539,38 @@ describe("launch override — the bound set names the launch it came from", () =
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ connection_overrides: { [INTEGRATION]: [] } }),
       });
-      expect(res.status).toBe(400);
+      // Ungoverned: the override's own `[]` leaves a required integration with nothing.
+      expect(res.status).toBe(409);
       const body = (await res.json()) as {
         code: string;
-        param?: string;
-        errors: { field: string; code: string }[];
+        errors: { field: string; code: string; source?: string }[];
       };
-      // The code a `[]` pin raises, on the override's own key.
-      expect(body.code).toBe("validation_failed");
-      expect(body.param).toBeUndefined();
-      expect(body.errors.map((e) => [e.field, e.code])).toEqual([
-        [`connection_overrides.${INTEGRATION}`, "required_integration_unbound"],
+      expect(body.code).toBe("missing_integration_connection");
+      expect(body.errors.map((e) => [e.field, e.code, e.source])).toEqual([
+        [`integrations.${INTEGRATION}`, "required_integration_unbound", "run_override"],
       ]);
       expect(await db.select().from(runs)).toHaveLength(0);
+
+      // Governed: the same `[]` adds nothing, and the imposed set satisfies the integration.
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: required,
+        integrationId: INTEGRATION,
+        userId: null,
+        connectionIds: [picked],
+      });
+      const governed = await app.request(`/api/agents/${required}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_overrides: { [INTEGRATION]: [] } }),
+      });
+      expect(governed.status).toBe(201);
+      const { id } = (await governed.json()) as { id: string };
+      const [row] = await db.select().from(runs).where(eq(runs.id, id));
+      expect(row!.resolvedConnections).toMatchObject({
+        [INTEGRATION]: [{ connectionId: picked, source: "admin_pin" }],
+      });
+      await waitForRunPipelineSettled();
     });
   });
 

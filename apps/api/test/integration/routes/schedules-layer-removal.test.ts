@@ -116,10 +116,14 @@ describe("removing the layer that names a schedule's connection set", () => {
     return id;
   }
 
-  /** A pin on `agent`: the admin's, or `userId`'s own. */
+  /** A pin on `agent`: the admin's (closed unless `open`), or `userId`'s own. */
   async function pin(
     connectionIds: string[],
-    { userId = null, agent = AGENT }: { userId?: string | null; agent?: string } = {},
+    {
+      userId = null,
+      agent = AGENT,
+      open = false,
+    }: { userId?: string | null; agent?: string; open?: boolean } = {},
   ): Promise<void> {
     await db.insert(integrationPins).values({
       spaceId: ctx.defaultSpaceId,
@@ -127,6 +131,7 @@ describe("removing the layer that names a schedule's connection set", () => {
       integrationId: INTEGRATION,
       userId,
       connectionIds,
+      allowAdditionalConnections: open,
     });
   }
 
@@ -344,11 +349,12 @@ describe("removing the layer that names a schedule's connection set", () => {
   });
 
   describe("an admin pin — DELETE /api/integrations/{integration}/pins/{agent}", () => {
-    it("disables the schedules of every actor it named the set for, sparing an actor with a pin of their own", async () => {
+    it("disables the schedules of every actor an OPEN pin named the set for, sparing an actor with a pin of their own", async () => {
       const shared = await sharedConnection();
-      await pin([shared]);
+      await pin([shared], { open: true });
       const colleague = await memberContext(ctx, "member");
-      await pin([shared], { userId: colleague.user.id });
+      // An addition outside the floor: the pin outlives the open floor (one within it would not).
+      await pin([shared, await sharedConnection()], { userId: colleague.user.id });
       const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
       const bound = [
         await armedSchedule(),
@@ -360,6 +366,22 @@ describe("removing the layer that names a schedule's connection set", () => {
       const disabled = bound.map((s) => s.id).sort();
       expect(await unnamed()).toEqual(disabled);
       expect((await rowOf(pinnedByActor.id)).enabled).toBe(true);
+      expect(await auditedAs("integration.pin.deleted")).toEqual(disabled);
+    });
+
+    it("a CLOSED pin purges the member pins it masked: the schedule relying on one is disabled too", async () => {
+      const shared = await sharedConnection();
+      await pin([shared]);
+      const colleague = await memberContext(ctx, "member");
+      await pin([shared], { userId: colleague.user.id });
+      const bound = await armedSchedule();
+      const pinnedByActor = await armedSchedule({ userId: colleague.user.id });
+
+      // The open-pin case above is the control: there the same member pin spares its schedule.
+      expect(await remove(ADMIN_PIN_PATH)).toBe(2);
+      const disabled = [bound.id, pinnedByActor.id].sort();
+      expect(await unnamed()).toEqual(disabled);
+      expect(await db.select().from(integrationPins)).toEqual([]);
       expect(await auditedAs("integration.pin.deleted")).toEqual(disabled);
     });
 
@@ -391,21 +413,199 @@ describe("removing the layer that names a schedule's connection set", () => {
         await pin([shared], { agent: PINNED });
         const colleague = await memberContext(ctx, "member");
         await pin([shared], { userId: colleague.user.id });
-        const bound = [await armedSchedule(), await armedSchedule({ packageId: OTHER_AGENT })];
+        // Under the enforced floor an override narrowing it added nothing: it goes too (A).
+        const withinFloor = await armedSchedule({ connectionOverrides: { [INTEGRATION]: [] } });
+        // The enforced default purged the colleague's pin it masked (I): their schedule is unnamed.
+        const pinnedByActor = await armedSchedule({ userId: colleague.user.id });
+        const bound = [
+          await armedSchedule(),
+          await armedSchedule({ packageId: OTHER_AGENT }),
+          ...(enforce ? [withinFloor, pinnedByActor] : []),
+        ];
         const spared = [
           await armedSchedule({ packageId: PLAIN }),
           await armedSchedule({ packageId: PINNED }),
-          await armedSchedule({ userId: colleague.user.id }),
-          await armedSchedule({ connectionOverrides: { [INTEGRATION]: [shared] } }),
+          ...(enforce ? [] : [withinFloor, pinnedByActor]),
         ];
 
-        expect(await remove(ORG_DEFAULT_PATH)).toBe(2);
+        expect(await remove(ORG_DEFAULT_PATH)).toBe(bound.length);
         const disabled = bound.map((s) => s.id).sort();
         expect(await unnamed()).toEqual(disabled);
         expect(await stillArmed(spared)).toEqual(spared.map((s) => s.id));
         expect(await auditedAs("integration.org_default.deleted")).toEqual(disabled);
       });
     }
+
+    it("an enforced default's PUT and DELETE purge the member pins it masks, and audit them (#2043 I)", async () => {
+      await seedAgent(OTHER_AGENT);
+      const shared = await sharedConnection();
+      const colleague = await memberContext(ctx, "member");
+      await ownPin([shared]);
+      /** The `memberPinsCleared` of the last `action` audit entry. */
+      const clearedBy = async (action: string) => {
+        const rows = await db
+          .select({ after: auditEvents.after })
+          .from(auditEvents)
+          .where(eq(auditEvents.action, action))
+          .orderBy(asc(auditEvents.id));
+        return asRecord(rows.at(-1)!.after).memberPinsCleared;
+      };
+
+      const res = await app.request(ORG_DEFAULT_PATH, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_ids: [shared], enforce: true }),
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(await clearedBy("integration.org_default.upserted")).toEqual([
+        { userId: ctx.user.id, agentPackageId: AGENT, connectionIds: [shared] },
+      ]);
+
+      // Written past the write rule while the default is enforced: its DELETE purges it too, and
+      // the schedule that relied on it is left unnamed.
+      await pin([shared], { userId: colleague.user.id, agent: OTHER_AGENT });
+      const relied = await armedSchedule({ userId: colleague.user.id, packageId: OTHER_AGENT });
+      expect(await remove(ORG_DEFAULT_PATH)).toBe(1);
+      expect(await unnamed()).toEqual([relied.id]);
+      expect(await clearedBy("integration.org_default.deleted")).toEqual([
+        { userId: colleague.user.id, agentPackageId: OTHER_AGENT, connectionIds: [shared] },
+      ]);
+      expect(await db.select().from(integrationPins)).toEqual([]);
+    });
+  });
+
+  describe("removing an imposed floor never changes what a stored selection means (#2043 A)", () => {
+    /**
+     * A floor of two shared connections and one schedule per selection shape. `within` strictly
+     * narrow the floor (`[]`, a strict subset, the same subset repeated in another case); `whole`
+     * names the floor itself in another order and case, which binds the same ungoverned (H);
+     * `outside` names an addition, `noKey` names nothing (another layer, when the case keeps one,
+     * names its set).
+     */
+    async function selections() {
+      const [a, b, c] = [
+        await sharedConnection(),
+        await sharedConnection(),
+        await sharedConnection(),
+      ];
+      const floor = [a, b];
+      const within = [
+        await armedSchedule({ connectionOverrides: { [INTEGRATION]: [] } }),
+        await armedSchedule({ connectionOverrides: { [INTEGRATION]: [a] } }),
+        await armedSchedule({ connectionOverrides: { [INTEGRATION]: [a.toUpperCase(), a] } }),
+      ];
+      const whole = await armedSchedule({
+        connectionOverrides: { [INTEGRATION]: [b.toUpperCase(), a] },
+      });
+      const outside = await armedSchedule({ connectionOverrides: { [INTEGRATION]: [a, c] } });
+      const noKey = await armedSchedule();
+      return { floor, a, b, c, within, whole, outside, noKey };
+    }
+
+    for (const open of [false, true]) {
+      it(`an admin pin DELETE (${open ? "open" : "closed"}) disables the schedules strictly narrowing its floor`, async () => {
+        const { floor, a, b, c, within, whole, outside, noKey } = await selections();
+        await pin(floor, { open });
+        await orgDefault([a]); // soft: names the set of the schedule with no key
+        const colleague = await memberContext(ctx, "member");
+        const other = await memberContext(ctx, "member");
+        const third = await memberContext(ctx, "member");
+        await pin([], { userId: colleague.user.id });
+        await pin([a, c], { userId: other.user.id });
+        await pin([b, a], { userId: third.user.id });
+
+        expect(await remove(ADMIN_PIN_PATH)).toBe(within.length);
+        const disabled = within.map((s) => s.id).sort();
+        expect(await unnamed()).toEqual(disabled);
+        expect(await stillArmed([whole, outside, noKey])).toEqual([whole.id, outside.id, noKey.id]);
+        expect(await auditedAs("integration.pin.deleted")).toEqual(disabled);
+        // Open: the member pin narrowing the floor goes; the one adding a connection and the one
+        // naming the whole floor stay.
+        const memberPins = await db
+          .select({ userId: integrationPins.userId })
+          .from(integrationPins);
+        expect(memberPins.map((p) => p.userId).sort()).toEqual(
+          open ? [other.user.id, third.user.id].sort() : [],
+        );
+      });
+    }
+
+    it("an admin pin DELETE of `[]` disables no schedule selecting `[]`: nothing narrows an empty floor (H)", async () => {
+      await pin([]);
+      const empty = await armedSchedule({ connectionOverrides: { [INTEGRATION]: [] } });
+
+      expect(await remove(ADMIN_PIN_PATH)).toBe(0);
+      expect(await stillArmed([empty])).toEqual([empty.id]);
+    });
+
+    it("an admin pin DELETE under an enforced default leaves them: a floor still governs", async () => {
+      const { floor, within } = await selections();
+      await pin(floor);
+      await orgDefault(floor, true);
+
+      expect(await remove(ADMIN_PIN_PATH)).toBe(0);
+      expect(await stillArmed(within)).toEqual(within.map((s) => s.id));
+    });
+
+    it("an enforced default DELETE disables them, sparing an agent an admin pin still governs", async () => {
+      const PINNED = "@unnamed/pinned";
+      await seedAgent(PINNED);
+      const { floor, within, whole, outside, noKey } = await selections();
+      await orgDefault(floor, true);
+      await pin(floor, { agent: PINNED });
+      const governed = await armedSchedule({
+        packageId: PINNED,
+        connectionOverrides: { [INTEGRATION]: [] },
+      });
+
+      // The schedule with no key is left unnamed by the default's removal, the existing rule.
+      expect(await remove(ORG_DEFAULT_PATH)).toBe(within.length + 1);
+      expect(await unnamed()).toEqual([...within, noKey].map((s) => s.id).sort());
+      expect(await stillArmed([whole, outside, governed])).toEqual([
+        whole.id,
+        outside.id,
+        governed.id,
+      ]);
+    });
+
+    it("writing an enforced default back soft (PUT enforce: false) disables them, and audits them", async () => {
+      const { floor, within, whole, outside, noKey } = await selections();
+      await orgDefault(floor, true);
+
+      const put = (enforce: boolean) =>
+        app.request(ORG_DEFAULT_PATH, {
+          method: "PUT",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({ connection_ids: floor, enforce }),
+        });
+      const res = await put(false);
+      expect(res.status, await res.clone().text()).toBe(200);
+      const disabled = within.map((s) => s.id).sort();
+      // The stored default, and how many schedules the write disabled.
+      expect(await res.json()).toMatchObject({
+        connection_ids: floor,
+        enforce: false,
+        schedules_disabled_count: disabled.length,
+      });
+      expect(await unnamed()).toEqual(disabled);
+      expect(await stillArmed([whole, outside, noKey])).toEqual([whole.id, outside.id, noKey.id]);
+      const [audit] = await db
+        .select({ after: auditEvents.after })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "integration.org_default.upserted"));
+      const after = asRecord(audit!.after);
+      expect([...(after.disabledScheduleIds as string[])].sort()).toEqual(disabled);
+
+      // Soft → soft, and soft → enforced, remove no floor: nothing more is disabled.
+      const armed = await armedSchedule({ connectionOverrides: { [INTEGRATION]: [] } });
+      for (const enforce of [false, true]) {
+        const again = await put(enforce);
+        expect(again.status).toBe(200);
+        const body = (await again.json()) as { schedules_disabled_count: number };
+        expect(body.schedules_disabled_count).toBe(0);
+      }
+      expect((await rowOf(armed.id)).enabled).toBe(true);
+    });
   });
 
   describe("a member pin dropped by a connection delete", () => {

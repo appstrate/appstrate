@@ -508,7 +508,8 @@ export function useUpdateIntegrationSettings() {
 export function useUpsertIntegrationPin() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  // The body is the WHOLE pinned set — this write replaces it.
+  // The body is the WHOLE pin, its set and its additions flag (`adminPinBody`): this write
+  // replaces both, an absent flag closing the pin.
   return $api.useMutation("put", "/api/integrations/{packageId}/pins/{agentPackageId}", {
     onSuccess: () => {
       toast.success(t("integration.admin.pin.upserted"));
@@ -553,8 +554,10 @@ export function useUpsertIntegrationOrgDefault() {
   const qc = useQueryClient();
   // The body is the WHOLE default set — this write replaces it.
   return $api.useMutation("put", "/api/integrations/{packageId}/default", {
-    onSuccess: () => {
-      toast.success(t("integration.admin.orgDefault.updated"));
+    onSuccess: ({ schedules_disabled_count: disabledCount }) => {
+      // An enforced default turned soft disables the schedules whose overrides only narrowed it.
+      if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
+      else toast.success(t("integration.admin.orgDefault.updated"));
       // Agent-page picker verdicts depend on the org default.
       void invalidateIntegrationQueries(qc);
     },

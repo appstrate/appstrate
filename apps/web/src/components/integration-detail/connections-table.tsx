@@ -7,6 +7,7 @@ import { EmptyState } from "../page-states";
 import { ListToolbar } from "../list-toolbar";
 import { AddIntegrationConnection } from "../integration-connect/add-integration-connection";
 import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-keys";
+import { isConnectionOwnedBy } from "../integration-connect/connection-ownership";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAuth } from "../../hooks/use-auth";
 import { authMethodLabel } from "../../lib/integration-presentation";
@@ -53,7 +54,7 @@ export function ConnectionsTable({
   const list = useLocalListParams(
     detail.auths.some((auth) => auth.auth_key === method) ? { method: [method!] } : {},
   );
-  const sharing = list.values("sharing", ["shared", "private"] as const);
+  const owners = list.values("owner", ["me"] as const);
   const methods = list.values(
     "method",
     detail.auths.map((auth) => auth.auth_key),
@@ -92,7 +93,7 @@ export function ConnectionsTable({
         connection.owner_name,
         auth ? labelFor(auth) : null,
       ]) &&
-      (sharing.length === 0 || sharing.includes(connection.shared_here ? "shared" : "private")) &&
+      (owners.length === 0 || isConnectionOwnedBy(connection, user?.id)) &&
       (methods.length === 0 || methods.includes(connection.auth_key))
     );
   });
@@ -106,14 +107,11 @@ export function ConnectionsTable({
         }}
         filters={[
           {
-            id: "sharing",
-            label: t("integration.connection.col.shared"),
-            values: sharing,
-            options: [
-              { value: "shared", label: t("detail.sharingShared", { ns: "agents" }) },
-              { value: "private", label: t("detail.sharingPrivate", { ns: "agents" }) },
-            ],
-            onChange: list.setValues("sharing"),
+            id: "owner",
+            label: t("integration.connection.col.owner"),
+            values: owners,
+            options: [{ value: "me", label: t("integration.connection.filterMine") }],
+            onChange: list.setValues("owner"),
           },
           ...(detail.auths.length > 1
             ? [
@@ -156,7 +154,7 @@ export function ConnectionsTable({
         empty={
           <EmptyState
             message={t(
-              list.search || sharing.length || methods.length
+              list.search || owners.length || methods.length
                 ? "integration.presentation.noMatch"
                 : "integration.auth.noConnection",
             )}

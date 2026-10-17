@@ -24,7 +24,12 @@ import { createVersionFromDraft } from "../../../src/services/package-versions.t
 import { eq } from "drizzle-orm";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { integrationConnections, integrationPins, packages } from "@appstrate/db/schema";
+import {
+  integrationConnections,
+  integrationOrgDefaults,
+  integrationPins,
+  packages,
+} from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
@@ -95,6 +100,7 @@ function buildIntegrationManifest(id: string, required: boolean) {
 interface ReadinessResolution {
   source: string | null;
   error_code: string | null;
+  additional_connections_allowed: boolean;
   resolved_connection_ids: string[];
   candidates: Array<{
     id: string;
@@ -473,6 +479,62 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     const problem = (await run.json()) as { errors: Array<{ field: string; code: string }> };
     const item = problem.errors.find((e) => e.field === `integrations.${INTEGRATION}`);
     expect(item!.code).toBe("auth_key_serves_no_selected_tool");
+  });
+
+  // #2043 — the flag is the projection of `additionsOpen`: an admin pin open to additions,
+  // and no enforced org default. Rows written straight to the tables: only the flag is judged.
+  describe("additional_connections_allowed", () => {
+    async function adminPin(allowAdditionalConnections: boolean) {
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: INTEGRATION,
+        userId: null,
+        connectionIds: [crypto.randomUUID()],
+        allowAdditionalConnections,
+      });
+    }
+
+    async function orgDefault(enforce: boolean) {
+      await db.insert(integrationOrgDefaults).values({
+        spaceId: ctx.defaultSpaceId,
+        integrationId: INTEGRATION,
+        connectionIds: [crypto.randomUUID()],
+        enforce,
+      });
+    }
+
+    async function allowed(): Promise<boolean> {
+      const body = (await (await getReadiness()).json()) as ReadinessBody;
+      const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
+      return integ!.resolution.additional_connections_allowed;
+    }
+
+    beforeEach(async () => {
+      await seedAgentWith(buildAgentManifest([INTEGRATION], true));
+      await seedIntegration(false);
+    });
+
+    it("is true under an open admin pin, alone or beside a soft default", async () => {
+      await adminPin(true);
+      expect(await allowed()).toBe(true);
+      await orgDefault(false);
+      expect(await allowed()).toBe(true);
+    });
+
+    it("is false with nothing imposed, under a closed admin pin, and under an enforced default", async () => {
+      expect(await allowed()).toBe(false);
+      await orgDefault(true);
+      expect(await allowed()).toBe(false);
+      await adminPin(false);
+      expect(await allowed()).toBe(false);
+    });
+
+    it("is false under an open admin pin when the default is enforced", async () => {
+      await adminPin(true);
+      await orgDefault(true);
+      expect(await allowed()).toBe(false);
+    });
   });
 });
 
