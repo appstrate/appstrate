@@ -222,14 +222,25 @@ export interface AccessibleIntegrationConnection extends ConnectionReach {
 }
 
 /**
- * An admin pin (`integration_pins`, `user_id IS NULL`) governing which
- * connections an agent uses for an integration. Wire shape for the
- * `/api/integrations/:packageId/pins` surface.
+ * A connection pin (`integration_pins`). Wire shape for the
+ * `/api/integrations/:packageId/pins` surface (admin pins) and for the
+ * member pin write of `/api/me/integration-pins/...`.
  */
 export interface IntegrationPin {
   agent_package_id: string;
   integration_package_id: string;
+  /** An admin pin's floor, bound by every run of the agent; a member pin's selection. */
   connection_ids: string[];
+  /**
+   * Admin pin: whether the run's selection (launch override, else the member pin) may add to the
+   * floor. Never true on an empty floor, nor on a member pin.
+   */
+  allow_additional_connections: boolean;
+  /**
+   * Whether the pin's agent is active in the space (placed and switched on): a pin of an agent
+   * that runs nowhere still stands. Always true on a write's response, which requires it.
+   */
+  agent_active: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -275,7 +286,9 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  * "which connection does this run use?" logic.
  *
  * The verdict is the resolver's own vocabulary, three fields:
- *  - `source`     — the layer that bound the set, or the layer whose set failed
+ *  - `source`     — the layer that bound the set's FIRST connection (under
+ *                   governance the floor's; per-connection provenance is in the
+ *                   run's `resolved_connections`), or the layer whose set failed
  *                   (an unreachable or unhealthy member); `null` when no layer
  *                   bound anything (the fallback's `not_connected` /
  *                   `must_choose_connection`, `auth_key_mismatch`,
@@ -287,6 +300,13 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *                   launch's `warnings[]` item itself, else `null`.
  * All three `null` with nothing resolved: an inert integration nothing binds,
  * or one whose manifest could not be loaded.
+ *
+ * Per-connection provenance: under governance the floor is
+ * `admin_pinned_connection_ids` when an admin pin exists, else the enforced
+ * `org_default_connection_ids`; every other id of `resolved_connection_ids` is
+ * an addition — here the member pin's; a run's launch override, when it
+ * carries one, supplies them instead. Ungoverned, the whole set comes from
+ * `source`.
  */
 export interface IntegrationAgentResolution {
   source: ConnectionResolutionSource | null;
@@ -308,6 +328,11 @@ export interface IntegrationAgentResolution {
    */
   org_default_connection_ids: string[] | null;
   org_default_enforced: boolean;
+  /**
+   * Whether the run's selection adds to the imposed set: an admin pin open to additions, with no
+   * enforced org default for the integration. `false` with nothing imposed too (no floor to add to).
+   */
+  additional_connections_allowed: boolean;
   /** Whether the actor may add a connection (admin OR not blocked). */
   can_add_connection: boolean;
   /** Own + shared connections on an auth serving the selected tools, annotated for the dropdown. */

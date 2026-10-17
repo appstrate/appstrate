@@ -154,7 +154,7 @@ import {
   deletePin,
   listAgentsConsumingIntegration,
   listIntegrationPins,
-  pinAudit,
+  adminPinAudit,
   pinAuditResourceId,
   setBlockUserConnections,
   upsertIntegrationPin,
@@ -269,8 +269,19 @@ export const updateSettingsSchema = z
 export const setPinSchema = z
   .object({
     connection_ids: connectionIdSetSchema,
+    // PUT replaces: absent is a closed pin, whatever was stored.
+    allow_additional_connections: z.boolean().default(false),
   })
-  .strict();
+  .strict()
+  .superRefine((body, ctx) => {
+    if (body.allow_additional_connections && body.connection_ids.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["allow_additional_connections"],
+        message: "cannot open a pin to no connection: an empty floor imposes nothing to add to",
+      });
+    }
+  });
 
 export const setOrgDefaultSchema = z
   .object({
@@ -1567,16 +1578,17 @@ export function createIntegrationsRouter() {
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setPinSchema);
-      const { previous, pin } = await upsertIntegrationPin(scope, packageId, {
+      const { previous, pin, memberPinsCleared } = await upsertIntegrationPin(scope, packageId, {
         agentPackageId,
         connectionIds: body.connection_ids,
+        allowAdditionalConnections: body.allow_additional_connections,
       });
       await recordAuditFromContext(c, {
         action: "integration.pin.upserted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, packageId),
-        before: pinAudit(previous),
-        after: pinAudit(pin.connection_ids),
+        before: previous ? adminPinAudit(previous) : null,
+        after: { ...adminPinAudit(pin), memberPinsCleared },
       });
       return c.json(pin);
     },
@@ -1589,20 +1601,22 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
-      const { previous, disabledScheduleIds } = await deletePin(
-        scope,
-        agentPackageId,
-        packageId,
-        null,
-      );
+      const { previous, previousAllowedAdditions, memberPinsCleared, disabledScheduleIds } =
+        await deletePin(scope, agentPackageId, packageId, null);
       await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.pin.deleted",
           resourceType: "integration_pin",
           resourceId: pinAuditResourceId(agentPackageId, packageId),
-          before: pinAudit(previous),
-          ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
+          before: adminPinAudit({
+            connection_ids: previous,
+            allow_additional_connections: previousAllowedAdditions,
+          }),
+          after: {
+            memberPinsCleared,
+            ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+          },
         });
       }
       return c.json({ schedules_disabled_count: disabledScheduleIds.length });
@@ -1621,8 +1635,9 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
       const item = await getOrgDefault(scope, packageId);
-      // Bare resource, or 204 when no default is set — same contract as
-      // PUT (bare resource) and the models/proxies default endpoints.
+      // Bare resource, or 204 when no default is set — the resource PUT
+      // answers (plus its `schedules_disabled_count`), as the models/proxies
+      // default endpoints do.
       if (!item) return c.body(null, 204);
       return c.json(item);
     },
@@ -1635,18 +1650,24 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setOrgDefaultSchema);
-      const { previous, orgDefault } = await upsertOrgDefault(scope, packageId, {
-        connectionIds: body.connection_ids,
-        enforce: body.enforce,
-      });
+      const { previous, orgDefault, memberPinsCleared, disabledScheduleIds } =
+        await upsertOrgDefault(scope, packageId, {
+          connectionIds: body.connection_ids,
+          enforce: body.enforce,
+        });
+      await removeScheduleJobs(disabledScheduleIds);
       await recordAuditFromContext(c, {
         action: "integration.org_default.upserted",
         resourceType: "integration_org_default",
         resourceId: packageId,
         before: orgDefaultAudit(previous),
-        after: orgDefaultAudit(orgDefault),
+        after: {
+          ...orgDefaultAudit(orgDefault),
+          memberPinsCleared,
+          ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+        },
       });
-      return c.json(orgDefault);
+      return c.json({ ...orgDefault, schedules_disabled_count: disabledScheduleIds.length });
     },
   );
 
@@ -1656,7 +1677,10 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
-      const { previous, disabledScheduleIds } = await deleteOrgDefault(scope, packageId);
+      const { previous, memberPinsCleared, disabledScheduleIds } = await deleteOrgDefault(
+        scope,
+        packageId,
+      );
       await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
         await recordAuditFromContext(c, {
@@ -1664,7 +1688,10 @@ export function createIntegrationsRouter() {
           resourceType: "integration_org_default",
           resourceId: packageId,
           before: orgDefaultAudit(previous),
-          ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
+          after: {
+            memberPinsCleared,
+            ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+          },
         });
       }
       return c.json({ schedules_disabled_count: disabledScheduleIds.length });

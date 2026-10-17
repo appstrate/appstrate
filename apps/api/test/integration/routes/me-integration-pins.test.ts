@@ -48,7 +48,7 @@ import {
   integrationPins,
   schedules,
 } from "@appstrate/db/schema";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, isNull } from "drizzle-orm";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
@@ -1103,6 +1103,113 @@ describe("/api/me/integration-pins", () => {
         "Appstrate-User": endUser.id,
       });
       expect(impact.schedules.map((s) => s.scheduleId)).toEqual([own.id]);
+    });
+  });
+
+  // ─── PUT under governance — a member pin is written only where it binds (#2043) ───
+
+  describe("PUT under an imposed set", () => {
+    /** An admin pin row on AGENT, straight to the table. */
+    async function adminPinRow(connectionIds: string[], open: boolean): Promise<void> {
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: INTEGRATION,
+        userId: null,
+        connectionIds,
+        allowAdditionalConnections: open,
+      });
+    }
+
+    async function defaultRow(connectionIds: string[], enforce: boolean): Promise<void> {
+      await db.insert(integrationOrgDefaults).values({
+        spaceId: ctx.defaultSpaceId,
+        integrationId: INTEGRATION,
+        connectionIds,
+        enforce,
+      });
+    }
+
+    async function storedMemberPins() {
+      return db
+        .select({ connectionIds: integrationPins.connectionIds })
+        .from(integrationPins)
+        .where(eq(integrationPins.userId, ctx.user.id));
+    }
+
+    const blocked: Array<{
+      name: string;
+      /** What `detail` names as imposing the set. */
+      by: string;
+      impose: (shared: string) => Promise<void>;
+    }> = [
+      {
+        name: "a closed admin pin",
+        by: "an admin pin closed to additions",
+        impose: (shared) => adminPinRow([shared], false),
+      },
+      {
+        name: "an enforced org default",
+        by: "the space's enforced default",
+        impose: (shared) => defaultRow([shared], true),
+      },
+      {
+        name: "an open admin pin under an enforced default",
+        by: "an admin pin the space's enforced default closes to additions",
+        impose: async (shared) => {
+          await adminPinRow([shared], true);
+          await defaultRow([shared], true);
+        },
+      },
+    ];
+
+    for (const { name, by, impose } of blocked) {
+      it(`DENY: 409 connection_additions_blocked under ${name}, nothing stored; DELETE allowed`, async () => {
+        const shared = await seedConnectionFor(ctx.user.id, { shared: true });
+        const own = await seedConnectionFor(ctx.user.id);
+        await impose(shared);
+
+        const res = await putPin([own]);
+        expect(res.status).toBe(409);
+        expect(await res.json()).toMatchObject({
+          code: "connection_additions_blocked",
+          detail: `The connections of '${INTEGRATION}' for '${AGENT}' are imposed by ${by}: a member's own selection cannot be added. Ask an admin to change that set.`,
+        });
+        expect(await storedMemberPins()).toEqual([]);
+        expect(await pinAudits("integration.member_pin.upserted")).toEqual([]);
+
+        const del = await deletePin();
+        expect(del.status).toBe(200);
+      });
+    }
+
+    it("ALLOW: an addition under an open admin pin; DENY 409 connection_set_too_large past the cap", async () => {
+      const own = await seedConnectionFor(ctx.user.id);
+      const floor = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, () =>
+        crypto.randomUUID(),
+      );
+      await adminPinRow(floor.slice(1), true);
+      const accepted = await putPin([own]);
+      expect(accepted.status, await accepted.clone().text()).toBe(200);
+      expect(await accepted.json()).toMatchObject({ connection_ids: [own], agent_active: true });
+
+      await db
+        .update(integrationPins)
+        .set({ connectionIds: floor })
+        .where(isNull(integrationPins.userId));
+      const refused = await putPin([own]);
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as { code: string }).code).toBe("connection_set_too_large");
+      // The pin stored before the cap was reached is left as it was.
+      expect(await storedMemberPins()).toEqual([{ connectionIds: [own] }]);
+    });
+
+    it("ALLOW: ungoverned, or under a soft org default, unchanged", async () => {
+      const own = await seedConnectionFor(ctx.user.id);
+      expect((await putPin([own])).status).toBe(200);
+      await defaultRow([await seedConnectionFor(ctx.user.id, { shared: true })], false);
+      expect((await putPin([])).status).toBe(200);
+      expect(await storedMemberPins()).toEqual([{ connectionIds: [] }]);
     });
   });
 });

@@ -136,7 +136,7 @@ export const connectionIdSetJsonSchema = {
   maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
   uniqueItems: true,
   description:
-    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, `[]` is `required_integration_unbound`: a 400 `validation_failed` item (`field: connection_overrides.<id>`) on a launch override, a 409 item on the runs a `[]` pin governs.",
+    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, `[]` is `required_integration_unbound` wherever nothing imposes a set: a 409 item on a launch or a schedule write (`source` `run_override` / `schedule_override`) and a 409 item on the runs a `[]` pin governs. Under an admin pin or an enforced org default a launch override of `[]` means no addition and is accepted.",
 } as const;
 
 /** The org default's set: never empty — none for every agent of the space is deactivation. */
@@ -147,23 +147,32 @@ const orgDefaultConnectionIdSetJsonSchema = {
     "A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that.",
 } as const;
 
+/** How many schedules a governance write or removal disabled. */
+const schedulesDisabledCountSchema = {
+  type: "integer",
+  minimum: 0,
+  description:
+    "How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove.",
+} as const;
+
 /** What removing a pin or an org default answers. */
 export const namingLayerRemovalSchema = {
   type: "object",
   required: ["schedules_disabled_count"],
-  properties: {
-    schedules_disabled_count: {
-      type: "integer",
-      minimum: 0,
-      description:
-        "How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove.",
-    },
-  },
+  properties: { schedules_disabled_count: schedulesDisabledCountSchema },
 } as const;
 
 /** The schedules a pin or org default removal disables, closing each removal's description. */
 export const namingLayerRemovalEffect =
   "The removal's transaction disables (`disabled_reason: connection_set_unnamed`) every enabled schedule it could name a set for — of its space; for a pin, on its agent; for a member pin, of that member — whose fired version uses this integration (declared, not inert) and whose set nothing names afterwards: no `connection_overrides` key, admin pin, pin of its actor or org default, however many connections its actor holds. Their jobs are removed once it commits.";
+
+/** The schedules removing an imposed floor disables, beyond {@link namingLayerRemovalEffect}. */
+const floorRemovalEffect =
+  "Removing a floor (an admin pin, an enforced default, or that enforcement) also disables (`disabled_reason: connection_set_unnamed`), in the same transaction, every enabled schedule it governed — for a pin, on its agent; for an enforced default, on every agent of the space no admin pin governs for this integration — that nothing governs afterwards and whose `connection_overrides` set for this integration strictly narrows the removed floor — names only connections of it, and fewer than it holds (`[]` included; ids compared case-insensitively, repeats counted once): under the floor it added nothing, ungoverned it would bind fewer connections, or none. A set naming the whole floor (in any order) binds the same either way; it, a set naming another connection, and a schedule with no key for this integration keep their meaning and are left alone.";
+
+/** The member pins writing or removing an enforced default deletes. */
+const enforcedDefaultMemberPinPurge =
+  "An enforced default admits no addition, so a member pin never survives under it: every write or removal where the default is enforced, or was, deletes in its transaction every member pin of this integration in the space (a closed admin pin left none, and the enforced default closes an open one), so none comes back later as a selection nobody chose again. The audit records each one (`memberPinsCleared`: `userId`, `agentPackageId`, `connectionIds`).";
 
 /** What a connection delete does to the schedules of a member pin it empties. */
 export const droppedPinEffect =
@@ -194,6 +203,20 @@ const integrationOrgDefaultSchema = {
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
+  },
+} as const;
+
+/** What writing an org default answers: the stored default, and the schedules un-enforcing it disabled. */
+const integrationOrgDefaultWriteSchema = {
+  type: "object",
+  required: [...integrationOrgDefaultSchema.required, "schedules_disabled_count"],
+  properties: {
+    ...integrationOrgDefaultSchema.properties,
+    schedules_disabled_count: {
+      ...schedulesDisabledCountSchema,
+      description:
+        "How many schedules the write disabled (`disabled_reason: connection_set_unnamed`): only writing an enforced default back with `enforce: false` disables any; 0 otherwise.",
+    },
   },
 } as const;
 
@@ -1858,7 +1881,11 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Pin a set of shared connections to an agent for all members of the space (admin)",
       description:
-        "Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.",
+        "Impose a floor: every run of the agent binds the pinned set, whoever runs it, and no launch override, member pin, org default or fallback narrows or replaces it. `allow_additional_connections` decides what may add to it. Closed (the default), nothing does: a launch override naming a connection outside the set is `override_outranked`. Open, the run's selection — its launch override, else the member's pin — is bound after the floor (deduplicated, at most " +
+        `${MAX_CONNECTIONS_PER_INTEGRATION} in all, else \`connection_set_too_large\`), from the connections the actor can reach. ` +
+        "Growing an open floor does not judge the member pins already stored: where the floor plus one of them exceeds " +
+        `${MAX_CONNECTIONS_PER_INTEGRATION} connections, that member's runs fail with \`connection_set_too_large\`. ` +
+        "A member pin never survives under a closed admin pin: a write that stores the pin closed, or replaces a closed one, deletes in its transaction every member pin of this agent and integration in the space, which the closed floor masks, so none comes back later as an addition or a selection nobody chose again. Only writing an open pin where there was none, or rewriting an open one, keeps them. The audit records each cleared member pin. Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1878,6 +1905,12 @@ export const integrationsPaths = {
                   description:
                     "The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration, reach this space and be shared into it by the member who owns it.",
                 },
+                allow_additional_connections: {
+                  type: "boolean",
+                  default: false,
+                  description:
+                    "Whether the run's selection may add to the pinned set. The write replaces it too: absent is `false`, whatever was stored. Refused over `[]` (an empty floor imposes nothing to add to), and while the space enforces a default for this integration (an enforced default is always closed).",
+                },
               },
               additionalProperties: false,
             },
@@ -1894,7 +1927,7 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: `Refused: ${connectionSetRefusals}.`,
+          description: `Refused: ${connectionSetRefusals}, or \`allow_additional_connections: true\` with \`connection_ids: []\` (an error on \`allow_additional_connections\`).`,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
@@ -1902,13 +1935,23 @@ export const integrationsPaths = {
           description:
             "A connection id that is unknown, not shared into this space by a member (an end user's connection never is), of another integration, or that does not reach this space — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
         },
+        "409": {
+          description:
+            "`connection_additions_conflict`: `allow_additional_connections: true` while the space enforces a default connection set for this integration. Stop enforcing the default, or keep the pin closed.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
       operationId: "deleteIntegrationPin",
       tags: ["Integrations"],
       summary: "Remove an admin pin (admin)",
-      description: `Removes the agent's admin pin for this integration. ${namingLayerRemovalEffect}`,
+      description: `Removes the agent's admin pin for this integration. Removing a closed pin also deletes, in the same transaction, every member pin of this agent and integration in the space: masked by the pin, none revives as the member's ungoverned selection. So does removing an open pin while the space enforces a default for this integration: the default governs the agent from then on and masks them all. Otherwise, removing an open pin keeps those that add a connection to its floor — their additions become each member's selection — or name all of it, and deletes those strictly narrowing it (only connections of the floor, fewer than it holds, \`[]\` included), which added nothing and would otherwise bind fewer connections as written. ${namingLayerRemovalEffect} A schedule that relied on a deleted member pin is disabled with them. ${floorRemovalEffect}`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1943,7 +1986,8 @@ export const integrationsPaths = {
       ],
       responses: {
         "200": {
-          description: "Org default (bare resource — same shape as PUT)",
+          description:
+            "Org default (bare resource — the shape PUT answers, without its `schedules_disabled_count`)",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
@@ -1969,7 +2013,11 @@ export const integrationsPaths = {
         "the current default rather than adding a second one. Every consuming agent gets the " +
         "default's scopes: bind an agent that needs more to its own connection rather than " +
         "upgrading a default one — a member pin overrides a soft default, and only an admin pin " +
-        "overrides an enforced one.",
+        "overrides an enforced one. " +
+        enforcedDefaultMemberPinPurge +
+        " Writing an enforced default back with `enforce: false` removes the floor it imposed. " +
+        floorRemovalEffect +
+        " Their jobs are removed once it commits; the response counts them (`schedules_disabled_count`) and the audit record lists them (`disabledScheduleIds`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1998,9 +2046,9 @@ export const integrationsPaths = {
       },
       responses: {
         "200": {
-          description: "Default set",
+          description: "Default set: the stored default, and how many schedules the write disabled",
           headers: STD_RESPONSE_HEADERS,
-          content: { "application/json": { schema: integrationOrgDefaultSchema } },
+          content: { "application/json": { schema: integrationOrgDefaultWriteSchema } },
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
@@ -2012,13 +2060,23 @@ export const integrationsPaths = {
           description:
             "A connection id that is unknown, not shared into this space by a member (an end user's connection never is), of another integration, or that does not reach this space — one answer for all, so an id cannot be probed.",
         },
+        "409": {
+          description:
+            "`connection_additions_conflict`: `enforce: true` while an admin pin of this integration lets members add connections; `detail` names the agents. An enforced default is always closed: close those pins to additions, or keep the default soft.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
       operationId: "deleteIntegrationOrgDefault",
       tags: ["Integrations"],
       summary: "Remove the space-wide default connection (admin)",
-      description: `Removes the space's default set for this integration, soft or enforced. ${namingLayerRemovalEffect}`,
+      description: `Removes the space's default set for this integration, soft or enforced. ${enforcedDefaultMemberPinPurge} ${namingLayerRemovalEffect} A schedule that relied on a deleted member pin is disabled with them. ${floorRemovalEffect}`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

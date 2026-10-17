@@ -36,13 +36,16 @@ import {
   integrationConnectionShares,
   integrationConnections,
   integrationOauthClients,
+  integrationOrgDefaults,
   integrationPins,
   runs,
   schedules,
+  spacePackages,
 } from "@appstrate/db/schema";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import type { Permission } from "../../../src/lib/permissions.ts";
 import {
+  deletePin,
   validatePinTargets,
   listAccessibleConnections,
   listAgentsConsumingIntegration,
@@ -61,7 +64,11 @@ import {
   deleteOwnConnection,
   deleteIntegrationOAuthClient,
 } from "../../../src/services/integration-connections.ts";
-import { upsertOrgDefault } from "../../../src/services/integration-org-defaults-service.ts";
+import {
+  deleteOrgDefault,
+  getOrgDefault,
+  upsertOrgDefault,
+} from "../../../src/services/integration-org-defaults-service.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { deleteSpace } from "../../../src/services/spaces.ts";
 
@@ -338,6 +345,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         upsertIntegrationPin(scope, INTEGRATION, {
           agentPackageId: "@pinsorg/pin-off",
           connectionIds: [connectionId],
+          allowAdditionalConnections: false,
         }),
       ).rejects.toThrow(/not active in this space/i);
 
@@ -346,6 +354,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: "@pinsorg/pin-off",
         connectionIds: [connectionId],
+        allowAdditionalConnections: false,
       });
       expect(pin.connection_ids).toEqual([connectionId]);
     });
@@ -406,6 +415,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
+        allowAdditionalConnections: false,
       });
       expect(pin.connection_ids).toEqual(ids);
 
@@ -414,18 +424,40 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(listed[0]!.connection_ids).toEqual(ids);
     });
 
+    it("says whether each pin's agent is active here; a write answers true", async () => {
+      const ids = await seedSharedConnections(1);
+      const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds: ids,
+        allowAdditionalConnections: false,
+      });
+      expect(pin.agent_active).toBe(true);
+      expect((await listIntegrationPins(scope, INTEGRATION))[0]!.agent_active).toBe(true);
+
+      // Deactivated: the pin stands, its agent runs nowhere here.
+      await db
+        .update(spacePackages)
+        .set({ enabled: false })
+        .where(and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, AGENT)));
+      const [listed] = await listIntegrationPins(scope, INTEGRATION);
+      expect(listed!.connection_ids).toEqual(ids);
+      expect(listed!.agent_active).toBe(false);
+    });
+
     it("a second write REPLACES the set rather than merging into it", async () => {
       const ids = await seedSharedConnections(3);
       const first = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
+        allowAdditionalConnections: false,
       });
       expect(first.previous).toBeNull();
       const second = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: [ids[2]!],
+        allowAdditionalConnections: false,
       });
-      expect(second.previous).toEqual(ids);
+      expect(second.previous?.connection_ids).toEqual(ids);
       const listed = await listIntegrationPins(scope, INTEGRATION);
       expect(listed).toHaveLength(1);
       expect(listed[0]!.connection_ids).toEqual([ids[2]!]);
@@ -438,6 +470,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: reversed.map((id) => id.toUpperCase()),
+        allowAdditionalConnections: false,
       });
       expect(pin.connection_ids).toEqual(reversed);
       expect((await listIntegrationPins(scope, INTEGRATION))[0]!.connection_ids).toEqual(
@@ -450,6 +483,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
+        allowAdditionalConnections: false,
       });
       await db.delete(integrationConnections).where(eq(integrationConnections.id, ids[1]!));
       expect((await listIntegrationPins(scope, INTEGRATION))[0]!.connection_ids).toEqual(ids);
@@ -460,6 +494,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
+        allowAdditionalConnections: false,
       });
       await expect(
         unshareConnection({
@@ -498,6 +533,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
           agentPackageId: AGENT,
           connectionIds: ids,
+          allowAdditionalConnections: false,
         });
         expect(pin.connection_ids).toEqual(ids);
         expect(Number.isNaN(Date.parse(pin.createdAt))).toBe(false);
@@ -512,6 +548,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
+        allowAdditionalConnections: false,
       });
       const owner = person(memberId);
       await expect(deleteOwnConnection(owner, ids[1]!)).rejects.toMatchObject({
@@ -894,6 +931,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
+        allowAdditionalConnections: false,
       });
       await expect(
         deleteIntegrationOAuthClient(scope, INTEGRATION, clientId),
@@ -916,9 +954,415 @@ describe("integration-pins-service — DB access/ownership", () => {
         upsertIntegrationPin(scope, INTEGRATION, {
           agentPackageId: AGENT,
           connectionIds: [shared!, personal],
+          allowAdditionalConnections: false,
         }),
       ).rejects.toMatchObject({ status: 404, code: "not_found" });
       expect(await listIntegrationPins(scope, INTEGRATION)).toEqual([]);
+    });
+  });
+
+  describe("additions — an admin pin open to the run's selection (#2043)", () => {
+    const AGENT = "@pinsorg/additions-agent";
+    const OTHER_AGENT = "@pinsorg/additions-other";
+
+    async function seedAgent(id: string): Promise<void> {
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        type: "agent",
+        homeSpaceId: scope.spaceId,
+        draftManifest: {
+          type: "agent",
+          schema_version: "0.1",
+          name: id,
+          version: "1.0.0",
+          display_name: id,
+          prompt: "x",
+          dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+        },
+      });
+      await seedSpacePackage(scope.spaceId, id, { enabled: true });
+    }
+
+    const shared = () => seedConnection({ spaceId: scope.spaceId, userId: memberId, shared: true });
+
+    const adminPin = (connectionIds: string[], allowAdditionalConnections: boolean) =>
+      upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds,
+        allowAdditionalConnections,
+      });
+
+    /** A member pin row written straight to the table: the controls live outside the pin doors' reach. */
+    async function memberPinRow(opts: {
+      userId: string;
+      spaceId?: string;
+      agent?: string;
+      integrationId?: string;
+    }): Promise<string[]> {
+      const connectionIds = [crypto.randomUUID()];
+      await db.insert(integrationPins).values({
+        spaceId: opts.spaceId ?? scope.spaceId,
+        packageId: opts.agent ?? AGENT,
+        integrationId: opts.integrationId ?? INTEGRATION,
+        userId: opts.userId,
+        connectionIds,
+      });
+      return connectionIds;
+    }
+
+    /** Every member pin, as `space|agent|integration|user`, sorted. */
+    async function memberPins(): Promise<string[]> {
+      const rows = await db
+        .select()
+        .from(integrationPins)
+        .where(sql`${integrationPins.userId} IS NOT NULL`);
+      return rows.map((r) => `${r.spaceId}|${r.packageId}|${r.integrationId}|${r.userId}`).sort();
+    }
+
+    beforeEach(async () => {
+      await seedAgent(AGENT);
+      await seedAgent(OTHER_AGENT);
+    });
+
+    it("persists the flag, returns it, and lists it; a member pin is never open", async () => {
+      const id = await shared();
+      const { pin } = await adminPin([id], true);
+      expect(pin.allow_additional_connections).toBe(true);
+      expect((await listIntegrationPins(scope, INTEGRATION))[0]!.allow_additional_connections).toBe(
+        true,
+      );
+
+      const member = await upsertMemberPin(scope, {
+        agentPackageId: AGENT,
+        integrationId: INTEGRATION,
+        connectionIds: [id],
+        userId: memberId,
+      });
+      expect(member.pin.allow_additional_connections).toBe(false);
+
+      const closed = await adminPin([id], false);
+      expect(closed.previous?.allow_additional_connections).toBe(true);
+      expect(closed.pin.allow_additional_connections).toBe(false);
+      expect((await listIntegrationPins(scope, INTEGRATION))[0]!.allow_additional_connections).toBe(
+        false,
+      );
+    });
+
+    it("the database refuses an open member pin and an open empty floor (CHECK)", async () => {
+      const id = await shared();
+      const insert = async (userId: string | null, connectionIds: string[]) => {
+        await db.insert(integrationPins).values({
+          spaceId: scope.spaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId,
+          connectionIds,
+          allowAdditionalConnections: true,
+        });
+      };
+      /** The constraint a refused insert names, wherever the driver puts it. */
+      const violated = async (write: Promise<void>): Promise<string> => {
+        const error = await write.then(
+          () => null,
+          (err: unknown) => err,
+        );
+        expect(error).not.toBeNull();
+        const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
+        return `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
+      };
+      expect(await violated(insert(memberId, [id]))).toContain(
+        "integration_pins_additions_admin_only",
+      );
+      expect(await violated(insert(null, []))).toContain("integration_pins_additions_need_imposed");
+      // Control: the same row is accepted as an admin pin over a non-empty floor.
+      await insert(null, [id]);
+      expect((await listIntegrationPins(scope, INTEGRATION))[0]!.allow_additional_connections).toBe(
+        true,
+      );
+    });
+
+    /**
+     * Every admin pin transition: the pin before (none / open / closed) and the write or delete.
+     * A member pin survives only where it was live before AND after (none → open, open → open,
+     * open → deleted); every transition into or out of a closed pin purges.
+     */
+    const transitions: Array<{
+      before: "none" | "open" | "closed";
+      act: "open" | "closed" | "delete";
+      purges: boolean;
+    }> = [
+      { before: "none", act: "closed", purges: true },
+      { before: "none", act: "open", purges: false },
+      { before: "open", act: "open", purges: false },
+      { before: "open", act: "closed", purges: true },
+      { before: "closed", act: "closed", purges: true },
+      { before: "closed", act: "open", purges: true },
+      { before: "closed", act: "delete", purges: true },
+      { before: "open", act: "delete", purges: false },
+    ];
+
+    for (const { before, act, purges } of transitions) {
+      it(`${before} → ${act === "delete" ? "deleted" : act} ${purges ? "purges" : "keeps"} the member pins of its (space, agent, integration) only`, async () => {
+        const id = await shared();
+        const colleague = (await createTestUser()).id;
+        await addOrgMember(ctx.orgId, colleague);
+        const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+        if (before !== "none") await adminPin([id], before === "open");
+        const mine = await memberPinRow({ userId: memberId });
+        const theirs = await memberPinRow({ userId: colleague });
+        await memberPinRow({ userId: memberId, agent: OTHER_AGENT });
+        await memberPinRow({ userId: memberId, integrationId: OTHER_INTEGRATION });
+        await memberPinRow({ userId: memberId, spaceId: elsewhere.id });
+        const controls = [
+          `${scope.spaceId}|${OTHER_AGENT}|${INTEGRATION}|${memberId}`,
+          `${scope.spaceId}|${AGENT}|${OTHER_INTEGRATION}|${memberId}`,
+          `${elsewhere.id}|${AGENT}|${INTEGRATION}|${memberId}`,
+        ];
+        const triple = [
+          `${scope.spaceId}|${AGENT}|${INTEGRATION}|${memberId}`,
+          `${scope.spaceId}|${AGENT}|${INTEGRATION}|${colleague}`,
+        ];
+
+        const { memberPinsCleared } =
+          act === "delete"
+            ? await deletePin(scope, AGENT, INTEGRATION, null)
+            : await adminPin([id], act === "open");
+
+        expect(await memberPins()).toEqual((purges ? controls : [...controls, ...triple]).sort());
+        const cleared = [
+          { userId: memberId, connectionIds: mine },
+          { userId: colleague, connectionIds: theirs },
+        ].sort((a, b) => a.userId.localeCompare(b.userId));
+        expect(memberPinsCleared).toEqual(purges ? cleared : []);
+      });
+    }
+
+    describe("a member pin is written only where it binds (#2043 B)", () => {
+      const memberPin = (connectionIds: string[]) =>
+        upsertMemberPin(scope, {
+          agentPackageId: AGENT,
+          integrationId: INTEGRATION,
+          connectionIds,
+          userId: memberId,
+        });
+
+      /** An enforced default row written straight to the table, past the 409 beside an open pin. */
+      async function enforcedDefaultRow(connectionIds: string[]): Promise<void> {
+        await db.insert(integrationOrgDefaults).values({
+          spaceId: scope.spaceId,
+          integrationId: INTEGRATION,
+          connectionIds,
+          enforce: true,
+        });
+      }
+
+      const governances: Array<{ name: string; impose: (id: string) => Promise<unknown> }> = [
+        { name: "a closed admin pin", impose: (id) => adminPin([id], false) },
+        { name: "a closed empty admin pin", impose: () => adminPin([], false) },
+        {
+          name: "an enforced org default",
+          impose: (id) =>
+            upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: true }),
+        },
+        {
+          name: "an open admin pin under an enforced default",
+          impose: async (id) => {
+            await adminPin([id], true);
+            await enforcedDefaultRow([id]);
+          },
+        },
+      ];
+
+      for (const { name, impose } of governances) {
+        it(`under ${name}: 409 connection_additions_blocked, nothing stored, DELETE allowed`, async () => {
+          const id = await shared();
+          await impose(id);
+          // A row of the colleague's, masked: the refusal purges nothing either.
+          const colleague = (await createTestUser()).id;
+          await addOrgMember(ctx.orgId, colleague);
+          await memberPinRow({ userId: colleague });
+          const before = await memberPins();
+
+          // Even naming only imposed ids, or `[]`: there it binds nothing.
+          for (const set of [[id], [], [id.toUpperCase()]]) {
+            await expect(memberPin(set)).rejects.toMatchObject({
+              status: 409,
+              code: "connection_additions_blocked",
+            });
+          }
+          expect(await memberPins()).toEqual(before);
+          await expect(deletePin(scope, AGENT, INTEGRATION, memberId)).resolves.toMatchObject({
+            previous: null,
+          });
+        });
+      }
+
+      it("under an open admin pin: accepted up to the cap, 409 connection_set_too_large past it", async () => {
+        const own = await seedConnection({ spaceId: scope.spaceId, userId: memberId });
+        // A floor of 20 straight to the table: the pin door would want each to be a shared row.
+        const floor = Array.from({ length: 20 }, () => crypto.randomUUID());
+        await db.insert(integrationPins).values({
+          spaceId: scope.spaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId: null,
+          connectionIds: floor,
+          allowAdditionalConnections: true,
+        });
+        await expect(memberPin([own])).rejects.toMatchObject({
+          status: 409,
+          code: "connection_set_too_large",
+        });
+        expect(await memberPins()).toEqual([]);
+
+        // Nineteen imposed plus one addition is the cap, accepted.
+        await db
+          .update(integrationPins)
+          .set({ connectionIds: floor.slice(1) })
+          .where(sql`${integrationPins.userId} IS NULL`);
+        expect((await memberPin([own])).pin.connection_ids).toEqual([own]);
+      });
+
+      it("ungoverned, or under a soft default: written as before", async () => {
+        const id = await shared();
+        expect((await memberPin([id])).pin.connection_ids).toEqual([id]);
+        await upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: false });
+        expect((await memberPin([])).pin.connection_ids).toEqual([]);
+      });
+    });
+
+    it("deleting an OPEN admin pin purges the member pins strictly narrowing its floor only (#2043 A, H)", async () => {
+      const [id, second, addition] = [await shared(), await shared(), await shared()];
+      await adminPin([id, second], true);
+      const users = await Promise.all(
+        Array.from({ length: 5 }, async () => {
+          const user = (await createTestUser()).id;
+          await addOrgMember(ctx.orgId, user);
+          return user;
+        }),
+      );
+      // Narrowing: `[]` and a strict subset. Kept: the whole floor in another order (it binds the
+      // same ungoverned), and every set adding a connection.
+      const sets = [[], [id.toUpperCase()], [second, id], [id, addition], [addition]];
+      for (const [i, connectionIds] of sets.entries()) {
+        await db.insert(integrationPins).values({
+          spaceId: scope.spaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId: users[i]!,
+          connectionIds,
+        });
+      }
+
+      const { memberPinsCleared } = await deletePin(scope, AGENT, INTEGRATION, null);
+
+      expect(memberPinsCleared.map((p) => p.userId).sort()).toEqual([users[0]!, users[1]!].sort());
+      expect(await memberPins()).toEqual(
+        users
+          .slice(2)
+          .map((u) => `${scope.spaceId}|${AGENT}|${INTEGRATION}|${u}`)
+          .sort(),
+      );
+    });
+
+    it("deleting an OPEN admin pin under an enforced default purges every member pin of its triple", async () => {
+      const [id, addition] = [await shared(), await shared()];
+      await adminPin([id], true);
+      // Past the 409 beside an open pin (an inactive agent's pin does not refuse it).
+      await db.insert(integrationOrgDefaults).values({
+        spaceId: scope.spaceId,
+        integrationId: INTEGRATION,
+        connectionIds: [id],
+        enforce: true,
+      });
+      const users = await Promise.all(
+        Array.from({ length: 2 }, async () => {
+          const user = (await createTestUser()).id;
+          await addOrgMember(ctx.orgId, user);
+          return user;
+        }),
+      );
+      // One adding a connection, one narrowing: the default masks both once the pin is gone.
+      for (const [i, connectionIds] of [[id, addition], []].entries()) {
+        await db.insert(integrationPins).values({
+          spaceId: scope.spaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId: users[i]!,
+          connectionIds,
+        });
+      }
+      // Control: another agent's member pin of the same integration.
+      await memberPinRow({ userId: users[0]!, agent: OTHER_AGENT });
+
+      const { memberPinsCleared } = await deletePin(scope, AGENT, INTEGRATION, null);
+
+      expect(memberPinsCleared.map((p) => p.userId).sort()).toEqual([...users].sort());
+      expect(await memberPins()).toEqual([
+        `${scope.spaceId}|${OTHER_AGENT}|${INTEGRATION}|${users[0]!}`,
+      ]);
+    });
+
+    it("refuses to open under an ENFORCED default (409), and writes nothing", async () => {
+      const id = await shared();
+      await adminPin([id], false);
+      await upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: true });
+      // Past the write rule: the refused write must leave even a masked member pin in place.
+      await memberPinRow({ userId: memberId });
+
+      await expect(adminPin([id], true)).rejects.toMatchObject({
+        status: 409,
+        code: "connection_additions_conflict",
+      });
+      expect((await listIntegrationPins(scope, INTEGRATION))[0]!.allow_additional_connections).toBe(
+        false,
+      );
+      expect(await memberPins()).toHaveLength(1);
+      // A closed pin under the same default is accepted.
+      expect((await adminPin([id], false)).pin.allow_additional_connections).toBe(false);
+    });
+
+    it("opens under a SOFT default", async () => {
+      const id = await shared();
+      await upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: false });
+      expect((await adminPin([id], true)).pin.allow_additional_connections).toBe(true);
+    });
+
+    it("two concurrent conflicting writes: exactly one wins, the pair never coexists", async () => {
+      // PGlite serialises transactions, so this discriminates only on PostgreSQL (the CI tiers),
+      // where it fails without lockIntegrationGovernance (verified).
+      const id = await shared();
+      for (let round = 0; round < 5; round++) {
+        // Fired together, in both orders: the loser must read the winner's committed row.
+        const writes =
+          round % 2 === 0
+            ? [
+                adminPin([id], true),
+                upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: true }),
+              ]
+            : [
+                upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: true }),
+                adminPin([id], true),
+              ];
+        const settled = await Promise.allSettled(writes);
+
+        expect(settled.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+        const refused = settled.find((r) => r.status === "rejected") as PromiseRejectedResult;
+        expect(refused.reason).toMatchObject({
+          status: 409,
+          code: "connection_additions_conflict",
+        });
+        const pinOpen =
+          (await listIntegrationPins(scope, INTEGRATION)).at(0)?.allow_additional_connections ??
+          false;
+        const enforced = (await getOrgDefault(scope, INTEGRATION))?.enforce ?? false;
+        expect(pinOpen && enforced).toBe(false);
+        expect(pinOpen || enforced).toBe(true);
+
+        await db.delete(integrationPins);
+        await deleteOrgDefault(scope, INTEGRATION);
+      }
     });
   });
 

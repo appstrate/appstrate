@@ -1727,17 +1727,17 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
       {
         action: "integration.org_default.upserted",
         before: null,
-        after: { connectionIds: [a], enforce: false },
+        after: { connectionIds: [a], enforce: false, memberPinsCleared: [] },
       },
       {
         action: "integration.org_default.upserted",
         before: { connectionIds: [a], enforce: false },
-        after: { connectionIds: [b], enforce: true },
+        after: { connectionIds: [b], enforce: true, memberPinsCleared: [] },
       },
       {
         action: "integration.org_default.deleted",
         before: { connectionIds: [b], enforce: true },
-        after: null,
+        after: { memberPinsCleared: [] },
       },
     ]);
   });

@@ -430,7 +430,7 @@ export const schemas = {
         type: "string",
         enum: [...CONNECTION_RESOLUTION_SOURCES],
         description:
-          "The cascade layer the item is about: the one whose set failed (`pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, and a member failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), or the one that chose `[]` (`required_integration_unbound`, `integration_unbound`). Absent when no layer bound anything.",
+          "The cascade layer the item is about: the one whose set failed (`pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, the selection's layer on `connection_set_too_large`, and a member failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), or the one that chose `[]` (`required_integration_unbound`, `integration_unbound`). Absent when no layer bound anything.",
       },
       connect_url: {
         type: "string",
@@ -1735,7 +1735,7 @@ export const schemas = {
       },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 0..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration (\`[]\` = none, see the set schema); each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.`,
+        description: `Per-integration connection picks for this run (the launch-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 0..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration (\`[]\` = none, see the set schema); each chosen connection carries its own authKey. Under an admin pin or an enforced org default it names additions to the imposed floor, which binds whole whatever it says (\`[]\` = no addition), and a connection outside the floor only when the admin pin allows additions (\`override_outranked\` otherwise); ungoverned, it beats member pins, a soft org default and the fallback. A set is stored as named, imposed ids included: the dashboard writes the additions only.`,
         additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
@@ -1866,7 +1866,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: [...scheduleDisabledReasonValues, null],
         description:
-          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin or an enforced org default (`override_outranked`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. Cleared by re-enabling.",
+          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. Cleared by re-enabling.",
       },
       cron_expression: { type: "string" },
       timezone: { type: "string" },
@@ -1879,7 +1879,7 @@ export const schemas = {
       version_override: { type: ["string", "null"] },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration (\`[]\` = none, see the set schema). Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.`,
+        description: `Per-integration connection picks frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration (\`[]\` = none, see the set schema). Replayed on every fire. Under an admin pin or an enforced org default it names additions to the imposed floor, which binds whole whatever it says (\`[]\` = no addition), and a connection outside the floor only when the admin pin allows additions (\`override_outranked\` otherwise); ungoverned, it beats member pins, a soft org default and the fallback. A set is stored as named, imposed ids included: the dashboard writes the additions only.`,
         additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
@@ -2349,7 +2349,9 @@ export const schemas = {
   IntegrationAgentResolution: {
     type: "object",
     description:
-      "Per-integration connection verdict for an agent: which connections the next run binds, the annotated candidate list, and admin/member pin + blocked state. The cascade, first layer with a set wins: admin pin → enforced org default → launch override (the run's `connection_overrides`, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the actor's ONE own serving connection binds; several answer `must_choose_connection`; a connection shared by another member is never bound without an explicit pick); then a health and scope check. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here.",
+      "Per-integration connection verdict for an agent: which connections the next run binds, the annotated candidate list, and admin/member pin + blocked state. The bound set is floor ∪ selection, floor first in its own order, then the selection's additions in theirs, deduplicated. Governed — an admin pin, else an enforced org default — the governing set is the floor, bound whole, and the selection is the launch override (the run's `connection_overrides`, or the firing schedule's — a scheduled fire carries no run override), else the member pin when additions are open, else nothing; no soft org default and no fallback contributes. Additions are open only under an admin pin that allows them with no enforced org default (`additional_connections_allowed`); open, the selection is drawn from the connections the actor can reach, closed, an override naming a connection outside the floor is `override_outranked`. Ungoverned there is no floor, and the first layer with a set is the selection: launch override → member pin → soft org default → fallback (the actor's ONE own serving connection binds; several answer `must_choose_connection`; a connection shared by another member is never bound without an explicit pick). More than " +
+      `${MAX_CONNECTIONS_PER_INTEGRATION} connections in all is \`connection_set_too_large\`; then a health and scope check on every bound connection. ` +
+      "Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here. Per-connection provenance, read off the fields: under governance the floor is `admin_pinned_connection_ids` when an admin pin exists, else `org_default_connection_ids` (enforced); every other id of `resolved_connection_ids` is an addition — here the member pin's (`member_pinned_connection_ids`); a run's launch override, when it carries one, supplies them instead. Ungoverned, the whole set comes from `source`.",
     required: [
       "source",
       "error_code",
@@ -2360,6 +2362,7 @@ export const schemas = {
       "member_pinned_connection_ids",
       "org_default_connection_ids",
       "org_default_enforced",
+      "additional_connections_allowed",
       "can_add_connection",
       "candidates",
     ],
@@ -2368,7 +2371,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: [...CONNECTION_RESOLUTION_SOURCES, null],
         description:
-          "The cascade layer that bound a non-empty set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`, `integration_not_active`), when the integration binds none (`[]` — `warning.source` names the layer that chose it) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
+          "The cascade layer that bound the FIRST connection of a non-empty set — under governance the floor's (`admin_pin` / `org_default_enforced`), whatever its additions came from; per-connection provenance is the `source` of each entry in the run's `resolved_connections` — or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside a governing set that allows no additions — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`, `integration_not_active`), when the integration binds none (`[]` — `warning.source` names the layer that chose it) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
       },
       error_code: {
         type: ["string", "null"],
@@ -2414,6 +2417,11 @@ export const schemas = {
         description: "`null` when no org default exists; an org default is never empty.",
       },
       org_default_enforced: { type: "boolean" },
+      additional_connections_allowed: {
+        type: "boolean",
+        description:
+          "Whether the run's selection — a launch override, else the caller's member pin — is bound on top of the imposed set: true only under an admin pin with `allow_additional_connections`, and no enforced org default for the integration. `false` with nothing imposed (no floor to add to: the selection binds alone) and under a closed one (it is masked, and an override outside the set is `override_outranked`).",
+      },
       can_add_connection: {
         type: "boolean",
         description:
@@ -2594,6 +2602,8 @@ export const schemas = {
       "agent_package_id",
       "integration_package_id",
       "connection_ids",
+      "allow_additional_connections",
+      "agent_active",
       "createdAt",
       "updatedAt",
     ],
@@ -2603,7 +2613,17 @@ export const schemas = {
       connection_ids: {
         ...connectionIdSetJsonSchema,
         description:
-          "The whole pinned set, in the order it was written — `[]` pins none. A write replaces it.",
+          "The whole pinned set, in the order it was written — `[]` pins none. A write replaces it. On an admin pin, the floor every run of the agent binds; on a member pin, the member's selection.",
+      },
+      allow_additional_connections: {
+        type: "boolean",
+        description:
+          "Admin pin: whether the run's selection (a launch override, else the member's pin) is bound on top of the pinned set; closed, nothing adds to it. An enforced org default for the integration keeps it closed whatever this says, and the two writes refuse each other (409 `connection_additions_conflict`). Never true over `[]`, and always false on a member pin.",
+      },
+      agent_active: {
+        type: "boolean",
+        description:
+          "Whether the pin's agent is active in this space — placed here and switched on, or on by the deployment's default. A pin of an inactive agent still stands and names its connections, but the agent runs nowhere here. Always true on a write's response: a pin is written only for an active agent.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
