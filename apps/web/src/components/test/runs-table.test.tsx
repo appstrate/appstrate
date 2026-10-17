@@ -23,7 +23,7 @@ await i18n.changeLanguage("fr");
 
 const STARTED_AT_LABEL = formatDateField(STARTED_AT);
 const agentName = () => "Rapport trimestriel";
-const agentIdentity = () => ({ icon: "lucide:chart-bar", color: "#2563eb" });
+const agentIdentity = () => ({ icon: "lucide:chart-bar", color: "blue" });
 
 /**
  * The column set is a hook — the toolbar's column menu and the table have
@@ -69,8 +69,8 @@ describe("the runs column set", () => {
   });
 
   it("draws the agent's tile before its name", () => {
-    // `#2563eb` is the agent's custom colour: the tile is tinted with it.
-    expect(html).toContain("#2563eb1f");
+    // The tile wears the agent's chosen colour.
+    expect(html).toContain("bg-identity-blue/20");
   });
 
   it("leads to the run, under a name that says which run", () => {

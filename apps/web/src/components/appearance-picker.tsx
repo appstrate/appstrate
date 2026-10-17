@@ -160,7 +160,7 @@ export function AppearancePicker({
   disabled = false,
 }: {
   value: AppearanceValue;
-  onChange: (next: { icon?: string | null; color?: string | null }) => void;
+  onChange: (next: { icon?: string | null; color?: AppearanceColor | null }) => void;
   allow: readonly IconForm[];
   seed: string;
   label: string;

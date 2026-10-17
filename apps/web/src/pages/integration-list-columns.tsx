@@ -33,7 +33,7 @@ export function useIntegrationListColumns(
       elastic: true,
       cell: (integration) => (
         <div className="flex min-w-0 items-center gap-2">
-          <PackageIcon type="integration" icon={integration.icon} size="sm" />
+          <PackageIcon type="integration" id={integration.id} icon={integration.icon} size="sm" />
           <span className="truncate font-medium">{integration.name}</span>
         </div>
       ),

@@ -23,8 +23,10 @@ import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
 import { CellText } from "../../components/table-cells";
 import { formatDateField } from "../../lib/format-date";
-import { spaceLabel } from "../../lib/space-label";
+import { IdentityTile } from "@appstrate/ui/components/identity-tile";
+import { spaceLabel, spaceTile } from "../../lib/space-label";
 import { isSpaceEnterable } from "../../hooks/use-current-space";
+import { useViewer } from "../../hooks/use-auth";
 
 export interface SpaceRow {
   id: string;
@@ -32,6 +34,8 @@ export interface SpaceRow {
   isDefault: boolean;
   createdAt: string;
   personal: boolean;
+  icon: string | null;
+  color: string | null;
   visibility: components["schemas"]["SpaceObject"]["visibility"];
   orphaned_at?: string | null;
   access: string;
@@ -51,6 +55,7 @@ export function useSpaceColumns({
   actionsBusy?: boolean;
 }): DataColumn<SpaceRow>[] {
   const { t } = useTranslation(["settings", "common"]);
+  const viewer = useViewer();
 
   return [
     {
@@ -59,15 +64,18 @@ export function useSpaceColumns({
       width: 160,
       elastic: true,
       cell: (space) => (
-        <CellText
-          strong
-          // A `closed` space is listed so the caller knows it exists, not so they
-          // can be dropped into it (pinning one 403s every space-scoped request,
-          // same rule as the org switcher): its row is static and says why.
-          title={isSpaceEnterable(space) ? spaceLabel(space, t) : t("spaces.requestAccess")}
-        >
-          {spaceLabel(space, t)}
-        </CellText>
+        <span className="flex min-w-0 items-center gap-3">
+          <IdentityTile {...spaceTile(space, viewer)} className="size-7 rounded-md" />
+          <CellText
+            strong
+            // A `closed` space is listed so the caller knows it exists, not so they
+            // can be dropped into it (pinning one 403s every space-scoped request,
+            // same rule as the org switcher): its row is static and says why.
+            title={isSpaceEnterable(space) ? spaceLabel(space, t) : t("spaces.requestAccess")}
+          >
+            {spaceLabel(space, t)}
+          </CellText>
+        </span>
       ),
     },
     {

@@ -17,7 +17,7 @@ interface PackageDetailBarDetail {
   type: PackageType;
   version?: string | null;
   /** Raw image URL or Iconify id for integrations. */
-  icon?: string;
+  icon?: string | null;
   /**
    * Name of the space this package lives in — the one whose permissions decide
    * who may edit it. Absent for the org catalog and for a home the reader
@@ -52,7 +52,14 @@ export function PackageDetailBar<T extends string>({
 
   return (
     <DetailBar
-      icon={<PackageIcon type={detail.type} icon={detail.icon} />}
+      icon={
+        <PackageIcon
+          type={detail.type}
+          id={detail.id}
+          name={detail.displayName}
+          icon={detail.icon}
+        />
+      }
       title={detail.displayName}
       badge={
         <>

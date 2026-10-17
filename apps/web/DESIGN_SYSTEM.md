@@ -581,15 +581,21 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   with `font-mono`; an agent whose working copy differs from its last published
   version (or has none) wears « Brouillon » in its place, and only then; a
   disabled reason hangs on `DisabledReasonTooltip`.
-- **Identity**: `PackageIcon` (`components/package-icon.tsx`), `OrganizationAvatar`, `EndUserAvatar`, `ActorLabel` (the
-  member or end-user a schedule runs as). One tile draws every `{ icon, color }`
-  identity: `IdentityTile` (`packages/ui/src/components/identity-tile.tsx`), sized
-  by one `size-*`, an image covering it, a glyph or the initials on its colour.
-  Its colours are the `APPEARANCE_COLORS` palette (`--identity-<key>` in
-  `styles.css`, tile classes in `packages/ui/src/identity-colors.ts`), never a raw
-  Tailwind colour; no colour chosen means one hashed from the id (an end-user's
-  always is). `AppearancePicker` (`components/appearance-picker.tsx`) edits an
-  identity: the icon forms the entity allows, a palette colour or « Automatique ».
+- **Identity**: one tile draws every identity — an agent, an organization, a
+  space, a member, an end-user: `IdentityTile`
+  (`packages/ui/src/components/identity-tile.tsx`), sized by one `size-*`, an
+  image covering it, a glyph or the initials on its colour; `shape="round"` for a
+  person. `PackageIcon` (`components/package-icon.tsx`), `EndUserAvatar` and the
+  user menu's avatar are callers of it, `ActorLabel` names the member or end-user
+  a schedule runs as. A space is drawn through `spaceTile` (`lib/space-label.ts`,
+  beside `spaceLabel`): a team space by its own icon and colour, the viewer's own
+  personal space as the viewer, an orphaned one as a departed person. Its colours
+  are the `APPEARANCE_COLORS` palette (`--identity-<key>` in `styles.css`, tile
+  classes in `packages/ui/src/identity-colors.ts`), never a raw Tailwind colour;
+  no colour chosen means one hashed from the id (an end-user's and a person's
+  always is). `AppearancePicker` (`components/appearance-picker.tsx`) is every
+  identity editor — an agent's, an organization's, a team space's: the icon forms
+  the entity allows, a palette colour or « Automatique ».
 - **Cards**: a summary block on a detail page is `DetailSectionCard`; a titled
   pane is `SectionCard` (`components/section-card.tsx`, a real `<h3>`); a figure with a label is `OperationalStat` (a `dl` row) with
   `OverviewCardAction` as its quiet footer action; a label and value fact grid is

@@ -21,7 +21,8 @@ function generalPage(personal: boolean, domains: string[] = []): string {
     id: "org_general",
     name: "General",
     slug: "general",
-    logo: null,
+    icon: null,
+    color: null,
     role: "owner",
     deleting_at: null,
     permissions: ["org:read", "spaces:delete"],
@@ -32,6 +33,8 @@ function generalPage(personal: boolean, domains: string[] = []): string {
     id: "spc_general",
     orgId: org.id,
     name: personal ? "Mon espace" : "Equipe",
+    icon: null,
+    color: null,
     isDefault: false,
     settings: { allowedRedirectDomains: domains },
     visibility: personal ? "private" : "open",
@@ -80,6 +83,8 @@ describe("a workspace's general settings", () => {
     expect(html).not.toContain("Domaines de redirection");
     expect(html).not.toContain("Zone de danger");
     expect(html).not.toContain('role="radiogroup"');
+    // The server refuses an icon or a colour on a personal space: it is drawn as its owner.
+    expect(html).not.toContain("Apparence");
   });
 
   it("shows every setting of a team workspace", () => {
@@ -88,6 +93,7 @@ describe("a workspace's general settings", () => {
     expect(html).toContain("Domaines de redirection");
     expect(html).toContain("Rôle des accès automatiques");
     expect(html).toContain("Zone de danger");
+    expect(html).toContain("Apparence");
     expect(html).not.toContain("toujours privé");
   });
 

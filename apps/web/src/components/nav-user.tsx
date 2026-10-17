@@ -4,11 +4,11 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { DOCS_URL, SUPPORT_URL } from "@/lib/external-links";
 import { BookOpen, Check, FileText, LifeBuoy, LogOut, Palette, Settings } from "lucide-react";
-import { useAuth } from "../hooks/use-auth";
+import { useAuth, useViewer } from "../hooks/use-auth";
+import type { SpaceViewer } from "../lib/space-label";
 import { useTheme } from "../stores/theme-store";
 import { themeOptions } from "../lib/theme";
-import { initials } from "@appstrate/ui/initials";
-import { Avatar, AvatarFallback } from "@appstrate/ui/components/avatar";
+import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
@@ -22,14 +22,9 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 
-function UserAvatar({ letters, className }: { letters: string; className: string }) {
-  return (
-    <Avatar className={className}>
-      <AvatarFallback className="bg-spark text-spark-foreground rounded-[inherit] font-medium">
-        {letters}
-      </AvatarFallback>
-    </Avatar>
-  );
+/** The signed-in person: their initials on the identity colour hashed from their id. */
+function UserAvatar({ viewer, className }: { viewer: SpaceViewer; className: string }) {
+  return <IdentityTile seed={viewer.id} label={viewer.name} shape="round" className={className} />;
 }
 
 interface NavUserProps {
@@ -44,15 +39,15 @@ interface NavUserProps {
 
 export function NavUser({ variant }: NavUserProps) {
   const { t } = useTranslation();
-  const { user, profile, logout } = useAuth();
+  const { user, logout } = useAuth();
+  const viewer = useViewer();
   const { theme, setTheme } = useTheme();
 
-  if (!user) return null;
+  if (!user || !viewer) return null;
 
   const row = variant === "row";
   const minimal = variant === "minimal";
-  const displayName = profile?.displayName || user.email || "";
-  const userInitials = initials(profile?.displayName, user.email);
+  const displayName = viewer.name;
   // Documentation and support live here as well as in the product switcher. The duplication is
   // deliberate: this menu is where people look for help by habit.
   const links = [
@@ -70,7 +65,7 @@ export function NavUser({ variant }: NavUserProps) {
             aria-label={t("userMenu.ariaLabel")}
             className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex w-full items-center gap-2 rounded-md p-2 text-left transition-colors"
           >
-            <UserAvatar letters={userInitials} className="size-7 text-xs" />
+            <UserAvatar viewer={viewer} className="size-7" />
             <span className="grid min-w-0 flex-1 leading-tight">
               <span className="truncate text-sm font-medium">{displayName}</span>
               <span className="text-muted-foreground truncate text-xs">{user.email}</span>
@@ -83,7 +78,7 @@ export function NavUser({ variant }: NavUserProps) {
             aria-label={t("userMenu.ariaLabel")}
             className="rounded-full"
           >
-            <UserAvatar letters={userInitials} className="size-8 text-sm" />
+            <UserAvatar viewer={viewer} className="size-8" />
           </Button>
         )}
       </DropdownMenuTrigger>
@@ -95,7 +90,7 @@ export function NavUser({ variant }: NavUserProps) {
       >
         <DropdownMenuLabel className="p-0 font-normal">
           <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-            <UserAvatar letters={userInitials} className="size-8 rounded-lg text-sm" />
+            <UserAvatar viewer={viewer} className="size-8 rounded-lg" />
             <div className="grid flex-1 text-left text-sm leading-tight">
               <span className="truncate font-semibold">{displayName}</span>
               <span className="truncate text-xs">{user.email}</span>

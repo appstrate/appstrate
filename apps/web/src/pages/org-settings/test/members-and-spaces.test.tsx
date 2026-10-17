@@ -39,6 +39,8 @@ describe("the spaces list", () => {
     isDefault: false,
     createdAt: "2026-01-01T00:00:00Z",
     personal: false,
+    icon: null,
+    color: null,
     visibility: "closed",
     access: "member",
   };

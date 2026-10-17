@@ -293,6 +293,8 @@ export function OrgCatalogueModal({
     ) : (
       <PackageIcon
         type={active}
+        id={item.id}
+        name={row.displayName}
         icon={active === "agent" ? look?.icon : integrationById.get(item.id)?.manifest.icon}
         color={look?.color}
       />

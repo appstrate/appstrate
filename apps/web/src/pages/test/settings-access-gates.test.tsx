@@ -44,6 +44,8 @@ function space(overrides: Partial<Space> = {}): Space {
     id: "spc_team",
     orgId: "org_gates",
     name: "Equipe",
+    icon: null,
+    color: null,
     isDefault: false,
     settings: {},
     visibility: "open",
@@ -76,7 +78,8 @@ function renderAs(
     id: "org_gates",
     name: "Gates",
     slug: "gates",
-    logo: null,
+    icon: null,
+    color: null,
     role,
     deleting_at: null,
     permissions,
@@ -149,10 +152,14 @@ describe("the organization's spaces", () => {
 });
 
 describe("the organization's general settings", () => {
+  /** The appearance picker's icon field: drawn for every member, editable by `org:update` only. */
+  const iconFieldDisabled = (html: string) =>
+    /disabled=""/.test(html.match(/<button[^>]*role="combobox"[^>]*>/)?.[0] ?? "");
+
   it("lets a member leave without drawing the administration controls", () => {
     const html = renderAs(<OrgSettingsGeneralPage />, { permissions: ["org:read"] });
     expect(html).toContain('data-testid="leave-org-button"');
-    expect(html).not.toContain("Importer une image");
+    expect(iconFieldDisabled(html)).toBe(true);
     expect(html).not.toContain("Distribution");
     expect(html).not.toContain('data-testid="delete-org-button"');
   });
@@ -162,7 +169,8 @@ describe("the organization's general settings", () => {
       permissions: ["org:read", "org:update", "org:settings", "org:delete"],
       role: "owner",
     });
-    expect(html).toContain("Importer une image");
+    expect(html).toContain("Apparence");
+    expect(iconFieldDisabled(html)).toBe(false);
     expect(html).toContain("Distribution");
     expect(html).toContain('data-testid="delete-org-button"');
   });

@@ -376,10 +376,11 @@ function GeneralSection({ schedule, draft, edit }: SectionProps) {
             <>
               <PackageIcon
                 type="agent"
+                id={schedule.packageId}
+                name={agent?.display_name}
                 icon={agent?.icon}
                 color={agent?.color}
                 className="size-11 rounded-xl"
-                iconClassName="size-5"
               />
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium">

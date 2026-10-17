@@ -68,6 +68,8 @@ function page(permissions: string[], integrations: IntegrationIndexItem[]): stri
           id: SPACE_ID,
           orgId: "org_a",
           name: "Ici",
+          icon: null,
+          color: null,
           isDefault: true,
           settings: {},
           visibility: "open",

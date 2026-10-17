@@ -12,7 +12,7 @@ import { useState, type ReactNode } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Settings } from "lucide-react";
-import { spaceLabel } from "../../lib/space-label";
+import { spaceLabel, spaceTile } from "../../lib/space-label";
 import { AppVersion } from "../../components/app-version";
 import { SettingsHeading } from "../../components/settings/settings-heading";
 import { SettingsPageActionTargetProvider } from "../../components/settings/settings-page-actions";
@@ -31,6 +31,7 @@ import {
   useCurrentSpaceId,
 } from "../../hooks/use-current-space";
 import { useOrg } from "../../hooks/use-org";
+import { useViewer } from "../../hooks/use-auth";
 import { useLandAfterOrgSwitch } from "../../lib/modal-route";
 import { SETTINGS_INDEX, type SettingsScope } from "../../lib/route-access";
 import { useOverlayBreadcrumb } from "../../hooks/use-overlay-breadcrumb";
@@ -89,6 +90,7 @@ export function UnifiedSettingsLayout() {
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
   const { currentOrg, orgs, switchOrg } = useOrg();
   const { data: spaces = [] } = useSpaces();
+  const viewer = useViewer();
   const spaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
   const [actionTarget, setActionTarget] = useState<HTMLDivElement | null>(null);
@@ -125,7 +127,11 @@ export function UnifiedSettingsLayout() {
     <ContextSelector
       value={currentOrg?.id ?? ""}
       label={label("unifiedSettings.organizationSelector")}
-      options={orgs}
+      options={orgs.map((org) => ({
+        id: org.id,
+        name: org.name,
+        tile: { icon: org.icon, color: org.color, seed: org.id, label: org.name },
+      }))}
       onValueChange={(id) => {
         switchOrg(id);
         landAfterOrgSwitch();
@@ -141,6 +147,7 @@ export function UnifiedSettingsLayout() {
       options={spaces.map((space) => ({
         id: space.id,
         name: spaceLabel(space, t),
+        tile: spaceTile(space, viewer),
         disabled: !isSpaceEnterable(space),
       }))}
       onValueChange={switchSpace}
