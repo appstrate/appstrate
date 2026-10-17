@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { createPath, useBlocker, useLocation, type BlockerFunction } from "react-router-dom";
 import { leavesEditor, type EditorPlace } from "../lib/editor-place";
 
 export interface UnsavedBlocker {
@@ -13,201 +22,132 @@ export interface UnsavedBlocker {
 }
 
 export const EditorPlaceContext = createContext<EditorPlace>(() => "");
-type PendingNavigation = {
-  to: string;
-  replace: boolean;
-  state: unknown;
-  action?: () => void;
-  othersDirty?: boolean;
-};
+
 interface Guard {
-  current: () => {
-    path: string;
-    state: unknown;
-    place: EditorPlace;
-    dirty: boolean;
-    skip: boolean;
-  };
-  block: (pending: PendingNavigation) => void;
+  id: symbol;
+  /** The location the form renders at (under an overlay, the page beneath it). */
+  path: string;
+  place: EditorPlace;
+  dirty: boolean;
+  /** `allowNavigation`, or a scope change the user agreed to: the draft is let go. */
+  skip: boolean;
 }
-const guards = new Map<symbol, Guard>();
-/** The destination the user agreed to leave for: one decision covers every dirty form. */
-let approved: string | null = null;
-let installed = false;
-let changingScope = false;
-const SCOPE_CHANGE = "\0scope-change";
 
-const isDirty = (guard: Guard) => {
-  const state = guard.current();
-  return state.dirty && !state.skip;
+/** A leave decision waiting on the user, shown by the one form it names. */
+interface Ask {
+  id: symbol;
+  othersDirty: boolean;
+  proceed: () => void;
+  reset: () => void;
+}
+
+const guards = new Map<symbol, Guard>();
+const dirtyGuards = () => [...guards.values()].filter((guard) => guard.dirty && !guard.skip);
+
+let ask: Ask | null = null;
+const listeners = new Set<() => void>();
+function setAsk(next: Ask | null) {
+  ask = next;
+  for (const listener of listeners) listener();
+}
+const subscribeAsk = (listener: () => void) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+const getAsk = () => ask;
+
+/** The form a blocked navigation would discard first, chosen when the router asks. */
+let leaving: Omit<Ask, "proceed" | "reset"> | null = null;
+
+const shouldBlock: BlockerFunction = ({ nextLocation }) => {
+  const dirty = dirtyGuards();
+  const to = new URL(createPath(nextLocation), window.location.origin);
+  const guard = dirty.find((g) => leavesEditor(new URL(g.path, to), to, g.place));
+  leaving = guard ? { id: guard.id, othersDirty: dirty.length > 1 } : null;
+  return leaving !== null;
 };
 
-/** Ask the first dirty form; it tells whether others would be discarded with it. */
-function block(guard: Guard, pending: PendingNavigation) {
-  guard.block({ ...pending, othersDirty: [...guards.values()].filter(isDirty).length > 1 });
+/**
+ * The app's one router blocker (React Router allows one): a navigation that unmounts a
+ * dirty form asks once for every dirty form. Mount once, inside the data router.
+ */
+export function UnsavedChangesGuard() {
+  const blocker = useBlocker(shouldBlock);
+  useEffect(() => {
+    if (blocker.state !== "blocked" || !leaving) return;
+    const mine: Ask = { ...leaving, proceed: blocker.proceed, reset: blocker.reset };
+    setAsk(mine);
+    return () => {
+      if (ask === mine) setAsk(null);
+    };
+  }, [blocker]);
+  useEffect(() => {
+    const unload = (event: BeforeUnloadEvent) => {
+      if (dirtyGuards().length === 0) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", unload);
+    return () => window.removeEventListener("beforeunload", unload);
+  }, []);
+  return null;
 }
 
 /** Store scope changes can unmount editors without changing the URL. Guard before mutating stores. */
 export function requestScopeChange(action: () => void): void {
-  if (approved !== SCOPE_CHANGE) {
-    const guard = [...guards.values()].find(isDirty);
-    if (guard) {
-      block(guard, {
-        to: SCOPE_CHANGE,
-        replace: false,
-        state: null,
-        action: () => requestScopeChange(action),
-      });
-      return;
-    }
-  }
-  changingScope = true;
-  try {
+  const dirty = dirtyGuards();
+  if (dirty.length === 0) {
     action();
-  } finally {
-    changingScope = false;
-    approved = null;
+    return;
   }
+  setAsk({
+    id: dirty[0]!.id,
+    othersDirty: dirty.length > 1,
+    proceed: () => {
+      setAsk(null);
+      // The answer covers whatever the change navigates to, an asynchronous Back included.
+      for (const guard of dirtyGuards()) guard.skip = true;
+      action();
+    },
+    reset: () => setAsk(null),
+  });
 }
 
-/** Undo one Back/Forward before asking whether to leave the mounted editor. */
-export function undoLeavingPop(
-  entry: { path: string; state: unknown },
-  href: string,
-  place: EditorPlace,
-  push: History["pushState"],
-): string | null {
-  const to = new URL(href);
-  if (!leavesEditor(new URL(entry.path, to), to, place)) return null;
-  push(entry.state, "", entry.path);
-  return `${to.pathname}${to.search}${to.hash}`;
-}
-
-/** Install before BrowserRouter: a pop must be intercepted before its listener can unmount editors. */
-export function installUnsavedChangesGuard() {
-  if (installed) return;
-  installed = true;
-  const push = history.pushState.bind(history);
-  const replace = history.replaceState.bind(history);
-  const findGuard = (from: URL, to: URL) => {
-    if (changingScope || approved === `${to.pathname}${to.search}${to.hash}`) return null;
-    for (const guard of guards.values()) {
-      if (isDirty(guard) && leavesEditor(from, to, guard.current().place)) return guard;
-    }
-    return null;
-  };
-  const patch =
-    (original: History["pushState"], replacing: boolean): History["pushState"] =>
-    (data, unused, url) => {
-      if (url) {
-        const from = new URL(window.location.href);
-        const to = new URL(url.toString(), from);
-        const blocked = findGuard(from, to);
-        if (blocked) {
-          block(blocked, {
-            to: `${to.pathname}${to.search}${to.hash}`,
-            replace: replacing,
-            state: data?.usr ?? null,
-          });
-          return;
-        }
-      }
-      approved = null;
-      original(data, unused, url);
-    };
-  history.pushState = patch(push, false);
-  history.replaceState = patch(replace, true);
-  const pop = (event: PopStateEvent) => {
-    const to = new URL(window.location.href);
-    for (const guard of guards.values()) {
-      const current = guard.current();
-      const blocked = findGuard(new URL(current.path, to), to);
-      if (!blocked) continue;
-      const target = undoLeavingPop(
-        { path: current.path, state: current.state },
-        to.href,
-        current.place,
-        push,
-      );
-      if (target) {
-        event.stopImmediatePropagation();
-        block(blocked, { to: target, replace: false, state: event.state?.usr ?? null });
-      }
-      return;
-    }
-    approved = null;
-  };
-  const unload = (event: BeforeUnloadEvent) => {
-    if (![...guards.values()].some(isDirty)) return;
-    event.preventDefault();
-    event.returnValue = "";
-  };
-  window.addEventListener("popstate", pop, true);
-  window.addEventListener("beforeunload", unload);
-}
+const noop = () => {};
 
 export function useUnsavedChanges(isDirty: boolean): {
   blocker: UnsavedBlocker;
   allowNavigation: (allowed?: boolean) => void;
 } {
-  const navigate = useNavigate();
   const location = useLocation();
   const place = useContext(EditorPlaceContext);
   const [id] = useState(() => Symbol());
-  const [blocked, setBlocked] = useState<PendingNavigation | null>(null);
-  const pending = useRef<PendingNavigation | null>(null);
-  const skip = useRef(false);
-  const current = useRef<{
-    path: string;
-    state: unknown;
-    place: EditorPlace;
-    dirty: boolean;
-    skip: boolean;
-  }>({ path: "", state: null, place, dirty: isDirty, skip: false });
-  const path = `${location.pathname}${location.search}${location.hash}`;
+  const guard = useRef<Guard>({ id, path: "", place, dirty: isDirty, skip: false });
+  const path = createPath(location);
   useLayoutEffect(() => {
-    current.current = { path, state: history.state, place, dirty: isDirty, skip: skip.current };
+    Object.assign(guard.current, { path, place, dirty: isDirty });
+    if (!isDirty) guard.current.skip = false;
   }, [path, place, isDirty]);
   useLayoutEffect(() => {
-    if (!isDirty) {
-      skip.current = false;
-      return;
-    }
-    guards.set(id, {
-      current: () => ({ ...current.current, skip: skip.current }),
-      block: (target) => {
-        pending.current = target;
-        setBlocked(target);
-      },
-    });
+    if (!isDirty) return;
+    guards.set(id, guard.current);
     return () => {
       guards.delete(id);
-      if (guards.size === 0) approved = null;
     };
   }, [id, isDirty]);
   const allowNavigation = useCallback((allowed = true) => {
-    skip.current = allowed;
+    guard.current.skip = allowed;
   }, []);
-  const proceed = useCallback(() => {
-    const target = pending.current;
-    pending.current = null;
-    setBlocked(null);
-    if (!target) return;
-    approved = target.to;
-    if (target.action) target.action();
-    else navigate(target.to, { replace: target.replace, state: target.state });
-  }, [navigate]);
-  const reset = useCallback(() => {
-    pending.current = null;
-    approved = null;
-    setBlocked(null);
-  }, []);
+  const asked = useSyncExternalStore(subscribeAsk, getAsk, getAsk);
+  const mine = asked?.id === id ? asked : null;
   return {
     blocker: {
-      state: blocked ? "blocked" : "unblocked",
-      othersDirty: blocked?.othersDirty ?? false,
-      proceed,
-      reset,
+      state: mine ? "blocked" : "unblocked",
+      othersDirty: mine?.othersDirty ?? false,
+      proceed: mine?.proceed ?? noop,
+      reset: mine?.reset ?? noop,
     },
     allowNavigation,
   };

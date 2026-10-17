@@ -3,14 +3,14 @@
 import { i18nReady } from "./i18n";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 import { App } from "./app";
 import { TranslatedUiLabels } from "./components/translated-ui-labels";
 import { queryClient } from "./lib/query-client";
 import { startAuthBootstrap } from "./hooks/use-auth";
-import { installUnsavedChangesGuard } from "./hooks/use-unsaved-changes";
+import { UnsavedChangesGuard } from "./hooks/use-unsaved-changes";
 import { sessionExpected } from "./lib/session-read";
 import { primeOrgList } from "./hooks/use-org";
 import { primeSpaceList } from "./hooks/use-spaces";
@@ -18,8 +18,6 @@ import { clearChunkReloadFlag, reloadOnceForChunkError } from "./lib/chunk-reloa
 import { warmChunk, warmupPending } from "./lib/chunk-warmup";
 import "./stores/theme-store";
 import "./styles.css";
-
-installUnsavedChangesGuard();
 
 // A failed dynamic-import preload is typically a stale hashed chunk after a redeploy:
 // hard-reload once (the sessionStorage guard in reloadOnceForChunkError prevents loops).
@@ -55,16 +53,26 @@ void i18nReady
   .then(() => {
     // Boot reached: clear the one-shot guard so a future redeploy can auto-recover.
     clearChunkReloadFlag();
-    createRoot(document.getElementById("root")!).render(
-      <StrictMode>
-        <QueryClientProvider client={queryClient}>
-          <BrowserRouter>
+    // A data router for its blocker (`useBlocker`); the route tree stays in `App`'s `<Routes>`.
+    const router = createBrowserRouter([
+      {
+        path: "*",
+        element: (
+          <>
+            <UnsavedChangesGuard />
             <TranslatedUiLabels>
               <TooltipProvider>
                 <App />
               </TooltipProvider>
             </TranslatedUiLabels>
-          </BrowserRouter>
+          </>
+        ),
+      },
+    ]);
+    createRoot(document.getElementById("root")!).render(
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
         </QueryClientProvider>
       </StrictMode>,
     );
