@@ -109,9 +109,10 @@ describe("assertPackageSharesFolded — live database", () => {
         packageId: AGENT,
         spaceId: team,
         orgId: ctx.orgId,
-        authorizeHome: () => true,
+        personalOwnerId: null,
+        authorityFor: () => "home",
       }),
-    ).toBe(true);
+    ).toEqual({ authority: "home", disabledScheduleIds: [] });
     expect(await guard()).toBeUndefined();
   });
 
