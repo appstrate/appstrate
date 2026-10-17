@@ -10,7 +10,7 @@
 
 import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageShares, packageVersions, packageDistTags } from "@appstrate/db/schema";
+import { packages, packageVersions, packageDistTags, spacePackages } from "@appstrate/db/schema";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { mcpServerManifestSchema, type McpServerManifest } from "@appstrate/core/mcp-server";
@@ -20,7 +20,7 @@ import { getSystemPackages } from "./system-packages.ts";
 import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
+import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import { pickVersion } from "./run-launcher/db-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { logger } from "../lib/logger.ts";
@@ -607,7 +607,7 @@ function asIntegrationManifest(raw: unknown): IntegrationManifest | null {
 
 /**
  * Fetch a single integration by id, PLACED in the caller's space — homed
- * there, offered there, or shipped with the deployment. Returns `null` when
+ * there, holding a row there, or shipped with the deployment. Returns `null` when
  * absent, out of placement, or when the row has been corrupted enough to fail
  * manifest parsing — the caller should treat all three as `404` for UX
  * consistency.
@@ -655,7 +655,7 @@ async function findPlacedIntegrationRow(scope: SpaceScope, packageId: string) {
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .where(
       and(
         orgOrSystemFilter(scope.orgId),
@@ -754,14 +754,13 @@ export async function getOrgWideIntegrationManifest(
 }
 
 /**
- * List every integration PLACED in the caller's space — homed there, offered
- * there, or shipped with the deployment. Manifests that fail validation are
+ * List every integration PLACED in the caller's space — homed there, holding a
+ * row there, or shipped with the deployment. Manifests that fail validation are
  * skipped (with a structured warning) rather than aborting the whole query —
  * one broken row shouldn't hide the rest.
  *
- * Placement, not activation: an offer the space has not taken up and a package
- * switched off are both still placed, and this listing decorates each row with
- * its own `active` flag afterwards. The conjunct is {@link
+ * Placement, not activation: a package switched off is still placed, and this
+ * listing decorates each row with its own `active` flag afterwards. The conjunct is {@link
  * placementReadFilter} — the same rule the per-type index and the space
  * library read — so an integration homed in a PERSONAL space of somebody else
  * never reaches the response, whatever the caller's organization role
@@ -791,7 +790,7 @@ export async function listIntegrations(
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .where(
       and(
         orgOrSystemFilter(scope.orgId),

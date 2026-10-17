@@ -34,18 +34,3 @@ export function maySetPackageActive(
 export function mayConfigurePackage(space: SpaceGrant | undefined, type: PackageType): boolean {
   return !!space && space.permissions.includes(spacePackagePermission(type, "configure"));
 }
-
-/**
- * What co-authoring a package means for the caller in its HOME space. `"personal"`
- * comes FIRST and is not a permission question: a personal space takes no other
- * members (`personal_space_has_no_members`); the way out is moving the PACKAGE
- * (`PUT …/home`). No grant, org owners included, turns it into `"invite"`.
- * `undefined` answers `"unknown"`.
- */
-export type CoeditVerdict = "unknown" | "personal" | "no_authority" | "invite";
-
-export function coeditVerdict(home: SpaceGrant | undefined): CoeditVerdict {
-  if (!home) return "unknown";
-  if (home.personal) return "personal";
-  return home.permissions.includes("space-members:invite") ? "invite" : "no_authority";
-}

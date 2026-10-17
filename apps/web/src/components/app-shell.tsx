@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useEffect, type ReactNode } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { LibraryBig, Menu, PanelLeft, Plus, Settings, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -8,7 +8,6 @@ import { NavOrg } from "@/components/nav-org";
 import { NavUser } from "@/components/nav-user";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { NotificationBell } from "@/components/notification-bell";
-import { CountBadge } from "@/components/count-badge";
 import { ProductTabs } from "@/components/product-tabs";
 import { HeaderSlotOutlet } from "@/components/shell-header-slots";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
@@ -16,7 +15,6 @@ import { SidebarCredits } from "@/components/sidebar-credits";
 import { useUnreadCount } from "@/hooks/use-notifications";
 import { useOverlayPath } from "@/lib/modal-route";
 import { useCanReach, useReachReady } from "@/hooks/use-can-reach";
-import { usePendingShares } from "@/hooks/use-pending-offers";
 import { catalogueHref } from "@/lib/catalogue-link";
 import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
 import { isSettingsPath, isUnder, SETTINGS_INDEX } from "@/lib/route-access";
@@ -29,7 +27,6 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSkeleton,
@@ -85,13 +82,11 @@ function OverlayEntry({
   active,
   icon: Icon,
   label,
-  children,
 }: {
   to: string;
   active: boolean;
   icon: LucideIcon;
   label: string;
-  children?: ReactNode;
 }) {
   const content = (
     <>
@@ -110,7 +105,6 @@ function OverlayEntry({
           </Link>
         )}
       </SidebarMenuButton>
-      {children}
     </SidebarMenuItem>
   );
 }
@@ -124,12 +118,10 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`).
   const canReach = useCanReach();
   const ready = useReachReady();
-  const pendingShares = usePendingShares();
   const overlayPath = useOverlayPath() ?? "";
   const settingsActive = isSettingsPath(overlayPath);
   const catalogueActive = isUnder(overlayPath, "/catalogue");
   const catalogueReachable = canReach("/catalogue");
-  const catalogueTo = pendingShares.href ?? catalogueHref("agent");
   // Always on screen, so their overlays' code is fetched ahead of any click (`lib/overlay-chunks.ts`).
   useEffect(
     () =>
@@ -175,24 +167,12 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
       </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
         <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
-          {/* With shares waiting, the entry opens ON them. */}
           <OverlayEntry
-            to={catalogueTo}
+            to={catalogueHref("agent")}
             active={catalogueActive}
             icon={LibraryBig}
             label={t("nav.catalogue")}
-          >
-            {/* The share route notifies a PERSON, not a team space: without this badge an offer to a team goes unseen. */}
-            {pendingShares.count > 0 && (
-              <SidebarMenuBadge>
-                <CountBadge
-                  count={pendingShares.count}
-                  label={t("catalogue.pendingOffers", { count: pendingShares.count })}
-                  tone="primary"
-                />
-              </SidebarMenuBadge>
-            )}
-          </OverlayEntry>
+          />
         </SidebarMenu>
         <SidebarMenu className="px-2 pb-2">
           <OverlayEntry

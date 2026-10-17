@@ -28,7 +28,7 @@ import { defaultTestAgentResources } from "../../helpers/run-resources.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -81,7 +81,7 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
       source: "local",
       draftManifest: integManifest(),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     const serverManifest = mcpServerManifest({
       name: SERVER,
       version: "0.1.0",
@@ -319,7 +319,7 @@ describe("resolveIntegrationSpawns — api_call per connection auth", () => {
       source: "local",
       draftManifest: manifest,
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, API);
+    await seedSpacePackage(ctx.defaultSpaceId, API);
   });
 
   async function seedOn(authKey: string, label: string): Promise<string> {

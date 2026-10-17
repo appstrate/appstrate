@@ -87,7 +87,7 @@ describe("org-scope connections across spaces", () => {
       draftManifest: integrationManifest,
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: a }, INTEGRATION);
-    await activatePackage({ orgId: ctx.orgId, spaceId: b }, INTEGRATION, { shareBy: ctx.user.id });
+    await seedSpacePackage(b, INTEGRATION);
   });
 
   /** `from`: an org-scope row connected from that space; `scopedTo`: a space-scoped row. */

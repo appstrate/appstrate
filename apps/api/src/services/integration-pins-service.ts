@@ -19,7 +19,6 @@ import type { AuditPayload } from "@appstrate/core/module";
 import { db, toRows } from "@appstrate/db/client";
 import {
   spacePackages,
-  packageShares,
   integrationConnections,
   integrationPins,
   packages,
@@ -33,7 +32,7 @@ import type {
   IntegrationPin,
 } from "@appstrate/shared-types";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { activatePackageWithin, isPackageActiveHere, placedRowFilter } from "./space-packages.ts";
+import { activatePackageWithin, isPackageActiveHere } from "./space-packages.ts";
 import { activeHereSql } from "./package-activation.ts";
 import {
   getPackageDisplayName,
@@ -70,7 +69,7 @@ import type {
   ReadinessErrorCode,
 } from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
-import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
+import { placementRowJoin } from "./package-placement.ts";
 import { pinLayer, removeNamingLayer } from "./schedules-named-by-layer.ts";
 
 // Canonical wire shapes live in @appstrate/shared-types so the frontend
@@ -83,16 +82,11 @@ type PinSummary = IntegrationPin;
 /**
  * Toggle the per-(space, integration) lock.
  *
- * An existing `space_packages` row is updated in place — but only where the
- * package is PLACED here ({@link placedRowFilter}), the same conjunct the
- * READER of this flag applies (`isUserConnectionCreationBlocked`). On the bare
- * `(space_id, package_id)` pair this would answer `200 blocked: true` on an
- * ORPHAN row while the gate went on letting every member create a personal
- * connection — a padlock drawn over an open door.
+ * An existing `space_packages` row is updated in place.
  *
  * With NO row the toggle still has to persist, and the row it needs is a
  * PLACEMENT row — which makes creating it an activation, not a side effect. It
- * goes through the one door that writes them (`activatePackageWithin`), inside
+ * goes through the door that writes them (`activatePackageWithin`), inside
  * this transaction, rather than spelling the INSERT a second time.
  *
  * That door reports whether the package was ALREADY active, and only that case
@@ -101,8 +95,8 @@ type PinSummary = IntegrationPin;
  * `package.activated` audit and no activation grant. Anything else would be
  * switched ON by the row, and recording a connection lock is not a decision to
  * switch an integration on, so the throw rolls the transaction back. The same
- * door refuses the orphan the UPDATE just skipped: no home, no share, no
- * `shareBy`, its own 404 before the row is touched.
+ * door refuses an integration not placed here: no home, no row, no `placeAs`,
+ * its own 404 before the row is touched.
  */
 export async function setBlockUserConnections(
   scope: SpaceScope,
@@ -115,11 +109,7 @@ export async function setBlockUserConnections(
         .update(spacePackages)
         .set({ blockUserConnections: blocked, updatedAt: new Date() })
         .where(
-          and(
-            eq(spacePackages.spaceId, scope.spaceId),
-            eq(spacePackages.packageId, integrationId),
-            placedRowFilter(tx, scope.spaceId, integrationId),
-          ),
+          and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, integrationId)),
         )
         .returning({ blockUserConnections: spacePackages.blockUserConnections });
 
@@ -130,9 +120,7 @@ export async function setBlockUserConnections(
     if (!activation.wasActive) {
       throw notFound(`Integration '${integrationId}' is not active in this space`);
     }
-    // The door above either found the package placed here or created the
-    // share that places it, so this second write matches — an orphan never
-    // reaches it.
+    // The door above created the row, so this second write matches.
     const [materialized] = await writeFlag();
     return { blocked: materialized!.blockUserConnections };
   });
@@ -191,8 +179,7 @@ export async function listIntegrationPins(
  * leaving the integration view).
  *
  * ACTIVE, not "holds a row" ({@link activeHereSql}): a pin names the agent a
- * run will use this connection for, and a deactivated agent — or an ORPHAN
- * row, a decision about a package this space has lost — runs nowhere, so
+ * run will use this connection for, and a deactivated agent runs nowhere, so
  * offering it as a pin target would offer a pin that can never fire. Written
  * in the query builder rather than as raw SQL so the rule is CONJOINED here
  * rather than copied.
@@ -205,13 +192,12 @@ export async function listAgentsConsumingIntegration(
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
-    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(
       and(
         eq(packages.type, "agent"),
         orgOrSystemFilter(scope.orgId),
         notEphemeralFilter(),
-        activeHereSql(scope.spaceId),
+        activeHereSql(),
         sql`(${packages.draftManifest} -> 'dependencies' -> 'integrations') ? ${integrationId}`,
       ),
     )
@@ -354,9 +340,8 @@ export async function deletePin(
 
 /**
  * A pin names the agent a run will resolve this connection FOR, so the
- * question is ACTIVATION and not the presence of a row: a deactivated agent,
- * and an orphan row naming a package this space no longer holds, both run
- * nowhere. {@link isPackageActiveHere} is the ONE rule and carries the org
+ * question is ACTIVATION and not the presence of a row: a deactivated agent
+ * runs nowhere. {@link isPackageActiveHere} is the ONE rule and carries the org
  * boundary in its own query — which is why the message now matches the check.
  */
 async function assertAgentActiveHere(scope: SpaceScope, agentPackageId: string): Promise<void> {

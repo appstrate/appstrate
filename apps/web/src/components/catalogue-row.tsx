@@ -18,6 +18,8 @@ interface CatalogueMenuProps {
   item: CardItem;
   deeds: CatalogueDeeds;
   spaceNameOf: (spaceId: string) => string;
+  /** The space the app acts in: leaving it reads « cet espace ». */
+  currentSpaceId: string | null;
   onMoveHome: (item: CardItem) => void;
   onShare: (item: CardItem) => void;
   onRevoke: (item: CardItem, spaceId: string) => void;
@@ -28,6 +30,7 @@ export function CatalogueMenuItems({
   item,
   deeds,
   spaceNameOf,
+  currentSpaceId,
   open,
   onMoveHome,
   onShare,
@@ -69,8 +72,8 @@ export function CatalogueMenuItems({
       {deeds.revokeFrom.length > 0 && (
         <>
           <DropdownMenuSeparator />
-          {/* Withdrawing an offer removes the package from that space, with the
-              activation it backs: the placement IS the offer. */}
+          {/* Removing takes the package out of that space, settings and schedules with it: the
+              placement is the only thing a space holds. A recipient gets this for the current space. */}
           {deeds.revokeFrom.map((spaceId) => (
             <DropdownMenuItem
               key={spaceId}
@@ -78,7 +81,9 @@ export function CatalogueMenuItems({
               onSelect={() => onRevoke(item, spaceId)}
             >
               <X />
-              {t("catalogue.revokeFrom", { space: spaceNameOf(spaceId) })}
+              {spaceId === currentSpaceId
+                ? t("catalogue.removeHere")
+                : t("catalogue.revokeFrom", { space: spaceNameOf(spaceId) })}
             </DropdownMenuItem>
           ))}
         </>

@@ -16,15 +16,12 @@ import type { OrgRole } from "@appstrate/core/permissions";
 import {
   integrationConnectionShares as shares,
   integrationConnections as c,
-  packageShares,
-  packages,
   spacePackages,
   spaces,
 } from "@appstrate/db/schema";
 import { actorFilter, actorOwns, type Actor } from "../lib/actor.ts";
 import { boundSpaceOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { Permission } from "../lib/permissions.ts";
-import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 
 function orgOf(spaceId: string): SQL {
   return sql`(SELECT ${spaces.orgId} FROM ${spaces} WHERE ${spaces.id} = ${spaceId})`;
@@ -56,13 +53,11 @@ function spacesWhere(
   return sql<string[]>`array_remove(ARRAY[${cases}], NULL)`;
 }
 
-/** Read off a PLACEMENT row only: an orphan `space_packages` row is nobody's decision here. */
+/** The space's own `space_packages` row locks members' connections to the integration. */
 export function userConnectionsBlocked(spaceId: string, integrationId: SQLWrapper | string): SQL {
   return sql`EXISTS (SELECT 1 FROM ${spacePackages}
-    INNER JOIN ${packages} ON ${packages.id} = ${spacePackages.packageId}
-    LEFT JOIN ${packageShares} ON ${placementShareJoin(spacePackages.packageId, spaceId)}
     WHERE ${spacePackages.spaceId} = ${spaceId} AND ${spacePackages.packageId} = ${integrationId}
-    AND ${spacePackages.blockUserConnections} AND ${placementReadFilter(spaceId)!})`;
+    AND ${spacePackages.blockUserConnections})`;
 }
 
 /** An own row the actor may bind in `spaceId`: unblocked there, or made there. */

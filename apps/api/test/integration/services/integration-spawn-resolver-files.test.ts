@@ -21,7 +21,7 @@ import { resolveIntegrationSpawns } from "../../../src/services/integration-spaw
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -130,7 +130,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       source: "local",
       draftManifest: manifestWithFiles({ mode: "0600" }),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, {
       client_cert: "-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----",
@@ -172,7 +172,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       source: "local",
       draftManifest: manifestWithFiles({}), // no mode → default
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, {
       client_cert: "cert-bytes",
@@ -200,7 +200,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       source: "local",
       draftManifest: manifestWithFiles({ withUnsafePath: true }),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, { client_cert: "c", client_key: "k" });
 
@@ -240,7 +240,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
         tools_policy: { call: {} },
       }),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, { api_key: "k-1" });
 

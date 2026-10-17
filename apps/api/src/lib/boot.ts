@@ -125,9 +125,14 @@ export async function bootCritical(): Promise<void> {
 
   // Refuse to boot while connection shares still sit in `shared_space_ids`, where nothing reads
   // them. Detection only; the copy is an operator task, see the function's doc comment.
-  await assertConnectionSharesCopied(
-    isEmbeddedDb ? (await import("node:path")).resolve(env.PGLITE_DATA_DIR) : null,
-  );
+  const embeddedDataDir = isEmbeddedDb
+    ? (await import("node:path")).resolve(env.PGLITE_DATA_DIR)
+    : null;
+  await assertConnectionSharesCopied(embeddedDataDir);
+
+  // Refuse to boot while a package share has no `space_packages` row, where nothing reads it.
+  // Detection only; the fold is an operator task, see the function's doc comment.
+  await assertPackageSharesFolded(embeddedDataDir);
 
   await assertKeyringCoversCiphertexts();
 
@@ -708,6 +713,46 @@ export async function uncopiedShareConnectionCount(
       FROM integration_connections
       WHERE cardinality(shared_space_ids) > 0
     `),
+  );
+  return row?.pending ?? 0;
+}
+
+/**
+ * Refuse to boot while `package_shares` holds a row, i.e. until
+ * `scripts/migration/0048-fold-package-shares.ts` has run: unfolded shares would
+ * vanish from the spaces they were shared with. Refuses rather than warns, like
+ * {@link assertOAuthResourceColumnsPresent}. Delete with the release that drops
+ * `package_shares` (§4). `pendingFolds` is injected for tests.
+ */
+export async function assertPackageSharesFolded(
+  embeddedDataDir: string | null,
+  pendingFolds: () => Promise<number> = unfoldedPackageShareCount,
+): Promise<void> {
+  const pending = await pendingFolds();
+  if (pending === 0) return;
+
+  const script = "bun scripts/migration/0048-fold-package-shares.ts";
+  const command =
+    embeddedDataDir === null
+      ? `\`${script}\` (dry run), then \`${script} --apply\`, with this DATABASE_URL`
+      : `\`PGLITE_DATA_DIR=${embeddedDataDir} ${script}\` (dry run), then the same with ` +
+        "`--apply`, from the platform's directory while it is stopped (an embedded database " +
+        "opens in one process at a time)";
+  throw new Error(
+    `Package shares not folded: package_shares still holds ${pending} row(s), so migration 0100 ` +
+      "has been applied and scripts/migration/0048-fold-package-shares.ts has not. Until it " +
+      "runs, every package shared but never activated is gone from the space it was shared " +
+      `with. Refusing to boot: run ${command}, then restart.`,
+  );
+}
+
+/** `database` is injected for tests that probe a second embedded database. */
+export async function unfoldedPackageShareCount(
+  database: { execute(query: SQL): PromiseLike<unknown> } = db,
+): Promise<number> {
+  const { sql: rawSql } = await import("drizzle-orm");
+  const [row] = toRows<{ pending: number }>(
+    await database.execute(rawSql`SELECT count(*)::int AS pending FROM package_shares`),
   );
   return row?.pending ?? 0;
 }

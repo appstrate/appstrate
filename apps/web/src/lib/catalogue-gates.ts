@@ -37,16 +37,36 @@ export function activationGate(
   return { allowed: false, refusal: next ? "activate" : "deactivate" };
 }
 
+/**
+ * The recipient's removal (`DELETE …/shares/{space}`): a placement someone else put in this space,
+ * which the caller may switch off there (a personal space's owner always may) — the same verdict
+ * as the switch, so no control offers what the server refuses.
+ */
+export function mayRemoveFromSpace(
+  pkg: Pick<LibraryPackageItem, "placements" | "activation">,
+  spaceId: string | null | undefined,
+): boolean {
+  return (
+    !!spaceId &&
+    pkg.placements.some(
+      (placement) => placement.space_id === spaceId && placement.via === "shared",
+    ) &&
+    activationGate(pkg, spaceId, false).allowed
+  );
+}
+
 export interface CatalogueDeeds {
   /** `home_writable`: moving is the same authority as editing. */
   moveHome: boolean;
   /** `home_shareable`: a verb of its own (RBAC spec §6.10). */
   share: boolean;
+  /** Spaces the package can be removed from: all its placements for a sharer, else the current space for its recipient. */
   revokeFrom: string[];
 }
 
 export function catalogueDeeds(
-  pkg: Pick<LibraryPackageItem, "home_writable" | "home_shareable" | "placements">,
+  pkg: Pick<LibraryPackageItem, "home_writable" | "home_shareable" | "placements" | "activation">,
+  currentSpaceId: string | null | undefined,
 ): CatalogueDeeds {
   const share = pkg.home_shareable === true;
   return {
@@ -56,6 +76,8 @@ export function catalogueDeeds(
       ? pkg.placements
           .filter((placement) => placement.via === "shared")
           .map((placement) => placement.space_id)
-      : [],
+      : currentSpaceId && mayRemoveFromSpace(pkg, currentSpaceId)
+        ? [currentSpaceId]
+        : [],
   };
 }

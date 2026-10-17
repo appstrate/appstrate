@@ -330,7 +330,8 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   },
   revokePackageShare: {
     category: "handler-guarded",
-    reason: "assertPackageShareAccess: <type>:share in home space",
+    reason:
+      "assertPlacementRemovalAccess: <type>:share in home space, or the type's deactivation permission in the target space",
   },
   rotateWebhookSecret: {
     category: "handler-guarded",

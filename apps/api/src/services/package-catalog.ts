@@ -2,7 +2,7 @@
 
 import { eq, and, count, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageShares } from "@appstrate/db/schema";
+import { packages, spacePackages } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
 import { caretRange } from "@appstrate/core/semver";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
@@ -10,7 +10,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { extractSkillIdsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
 import { isPackageReadableInSpace } from "../lib/package-access.ts";
-import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
+import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 
 interface DbPackageRow {
   id: string;
@@ -45,7 +45,7 @@ interface DeclaredSkill {
  *
  * The home is the right anchor because a closure belongs to the package that
  * declares it, not to the space a run happens to start in: an agent homed in
- * team space T and OFFERED to space U must keep running U's launches with the
+ * team space T and placed in space U must keep running U's launches with the
  * skills T placed beside it.
  *
  * The fallback covers the two rows that carry no home: a SYSTEM agent, whose
@@ -122,7 +122,7 @@ export async function resolveDeclaredSkills(
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    .leftJoin(packageShares, placementShareJoin(packages.id, anchor))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, anchor))
     .where(
       and(inArray(packages.id, skillIds), orgOrSystemFilter(orgId), placementReadFilter(anchor)),
     );

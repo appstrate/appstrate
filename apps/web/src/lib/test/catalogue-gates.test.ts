@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { activationGate, catalogueDeeds } from "../catalogue-gates.ts";
+import { activationGate, catalogueDeeds, mayRemoveFromSpace } from "../catalogue-gates.ts";
 import type { LibraryPackageItem, LibraryPlacement } from "../../hooks/use-library.ts";
 
 function placement(
@@ -75,7 +75,7 @@ describe("activationGate", () => {
 describe("catalogueDeeds", () => {
   const placements = [
     placement("spc_home", "home", "active"),
-    placement("spc_guest", "shared", "none"),
+    placement("spc_guest", "shared", "inactive"),
   ];
 
   it("offers the move, the share and each withdrawal to a reader with the home's authority", () => {
@@ -86,24 +86,72 @@ describe("catalogueDeeds", () => {
           home_writable: true,
           home_shareable: true,
         }),
+        "spc_home",
       ),
     ).toEqual({ moveHome: true, share: true, revokeFrom: ["spc_guest"] });
   });
 
   it("offers neither the move nor the share to a reader without the home's authority", () => {
     // CONTROL for the case above, on the same placements.
-    expect(catalogueDeeds(packageRow("agent", placements, { home_space_id: "spc_home" }))).toEqual({
-      moveHome: false,
-      share: false,
-      revokeFrom: [],
-    });
+    expect(
+      catalogueDeeds(packageRow("agent", placements, { home_space_id: "spc_home" }), "spc_home"),
+    ).toEqual({ moveHome: false, share: false, revokeFrom: [] });
   });
 
   it("reads the two verbs apart: writing does not grant sharing", () => {
-    expect(catalogueDeeds(packageRow("agent", placements, { home_writable: true }))).toEqual({
-      moveHome: true,
-      share: false,
-      revokeFrom: [],
+    expect(
+      catalogueDeeds(packageRow("agent", placements, { home_writable: true }), "spc_home"),
+    ).toEqual({ moveHome: true, share: false, revokeFrom: [] });
+  });
+
+  it("lets the recipient remove a placement from the space they stand in", () => {
+    const row = packageRow("agent", placements, {
+      activation: [{ spaceId: "spc_guest", activate: "allowed", deactivate: "allowed" }],
     });
+    expect(catalogueDeeds(row, "spc_guest").revokeFrom).toEqual(["spc_guest"]);
+  });
+
+  it("does not list the current space twice for a sharer who is also its recipient", () => {
+    const row = packageRow("agent", placements, {
+      home_shareable: true,
+      activation: [{ spaceId: "spc_guest", activate: "allowed", deactivate: "allowed" }],
+    });
+    expect(catalogueDeeds(row, "spc_guest").revokeFrom).toEqual(["spc_guest"]);
+  });
+});
+
+describe("mayRemoveFromSpace", () => {
+  const verdicts = (deactivate: "allowed" | "forbidden") => [
+    { spaceId: "spc_home", activate: "allowed" as const, deactivate: "allowed" as const },
+    { spaceId: "spc_guest", activate: "allowed" as const, deactivate },
+  ];
+  const placements = [
+    placement("spc_home", "home", "active"),
+    placement("spc_guest", "shared", "inactive"),
+    placement("spc_sys", "system", "active"),
+  ];
+
+  it("is open where someone else placed the package and the caller may switch it off", () => {
+    const row = packageRow("skill", placements, { activation: verdicts("allowed") });
+    expect(mayRemoveFromSpace(row, "spc_guest")).toBe(true);
+  });
+
+  it("follows the switch's deactivation verdict: refused there, refused here", () => {
+    const row = packageRow("skill", placements, { activation: verdicts("forbidden") });
+    expect(mayRemoveFromSpace(row, "spc_guest")).toBe(false);
+  });
+
+  it("is closed at home, for a system package, and for a space the package is not in", () => {
+    const row = packageRow("skill", placements, {
+      activation: [
+        ...verdicts("allowed"),
+        { spaceId: "spc_sys", activate: "allowed", deactivate: "allowed" },
+        { spaceId: "spc_none", activate: "allowed", deactivate: "allowed" },
+      ],
+    });
+    expect(mayRemoveFromSpace(row, "spc_home")).toBe(false);
+    expect(mayRemoveFromSpace(row, "spc_sys")).toBe(false);
+    expect(mayRemoveFromSpace(row, "spc_none")).toBe(false);
+    expect(mayRemoveFromSpace(row, null)).toBe(false);
   });
 });

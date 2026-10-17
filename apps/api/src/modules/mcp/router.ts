@@ -31,7 +31,7 @@
  * that lets a tokenless client start the OAuth flow against the right resource.
  */
 
-import { authorizeBundlePackages, holdsPackageShareAuthority } from "../../lib/package-access.ts";
+import { authorizeBundlePackages, heldPlacementAuthority } from "../../lib/package-access.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { Hono } from "hono";
 import type { Context } from "hono";
@@ -648,7 +648,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // the forwarded auth headers. The index is scoped to the caller's role.
     const toolCtx = {
       authorizeBundle: (bundle: Bundle) => authorizeBundlePackages(c, bundle),
-      mayShareRoot: (packageId: string) => holdsPackageShareAuthority(c, packageId),
+      placeRootAs: (packageId: string) => heldPlacementAuthority(c, packageId),
       readSkill: skillReaderFor(c, scope),
       requestId: c.get("requestId"),
       origin,

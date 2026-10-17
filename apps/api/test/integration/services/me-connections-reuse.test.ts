@@ -14,7 +14,7 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedSpace } from "../../helpers/seed.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 import { listMeConnections } from "../../../src/services/me-connections.ts";
@@ -132,7 +132,7 @@ describe("listMeConnections — reused_by_agents", () => {
   });
 
   it("does not count B when B blocks user connections", async () => {
-    await seedPlacedPackage(b, INTEGRATION, { blockUserConnections: true });
+    await seedSpacePackage(b, INTEGRATION, { blockUserConnections: true });
     expect(await reuseOf(await seedConnection({ from: a }))).toBe(1);
   });
 
@@ -147,7 +147,7 @@ describe("listMeConnections — reused_by_agents", () => {
   });
 
   it("counts an agent running in two of the row's spaces once", async () => {
-    await seedPlacedPackage(b, "@reuse/in-a", { enabled: true });
+    await seedSpacePackage(b, "@reuse/in-a", { enabled: true });
     const id = await seedConnection({ from: a, sharedSpaceIds: [b] });
     expect(await reuseOf(id)).toBe(2);
   });

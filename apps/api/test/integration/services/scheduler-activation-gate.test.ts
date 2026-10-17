@@ -16,22 +16,22 @@
  *
  * PLACEMENT is the other half, and it is re-read here for the same reason: the
  * tick and the three HTTP doors ask ONE predicate
- * (`agentExecutionBlock` — placed here AND active here), so an orphan
- * `space_packages` row with neither a home nor a share behind it cannot keep
- * firing from a cron in a space every request-borne door already refuses.
+ * (`agentExecutionBlock` — placed here AND active here), so an agent no longer
+ * placed in a space cannot keep firing from a cron there while every
+ * request-borne door already refuses it.
  *
  * Tier 0: `triggerScheduledRun` is called directly, so none of this needs the
  * real BullMQ repeatable-job semantics the sibling suite waits for Redis on.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, runs, schedules } from "@appstrate/db/schema";
+import { packages, runs, schedules, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { deactivatePackage, activatePackage } from "../../../src/services/space-packages.ts";
 import { createSchedule, triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
@@ -125,45 +125,36 @@ describe("the scheduler tick reads the activation, like every other execution do
     expect(all[0]!.error ?? "").not.toContain("is not placed in space");
   });
 
-  it("refuses an ORPHAN placement — a row with neither a home nor a share", async () => {
-    // The pre-0016 residue, reproduced exactly: the agent is homed in ANOTHER
-    // space, the scheduled space holds an enabled `space_packages` row, and no
-    // `package_shares` row ever authorized it. The activation question alone
-    // answers "yes" here — the row says `enabled` — so this is precisely the
-    // state the placement half of the gate exists to refuse.
+  it("refuses an agent no longer placed in the space — homed elsewhere, no row here", async () => {
+    // The agent moves its home out and the scheduled space's row is withdrawn:
+    // nothing places it here any more.
     const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
     await db.update(packages).set({ homeSpaceId: elsewhere.id }).where(eq(packages.id, AGENT));
+    await db
+      .delete(spacePackages)
+      .where(
+        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, AGENT)),
+      );
 
     await fire();
 
     const after = await runsOfSchedule();
     expect(after).toHaveLength(1);
     expect(after[0]!.status).toBe("failed");
-    // The refusal names PLACEMENT, not the switch: sharing the agent into the
+    // The refusal names PLACEMENT, not the switch: placing the agent in the
     // space is the repair, and "activate it" would send the operator to a page
     // that cannot show them this agent at all.
     expect(after[0]!.error).toContain("is not placed in space");
     expect(after[0]!.error).not.toContain("is not active in space");
 
-    // ARMED, like the deactivation refusal: an offer can be made again.
+    // ARMED, like the deactivation refusal: the agent can be placed again.
     const [row] = await db.select().from(schedules).where(eq(schedules.id, scheduleId));
     expect(row!.enabled).toBe(true);
     expect(row!.nextRunAt).not.toBeNull();
-  });
 
-  it("launches once the missing SHARE is written — the placement half, isolated", async () => {
-    // Same fixture as above, plus the one row that was missing. Nothing else
-    // changes: the `space_packages` row was already enabled throughout, so a
-    // second fire that gets past the gate can only be the placement half
-    // answering differently.
-    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
-    await db.update(packages).set({ homeSpaceId: elsewhere.id }).where(eq(packages.id, AGENT));
+    // …and once a row places it here, switched on, the next fire launches.
+    await seedSpacePackage(ctx.defaultSpaceId, AGENT);
     await fire();
-    expect((await runsOfSchedule())[0]!.error).toContain("is not placed in space");
-
-    await seedPackageShare(ctx.defaultSpaceId, AGENT);
-    await fire();
-
     const all = await runsOfSchedule();
     expect(all).toHaveLength(2);
     expect(all[1]!.error ?? "").not.toContain("is not placed in space");
