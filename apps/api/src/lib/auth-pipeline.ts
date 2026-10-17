@@ -608,9 +608,9 @@ function skipOrgContext(path: string): boolean {
   // both wrong (no single org represents the caller's full inventory) and
   // user-hostile (would force the SPA to pick one before showing the list).
   if (path === "/api/me/connections" || path === "/api/me/connections/") return true;
-  // `/api/me/connections/:id` and its `shares/:spaceId` sub-resource act on
+  // `/api/me/connections/:id`, its `shares` policy and `shares/:spaceId` act on
   // one of the caller's own rows and take the org from the row itself.
-  if (/^\/api\/me\/connections\/[^/]+(\/shares\/[^/]+)?\/?$/.test(path)) return true;
+  if (/^\/api\/me\/connections\/[^/]+(\/shares(\/[^/]+)?)?\/?$/.test(path)) return true;
   // Instance-wide operator routes: an operator may belong to no organization.
   // Listed by exact family, so a new `/api/admin/*` route stays org-gated
   // until it is added here with a guard of its own.

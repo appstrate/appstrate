@@ -371,6 +371,9 @@ router.put(
   "/connections/:connectionId/shares",
   requireCeiling("integrations", "connect"),
   async (c) => {
+    // No org context here, so a role preview names its org with X-Org-Id, as on the listing.
+    if (c.req.header(VIEW_AS_HEADER) !== undefined)
+      await resolveListingViewAs(c, await getUserOrganizations(c.get("user").id));
     const body = await readJsonBody(c, connectionShareAllSpacesSchema);
     await applyConnectionShareAllSpaces(c, meEdit(c), readConnectionId(c), body.share_all_spaces);
     return c.body(null, 204);
