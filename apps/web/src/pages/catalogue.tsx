@@ -53,7 +53,7 @@ export function CataloguePage() {
         query.delete(CATALOGUE_PACKAGE_PARAM);
         query.delete(CATALOGUE_VERSION_PARAM);
         if (nextReading !== reading) query.delete("state");
-        return `/catalogue/${nextReading}/${nextType}${searchOf(query)}`;
+        return catalogueKindAddress(nextReading, nextType, { search: searchOf(query), hash: "" });
       }}
     />
   );

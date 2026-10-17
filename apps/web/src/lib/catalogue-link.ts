@@ -47,11 +47,15 @@ export function catalogueHref(
   type: PackageType,
   options: { packageId?: string; version?: string } = {},
 ): string {
-  const base = `/catalogue/discover/${type}`;
+  const base = cataloguePath("discover", type);
   if (!options.packageId) return base;
   const query = new URLSearchParams({ [CATALOGUE_PACKAGE_PARAM]: options.packageId });
   if (options.version) query.set(CATALOGUE_VERSION_PARAM, options.version);
   return `${base}?${query.toString().replace(/\+/g, "%20")}`;
+}
+
+function cataloguePath(reading: CatalogueReading, type: PackageType): string {
+  return `/catalogue/${reading}/${type}`;
 }
 
 /** A reading and kind's address, keeping the current query (the sheet's `package`, `version`) and hash. */
@@ -60,7 +64,23 @@ export function catalogueKindAddress(
   type: PackageType,
   from: { search: string; hash: string },
 ): string {
-  return `/catalogue/${reading}/${type}${from.search}${from.hash}`;
+  return `${cataloguePath(reading, type)}${from.search}${from.hash}`;
+}
+
+/**
+ * Where the address must move for a sheet to open, or `null` when it already can. A sheet shows
+ * on its package's own kind; the `shared` reading lists waiting shares and renders no sheet, so a
+ * package named there opens on Découvrir (as the shares list's own links do).
+ */
+export function catalogueSheetAddress(
+  reading: CatalogueReading,
+  active: PackageType,
+  target: PackageType | undefined,
+  from: { search: string; hash: string },
+): string | null {
+  if (target === undefined) return null;
+  if (reading !== "shared" && target === active) return null;
+  return catalogueKindAddress(reading === "shared" ? "discover" : reading, target, from);
 }
 
 /**
@@ -79,4 +99,4 @@ export function catalogueVersionFor(page: {
   return page.version || undefined;
 }
 
-export const CATALOGUE_SHARED_HREF = `/catalogue/shared/${CATALOGUE_KINDS[0]}`;
+export const CATALOGUE_SHARED_HREF = cataloguePath("shared", CATALOGUE_KINDS[0]);
