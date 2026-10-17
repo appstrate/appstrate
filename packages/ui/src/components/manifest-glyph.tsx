@@ -2,15 +2,10 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon, iconLoaded, loadIcon } from "@iconify/react";
-import { DynamicIcon, iconNames, type IconName } from "lucide-react/dynamic";
+import { DynamicIcon } from "lucide-react/dynamic";
 import type { AppearanceIcon } from "@appstrate/core/appearance";
 import { cn } from "../cn.ts";
-
-const LUCIDE_NAMES = new Set<string>(iconNames);
-
-function isLucideName(name: string): name is IconName {
-  return LUCIDE_NAMES.has(name);
-}
+import { isLucideName } from "../lucide-names.ts";
 
 type LoadState = "loading" | "ok" | "error";
 

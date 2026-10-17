@@ -52,6 +52,19 @@ describe("AppearancePicker", () => {
     expect(html).toContain("Retirer l’icône");
   });
 
+  it("names the icon group by its label and the form tabs by theirs", () => {
+    const html = picker(["lucide", "emoji"]);
+    const labelId = html.match(/<label[^>]*id="([^"]+)"[^>]*>Icône</)?.[1];
+    expect(labelId).toBeDefined();
+    expect(html).toContain(`role="group" aria-labelledby="${labelId}"`);
+    expect(html).toMatch(/role="radiogroup"[^>]*aria-label="Type d’icône"/);
+  });
+
+  it("names the emoji trigger by the current emoji", () => {
+    const html = picker(["emoji"], { icon: "emoji:🚜", color: null });
+    expect(html).toContain('<span class="text-base leading-none">🚜</span>');
+  });
+
   it("offers the nine colours and the automatic one", () => {
     const html = picker(["lucide"]);
     const values = [...html.matchAll(/role="radio"[^>]*value="([^"]+)"/g)].map((m) => m[1]);

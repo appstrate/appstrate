@@ -23,6 +23,7 @@ import {
 } from "@appstrate/core/appearance";
 import { cn } from "@appstrate/ui/cn";
 import { IDENTITY_COLOR_CLASSES } from "@appstrate/ui/identity-colors";
+import { isLucideName } from "@appstrate/ui/lucide-names";
 import { Button } from "@appstrate/ui/components/button";
 import {
   Command,
@@ -80,7 +81,6 @@ const ICON_ERROR_KEYS: Record<IconImageError, string> = {
 /** The colour radio's value for `color: null`. */
 const AUTO_COLOR = "auto";
 
-const LUCIDE_NAMES = new Set<string>(iconNames);
 const FEATURED_ICONS: IconName[] = [
   "bot",
   "sparkles",
@@ -97,10 +97,6 @@ const FEATURED_ICONS: IconName[] = [
 ];
 const ICON_RESULT_LIMIT = 80;
 const EMOJI_COLUMNS = 9;
-
-function isLucideName(name: string): name is IconName {
-  return LUCIDE_NAMES.has(name);
-}
 
 function iconLabel(name: string): string {
   return name
@@ -168,6 +164,7 @@ export function AppearancePicker({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
+  const iconLabelId = useId();
   const colorLabelId = useId();
   const parsed = parseIcon(value.icon);
   const [picked, setPicked] = useState<IconForm | null>(null);
@@ -192,9 +189,11 @@ export function AppearancePicker({
       </div>
 
       {form && (
-        <div className="flex flex-col gap-2">
+        <div role="group" aria-labelledby={iconLabelId} className="flex flex-col gap-2">
           <div className="flex min-h-8 items-center justify-between gap-2">
-            <Label className="mb-0">{t("appearance.icon")}</Label>
+            <Label id={iconLabelId} className="mb-0">
+              {t("appearance.icon")}
+            </Label>
             {value.icon !== null && (
               <Button
                 type="button"
@@ -214,6 +213,7 @@ export function AppearancePicker({
               variant="outline"
               size="sm"
               className="justify-start"
+              aria-label={t("appearance.formLabel")}
               disabled={disabled}
               value={form}
               onValueChange={(next) => {
@@ -401,12 +401,10 @@ function EmojiField({
           disabled={disabled}
           className="w-full justify-between font-normal"
         >
+          {/* The emoji is read, not hidden: it is the field's current value, as the
+              Lucide trigger names its icon. */}
           <span className="flex min-w-0 items-center gap-2">
-            {picked && (
-              <span aria-hidden className="text-base leading-none">
-                {picked}
-              </span>
-            )}
+            {picked && <span className="text-base leading-none">{picked}</span>}
             <span className={cn("truncate", !picked && "text-muted-foreground")}>
               {t("appearance.emojiPick")}
             </span>
@@ -428,8 +426,9 @@ function EmojiField({
 
 /**
  * Frimousse, styled with the app's tokens. Mounted only while the popover is
- * open: that is when it fetches the dataset the build serves under
- * `emojibase/` (`vite.config.ts`), then caches it in localStorage.
+ * open: that is when it reads the dataset the build serves under `emojibase/`
+ * (`vite.config.ts`). Frimousse caches it in localStorage and revalidates it
+ * through its ETag, which the server answers with a 304 while it is unchanged.
  */
 function EmojiPanel({ onPick }: { onPick: (emoji: string) => void }) {
   const { t, i18n } = useTranslation();
@@ -512,7 +511,7 @@ function ImageField({ disabled, onPick }: { disabled: boolean; onPick: (icon: st
     const file = event.currentTarget.files?.[0];
     // Cleared so picking the same file again fires a change.
     event.currentTarget.value = "";
-    if (!file) return;
+    if (!file || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -534,12 +533,17 @@ function ImageField({ disabled, onPick }: { disabled: boolean; onPick: (icon: st
         tabIndex={-1}
         onChange={(event) => void upload(event)}
       />
+      {/* Not disabled while encoding: focus is back on it when the file dialog
+          closes, and disabling it would drop that focus to the page. */}
       <Button
         type="button"
         variant="outline"
         className="w-fit"
-        disabled={disabled || busy}
-        onClick={() => input.current?.click()}
+        disabled={disabled}
+        aria-busy={busy}
+        onClick={() => {
+          if (!busy) input.current?.click();
+        }}
       >
         {busy ? <Spinner /> : <Upload />}
         {t("appearance.upload")}

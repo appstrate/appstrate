@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { DOCS_URL, SUPPORT_URL } from "@/lib/external-links";
 import { BookOpen, Check, FileText, LifeBuoy, LogOut, Palette, Settings } from "lucide-react";
 import { useAuth, useViewer } from "../hooks/use-auth";
-import type { SpaceViewer } from "../lib/space-label";
+import type { SpaceViewer } from "../lib/identity-tile-props";
 import { useTheme } from "../stores/theme-store";
 import { themeOptions } from "../lib/theme";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";

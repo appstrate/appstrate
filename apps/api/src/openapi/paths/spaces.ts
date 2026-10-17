@@ -222,7 +222,8 @@ export const spacesPaths = {
                 },
                 icon: {
                   type: ["string", "null"],
-                  description: "`lucide:<name>` or `emoji:<one emoji>`; `null` clears it.",
+                  description:
+                    "`lucide:<name>` or `emoji:<one emoji>` (stored in its RGI form); `null` clears it.",
                 },
                 color: {
                   type: ["string", "null"],

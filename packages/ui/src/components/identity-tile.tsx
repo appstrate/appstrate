@@ -47,7 +47,7 @@ export function IdentityTile({
   const parsed = parseIcon(icon);
   const parsedFallback = parseIcon(fallbackIcon);
   const letters = (
-    <span className="text-[length:40cqw] leading-none font-semibold">{initials(label, null)}</span>
+    <span className="text-[length:40cqw] leading-none font-semibold">{initials(label)}</span>
   );
   const fallback = parsedFallback ? <Glyph icon={parsedFallback} fallback={letters} /> : letters;
 

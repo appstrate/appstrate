@@ -61,7 +61,7 @@ describe("IdentityTile", () => {
   });
 
   it("draws the fallback icon for an absent or unreadable icon", () => {
-    for (const icon of [null, "icon.png", "emoji:not-an-emoji"]) {
+    for (const icon of [null, "icon.png", "emoji:"]) {
       const html = render({ seed: SEED, label: "Mon agent", icon, fallbackIcon: "emoji:🤖" });
       expect(html).toContain("🤖");
       expect(html).not.toContain(">MA<");

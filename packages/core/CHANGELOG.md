@@ -30,17 +30,26 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
 - **`@appstrate/core/appearance`**: the one grammar of a visual identity
   (agent, space, organization). **`parseIcon(value)`** reads an `icon` as an
   **`AppearanceIcon`** (`lucide` name, other Iconify id, image URL, or
-  `emoji:<one emoji>`), `null` when no surface can draw it; the prefixes
-  **`LUCIDE_ICON_PREFIX`**, **`EMOJI_ICON_PREFIX`** and **`IMAGE_ICON_PREFIX`**;
-  **`isEmoji(value)`**, exactly one RGI emoji. The palette
+  `emoji:<text>`), `null` when no surface can draw it — leniently: an `emoji:`
+  value is drawn as written when it carries a pictograph, a regional indicator
+  or a keycap and holds no whitespace within 32 UTF-16 units, read with `u`-flag
+  expressions only, so the module loads and reads on browsers that cannot
+  compile a `v`-flag one. The prefixes
+  **`LUCIDE_ICON_PREFIX`** and **`EMOJI_ICON_PREFIX`**;
+  **`normalizeEmoji(value)`**, the RGI form of one emoji or `null` (a
+  superfluous U+FE0F dropped, a missing one added: `👍️` → `👍`, `❤` → `❤️`),
+  its `\p{RGI_Emoji}` expression compiled on first call. The palette
   **`APPEARANCE_COLORS`** / **`AppearanceColor`** with **`isAppearanceColor`**,
   **`derivedColor(seed)`** (a stable hue from an entity id, never `neutral`)
   and **`resolveColor(color, seed)`** (`null` means derived). An uploaded icon
-  image: **`isIconImage(value)`**, a base64 WebP data URI within
-  **`ICON_IMAGE_MAX_BYTES`** (12 000) and **`ICON_IMAGE_MAX_SIZE`** (256 px),
-  its canvas read by **`webpSize(bytes)`**. The write-side Zod schemas
+  image: **`isIconImage(value)`**, a base64 data URI of one of
+  **`ICON_IMAGE_TYPES`** (`image/webp`, `image/png`) whose bytes are that type,
+  within **`ICON_IMAGE_MAX_BYTES`** (12 000) and **`ICON_IMAGE_MAX_SIZE`**
+  (256 px), its type and size read by **`imageSize(bytes)`** (a WebP's first
+  chunk, a PNG's `IHDR`). The write-side Zod schemas
   **`appearanceIconSchema(forms)`** (one of the **`IconForm`**s `lucide`,
-  `emoji`, `image`) and **`appearanceColorSchema`**.
+  `emoji`, `image`; it parses an emoji to its RGI form) and
+  **`appearanceColorSchema`**.
 - **`unwrapMcpResult(value)`** (`@appstrate/core/mcp-result`): the payload inside
   an MCP tool result — a `CallToolResult`, a bare content array or a JSON
   string — recovered even when a prose text part (the turn-budget note) follows

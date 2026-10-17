@@ -233,7 +233,7 @@ function SourceGroupCard({
     <Card className="p-5">
       <div className="flex cursor-pointer items-center justify-between" onClick={onToggle}>
         <div className="flex items-center gap-3">
-          <PackageIcon type="integration" id={group.source_id} icon={group.logo} size="sm" />
+          <PackageIcon type="integration" icon={group.logo} size="sm" />
           <div className="flex-1">
             <div className="flex items-center gap-2">
               <h3 className="text-[0.95rem] font-semibold">{group.display_name}</h3>

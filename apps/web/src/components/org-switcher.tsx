@@ -16,7 +16,8 @@ import { useOrg } from "../hooks/use-org";
 import { useOrgSpaces, useSpaces } from "../hooks/use-spaces";
 import { spaceRoleLabel } from "../hooks/use-roles";
 import { usePermissions } from "../hooks/use-permissions";
-import { spaceLabel, spaceTile } from "../lib/space-label";
+import { spaceLabel } from "../lib/space-label";
+import { orgTile, spaceTile } from "../lib/identity-tile-props";
 import { matchesSearch } from "../lib/strings";
 import { isSpaceEnterable, useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { useCanCreateOrg, useViewer } from "../hooks/use-auth";
@@ -205,13 +206,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
               : "hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent",
           )}
         >
-          <IdentityTile
-            icon={currentOrg.icon}
-            color={currentOrg.color}
-            seed={currentOrg.id}
-            label={currentOrg.name}
-            className="size-6 rounded-md"
-          />
+          <IdentityTile {...orgTile(currentOrg)} className="size-6 rounded-md" />
           <span className="min-w-0 flex-1 truncate text-left">
             <span className="font-semibold">{currentOrg.name}</span>
             {spaceName && (
@@ -286,13 +281,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                     }
                     onNavigate={closeSwitcherAndSidebar}
                   >
-                    <IdentityTile
-                      icon={org.icon}
-                      color={org.color}
-                      seed={org.id}
-                      label={org.name}
-                      className="size-[30px]"
-                    />
+                    <IdentityTile {...orgTile(org)} className="size-[30px]" />
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate text-sm font-medium">{org.name}</span>
                       <span className="text-muted-foreground text-xs">

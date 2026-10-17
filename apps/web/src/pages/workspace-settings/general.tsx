@@ -172,12 +172,15 @@ function GeneralForm({
               status={<SaveFeedback {...appearanceWrite} />}
             >
               <div className="w-full min-w-0">
+                {/* Keyed: no tab carries over to another space. Never disabled by a pending
+                    write — each arrow key on the colours is a PATCH, and disabling would drop
+                    the focus; the last write wins. */}
                 <AppearancePicker
+                  key={spaceId}
                   value={{ icon: space.icon, color: space.color }}
                   allow={["lucide", "emoji"]}
                   seed={spaceId}
                   label={space.name}
-                  disabled={appearanceWrite.pending}
                   onChange={(next) => {
                     if (next.icon !== undefined) save({ field: "icon", value: next.icon });
                     if (next.color !== undefined) save({ field: "color", value: next.color });

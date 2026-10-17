@@ -3116,7 +3116,7 @@ export interface paths {
         head?: never;
         /**
          * Update organization
-         * @description Update organization name, slug, icon and/or colour. Requires `org:update`. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. An uploaded image travels as the `icon` itself, a base64 WebP data URI; the audit log records its SHA-256 digest, never its bytes.
+         * @description Update organization name, slug, icon and/or colour. Requires `org:update`. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. An uploaded image travels as the `icon` itself, a base64 WebP or PNG data URI; the audit log records the first 16 hex digits of its SHA-256 digest, never its bytes.
          */
         patch: operations["updateOrganization"];
         trace?: never;
@@ -5541,7 +5541,7 @@ export interface components {
         };
         AgentDetail: {
             id: string;
-            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — `data:image/webp;base64,…` (a WebP of at most 12000 bytes and 256×256 px). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
             icon: string | null;
             /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
             color: string | null;
@@ -5643,7 +5643,7 @@ export interface components {
         };
         AgentListItem: {
             id: string;
-            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — `data:image/webp;base64,…` (a WebP of at most 12000 bytes and 256×256 px). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
             icon: string | null;
             /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
             color: string | null;
@@ -6360,7 +6360,7 @@ export interface components {
             id: string;
             name: string;
             slug: string;
-            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — `data:image/webp;base64,…` (a WebP of at most 12000 bytes and 256×256 px). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
             icon: string | null;
             /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
             color: string | null;
@@ -6596,7 +6596,7 @@ export interface components {
             id: string;
             name: string;
             slug: string;
-            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — `data:image/webp;base64,…` (a WebP of at most 12000 bytes and 256×256 px). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
             icon: string | null;
             /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
             color: string | null;
@@ -7281,7 +7281,7 @@ export interface components {
             orgId: string;
             /** @description Human-readable space name */
             name: string;
-            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — `data:image/webp;base64,…` (a WebP of at most 12000 bytes and 256×256 px). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
             icon: string | null;
             /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
             color: string | null;
@@ -17056,7 +17056,7 @@ export interface operations {
                             id: string;
                             name: string;
                             slug: string;
-                            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — `data:image/webp;base64,…` (a WebP of at most 12000 bytes and 256×256 px). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+                            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
                             icon: string | null;
                             /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
                             color: string | null;
@@ -19502,7 +19502,7 @@ export interface operations {
                         id: string;
                         name: string;
                         slug: string;
-                        /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — `data:image/webp;base64,…` (a WebP of at most 12000 bytes and 256×256 px). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+                        /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
                         icon: string | null;
                         /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
                         color: string | null;
@@ -19635,7 +19635,7 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     slug?: string;
-                    /** @description `lucide:<name>`, `emoji:<one emoji>`, or `data:image/webp;base64,…` (a WebP of at most 12000 bytes and 256×256 px); `null` clears it. */
+                    /** @description `lucide:<name>`, `emoji:<one emoji>` (stored in its RGI form), or `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px); `null` clears it. */
                     icon?: string | null;
                     /**
                      * @description A palette key; `null` clears it, the colour then derived from the organization id.
@@ -25540,7 +25540,7 @@ export interface operations {
                 "application/json": {
                     /** @description Human-readable space name */
                     name?: string;
-                    /** @description `lucide:<name>` or `emoji:<one emoji>`; `null` clears it. */
+                    /** @description `lucide:<name>` or `emoji:<one emoji>` (stored in its RGI form); `null` clears it. */
                     icon?: string | null;
                     /**
                      * @description A palette key; `null` clears it, the colour then derived from the space id.

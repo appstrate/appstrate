@@ -9,10 +9,12 @@
  *
  * Drizzle `0097` stored an uploaded organization logo as `image:<version>`, its bytes in the `orgs`
  * bucket; `0100` renames the column `icon`, whose grammar holds an image inline
- * (`data:image/webp;base64,…`), and the platform reads neither the pointer nor the bucket any more.
- * Only a database that applied `0097` before `0100` holds such a row; production never had the column.
+ * (`data:image/webp;base64,…` or `data:image/png;base64,…`), and the platform reads neither the
+ * pointer nor the bucket any more. Only a database that applied `0097` before `0100` holds such a
+ * row; production never had the column.
  *
- * Run after `0100` is applied (it refuses otherwise). With `--apply`, every `icon` reading
+ * Run in the same window as `0100`, right after it (it refuses before): a leftover `image:<uuid>` has
+ * the shape of an Iconify id, which every viewer would fetch from `api.iconify.design`. With `--apply`, every `icon` reading
  * `image:<version>` is set to NULL (the organization renders its initial), `updated_at` bumped, in
  * one transaction; then every object of the `orgs` bucket is deleted. Dry run by default: prints
  * the counts, writes nothing. With `--apply`, the rows and objects left must both be 0, else it
@@ -40,7 +42,7 @@ async function bucketKeys(): Promise<string[]> {
   return keys;
 }
 
-async function runOrgIconImages(options: {
+export async function runOrgIconImages(options: {
   apply: boolean;
   out: (line: string) => void;
 }): Promise<void> {

@@ -24,7 +24,8 @@ import { rowActionsColumn } from "../../components/row-actions-column";
 import { CellText } from "../../components/table-cells";
 import { formatDateField } from "../../lib/format-date";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
-import { spaceLabel, spaceTile } from "../../lib/space-label";
+import { spaceLabel } from "../../lib/space-label";
+import { spaceTile } from "../../lib/identity-tile-props";
 import { isSpaceEnterable } from "../../hooks/use-current-space";
 import { useViewer } from "../../hooks/use-auth";
 

@@ -11,7 +11,7 @@ import { clearSession } from "../lib/clear-session";
 import { readSession, rememberSignedIn, sessionExpected } from "../lib/session-read";
 import { registerSessionCheck } from "../lib/stale-authority";
 import i18n from "../i18n";
-import type { SpaceViewer } from "../lib/space-label";
+import type { SpaceViewer } from "../lib/identity-tile-props";
 
 async function fetchProfile(): Promise<AuthProfile | null> {
   try {

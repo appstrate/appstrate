@@ -236,7 +236,7 @@ export function HostedConnectPage() {
         {(phase === "form" || phase === "submitting") && context && (
           <>
             <div className="flex items-center gap-3">
-              <PackageIcon type="integration" id={context.packageId} icon={context.icon} />
+              <PackageIcon type="integration" icon={context.icon} />
               <h1 className="text-lg font-semibold">
                 {t("integration.connect.hosted.title", { display: context.display_name })}
               </h1>

@@ -466,7 +466,7 @@ export interface OrganizationWithRole {
   id: string;
   name: string;
   slug: string;
-  /** `lucide:<name>`, `emoji:<one emoji>` or a base64 WebP data URI; `null` when unset. */
+  /** `lucide:<name>`, `emoji:<one emoji>` or a base64 WebP or PNG data URI; `null` when unset. */
   icon: string | null;
   /** A palette key (`@appstrate/core/appearance`); `null` = derived from the id. */
   color: string | null;

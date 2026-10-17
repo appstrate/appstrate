@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Avatar initials: the first letter of the first two words of the name, else of the email. */
-export function initials(
-  name: string | null | undefined,
-  email: string | null | undefined,
-): string {
-  const label = name?.trim() || email?.trim() || "";
+/** Avatar initials: the first letter of the first two words of `label`, `?` when it has none. */
+export function initials(label: string): string {
   const letters = label
     .split(/\s+/)
     .filter(Boolean)

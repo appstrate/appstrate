@@ -9,7 +9,7 @@ import {
   APPEARANCE_COLORS,
   ICON_IMAGE_MAX_BYTES,
   ICON_IMAGE_MAX_SIZE,
-  IMAGE_ICON_PREFIX,
+  ICON_IMAGE_TYPES,
 } from "@appstrate/core/appearance";
 
 /** Request-body shape of one space assignment — mirrors the `SpaceAssignment` component. */
@@ -201,7 +201,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Update organization",
       description:
-        "Update organization name, slug, icon and/or colour. Requires `org:update`. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. An uploaded image travels as the `icon` itself, a base64 WebP data URI; the audit log records its SHA-256 digest, never its bytes.",
+        "Update organization name, slug, icon and/or colour. Requires `org:update`. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. An uploaded image travels as the `icon` itself, a base64 WebP or PNG data URI; the audit log records the first 16 hex digits of its SHA-256 digest, never its bytes.",
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
         required: true,
@@ -214,7 +214,7 @@ export const organizationsPaths = {
                 slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
                 icon: {
                   type: ["string", "null"],
-                  description: `\`lucide:<name>\`, \`emoji:<one emoji>\`, or \`${IMAGE_ICON_PREFIX}…\` (a WebP of at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px); \`null\` clears it.`,
+                  description: `\`lucide:<name>\`, \`emoji:<one emoji>\` (stored in its RGI form), or ${ICON_IMAGE_TYPES.map((type) => `\`data:${type};base64,…\``).join(" or ")} (at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px); \`null\` clears it.`,
                 },
                 color: {
                   type: ["string", "null"],

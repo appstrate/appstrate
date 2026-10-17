@@ -91,8 +91,9 @@ const EMOJIBASE_DIR = "emojibase";
  * Serve the Emojibase dataset the emoji picker (Frimousse, `emojibaseUrl`)
  * reads from the app itself rather than from a third-party CDN: for each
  * supported language, `data.json` and `messages.json` copied from the
- * installed `emojibase-data`. The picker fetches them only when it opens and
- * caches them in localStorage.
+ * installed `emojibase-data`. The picker fetches them only when it opens;
+ * Frimousse caches them in localStorage and revalidates them by their ETag, a
+ * 304 while they are unchanged.
  *
  * Emitted into every build, so `vite build --watch` (the `dev` loop) writes
  * them into `dist/` as well, and answered by the dev server under `vite dev`.

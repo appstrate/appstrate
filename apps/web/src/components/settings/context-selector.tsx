@@ -2,7 +2,7 @@
 
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { OptionSelect } from "@/components/app-ui/option-select";
-import type { IdentityTileProps } from "@/lib/space-label";
+import type { IdentityTileProps } from "@/lib/identity-tile-props";
 
 /** Transparent in the rail so the settings overlay reads as one sheet; bordered from `md`. */
 const TRIGGER = [
@@ -37,6 +37,8 @@ export function ContextSelector({
       aria-label={label}
       options={options.map((option) => ({
         value: option.id,
+        // The tile's initials would lead the typeahead text otherwise.
+        textValue: option.name,
         label: (
           <span className="flex min-w-0 items-center gap-2">
             <IdentityTile {...option.tile} className="size-5 rounded-md" />

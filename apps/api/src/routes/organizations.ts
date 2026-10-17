@@ -64,11 +64,7 @@ import { recordAuditFromContext } from "../services/audit.ts";
 import { recordSharesRemoved } from "../services/connection-shares.ts";
 import { ASSIGNABLE_ORG_ROLES, type OrganizationMemberSpace } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
-import {
-  IMAGE_ICON_PREFIX,
-  appearanceColorSchema,
-  appearanceIconSchema,
-} from "@appstrate/core/appearance";
+import { appearanceColorSchema, appearanceIconSchema } from "@appstrate/core/appearance";
 
 export const createOrgSchema = z
   .object({
@@ -112,9 +108,12 @@ export const updateInvitationSchema = z
   })
   .strict();
 
-/** An icon as the audit log records it: an uploaded image by its digest, never its bytes. */
+/**
+ * An icon as the audit log records it: an uploaded image (a `data:` URI, whatever its type) by
+ * the first 16 hex digits of its SHA-256 digest, never its bytes.
+ */
 function auditedIcon(icon: string): string {
-  if (!icon.startsWith(IMAGE_ICON_PREFIX)) return icon;
+  if (!icon.startsWith("data:")) return icon;
   return `sha256:${new Bun.CryptoHasher("sha256").update(icon).digest("hex").slice(0, 16)}`;
 }
 

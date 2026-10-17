@@ -28,7 +28,7 @@ import {
   APPEARANCE_COLORS,
   ICON_IMAGE_MAX_BYTES,
   ICON_IMAGE_MAX_SIZE,
-  IMAGE_ICON_PREFIX,
+  ICON_IMAGE_TYPES,
 } from "@appstrate/core/appearance";
 import {
   CONNECTION_RESOLUTION_ERROR_CODES,
@@ -128,7 +128,7 @@ const PACKAGE_HOME_PROPERTIES = {
 export const APPEARANCE_PROPERTIES = {
   icon: {
     type: ["string", "null"],
-    description: `The icon, \`null\` when none is set. Written as \`lucide:<name>\` (a Lucide icon, e.g. \`lucide:bot\`), \`emoji:<one emoji>\`, or — on an organization only — \`${IMAGE_ICON_PREFIX}…\` (a WebP of at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px). An agent's is its manifest \`icon\`, read as written: it may also be another Iconify id (\`<prefix>:<name>\`) or an image URL, and a client draws nothing for a value it cannot parse.`,
+    description: `The icon, \`null\` when none is set. Written as \`lucide:<name>\` (a Lucide icon, e.g. \`lucide:bot\`), \`emoji:<one emoji>\`, or — on an organization only — an uploaded image as a base64 data URI, ${ICON_IMAGE_TYPES.map((type) => `\`data:${type};base64,…\``).join(" or ")} (at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px). On an organization or a space, an emoji is stored in its RGI form: a superfluous or missing U+FE0F is corrected on write. An agent's is its manifest \`icon\`, read as written: it may also be another Iconify id (\`<prefix>:<name>\`) or an image URL, and a client draws nothing for a value it cannot parse.`,
   },
   color: {
     type: ["string", "null"],

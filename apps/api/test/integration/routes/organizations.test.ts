@@ -508,6 +508,28 @@ describe("Organizations API", () => {
         return `data:image/webp;base64,${btoa(String.fromCharCode(...bytes))}`;
       };
 
+      /** A PNG: its signature and an `IHDR` chunk naming its size, padded to `length` bytes. */
+      const pngIcon = (width: number, height: number, length = 0) => {
+        const u32 = (n: number) => [
+          (n >>> 24) & 0xff,
+          (n >>> 16) & 0xff,
+          (n >>> 8) & 0xff,
+          n & 0xff,
+        ];
+        const ascii = (text: string) => [...text].map((char) => char.charCodeAt(0));
+        const bytes = [
+          ...[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+          ...u32(13),
+          ...ascii("IHDR"),
+          ...u32(width),
+          ...u32(height),
+          ...[8, 6, 0, 0, 0],
+          ...u32(0),
+        ];
+        while (bytes.length < length) bytes.push(0);
+        return `data:image/png;base64,${btoa(String.fromCharCode(...bytes))}`;
+      };
+
       const patchOrg = (headers: Record<string, string>, orgId: string, body: unknown) =>
         app.request(`/api/orgs/${orgId}`, {
           method: "PATCH",
@@ -526,7 +548,7 @@ describe("Organizations API", () => {
         const ctx = await createTestContext({ orgSlug: "appearance-org" });
         const owner = authHeaders(ctx);
 
-        for (const icon of ["lucide:tractor", "emoji:🚜", webpIcon(64, 64)]) {
+        for (const icon of ["lucide:tractor", "emoji:🚜", webpIcon(64, 64), pngIcon(64, 64)]) {
           const res = await patchOrg(owner, ctx.orgId, { icon, color: "emerald" });
           expect(res.status, await res.clone().text()).toBe(200);
           expect(await res.json()).toMatchObject({ icon, color: "emerald" });
@@ -549,6 +571,23 @@ describe("Organizations API", () => {
             icon,
             color: "emerald",
           });
+        }
+      });
+
+      it("stores an emoji in its RGI form, as a picker's near miss is corrected", async () => {
+        const ctx = await createTestContext({ orgSlug: "rgi-appearance-org" });
+        const owner = authHeaders(ctx);
+        // Emojibase's 👍️ carries a U+FE0F that 👍 does not take; ❤ lacks the one it needs.
+        for (const [sent, kept] of [
+          ["emoji:\u{1F44D}\uFE0F", "emoji:\u{1F44D}"],
+          ["emoji:\u2764", "emoji:\u2764\uFE0F"],
+        ] as const) {
+          const res = await patchOrg(owner, ctx.orgId, { icon: sent });
+          expect(res.status, await res.clone().text()).toBe(200);
+          expect(await res.json()).toMatchObject({ icon: kept });
+          expect((await stored(ctx.orgId))?.icon).toBe(kept);
+          const detail = await app.request(`/api/orgs/${ctx.orgId}`, { headers: owner });
+          expect(await detail.json()).toMatchObject({ icon: kept });
         }
       });
 
@@ -577,7 +616,7 @@ describe("Organizations API", () => {
       it("refuses an icon or a colour outside the grammar", async () => {
         const ctx = await createTestContext({ orgSlug: "bad-appearance-org" });
         const owner = authHeaders(ctx);
-        const png = `data:image/png;base64,${btoa("\x89PNG\r\n\x1a\n")}`;
+        const pngSignatureOnly = `data:image/png;base64,${btoa("\x89PNG\r\n\x1a\n")}`;
         for (const body of [
           { icon: "emoji:A" },
           { icon: "emoji:🧠🚜" },
@@ -586,9 +625,14 @@ describe("Organizations API", () => {
           { icon: "lucide:Bot" },
           { icon: "logos:slack-icon" },
           { icon: "https://example.com/icon.png" },
-          { icon: png },
+          { icon: pngSignatureOnly },
           { icon: webpIcon(64, 64, 13_000) },
           { icon: webpIcon(257, 64) },
+          { icon: pngIcon(64, 64, 13_000) },
+          { icon: pngIcon(257, 64) },
+          { icon: pngIcon(64, 300) },
+          { icon: pngIcon(64, 64).replace("image/png", "image/webp") },
+          { icon: `data:image/jpeg;base64,${btoa("\xff\xd8\xff")}` },
           { icon: { kind: "emoji", emoji: "🧠" } },
           { color: "#ff0000" },
           { color: "red" },
@@ -626,6 +670,16 @@ describe("Organizations API", () => {
         const digest = new Bun.CryptoHasher("sha256").update(icon).digest("hex").slice(0, 16);
         expect(rows[0]!.after).toEqual({ icon: `sha256:${digest}`, color: "violet" });
         expect(JSON.stringify(rows[0]!.after)).not.toContain("data:");
+
+        const png = pngIcon(32, 32);
+        expect((await patchOrg(authHeaders(ctx), ctx.orgId, { icon: png })).status).toBe(200);
+        const all = await db
+          .select({ after: auditEvents.after })
+          .from(auditEvents)
+          .where(and(eq(auditEvents.orgId, ctx.orgId), eq(auditEvents.action, "org.updated")));
+        const pngDigest = new Bun.CryptoHasher("sha256").update(png).digest("hex").slice(0, 16);
+        expect(all.map((row) => row.after)).toContainEqual({ icon: `sha256:${pngDigest}` });
+        expect(JSON.stringify(all)).not.toContain("data:");
       });
 
       it("audits a lucide or emoji icon as written", async () => {

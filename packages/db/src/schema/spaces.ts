@@ -26,9 +26,9 @@ export const spaces = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     /**
-     * Visual identity, shared with agents and organizations: `lucide:<name>`,
-     * `emoji:<one emoji>` or `data:image/webp;base64,<…>` (the image inline, at most
-     * 16 KiB — `spaces_icon_length`). Null renders the space's initial.
+     * Visual identity, shared with agents and organizations: `lucide:<name>` or
+     * `emoji:<one emoji>` — a space takes no uploaded image (`PATCH /api/spaces/{id}`
+     * refuses one). Null renders the space's initial.
      */
     icon: text("icon"),
     /**
@@ -99,7 +99,9 @@ export const spaces = pgTable(
     check("spaces_personal_is_private", sql`owner_user_id IS NULL OR visibility = 'private'`),
     check("spaces_personal_not_default", sql`owner_user_id IS NULL OR NOT is_default`),
     check("spaces_orphaned_is_personal", sql`orphaned_at IS NULL OR owner_user_id IS NOT NULL`),
-    // Backstop behind the application's icon validation (see `icon`).
+    // Backstop behind the application's icon validation, the same bound as
+    // `organizations_icon_length`: one ceiling for the one icon grammar, though a
+    // space's own forms stay far below it.
     check("spaces_icon_length", sql`octet_length(icon) <= 16384`),
   ],
 );

@@ -43,7 +43,7 @@ export function usePackageNameColumn(): DataColumn<CardItem> {
           />
         )}
         {item.type === "integration" && (
-          <PackageIcon type="integration" id={item.id} icon={item.logo} size="sm" />
+          <PackageIcon type="integration" icon={item.logo} size="sm" />
         )}
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">

@@ -121,12 +121,16 @@ export function OrgSettingsGeneralPage() {
           status={<SaveFeedback {...appearanceWrite} />}
         >
           <div className="w-full min-w-0">
+            {/* Keyed: no tab or upload error carries over to another org. Never disabled by a
+                pending write — each arrow key on the colours is a PATCH, and disabling would
+                drop the focus; the last write wins. */}
             <AppearancePicker
+              key={currentOrg.id}
               value={{ icon: currentOrg.icon, color: currentOrg.color }}
               allow={["lucide", "emoji", "image"]}
               seed={currentOrg.id}
               label={currentOrg.name}
-              disabled={!canUpdateOrg || appearanceWrite.pending}
+              disabled={!canUpdateOrg}
               onChange={(next) => {
                 if (next.icon !== undefined) save({ field: "icon", value: next.icon });
                 if (next.color !== undefined) save({ field: "color", value: next.color });

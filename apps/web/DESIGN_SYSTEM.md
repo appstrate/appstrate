@@ -587,11 +587,13 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   image covering it, a glyph or the initials on its colour; `shape="round"` for a
   person. `PackageIcon` (`components/package-icon.tsx`), `EndUserAvatar` and the
   user menu's avatar are callers of it, `ActorLabel` names the member or end-user
-  a schedule runs as. A space is drawn through `spaceTile` (`lib/space-label.ts`,
-  beside `spaceLabel`): a team space by its own icon and colour, the viewer's own
-  personal space as the viewer, an orphaned one as a departed person. Its colours
-  are the `APPEARANCE_COLORS` palette (`--identity-<key>` in `styles.css`, tile
-  classes in `packages/ui/src/identity-colors.ts`), never a raw Tailwind colour;
+  a schedule runs as. An organization is drawn through `orgTile`, a space through
+  `spaceTile` (both `lib/identity-tile-props.ts`): a team space by its own icon and
+  colour, the viewer's own personal space as the viewer, an orphaned one as a
+  departed person. Its colours are the `APPEARANCE_COLORS` palette
+  (`--identity-<key>` for the tint and `--identity-<key>-foreground` for the glyph,
+  4.5:1 in both themes, in `styles.css`; tile classes in
+  `packages/ui/src/identity-colors.ts`), never a raw Tailwind colour;
   no colour chosen means one hashed from the id (an end-user's and a person's
   always is). `AppearancePicker` (`components/appearance-picker.tsx`) is every
   identity editor — an agent's, an organization's, a team space's: the icon forms

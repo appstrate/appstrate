@@ -12,7 +12,8 @@ import { useState, type ReactNode } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Settings } from "lucide-react";
-import { spaceLabel, spaceTile } from "../../lib/space-label";
+import { spaceLabel } from "../../lib/space-label";
+import { orgTile, spaceTile } from "../../lib/identity-tile-props";
 import { AppVersion } from "../../components/app-version";
 import { SettingsHeading } from "../../components/settings/settings-heading";
 import { SettingsPageActionTargetProvider } from "../../components/settings/settings-page-actions";
@@ -130,7 +131,7 @@ export function UnifiedSettingsLayout() {
       options={orgs.map((org) => ({
         id: org.id,
         name: org.name,
-        tile: { icon: org.icon, color: org.color, seed: org.id, label: org.name },
+        tile: orgTile(org),
       }))}
       onValueChange={(id) => {
         switchOrg(id);

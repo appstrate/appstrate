@@ -29,8 +29,9 @@ export const organizations = pgTable(
     name: text("name").notNull(),
     slug: text("slug").unique().notNull(),
     // Visual identity, shared with agents and spaces: `lucide:<name>`,
-    // `emoji:<one emoji>` or `data:image/webp;base64,<…>` (the image inline, at most
-    // 16 KiB — `organizations_icon_length`). Null renders the organization's initial.
+    // `emoji:<one emoji>`, or an uploaded image inline as `data:image/webp;base64,<…>`
+    // or `data:image/png;base64,<…>` (at most 16 KiB — `organizations_icon_length`).
+    // Null renders the organization's initial.
     icon: text("icon"),
     // A palette key (`blue`, `emerald`, …), validated by the application so a new
     // colour needs no migration. Null derives the colour from the id.
@@ -85,7 +86,8 @@ export const organizations = pgTable(
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_organizations_created_by").on(table.createdBy),
     // Backstop behind the application's icon validation: the largest image icon
-    // (`data:image/webp;base64,` + 12 000 bytes encoded) is about 16 023 bytes.
+    // (`data:image/webp;base64,` + 12 000 bytes encoded) is 16 023 bytes, its PNG
+    // twin one byte shorter.
     check("organizations_icon_length", sql`octet_length(icon) <= 16384`),
   ],
 );

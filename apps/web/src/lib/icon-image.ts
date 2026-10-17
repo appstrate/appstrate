@@ -1,15 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { IMAGE_ICON_PREFIX, isIconImage } from "@appstrate/core/appearance";
+import { ICON_IMAGE_TYPES, isIconImage } from "@appstrate/core/appearance";
 
 /** Largest image file accepted for an icon, before it is cropped and re-encoded. */
 export const ICON_SOURCE_MAX_BYTES = 5 * 1024 * 1024;
 
-/** Image types the encoder reads: what `createImageBitmap` decodes in every browser. */
-export const ICON_SOURCE_TYPES = "image/png,image/jpeg,image/webp,image/gif";
+/**
+ * Image types the encoder reads: what `createImageBitmap` decodes in every
+ * browser. SVG stays out — a vector file has no pixel size to crop, and not
+ * every browser rasterises one through `createImageBitmap`.
+ */
+const ICON_SOURCE_TYPE_LIST = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+
+/** The file input's `accept`. */
+export const ICON_SOURCE_TYPES = ICON_SOURCE_TYPE_LIST.join(",");
 
 /** Edge lengths tried in turn; the first encoding that `isIconImage` accepts wins. */
-const ICON_SIZES = [128, 96];
+const ICON_SIZES = [128, 96, 64] as const;
+
+type IconImageType = (typeof ICON_IMAGE_TYPES)[number];
 
 /** Why an icon image could not be produced; one `appearance.error.<code>` sentence each. */
 export type IconImageError = "icon_file_type" | "icon_file_size" | "icon_processing";
@@ -24,7 +33,7 @@ export class IconImageFailure extends Error {
 
 /** What refuses `file` before it is decoded, or `null`. */
 export function iconSourceError(file: { type: string; size: number }): IconImageError | null {
-  if (!file.type.startsWith("image/")) return "icon_file_type";
+  if (!(ICON_SOURCE_TYPE_LIST as readonly string[]).includes(file.type)) return "icon_file_type";
   if (file.size > ICON_SOURCE_MAX_BYTES) return "icon_file_size";
   return null;
 }
@@ -38,28 +47,53 @@ export function centerSquare(
   return { x: (width - size) / 2, y: (height - size) / 2, size };
 }
 
-/** WebP bytes as the icon data URI `isIconImage` reads. */
-export function iconDataUri(bytes: Uint8Array): string {
+/** Encoded image bytes as a base64 data URI of their `type`. */
+export function iconDataUri(type: string, bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return IMAGE_ICON_PREFIX + btoa(binary);
+  return `data:${type};base64,${btoa(binary)}`;
 }
 
-function encodeWebp(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) =>
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new IconImageFailure("icon_processing"))),
-      "image/webp",
-      0.82,
-    ),
-  );
+function isIconImageType(type: string): type is IconImageType {
+  return (ICON_IMAGE_TYPES as readonly string[]).includes(type);
+}
+
+/** Draws the square at `size` px and encodes it as WebP; `null` when the browser cannot. */
+export type IconEncoder = (size: number) => Promise<Blob | null>;
+
+/**
+ * The first encoding `isIconImage` accepts, walking the size ladder. Each size
+ * asks for WebP once; a browser that cannot encode WebP (WebKit) hands back a
+ * PNG, as the HTML spec's `toBlob` fallback requires, and that PNG is kept. The
+ * data URI names the type the blob actually carries.
+ */
+export async function pickIconEncoding(encode: IconEncoder): Promise<string> {
+  for (const size of ICON_SIZES) {
+    const blob = await encode(size);
+    if (!blob || !isIconImageType(blob.type)) continue;
+    const uri = iconDataUri(blob.type, new Uint8Array(await blob.arrayBuffer()));
+    if (isIconImage(uri)) return uri;
+  }
+  throw new IconImageFailure("icon_processing");
+}
+
+function canvasEncoder(bitmap: ImageBitmap): IconEncoder {
+  const crop = centerSquare(bitmap.width, bitmap.height);
+  return (size) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    if (!context) return Promise.resolve(null);
+    context.drawImage(bitmap, crop.x, crop.y, crop.size, crop.size, 0, 0, size, size);
+    return new Promise((resolve) => canvas.toBlob(resolve, "image/webp", 0.82));
+  };
 }
 
 /**
  * An image file as an uploaded icon: centre-cropped to a square and re-encoded
- * to WebP, at 128 then 96 px, keeping the first result `isIconImage` accepts.
- * Rejects with an `IconImageFailure`. A browser that cannot encode WebP hands
- * back another format, which `isIconImage` refuses.
+ * as WebP, or PNG where the browser encodes no WebP (`pickIconEncoding`).
+ * Rejects with an `IconImageFailure`.
  */
 export async function encodeIconImage(file: File): Promise<string> {
   const refused = iconSourceError(file);
@@ -69,22 +103,10 @@ export async function encodeIconImage(file: File): Promise<string> {
     throw new IconImageFailure("icon_processing");
   });
   try {
-    const crop = centerSquare(bitmap.width, bitmap.height);
-    for (const size of ICON_SIZES) {
-      const canvas = document.createElement("canvas");
-      canvas.width = size;
-      canvas.height = size;
-      const context = canvas.getContext("2d");
-      if (!context) throw new IconImageFailure("icon_processing");
-      context.drawImage(bitmap, crop.x, crop.y, crop.size, crop.size, 0, 0, size, size);
-      const blob = await encodeWebp(canvas);
-      const uri = iconDataUri(new Uint8Array(await blob.arrayBuffer()));
-      if (isIconImage(uri)) return uri;
-    }
+    return await pickIconEncoding(canvasEncoder(bitmap));
   } finally {
     bitmap.close();
   }
-  throw new IconImageFailure("icon_processing");
 }
 
 /** The `IconImageError` an `encodeIconImage` rejection carries; `icon_processing` for anything else. */
