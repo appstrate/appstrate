@@ -1231,6 +1231,92 @@ describe("Agents API", () => {
       expect(body.memories).toHaveLength(2);
       expect(body.memories.every((m) => m.runId === r1.id)).toBe(true);
     });
+
+    it("applies one actor-scope rule to both halves, with or without runId", async () => {
+      const agentId = "@myorg/persist-one-rule";
+      await seedActiveAgent({
+        id: agentId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        spaceId: ctx.defaultSpaceId,
+      });
+      // A colleague without `persistence:delete` runs the agent; the run
+      // writes a pinned slot and a memory under the colleague's actor.
+      const colleague = await createTestUser();
+      await addOrgMember(ctx.orgId, colleague.id, "member");
+      await seedSpaceMember({
+        spaceId: ctx.defaultSpaceId,
+        userId: colleague.id,
+        presetRole: "operator",
+      });
+      const run = await seedRun({
+        packageId: agentId,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: colleague.id,
+        status: "success",
+      });
+      const colleagueActor = { type: "user" as const, id: colleague.id };
+      await upsertPinned(
+        agentId,
+        ctx.defaultSpaceId,
+        ctx.orgId,
+        colleagueActor,
+        "persona",
+        "colleague",
+        run.id,
+      );
+      await addMemories(
+        agentId,
+        ctx.defaultSpaceId,
+        ctx.orgId,
+        colleagueActor,
+        ["colleague-memory"],
+        run.id,
+      );
+      // And one row of each kind under the caller's own actor, outside the run.
+      const ownActor = { type: "user" as const, id: ctx.user.id };
+      await upsertPinned(agentId, ctx.defaultSpaceId, ctx.orgId, ownActor, "goals", "own", null);
+      await addMemories(agentId, ctx.defaultSpaceId, ctx.orgId, ownActor, ["own-memory"], null);
+
+      type Body = {
+        pinned: Array<{ actor_id: string | null }>;
+        memories: Array<{ actor_id: string | null }>;
+      };
+      const read = async (headers: Record<string, string>, query = "") => {
+        const res = await app.request(`/api/agents/${agentId}/persistence${query}`, { headers });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as Body;
+        return {
+          pinned: body.pinned.map((p) => p.actor_id).sort(),
+          memories: body.memories.map((m) => m.actor_id).sort(),
+        };
+      };
+
+      // The admin (holds `persistence:delete`) sees every actor in both
+      // halves; `runId` narrows to the run's rows without changing whose.
+      const everyActor = [ctx.user.id, colleague.id].sort();
+      expect(await read(authHeaders(ctx))).toEqual({ pinned: everyActor, memories: everyActor });
+      expect(await read(authHeaders(ctx), `?runId=${run.id}`)).toEqual({
+        pinned: [colleague.id],
+        memories: [colleague.id],
+      });
+
+      // The colleague holds no `persistence:delete`: own scope, in both halves.
+      const colleagueHeaders = {
+        Cookie: colleague.cookie,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+      };
+      expect(await read(colleagueHeaders)).toEqual({
+        pinned: [colleague.id],
+        memories: [colleague.id],
+      });
+      expect(await read(colleagueHeaders, `?runId=${run.id}`)).toEqual({
+        pinned: [colleague.id],
+        memories: [colleague.id],
+      });
+    });
   });
 
   describe("DELETE /api/agents/:scope/:name/persistence/pinned/:id", () => {

@@ -279,7 +279,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List unified agent persistence (pinned slots + memories)",
       description:
-        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actor_type` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. An inline run's shadow agent (`@inline/r-…`) is readable here by a caller who may read a run of it in this space, so its run page can show what `note`/`pin` wrote.",
+        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). A caller holding `persistence:delete` who names no `actor_type` sees every actor's rows in both halves; `runId` only narrows the rows to one run and never changes whose rows are visible. Every other caller sees their own actor scope plus shared rows, in both halves. An inline run's shadow agent (`@inline/r-…`) is readable here by a caller who may read a run of it in this space, so its run page can show what `note`/`pin` wrote.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -297,7 +297,8 @@ export const agentsPaths = {
           in: "query",
           required: false,
           schema: { type: "string", enum: ["user", "end_user", "shared"] },
-          description: "Admin-only scope override. Defaults to caller's actor scope.",
+          description:
+            "Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope.",
         },
         {
           name: "actor_id",

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useStore } from "zustand";
 import { BrainCircuit } from "lucide-react";
 import { EmptyState, NoMatchState } from "../page-states";
 import { ActorBadge } from "./actor-badge";
@@ -24,6 +25,7 @@ import {
 } from "../../hooks/use-persistence";
 import { useDeleteMemory } from "../../hooks/use-mutations";
 import { usePermissions } from "../../hooks/use-permissions";
+import { authStore } from "../../stores/auth-store";
 
 interface MemoryPanelProps {
   packageId: string;
@@ -35,7 +37,7 @@ interface MemoryPanelProps {
 
 const EMPTY_MEMORY_TYPES: Array<"pinned" | "archive"> = [];
 const MEMORY_TYPES = ["pinned", "archive"] as const;
-const MEMORY_SCOPES = ["shared", "mine"] as const;
+const MEMORY_SCOPES = ["shared", "mine", "others"] as const;
 
 /** Pinned slots (always-in-prompt, incl. `checkpoint`) and archive memories in one filterable list. */
 export function MemoryPanel({
@@ -61,7 +63,10 @@ export function MemoryPanel({
   const deleteMemory = useDeleteMemory(packageId);
   const deletePinned = useDeletePinnedSlot(packageId);
   const { can } = usePermissions();
-  const canDelete = !isRunView && can("persistence:delete");
+  // `persistence:delete` is also what lets the API return other actors' rows.
+  const readsEveryActor = can("persistence:delete");
+  const canDelete = !isRunView && readsEveryActor;
+  const userId = useStore(authStore, (s) => s.user?.id);
   const [toDelete, setToDelete] = useState<{ kind: "pinned" | "archive"; id: number } | null>(null);
   const deletion = toDelete?.kind === "pinned" ? deletePinned : deleteMemory;
 
@@ -94,7 +99,7 @@ export function MemoryPanel({
   );
   const selected = memoryParam.target ?? null;
 
-  const filteredItems = filterMemoryItems(allItems, { query: list.search, scopes, types });
+  const filteredItems = filterMemoryItems(allItems, { query: list.search, scopes, types }, userId);
 
   const filters: FilterSpec[] = [
     {
@@ -116,6 +121,9 @@ export function MemoryPanel({
             options: [
               { value: "shared", label: t("agents:detail.memoryScopeShared") },
               { value: "mine", label: t("agents:detail.memoryScopeMine") },
+              ...(readsEveryActor
+                ? [{ value: "others", label: t("agents:detail.memoryScopeOthers") }]
+                : []),
             ],
             onChange: list.setValues("scope"),
           },

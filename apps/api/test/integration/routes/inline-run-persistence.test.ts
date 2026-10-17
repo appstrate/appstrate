@@ -203,7 +203,9 @@ describe("GET /api/agents/@inline/:name/persistence", () => {
       const res = await persistence(member);
       expect(res.status).toBe(200);
       const body = (await res.json()) as PersistenceBody;
-      expect(body.memories?.map((m) => m.content)).toEqual(["shared-memo"]);
+      // `persistence:delete` (builder) sees every actor's rows in both halves.
+      expect(body.memories?.map((m) => m.content).sort()).toEqual(["inline-memo", "shared-memo"]);
+      expect(body.pinned?.map((p) => p.content)).toEqual(["inline-pin"]);
     });
 
     it("serves the run's owner", async () => {

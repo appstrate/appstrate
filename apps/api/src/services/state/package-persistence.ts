@@ -314,12 +314,13 @@ export async function listPinnedSlots(
 /**
  * Read every memory visible to a scope. Includes both pinned + archive
  * rows — the UI tab uses this to show all memories regardless of
- * visibility tier.
+ * visibility tier. Passing `scope: undefined` skips the visibility filter,
+ * exactly as in `listPinnedSlots`.
  */
 export async function listMemories(
   packageId: string,
   spaceId: string,
-  scope: PersistenceScope,
+  scope?: PersistenceScope,
   runId?: string,
 ): Promise<Memory[]> {
   const rows = await db
@@ -338,7 +339,7 @@ export async function listMemories(
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.spaceId, spaceId),
         isNull(packagePersistence.key),
-        buildVisibilityFilter(scope)!,
+        ...(scope ? [buildVisibilityFilter(scope)!] : []),
         ...(runId ? [eq(packagePersistence.runId, runId)] : []),
       ),
     )
