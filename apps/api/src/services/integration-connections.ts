@@ -3386,7 +3386,7 @@ export async function listIntegrationConnections(
       ...serializeIntegrationConnection(row, view),
       owner_name: ownerName(row),
       locked_by: locks.get(row.id) ?? null,
-      allowed_actions: connectionActions(row, caller, rowShares.includes(scope.spaceId)),
+      allowed_actions: connectionActions(row, caller, rowShares.includes(scope.spaceId), orgRole),
       ...(view.owner && row.userId !== null
         ? { shareable_spaces: shareable.get(row.id) ?? [] }
         : {}),
@@ -3890,7 +3890,10 @@ export function connectionViewOf(
  * owner, its shares and origin, within the space its credential is bound to.
  */
 export function connectionReach(
-  row: Pick<typeof integrationConnections.$inferSelect, "spaceId" | "originSpaceId">,
+  row: Pick<
+    typeof integrationConnections.$inferSelect,
+    "spaceId" | "originSpaceId" | "shareAllSpaces"
+  >,
   view: ConnectionView,
 ): ConnectionReach {
   const bound = view.owner?.boundSpaceId ?? null;
@@ -3903,6 +3906,7 @@ export function connectionReach(
     ...(view.owner
       ? {
           shared_space_ids: seen(view.shares),
+          ...(bound === null ? { share_all_spaces: row.shareAllSpaces } : {}),
           origin_space_id: seen([row.originSpaceId])[0] ?? null,
         }
       : {}),

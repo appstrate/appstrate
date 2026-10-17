@@ -4,22 +4,25 @@
  * The edits of a connection: renaming it, sharing it into a space and withdrawing it (one
  * `integration_connection_shares` row per (connection, space)). Each edit authorizes on the locked
  * row by the actions {@link connectionActions} projects, so what a list offers is what an edit
- * accepts. Lock order, as every other connection write: the owner's membership and the target
+ * accepts. All-spaces sharing first locks the org to serialize with space creation.
+ * Other lock order, as every connection write: the owner's membership and the target
  * space (`assertConnectionShareable`) or the label keys, the connection row, then schedules.
  */
 
 import type { Context } from "hono";
-import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   integrationConnectionShares as shares,
   integrationConnections as c,
+  organizationMembers,
+  spaces,
   type IntegrationConnectionRow as ConnectionRow,
 } from "@appstrate/db/schema";
 import type { OrgRole } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError, conflict, forbidden, notFound } from "../lib/errors.ts";
-import { isUniqueViolation, type Tx } from "../lib/db-helpers.ts";
+import { isUniqueViolation, lockOrganizationRow, type Tx } from "../lib/db-helpers.ts";
 import { actorFilter, actorFromIds } from "../lib/actor.ts";
 import { boundSpaceOf } from "../lib/connection-principal.ts";
 import {
@@ -219,6 +222,7 @@ export async function unshareConnection(input: ShareInput): Promise<{
 }> {
   const { connectionId, spaceId, caller } = input;
   return db.transaction(async (tx) => {
+    // The row lock orders this with space creation, which re-reads `share_all_spaces` after it.
     const row = await lockVisible(tx, input);
     const [existing] = await tx
       .select({ spaceId: shares.spaceId })
@@ -242,14 +246,77 @@ export async function unshareConnection(input: ShareInput): Promise<{
       spaceId,
     );
     await tx.delete(shares).where(shareRow(connectionId, spaceId));
-    const connection = await touch(tx, connectionId);
-    const owner = actorFromIds(connection.userId, connection.endUserId)!;
+    // Any effective withdrawal chooses specific spaces and stops sharing with all spaces atomically.
+    const [connection] = await tx
+      .update(c)
+      .set({ shareAllSpaces: false, updatedAt: new Date() })
+      .where(eq(c.id, connectionId))
+      .returning();
+    const owner = actorFromIds(connection!.userId, connection!.endUserId)!;
     const disabledScheduleIds = await disableForeignSchedules(
       tx,
       [{ id: connectionId, owner, inSpaceId: spaceId }],
       "connection_unshared",
     );
-    return { connection, removed: true, disabledScheduleIds };
+    return { connection: connection!, removed: true, disabledScheduleIds };
+  });
+}
+
+/**
+ * Share with all current team spaces and opt into future ones. Turning the policy off keeps
+ * existing shares: withdrawing one still uses the ordinary pin/schedule-aware door.
+ */
+export async function setConnectionShareAllSpaces(input: EditInput & { enabled: boolean }) {
+  const [read] = await db.select({ orgId: c.orgId }).from(c).where(visibleTo(input)).limit(1);
+  if (!read) throw connectionNotFound(input.connectionId);
+  return db.transaction(async (tx) => {
+    await lockOrganizationRow(tx, read.orgId);
+    // Role writers take the org lock first, so this read is stable without a member lock.
+    const actor = input.caller.principal.actor;
+    const [member] =
+      actor.type === "user"
+        ? await tx
+            .select({ role: organizationMembers.role })
+            .from(organizationMembers)
+            .where(
+              and(
+                eq(organizationMembers.orgId, read.orgId),
+                eq(organizationMembers.userId, actor.id),
+              ),
+            )
+        : [];
+    // Org administrators reach all team spaces; personal spaces are always isolated.
+    const targets = input.enabled
+      ? await tx
+          .select({ id: spaces.id })
+          .from(spaces)
+          .where(and(eq(spaces.orgId, read.orgId), isNull(spaces.ownerUserId)))
+          .orderBy(asc(spaces.id))
+          .for("share")
+      : [];
+    const row = await lockVisible(tx, input);
+    if (!connectionActions(row, input.caller, false, member?.role).includes("share_all_spaces")) {
+      throw forbidden(
+        "Sharing with current and future spaces requires the connection owner to administer the organization with integrations:configure",
+      );
+    }
+    const added =
+      input.enabled && targets.length > 0
+        ? await tx
+            .insert(shares)
+            .values(
+              targets.map(({ id }) => ({ connectionId: row.id, orgId: row.orgId, spaceId: id })),
+            )
+            .onConflictDoNothing()
+            .returning({ spaceId: shares.spaceId })
+        : [];
+    const policyChanged = row.shareAllSpaces !== input.enabled;
+    if (policyChanged || added.length > 0)
+      await tx
+        .update(c)
+        .set({ shareAllSpaces: input.enabled, updatedAt: new Date() })
+        .where(eq(c.id, row.id));
+    return { orgId: row.orgId, policyChanged, addedSpaceIds: added.map((s) => s.spaceId) };
   });
 }
 

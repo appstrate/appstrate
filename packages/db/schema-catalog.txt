@@ -150,6 +150,7 @@ column integration_connections.org_id uuid not null
 column integration_connections.origin_space_id text
 column integration_connections.refresh_failure_count integer not null default 0
 column integration_connections.scopes_granted text[] not null default '{}'::text[]
+column integration_connections.share_all_spaces boolean not null default false
 column integration_connections.shared_space_ids text[] not null default '{}'::text[]
 column integration_connections.space_id text
 column integration_connections.updated_at timestamp with time zone not null default now()
@@ -739,6 +740,7 @@ constraint integration_connections integration_connections_org_id_organizations_
 constraint integration_connections integration_connections_origin_is_org CHECK (((origin_space_id IS NULL) OR (space_id IS NULL)))
 constraint integration_connections integration_connections_origin_space_org_fk FOREIGN KEY (origin_space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE SET NULL (origin_space_id)
 constraint integration_connections integration_connections_pkey PRIMARY KEY (id)
+constraint integration_connections integration_connections_share_all_spaces_org_scoped_user CHECK (((NOT share_all_spaces) OR ((user_id IS NOT NULL) AND (space_id IS NULL))))
 constraint integration_connections integration_connections_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint integration_connections integration_connections_space_shares_own CHECK (((space_id IS NULL) OR (shared_space_ids <@ ARRAY[space_id])))
 constraint integration_connections integration_connections_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE

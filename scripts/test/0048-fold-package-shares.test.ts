@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Migration `0046` against the test database: each `package_shares` row becomes the
+ * Migration `0048` against the test database: each `package_shares` row becomes the
  * `space_packages` row of its (space, package), switched off, with `shared_by` copied; a space
  * that had already activated the package keeps its row and gains the `shared_by` it lacked; a dry
  * run writes nothing; `--apply` empties `package_shares`, so a second `--apply` writes nothing; a
@@ -14,13 +14,13 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packageShares, spacePackages } from "@appstrate/db/schema";
-import { runFoldPackageShares } from "../migration/0046-fold-package-shares.ts";
+import { runFoldPackageShares } from "../migration/0048-fold-package-shares.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../apps/api/test/helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage } from "../../apps/api/test/helpers/seed.ts";
 
-const AGENT = "@mig0046/agent";
-const SKILL = "@mig0046/skill";
+const AGENT = "@mig0048/agent";
+const SKILL = "@mig0048/skill";
 
 let ctx: TestContext;
 let home: string;
@@ -44,11 +44,11 @@ async function rows(): Promise<Row[]> {
   return sorted(list);
 }
 
-describe("0046 — package shares folded into space_packages", () => {
+describe("0048 — package shares folded into space_packages", () => {
   beforeEach(async () => {
     await truncateAll();
     lines.length = 0;
-    ctx = await createTestContext({ orgSlug: "mig0046" });
+    ctx = await createTestContext({ orgSlug: "mig0048" });
     home = (await seedSpace({ orgId: ctx.orgId, name: "Home" })).id;
     await seedPackage({ id: AGENT, orgId: ctx.orgId, type: "agent", homeSpaceId: home });
     await seedPackage({ id: SKILL, orgId: ctx.orgId, type: "skill", homeSpaceId: home });
@@ -86,7 +86,7 @@ describe("0046 — package shares folded into space_packages", () => {
     expect(lines).toContain("package_shares emptied: 2");
     expect(await db.select().from(packageShares)).toEqual([]);
     expect(lines).toContain("inserted: 1, shared_by copied: 1, skipped: 0, orphans deleted: 0");
-    expect(lines.at(-1)).toBe("0046: APPLIED — committed.");
+    expect(lines.at(-1)).toBe("0048: APPLIED — committed.");
     expect(await rows()).toEqual(
       sorted([
         { spaceId: home, packageId: AGENT, enabled: true, sharedBy: null },
@@ -112,7 +112,7 @@ describe("0046 — package shares folded into space_packages", () => {
 
   it("leaves a row's existing sharer alone", async () => {
     const team = (await seedSpace({ orgId: ctx.orgId, name: "Team" })).id;
-    const other = await createTestContext({ orgSlug: "mig0046-sharer" });
+    const other = await createTestContext({ orgSlug: "mig0048-sharer" });
     await db
       .insert(packageShares)
       .values({ packageId: AGENT, spaceId: team, sharedBy: ctx.user.id });
@@ -123,7 +123,7 @@ describe("0046 — package shares folded into space_packages", () => {
   });
 
   it("skips, reports and deletes a share naming another organization's space", async () => {
-    const stranger = await createTestContext({ orgSlug: "mig0046-other" });
+    const stranger = await createTestContext({ orgSlug: "mig0048-other" });
     await db
       .insert(packageShares)
       .values({ packageId: AGENT, spaceId: stranger.defaultSpaceId, sharedBy: null });
@@ -142,7 +142,7 @@ describe("0046 — package shares folded into space_packages", () => {
   it("deletes an orphan row and a cross-org row, reporting each with its switch", async () => {
     const team = (await seedSpace({ orgId: ctx.orgId, name: "Team" })).id;
     const shared = (await seedSpace({ orgId: ctx.orgId, name: "Shared" })).id;
-    const stranger = await createTestContext({ orgSlug: "mig0046-orphan" });
+    const stranger = await createTestContext({ orgSlug: "mig0048-orphan" });
     await db
       .insert(packageShares)
       .values({ packageId: AGENT, spaceId: shared, sharedBy: ctx.user.id });
@@ -173,15 +173,15 @@ describe("0046 — package shares folded into space_packages", () => {
       .values({ packageId: AGENT, spaceId: team, sharedBy: ctx.user.id });
     await seedSpacePackage(team, SKILL, { enabled: true });
     // A fold that drops its insert: the share would place nothing after.
-    await db.execute(sql`CREATE FUNCTION mig0046_drop() RETURNS trigger LANGUAGE plpgsql
+    await db.execute(sql`CREATE FUNCTION mig0048_drop() RETURNS trigger LANGUAGE plpgsql
       AS $$ BEGIN RETURN NULL; END $$`);
-    await db.execute(sql`CREATE TRIGGER mig0046_drop BEFORE INSERT ON space_packages
-      FOR EACH ROW EXECUTE FUNCTION mig0046_drop()`);
+    await db.execute(sql`CREATE TRIGGER mig0048_drop BEFORE INSERT ON space_packages
+      FOR EACH ROW EXECUTE FUNCTION mig0048_drop()`);
     try {
       await expect(run(true)).rejects.toThrow(/placements differ in 1 space\(s\): /);
     } finally {
-      await db.execute(sql`DROP TRIGGER mig0046_drop ON space_packages`);
-      await db.execute(sql`DROP FUNCTION mig0046_drop()`);
+      await db.execute(sql`DROP TRIGGER mig0048_drop ON space_packages`);
+      await db.execute(sql`DROP FUNCTION mig0048_drop()`);
     }
     expect(await db.select().from(packageShares)).toHaveLength(1);
     // The orphan deletion rolled back with it.

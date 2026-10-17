@@ -719,7 +719,7 @@ export async function uncopiedShareConnectionCount(
 
 /**
  * Refuse to boot while `package_shares` holds a row, i.e. until
- * `scripts/migration/0046-fold-package-shares.ts` has run: unfolded shares would
+ * `scripts/migration/0048-fold-package-shares.ts` has run: unfolded shares would
  * vanish from the spaces they were shared with. Refuses rather than warns, like
  * {@link assertOAuthResourceColumnsPresent}. Delete with the release that drops
  * `package_shares` (§4). `pendingFolds` is injected for tests.
@@ -731,7 +731,7 @@ export async function assertPackageSharesFolded(
   const pending = await pendingFolds();
   if (pending === 0) return;
 
-  const script = "bun scripts/migration/0046-fold-package-shares.ts";
+  const script = "bun scripts/migration/0048-fold-package-shares.ts";
   const command =
     embeddedDataDir === null
       ? `\`${script}\` (dry run), then \`${script} --apply\`, with this DATABASE_URL`
@@ -739,8 +739,8 @@ export async function assertPackageSharesFolded(
         "`--apply`, from the platform's directory while it is stopped (an embedded database " +
         "opens in one process at a time)";
   throw new Error(
-    `Package shares not folded: package_shares still holds ${pending} row(s), so migration 0099 ` +
-      "has been applied and scripts/migration/0046-fold-package-shares.ts has not. Until it " +
+    `Package shares not folded: package_shares still holds ${pending} row(s), so migration 0100 ` +
+      "has been applied and scripts/migration/0048-fold-package-shares.ts has not. Until it " +
       "runs, every package shared but never activated is gone from the space it was shared " +
       `with. Refusing to boot: run ${command}, then restart.`,
   );

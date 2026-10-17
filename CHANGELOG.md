@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Connection use and sharing are separate** (#2041). “Multi-space use” describes the owner's
+  reach; the sharing control grants access to other members. “All spaces” includes current and
+  future team spaces and hides the individual list. Any effective withdrawal switches atomically
+  to specific-space sharing, preserving pin checks and schedule revocation. Personal spaces are
+  excluded from sharing targets and rejected by the API.
+  **Operators:** after deploying this version, run `scripts/migration/0047-connection-personal-shares.sql`
+  (the app may keep running; PGlite: app stopped). It removes redundant personal-space shares, each
+  audited.
+  See `scripts/migration/README.md`.
+
 - **The dashboard is redesigned** (#1937): settings and preferences open as
   routed overlays, every real dialog has a URL, tables share one component, and
   one connection menu and one model picker serve every screen. SPA routes moved

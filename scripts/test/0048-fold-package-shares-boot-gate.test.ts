@@ -2,9 +2,9 @@
 
 /**
  * Boot refusal while `package_shares` holds a row — i.e. while
- * `scripts/migration/0046-fold-package-shares.ts` has not run on a database migrated past drizzle
- * `0099`. A database with nothing to fold boots, a database holding a share refuses with the
- * operator command for its tier, and the same database boots once `0046 --apply` has emptied the
+ * `scripts/migration/0048-fold-package-shares.ts` has not run on a database migrated past drizzle
+ * `0100`. A database with nothing to fold boots, a database holding a share refuses with the
+ * operator command for its tier, and the same database boots once `0048 --apply` has emptied the
  * table — a share it skips included, and after a placement is revoked. On an embedded database the command it names is run through the
  * script's entry point. See docs/NO_TRANSITIONAL_CODE.md §4 — this check must never repair.
  */
@@ -21,21 +21,21 @@ import {
   assertPackageSharesFolded,
   unfoldedPackageShareCount,
 } from "../../apps/api/src/lib/boot.ts";
-import { runFoldPackageShares } from "../migration/0046-fold-package-shares.ts";
+import { runFoldPackageShares } from "../migration/0048-fold-package-shares.ts";
 import { revokePackageShare } from "../../apps/api/src/services/package-shares.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../apps/api/test/helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../apps/api/test/helpers/seed.ts";
 
-const AGENT = "@gate0046/agent";
-const SCRIPT = new URL("../migration/0046-fold-package-shares.ts", import.meta.url).pathname;
-const COMMAND = /bun scripts\/migration\/0046-fold-package-shares\.ts --apply/;
+const AGENT = "@gate0048/agent";
+const SCRIPT = new URL("../migration/0048-fold-package-shares.ts", import.meta.url).pathname;
+const COMMAND = /bun scripts\/migration\/0048-fold-package-shares\.ts --apply/;
 
 let ctx: TestContext;
 
 const share = (spaceId: string) =>
   db.insert(packageShares).values({ packageId: AGENT, spaceId, sharedBy: ctx.user.id });
-const apply0046 = () => runFoldPackageShares({ apply: true, out: () => {} });
+const apply0048 = () => runFoldPackageShares({ apply: true, out: () => {} });
 const guard = () => assertPackageSharesFolded(null);
 
 describe("assertPackageSharesFolded — injected count", () => {
@@ -45,7 +45,7 @@ describe("assertPackageSharesFolded — injected count", () => {
 
   it("refuses to boot, naming the count and the operator command", async () => {
     await expect(assertPackageSharesFolded(null, async () => 3)).rejects.toThrow(
-      /package_shares still holds 3 row\(s\)[\s\S]*Refusing to boot[\s\S]*0046-fold-package-shares\.ts --apply`, with this DATABASE_URL/,
+      /package_shares still holds 3 row\(s\)[\s\S]*Refusing to boot[\s\S]*0048-fold-package-shares\.ts --apply`, with this DATABASE_URL/,
     );
   });
 
@@ -53,7 +53,7 @@ describe("assertPackageSharesFolded — injected count", () => {
     await expect(
       assertPackageSharesFolded("/srv/appstrate/data/pglite", async () => 1),
     ).rejects.toThrow(
-      "`PGLITE_DATA_DIR=/srv/appstrate/data/pglite bun scripts/migration/0046-fold-package-shares.ts` (dry run), then the same with `--apply`",
+      "`PGLITE_DATA_DIR=/srv/appstrate/data/pglite bun scripts/migration/0048-fold-package-shares.ts` (dry run), then the same with `--apply`",
     );
   });
 
@@ -74,7 +74,7 @@ describe("assertPackageSharesFolded — live database", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    ctx = await createTestContext({ orgSlug: "gate0046" });
+    ctx = await createTestContext({ orgSlug: "gate0048" });
     const home = (await seedSpace({ orgId: ctx.orgId, name: "Home" })).id;
     team = (await seedSpace({ orgId: ctx.orgId, name: "Team" })).id;
     await seedPackage({ id: AGENT, orgId: ctx.orgId, type: "agent", homeSpaceId: home });
@@ -88,14 +88,14 @@ describe("assertPackageSharesFolded — live database", () => {
     expect(await guard()).toBeUndefined();
   });
 
-  it("refuses while a share has no row, and boots once 0046 --apply has folded it", async () => {
+  it("refuses while a share has no row, and boots once 0048 --apply has folded it", async () => {
     await share(team);
     await expect(guard()).rejects.toThrow(COMMAND);
 
     await runFoldPackageShares({ apply: false, out: () => {} });
     await expect(guard()).rejects.toThrow(/package_shares still holds 1 row\(s\)/);
 
-    expect((await apply0046()).inserted).toBe(1);
+    expect((await apply0048()).inserted).toBe(1);
     expect(await guard()).toBeUndefined();
   });
 
@@ -103,7 +103,7 @@ describe("assertPackageSharesFolded — live database", () => {
     // No code writes `package_shares` any more, so the row a revoke deletes is
     // the `space_packages` one alone: the emptied table must stay empty.
     await share(team);
-    await apply0046();
+    await apply0048();
     expect(
       await revokePackageShare({
         packageId: AGENT,
@@ -116,12 +116,12 @@ describe("assertPackageSharesFolded — live database", () => {
     expect(await guard()).toBeUndefined();
   });
 
-  it("boots after 0046 --apply when the only share names a space 0046 skips", async () => {
-    const stranger = await createTestContext({ orgSlug: "gate0046-other" });
+  it("boots after 0048 --apply when the only share names a space 0048 skips", async () => {
+    const stranger = await createTestContext({ orgSlug: "gate0048-other" });
     await share(stranger.defaultSpaceId);
     await expect(guard()).rejects.toThrow(COMMAND);
 
-    const fold = await apply0046();
+    const fold = await apply0048();
     expect(fold.inserted).toBe(0);
     expect(fold.skipped).toHaveLength(1);
     expect(await guard()).toBeUndefined();
@@ -132,17 +132,17 @@ describe("assertPackageSharesFolded — live database", () => {
     "on an embedded database, the command the refusal names lifts it through the script's entry point",
     async () => {
       await share(team);
-      const dataDir = tempDir("pglite-0046-");
+      const dataDir = tempDir("pglite-0048-");
       const seeded = new PGlite(dataDir, { loadDataDir: await getPGliteClient()!.dumpDataDir() });
       await expect(
         assertPackageSharesFolded(dataDir, () => unfoldedPackageShareCount(drizzle(seeded))),
       ).rejects.toThrow(
-        `PGLITE_DATA_DIR=${dataDir} bun scripts/migration/0046-fold-package-shares.ts`,
+        `PGLITE_DATA_DIR=${dataDir} bun scripts/migration/0048-fold-package-shares.ts`,
       );
       await seeded.close();
 
       // A directory with no `.env`, so Bun loads none into the script.
-      const cwd = tempDir("cwd-0046-");
+      const cwd = tempDir("cwd-0048-");
       const env = Object.fromEntries(
         Object.entries(process.env).filter(
           ([k]) => k !== "DATABASE_URL" && k !== "PGLITE_DATA_DIR",
@@ -158,7 +158,7 @@ describe("assertPackageSharesFolded — live database", () => {
         cwd,
         env: { ...env, PGLITE_DATA_DIR: dataDir },
       });
-      expect(named.stdout.toString()).toContain("0046: APPLIED — committed.");
+      expect(named.stdout.toString()).toContain("0048: APPLIED — committed.");
       expect(named.exitCode).toBe(0);
 
       const migrated = new PGlite(dataDir);

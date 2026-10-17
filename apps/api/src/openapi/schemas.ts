@@ -43,6 +43,7 @@ import {
   originSpaceIdSchema,
   sharedHereSchema,
   sharedSpaceIdsSchema,
+  shareAllSpacesSchema,
   spaceIdSchema,
 } from "./paths/integrations.ts";
 
@@ -2458,6 +2459,7 @@ export const schemas = {
             spaceId: spaceIdSchema,
             shared_here: sharedHereSchema,
             shared_space_ids: sharedSpaceIdsSchema,
+            share_all_spaces: shareAllSpacesSchema,
             origin_space_id: originSpaceIdSchema,
             needs_reconnection: { type: "boolean" },
             missing_scopes: { type: "array", items: { type: "string" } },

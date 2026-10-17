@@ -18,7 +18,7 @@ import {
 } from "@appstrate/db/schema";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
-import { scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
+import { lockOrganizationRow, scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
@@ -42,6 +42,11 @@ import {
   type SpaceMemberRow,
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
+
+import {
+  shareConnectionsWithNewSpace,
+  recordAllSpacesShares,
+} from "./connection-all-spaces-shares.ts";
 
 type SpaceRow = InferSelectModel<typeof spaces>;
 
@@ -117,19 +122,25 @@ export async function createSpace(
   createdBy?: string,
 ) {
   const id = prefixedId("spc");
-  const [space] = await db
-    .insert(spaces)
-    .values({
-      id,
-      orgId,
-      name: params.name,
-      isDefault: params.isDefault ?? false,
-      settings: params.settings ?? {},
-      createdBy: createdBy ?? null,
-    })
-    .returning();
+  const result = await db.transaction(async (tx) => {
+    await lockOrganizationRow(tx, orgId);
+    const [space] = await tx
+      .insert(spaces)
+      .values({
+        id,
+        orgId,
+        name: params.name,
+        isDefault: params.isDefault ?? false,
+        settings: params.settings ?? {},
+        createdBy: createdBy ?? null,
+      })
+      .returning();
 
-  return space!;
+    const added = await shareConnectionsWithNewSpace(tx, orgId, id);
+    return { space: space!, added };
+  });
+  await recordAllSpacesShares(orgId, id, result.added);
+  return result.space;
 }
 
 /**
@@ -676,7 +687,8 @@ export async function convertPersonalSpaceToTeam(
   orgId: string,
   spaceId: string,
 ): Promise<SpaceRow> {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
+    await lockOrganizationRow(tx, orgId);
     const [current] = await tx
       .select({
         id: spaces.id,
@@ -703,8 +715,11 @@ export async function convertPersonalSpaceToTeam(
       .set({ ownerUserId: null, orphanedAt: null, updatedAt: new Date() })
       .where(eq(spaces.id, spaceId))
       .returning();
-    return space!;
+    const added = await shareConnectionsWithNewSpace(tx, orgId, spaceId);
+    return { space: space!, added };
   });
+  await recordAllSpacesShares(orgId, spaceId, result.added);
+  return result.space;
 }
 
 /** How long an orphaned personal space is kept before the sweeper empties it. */

@@ -31,12 +31,13 @@ import { CellDate, CellEmpty, CellText } from "../table-cells";
 import { isConnectionOwnedBy } from "../integration-connect/connection-ownership";
 import type { ConnectionAuthContext } from "../../lib/integration-presentation";
 import type { IntegrationConnection, IntegrationManifestView } from "../../hooks/use-integrations";
+import { ConnectionScopeBadge } from "../integration-connect/connection-scope-badge";
 import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import type { ClientRow } from "../../lib/integration-clients";
 import {
   AccountCell,
   ConnectionActionsCell,
-  ScopeCell,
+  SharingCell,
   StatusCell,
 } from "./integration-connection-cells";
 
@@ -306,13 +307,19 @@ export function useConnectionColumns({
       cell: (c) => <CellDate value={c.expiresAt} granularity="date" />,
     },
     {
+      id: "usage",
+      header: t("integration.connection.col.usage"),
+      width: 184,
+      tier: 2,
+      cell: (c) => <ConnectionScopeBadge scope={c.scope} testId={`connection-scope-${c.id}`} />,
+    },
+    {
       id: "shared",
       header: t("integration.connection.col.shared"),
-      width: 128,
-      elastic: true,
+      width: 168,
       // Share menus: the column scrolls into reach rather than waiting for room.
       control: true,
-      cell: (c) => <ScopeCell connection={c} packageId={packageId} isAdmin={isAdmin} />,
+      cell: (c) => <SharingCell connection={c} packageId={packageId} isAdmin={isAdmin} />,
     },
     rowActionsColumn((c) => (
       <ConnectionActionsCell

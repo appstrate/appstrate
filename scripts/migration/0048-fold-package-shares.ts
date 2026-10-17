@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * 0046 — package shares folded into `space_packages` (#2045):
+ * 0048 — package shares folded into `space_packages` (#2045):
  *
  *   set -a && . ./.env && set +a && \
- *     bun scripts/migration/0046-fold-package-shares.ts [--apply]
+ *     bun scripts/migration/0048-fold-package-shares.ts [--apply]
  *
- * Run after drizzle `0099` has applied and BEFORE the app starts (`pg_dump`
+ * Run after drizzle `0100` has applied and BEFORE the app starts (`pg_dump`
  * first): the platform refuses to boot while `package_shares` holds a row
  * (`assertPackageSharesFolded`). Dry run by default (rolled back); `--apply`
  * commits; a second `--apply` writes nothing. Targets `DATABASE_URL` or
@@ -224,10 +224,10 @@ export async function runFoldPackageShares(options: {
     });
   } catch (error) {
     if (!(error instanceof DryRunRollback)) throw error;
-    out("0046: DRY RUN — rolled back, nothing written. Re-run with --apply to commit.");
+    out("0048: DRY RUN — rolled back, nothing written. Re-run with --apply to commit.");
     return result;
   }
-  out("0046: APPLIED — committed.");
+  out("0048: APPLIED — committed.");
   return result;
 }
 
@@ -244,11 +244,11 @@ if (import.meta.main) {
     const apply = values.apply === true;
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
-    out(`0046 — ${apply ? "APPLY" : "DRY RUN"}`);
+    out(`0048 — ${apply ? "APPLY" : "DRY RUN"}`);
     await runFoldPackageShares({ apply, out });
     code = 0;
   } catch (error) {
-    process.stdout.write(`0046: FAILED, nothing committed — ${getErrorMessage(error)}\n`);
+    process.stdout.write(`0048: FAILED, nothing committed — ${getErrorMessage(error)}\n`);
   } finally {
     await closeDb?.();
   }

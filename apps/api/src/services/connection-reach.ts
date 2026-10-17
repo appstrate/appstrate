@@ -123,6 +123,8 @@ export interface ConnectionCaller {
   spaceId: string | null;
   /** Holds `integrations:connect` where the credential acts. */
   canConnect: boolean;
+  /** The credential permits org-wide consent; role and ownership are checked per row. */
+  canShareAllSpaces?: (orgId: string) => boolean;
   /** Holds `integrations:configure` in `spaceId`. */
   governs: boolean;
   /** The caller's permissions in one space of `orgId` (empty outside it). */
@@ -145,6 +147,7 @@ export function shareableIn(t: ShareTargets): SQL<string[]> {
   return spacesWhere(t.spaceIds, (spaceId) =>
     and(
       connectionInSpace(spaceId),
+      sql`EXISTS (SELECT 1 FROM ${spaces} WHERE ${spaces.id} = ${spaceId} AND ${spaces.ownerUserId} IS NULL)`,
       t.configures.has(spaceId) ? sql`TRUE` : not(userConnectionsBlocked(spaceId, c.integrationId)),
     )!,
   );
@@ -157,16 +160,26 @@ export function shareableIn(t: ShareTargets): SQL<string[]> {
  * into it. Sharing is the owner's consent: a governor never shares.
  */
 export function connectionActions(
-  row: { userId: string | null; endUserId: string | null; spaceId: string | null },
+  row: { orgId: string; userId: string | null; endUserId: string | null; spaceId: string | null },
   caller: ConnectionCaller,
   sharedHere: boolean,
+  orgRole?: OrgRole | null,
 ): ConnectionAction[] {
   if (!caller.canConnect) return [];
   const actions: ConnectionAction[] = [];
   if (actorOwns(caller.principal.actor, row)) {
     const bound = boundSpaceOf(caller.principal);
     if (bound === null || row.spaceId === bound) actions.push("rename");
-    if (row.userId !== null) actions.push("share");
+    if (row.userId !== null) {
+      actions.push("share");
+      if (
+        row.spaceId === null &&
+        caller.canShareAllSpaces?.(row.orgId) &&
+        caller.principal.kind === "person" &&
+        (orgRole === "owner" || orgRole === "admin")
+      )
+        actions.push("share_all_spaces");
+    }
     return actions;
   }
   if (!caller.governs || caller.spaceId === null) return actions;

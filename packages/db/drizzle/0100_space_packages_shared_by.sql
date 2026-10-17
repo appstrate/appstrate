@@ -1,7 +1,7 @@
--- 0099 — one table answers "is this package placed here?" (#2045). `space_packages` gains
+-- 0100 — one table answers "is this package placed here?" (#2045). `space_packages` gains
 -- `shared_by` (who placed the package outside its home; SET NULL with the account) and `enabled`
 -- loses its DEFAULT, so every writer states whether the row it creates is on. Pure DDL: the
--- `package_shares` rows are folded into `space_packages` by `scripts/migration/0046`, which
+-- `package_shares` rows are folded into `space_packages` by `scripts/migration/0048`, which
 -- needs this column, so the table stays until the follow-up release drops it (drizzle applies the
 -- batch in one transaction and the scripts run after it — nothing can run between the two).
 -- `schedule_disabled_reason` gains 'package_removed' (a withdrawn placement disables the package's

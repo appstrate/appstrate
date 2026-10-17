@@ -79,7 +79,7 @@ const CORE_TABLES = [
   // A package's placement. Both cascade from `packages` and `spaces`, so the
   // order below would clean them anyway — they are named because a table this
   // list does not name is a table whose isolation nobody checked.
-  // `package_shares` is read only by script 0046 and its boot guard.
+  // `package_shares` is read only by script 0048 and its boot guard.
   "package_shares",
   "space_packages",
   "integration_connections",
