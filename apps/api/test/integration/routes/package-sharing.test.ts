@@ -38,6 +38,7 @@ import {
 import { sql } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { sharePackage } from "../../../src/services/package-shares.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
@@ -1682,6 +1683,14 @@ describe("who switches a placement on (R3)", () => {
     // Withdrawn: back to no row, and the call cannot recreate it.
     expect((await revokeShare(sharer.headers(homeId), AGENT, teamId)).status).toBe(204);
     await expectProblem(await activate(teamBuilder.headers(teamId), teamId), 404);
+    expect(await rowIn(teamId)).toBeUndefined();
+  });
+
+  it("never creates a row outside the home without `placeAs`, even past the route", async () => {
+    // The service itself, so a caller that skipped the route's read still meets the rule.
+    await expect(
+      activatePackage({ orgId: ctx.orgId, spaceId: teamId }, AGENT),
+    ).rejects.toMatchObject({ status: 404 });
     expect(await rowIn(teamId)).toBeUndefined();
   });
 

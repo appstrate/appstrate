@@ -22764,7 +22764,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Share (and any placement behind it) removed. */
+            /** @description Placement removed, with its settings; the package's schedules in that space are disabled (`package_removed`). */
             204: {
                 headers: {
                     [name: string]: unknown;

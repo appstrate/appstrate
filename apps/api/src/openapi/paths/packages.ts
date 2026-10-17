@@ -2002,7 +2002,10 @@ export const packagesPaths = {
         },
       ],
       responses: {
-        "204": { description: "Share (and any placement behind it) removed." },
+        "204": {
+          description:
+            "Placement removed, with its settings; the package's schedules in that space are disabled (`package_removed`).",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

@@ -2218,8 +2218,12 @@ export function createPackagesRouter() {
       ? recipientUserId === ownerId
       : (ownerId !== null && destination?.ownerUserId === ownerId) ||
         (destination?.permissions.has(spacePackagePermission(pkg.type, "activate")) ?? false);
-    // Landing ON is an activation: run its bundle check first.
-    if (enabled) await assertMcpServerActivatable({ orgId, spaceId }, packageId);
+    // Landing ON is an activation: run its bundle check first, after the
+    // version refusal the dialog knows how to answer.
+    if (enabled) {
+      await assertHasPublishedVersion(packageId);
+      await assertMcpServerActivatable({ orgId, spaceId }, packageId);
+    }
     const { created } = await sharePackage({
       packageId,
       spaceId,
