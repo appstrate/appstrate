@@ -209,6 +209,44 @@ describe("Spaces API", () => {
     });
   });
 
+  describe("PATCH /api/spaces/:id — default space visibility", () => {
+    const patchVisibility = (visibility: string) =>
+      app.request(`/api/spaces/${ctx.defaultSpaceId}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility }),
+      });
+    const readVisibility = async () => {
+      const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { visibility: string }).visibility;
+    };
+
+    it("refuses any visibility other than open on the default space (400 on visibility)", async () => {
+      expect(await readVisibility()).toBe("open");
+
+      for (const visibility of ["closed", "private"]) {
+        const res = await patchVisibility(visibility);
+        const body = await expectProblem(res, 400, {
+          code: "invalid_request",
+          param: "visibility",
+        });
+        expect(body.detail, visibility).toBe(
+          "The default space must stay open — every org member lands there.",
+        );
+        expect(await readVisibility(), visibility).toBe("open");
+      }
+    });
+
+    it("accepts open on the default space", async () => {
+      const res = await patchVisibility("open");
+      expect(res.status).toBe(200);
+      expect(await readVisibility()).toBe("open");
+    });
+  });
+
   describe("PATCH /api/spaces/:id — icon and color", () => {
     const patchSpace = (headers: Record<string, string>, spaceId: string, body: unknown) =>
       app.request(`/api/spaces/${spaceId}`, {
