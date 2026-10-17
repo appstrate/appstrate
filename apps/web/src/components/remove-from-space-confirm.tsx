@@ -21,7 +21,7 @@ export function RemoveFromSpaceConfirm({
 }: {
   removal: RemovalTarget | null;
   onClose: () => void;
-  /** After the server removed it, once the dialog is closed. */
+  /** After the server removed it, once the dialog is closed; passing it means the caller leaves the page. */
   onRemoved?: () => void;
 }) {
   const { t } = useTranslation("settings");
@@ -41,6 +41,7 @@ export function RemoveFromSpaceConfirm({
       onConfirm={() =>
         removal &&
         removing.remove(removal, {
+          leavesPage: onRemoved !== undefined,
           onSuccess: () => {
             onClose();
             onRemoved?.();

@@ -72,6 +72,22 @@ describe("cataloguePlacement", () => {
     expect(cataloguePlacement(named, "spc_off").sharedBy).toEqual({ spc_off: "Bob" });
   });
 
+  it("keys the sharer by space, so a card reads only the placement of the space on screen", () => {
+    const row = pkg([
+      { space_id: "spc_here", state: "active" },
+      { space_id: "spc_off", state: "inactive" },
+    ]);
+    const named = {
+      ...row,
+      placements: row.placements.map((p) =>
+        p.space_id === "spc_off" ? { ...p, shared_by: { user_id: "u1", name: "Olivia" } } : p,
+      ),
+    };
+    const { sharedBy } = cataloguePlacement(named, "spc_here");
+    expect(sharedBy["spc_here"]).toBeUndefined();
+    expect(sharedBy["spc_off"]).toBe("Olivia");
+  });
+
   it("answers null for a space the package does not reach, without calling it unplaced", () => {
     const placement = cataloguePlacement(pkg([{ space_id: "spc_home", state: "active" }]), "spc_z");
     expect(placement.here).toBeNull();

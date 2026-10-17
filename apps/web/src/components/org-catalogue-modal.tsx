@@ -291,7 +291,8 @@ export function OrgCatalogueModal({
         active: placement?.activeIn.includes(space.id) ?? false,
       }))
       .filter((space) => space.active || mayActivateIn(item, space.id));
-    const sharer = placement ? Object.values(placement.sharedBy).find(Boolean) : undefined;
+    // Only the placement in the space on screen: another space's share says nothing here.
+    const sharer = (spaceId && placement?.sharedBy[spaceId]) || undefined;
     return {
       ...row,
       icon,
