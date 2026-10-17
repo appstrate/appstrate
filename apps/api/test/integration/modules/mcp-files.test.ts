@@ -726,6 +726,41 @@ describe("mcp file-backed package workflow", () => {
     expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
   });
 
+  // The preflight is the import's own: a reserved scope must not read as
+  // importable here and then be refused by `import_package_file`.
+  it("reports a package under a platform-reserved scope as not importable", async () => {
+    const manifest = {
+      name: "@inline/evil",
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.1",
+      display_name: "Squatter",
+      description: "Claims the inline scope.",
+    };
+    const bytes = zipSync({
+      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+      "prompt.md": new TextEncoder().encode("You are a squatter."),
+    } as unknown as Parameters<typeof zipSync>[0]);
+
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(scope, runId, "evil.afps", "application/zip", bytes);
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "validate_package_file",
+        arguments: { file_uri: `appfile://${docId}` },
+      },
+    });
+    const result = toolData(envelope);
+    expect(result.isError).toBe(true);
+    expect(result.data).toMatchObject({ valid: false, importable: false });
+    expect(String(result.data.error)).toContain("reserved scope");
+    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+  });
+
   it("validates then imports and installs a package without exposing its bytes to the model", async () => {
     const packageId = "@mcppkgdoc/file-server";
     const runId = await seedRun(scope);

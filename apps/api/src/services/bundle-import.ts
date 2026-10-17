@@ -345,14 +345,6 @@ export async function importBundle(
   }
   await assertRootVersionForward({ identity: bundle.root, ...rootParsed }, scope.orgId);
 
-  // Before any write: a system package is reused, but any other id under a
-  // platform scope would become an org row, and refusing it mid-loop would
-  // leave the packages before it imported.
-  for (const identity of bundle.packages.keys()) {
-    const packageId = parsePackageIdentity(identity)?.packageId;
-    if (packageId && !isSystemPackage(packageId)) assertPackageScopeNotReserved(packageId);
-  }
-
   for (const [identity, pkg] of bundle.packages) {
     const parsedIdentity = parsePackageIdentity(identity);
     if (!parsedIdentity) {
@@ -751,6 +743,20 @@ async function assertBundleRootDefaultToolsExposed(
  * tools. It performs the exact parse, callable-tool and conflict checks the
  * mutation will use, but writes nothing.
  */
+/**
+ * Refuse a bundle carrying any package under a platform scope (`@appstrate/`,
+ * `@inline/`) other than a system package, which the import reuses. Part of the
+ * preflight, so it runs before any write — refusing mid-import would leave the
+ * packages before it imported — and so `validate_package_file` gives the same
+ * answer the import does.
+ */
+function assertBundleScopesNotReserved(bundle: Bundle): void {
+  for (const identity of bundle.packages.keys()) {
+    const packageId = parsePackageIdentity(identity)?.packageId;
+    if (packageId && !isSystemPackage(packageId)) assertPackageScopeNotReserved(packageId);
+  }
+}
+
 export async function preflightBundleImport(
   bytes: Uint8Array,
   scope: BundleAssemblyScope,
@@ -758,6 +764,7 @@ export async function preflightBundleImport(
 ): Promise<BundleImportPreflight> {
   const bundle = await readOrBuildBundle(bytes, scope);
   assertBundleRootConforms(bundle);
+  assertBundleScopesNotReserved(bundle);
   await authorize(bundle);
   const carried = carriedVersionsById(bundle);
   await assertBundleAgentsExposeCallableTools(bundle, scope.orgId, carried);
