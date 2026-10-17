@@ -607,3 +607,25 @@ export function useConnectionShare(op: "share" | "unshare", packageId?: string) 
     },
   });
 }
+
+/** Explicit policy, atomically saved with current team-space shares by the server. */
+export function useConnectionShareAllSpaces(packageId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ connectionId, enabled }: { connectionId: string; enabled: boolean }) => {
+      const body = { share_all_spaces: enabled };
+      if (packageId) {
+        await client.PUT("/api/integrations/{packageId}/connections/{connectionId}/shares", {
+          params: { path: { packageId, connectionId } },
+          body,
+        });
+      } else {
+        await client.PUT("/api/me/connections/{connectionId}/shares", {
+          params: { path: { connectionId } },
+          body,
+        });
+      }
+    },
+    onSuccess: () => invalidateIntegrationQueries(qc),
+  });
+}

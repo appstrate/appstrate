@@ -1777,6 +1777,26 @@ export interface paths {
         patch: operations["updateIntegrationConnectionMetadata"];
         trace?: never;
     };
+    "/api/integrations/{packageId}/connections/{connectionId}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Share a connection with current and future team spaces
+         * @description Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With share_all_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False selects specific-space sharing and keeps existing shares. Every effective individual withdrawal also selects specific-space sharing atomically, through the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.
+         */
+        put: operations["setIntegrationConnectionShareAllSpaces"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}": {
         parameters: {
             query?: never;
@@ -1787,13 +1807,13 @@ export interface paths {
         get?: never;
         /**
          * Share one of the caller's connections into a space
-         * @description Shares the connection into `spaceId`. Owner only. The target must be a space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any space of its org, a space-scoped one only into its own space. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.
+         * @description Shares the connection into `spaceId`. Owner only. The target must be a team space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any team space of its org, a space-scoped one only into its own team space. Personal spaces are refused. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.
          */
         put: operations["shareIntegrationConnection"];
         post?: never;
         /**
          * Withdraw one of the caller's connections from a space
-         * @description Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.
+         * @description Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. An effective withdrawal atomically selects specific-space mode by clearing share_all_spaces; a no-op preserves the current mode. A withdrawal and a concurrent team-space creation are ordered on the connection row. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.
          */
         delete: operations["unshareIntegrationConnection"];
         options?: never;
@@ -2217,6 +2237,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/connections/{connectionId}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Share an owned connection with current and future team spaces
+         * @description Owner only, org-scoped member connection. Requires a user principal, organization owner/admin role and integrations:connect plus integrations:configure within the credential ceiling. With share_all_spaces=true, atomically shares with every current team space and enables sharing into future team spaces (including personal spaces converted to teams). Personal spaces stay isolated. Enabling again restores all current team shares, including individual withdrawals. False selects specific-space sharing and keeps existing shares. Every effective individual withdrawal also selects specific-space sharing atomically, through the pin- and schedule-aware DELETE door. Demotion below org admin clears the policy. New spaces and policy changes serialize on the organization row.
+         */
+        put: operations["setMeConnectionShareAllSpaces"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/connections/{connectionId}/shares/{spaceId}": {
         parameters: {
             query?: never;
@@ -2227,13 +2267,13 @@ export interface paths {
         get?: never;
         /**
          * Share one of the caller's connections into a space
-         * @description The owner's door to the share `PUT /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` makes, wherever the connection lives. With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) are reachable. Shares the connection into `spaceId`. Owner only. The target must be a space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any space of its org, a space-scoped one only into its own space. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.
+         * @description The owner's door to the share `PUT /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` makes, wherever the connection lives. With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) are reachable. Shares the connection into `spaceId`. Owner only. The target must be a team space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any team space of its org, a space-scoped one only into its own team space. Personal spaces are refused. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.
          */
         put: operations["shareMyConnection"];
         post?: never;
         /**
          * Withdraw one of the caller's connections from a space
-         * @description The owner's door to the withdrawal `DELETE /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` makes, wherever the connection lives. With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) are reachable. Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.
+         * @description The owner's door to the withdrawal `DELETE /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` makes, wherever the connection lives. With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) are reachable. Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. An effective withdrawal atomically selects specific-space mode by clearing share_all_spaces; a no-op preserves the current mode. A withdrawal and a concurrent team-space creation are ordered on the connection row. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.
          */
         delete: operations["unshareMyConnection"];
         options?: never;
@@ -6046,6 +6086,8 @@ export interface components {
                 shared_here: boolean;
                 /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                 shared_space_ids?: string[];
+                /** @description Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically. */
+                share_all_spaces?: boolean;
                 /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                 origin_space_id?: string | null;
                 needs_reconnection: boolean;
@@ -13397,11 +13439,13 @@ export interface operations {
                             shared_here: boolean;
                             /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                             shared_space_ids?: string[];
+                            /** @description Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically. */
+                            share_all_spaces?: boolean;
                             /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                             origin_space_id?: string | null;
                             /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                            allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                            /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                            allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                            /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                             shareable_spaces?: {
                                 id: string;
                                 name: string;
@@ -13570,11 +13614,13 @@ export interface operations {
                                 shared_here: boolean;
                                 /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                                 shared_space_ids?: string[];
+                                /** @description Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically. */
+                                share_all_spaces?: boolean;
                                 /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                                 origin_space_id?: string | null;
                                 /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                                allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                                /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                                allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                                /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                                 shareable_spaces?: {
                                     id: string;
                                     name: string;
@@ -13768,11 +13814,13 @@ export interface operations {
                         shared_here: boolean;
                         /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                         shared_space_ids?: string[];
+                        /** @description Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically. */
+                        share_all_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
                         /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                        allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                        /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                        allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                        /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                         shareable_spaces?: {
                             id: string;
                             name: string;
@@ -14162,11 +14210,13 @@ export interface operations {
                             shared_here: boolean;
                             /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                             shared_space_ids?: string[];
+                            /** @description Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically. */
+                            share_all_spaces?: boolean;
                             /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                             origin_space_id?: string | null;
                             /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                            allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                            /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                            allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                            /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                             shareable_spaces?: {
                                 id: string;
                                 name: string;
@@ -14259,11 +14309,13 @@ export interface operations {
                         shared_here: boolean;
                         /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                         shared_space_ids?: string[];
+                        /** @description Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically. */
+                        share_all_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
                         /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                        allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                        /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                        allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                        /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                         shareable_spaces?: {
                             id: string;
                             name: string;
@@ -14300,6 +14352,45 @@ export interface operations {
             };
         };
     };
+    setIntegrationConnectionShareAllSpaces: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Integration connection id (UUID). */
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    share_all_spaces: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description All-spaces sharing policy saved */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     shareIntegrationConnection: {
         parameters: {
             query?: never;
@@ -14330,7 +14421,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed `spaceId` (`invalid_request`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`). */
+            /** @description A malformed `spaceId` (`invalid_request`), or a personal-space target, a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`). */
             400: components["responses"]["ValidationError"];
             /** @description The caller is not the owner of the connection; a credential bound to another space than the target; `integrations:connect` missing in the target space; or the target blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`). */
             403: components["responses"]["Forbidden"];
@@ -14957,11 +15048,13 @@ export interface operations {
                                 shared_here: boolean;
                                 /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                                 shared_space_ids?: string[];
+                                /** @description Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically. */
+                                share_all_spaces?: boolean;
                                 /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                                 origin_space_id?: string | null;
                                 /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                                allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                                /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                                allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                                /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                                 shareable_spaces?: {
                                     id: string;
                                     name: string;
@@ -16134,14 +16227,16 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 scope: "org" | "space";
+                                /** @description Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically. */
+                                share_all_spaces?: boolean;
                                 /** @description The spaces whose members may use it. */
                                 shared_spaces: {
                                     id: string;
                                     name: string;
                                 }[];
                                 /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). */
-                                allowed_actions: ("rename" | "share" | "unshare_here")[];
-                                /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. */
+                                allowed_actions: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                                /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. */
                                 shareable_spaces: {
                                     id: string;
                                     name: string;
@@ -16270,11 +16365,13 @@ export interface operations {
                         shared_here: boolean;
                         /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                         shared_space_ids?: string[];
+                        /** @description Owner only, unbound credential: all current and future team spaces when true, explicit selected spaces when false. An effective withdrawal clears this mode atomically. */
+                        share_all_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
                         /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                        allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                        /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                        allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                        /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                         shareable_spaces?: {
                             id: string;
                             name: string;
@@ -16478,6 +16575,37 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    setMeConnectionShareAllSpaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    share_all_spaces: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description All-spaces sharing policy saved */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     shareMyConnection: {
         parameters: {
             query?: never;
@@ -16500,7 +16628,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed `spaceId` (`invalid_request`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`). */
+            /** @description A malformed `spaceId` (`invalid_request`), or a personal-space target, a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             /** @description The credential's scope ceiling lacks `integrations:connect`; `integrations:connect` missing in the target space; or the target blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`). */

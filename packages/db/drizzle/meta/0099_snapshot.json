@@ -1,5 +1,5 @@
 {
-  "id": "5f7aee97-34b9-46cc-80e8-57c6232ba66a",
+  "id": "b3c290ef-d56d-408f-88a4-40ab7ec9f573",
   "prevId": "47b310d7-6cdc-4a12-9b3d-7ff7088698ac",
   "version": "7",
   "dialect": "postgresql",
@@ -1579,14 +1579,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "icon": {
-          "name": "icon",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "color": {
-          "name": "color",
+        "logo": {
+          "name": "logo",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1687,12 +1681,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "organizations_icon_length": {
-          "name": "organizations_icon_length",
-          "value": "octet_length(icon) <= 16384"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.end_users": {
@@ -2158,18 +2147,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "icon": {
-          "name": "icon",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "color": {
-          "name": "color",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "is_default": {
           "name": "is_default",
           "type": "boolean",
@@ -2363,10 +2340,6 @@
         "spaces_orphaned_is_personal": {
           "name": "spaces_orphaned_is_personal",
           "value": "orphaned_at IS NULL OR owner_user_id IS NOT NULL"
-        },
-        "spaces_icon_length": {
-          "name": "spaces_icon_length",
-          "value": "octet_length(icon) <= 16384"
         }
       },
       "isRLSEnabled": false
@@ -4673,14 +4646,6 @@
           "name": "runs_cost_pricing_status_valid",
           "value": "cost_pricing_status IN ('priced', 'partial', 'unpriced')"
         },
-        "runs_proxy_route_has_model": {
-          "name": "runs_proxy_route_has_model",
-          "value": "inference_route <> 'proxy' OR model_id IS NOT NULL"
-        },
-        "runs_remote_has_no_platform_model": {
-          "name": "runs_remote_has_no_platform_model",
-          "value": "run_origin = 'platform' OR (model_source IS NULL AND model_id IS NULL AND inference_route IS NULL)"
-        },
         "runs_model_error_category_valid": {
           "name": "runs_model_error_category_valid",
           "value": "model_error_category IN ('credential_unavailable', 'rate_limited', 'upstream_unavailable', 'invalid_request', 'unknown')"
@@ -4692,6 +4657,14 @@
         "runs_model_error_status_http": {
           "name": "runs_model_error_status_http",
           "value": "model_error_status BETWEEN 100 AND 599"
+        },
+        "runs_proxy_route_has_model": {
+          "name": "runs_proxy_route_has_model",
+          "value": "inference_route <> 'proxy' OR model_id IS NOT NULL"
+        },
+        "runs_remote_has_no_platform_model": {
+          "name": "runs_remote_has_no_platform_model",
+          "value": "run_origin = 'platform' OR (model_source IS NULL AND model_id IS NULL AND inference_route IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -5433,6 +5406,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "share_all_spaces": {
+          "name": "share_all_spaces",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "shared_space_ids": {
           "name": "shared_space_ids",
           "type": "text[]",
@@ -5710,6 +5690,10 @@
         "integration_connections_origin_is_org": {
           "name": "integration_connections_origin_is_org",
           "value": "origin_space_id IS NULL OR space_id IS NULL"
+        },
+        "integration_connections_share_all_spaces_org_scoped_user": {
+          "name": "integration_connections_share_all_spaces_org_scoped_user",
+          "value": "NOT share_all_spaces OR (user_id IS NOT NULL AND space_id IS NULL)"
         },
         "integration_connections_space_shares_own": {
           "name": "integration_connections_space_shares_own",

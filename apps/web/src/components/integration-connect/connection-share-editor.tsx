@@ -35,6 +35,9 @@ export function ConnectionShareEditor({
   lockHint,
   pending,
   onShare,
+  canShareAllSpaces,
+  shareAllSpaces,
+  onShareAllSpacesChange,
   onUnshare,
 }: {
   connectionId: string;
@@ -55,12 +58,21 @@ export function ConnectionShareEditor({
   lockHint: string | null;
   pending: boolean;
   onShare: (spaceId: string) => void;
+  canShareAllSpaces: boolean;
+  shareAllSpaces: boolean;
+  onShareAllSpacesChange: (enabled: boolean) => void;
   onUnshare: (spaceId: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
 
   if (canShare && scope === "space") {
+    if (!targets.some((space) => space.id === rowSpaceId))
+      return (
+        <span className="text-muted-foreground text-xs">
+          {t("integration.connection.share.none")}
+        </span>
+      );
     return (
       <label
         className="flex items-center gap-1.5 text-xs"
@@ -89,43 +101,69 @@ export function ConnectionShareEditor({
           <Button
             variant="outline"
             size="sm"
-            className="h-7 max-w-[16rem] justify-between gap-1.5 text-xs font-normal"
+            className="h-7 max-w-full min-w-0 justify-between gap-1 px-1.5 text-xs font-normal"
             disabled={pending}
             title={names.join(", ") || t("integration.connection.share.help")}
             data-testid={`share-editor-${connectionId}`}
           >
             <span className="truncate">
-              {sharedSpaceIds.length === 0
-                ? t("integration.connection.share.none")
-                : t("integration.connection.share.count", { count: sharedSpaceIds.length })}
+              {shareAllSpaces
+                ? t("integration.connection.share.all")
+                : sharedSpaceIds.length === 0
+                  ? t("integration.connection.share.none")
+                  : t("integration.connection.share.count", { count: sharedSpaceIds.length })}
             </span>
             <ChevronsUpDown className="shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-72 p-0" align="start">
-          <Command>
-            <CommandInput placeholder={t("integration.connection.share.search")} />
-            <CommandList>
-              <CommandEmpty>{t("viewAs.noSpace")}</CommandEmpty>
-              <CommandGroup heading={t("integration.connection.share.help")}>
-                {targets.map((space) => {
-                  const selected = sharedSpaceIds.includes(space.id);
-                  return (
-                    <CommandItem
-                      key={space.id}
-                      value={`${space.name} ${space.id}`}
-                      disabled={pending}
-                      onSelect={() => (selected ? onUnshare(space.id) : onShare(space.id))}
-                      data-testid={`share-target-${connectionId}-${space.id}`}
-                    >
-                      <Check className={cn(selected ? "opacity-100" : "opacity-0")} />
-                      <span className="truncate">{space.name}</span>
-                    </CommandItem>
-                  );
-                })}
-              </CommandGroup>
-            </CommandList>
-          </Command>
+        <PopoverContent className="w-80 p-0" align="start">
+          <div className="flex flex-col gap-2 p-3">
+            <p className="text-muted-foreground text-xs">
+              {t("integration.connection.share.help")}
+            </p>
+            {canShareAllSpaces && (
+              <>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={shareAllSpaces}
+                    disabled={pending}
+                    onCheckedChange={(checked) => onShareAllSpacesChange(checked === true)}
+                    aria-describedby={`share-all-help-${connectionId}`}
+                    data-testid={`share-all-${connectionId}`}
+                  />
+                  {t("integration.connection.share.all")}
+                </label>
+                <p id={`share-all-help-${connectionId}`} className="text-muted-foreground text-xs">
+                  {t("integration.connection.share.allHelp")}
+                </p>
+              </>
+            )}
+          </div>
+          {!shareAllSpaces && (
+            <Command>
+              <CommandInput placeholder={t("integration.connection.share.search")} />
+              <CommandList>
+                <CommandEmpty>{t("viewAs.noSpace")}</CommandEmpty>
+                <CommandGroup>
+                  {targets.map((space) => {
+                    const selected = sharedSpaceIds.includes(space.id);
+                    return (
+                      <CommandItem
+                        key={space.id}
+                        value={`${space.name} ${space.id}`}
+                        disabled={pending}
+                        onSelect={() => (selected ? onUnshare(space.id) : onShare(space.id))}
+                        data-testid={`share-target-${connectionId}-${space.id}`}
+                      >
+                        <Check className={cn(selected ? "opacity-100" : "opacity-0")} />
+                        <span className="truncate">{space.name}</span>
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          )}
         </PopoverContent>
       </Popover>
     );

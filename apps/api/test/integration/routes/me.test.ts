@@ -733,6 +733,33 @@ describe("Me API (/api/me)", () => {
       return rows.map((row) => row.spaceId).toSorted();
     }
 
+    it("lets the owner share with all spaces without an org header, preview still explicit", async () => {
+      const ctx = await createTestContext({ orgSlug: "meall-org" });
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
+      const id = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
+        integrationId: "@meall/gmail",
+        userId: ctx.user.id,
+      });
+      const shareAll = (headers: Record<string, string>) =>
+        app.request(`/api/me/connections/${id}/shares`, {
+          method: "PUT",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ share_all_spaces: true }),
+        });
+
+      // A role preview cannot ride the missing org context: it must name its org.
+      const preview = await shareAll({ Cookie: ctx.cookie, "X-View-As": "org_role=member" });
+      expect(preview.status).toBe(400);
+      expect(((await preview.json()) as { code: string }).code).toBe("invalid_view_as");
+      expect(await sharesOf(id)).toEqual([]);
+
+      expect((await shareAll({ Cookie: ctx.cookie })).status).toBe(204);
+      expect(await sharesOf(id)).toEqual([ctx.defaultSpaceId, spaceB.id].toSorted());
+    });
+
     it("lets the owner rename an org-scoped connection and share it, without a space header", async () => {
       const ctx = await createTestContext({ orgSlug: "mepatch-org" });
       const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
