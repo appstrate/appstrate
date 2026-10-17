@@ -53,13 +53,18 @@ export function usePackageNameColumn(): DataColumn<CardItem> {
               className="relative z-10 shrink-0"
             />
           </span>
-          {/* One line, where the card gives two: at this density a description
-                is there to tell two neighbours apart, not to be read. Without
-                one the identifier does that job, and every row keeps one height. */}
+          {/* Second line: the description, else the id. When the name line already
+              is the id (no display_name), a dash keeps the row height. */}
           {item.description ? (
             <CellText>{item.description}</CellText>
+          ) : item.displayName !== item.id ? (
+            <CellText mono title={item.id}>
+              {item.id}
+            </CellText>
           ) : (
-            <CellText mono>{item.id}</CellText>
+            <CellText>
+              <CellEmpty />
+            </CellText>
           )}
         </div>
       </div>

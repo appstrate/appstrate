@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The runs column set over {@link DataTable}: six columns, with the number
- * and the name doing the identifying and the rest reading as columns rather
- * than as a sentence, so facts line up between rows and the eye does not
- * re-read each one.
+ * The runs column set over {@link DataTable}, with the number and the name
+ * doing the identifying and the rest reading as columns rather than as a
+ * sentence, so facts line up between rows and the eye does not re-read each
+ * one.
  *
  * The set is ONE array of column literals. Widths, breakpoint behaviour,
  * alignment and content sit together per column, so adding one is one edit
@@ -25,7 +25,7 @@ import { PackageIcon } from "./package-icon";
 import { RunStatusBadge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { RunDuration } from "./run-duration";
-import { RunProvenanceBadges } from "./run-cells";
+import { RunProvenanceBadges } from "./run-provenance-badges";
 import { CellDate } from "./table-cells";
 
 /**

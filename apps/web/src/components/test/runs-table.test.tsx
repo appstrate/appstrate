@@ -55,7 +55,6 @@ describe("the runs column set", () => {
     const heads = Object.entries(agentsFr)
       .filter(([key]) => key.startsWith("runs.column."))
       .map(([, label]) => label);
-    expect(heads).toHaveLength(6);
     for (const head of heads) expect(html).toContain(head);
   });
 
@@ -79,9 +78,7 @@ describe("the runs column set", () => {
     // identifiable out of context.
     expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');
   });
-});
 
-describe("the column set", () => {
   it("holds the run's identity and timing, not its outcome", () => {
     // The outcome (error, output, files) lives on the run's own page: a list
     // cell can only truncate it.

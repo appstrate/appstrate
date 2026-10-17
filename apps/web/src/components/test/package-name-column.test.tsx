@@ -35,7 +35,15 @@ describe("the package name column", () => {
 
   it.each([null, "", undefined])("falls back to the identifier when description is %p", (d) => {
     const html = render(<NameCell item={item(d)} />);
-    expect(html).toContain("@appstrate/agent-test");
-    expect(html).toContain("font-mono");
+    expect(html).toMatch(/class="[^"]*font-mono[^"]*"[^>]*>@appstrate\/agent-test</);
+    expect(html).toContain('title="@appstrate/agent-test"');
+  });
+
+  it("does not print the identifier twice when the name already is the identifier", () => {
+    const html = render(
+      <NameCell item={{ ...item(null), displayName: "@appstrate/agent-test" }} />,
+    );
+    expect(html.split(">@appstrate/agent-test<")).toHaveLength(2);
+    expect(html).toContain("—");
   });
 });
