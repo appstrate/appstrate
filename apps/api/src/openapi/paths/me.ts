@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { packageSourceValues } from "@appstrate/db/schema";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { ORG_LOGO_PROPERTY } from "../schemas.ts";
 import {
@@ -417,9 +418,15 @@ export const mePaths = {
       summary: "Pin connections for the caller's runs of an agent",
       description:
         "Persists the caller's preference for an integration on this agent. " +
-        "Sits at cascade layer 4 — wins over a soft org default and the fallback, loses " +
-        "to an admin pin, an enforced org default and the launch override (the run's or " +
-        "the schedule's `connection_overrides`). " +
+        "It wins over a soft org default and the fallback, and loses to the launch override " +
+        "(the run's or the schedule's `connection_overrides`); an admin pin or an enforced org " +
+        "default governs instead. " +
+        "Under an admin pin that allows additions the pin supplies the member's additions to the " +
+        "imposed set, which it never removes (`[]` there means no addition); the set is stored as " +
+        "named, imposed ids included — the dashboard writes the additions only. It is written only " +
+        "where it binds: under an admin pin closed to additions, an enforced org default, or an " +
+        "open admin pin the space's enforced default closes, it would bind nothing, so the write " +
+        "is refused (409) and nothing is stored. " +
         "The body carries the WHOLE set and this write replaces it — `[]` pins none: the run " +
         "starts without the integration, or is refused when the agent requires it; `DELETE` " +
         "clears the pin. " +
@@ -472,6 +479,15 @@ export const mePaths = {
           description:
             "A connection id that is unknown, of another integration or space, or neither owned by the caller nor shared — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
         },
+        "409": {
+          description: `\`connection_additions_blocked\`: an admin pin closed to additions, an enforced org default, or an open admin pin under an enforced default imposes this agent's set for the integration, and nothing can be added to it — a member pin there would bind nothing. Ask an admin to open the pin to additions, or drop the member pin. \`connection_set_too_large\`: under an admin pin open to additions, its connections plus this set exceed ${MAX_CONNECTIONS_PER_INTEGRATION} distinct connections (compared case-insensitively) — pin fewer. Nothing is stored either way.`,
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
@@ -479,8 +495,9 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "Clear the caller's pin on a (agent, integration)",
       description:
-        "Removes the caller's member pin so the resolver falls back to layers 5-6 " +
-        "(soft org default, then accessible connections). " +
+        "Removes the caller's member pin. Ungoverned, the resolver falls back to the soft org " +
+        "default, then the caller's own connection; under an admin pin that allows additions the " +
+        "run binds the imposed set with no addition. Always allowed, whatever governs. " +
         namingLayerRemovalEffect,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },

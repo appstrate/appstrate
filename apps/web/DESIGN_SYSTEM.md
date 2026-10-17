@@ -267,12 +267,18 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
     integration nothing refused keeps « Hériter » (the absence of a pick) and « Aucune connexion ».
   - Usages over a plain list go through `ConnectionSetPicker` (same file, a controlled value:
     `null` no choice, `[]` none, each tick handed to `onChange`).
+  - **An imposed set makes the picker partially locked.** Under an admin pin or an enforced org
+    default the imposed connections are shown with a padlock and cannot be unticked; when the admin
+    pin allows additions (`additional_connections_allowed`) the other connections stay tickable
+    and the UI writes the additions only (the imposed ones are never part of an override or a
+    member pin, and `[]` means no addition, not no connection); when it does not, no other
+    connection is offered.
 
   What turns a trigger amber is `gatesRun` (`use-connection-picker.ts`): the server's `run_blocking`
   while nothing is chosen (an unset override included, which inherits the cascade), the pick itself
   once a set is chosen (an under-scoped, dead or unavailable member, or « Aucune connexion » for a
-  required integration). An override reaching outside an admin lock says so under the locked
-  picker (`override_outranked`). **A schedule takes no fallback**: the server refuses to arm one
+  required integration). An override reaching outside a closed imposed set says so under the
+  locked picker (`override_outranked`). **A schedule takes no fallback**: the server refuses to arm one
   whose connections nobody named. When the caller arms a schedule that runs as themself and holds
   a single connection for an integration, the server names that connection on the write
   (`withScheduleFallback`); the SPA sends only the user's picks (`savedScheduleOverrides`) and

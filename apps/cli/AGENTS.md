@@ -133,6 +133,12 @@ appstrate run @acme/email-sorter --connection @acme/gmail=<connection-id>
 
 # Through the API the same choice is `connection_overrides` on the launch body
 # (always an array), and the 409's `errors[].candidate_connections` is the list.
+# Where an admin imposes connections on the integration (an admin pin or an
+# enforced org default) they are always bound, whatever you pass: the override
+# then names additions only (`[]` means no addition, never no connection), and
+# one naming a connection outside a set that allows none is refused with
+# `override_outranked`. The imposed set plus an addition can be a set of
+# several, which a run executed locally refuses (`remote_binds_one_connection`).
 echo '{"connection_overrides": {"@acme/gmail": ["<connection-id>"]}}' \
   | appstrate api POST '/api/agents/@acme/email-sorter/run' -d @-
 ```

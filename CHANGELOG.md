@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Operators
+
+- **Run the read-only pre-flight `scripts/migration/0048-report-narrowing-overrides.ts`
+  before deploying the release that carries migration `0100`** (#2043):
+  `DATABASE_URL=<platform> bun scripts/migration/0048-report-narrowing-overrides.ts`
+  (the image ships it, see "The image ships `scripts/migration/`" below). It
+  lists the schedules whose `connection_overrides` are `[]` or a strict subset of
+  a set an admin pin or an enforced org default imposes. Until now such an override
+  bound just that subset; after the deploy the whole imposed set binds, so each
+  listed schedule's bound set widens at its next fire. `[]` entries are expected:
+  until now the run and schedule form's locked picker let a user store `[]`
+  (« Aucune connexion ») under an admin pin or an enforced default for a
+  non-required integration, and those schedules bind the whole imposed set after
+  the deploy. Only a non-empty strict subset could not come from the interface.
+  Every listed schedule is a decision for its owner before the deploy; the script
+  rewrites nothing. Migration `0100` itself
+  rewrites no data: every existing admin pin stays closed.
+
 ### Changed
 
 - **Connection use and sharing are separate** (#2041). “Multi-space use” describes the owner's
@@ -131,6 +149,97 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `--local --integrations local` it therefore needs credentials for every
     `api_call` integration the exported agent declares, as a local bundle
     read from disk already did.
+- **BREAKING: a launch override no longer narrows a connection set an admin
+  imposes** (#2043). An admin pin or an enforced org default is now a floor:
+  its connections are always bound, whatever a run's or a schedule's
+  `connection_overrides` or a member's pin say. An override naming only imposed
+  connections, or `[]`, is a no-op (under an imposed set `[]` means "no
+  addition", never "no connection"); before, it bound just that subset. Under an
+  imposed set the selection is the launch override, else the member's pin when
+  the admin pin allows additions, else nothing: a soft org default and the actor
+  fallback add nothing. An override naming a connection outside a set that
+  allows no additions is still refused (`override_outranked`), at the run, the
+  API, the MCP tools and a schedule write; a schedule that meets it at a fire is
+  disabled, as before. `[]` on an integration the agent marks `required` is no
+  longer refused at the write (the `400 validation_failed` item
+  `required_integration_unbound` is gone and `OVERRIDE_REFUSAL_CODES` loses
+  it): under an imposed set it adds nothing and is accepted, the floor binding;
+  where nothing imposes one, the resolver answers `required_integration_unbound`
+  as a `409 missing_integration_connection` item (`source: run_override` at a
+  launch, `schedule_override` at a schedule write, which refuses it the same way)
+  and as a `400` item on `integrations.<id>` from the inline `/validate`. A floor
+  plus additions above 20 connections is refused
+  with the new error code `connection_set_too_large` (in
+  `CONNECTION_RESOLUTION_ERROR_CODES`), never truncated. Each bound connection
+  carries its own `source` in the run's snapshot: `admin_pin` or
+  `org_default_enforced` for the floor, `run_override`, `schedule_override` or
+  `member_pin` for an addition. The credential proxy outside a run is unchanged.
+  Under a closed imposed set of two connections or more, a member can therefore
+  no longer narrow it to one: a locally executed run (`POST /api/runs/remote`,
+  which addresses one connection per integration) is refused with
+  `remote_binds_one_connection` until an admin changes the pin. Removing an
+  imposed set — deleting an admin pin (open or closed) or an enforced org
+  default, or writing the default back with `enforce: false` — never changes
+  what a stored selection means: in the same transaction it disables
+  (`connection_set_unnamed`) every enabled schedule it governed that nothing
+  governs afterwards and whose `connection_overrides` set for the integration
+  strictly narrows the removed set (only its connections, fewer than it holds,
+  `[]` included; ids compared case-insensitively, repeats counted once), since
+  that set added nothing under it and would bind fewer connections as written
+  without it; a set naming the whole removed set binds the same and is left
+  alone. Deleting an open admin pin also deletes the member pins strictly
+  narrowing its connections, by the same rule. The org default `PUT` removes
+  those schedules' jobs and records them in its audit.
+
+### Added
+
+- **An admin pin can let members add connections to the imposed ones**
+  (#2043). `PUT` of an integration pin takes `allow_additional_connections`
+  (default `false`, absent means `false` on the replacing `PUT`; `true` with
+  `connection_ids: []` is a `400`), and the pin responses return it. The
+  connection readiness verdict of each integration returns
+  `additional_connections_allowed`. When it is on, a run binds the imposed
+  connections plus the ones the actor chose among those they can use in the
+  space (`block_user_connections` still bounds them); nothing is added
+  automatically. Migration `0100_integration_pin_additions` adds the column and
+  two `CHECK`s: a member pin is never open, and an open pin imposes at least one
+  connection. A member pin no longer survives under a closed admin pin: every
+  admin pin write or delete where the pin is, or was, closed deletes the member
+  pins of the same space, agent and integration in the same transaction (masked
+  by the closed pin, none comes back unasked). Only writing an open pin where
+  there was none, rewriting an open one, or deleting an open one keeps them —
+  unless the space enforces a default for the integration, which governs the
+  agent once the pin is gone and masks them all, so that delete deletes them.
+  Before, deleting a closed admin pin revived the member pins it masked; now they
+  are gone, and a schedule that relied on one is disabled
+  (`connection_set_unnamed`) with the pin's other unnamed schedules. The audit
+  record carries `allowAdditionalConnections` and each cleared member pin
+  (`memberPinsCleared: [{ userId, connectionIds }]`, on the upsert and the
+  delete). An enforced org default follows the same rule: every org default
+  `PUT` or `DELETE` where the default is, or was, enforced deletes every member
+  pin of that space and integration in the same transaction (a closed admin pin
+  left none, and the enforced default closes an open one); deleting an enforced
+  default then disables (`connection_set_unnamed`) a schedule that relied on
+  one, and the `integration.org_default.upserted` / `.deleted` audit records
+  them (`memberPinsCleared: [{ userId, agentPackageId, connectionIds }]`).
+  Before, a member pin an enforced default came to govern stayed masked and
+  came back once the default was soft or gone. Rewriting an open pin with more
+  imposed connections does not judge the member pins already stored: where
+  the imposed set plus one of them exceeds 20, that member's runs fail with
+  `connection_set_too_large`. An open pin and an enforced org default exclude
+  each other on one space and integration: opening one while the other exists is the new
+  `409 connection_additions_conflict`, on the pin `PUT` and on the org default
+  `PUT` with `enforce: true` (an admin pin of an agent not active in the space
+  does not count: it runs nowhere, and the resolver closes it under the enforced
+  default should the agent come back); at resolution an enforced default closes
+  the additions. A member pin is written only where it binds:
+  `PUT /api/me/integration-pins/…` under an admin pin closed to additions, an
+  enforced org default, or an open pin under one is the new
+  `409 connection_additions_blocked`, and under an open pin a set taking the
+  imposed connections past 20 is a `409 connection_set_too_large`; nothing is
+  stored, and `DELETE` is always allowed. A stored selection keeps the ids its
+  writer named, imposed ones included. The connection picker shows the imposed
+  connections locked and edits the additions only.
 
 ## [1.0.0-beta.68] - 2026-10-15
 

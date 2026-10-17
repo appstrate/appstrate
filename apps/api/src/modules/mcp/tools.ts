@@ -1189,7 +1189,10 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
             `["<connection_id>", ...] }\`, 0 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
             "integration — always an ARRAY, even for a single one (a bare string is a 400). " +
             "`[]` runs without that integration — only for one the agent does not mark " +
-            "`required` (a 400 otherwise). " +
+            "`required` (`required_integration_unbound` otherwise, unless an admin imposes a set, " +
+            "where `[]` adds nothing). Connections an admin imposes on an integration stay " +
+            "bound whatever is passed: here the map only adds to them, and a connection outside " +
+            "an imposed set that allows no additions is a `409 override_outranked`. " +
             "Naming several binds them all: the run's tools then take a " +
             "required `connection` argument carrying the connection's label. This is also the " +
             "retry path for a `409 must_choose_connection` launch error — that error lists the " +
