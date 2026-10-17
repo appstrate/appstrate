@@ -344,6 +344,23 @@ describe("apiCallRequestSchema — target", () => {
     expect(accepts("{{base_url}}/x")).toBe(true);
   });
 
+  it("accepts a base-URL {{field}} followed by a query or a fragment", () => {
+    expect(accepts("{{base_url}}?d1=2026-01-01")).toBe(true);
+    expect(accepts("{{base_url}}#f")).toBe(true);
+    expect(accepts("{{base_url}}")).toBe(true);
+  });
+
+  it("rejects a {{field}} that does not stand for a whole base URL", () => {
+    for (const target of [
+      "{{base_url}}x",
+      "{{base_url}}.evil.com",
+      "{{a}}{{b}}",
+      "x{{base_url}}",
+    ]) {
+      expect(accepts(target)).toBe(false);
+    }
+  });
+
   it("rejects a non-http(s) scheme, an empty host and garbage", () => {
     for (const target of [
       "ftp://api.example.com/x",

@@ -289,8 +289,8 @@ const httpUrl = z
   .string()
   .regex(/^[Hh][Tt][Tt][Pp][Ss]?:\/\/[^\s/?#\\]+(?:[/?#].*)?$/)
   .refine((value) => URL.canParse(value));
-/** A URL-valued credential field, then nothing or a path: `{{site_url}}/wp-json/…`. */
-const URL_FIELD_TARGET = new RegExp(`^${PLACEHOLDER.source}(?:/.*)?$`);
+/** A URL-valued credential field, then nothing, `/`, `?` or `#`: `{{site_url}}/wp-json/…`. */
+const URL_FIELD_TARGET = new RegExp(`^${PLACEHOLDER.source}(?:[/?#].*)?$`);
 
 /** Zod schema for `api_call` arguments — validated at runtime in execute(). */
 export const apiCallRequestSchema = z.object({
@@ -303,7 +303,7 @@ export const apiCallRequestSchema = z.object({
       error: "target must be an absolute http(s) URL or start with a {{field}} holding one",
     })
     .describe(
-      "Absolute URL of the upstream endpoint, or a {{field}} holding the base URL followed by a path. Any other {{field}} is percent-encoded as one URL component: write the URL's own `/`, `?` and `&` in the target",
+      "Absolute URL of the upstream endpoint, or a {{field}} holding the base URL followed by a path or query. Any other {{field}} is percent-encoded as one URL component: write the URL's own `/`, `?` and `&` in the target",
     ),
   headers: z
     .record(z.string(), z.string())

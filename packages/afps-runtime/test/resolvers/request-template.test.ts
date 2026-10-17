@@ -25,6 +25,9 @@ describe("substituteRequest — URL", () => {
     expect(url("{{base_url}}/x?y={{v}}", { base_url: "https://h.example/app", v: "a&b=c" })).toBe(
       "https://h.example/app/x?y=a%26b%3Dc",
     );
+    expect(
+      url("{{base_url}}?d={{v}}#{{v}}", { base_url: "https://h.example/feed", v: "a&b#" }),
+    ).toBe("https://h.example/feed?d=a%26b%23#a%26b%23");
   });
 
   it("a port or userinfo value is encoded", () => {
