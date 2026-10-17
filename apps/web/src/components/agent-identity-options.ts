@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { iconNames, type IconName } from "lucide-react/dynamic";
-import {
-  LUCIDE_ICON_PREFIX,
-  parseManifestIcon,
-  type ManifestIcon,
-} from "@appstrate/core/manifest-icon";
+import { LUCIDE_ICON_PREFIX, parseIcon, type AppearanceIcon } from "@appstrate/core/appearance";
 
 export const AGENT_ICON_NAMES = iconNames;
 export type AgentIconName = IconName;
@@ -25,7 +21,7 @@ export const AGENT_COLOR_CATALOG = {
 export type AgentColorKey = keyof typeof AGENT_COLOR_CATALOG;
 
 /** The icon an agent without a drawable one shows. */
-const DEFAULT_AGENT_ICON: ManifestIcon = { kind: "lucide", name: "bot" };
+const DEFAULT_AGENT_ICON: AppearanceIcon = { kind: "lucide", name: "bot" };
 
 export function isLucideIconName(value: string): value is AgentIconName {
   return AGENT_ICON_NAME_SET.has(value);
@@ -50,7 +46,7 @@ function isAgentCustomColor(value: string | null | undefined): value is `#${stri
  * otherwise; its colour key or `#rrggbb`, neutral otherwise.
  */
 export function resolveAgentIdentity(icon?: string | null, color?: string | null) {
-  const parsed = parseManifestIcon(icon);
+  const parsed = parseIcon(icon);
   const resolvedIcon =
     parsed && (parsed.kind !== "lucide" || isLucideIconName(parsed.name))
       ? parsed

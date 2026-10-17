@@ -2,7 +2,7 @@
 
 import { Puzzle } from "lucide-react";
 import { DynamicIcon } from "lucide-react/dynamic";
-import { parseManifestIcon } from "@appstrate/core/manifest-icon";
+import { parseIcon } from "@appstrate/core/appearance";
 import type { PackageType } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
 import { ManifestGlyph } from "@appstrate/ui/components/manifest-glyph";
@@ -15,7 +15,7 @@ type PackageIconSize = keyof typeof BOX;
 
 /**
  * A package's identity tile, the same for every type and surface. Its manifest
- * `icon` follows one grammar for every type (`@appstrate/core/manifest-icon`):
+ * `icon` follows one grammar for every type (`@appstrate/core/appearance`):
  * an agent draws it on its chosen colour (`lucide:bot` when it has none), an
  * integration as its logo (a neutral placeholder when it has none), the other
  * types show their type's glyph on a muted ground.
@@ -72,7 +72,7 @@ export function PackageIcon({
         <Puzzle className={mutedGlyph} />
       </span>
     );
-    const parsed = parseManifestIcon(icon);
+    const parsed = parseIcon(icon);
     if (!parsed) return placeholder;
     return (
       <ManifestGlyph
