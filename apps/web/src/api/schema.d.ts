@@ -338,7 +338,7 @@ export interface paths {
         };
         /**
          * List unified agent persistence (pinned slots + memories)
-         * @description Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actor_type` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows.
+         * @description Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). A caller holding `persistence:delete` who names no `actor_type` sees every actor's rows in both halves; `runId` only narrows the rows to one run and never changes whose rows are visible. Every other caller sees their own actor scope plus shared rows, in both halves.
          */
         get: operations["listAgentPersistence"];
         put?: never;
@@ -8567,7 +8567,7 @@ export interface operations {
             query?: {
                 /** @description Limit the response to one kind. Omitted → both. */
                 kind?: "pinned" | "memory";
-                /** @description Admin-only scope override. Defaults to caller's actor scope. */
+                /** @description Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope. */
                 actor_type?: "user" | "end_user" | "shared";
                 /** @description Required when `actor_type` is `user` or `end_user`. */
                 actor_id?: string;
