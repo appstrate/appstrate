@@ -181,6 +181,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the memories and pinned slots an inline run wrote with `note`/`pin` were
   unreachable. The read route now serves them to a caller who may read the
   run in that space; every other agent route is unchanged.
+- **The platform's package scopes can no longer be claimed** (#2072). `@appstrate/`
+  is the system packages' namespace and `@inline/` the inline runs' shadow
+  packages', but an organization could take `inline` or `appstrate` as its slug,
+  and any organization could create a package under either scope by naming it
+  in a manifest. Creating or renaming an organization to one of these slugs now
+  answers `400 slug_reserved`, explicit or derived from the name; the
+  bootstrap organization takes `appstrate-2` instead. Every door that writes an
+  organization package (JSON create, ZIP and GitHub import, bundle import with
+  its carried dependencies, and the MCP `validate_package_file` /
+  `import_package_file` pair) answers `400 scope_reserved` for such an id; a
+  system package carried by a bundle is still reused.
+  **Operators:** existing rows are not rewritten. Before deploying, check that both
+  queries return nothing:
+  `SELECT slug FROM organizations WHERE slug IN ('inline', 'appstrate');` and
+  `SELECT id, org_id FROM packages WHERE (id LIKE '@inline/%' AND ephemeral = false) OR (id LIKE '@appstrate/%' AND org_id IS NOT NULL);`.
+  A row in either is data to handle with a `scripts/migration/` script, never
+  left in place: a non-ephemeral `@inline/` agent is no longer served by the
+  persistence read.
 - **An `api_call` target can carry a `{{field}}` in its path or query**
   (#2063). The target's published JSON schema said `format: "uri"`, which the
   agent's tool-argument validator applies before the call leaves the agent: it

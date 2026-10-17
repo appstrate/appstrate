@@ -98,13 +98,12 @@ export function requireAgentOrInlineRun() {
     const orgId = c.get("orgId");
     const spaceId = c.get("spaceId");
 
-    // Shadow first: `getPackage` never returns one without `includeEphemeral`, so
-    // placement is a wasted query for it. The scope is not reserved at org
-    // creation, though — an org slugged `inline` may own a real `@inline/x` — so
-    // placement stays the fallback.
-    const agent =
-      (isInlineShadowPackageId(packageId) ? await loadReadableShadow(c, packageId) : null) ??
-      (await loadPlacedAgent(packageId, orgId, spaceId));
+    // An `@inline/` id is a shadow and nothing else: no organization package can
+    // be created under a reserved scope (`assertPackageScopeNotReserved`), so
+    // there is no placed `@inline/` agent to fall back to.
+    const agent = isInlineShadowPackageId(packageId)
+      ? await loadReadableShadow(c, packageId)
+      : await loadPlacedAgent(packageId, orgId, spaceId);
     if (!agent) throw agentNotFound(packageId);
     c.set("package", agent);
     return next();
