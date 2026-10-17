@@ -72,6 +72,14 @@ describe("substituteRequest — URL", () => {
     expect(url("https://h.example/a/{{v}}.json", { v: "" })).toBe("https://h.example/a/.json");
   });
 
+  it("treats a backslash like a slash: the segment checks apply after it", () => {
+    for (const seg of [".", "..", ""]) {
+      expect(() => url("https://h.example\\{{seg}}", { seg })).toThrow(UnencodableInputError);
+      expect(() => url("https://h.example/a\\{{seg}}/b", { seg })).toThrow(UnencodableInputError);
+    }
+    expect(url("https://h.example\\{{seg}}", { seg: "x" })).toBe("https://h.example\\x");
+  });
+
   it("a host or port placeholder is no path segment", () => {
     expect(url("https://{{h}}example.com/x", { h: "" })).toBe("https://example.com/x");
     expect(url("https://h.example:{{port}}", { port: "" })).toBe("https://h.example:");

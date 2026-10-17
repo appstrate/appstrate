@@ -185,6 +185,7 @@ describe("buildApiCallExtensionFactory", () => {
     expect(accepts("ftp://api.acme.com/x")).toBe(false);
     expect(accepts("javascript:alert(1)")).toBe(false);
     expect(accepts("https://")).toBe(false);
+    expect(accepts("https://api.acme.com\\{{seg}}")).toBe(false);
   });
 
   it("exposes no api_call the agent did not select", async () => {
