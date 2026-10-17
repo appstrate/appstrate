@@ -179,12 +179,12 @@ function RecentAgents({
   const { t } = useTranslation("common");
   return (
     <div
-      className="no-scrollbar scroll-fade-x scroll-buttons-x flex gap-3 overflow-x-auto pb-1"
+      className="no-scrollbar scroll-fade-x scroll-buttons-x flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1"
       data-scroll-prev={t("pagination.previous")}
       data-scroll-next={t("pagination.next")}
     >
       {agents.map((agent) => (
-        <div key={agent.id} className="w-[19rem] shrink-0">
+        <div key={agent.id} className="w-[19rem] shrink-0 snap-start last:snap-end">
           <PackageCard {...agentCardItem(agent, unreadCounts?.[agent.id])} headingLevel={3} />
         </div>
       ))}
