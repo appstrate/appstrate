@@ -89,7 +89,7 @@ export function MemoryPanel({
   // The entry read in the modal: `?memory=pinned:12`.
   const memoryParam = useUrlModalTarget(
     "memory",
-    isLoading ? undefined : allItems,
+    pinned && memories ? allItems : undefined,
     (item) => `${item.kind}:${item.id}`,
   );
   const selected = memoryParam.target ?? null;

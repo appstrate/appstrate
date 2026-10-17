@@ -14,7 +14,7 @@
  * panel and its breadcrumb would claim the current space for a package not in it.
  */
 import { PendingButton } from "@/components/app-ui/pending-button";
-import { useLayoutEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -196,9 +196,10 @@ export function OrgCatalogueModal({
     library ? CATALOGUE_KINDS.flatMap((kind) => library.packages[kind]) : undefined,
     { companions: SHEET_COMPANIONS },
   );
-  // A package of another kind, or named under `shared`, moves the address before the first paint.
+  // A package of another kind, or named under `shared`, moves the address to its sheet's own;
+  // the sheet renders only once the address is its own (`previewed`).
   const sheetAddress = catalogueSheetAddress(reading, active, preview.target?.type, location);
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (sheetAddress !== null) navigate(sheetAddress, { replace: true, state: location.state });
   }, [sheetAddress, navigate, location.state]);
   const placementById = new Map(ofKind.map((item) => [item.id, placementOf(item)] as const));
