@@ -23,7 +23,7 @@ import createFetchClient, { type Middleware } from "openapi-fetch";
 import createReactQueryClient from "openapi-react-query";
 import type { components, paths } from "./schema";
 import { ApiError } from "./errors";
-import { buildScopingHeaders } from "../lib/scoping-headers";
+import { missingScopingHeaders } from "../lib/scoping-headers";
 import { noteViewAsRefusal } from "../lib/view-as-refusal";
 import { noteStaleAuthority } from "../lib/stale-authority";
 
@@ -79,8 +79,8 @@ function encodeSegment(segment: string): string {
 
 const orgContext: Middleware = {
   onRequest({ request }) {
-    for (const [k, v] of Object.entries(buildScopingHeaders())) {
-      if (!request.headers.has(k)) request.headers.set(k, v);
+    for (const [k, v] of Object.entries(missingScopingHeaders(request.headers))) {
+      request.headers.set(k, v);
     }
     return request;
   },

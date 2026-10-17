@@ -21,9 +21,9 @@ import { usePermissions } from "../hooks/use-permissions";
 import { spaceLabel } from "../lib/space-label";
 import { orgTile, spaceTile } from "../lib/identity-tile-props";
 import { matchesSearch } from "../lib/strings";
-import { isSpaceEnterable, useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
+import { isSpaceEnterable, useCurrentSpaceId } from "../hooks/use-current-space";
+import { useEnterSpace } from "../hooks/use-enter-space";
 import { useCanCreateOrg, useViewer } from "../hooks/use-auth";
-import { spaceStore } from "../stores/space-store";
 import { Command, CommandInput } from "@appstrate/ui/components/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -110,10 +110,10 @@ const TRIGGER_BOX = {
 export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const { t } = useTranslation();
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
-  const { currentOrg, orgs, switchOrg, loading } = useOrg();
+  const { currentOrg, orgs, loading } = useOrg();
   const { data: spaces, isPending: spacesPending } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
-  const { switchSpace } = useSpaceSwitcher();
+  const enterSpace = useEnterSpace();
   const { isMobile, setOpenMobile } = useSidebar();
   const { can } = usePermissions();
   const canCreateOrg = useCanCreateOrg();
@@ -154,18 +154,10 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     .filter((a) => matchesSearch(query, [spaceLabel(a, t)]))
     .sort((a, b) => Number(Boolean(b.personal)) - Number(Boolean(a.personal)));
 
-  /**
-   * The one place the context is applied, whole. In a new organization the pick is
-   * remembered there first so the space resolver enters it rather than the default; the
-   * current page may not exist there, so `useLandAfterOrgSwitch` moves it.
-   */
+  /** The pick is applied whole (`useEnterSpace`); the current page may not exist in another organization, so `useLandAfterOrgSwitch` moves it. */
   const applyContext = (orgId: string, spaceId: string) =>
     requestScopeChange(() => {
-      if (orgId !== currentOrg.id) {
-        spaceStore.getState().remember(orgId, spaceId);
-        switchOrg(orgId);
-        landAfterOrgSwitch();
-      } else switchSpace(spaceId);
+      if (enterSpace(orgId, spaceId)) landAfterOrgSwitch();
       closeSwitcherAndSidebar();
     });
 
