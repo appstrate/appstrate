@@ -2,6 +2,7 @@
 
 import { packageTypeValues } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import { APPEARANCE_COLORS } from "@appstrate/core/appearance";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
 
@@ -61,6 +62,8 @@ export const spacesPaths = {
                 object: "space",
                 orgId: "550e8400-e29b-41d4-a716-446655440000",
                 name: "My SaaS App",
+                icon: null,
+                color: null,
                 isDefault: false,
                 settings: {
                   allowedRedirectDomains: ["myapp.com", "staging.myapp.com"],
@@ -122,6 +125,8 @@ export const spacesPaths = {
                     object: "space",
                     orgId: "550e8400-e29b-41d4-a716-446655440000",
                     name: "Default",
+                    icon: null,
+                    color: null,
                     isDefault: true,
                     settings: { allowedRedirectDomains: [] },
                     visibility: "open",
@@ -139,6 +144,8 @@ export const spacesPaths = {
                     object: "space",
                     orgId: "550e8400-e29b-41d4-a716-446655440000",
                     name: "My SaaS App",
+                    icon: "emoji:🚀",
+                    color: "violet",
                     isDefault: false,
                     settings: { allowedRedirectDomains: ["myapp.com"] },
                     visibility: "closed",
@@ -196,7 +203,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Update a space",
       description:
-        "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility` or `default_role` is a 409 `personal_space_immutable`.",
+        "Update space name, icon, colour, settings, visibility or default role. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon` or `color` is a 409 `personal_space_immutable`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -212,6 +219,16 @@ export const spacesPaths = {
                   minLength: 1,
                   maxLength: 100,
                   description: "Human-readable space name",
+                },
+                icon: {
+                  type: ["string", "null"],
+                  description: "`lucide:<name>` or `emoji:<one emoji>`; `null` clears it.",
+                },
+                color: {
+                  type: ["string", "null"],
+                  enum: [...APPEARANCE_COLORS, null],
+                  description:
+                    "A palette key; `null` clears it, the colour then derived from the space id.",
                 },
                 settings: {
                   type: "object",

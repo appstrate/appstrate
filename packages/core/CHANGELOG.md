@@ -23,14 +23,24 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
   the `_meta` key holding an agent's presentation (`color`), next to
   `AGENT_RESOURCES_META_KEY`.
 - **`readAgentAppearance(manifest)`** (`@appstrate/core/validation`): an
-  agent's identity tile, `{ icon?, color? }` — the manifest `icon` and the
-  `color` under `_meta[AGENT_UI_META_KEY]`, each only when it is a string.
-- **`@appstrate/core/manifest-icon`**: the grammar of a manifest `icon` —
-  **`parseManifestIcon(value)`** reads it as a `ManifestIcon` (`lucide` name,
-  other Iconify id, or image URL), `null` when no surface can draw it;
-  **`LUCIDE_ICON_PREFIX`** is `"lucide:"`, the prefix of an agent's icon.
-- **`ORG_LOGO_MAX_BYTES`** (`@appstrate/core/validation`): the largest
-  organization logo image `PUT /api/orgs/{orgId}/logo` accepts, 36 000 bytes.
+  agent's identity tile, `{ icon, color }`, both always present — the manifest
+  `icon` when it is a non-empty string, else `null`, and the `color` under
+  `_meta[AGENT_UI_META_KEY]` when it is a palette key (`isAppearanceColor`),
+  else `null` (derived from the agent id).
+- **`@appstrate/core/appearance`**: the one grammar of a visual identity
+  (agent, space, organization). **`parseIcon(value)`** reads an `icon` as an
+  **`AppearanceIcon`** (`lucide` name, other Iconify id, image URL, or
+  `emoji:<one emoji>`), `null` when no surface can draw it; the prefixes
+  **`LUCIDE_ICON_PREFIX`**, **`EMOJI_ICON_PREFIX`** and **`IMAGE_ICON_PREFIX`**;
+  **`isEmoji(value)`**, exactly one RGI emoji. The palette
+  **`APPEARANCE_COLORS`** / **`AppearanceColor`** with **`isAppearanceColor`**,
+  **`derivedColor(seed)`** (a stable hue from an entity id, never `neutral`)
+  and **`resolveColor(color, seed)`** (`null` means derived). An uploaded icon
+  image: **`isIconImage(value)`**, a base64 WebP data URI within
+  **`ICON_IMAGE_MAX_BYTES`** (12 000) and **`ICON_IMAGE_MAX_SIZE`** (256 px),
+  its canvas read by **`webpSize(bytes)`**. The write-side Zod schemas
+  **`appearanceIconSchema(forms)`** (one of the **`IconForm`**s `lucide`,
+  `emoji`, `image`) and **`appearanceColorSchema`**.
 - **`unwrapMcpResult(value)`** (`@appstrate/core/mcp-result`): the payload inside
   an MCP tool result — a `CallToolResult`, a bare content array or a JSON
   string — recovered even when a prose text part (the turn-budget note) follows

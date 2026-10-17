@@ -111,21 +111,32 @@ describe("Me API (/api/me)", () => {
       expect(found?.role).toBe("owner");
     });
 
-    it("carries each org's logo, as GET /api/orgs does", async () => {
-      const ctx = await createTestContext({ orgSlug: "logo-me-org" });
+    it("carries each org's icon and color, as GET /api/orgs does", async () => {
+      const ctx = await createTestContext({ orgSlug: "icon-me-org" });
       await db
         .update(organizations)
-        .set({ logo: "emoji:🧠" })
+        .set({ icon: "emoji:🧠", color: "violet" })
         .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request("/api/me/orgs", { headers: { Cookie: ctx.cookie } });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: Array<{ id: string; logo: unknown }> };
-      expect(body.data.find((o) => o.id === ctx.orgId)?.logo).toEqual({
-        kind: "emoji",
-        emoji: "🧠",
-      });
+      const body = (await res.json()) as {
+        data: Array<{ id: string; icon: unknown; color: unknown }>;
+      };
+      const found = body.data.find((o) => o.id === ctx.orgId);
+      expect(found?.icon).toBe("emoji:🧠");
+      expect(found?.color).toBe("violet");
+    });
+
+    it("carries a null icon and color when none is set", async () => {
+      const ctx = await createTestContext({ orgSlug: "plain-me-org" });
+
+      const res = await app.request("/api/me/orgs", { headers: { Cookie: ctx.cookie } });
+
+      const body = (await res.json()) as { data: Array<Record<string, unknown>> };
+      const found = body.data.find((o) => o.id === ctx.orgId);
+      expect(found).toMatchObject({ icon: null, color: null });
     });
 
     it("returns every org the user is a member of", async () => {

@@ -40,6 +40,8 @@ export const agentsPaths = {
                 data: [
                   {
                     id: "@acme/email-sorter",
+                    icon: "lucide:mail",
+                    color: "blue",
                     display_name: "Email Sorter",
                     description: "Automatically sorts and labels incoming emails",
                     schema_version: "0.1",
@@ -58,6 +60,8 @@ export const agentsPaths = {
                   },
                   {
                     id: "@appstrate/code-reviewer",
+                    icon: null,
+                    color: null,
                     display_name: "Code Reviewer",
                     description: "Reviews pull requests and suggests improvements",
                     schema_version: "0.1",

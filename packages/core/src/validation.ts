@@ -18,6 +18,7 @@ import { SELECTABLE_RUNTIME_TOOLS, canonicalizeRuntimeToolIds } from "./runtime-
 import { findRetiredDependencyKeys } from "./dependencies.ts";
 import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { asRecord } from "./safe-json.ts";
+import { isAppearanceColor, type AppearanceColor } from "./appearance.ts";
 
 export { integrationManifestSchema, type IntegrationManifest };
 export { mcpServerManifestSchema, type McpServerManifest };
@@ -221,25 +222,20 @@ export const AGENT_UI_META_KEY = "dev.appstrate/ui";
 
 /**
  * An agent's identity tile: the AFPS manifest `icon` (its grammar is
- * `@appstrate/core/manifest-icon`; a picked icon is `lucide:<name>`), and the
- * `color` held under `_meta[AGENT_UI_META_KEY]`. A field that is not a string
- * is left out.
+ * `@appstrate/core/appearance`; a picked icon is `lucide:<name>`), and the
+ * `color` held under `_meta[AGENT_UI_META_KEY]`. Both are always present:
+ * `icon` is any non-empty string, read leniently (a surface parses it), and
+ * `color` a palette key — anything else, a `#rrggbb` included, reads as
+ * `null`, i.e. derived from the agent id.
  */
 export function readAgentAppearance(manifest: Record<string, unknown>): {
-  icon?: string;
-  color?: string;
+  icon: string | null;
+  color: AppearanceColor | null;
 } {
-  const icon = typeof manifest.icon === "string" ? manifest.icon : undefined;
+  const icon = typeof manifest.icon === "string" && manifest.icon !== "" ? manifest.icon : null;
   const ui = asRecord(asRecord(manifest._meta)[AGENT_UI_META_KEY]);
-  const color = typeof ui.color === "string" ? ui.color : undefined;
-  return {
-    ...(icon ? { icon } : {}),
-    ...(color ? { color } : {}),
-  };
+  return { icon, color: isAppearanceColor(ui.color) ? ui.color : null };
 }
-
-/** Largest organization logo image accepted, in bytes. */
-export const ORG_LOGO_MAX_BYTES = 36_000;
 
 /**
  * Agent-authored resource hints read from `_meta["dev.appstrate/resources"]`.

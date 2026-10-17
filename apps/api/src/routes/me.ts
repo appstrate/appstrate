@@ -55,7 +55,6 @@ import {
   noConnectionDeleteImpact,
 } from "../services/me-connections.ts";
 import { meConnectionAuthorityFilter } from "../services/connection-reach.ts";
-import { orgLogoWire } from "../services/org-logo.ts";
 import { actorFilter, getActor } from "../lib/actor.ts";
 import { connectionPrincipal } from "../lib/connection-principal.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
@@ -136,7 +135,8 @@ router.get("/orgs", async (c) => {
           id: org.id,
           name: org.name,
           slug: org.slug,
-          logo: orgLogoWire(org.id, org.logo),
+          icon: org.icon,
+          color: org.color,
           // End-users have no org role — surface a stable string instead
           // of `undefined` so the consumer doesn't have to special-case it.
           role: "end_user" as const,
@@ -176,7 +176,8 @@ router.get("/orgs", async (c) => {
             id: o.id,
             name: o.name,
             slug: o.slug,
-            logo: orgLogoWire(o.id, o.logo),
+            icon: o.icon,
+            color: o.color,
             role: identity.role,
             permissions: identity.permissions,
             createdAt: o.createdAt,

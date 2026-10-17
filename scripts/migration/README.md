@@ -1320,6 +1320,26 @@ dry run; `--apply` commits. It refuses to run with neither `DATABASE_URL` nor `P
 
 Rollback: see the table above.
 
+## Detail — Organization icons pointing at an image in object storage (script `0047`, drizzle `0099`)
+
+**Not a runbook.** Drizzle `0097` stored an uploaded organization logo as `image:<version>`, its
+bytes in the `orgs` bucket. `0099` renames `organizations.logo` to `icon`, whose grammar
+(`lucide:<name>`, `emoji:<one emoji>`, `data:image/webp;base64,<…>`) holds an image inline; an
+`emoji:` value stays valid, but the platform no longer reads an `image:` pointer nor the bucket.
+Only a database that applied `0097` before `0099` holds one (staging): production never had the
+column, so the script has nothing to do there.
+
+Run it after `0099` is applied (it refuses otherwise), with the platform's env loaded, since the
+bucket is its storage (`S3_BUCKET`, else `FS_STORAGE_PATH`). The dry run prints the two counts:
+organizations whose `icon` reads `image:`, objects in the `orgs` bucket. `--apply` sets those icons
+to NULL (the organization renders its initial again), `updated_at` bumped, in one transaction, then
+deletes every object of the bucket, and exits 1 unless both counts read 0 after. A second run finds
+nothing; one that failed after the commit deletes the objects left.
+`set -a && . ./.env && set +a && bun scripts/migration/0047-org-icon-images.ts` is the dry run;
+`--apply` commits. It refuses to run with neither `DATABASE_URL` nor `PGLITE_DATA_DIR` set.
+
+Rollback: none for the bytes. `pg_dump` and a copy of the bucket first if an image must survive.
+
 ## Log
 
 | #    | date                | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |

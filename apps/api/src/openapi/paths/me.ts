@@ -2,7 +2,7 @@
 
 import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { ORG_LOGO_PROPERTY } from "../schemas.ts";
+import { APPEARANCE_PROPERTIES } from "../schemas.ts";
 import {
   agentPackageIdParam,
   connectionActionsSchema,
@@ -140,12 +140,12 @@ export const mePaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["id", "name", "slug", "logo", "role", "createdAt"],
+                      required: ["id", "name", "slug", "icon", "color", "role", "createdAt"],
                       properties: {
                         id: { type: "string" },
                         name: { type: "string" },
                         slug: { type: "string" },
-                        logo: ORG_LOGO_PROPERTY,
+                        ...APPEARANCE_PROPERTIES,
                         role: {
                           type: "string",
                           enum: ["owner", "admin", "member", "guest", "end_user"],
@@ -173,7 +173,8 @@ export const mePaths = {
                     id: "org_abc123",
                     name: "Acme Corp",
                     slug: "acme",
-                    logo: null,
+                    icon: null,
+                    color: null,
                     role: "owner",
                     permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
