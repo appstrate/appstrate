@@ -83,14 +83,14 @@ export async function isPlacedElsewhere(
 }
 
 /**
- * Re-home a package — the ONE reconciliation, called by everything that
- * rewrites `packages.home_space_id`.
+ * What a home MOVE (`PUT /api/packages/{scope}/{name}/home`) does to the
+ * placement it leaves.
  *
  * Every space holding a row keeps it, and the row keeps placing the package
  * there: nothing to write. The one space whose answer is a CHOICE is the home
- * being left (`previousHome` below). The personal-space sweeper
- * (`emptyAndDeletePersonalSpace`, `services/spaces.ts`), which re-homes on
- * nobody's request, has no such choice to make and does not call this.
+ * being left (`previousHome` below). The other writer of `home_space_id`, the
+ * personal-space sweeper (`emptyAndDeletePersonalSpace`, `services/spaces.ts`),
+ * deletes the space it re-homes out of, so it has nothing to reconcile.
  *
  * Runs INSIDE the caller's transaction (`PUT /api/packages/{scope}/{name}/home`):
  * the move and the placement it releases commit together or not at all.

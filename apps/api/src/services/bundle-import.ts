@@ -621,7 +621,7 @@ export async function importBundle(
     await activatePackage(scope, rootParsed.packageId, placeAs ? { placeAs } : undefined);
     rootActive = true;
   } catch (err) {
-    // An unreachable or unofferable root is what a caller has to diagnose, and
+    // An unreachable or unplaceable root is what a caller has to diagnose, and
     // the response only says `false`. WARN, carrying the refusal's own message:
     // a bundle that imported its packages and then failed to place its root is
     // an operator-visible outcome, not a debugging detail.

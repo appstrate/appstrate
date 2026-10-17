@@ -22,6 +22,7 @@ import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle
 import {
   activatePackage,
   activatePackageWithin,
+  assertHasPublishedVersion,
   assertMcpServerActivatable,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
@@ -446,8 +447,8 @@ export const packageHomeSpaceSchema = z
   .strict();
 
 /**
- * Body of `POST /api/packages/{scope}/{name}/shares` — WHO the package is
- * offered to (RBAC spec §6.10).
+ * Body of `POST /api/packages/{scope}/{name}/shares` — WHERE the package is
+ * placed outside its home (RBAC spec §6.10).
  *
  * Two kinds, and a person is not a space: a `user` target is resolved
  * server-side to that member's personal space, so the sharer never handles
@@ -1038,7 +1039,7 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     const spaceId = c.get("spaceId");
     const itemId = getItemId(c);
 
-    // Space-level visibility: offered here, homed here, or a system package.
+    // Space-level visibility: placed here, homed here, or a system package.
     if (!(await isPackageReadableInSpace(spaceId, itemId))) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
@@ -1576,7 +1577,7 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  * Two gates that answer different questions, both required:
  *
  * - `isPackageReadableInSpace` is VISIBILITY: "is this a system package,
- *   offered to THIS space, or homed here?" (it also excludes ephemeral
+ *   placed in THIS space, or homed here?" (it also excludes ephemeral
  *   shadows). It says nothing about what the caller is ALLOWED to do — a
  *   credential with `scopes: []` passes it. It is not an authorization.
  * - `requirePackageReadPermission` is AUTHORIZATION: the resolved row's
@@ -2243,10 +2244,12 @@ export function createPackagesRouter() {
 
   // --- Sharing: a package's AUDIENCE (RBAC spec §6.10) ---
   //
-  // All three routes — place, list, withdraw — are authorized by `<type>:share`
-  // in the package's HOME space, the same authority helper the write routes
-  // use, so they have no route-level permission guard either. `share` is in no
-  // API key's allowlist, so all three are session-borne in effect without a
+  // Place and list are authorized by `<type>:share` in the package's HOME
+  // space, the same authority helper the write routes use, so they have no
+  // route-level permission guard either. Withdraw accepts EITHER side: that
+  // home authority, or the target space's deactivation grant
+  // (`assertPlacementRemovalAccess`, below). `share` is in no API key's
+  // allowlist, so placing and listing are session-borne in effect without a
   // transport check of their own.
   //
   // There is no ACCEPT route: switching on a placement that landed off is
@@ -2272,7 +2275,15 @@ export function createPackagesRouter() {
       await makePermissionGuard("members:read")(c, async () => {});
       const membership = await getOrgMember(orgId, target.userId);
       if (!membership) throw notFound(`User '${target.userId}' not found in this organization`);
-      const space = await ensurePersonalSpaceFor(orgId, target.userId);
+      // A refused share provisions nothing. With no personal space yet the
+      // target cannot be the home, so the one refusal `placePackage` could
+      // still answer after the space exists is `package_has_no_version`:
+      // asked first, through the same function, before the space is created.
+      let space = await findPersonalSpace(orgId, target.userId);
+      if (!space) {
+        await assertHasPublishedVersion(packageId);
+        space = await ensurePersonalSpaceFor(orgId, target.userId);
+      }
       spaceId = space.id;
       recipientUserId = target.userId;
     } else {
@@ -2934,7 +2945,7 @@ export function createPackagesRouter() {
     const spaceId = c.get("spaceId");
     const versionSpec = c.req.param("version")!;
 
-    // Visibility first — "system package, offered to THIS space, or homed
+    // Visibility first — "system package, placed in THIS space, or homed
     // here", the same gate the rest of the package read surface applies.
     // Without it this route served the artifact bytes of packages that are
     // merely owned by the org and placed nowhere the caller can reach.

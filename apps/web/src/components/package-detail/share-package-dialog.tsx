@@ -40,7 +40,7 @@ import { memberLabel } from "../../lib/members";
 import { toastError } from "../../lib/mutation-error";
 import { TextSkeleton } from "../loading-skeletons";
 
-/** The subject of one offer, as the picker encodes it. */
+/** The subject of one share, as the picker encodes it. */
 type ShareTarget = { kind: "user"; userId: string } | { kind: "space"; spaceId: string };
 
 /** One `<SelectItem>` value carrying both halves of a target; the prefix keeps a value from being read as the other kind. */
@@ -105,22 +105,22 @@ export function SharePackageDialog({
   const home = useSpaceGrant(homeSpaceId);
   const { switchSpace } = useSpaceSwitcher();
   const [target, setTarget] = useState("");
-  /** The offer the server refused for want of a version, kept to replay it. */
+  /** The share the server refused for want of a version, kept to replay it. */
   const [needsVersion, setNeedsVersion] = useState<ShareTarget | null>(null);
 
-  /** Already-offered subjects, so the picker does not propose a no-op. */
-  const offered = useMemo(() => new Set((shares ?? []).map(shareTargetHandle)), [shares]);
+  /** Subjects already holding a placement, so the picker does not propose a no-op. */
+  const placed = useMemo(() => new Set((shares ?? []).map(shareTargetHandle)), [shares]);
 
   // The home's OWNER is a no-op target too, but a personal space's owner is not named on the wire,
-  // so the picker may offer them; the `409 share_target_is_home` branch below says so.
-  const members = (org?.members ?? []).filter((member) => !offered.has(member.userId));
+  // so the picker lists them; the `409 share_target_is_home` branch below says so.
+  const members = (org?.members ?? []).filter((member) => !placed.has(member.userId));
   // Neither the package's home (already has it) nor the caller's own personal space (reached by activating).
   const destinations = (spaces ?? []).filter(
     (candidate) =>
       !candidate.personal &&
       candidate.id !== homeSpaceId &&
       candidate.access === "member" &&
-      !offered.has(candidate.id),
+      !placed.has(candidate.id),
   );
 
   const selected = parseTargetValue(target);
@@ -134,9 +134,9 @@ export function SharePackageDialog({
     onClose();
   };
 
-  const submit = (offer: ShareTarget) =>
+  const submit = (subject: ShareTarget) =>
     share.mutate(
-      { params: { path: splitPackageRef(packageId) }, body: { target: offer } },
+      { params: { path: splitPackageRef(packageId) }, body: { target: subject } },
       {
         onSuccess: () => {
           toast.success(t("packages.shareDone"));
@@ -146,7 +146,7 @@ export function SharePackageDialog({
         onError: (error) => {
           // A missing step, performed by the next panel; every other refusal is a toast.
           if (error instanceof ApiError && error.code === "package_has_no_version") {
-            setNeedsVersion(offer);
+            setNeedsVersion(subject);
             return;
           }
           // The picker cannot always rule this target out beforehand (another member's personal space is unknown to it).
@@ -159,15 +159,15 @@ export function SharePackageDialog({
       },
     );
 
-  /** Publish the draft, then replay the refused offer; the server never publishes on its own (freezing a working copy is the author's call). */
+  /** Publish the draft, then replay the refused share; the server never publishes on its own (freezing a working copy is the author's call). */
   const publishAndShare = async () => {
-    const offer = needsVersion;
-    if (!offer) return;
+    const subject = needsVersion;
+    if (!subject) return;
     try {
       const created = await publish.mutateAsync({});
       toast.success(t("packages.sharePublished", { version: created.version }));
       setNeedsVersion(null);
-      submit(offer);
+      submit(subject);
     } catch (error) {
       toastError(error);
     }
@@ -237,7 +237,7 @@ export function SharePackageDialog({
               ? t("packages.shareSpaceHint")
               : t("packages.shareUseHint")}
         </p>
-        {/* Said BEFORE the offer: integrations are judged where the run starts, so a recipient without them gets an unexplained `integration_not_active`. */}
+        {/* Said BEFORE the share: integrations are judged where the run starts, so a recipient without them gets an unexplained `integration_not_active`. */}
         {declaredIntegrations.length > 0 && (
           <p className="text-muted-foreground text-sm">
             {t("packages.shareIntegrationsHint", {

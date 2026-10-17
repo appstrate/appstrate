@@ -20579,7 +20579,7 @@
         "operationId": "sharePackage",
         "tags": ["Packages"],
         "summary": "Share a package with a person or a space",
-        "description": "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{spaceId}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{spaceId}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.",
+        "description": "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{spaceId}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{spaceId}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -32625,7 +32625,7 @@
           },
           "home_shareable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "has_unarchived_changes": {
             "type": "boolean",
@@ -33652,7 +33652,7 @@
           },
           "home_shareable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "createdAt": {
             "type": "string",
@@ -33750,7 +33750,7 @@
           },
           "home_shareable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "createdAt": {
             "type": "string",
@@ -33874,7 +33874,7 @@
           },
           "home_shareable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "agents": {
             "type": "array",
@@ -35209,7 +35209,7 @@
             },
             "home_shareable": {
               "type": "boolean",
-              "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+              "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
             },
             "published": {
               "type": "boolean",
@@ -35217,7 +35217,7 @@
             },
             "activation": {
               "type": "array",
-              "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the offer; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
+              "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
               "items": {
                 "type": "object",
                 "required": ["spaceId", "activate", "deactivate"],
@@ -35286,7 +35286,7 @@
       },
       "ShareTarget": {
         "type": "object",
-        "description": "Who a package is offered to. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
+        "description": "Where a package is placed outside its home. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
         "required": ["kind"],
         "oneOf": [
           {
@@ -35415,7 +35415,7 @@
           },
           "home_shareable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "read_space_ids": {
             "type": "array",

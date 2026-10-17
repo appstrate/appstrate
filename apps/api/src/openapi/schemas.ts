@@ -109,7 +109,7 @@ const PACKAGE_HOME_PROPERTIES = {
   home_shareable: {
     type: "boolean",
     description:
-      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
+      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
   },
 } as const;
 
@@ -3013,7 +3013,7 @@ export const schemas = {
         activation: {
           type: "array",
           description:
-            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the offer; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
+            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
           items: {
             type: "object",
             required: ["spaceId", "activate", "deactivate"],
@@ -3077,7 +3077,7 @@ export const schemas = {
   ShareTarget: {
     type: "object",
     description:
-      "Who a package is offered to. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
+      "Where a package is placed outside its home. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
     required: ["kind"],
     oneOf: [
       {

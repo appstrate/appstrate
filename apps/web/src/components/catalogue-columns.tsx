@@ -126,7 +126,7 @@ export function useCatalogueActionsColumn({
   return rowActionsColumn((item) => (
     <CatalogueRowMenu
       item={item}
-      // A system package has no home to move and no audience to offer.
+      // A system package has no home to move and no audience to share with.
       deeds={deedsOf(item) ?? NO_DEEDS}
       spaceNameOf={spaceNameOf}
       currentSpaceId={currentSpaceId}

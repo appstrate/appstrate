@@ -31,7 +31,7 @@ import {
 import { conflict, forbidden, notFound, parseBody } from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
-import type { Tx } from "../lib/db-helpers.ts";
+import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
@@ -227,18 +227,29 @@ export async function placePackage(
       "This package already lives in that space — sharing it there would place it in itself.",
     );
   }
-  if ((await getLatestVersionId(pkg.id, tx)) === null) {
-    throw conflict(
-      "package_has_no_version",
-      `Package '${pkg.id}' has no published version — publish one first, since a package runs its latest published version outside the space that owns it.`,
-    );
-  }
+  await assertHasPublishedVersion(pkg.id, tx);
   const [row] = await tx
     .insert(spacePackages)
     .values({ spaceId, packageId: pkg.id, enabled: params.enabled, sharedBy: params.sharedBy })
     .onConflictDoNothing()
     .returning();
   return row ?? null;
+}
+
+/**
+ * 409 `package_has_no_version` unless the package has a published version —
+ * {@link placePackage}'s third precondition, exported so a caller may ask it
+ * BEFORE a side effect the refusal must not leave behind (the share route
+ * provisioning a recipient's personal space). `placePackage` still asks it
+ * inside its transaction, and that answer is the authoritative one.
+ */
+export async function assertHasPublishedVersion(packageId: string, executor: DbOrTx = db) {
+  if ((await getLatestVersionId(packageId, executor)) === null) {
+    throw conflict(
+      "package_has_no_version",
+      `Package '${packageId}' has no published version — publish one first, since a package runs its latest published version outside the space that owns it.`,
+    );
+  }
 }
 
 /**
