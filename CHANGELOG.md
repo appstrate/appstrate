@@ -122,6 +122,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `api_call` integration the exported agent declares, as a local bundle
     read from disk already did.
 
+### Fixed
+
+- **A link to a catalogue sheet opens it from the package id alone** (#2013).
+  `/catalogue?package=<id>[&version=…]`, or a link naming the wrong kind,
+  lands on the package's own kind instead of closing the sheet; a package named
+  under the shared reading opens on Découvrir. Interface only.
+- **A link to an object that does not exist is announced** (#2013). A dialog
+  address naming an object its list does not hold (deleted, mistyped, out of
+  reach) shows « Élément introuvable ou inaccessible » instead of closing in
+  silence, on every dialog that has an address. An object that leaves the list
+  while its dialog is open (renamed, deleted) still closes silently.
+
 ## [1.0.0-beta.68] - 2026-10-15
 
 ### Operators
