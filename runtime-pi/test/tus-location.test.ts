@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from "bun:test";
 import { tusAdapter } from "../mcp/upload-adapters/tus.ts";
-import type { AdapterContext } from "../mcp/upload-adapters/types.ts";
+import { UploadError, type AdapterContext } from "../mcp/upload-adapters/types.ts";
 
 async function sessionUrl(target: string, location: string): Promise<string> {
   const ctx = {
@@ -69,5 +69,26 @@ describe("tus Location resolution", () => {
         /tus: Location header holds '\{\{'/,
       );
     }
+  });
+
+  it("refuses a non-http(s) absolute Location", async () => {
+    for (const location of ["javascript:alert(1)", "file:///etc/passwd"]) {
+      await expect(sessionUrl("https://h.example/upload", location)).rejects.toThrow(
+        /must be an http\(s\) URL/,
+      );
+    }
+  });
+
+  it("refuses an unparsable Location as an UploadError", async () => {
+    for (const target of ["https://h.example/upload", "https://h.example/{{folder}}/upload"]) {
+      const err = await sessionUrl(target, "http://[bad").catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(UploadError);
+    }
+  });
+
+  it("resolves backslash and protocol-relative Locations per WHATWG under a templated path", async () => {
+    const target = "https://h.example/{{folder}}/upload";
+    expect(await sessionUrl(target, "\\files\\abc")).toBe("https://h.example/files/abc");
+    expect(await sessionUrl(target, "//other.example/x")).toBe("https://other.example/x");
   });
 });

@@ -32,7 +32,6 @@
  */
 
 import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
-import { apiCallTargetJsonSchema } from "@appstrate/afps-runtime/resolvers";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { piToolResultOrThrow, type RuntimeEventEmitter } from "@appstrate/runner-pi";
 import { McpApiUploadResolver } from "./api-upload-resolver.ts";
@@ -102,20 +101,9 @@ function makeExtension(
           "the agent never holds credentials. Returns the upstream's final response (file ID, " +
           "ETag, etc.) plus a SHA-256 of the bytes uploaded so post-upload verification is " +
           "possible.",
+      // Non-empty `protocols` guarantees the advertised schema is an object.
       parameters: Type.Unsafe<Record<string, unknown>>(
-        (opts.tool.inputSchema as Record<string, unknown>) ?? {
-          type: "object",
-          additionalProperties: false,
-          required: ["target", "fromFile", "uploadProtocol"],
-          properties: {
-            target: apiCallTargetJsonSchema,
-            fromFile: { type: "string" },
-            uploadProtocol: { type: "string", enum: protocols },
-            metadata: { type: "object", additionalProperties: true },
-            sourceMimeType: { type: "string" },
-            partSizeBytes: { type: "integer", minimum: 1 },
-          },
-        },
+        opts.tool.inputSchema as Record<string, unknown>,
       ),
       async execute(toolCallId, params, signal) {
         const args = (params ?? {}) as {

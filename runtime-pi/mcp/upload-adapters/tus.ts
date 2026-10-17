@@ -38,7 +38,6 @@ import {
 
 const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
 const TUS_VERSION = "1.0.0";
-const ABSOLUTE_URL = /^[a-z][a-z\d+.-]*:/i;
 
 interface TusSessionState {
   sessionUrl: string;
@@ -228,16 +227,27 @@ function encodeTusMetadata(metadata: Record<string, unknown> | undefined): strin
  * placeholder may carry a path, a path-relative reference depends on a templated path.
  */
 function resolveLocation(target: string, location: string, res: AdapterApiCallResponse): string {
-  if (ABSOLUTE_URL.test(location)) return new URL(location).toString();
-  if (placeholderKeys(target).length === 0) return new URL(location, target).toString();
-  const origin = urlTemplateAuthority(target);
-  if (/^[/\\]/.test(location) && placeholderKeys(origin).length === 0) {
-    return new URL(location, origin).toString();
+  const refuse = (reason: string): never => {
+    throw new UploadError(`tus: ${reason}`, res.status, res.headers, res.body);
+  };
+  const resolve = (base?: string): string => {
+    try {
+      return new URL(location, base).toString();
+    } catch {
+      return refuse(`Location '${location}' is not a valid URL`);
+    }
+  };
+  if (URL.canParse(location)) {
+    const { protocol } = new URL(location);
+    if (protocol !== "http:" && protocol !== "https:") {
+      refuse(`Location '${location}' must be an http(s) URL`);
+    }
+    return resolve();
   }
-  throw new UploadError(
-    `tus: relative Location '${location}' cannot be resolved against target '${target}' before its {{field}} placeholders are rendered`,
-    res.status,
-    res.headers,
-    res.body,
+  if (placeholderKeys(target).length === 0) return resolve(target);
+  const origin = urlTemplateAuthority(target);
+  if (/^[/\\]/.test(location) && placeholderKeys(origin).length === 0) return resolve(origin);
+  return refuse(
+    `relative Location '${location}' cannot be resolved against target '${target}' before its {{field}} placeholders are rendered`,
   );
 }
