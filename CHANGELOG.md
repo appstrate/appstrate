@@ -155,13 +155,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Garmin inReach (MapShare) — an agent reads where an inReach is (#2060).**
   `@appstrate/garmin-mapshare@1.0.0` reads the owner's Garmin Explore MapShare
-  KML feed (`https://explore.garmin.com/feed/share/<map link name>`) through
-  `api_call`, with one `api_key` auth: the map link name, which labels the
-  connection, and an optional MapShare password sent as HTTP Basic with an
-  empty username (never the Garmin account password). Its `INTEGRATION.md`
-  gives the last point or a `d1`/`d2` UTC range, the KML fields and their
-  units, and what an empty `200` (wrong name, MapShare off, nothing visible)
-  and a `401` (password) mean. The position is the last tracking point, not a
+  KML feed (`https://share.garmin.com/feed/share/<map link name>`, the host
+  that serves every Garmin region) through `api_call`, with one `api_key`
+  auth: the map link name, which labels the connection, and an optional
+  MapShare password sent as HTTP Basic with an empty username (never the
+  Garmin account password). Its `INTEGRATION.md` gives the last point or a
+  `d1`/`d2` UTC range written to a workspace file (`responseMode.toFile`, a
+  point is about 2.3 KB of KML), which `Placemark`s are points (not the
+  trailing track `LineString`), the KML fields and their units, `Time UTC`
+  for age and local display, and what an empty body (wrong name, MapShare
+  off, nothing shared yet), a KML without points (nothing in range) and a `401` (password) mean.
+  The position is the last tracking point at the device's interval, not a
   live fix: no on-demand locate, no messaging, and messages sent in SOS mode
   are absent from the feed.
 

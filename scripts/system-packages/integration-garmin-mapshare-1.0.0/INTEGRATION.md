@@ -1,48 +1,57 @@
 Garmin Explore publishes the owner's inReach track as a KML feed (MapShare).
 Read it with `api_call` GET on
-`https://explore.garmin.com/feed/share/{{mapshare_id}}` (lowercase path):
-`{{mapshare_id}}` is substituted from the connection.
+`https://share.garmin.com/feed/share/{{mapshare_id}}` (keep the path
+lowercase): `{{mapshare_id}}` is substituted from the connection.
 
-#### 1. Pick the range
+#### 1. Call
 
 - No query parameter: the most recent point only.
-- History: `?d1=YYYY-MM-DDTHH:MMz&d2=YYYY-MM-DDTHH:MMz`, in UTC, lowercase `z`,
-  no seconds. Example, the 17 October 2026 from 06:00 to 18:00 UTC:
-  `?d1=2026-10-17T06:00z&d2=2026-10-17T18:00z`.
-- Keep ranges short (a day or two): a large answer is spilled to a workspace
-  file.
+- History: `?d1=…&d2=…`, both in UTC, e.g. 17 October 2026, 06:00 to 18:00
+  UTC: `?d1=2026-10-17T06:00z&d2=2026-10-17T18:00z` (`Z`, seconds or a
+  date alone also work). "Today" means the user's local day, converted to
+  UTC.
+- Always pass `responseMode: { "toFile": "garmin/<name>.kml" }`: a point
+  weighs about 2.3 KB of KML, so a history would flood the context. The
+  result is `{ "kind": "file", "path", "size", "status" }`: read the KML from
+  `path`.
 
 #### 2. Read the answer
 
-- `200` with KML: one `Placemark` per point. Its fields are in `ExtendedData`,
-  as `<Data name="…"><value>…</value></Data>`:
-  - `Time UTC`: US format `M/D/YYYY h:mm:ss AM/PM`, in UTC.
+- `size: 0` (empty body): the map link name is wrong, MapShare is disabled,
+  or no point has been shared on the map yet. Say so; never invent a
+  position.
+- Points are the `Placemark`s holding a `Point`. The last `Placemark` holds a
+  `LineString` (the drawn track) and no point data: ignore it. A call without
+  parameters therefore returns two `Placemark`s.
+- A valid KML with no `Point` Placemark: no visible point in that range. Not
+  an error.
+- A point's fields are in `ExtendedData`, as
+  `<Data name="…"><value>…</value></Data>`:
+  - `Time UTC`: US format `M/D/YYYY h:mm:ss AM/PM`, in UTC. Use it, not
+    `Time` (owner's zone, unlabelled).
   - `Latitude`, `Longitude`: decimal degrees.
   - `Elevation` (`… m from MSL`), `Velocity` (`… km/h`), `Course`
     (`… ° True`): strip the unit before using the number.
-  - `Valid GPS Fix` (`True` / `False`), `In Emergency`, `Event` (tracking,
-    message…), `Text` (the message, if any), `Map Display Name`,
-    `Device Type`.
-- `200` with an EMPTY body: the map link name is wrong, MapShare is disabled,
-  or nothing in the range is visible under the owner's MapShare settings. Say
-  so; never invent a position.
-- `401`: the MapShare password is missing or wrong. Do not retry and do not
-  loop: stop and report that the Garmin MapShare connection must be fixed.
+  - `Valid GPS Fix` (`True` / `False`), `In Emergency`, `Event`, `Text` (the
+    message, if any).
+- `401`: the MapShare password is missing or wrong. Do not retry: report that
+  the Garmin MapShare connection must be fixed.
 
 #### Reporting
 
-- Always give the point's UTC time and its age ("il y a 2 h") with the
-  position.
+- Give each point's time in the user's local time, and its age computed from
+  `Time UTC` ("il y a 2 h").
+- Never present a position as live. Points arrive at the interval set on the
+  device (often 10 min; 2 min possible on Premium; billed per point on
+  Essential), only while tracking is on: the latest point may be days or
+  months old.
 - Say when `Valid GPS Fix` is `False`: the position may be wrong.
-- A position is only as fresh as the last tracking point. Tracking must be on
-  in the device, and points come every 10 min (Standard plan) or 2 min
-  (Premium). Never present it as live.
 - Give a map link:
   `https://www.openstreetmap.org/?mlat=<lat>&mlon=<lon>#map=15/<lat>/<lon>`.
 
 #### Limits
 
-- This integration cannot locate the device on demand or send it a message.
+- No on-demand locate, no messaging.
 - Messages sent in SOS mode are absent from the feed: never use it to assess
   an emergency.
 - Do not poll more than once every few minutes.

@@ -7,7 +7,7 @@
   "description": "Reads the owner's Garmin inReach position (last point, history) from their Garmin Explore MapShare feed. Not real time: a point exists only when the device tracked or sent a message. No on-demand locate, and messages sent in SOS mode are absent.",
   "keywords": ["gps", "location", "satellite"],
   "license": "Apache-2.0",
-  "icon": "simple-icons:garmin",
+  "icon": "cib:garmin",
   "source": {
     "kind": "none"
   },
@@ -15,7 +15,7 @@
   "auths": {
     "primary": {
       "type": "api_key",
-      "authorized_uris": ["https://explore.garmin.com/feed/share/**"],
+      "authorized_uris": ["https://share.garmin.com/feed/share/**"],
       "identity_claims": {
         "account_id": "$.mapshare_id"
       },
@@ -26,7 +26,7 @@
             "mapshare_id": {
               "type": "string",
               "title": "Nom du lien MapShare",
-              "description": "La fin de l'adresse MapShare, share.garmin.com/<nom>, affichée dans Garmin Explore (Réglages ou Social › MapShare). MapShare doit être activé.",
+              "description": "La fin de l'adresse MapShare, share.garmin.com/<nom>, affichée dans Garmin Explore (explore.garmin.com), onglet Social › MapShare. MapShare doit être activé.",
               "pattern": "^[^/?#\\s]+$"
             },
             "password": {
