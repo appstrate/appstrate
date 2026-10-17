@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * ONE definition of "PLACED here", stated FOUR times — and the four must agree.
  *
