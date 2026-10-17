@@ -54,8 +54,13 @@ export function usePackageNameColumn(): DataColumn<CardItem> {
             />
           </span>
           {/* One line, where the card gives two: at this density a description
-                is there to tell two neighbours apart, not to be read. */}
-          {item.description && <CellText>{item.description}</CellText>}
+                is there to tell two neighbours apart, not to be read. Without
+                one the identifier does that job, and every row keeps one height. */}
+          {item.description ? (
+            <CellText>{item.description}</CellText>
+          ) : (
+            <CellText mono>{item.id}</CellText>
+          )}
         </div>
       </div>
     ),
