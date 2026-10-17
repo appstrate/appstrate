@@ -136,16 +136,21 @@ interface ModalTargetOptions {
  */
 export type ModalTargetVerdict = "closed" | "pending" | "found" | "vanished" | "unknown";
 
-export function modalTargetVerdict(
+/**
+ * One look at a URL modal's object: its verdict, and the id to remember as the last one
+ * the list held (`lastResolved`). A found id is remembered, a close forgets it, every other
+ * verdict keeps the previous one: a reloading list or an unknown id says nothing new.
+ */
+export function modalTargetStep(
   value: string | null,
   loaded: boolean,
   found: boolean,
   lastResolved: string | null,
-): ModalTargetVerdict {
-  if (value === null) return "closed";
-  if (!loaded) return "pending";
-  if (found) return "found";
-  return value === lastResolved ? "vanished" : "unknown";
+): { verdict: ModalTargetVerdict; lastResolved: string | null } {
+  if (value === null) return { verdict: "closed", lastResolved: null };
+  if (!loaded) return { verdict: "pending", lastResolved };
+  if (found) return { verdict: "found", lastResolved: value };
+  return { verdict: value === lastResolved ? "vanished" : "unknown", lastResolved };
 }
 
 /** One toast however many modals or effect runs report an unknown object. */
@@ -187,13 +192,15 @@ export function useUrlModalTarget<T>(
   const found = target !== undefined;
   const lastResolved = useRef<string | null>(null);
   useEffect(() => {
-    const verdict = modalTargetVerdict(value, loaded, found, lastResolved.current);
-    if (verdict === "found" || verdict === "closed") lastResolved.current = value;
+    const { verdict, lastResolved: next } = modalTargetStep(
+      value,
+      loaded,
+      found,
+      lastResolved.current,
+    );
+    lastResolved.current = next;
     if (verdict === "unknown") {
-      toast.error(i18n.t("error.resourceUnavailable"), {
-        id: UNKNOWN_TARGET_TOAST,
-        description: i18n.t("error.resourceUnavailableHint"),
-      });
+      toast.error(i18n.t("common:error.resourceUnavailable"), { id: UNKNOWN_TARGET_TOAST });
     }
     if (verdict === "unknown" || verdict === "vanished") close();
   }, [value, loaded, found, close]);
