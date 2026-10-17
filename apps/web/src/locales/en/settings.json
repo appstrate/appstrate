@@ -886,6 +886,7 @@
   "integration.connection.statusConnected": "Connected",
   "integration.connection.variables": "Connection variables:",
   "integration.connection.col.owner": "Owner",
+  "integration.connection.filterMine": "My connections",
   "integration.connection.ownerUnknown": "Unknown",
   "integration.connection.defaultPermissions": "Default permissions",
   "integration.connection.col.usage": "Use",

@@ -41,8 +41,6 @@
   "packageTools.search": "Rechercher un outil…",
   "packageTools.noMatch": "Aucun outil ne correspond à votre recherche.",
   "packageTools.empty": "Aucun outil déclaré.",
-  "detail.sharingShared": "Partagée",
-  "detail.sharingPrivate": "Personnelle",
   "dashboard.recentAgents": "Agents récents",
   "dashboard.recentRuns": "Derniers runs",
   "dashboard.upcomingSchedules": "Planifications à venir",

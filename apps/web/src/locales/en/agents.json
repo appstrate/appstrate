@@ -41,8 +41,6 @@
   "packageTools.search": "Search tools…",
   "packageTools.noMatch": "No tools match your search.",
   "packageTools.empty": "No tools declared.",
-  "detail.sharingShared": "Shared",
-  "detail.sharingPrivate": "Personal",
   "dashboard.recentAgents": "Recent agents",
   "dashboard.recentRuns": "Recent runs",
   "dashboard.upcomingSchedules": "Upcoming schedules",
