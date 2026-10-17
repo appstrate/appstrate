@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
-import { Switch } from "@appstrate/ui/components/switch";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import type { DataColumn } from "../data-table";
 import { rowActionsColumn } from "../row-actions-column";
 import { TableRowActions } from "../table-row-actions";
@@ -10,7 +10,13 @@ import { CellText } from "../table-cells";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import type { IntegrationConnection, IntegrationPin } from "@appstrate/shared-types";
 import { connectionOptionLabel, unavailableConnectionIds } from "../../lib/connection-set";
-import { additionsRefusal, ADDITIONS_REFUSAL_KEYS } from "../../lib/admin-pin-payload";
+import {
+  additionsRefusal,
+  ADDITIONS_REFUSAL_KEYS,
+  PIN_MODE_KEYS,
+  PIN_MODES,
+  pinMode,
+} from "../../lib/admin-pin-payload";
 
 export function usePinColumns({
   agentName,
@@ -19,8 +25,8 @@ export function usePinColumns({
   isDeleting,
   onDelete,
   enforcedDefault,
-  isToggling,
-  onToggleAdditions,
+  isChangingMode,
+  onChangeMode,
 }: {
   agentName: (pin: IntegrationPin) => string;
   /** The connections shared into this space: the ones a pin can name. */
@@ -30,12 +36,12 @@ export function usePinColumns({
   /** Only the row being deleted shows the spinner. */
   isDeleting: (pin: IntegrationPin) => boolean;
   onDelete: (pin: IntegrationPin) => void;
-  /** The space enforces a default for this integration: no pin may open to additions. */
+  /** The space enforces a default for this integration: every pin stays « exact ». */
   enforcedDefault: boolean;
   /** Only the row being rewritten waits. */
-  isToggling: (pin: IntegrationPin) => boolean;
-  /** Asks to rewrite the pin with the flag flipped, its imposed set as stored. */
-  onToggleAdditions: (pin: IntegrationPin) => void;
+  isChangingMode: (pin: IntegrationPin) => boolean;
+  /** Asks to rewrite the pin in its other mode, its imposed set as stored. */
+  onChangeMode: (pin: IntegrationPin) => void;
 }): DataColumn<IntegrationPin>[] {
   const { t } = useTranslation(["settings", "agents"]);
 
@@ -81,12 +87,13 @@ export function usePinColumns({
       },
     },
     {
-      id: "additions",
-      header: t("integration.admin.pinManagement.colAdditions"),
+      id: "mode",
+      header: t("integration.admin.pinManagement.colMode"),
       control: true,
-      width: 120,
+      width: 240,
+      elastic: true,
       cell: (pin) => {
-        // Until the connections load, a stored member cannot be told unavailable: the switch waits.
+        // Until the connections load, a stored member cannot be told unavailable: the select waits.
         const unavailableIds = connections
           ? unavailableConnectionIds(
               pin.connection_ids,
@@ -99,27 +106,23 @@ export function usePinColumns({
           unavailableIds,
           agentInactive: !pin.agent_active,
         });
+        const mode = pinMode(pin);
         return (
           // `relative z-10`: sit above the row link's overlay or the row swallows the click (see `data-table.tsx`).
-          <span className="relative z-10 flex min-w-0 items-center gap-1.5">
+          <span className="relative z-10 flex min-w-0">
             <DisabledReasonTooltip reason={refusal ? t(ADDITIONS_REFUSAL_KEYS[refusal]) : null}>
-              <Switch
-                checked={pin.allow_additional_connections}
-                disabled={refusal !== null || connections === undefined || isToggling(pin)}
-                aria-label={t("integration.admin.pinManagement.allowAdditionsFor", {
-                  agent: agentName(pin),
-                })}
-                onCheckedChange={() => onToggleAdditions(pin)}
-                data-testid={`pin-additions-${pin.agent_package_id}`}
+              <OptionSelect
+                value={mode}
+                onValueChange={(next) => {
+                  if (next !== mode) onChangeMode(pin);
+                }}
+                options={PIN_MODES.map((value) => ({ value, label: t(PIN_MODE_KEYS[value]) }))}
+                disabled={refusal !== null || connections === undefined || isChangingMode(pin)}
+                className="h-7 w-full text-xs"
+                aria-label={t("integration.admin.pinManagement.modeFor", { agent: agentName(pin) })}
+                data-testid={`pin-mode-${pin.agent_package_id}`}
               />
             </DisabledReasonTooltip>
-            <span className="text-muted-foreground text-[0.7rem]">
-              {t(
-                pin.allow_additional_connections
-                  ? "integration.admin.pinManagement.additionsOpen"
-                  : "integration.admin.pinManagement.additionsClosed",
-              )}
-            </span>
           </span>
         );
       },

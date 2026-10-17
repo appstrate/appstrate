@@ -4,10 +4,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
-import { Switch } from "@appstrate/ui/components/switch";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { SettingsHeading } from "../settings/settings-heading";
-import { SettingRow } from "../settings/setting-row";
 import { ConfirmModal } from "../confirm-modal";
 import { DataTable } from "../data-table";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -27,16 +25,21 @@ import {
   additionsRefusal,
   ADDITIONS_REFUSAL_KEYS,
   adminPinBody,
-  toggledAdditionsBody,
+  PIN_MODE_HELP_KEYS,
+  PIN_MODE_KEYS,
+  PIN_MODES,
+  pinMode,
+  switchedModeBody,
+  type PinMode,
 } from "../../lib/admin-pin-payload";
 import { ConnectionSetPicker } from "../integration-connect/connection-choice-menu";
 import { connectionSetOption } from "../integration-connect/connection-set-option";
 
 /**
- * Per-agent pins: one per (agent, integration), holding the whole imposed SET and whether runs
- * may add to it, both replaced on write. With an org default in place, these are per-agent
- * EXCEPTIONS. An empty set pins "no connection"; whether that blocks a run is the running
- * version's `required` to say.
+ * Per-agent pins: one per (agent, integration), holding the whole imposed SET and its mode (runs
+ * use exactly that set, or that set plus the user's connections), both replaced on write. With an
+ * org default in place, these are per-agent EXCEPTIONS. An empty set pins "no connection"; whether
+ * that blocks a run is the running version's `required` to say.
  */
 export function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings", "agents"]);
@@ -45,15 +48,15 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
   const { data: consumingAgents, isLoading: agentsLoading } =
     useAgentsConsumingIntegration(packageId);
   const deletePin = useDeleteIntegrationPin();
-  const togglePin = useUpsertIntegrationPin();
-  // An enforced default is always closed: no pin of this integration may open while it holds.
+  const changeMode = useUpsertIntegrationPin();
+  // An enforced default accepts only « exact »: no pin of this integration may leave it meanwhile.
   const { data: orgDefault } = useIntegrationOrgDefault(packageId);
   const enforcedDefault = orgDefault?.enforce === true;
 
   const [adding, setAdding] = useState(false);
   const [toDelete, setToDelete] = useState<IntegrationPin | null>(null);
-  // Every flip of the switch clears the members' own choices for the agent, so it is confirmed.
-  const [toToggle, setToToggle] = useState<IntegrationPin | null>(null);
+  // Every change of mode clears the members' own choices for the agent, so it is confirmed.
+  const [toChange, setToChange] = useState<IntegrationPin | null>(null);
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_here);
 
@@ -68,10 +71,10 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
     isDeleting: (pin) => deletePin.isPending && toDelete?.agent_package_id === pin.agent_package_id,
     onDelete: setToDelete,
     enforcedDefault,
-    isToggling: (pin) =>
-      togglePin.isPending &&
-      togglePin.variables?.params.path.agentPackageId === pin.agent_package_id,
-    onToggleAdditions: setToToggle,
+    isChangingMode: (pin) =>
+      changeMode.isPending &&
+      changeMode.variables?.params.path.agentPackageId === pin.agent_package_id,
+    onChangeMode: setToChange,
   });
 
   // Only include agents not already pinned.
@@ -160,19 +163,19 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
         )}
       </ConfirmModal>
 
-      {toToggle && (
-        <AdditionsToggleConfirm
-          pin={toToggle}
-          agent={agentDisplayName(toToggle.agent_package_id)}
-          isPending={togglePin.isPending}
-          onClose={() => setToToggle(null)}
+      {toChange && (
+        <PinModeConfirm
+          pin={toChange}
+          agent={agentDisplayName(toChange.agent_package_id)}
+          isPending={changeMode.isPending}
+          onClose={() => setToChange(null)}
           onConfirm={() =>
-            togglePin.mutate(
+            changeMode.mutate(
               {
-                params: { path: { packageId, agentPackageId: toToggle.agent_package_id } },
-                body: toggledAdditionsBody(toToggle),
+                params: { path: { packageId, agentPackageId: toChange.agent_package_id } },
+                body: switchedModeBody(toChange),
               },
-              { onSuccess: () => setToToggle(null) },
+              { onSuccess: () => setToChange(null) },
             )
           }
         />
@@ -182,12 +185,12 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
 }
 
 /**
- * Flipping a pin's additions switch: the server deletes the members' own choices for the agent
- * whenever the pin is closed before or after (a member pin never survives under a closed pin),
- * so either way the body says so; opening repeats what a run may then combine, closing that the
- * schedules whose overrides add connections fail at their next run and stay disabled.
+ * Changing a pin's mode: the server deletes the members' own choices for the agent whenever the pin
+ * is « exact » before or after (a member pin never survives under it), so either way the body says
+ * so; moving to « plus » repeats what a run may then combine, moving to « exact » that the schedules
+ * whose overrides add connections fail at their next run and stay disabled.
  */
-export function AdditionsToggleConfirm({
+export function PinModeConfirm({
   pin,
   agent,
   isPending,
@@ -201,32 +204,28 @@ export function AdditionsToggleConfirm({
   onConfirm: () => void;
 }) {
   const { t } = useTranslation("settings");
-  const opening = !pin.allow_additional_connections;
+  const toPlus = pinMode(pin) === "exact";
   return (
     <ConfirmModal
       open
       onClose={onClose}
       onConfirm={onConfirm}
       title={t(
-        opening
-          ? "integration.admin.pinManagement.openAdditionsTitle"
-          : "integration.admin.pinManagement.closeAdditionsTitle",
+        toPlus
+          ? "integration.admin.pinManagement.toPlusTitle"
+          : "integration.admin.pinManagement.toExactTitle",
         { agent },
       )}
       description={t("integration.admin.pinManagement.clearsMemberChoices")}
-      confirmLabel={t(
-        opening
-          ? "integration.admin.pinManagement.openAdditions"
-          : "integration.admin.pinManagement.closeAdditions",
-      )}
+      confirmLabel={t("integration.admin.pinManagement.changeMode")}
       variant="default"
       isPending={isPending}
     >
       <p className="text-muted-foreground text-sm">
         {t(
-          opening
-            ? "integration.admin.pinManagement.allowAdditionsHelp"
-            : "integration.admin.pinManagement.closeAdditionsSchedules",
+          toPlus
+            ? "integration.admin.pinManagement.modePlusHelp"
+            : "integration.admin.pinManagement.toExactSchedules",
         )}
       </p>
     </ConfirmModal>
@@ -234,8 +233,8 @@ export function AdditionsToggleConfirm({
 }
 
 /**
- * Pins one agent to a set of connections, or to none, closed to additions unless the admin opens
- * it (never over none, nor while the space enforces a default); `onDone` closes it.
+ * Pins one agent to a set of connections, or to none, in « exact » mode unless the admin picks
+ * « plus » (never over none, nor while the space enforces a default); `onDone` closes it.
  */
 export function NewPinForm({
   packageId,
@@ -254,15 +253,15 @@ export function NewPinForm({
   const upsertPin = useUpsertIntegrationPin();
   const [newAgent, setNewAgent] = useState("");
   const [newConnectionIds, setNewConnectionIds] = useState<ConnectionSet>(null);
-  const [allowAdditions, setAllowAdditions] = useState(false);
+  const [chosenMode, setChosenMode] = useState<PinMode>("exact");
   // Only shared connections are offered here: none can be unavailable.
   const refusal = additionsRefusal(
     { connection_ids: newConnectionIds, allow_additional_connections: false },
     // The agents offered are the active ones.
     { enforcedDefault, unavailableIds: [], agentInactive: false },
   );
-  // A switch that cannot be on reads off, whatever was flipped before the set emptied.
-  const opened = allowAdditions && refusal === null;
+  // « plus » unavailable reads « exact », whatever was chosen before the set emptied.
+  const mode: PinMode = refusal === null ? chosenMode : "exact";
 
   const onSubmitNewPin = () => {
     if (!newAgent || newConnectionIds === null) return;
@@ -271,7 +270,7 @@ export function NewPinForm({
         params: { path: { packageId, agentPackageId: newAgent } },
         body: adminPinBody({
           connection_ids: newConnectionIds,
-          allow_additional_connections: opened,
+          allow_additional_connections: mode === "plus",
         }),
       },
       { onSuccess: onDone },
@@ -314,38 +313,35 @@ export function NewPinForm({
           />
         </div>
       </div>
-      <SettingRow
-        variant="toggle"
-        label={
-          <Label htmlFor="pin-add-additions" className="cursor-pointer">
-            {t("integration.admin.pinManagement.allowAdditions")}
-          </Label>
-        }
-        description={
-          <>
-            {t("integration.admin.pinManagement.allowAdditionsHelp")}
-            {refusal && (
-              <span className="mt-1 block" data-testid="pin-add-additions-refusal">
-                {t(ADDITIONS_REFUSAL_KEYS[refusal])}
-              </span>
-            )}
-            {/* A closed pin clears the members' own choices for the agent; an open one keeps them. */}
-            {!opened && (
-              <span className="mt-1 block" data-testid="pin-add-clears-choices">
-                {t("integration.admin.pinManagement.clearsMemberChoices")}
-              </span>
-            )}
-          </>
-        }
-      >
-        <Switch
-          id="pin-add-additions"
-          checked={opened}
-          disabled={refusal !== null || upsertPin.isPending}
-          onCheckedChange={(checked) => setAllowAdditions(checked === true)}
-          data-testid="pin-add-additions"
+      <div className="max-w-md">
+        <Label htmlFor="pin-add-mode" className="mb-2 block text-sm">
+          {t("integration.admin.pinManagement.colMode")}
+        </Label>
+        <OptionSelect
+          id="pin-add-mode"
+          value={mode}
+          onValueChange={(value) => setChosenMode(value as PinMode)}
+          disabled={upsertPin.isPending}
+          data-testid="pin-add-mode"
+          options={PIN_MODES.map((value) => ({
+            value,
+            label: t(PIN_MODE_KEYS[value]),
+            disabled: value === "plus" && refusal !== null,
+          }))}
         />
-      </SettingRow>
+        <p className="text-muted-foreground mt-2 text-sm">{t(PIN_MODE_HELP_KEYS[mode])}</p>
+        {refusal && (
+          <p className="text-muted-foreground mt-1 text-xs" data-testid="pin-add-mode-refusal">
+            {t(ADDITIONS_REFUSAL_KEYS[refusal])}
+          </p>
+        )}
+        {/* « exact » clears the members' own choices for the agent; « plus » keeps them. */}
+        {mode === "exact" && (
+          <p className="text-muted-foreground mt-1 text-sm" data-testid="pin-add-clears-choices">
+            {t("integration.admin.pinManagement.clearsMemberChoices")}
+          </p>
+        )}
+      </div>
       <div className="flex gap-2">
         <Button
           size="sm"

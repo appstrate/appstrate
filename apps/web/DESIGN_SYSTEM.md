@@ -260,7 +260,10 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   - the **organisation default** of an integration page (`OrgDefaultSection`): the list alone
     (an empty set is « no default », which its own select says), each tick commits alone;
   - **pins** of an integration page (`NewPinForm`): « Choisir » and « Aucune connexion », no
-    « Hériter » (a pin is the exception, its absence is the delete button), a form value;
+    « Hériter » (a pin is the exception, its absence is the delete button), a form value. Beside
+    it, the pin's mode is a `Select` of two effects, « Exactement ces connexions » (the default)
+    or « Ces connexions, plus celles de l'utilisateur » (`allow_additional_connections`), the same
+    select in the pins table's Mode column, where a change is confirmed;
   - the **identity of a schedule** (`ScheduleActorConnectionChoice`, in Identité, Connexions and
     the creation modal): after a 409 the candidates and « Aucune connexion » when optional, no
     « Hériter » (the server just said the actor's own resolution cannot decide); an optional
@@ -269,10 +272,10 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
     `null` no choice, `[]` none, each tick handed to `onChange`).
   - **An imposed set makes the picker partially locked.** Under an admin pin or an enforced org
     default the imposed connections are shown with a padlock and cannot be unticked; when the admin
-    pin allows additions (`additional_connections_allowed`) the other connections stay tickable
-    and the UI writes the additions only (the imposed ones are never part of an override or a
-    member pin, and `[]` means no addition, not no connection); when it does not, no other
-    connection is offered.
+    pin is in « Ces connexions, plus celles de l'utilisateur » (`additional_connections_allowed`)
+    the other connections stay tickable and the UI writes the additions only (the imposed ones are
+    never part of an override or a member pin, and `[]` means no addition, not no connection); in
+    « Exactement ces connexions », no other connection is offered.
 
   What turns a trigger amber is `gatesRun` (`use-connection-picker.ts`): the server's `run_blocking`
   while nothing is chosen (an unset override included, which inherits the cascade), the pick itself

@@ -3,12 +3,13 @@
 /**
  * An admin's per-agent pins of an integration. "Aucune connexion" pins none — so it is offered even
  * when no connection is shared to pin (in the form that opens behind "Ajouter") — and a stored pin
- * to none reads as such. Whether a pin lets runs add connections: a switch per pin in the table,
- * and one in the new-pin form, closed by default. Neither opens over no imposed connection, nor
- * while the space enforces a default for the integration (the server refuses both); a table switch
- * flips neither way while its stored set names an unavailable connection (the rewrite would 404).
- * A member pin never survives under a closed admin pin, so every flip is confirmed by a dialog
- * saying the members' choices go, and the form says it while its switch is off.
+ * to none reads as such. A pin's mode, named by its effect: « Exactement ces connexions » (the
+ * default) or « Ces connexions, plus celles de l’utilisateur », a select per pin in the table and
+ * one in the new-pin form. « plus » is refused over no imposed connection, and while the space
+ * enforces a default for the integration (the server refuses both); a table select changes neither
+ * way while its stored set names an unavailable connection (the rewrite would 404). A member pin
+ * never survives under an « exact » admin pin, so every change is confirmed by a dialog saying the
+ * members' choices go, and the form says it while it reads « exact ».
  */
 
 import { afterAll, describe, expect, it, spyOn } from "bun:test";
@@ -26,7 +27,7 @@ const { $api } = await import("../../../api/client.ts");
 const { render } = await import("../../../test/render.tsx");
 const { spaceStore } = await import("../../../stores/space-store.ts");
 const { usePinColumns } = await import("../pin-columns.tsx");
-const { AdditionsToggleConfirm, NewPinForm, PinManagementSection } =
+const { PinModeConfirm, NewPinForm, PinManagementSection } =
   await import("../pin-management-section.tsx");
 const { descriptionOf, menuItems } = await import("../../../test/connection-menu-tree.tsx");
 const settingsFr = (await import("../../../locales/fr/settings.json")).default;
@@ -204,13 +205,13 @@ function pin(over: Partial<IntegrationPin> = {}): IntegrationPin {
 const WEB_CONNECTION = { ...SHARED, id: WEB } as never;
 
 /**
- * The additions cell of a pin, with what its switch hands back when flipped. Only WEB is shared
- * here, once the integration's connections are `loaded`.
+ * The mode cell of a pin, with what its select hands back when changed. Only WEB is shared here,
+ * once the integration's connections are `loaded`.
  */
-function additionsCell(row: IntegrationPin, enforcedDefault: boolean, loaded = true) {
+function modeCell(row: IntegrationPin, enforcedDefault: boolean, loaded = true) {
   const connections = loaded ? [WEB_CONNECTION] : undefined;
   let columns: DataColumn<IntegrationPin>[] = [];
-  const toggled: IntegrationPin[] = [];
+  const changed: IntegrationPin[] = [];
   function Probe({
     onColumns,
   }: {
@@ -223,16 +224,16 @@ function additionsCell(row: IntegrationPin, enforcedDefault: boolean, loaded = t
       isDeleting: () => false,
       onDelete: () => {},
       enforcedDefault,
-      isToggling: () => false,
-      onToggleAdditions: (p) => toggled.push(p),
+      isChangingMode: () => false,
+      onChangeMode: (p) => changed.push(p),
     });
     onColumns(found);
     return null;
   }
   render(<Probe onColumns={(found) => (columns = found)} />);
-  const column = columns.find((c) => c.id === "additions")!;
+  const column = columns.find((c) => c.id === "mode")!;
   const cell = column.cell(row) as ReactElement;
-  return { column, html: render(cell), cell, toggled };
+  return { column, html: render(cell), cell, changed };
 }
 
 /** The props of the element carrying `testId`, found in an element tree. */
@@ -249,51 +250,64 @@ function propsOf(node: ReactNode, testId: string): Record<string, unknown> | und
   return propsOf(node.props.children as ReactNode, testId);
 }
 
-describe("the pins table's additions column", () => {
+const EXACT = settingsFr["integration.admin.pinManagement.modeExact"];
+const PLUS = settingsFr["integration.admin.pinManagement.modePlus"];
+
+/** The labels of a mode select's options, and which are unavailable. */
+function optionsOf(props: Record<string, unknown>) {
+  return (props.options as { value: string; label: string; disabled?: boolean }[]).map(
+    ({ value, label, disabled }) => ({ value, label, disabled: disabled === true }),
+  );
+}
+
+describe("the pins table's mode column", () => {
   it("is a control column, never waiting for room", () => {
-    expect(additionsCell(pin(), false).column).toMatchObject({ control: true });
+    expect(modeCell(pin(), false).column).toMatchObject({ control: true });
+    expect(modeCell(pin(), false).column.header).toBe("Mode");
   });
 
-  it("says the state of each pin, and flips it with the stored pin", () => {
-    const closed = additionsCell(pin(), false);
-    expect(closed.html).toContain(settingsFr["integration.admin.pinManagement.additionsClosed"]);
-    expect(closed.html).not.toContain('disabled=""');
-    const props = propsOf(closed.cell, `pin-additions-${AGENT}`)!;
-    expect(props.checked).toBe(false);
-    (props.onCheckedChange as (checked: boolean) => void)(true);
-    expect(closed.toggled).toEqual([pin()]);
+  it("reads each pin's mode, and asks to change it with the stored pin", () => {
+    const exact = modeCell(pin(), false);
+    expect(exact.html).not.toContain('disabled=""');
+    const props = propsOf(exact.cell, `pin-mode-${AGENT}`)!;
+    expect(props.value).toBe("exact");
+    expect(optionsOf(props).map((o) => o.label)).toEqual([EXACT, PLUS]);
+    // Re-picking the current mode is not a change.
+    (props.onValueChange as (value: string) => void)("exact");
+    expect(exact.changed).toEqual([]);
+    (props.onValueChange as (value: string) => void)("plus");
+    expect(exact.changed).toEqual([pin()]);
 
-    const opened = additionsCell(pin({ allow_additional_connections: true }), false);
-    expect(opened.html).toContain(settingsFr["integration.admin.pinManagement.additionsOpen"]);
-    expect(propsOf(opened.cell, `pin-additions-${AGENT}`)!.checked).toBe(true);
+    const plus = modeCell(pin({ allow_additional_connections: true }), false);
+    expect(propsOf(plus.cell, `pin-mode-${AGENT}`)!.value).toBe("plus");
   });
 
-  it("refuses to open a pin to none, or under an enforced default, and says why", () => {
-    const none = additionsCell(pin({ connection_ids: [] }), false);
+  it("refuses « plus » for a pin to none, or under an enforced default, and says why", () => {
+    const none = modeCell(pin({ connection_ids: [] }), false);
     expect(none.html).toContain('disabled=""');
     expect(none.html).toContain(
       settingsFr["integration.admin.pinManagement.additionsNeedConnection"],
     );
-    const enforced = additionsCell(pin(), true);
+    const enforced = modeCell(pin(), true);
     expect(enforced.html).toContain('disabled=""');
     expect(enforced.html).toContain(
       settingsFr["integration.admin.pinManagement.additionsEnforcedDefault"],
     );
   });
 
-  it("always lets an open pin close", () => {
-    const html = additionsCell(pin({ allow_additional_connections: true }), true).html;
+  it("always lets a « plus » pin go back to « exact »", () => {
+    const html = modeCell(pin({ allow_additional_connections: true }), true).html;
     expect(html).not.toContain('disabled=""');
   });
 });
 
-describe("the pins table's additions switch over an unavailable connection", () => {
+describe("the pins table's mode select over an unavailable connection", () => {
   const GONE = "33333333-3333-4333-8333-333333333333";
   const reason = settingsFr["integration.admin.pinManagement.additionsUnavailableConnection"];
 
-  it("flips neither way, and says why", () => {
+  it("changes neither way, and says why", () => {
     for (const allow of [false, true]) {
-      const html = additionsCell(
+      const html = modeCell(
         pin({ connection_ids: [WEB, GONE], allow_additional_connections: allow }),
         false,
       ).html;
@@ -303,18 +317,18 @@ describe("the pins table's additions switch over an unavailable connection", () 
   });
 
   it("waits, saying nothing, while the connections load", () => {
-    const html = additionsCell(pin(), false, false).html;
+    const html = modeCell(pin(), false, false).html;
     expect(html).toContain('disabled=""');
     expect(html).not.toContain(reason);
   });
 });
 
-describe("the pins table's additions switch over an agent not active in the space", () => {
+describe("the pins table's mode select over an agent not active in the space", () => {
   const reason = settingsFr["integration.admin.pinManagement.additionsInactiveAgent"];
 
-  it("flips neither way, and says why", () => {
+  it("changes neither way, and says why", () => {
     for (const allow of [false, true]) {
-      const html = additionsCell(
+      const html = modeCell(
         pin({ allow_additional_connections: allow, agent_active: false }),
         false,
       ).html;
@@ -323,8 +337,8 @@ describe("the pins table's additions switch over an agent not active in the spac
     }
   });
 
-  it("leaves an active agent's switch alone", () => {
-    const html = additionsCell(pin(), false).html;
+  it("leaves an active agent's select alone", () => {
+    const html = modeCell(pin(), false).html;
     expect(html).not.toContain('disabled=""');
     expect(html).not.toContain(reason);
   });
@@ -367,11 +381,11 @@ describe("the delete confirmation's note", () => {
   });
 });
 
-/** The confirmation a flip of `row` opens: the props it hands `ConfirmModal`. */
-function toggleConfirm(row: IntegrationPin): Record<string, unknown> {
+/** The confirmation a mode change of `row` opens: the props it hands `ConfirmModal`. */
+function modeConfirm(row: IntegrationPin): Record<string, unknown> {
   let props: Record<string, unknown> = {};
   function Probe(): null {
-    const element = AdditionsToggleConfirm({
+    const element = PinModeConfirm({
       pin: row,
       agent: "Ops",
       isPending: false,
@@ -385,43 +399,68 @@ function toggleConfirm(row: IntegrationPin): Record<string, unknown> {
   return props;
 }
 
-describe("the confirmation of an additions flip", () => {
+describe("the confirmation of a mode change", () => {
   const cleared = settingsFr["integration.admin.pinManagement.clearsMemberChoices"];
-  const help = settingsFr["integration.admin.pinManagement.allowAdditionsHelp"];
+  const help = settingsFr["integration.admin.pinManagement.modePlusHelp"];
+  const schedules = settingsFr["integration.admin.pinManagement.toExactSchedules"];
 
-  it("opening: says the members' choices go, and what a run may then combine", () => {
-    const props = toggleConfirm(pin());
-    expect(props.title).toBe("Autoriser les ajouts pour Ops ?");
-    expect(props.confirmLabel).toBe("Autoriser");
-    expect(props.description).toBe(cleared);
-    expect(render(props.children as ReactElement)).toContain(help);
-  });
-
-  it("closing: says the members' choices go, and that schedules adding connections get disabled", () => {
-    const props = toggleConfirm(pin({ allow_additional_connections: true }));
-    expect(props.title).toBe("Bloquer les ajouts pour Ops ?");
-    expect(props.confirmLabel).toBe("Bloquer");
+  it("to « plus »: says the members' choices go, and what a run may then combine", () => {
+    const props = modeConfirm(pin());
+    expect(props.title).toBe("Passer Ops en « Ces connexions, plus celles de l’utilisateur » ?");
+    expect(props.confirmLabel).toBe("Changer de mode");
     expect(props.description).toBe(cleared);
     const html = render(props.children as ReactElement);
-    expect(html).toContain(settingsFr["integration.admin.pinManagement.closeAdditionsSchedules"]);
+    expect(html).toContain("gardez « Exactement ces connexions » pour un agent sensible");
+    expect(html).not.toContain(schedules);
+  });
+
+  it("to « exact »: says the members' choices go, and that schedules adding connections get disabled", () => {
+    const props = modeConfirm(pin({ allow_additional_connections: true }));
+    expect(props.title).toBe("Passer Ops en « Exactement ces connexions » ?");
+    expect(props.confirmLabel).toBe("Changer de mode");
+    expect(props.description).toBe(cleared);
+    const html = render(props.children as ReactElement);
+    expect(html).toContain(schedules);
     expect(html).not.toContain(help);
   });
 
-  it("opening does not say the schedules' fate", () => {
-    const html = render(toggleConfirm(pin()).children as ReactElement);
-    expect(html).not.toContain(
-      settingsFr["integration.admin.pinManagement.closeAdditionsSchedules"],
-    );
-  });
-
   it("says, in both languages, that the schedules fail, are disabled, and stay so", () => {
-    const key = "integration.admin.pinManagement.closeAdditionsSchedules";
+    const key = "integration.admin.pinManagement.toExactSchedules";
     expect(settingsFr[key]).toMatch(/échoueront.*désactivées.*ne les réactivera pas/);
     expect(settingsEn[key]).toMatch(/will fail.*be disabled.*will not re-enable/);
   });
+
+  it("names both modes by their effect, in both languages", () => {
+    expect([EXACT, PLUS]).toEqual([
+      "Exactement ces connexions",
+      "Ces connexions, plus celles de l’utilisateur",
+    ]);
+    expect([
+      settingsEn["integration.admin.pinManagement.modeExact"],
+      settingsEn["integration.admin.pinManagement.modePlus"],
+    ]).toEqual(["Exactly these connections", "These connections, plus the user’s"]);
+  });
 });
 
-describe("the new pin's additions switch", () => {
+/** The new-pin form's mode select, as the form hands it, with `connections` shared. */
+function formMode(connections: (typeof SHARED)[], enforcedDefault = false) {
+  let props: Record<string, unknown> = {};
+  function Probe(): null {
+    const tree: ReactNode = NewPinForm({
+      packageId: GMAIL,
+      agents: [{ agent_package_id: "@acme/mailer", display_name: "Mailer" }],
+      connections: connections as never,
+      enforcedDefault,
+      onDone: () => {},
+    });
+    props = propsOf(tree, "pin-add-mode")!;
+    return null;
+  }
+  render(<Probe />, { queryClient: new QueryClient() });
+  return props;
+}
+
+describe("the new pin's mode", () => {
   const form = () =>
     render(
       <NewPinForm
@@ -433,17 +472,22 @@ describe("the new pin's additions switch", () => {
       />,
     );
 
-  it("starts closed, says what opening means, and waits for an imposed connection", () => {
+  it("starts on « exact », says what it does, and offers « plus » only once a connection is imposed", () => {
+    const props = formMode([SHARED]);
+    expect(props.value).toBe("exact");
+    expect(optionsOf(props)).toEqual([
+      { value: "exact", label: EXACT, disabled: false },
+      // No connection chosen yet: nothing is imposed to add to.
+      { value: "plus", label: PLUS, disabled: true },
+    ]);
     const html = form();
-    expect(html).toContain('id="pin-add-additions"');
-    expect(html).toContain('aria-checked="false"');
-    expect(html).toContain(settingsFr["integration.admin.pinManagement.allowAdditions"]);
-    expect(html).toContain(settingsFr["integration.admin.pinManagement.allowAdditionsHelp"]);
-    expect(html).toContain('data-testid="pin-add-additions-refusal"');
+    expect(html).toContain('id="pin-add-mode"');
+    expect(html).toContain(settingsFr["integration.admin.pinManagement.modeExactHelp"]);
+    expect(html).toContain('data-testid="pin-add-mode-refusal"');
     expect(html).toContain(settingsFr["integration.admin.pinManagement.additionsNeedConnection"]);
   });
 
-  it("says, while it is off, that the members' choices for the agent go", () => {
+  it("says, while it reads « exact », that the members' choices for the agent go", () => {
     const html = form();
     expect(html).toContain('data-testid="pin-add-clears-choices"');
     expect(html).toContain(settingsFr["integration.admin.pinManagement.clearsMemberChoices"]);

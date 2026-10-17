@@ -269,7 +269,7 @@
   "apiError.connection_blocked_by_admin": "The administrator disabled personal connections for this integration: use the shared connection.",
   "apiError.auto_client_exists_at_org": "The organization already has its own automatic OAuth client for this integration: this space client cannot replace it.",
   "apiError.connection_scope_narrowing": "This connection serves the whole organization: reconnecting it through this space's OAuth client would confine it to this space. Create a new connection instead.",
-  "apiError.connection_additions_conflict": "The enforced space default accepts no addition: for one integration it cannot coexist with an admin pin that lets users add connections. Block additions on those pins, or make the default optional.",
+  "apiError.connection_additions_conflict": "The enforced space default accepts no addition: for one integration it cannot coexist with an admin pin set to \"These connections, plus the user’s\". Switch those pins to \"Exactly these connections\", or make the default optional.",
   "apiError.connection_additions_blocked": "The administrator imposes this agent's connections for this integration (closed pin or enforced space default): your own choice is not accepted there.",
   "apiError.invalid_share_target": "A connection can only be shared with spaces of its organization, and a connection confined to one space only with that space.",
   "apiError.identity_mismatch": "This connection is linked to another account, reconnect with the same account or create a new connection: {{message}}",

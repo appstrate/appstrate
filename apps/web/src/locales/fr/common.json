@@ -269,7 +269,7 @@
   "apiError.connection_blocked_by_admin": "L'administrateur a désactivé les connexions personnelles pour cette intégration : utilisez la connexion partagée.",
   "apiError.auto_client_exists_at_org": "L'organisation a déjà son propre client OAuth automatique pour cette intégration : ce client d'espace ne peut pas le remplacer.",
   "apiError.connection_scope_narrowing": "Cette connexion sert toute l'organisation : la reconnecter via le client OAuth de cet espace la limiterait à cet espace. Créez plutôt une nouvelle connexion.",
-  "apiError.connection_additions_conflict": "Le défaut obligatoire de l'espace n'accepte aucun ajout : il ne peut pas coexister, pour une même intégration, avec un épinglage admin qui autorise les utilisateurs à ajouter des connexions. Bloquez les ajouts de ces épinglages, ou rendez le défaut facultatif.",
+  "apiError.connection_additions_conflict": "Le défaut obligatoire de l'espace n'accepte aucun ajout : il ne peut pas coexister, pour une même intégration, avec un épinglage admin en « Ces connexions, plus celles de l’utilisateur ». Passez ces épinglages en « Exactement ces connexions », ou rendez le défaut facultatif.",
   "apiError.connection_additions_blocked": "L'administrateur impose les connexions de cet agent pour cette intégration (épinglage fermé ou défaut obligatoire de l'espace) : votre propre choix n'y est pas accepté.",
   "apiError.invalid_share_target": "Une connexion ne peut être partagée qu'avec des espaces de son organisation, et une connexion limitée à un espace seulement avec cet espace.",
   "apiError.identity_mismatch": "Cette connexion est liée à un autre compte, reconnectez-vous avec le même compte ou créez une nouvelle connexion : {{message}}",

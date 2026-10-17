@@ -4,8 +4,8 @@
  * The space default's usage mode: a stored default whose members are all unshared has nothing the
  * server accepts to write a mode change with, so the section says so instead of a draft that
  * reads as saved. An enforced default accepts no addition, so « imposée » is refused, naming the
- * agents, while an admin pin of an active agent (the pin's own `agent_active`) is open to additions
- * (the server answers 409).
+ * agents, while an admin pin of an active agent (the pin's own `agent_active`) is in « Ces
+ * connexions, plus celles de l’utilisateur » (the server answers 409).
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -160,10 +160,10 @@ describe("the space default's usage mode", () => {
   });
 });
 
-describe("the enforced mode beside admin pins open to additions", () => {
+describe("the enforced mode beside admin pins in « plus » mode", () => {
   const locked = 'data-testid="org-default-forced-locked"';
 
-  it("is refused, naming every agent whose pin is open", () => {
+  it("is refused, naming every agent whose pin is « plus »", () => {
     const html = section(
       [SHARED],
       [
@@ -173,11 +173,14 @@ describe("the enforced mode beside admin pins open to additions", () => {
       ],
     );
     expect(html).toContain(locked);
-    expect(html).toContain("les épinglages de Ops, Triage autorisent les ajouts");
+    expect(html).toContain(
+      "les épinglages de Ops, Triage sont en « Ces connexions, plus celles de l’utilisateur »",
+    );
+    expect(html).toContain("Passez-les d’abord en « Exactement ces connexions »");
     expect(html).not.toContain("@acme/closed");
   });
 
-  it("ignores the open pin of an agent inactive in the space, as the server does", () => {
+  it("ignores the « plus » pin of an agent inactive in the space, as the server does", () => {
     const html = section(
       [SHARED],
       [{ agent_package_id: "@acme/gone", allow_additional_connections: true, agent_active: false }],
@@ -186,7 +189,7 @@ describe("the enforced mode beside admin pins open to additions", () => {
     expect(html).not.toContain("@acme/gone");
   });
 
-  it("counts only the active agents when open pins mix both", () => {
+  it("counts only the active agents when « plus » pins mix both", () => {
     const html = section(
       [SHARED],
       [
@@ -194,7 +197,9 @@ describe("the enforced mode beside admin pins open to additions", () => {
         { agent_package_id: "@acme/gone", allow_additional_connections: true, agent_active: false },
       ],
     );
-    expect(html).toContain("l’épinglage de Ops autorise les ajouts");
+    expect(html).toContain(
+      "l’épinglage de Ops est en « Ces connexions, plus celles de l’utilisateur »",
+    );
     expect(html).not.toContain("@acme/gone");
   });
 
@@ -205,10 +210,12 @@ describe("the enforced mode beside admin pins open to additions", () => {
       { agentsLoaded: false },
     );
     expect(html).toContain(locked);
-    expect(html).toContain("l’épinglage de @acme/ops autorise les ajouts");
+    expect(html).toContain(
+      "l’épinglage de @acme/ops est en « Ces connexions, plus celles de l’utilisateur »",
+    );
   });
 
-  it("is offered while every pin is closed", () => {
+  it("is offered while every pin is « exact »", () => {
     const html = section(
       [SHARED],
       [{ agent_package_id: "@acme/ops", allow_additional_connections: false }],

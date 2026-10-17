@@ -198,9 +198,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (default `false`, absent means `false` on the replacing `PUT`; `true` with
   `connection_ids: []` is a `400`), and the pin responses return it. The
   connection readiness verdict of each integration returns
-  `additional_connections_allowed`. When it is on, a run binds the imposed
-  connections plus the ones the actor chose among those they can use in the
-  space (`block_user_connections` still bounds them); nothing is added
+  `additional_connections_allowed`. The dashboard offers it as the pin's mode,
+  « Exactement ces connexions » (default) or « Ces connexions, plus celles de
+  l'utilisateur »; in the latter, a run binds the imposed connections plus the
+  ones the actor chose among those they can use in the space (`block_user_connections` still bounds them); nothing is added
   automatically. Migration `0101_integration_pin_additions` adds the column and
   two `CHECK`s: a member pin is never open, and an open pin imposes at least one
   connection. A member pin no longer survives under a closed admin pin: every
