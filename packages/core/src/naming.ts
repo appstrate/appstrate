@@ -67,6 +67,24 @@ export function parseScopedName(scopedName: string): { scope: string; name: stri
   return { scope: match[1]!, name: match[3]! };
 }
 
+/** Scope of the system packages the deployment ships (`@appstrate/<name>`, no owning organization). */
+const SYSTEM_PACKAGE_SCOPE = "appstrate";
+
+/** Scope of inline runs' ephemeral shadow packages (`@inline/r-<uuid>`). Never publishable. */
+export const INLINE_SHADOW_SCOPE = "inline";
+
+const RESERVED_SCOPES: ReadonlySet<string> = new Set([SYSTEM_PACKAGE_SCOPE, INLINE_SHADOW_SCOPE]);
+
+/**
+ * Whether `scope` (without `@`) belongs to the platform. An organization's slug
+ * IS its package scope (`isOwnedByOrg`), so a reserved scope can never be an
+ * organization slug: an org named `appstrate` would own every system package,
+ * one named `inline` could publish into the shadow namespace.
+ */
+export function isReservedScope(scope: string): boolean {
+  return RESERVED_SCOPES.has(scope);
+}
+
 /** Single source of truth for package ownership. */
 export function isOwnedByOrg(packageId: string, orgSlug: string): boolean {
   if (!orgSlug) return false;

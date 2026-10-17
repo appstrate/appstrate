@@ -150,6 +150,7 @@
   "apiError.bootstrap_user_lookup_failed": "Le compte propriétaire n'a pas pu être créé. Réessayez.",
   "apiError.bootstrap_org_failed": "Le compte est créé, mais pas l'organisation. Connectez-vous pour la créer.",
   "apiError.org_creation_disabled": "La création d'organisations est désactivée sur cette instance : demandez une invitation à un administrateur.",
+  "apiError.slug_reserved": "Cet identifiant est réservé par la plateforme. Choisissez-en un autre.",
   "apiError.slug_taken": "Cet identifiant est déjà utilisé par une autre organisation. Choisissez-en un autre.",
   "apiError.delete_failed": "L'organisation n'a pas pu être supprimée : {{message}}",
   "apiError.org_deleting": "Cette organisation est en cours de suppression : plus rien ne peut y être lancé.",

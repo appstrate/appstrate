@@ -150,6 +150,7 @@
   "apiError.bootstrap_user_lookup_failed": "The owner account could not be created. Try again.",
   "apiError.bootstrap_org_failed": "The account was created, but the organization was not. Sign in to create it.",
   "apiError.org_creation_disabled": "Creating organizations is disabled on this instance: ask an administrator for an invitation.",
+  "apiError.slug_reserved": "This slug is reserved by the platform. Pick another one.",
   "apiError.slug_taken": "This slug is already used by another organization. Pick another one.",
   "apiError.delete_failed": "The organization could not be deleted: {{message}}",
   "apiError.org_deleting": "This organization is being deleted: nothing more can be started in it.",

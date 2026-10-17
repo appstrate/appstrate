@@ -139,6 +139,13 @@ describe("personal spaces — provisioning at every membership door", () => {
     expect(rows.filter((s) => s.ownerUserId === user.id)).toHaveLength(1);
   });
 
+  it("first-boot bootstrap never takes a platform-reserved slug", async () => {
+    const user = await createTestUser();
+    const result = await createBootstrapOrg(user.id, "Appstrate");
+    expect(result.created).toBe(true);
+    expect(result.slug).toBe("appstrate-2");
+  });
+
   it("accepting an invitation provisions one for the invitee", async () => {
     const ctx = await createTestContext({ orgSlug: "invite-personal" });
     const invitee = await createTestUser();

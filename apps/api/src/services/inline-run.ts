@@ -27,10 +27,8 @@ import { assertExplicitModelExists } from "./org-models.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { fileUri, extractFileIdsFromText, isFileUri, parseFileUri } from "@appstrate/core/file-uri";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
+import { INLINE_SHADOW_SCOPE } from "@appstrate/core/naming";
 import { invalidRequest, validationFailed } from "../lib/errors.ts";
-
-/** Reserved scope for inline-run shadow packages. Never publishable. */
-export const INLINE_SHADOW_SCOPE = "inline";
 
 /**
  * Return true when the package id belongs to the reserved inline scope.

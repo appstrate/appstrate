@@ -13294,7 +13294,8 @@
                   },
                   "slug": {
                     "type": "string",
-                    "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+                    "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                    "description": "Kebab-case. The organization's package scope (`@<slug>/<name>`). The platform's own scopes, `appstrate` (system packages) and `inline` (inline runs' shadow packages), are refused with `400 slug_reserved`; a slug another organization holds with `400 slug_taken`."
                   }
                 },
                 "additionalProperties": false
@@ -13494,7 +13495,8 @@
                   },
                   "slug": {
                     "type": "string",
-                    "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+                    "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                    "description": "Kebab-case. The organization's package scope (`@<slug>/<name>`). The platform's own scopes, `appstrate` (system packages) and `inline` (inline runs' shadow packages), are refused with `400 slug_reserved`; a slug another organization holds with `400 slug_taken`."
                   },
                   "icon": {
                     "type": ["string", "null"],

@@ -34,7 +34,7 @@ import {
   orgSettingsPatchSchema,
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
+import { toSlug, SLUG_REGEX, isReservedScope } from "@appstrate/core/naming";
 import { ApiError, forbidden, invalidRequest, notFound, unauthorized } from "../lib/errors.ts";
 import {
   CURRENT_API_VERSION,
@@ -81,6 +81,30 @@ export const updateOrgSchema = z
     color: appearanceColorSchema.nullable().optional(),
   })
   .strict();
+
+/**
+ * An organization's slug is its package scope, so a slug must be neither one
+ * the platform owns (`isReservedScope`) nor another organization's. Checked on
+ * create and on rename — the only two doors that write a slug.
+ */
+async function assertSlugClaimable(slug: string): Promise<void> {
+  if (isReservedScope(slug)) {
+    throw new ApiError({
+      status: 400,
+      code: "slug_reserved",
+      title: "Bad Request",
+      detail: `Slug '${slug}' is reserved by the platform`,
+    });
+  }
+  if (!(await isSlugAvailable(slug))) {
+    throw new ApiError({
+      status: 400,
+      code: "slug_taken",
+      title: "Bad Request",
+      detail: `Slug '${slug}' is already in use`,
+    });
+  }
+}
 
 export const addMemberSchema = z
   .object({
@@ -192,14 +216,7 @@ router.post("/", async (c) => {
     throw invalidRequest("Invalid slug (kebab-case required)");
   }
 
-  if (!(await isSlugAvailable(slug))) {
-    throw new ApiError({
-      status: 400,
-      code: "slug_taken",
-      title: "Bad Request",
-      detail: `Slug '${slug}' is already in use`,
-    });
-  }
+  await assertSlugClaimable(slug);
 
   const org = await createOrganization(data.name.trim(), slug, user.id);
 
@@ -348,16 +365,7 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, updateOrgSchema);
 
-  if (data.slug) {
-    if (!(await isSlugAvailable(data.slug))) {
-      throw new ApiError({
-        status: 400,
-        code: "slug_taken",
-        title: "Bad Request",
-        detail: `Slug '${data.slug}' is already in use`,
-      });
-    }
-  }
+  if (data.slug) await assertSlugClaimable(data.slug);
 
   const updates = {
     ...(data.name?.trim() ? { name: data.name.trim() } : {}),

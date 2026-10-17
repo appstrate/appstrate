@@ -239,6 +239,40 @@ describe("Organizations API", () => {
       expect(body.code).toBe("slug_taken");
     });
 
+    // An org's slug is its package scope: `appstrate` would own every system
+    // package (`isOwnedByOrg`), `inline` could publish into the namespace of
+    // inline runs' shadow packages.
+    for (const slug of ["appstrate", "inline"]) {
+      it(`refuses the platform-reserved slug '${slug}' with 400 slug_reserved`, async () => {
+        const testUser = await createTestUser();
+
+        const res = await app.request("/api/orgs", {
+          method: "POST",
+          headers: { Cookie: testUser.cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "Squatter", slug }),
+        });
+
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as any;
+        expect(body.code).toBe("slug_reserved");
+        await assertDbMissing(organizations, eq(organizations.slug, slug));
+      });
+    }
+
+    it("refuses a reserved slug derived from the name, not only an explicit one", async () => {
+      const testUser = await createTestUser();
+
+      const res = await app.request("/api/orgs", {
+        method: "POST",
+        headers: { Cookie: testUser.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Inline" }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as any).code).toBe("slug_reserved");
+      await assertDbMissing(organizations, eq(organizations.slug, "inline"));
+    });
+
     it("pins api_version in settings at creation", async () => {
       const testUser = await createTestUser();
 
@@ -469,6 +503,20 @@ describe("Organizations API", () => {
   });
 
   describe("PATCH /api/orgs/:orgId", () => {
+    it("refuses renaming the slug to a platform-reserved one", async () => {
+      const ctx = await createTestContext({ orgSlug: "would-be-inline" });
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PATCH",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: "inline" }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as any).code).toBe("slug_reserved");
+      await assertDbHas(organizations, eq(organizations.slug, "would-be-inline"));
+    });
+
     it("returns the bare OrgDetail (same serializer as GET /api/orgs/:orgId)", async () => {
       const ctx = await createTestContext({ orgSlug: "renameorg" });
 
