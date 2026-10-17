@@ -176,6 +176,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the memories and pinned slots an inline run wrote with `note`/`pin` were
   unreachable. The read route now serves them to a caller who may read the
   run in that space; every other agent route is unchanged.
+- **An `api_call` target can carry a `{{field}}` in its path or query**
+  (#2063). The target's published JSON schema said `format: "uri"`, which the
+  agent's tool-argument validator applies before the call leaves the agent: it
+  refused `{` and `}`, so `https://share.garmin.com/feed/share/{{mapshare_id}}`
+  (or Twilio's `/Accounts/{{account_sid}}/…`) never reached the sidecar,
+  although the sidecar renders such a field as one percent-encoded component.
+  The schema is now a pattern on `http(s)://`, shared by `api_upload` (which
+  published the same `format: "uri"`); the rendered URL is still parsed and
+  matched against the allowlist. The validator also refuses `ftp:` or
+  `javascript:` targets it used to let through. A base-URL field may now be
+  followed by a query or fragment (`{{base_url}}?d1=…`), not only a path.
+- **`responseMode.toFile` writes under a workspace reached through a symlink**
+  (#2063). The escape check compared the real path of the target directory to
+  the workspace path as given, so under `RUN_ADAPTER=process` on macOS (the
+  temp dir is `/var` → `/private/var`) every `toFile` was refused as "escapes
+  the workspace via a symlink". The workspace root is now resolved the same
+  way; a symlinked subdirectory pointing outside is still refused. A refused
+  `toFile` no longer creates directories outside the workspace before refusing.
+- **`api_upload` no longer sends back a server-supplied session URL holding
+  `{{`** (#2063). A tus or Google `Location`, or a Microsoft `uploadUrl`,
+  becomes the target of the next call, and the sidecar would have rendered its
+  `{{field}}` as a credential placeholder. A relative tus `Location` under a
+  templated target resolves only where rendering cannot change the result,
+  otherwise it is refused. A tus `Location` that is not an http(s) URL, or that
+  holds `{{` once parsed, is an `UploadError`.
+
 - **A link to a catalogue sheet opens it from the package id alone** (#2013).
   `/catalogue?package=<id>[&version=…]`, or a link naming the wrong kind,
   lands on the package's own kind instead of closing the sheet. Interface only.

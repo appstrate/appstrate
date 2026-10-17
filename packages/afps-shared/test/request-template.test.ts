@@ -34,6 +34,7 @@ describe("urlTemplateAuthority", () => {
     ["{{base}}/v1/{{id}}", "{{base}}"],
     ["{{base}}{{path}}", "{{base}}{{path}}"],
     ["/v1/{{id}}", ""],
+    ["https://h.example\\{{seg}}", "https://h.example"],
   ])("%s → %s", (template, authority) => {
     expect(urlTemplateAuthority(template)).toBe(authority);
   });
