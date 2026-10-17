@@ -12,9 +12,6 @@
  * footer strip: one column, and it holds the CONTROL when the actor may change
  * the role, falling back to plain text when they may not — "the control IS the setting",
  * which a value with a picker beside it is not.
- *
- * Out of the page for the same reason as `model-columns.tsx`: a column set is
- * data, and it has to be reachable by `column-tiers.test.tsx`.
  */
 
 import { useTranslation } from "react-i18next";

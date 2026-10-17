@@ -3,8 +3,7 @@
 /**
  * The organization roles as data: the four roles, how far each reaches into
  * spaces, and the list's column set (what each can do is
- * `lib/org-role-capabilities.ts`). Out of the component file so
- * `column-tiers.test.tsx` can measure the columns.
+ * `lib/org-role-capabilities.ts`).
  */
 import { useTranslation } from "react-i18next";
 import { Eye } from "lucide-react";
