@@ -609,8 +609,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     object's id otherwise. Export the name when several entry points open the same
     modal (`SHARE_PARAM`).
   - **An object that may not exist**: `useUrlModalTarget(name, items)` resolves the
-    id against the loaded list and drops the param for an unknown id. Pass
-    `undefined` while the list loads, never `[]`. Never `find` by `param.value` by hand.
+    id against the loaded list and drops the param for an id it does not hold: with
+    the « Élément introuvable ou inaccessible » toast when the id never resolved (a
+    link to a deleted, mistyped or out-of-reach object), silently when its object
+    left the list (deleted from its modal, renamed). Pass `undefined` while the list
+    loads, never `[]`. Never `find` by `param.value` by hand.
   - **Handing over** from a URL modal to another modal: close the first, open the
     second (`share.close(); setMovingHome(true)`). Closing a URL modal goes back one
     entry, which lands a frame later: the two overlap for that frame.

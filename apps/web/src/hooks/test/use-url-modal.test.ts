@@ -2,7 +2,12 @@
 
 import { describe, expect, it } from "bun:test";
 import { createMemoryRouter } from "react-router-dom";
-import { closeOncePerEntry, modalOpeningState, modalParamStep } from "../use-url-modal.ts";
+import {
+  closeOncePerEntry,
+  modalOpeningState,
+  modalParamStep,
+  modalTargetVerdict,
+} from "../use-url-modal.ts";
 
 const at = (search: string, state: unknown = null) => ({ search, state });
 
@@ -163,5 +168,31 @@ describe("opening a modal on another address", () => {
       overlayBackground: { index: 2 },
       openedModal: "package",
     });
+  });
+});
+
+describe("the object a modal's parameter names", () => {
+  it("is closed without a parameter", () => {
+    expect(modalTargetVerdict(null, true, false, "p_1")).toBe("closed");
+  });
+
+  it("is never unknown while the list loads", () => {
+    expect(modalTargetVerdict("p_1", false, false, null)).toBe("pending");
+  });
+
+  it("is found when the list holds it", () => {
+    expect(modalTargetVerdict("p_1", true, true, null)).toBe("found");
+  });
+
+  it("is unknown when the list never held it", () => {
+    expect(modalTargetVerdict("p_1", true, false, null)).toBe("unknown");
+  });
+
+  it("vanished when it was seen and then left the list", () => {
+    expect(modalTargetVerdict("p_1", true, false, "p_1")).toBe("vanished");
+  });
+
+  it("is unknown when another id follows a resolved one", () => {
+    expect(modalTargetVerdict("p_2", true, false, "p_1")).toBe("unknown");
   });
 });

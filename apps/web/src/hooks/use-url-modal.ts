@@ -8,8 +8,10 @@
  * it; a modal the address opened (pasted link, reload) has no entry to go back over, so its
  * close replaces. The hash rides along (it holds the tab).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import i18n from "../i18n";
 import { searchOf } from "../lib/url-search";
 
 const NO_COMPANIONS: readonly string[] = [];
@@ -127,10 +129,35 @@ interface ModalTargetOptions {
 }
 
 /**
+ * Where a URL modal's object stands. `closed`: no parameter; `pending`: the list
+ * is loading; `found`: the list holds it; `vanished`: it held this id earlier
+ * (deleted from its modal, renamed, refetched); `unknown`: it never did (deleted,
+ * mistyped, out of reach).
+ */
+export type ModalTargetVerdict = "closed" | "pending" | "found" | "vanished" | "unknown";
+
+export function modalTargetVerdict(
+  value: string | null,
+  loaded: boolean,
+  found: boolean,
+  lastResolved: string | null,
+): ModalTargetVerdict {
+  if (value === null) return "closed";
+  if (!loaded) return "pending";
+  if (found) return "found";
+  return value === lastResolved ? "vanished" : "unknown";
+}
+
+/** One toast however many modals or effect runs report an unknown object. */
+const UNKNOWN_TARGET_TOAST = "url-modal-unknown-target";
+
+/**
  * A modal on one object of a list, named by id (`?editProxy=<id>`). `target` is
- * the object once the list has loaded; an id the list does not hold (deleted,
- * mistyped, another space) drops the parameter instead of leaving a modal on
- * nothing. Objects without an `id` say which key names them.
+ * the object once the list has loaded; an id the list does not hold drops the
+ * parameter instead of leaving a modal on nothing, with a toast when the id never
+ * named a listed object (a link to a deleted, mistyped or out-of-reach object)
+ * and silently when its object left the list. Objects without an `id` say which
+ * key names them.
  */
 export function useUrlModalTarget<T extends { id: string }>(
   name: string,
@@ -155,10 +182,20 @@ export function useUrlModalTarget<T>(
   const param = useUrlModal(name, options?.companions);
   const target =
     param.value === null ? undefined : items?.find((item) => keyOf(item) === param.value);
-  const unknown = param.value !== null && items !== undefined && target === undefined;
-  const { close } = param;
+  const { value, close } = param;
+  const loaded = items !== undefined;
+  const found = target !== undefined;
+  const lastResolved = useRef<string | null>(null);
   useEffect(() => {
-    if (unknown) close();
-  }, [unknown, close]);
+    const verdict = modalTargetVerdict(value, loaded, found, lastResolved.current);
+    if (verdict === "found" || verdict === "closed") lastResolved.current = value;
+    if (verdict === "unknown") {
+      toast.error(i18n.t("error.resourceUnavailable"), {
+        id: UNKNOWN_TARGET_TOAST,
+        description: i18n.t("error.resourceUnavailableHint"),
+      });
+    }
+    if (verdict === "unknown" || verdict === "vanished") close();
+  }, [value, loaded, found, close]);
   return { ...param, target };
 }
