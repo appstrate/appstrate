@@ -26,7 +26,7 @@
             "mapshare_id": {
               "type": "string",
               "title": "Nom du lien MapShare",
-              "description": "La fin de l'adresse MapShare, share.garmin.com/<nom>, affichée dans Garmin Explore (explore.garmin.com), onglet Social › MapShare. MapShare doit être activé.",
+              "description": "Seulement le nom, sans l'adresse : pour share.garmin.com/mon-nom, saisissez mon-nom. Il s'affiche dans Garmin Explore (explore.garmin.com), onglet Social › MapShare, qui doit être activé.",
               "pattern": "^[^/?#\\s]+$"
             },
             "password": {
