@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "type": "integration",
   "schema_version": "0.3",
-  "display_name": "Garmin LiveTrack",
-  "description": "Read a Garmin device owner's last known position and LiveTrack sessions from their public personal LiveTrack link. Relies on Garmin's undocumented web API, which Garmin may change at any time. Only sessions shared with everyone are visible; passcode-protected links are not supported.",
+  "display_name": "Garmin LiveTrack (API)",
+  "description": "Location — reads the owner's last position and LiveTrack sessions from a public personal LiveTrack link. Relies on Garmin's undocumented web API: it may break, and automated reading may fall outside Garmin's terms of use. Only sessions shared with everyone; no passcode-protected links.",
   "keywords": ["garmin", "gps", "location", "tracking", "inreach"],
   "license": "Apache-2.0",
   "icon": "cib:garmin",
@@ -15,7 +15,7 @@
   "auths": {
     "primary": {
       "type": "custom",
-      "authorized_uris": ["https://livetrack.garmin.com/**"],
+      "authorized_uris": ["https://livetrack.garmin.com/**", "https://live.garmin.com/**"],
       "identity_claims": {
         "account_id": "$.livetrack_url"
       },
@@ -27,8 +27,8 @@
               "type": "string",
               "format": "uri",
               "title": "Lien LiveTrack personnel",
-              "description": "Le lien permanent de la page LiveTrack du propriétaire, de la forme https://livetrack.garmin.com/<nom>. Dans Garmin Connect ou Garmin Messenger : Sécurité et suivi → LiveTrack → lien personnel. Il faut un abonnement en cours (inReach ou Connect+). Les sessions doivent être visibles par tout le monde, sans code d'accès.",
-              "pattern": "^https://livetrack\\.garmin\\.com/[A-Za-z0-9_-]{3,64}/?$"
+              "description": "Le lien LiveTrack personnel du propriétaire, de la forme https://livetrack.garmin.com/<nom> ou https://live.garmin.com/<nom>, affiché dans Garmin Connect ou Garmin Messenger. Il faut un abonnement en cours (inReach, Connect+ ou Outdoor Maps+) et des sessions visibles par tout le monde. Ce doit être votre propre lien ou un lien qu'on vous a communiqué.",
+              "pattern": "^https://live(track)?\\.garmin\\.com/[A-Za-z0-9_-]{3,64}/?$"
             }
           },
           "required": ["livetrack_url"]
