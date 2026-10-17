@@ -51,7 +51,7 @@ for (const width of [1440, 390]) {
     await openSettings();
 
     // Image: drawn by the canvas the old logo spec used, encoded to WebP by the picker.
-    await settings.getByRole("radio", { name: "Image", exact: true }).click();
+    await settings.getByRole("tab", { name: "Image", exact: true }).click();
     const base64 = await page.evaluate(() => {
       const canvas = document.createElement("canvas");
       canvas.width = canvas.height = 16;
@@ -80,7 +80,7 @@ for (const width of [1440, 390]) {
     // Emoji: picked by its French name. Emojibase writes 👍 with U+FE0F; the
     // server stores the RGI form, which this emoji takes without it.
     await openSettings();
-    await settings.getByRole("radio", { name: "Emoji", exact: true }).click();
+    await settings.getByRole("tab", { name: "Emoji", exact: true }).click();
     await settings.getByRole("button", { name: "Choisir un emoji", exact: true }).click();
     await page.getByPlaceholder("Rechercher un emoji…", { exact: true }).fill("pouce");
     await page.getByRole("gridcell", { name: /^pouce vers le haut$/i }).click();

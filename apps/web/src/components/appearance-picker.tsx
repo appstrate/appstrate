@@ -2,7 +2,17 @@
 
 import { useId, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronsUpDown, Sparkles, Upload, X } from "lucide-react";
+import {
+  Check,
+  ChevronsUpDown,
+  ImageUp,
+  Shapes,
+  Smile,
+  Sparkles,
+  Upload,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { DynamicIcon, iconNames, type IconName } from "lucide-react/dynamic";
 import {
   EmojiPicker,
@@ -39,7 +49,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/component
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Spinner } from "@appstrate/ui/components/spinner";
-import { ToggleGroup, ToggleGroupItem } from "@appstrate/ui/components/toggle-group";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { I18N_FALLBACK_LANGUAGE, I18N_SUPPORTED_LANGUAGES } from "../i18n-config";
 import { AUTO_COLOR, colorChange } from "../lib/appearance-change";
 import {
@@ -65,6 +75,12 @@ const FORM_LABEL_KEYS: Record<IconForm, string> = {
   lucide: "appearance.form.lucide",
   emoji: "appearance.form.emoji",
   image: "appearance.form.image",
+};
+
+const FORM_ICONS: Record<IconForm, LucideIcon> = {
+  lucide: Shapes,
+  emoji: Smile,
+  image: ImageUp,
 };
 
 const COLOR_NAME_KEYS: Record<AppearanceColor, string> = {
@@ -178,6 +194,30 @@ export function AppearancePicker({
     allow.find((candidate) => candidate === storedForm) ??
     allow[0];
 
+  const formField = (candidate: IconForm) => {
+    switch (candidate) {
+      case "lucide":
+        return (
+          <LucideIconField
+            labelId={iconLabelId}
+            picked={parsed?.kind === "lucide" && isLucideName(parsed.name) ? parsed.name : null}
+            disabled={disabled}
+            onPick={(name) => onChange({ icon: `${LUCIDE_ICON_PREFIX}${name}` })}
+          />
+        );
+      case "emoji":
+        return (
+          <EmojiField
+            picked={parsed?.kind === "emoji" ? parsed.emoji : null}
+            disabled={disabled}
+            onPick={(emoji) => onChange({ icon: `${EMOJI_ICON_PREFIX}${emoji}` })}
+          />
+        );
+      case "image":
+        return <ImageField disabled={disabled} onPick={(icon) => onChange({ icon })} />;
+    }
+  };
+
   return (
     <div className="flex flex-col gap-5">
       <div className="border-border bg-muted/20 flex items-center gap-3 rounded-lg border p-3">
@@ -211,44 +251,41 @@ export function AppearancePicker({
               </Button>
             )}
           </div>
-          {allow.length > 1 && (
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              size="sm"
-              className="justify-start"
-              aria-label={t("appearance.formLabel")}
-              disabled={disabled}
+          {allow.length > 1 ? (
+            <Tabs
               value={form}
               onValueChange={(next) => {
                 const nextForm = allow.find((candidate) => candidate === next);
                 if (nextForm) setPicked(nextForm);
               }}
             >
+              <TabsList
+                aria-label={t("appearance.formLabel")}
+                className="h-auto w-fit flex-wrap justify-start max-sm:grid max-sm:w-full max-sm:auto-cols-fr max-sm:grid-flow-col"
+              >
+                {allow.map((candidate) => {
+                  const FormIcon = FORM_ICONS[candidate];
+                  return (
+                    <TabsTrigger
+                      key={candidate}
+                      value={candidate}
+                      disabled={disabled}
+                      className="gap-1.5"
+                    >
+                      <FormIcon className="size-4" />
+                      {t(FORM_LABEL_KEYS[candidate])}
+                    </TabsTrigger>
+                  );
+                })}
+              </TabsList>
               {allow.map((candidate) => (
-                <ToggleGroupItem key={candidate} value={candidate}>
-                  {t(FORM_LABEL_KEYS[candidate])}
-                </ToggleGroupItem>
+                <TabsContent key={candidate} value={candidate}>
+                  {formField(candidate)}
+                </TabsContent>
               ))}
-            </ToggleGroup>
-          )}
-          {form === "lucide" && (
-            <LucideIconField
-              labelId={iconLabelId}
-              picked={parsed?.kind === "lucide" && isLucideName(parsed.name) ? parsed.name : null}
-              disabled={disabled}
-              onPick={(name) => onChange({ icon: `${LUCIDE_ICON_PREFIX}${name}` })}
-            />
-          )}
-          {form === "emoji" && (
-            <EmojiField
-              picked={parsed?.kind === "emoji" ? parsed.emoji : null}
-              disabled={disabled}
-              onPick={(emoji) => onChange({ icon: `${EMOJI_ICON_PREFIX}${emoji}` })}
-            />
-          )}
-          {form === "image" && (
-            <ImageField disabled={disabled} onPick={(icon) => onChange({ icon })} />
+            </Tabs>
+          ) : (
+            formField(form)
           )}
         </div>
       )}

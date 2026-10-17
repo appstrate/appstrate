@@ -25,9 +25,9 @@ function picker(allow: readonly IconForm[], value: AppearanceValue = EMPTY): str
   );
 }
 
-/** The labels of the icon form tabs, in order. */
+/** The labels of the icon form tabs, in order (each trigger draws an icon before its label). */
 function tabs(html: string): string[] {
-  return [...html.matchAll(/data-state="(?:on|off)" role="radio"[^>]*>([^<]+)</g)].map(
+  return [...html.matchAll(/role="tab"[^>]*>(?:<svg[^>]*>.*?<\/svg>)?([^<]+)</g)].map(
     (match) => match[1]!,
   );
 }
@@ -41,13 +41,20 @@ describe("AppearancePicker", () => {
   it("draws no tabs for a single form", () => {
     const html = picker(["lucide"]);
     expect(tabs(html)).toEqual([]);
+    expect(html).not.toContain('role="tablist"');
+    expect(html).not.toContain('role="tabpanel"');
     expect(html).toContain("Choisir une icône");
     expect(html).not.toContain("Importer une image");
   });
 
   it("opens on the form of the stored icon", () => {
     const html = picker(["lucide", "emoji"], { icon: "emoji:🚜", color: null });
-    expect(html).toMatch(/data-state="on"[^>]*>Emoji</);
+    expect(html).toMatch(
+      /role="tab"[^>]*aria-selected="true"[^>]*data-state="active"[^>]*>(?:<svg[^>]*>.*?<\/svg>)?Emoji</,
+    );
+    expect(html).toMatch(
+      /role="tab"[^>]*aria-selected="false"[^>]*>(?:<svg[^>]*>.*?<\/svg>)?Icône</,
+    );
     expect(html).toContain("Changer d’emoji");
     expect(html).not.toContain("Choisir un emoji");
     expect(html).toContain("Retirer l’icône");
@@ -58,7 +65,7 @@ describe("AppearancePicker", () => {
     const labelId = html.match(/<label[^>]*id="([^"]+)"[^>]*>Icône</)?.[1];
     expect(labelId).toBeDefined();
     expect(html).toContain(`role="group" aria-labelledby="${labelId}"`);
-    expect(html).toMatch(/role="radiogroup"[^>]*aria-label="Type d’icône"/);
+    expect(html).toMatch(/role="tablist"[^>]*aria-label="Type d’icône"/);
   });
 
   it("names the Lucide combobox by the Icône label and its current value", () => {
