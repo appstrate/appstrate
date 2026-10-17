@@ -289,7 +289,15 @@ function RunDetailBody() {
   return (
     <DetailTabs value={tab} onChange={setTab}>
       <DetailBar
-        icon={<PackageIcon type="agent" icon={identity?.icon} color={identity?.color} />}
+        icon={
+          <PackageIcon
+            type="agent"
+            id={packageId}
+            name={identity?.display_name}
+            icon={identity?.icon}
+            color={identity?.color}
+          />
+        }
         title={title}
         trail={trail}
         tabs={tabs}

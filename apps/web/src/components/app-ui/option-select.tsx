@@ -13,6 +13,8 @@ import {
 export interface SelectOption {
   value: string;
   label: ReactNode;
+  /** The text typeahead matches, when `label` is not plain text (Radix reads `textContent` otherwise). */
+  textValue?: string;
   disabled?: boolean;
 }
 
@@ -54,7 +56,12 @@ export function OptionSelect({
         <SelectGroup>
           {leading}
           {options.map((option) => (
-            <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+            <SelectItem
+              key={option.value}
+              value={option.value}
+              textValue={option.textValue}
+              disabled={option.disabled}
+            >
               {option.label}
             </SelectItem>
           ))}

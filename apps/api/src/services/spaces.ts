@@ -261,28 +261,29 @@ export async function updateSpace(
     settings?: SpaceSettings;
     visibility?: SpaceVisibility;
     defaultRole?: SpaceRolePreset;
+    icon?: string | null;
+    color?: string | null;
   },
   judged: Pick<SpaceRow, "visibility" | "defaultRole" | "ownerUserId" | "isDefault">,
 ) {
   const changesAccess = params.visibility !== undefined || params.defaultRole !== undefined;
-  // Both rules are DB CHECKs too, but a named 4xx beats a 23514.
-  if (changesAccess) {
-    if (judged.ownerUserId !== null) {
-      // A personal space is `private` with one member by construction; there is
-      // no visibility to choose and no implicit member to give a default role
-      // to (RBAC spec §3.6). `name` stays editable, and `is_default` is not a
-      // field of this route at all.
-      throw conflict(
-        "personal_space_immutable",
-        "A personal space is always private and has no implicit members: only its name can be changed.",
-      );
-    }
-    if (params.visibility !== undefined && params.visibility !== "open" && judged.isDefault) {
-      throw invalidRequest(
-        "The default space must stay open — every org member lands there.",
-        "visibility",
-      );
-    }
+  const changesAppearance = params.icon !== undefined || params.color !== undefined;
+  // A personal space is `private` with one member by construction; there is no
+  // visibility to choose and no implicit member to give a default role to
+  // (RBAC spec §3.6), nor an icon or colour to set. `name` stays editable, and
+  // `is_default` is not a field of this route at all. The access rules are DB
+  // CHECKs too, but a named 4xx beats a 23514.
+  if ((changesAccess || changesAppearance) && judged.ownerUserId !== null) {
+    throw conflict(
+      "personal_space_immutable",
+      "A personal space is always private, has no implicit members and no icon or colour of its own: only its name can be changed.",
+    );
+  }
+  if (params.visibility !== undefined && params.visibility !== "open" && judged.isDefault) {
+    throw invalidRequest(
+      "The default space must stay open — every org member lands there.",
+      "visibility",
+    );
   }
   const { space, unshared } = await db.transaction(async (tx) => {
     const [updated] = await tx
@@ -292,6 +293,8 @@ export async function updateSpace(
         ...(params.settings !== undefined && { settings: params.settings }),
         ...(params.visibility !== undefined && { visibility: params.visibility }),
         ...(params.defaultRole !== undefined && { defaultRole: params.defaultRole }),
+        ...(params.icon !== undefined && { icon: params.icon }),
+        ...(params.color !== undefined && { color: params.color }),
         updatedAt: new Date(),
       })
       .where(

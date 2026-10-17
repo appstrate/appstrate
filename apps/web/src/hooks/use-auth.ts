@@ -11,6 +11,7 @@ import { clearSession } from "../lib/clear-session";
 import { readSession, rememberSignedIn, sessionExpected } from "../lib/session-read";
 import { registerSessionCheck } from "../lib/stale-authority";
 import i18n from "../i18n";
+import type { SpaceViewer } from "../lib/identity-tile-props";
 
 async function fetchProfile(): Promise<AuthProfile | null> {
   try {
@@ -111,6 +112,13 @@ export async function refreshAuth(): Promise<void> {
       "Authentication did not complete — the session could not be established.",
     );
   }
+}
+
+/** The signed-in person as the UI names and draws them; null while no session is known. */
+export function useViewer(): SpaceViewer | null {
+  const user = useStore(authStore, (s) => s.user);
+  const displayName = useStore(authStore, (s) => s.profile?.displayName);
+  return user ? { id: user.id, name: displayName || user.email } : null;
 }
 
 /** `can_create_org`; `true` while the profile is unknown, so a failed read strands nobody on the waiting page. */

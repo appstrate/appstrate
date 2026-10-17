@@ -844,6 +844,8 @@
                   "data": [
                     {
                       "id": "@acme/email-sorter",
+                      "icon": "lucide:mail",
+                      "color": "blue",
                       "display_name": "Email Sorter",
                       "description": "Automatically sorts and labels incoming emails",
                       "schema_version": "0.1",
@@ -862,6 +864,8 @@
                     },
                     {
                       "id": "@appstrate/code-reviewer",
+                      "icon": null,
+                      "color": null,
                       "display_name": "Code Reviewer",
                       "description": "Reviews pull requests and suggests improvements",
                       "schema_version": "0.1",
@@ -13245,7 +13249,8 @@
                       "id": "550e8400-e29b-41d4-a716-446655440000",
                       "name": "Acme Corp",
                       "slug": "acme-corp",
-                      "logo": null,
+                      "icon": null,
+                      "color": null,
                       "role": "owner",
                       "permissions": ["org:read", "org:update", "members:invite"],
                       "createdAt": "2026-01-10T08:00:00Z",
@@ -13312,7 +13317,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["id", "name", "slug", "logo", "role", "createdAt"],
+                  "required": ["id", "name", "slug", "icon", "color", "role", "createdAt"],
                   "properties": {
                     "id": {
                       "type": "string",
@@ -13324,43 +13329,13 @@
                     "slug": {
                       "type": "string"
                     },
-                    "logo": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": ["kind", "emoji"],
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "const": "emoji"
-                            },
-                            "emoji": {
-                              "type": "string",
-                              "description": "Exactly one emoji."
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": ["kind", "url"],
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "const": "image"
-                            },
-                            "url": {
-                              "type": "string",
-                              "description": "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good."
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "description": "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial."
+                    "icon": {
+                      "type": ["string", "null"],
+                      "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+                    },
+                    "color": {
+                      "type": ["string", "null"],
+                      "description": "The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta[\"dev.appstrate/ui\"].color`, `null` when that is not a palette key."
                     },
                     "role": {
                       "type": "string",
@@ -13376,7 +13351,8 @@
                   "id": "550e8400-e29b-41d4-a716-446655440001",
                   "name": "New Organization",
                   "slug": "new-org",
-                  "logo": null,
+                  "icon": null,
+                  "color": null,
                   "role": "owner",
                   "createdAt": "2026-01-15T10:30:00Z"
                 }
@@ -13432,7 +13408,8 @@
                   "id": "550e8400-e29b-41d4-a716-446655440000",
                   "name": "Acme Corp",
                   "slug": "acme-corp",
-                  "logo": null,
+                  "icon": null,
+                  "color": null,
                   "members": [
                     {
                       "userId": "usr_abc123",
@@ -13493,7 +13470,7 @@
         "operationId": "updateOrganization",
         "tags": ["Organizations"],
         "summary": "Update organization",
-        "description": "Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes `{ kind: \"emoji\", emoji }` or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.",
+        "description": "Update organization name, slug, icon and/or colour. Requires `org:update`. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. An uploaded image travels as the `icon` itself, a base64 WebP or PNG data URI; the audit log records the first 16 hex digits of its SHA-256 digest, never its bytes.",
         "parameters": [
           {
             "name": "orgId",
@@ -13519,28 +13496,26 @@
                     "type": "string",
                     "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
                   },
-                  "logo": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "required": ["kind", "emoji"],
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "emoji"
-                          },
-                          "emoji": {
-                            "type": "string",
-                            "description": "Exactly one emoji."
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "null"
-                      }
+                  "icon": {
+                    "type": ["string", "null"],
+                    "maxLength": 16384,
+                    "description": "`lucide:<name>`, `emoji:<one emoji>`, or `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px); `null` clears it. An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`)."
+                  },
+                  "color": {
+                    "type": ["string", "null"],
+                    "enum": [
+                      "neutral",
+                      "blue",
+                      "emerald",
+                      "violet",
+                      "amber",
+                      "rose",
+                      "cyan",
+                      "pink",
+                      "orange",
+                      null
                     ],
-                    "description": "`{ \"kind\": \"emoji\", \"emoji\": \"<one emoji>\" }`, or `null` to clear the logo."
+                    "description": "A palette key; `null` clears it, the colour then derived from the organization id."
                   }
                 },
                 "additionalProperties": false
@@ -13616,159 +13591,6 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
-          }
-        }
-      }
-    },
-    "/api/orgs/{orgId}/logo": {
-      "get": {
-        "operationId": "getOrganizationLogo",
-        "tags": ["Organizations"],
-        "summary": "Get organization logo image",
-        "description": "The organization's logo image, for any member. Its `ETag` is the image's version, the `v` of `logo.url`; a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.",
-        "parameters": [
-          {
-            "name": "orgId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "v",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "The logo version the caller expects: the `v` of `logo.url`."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The logo image.",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "The quoted logo version."
-              },
-              "Cache-Control": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "`private, max-age=31536000, immutable` when `v` names the current version, `private, no-cache` otherwise."
-              },
-              "X-Content-Type-Options": {
-                "schema": {
-                  "type": "string",
-                  "enum": ["nosniff"]
-                }
-              }
-            },
-            "content": {
-              "image/webp": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              }
-            }
-          },
-          "304": {
-            "description": "Cached copy is still current (`If-None-Match` matched). No body.",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "The quoted logo version."
-              },
-              "Cache-Control": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "As on the `200`."
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound",
-            "description": "The organization's logo is not an image."
-          }
-        }
-      },
-      "put": {
-        "operationId": "uploadOrganizationLogo",
-        "tags": ["Organizations"],
-        "summary": "Upload organization logo image",
-        "description": "Replace the organization logo with a WebP image sent as the raw request body (`Content-Type: image/webp`, at most 36000 bytes, a RIFF container of form type `WEBP`). Requires `org:update`. `logo` becomes `{ kind: \"image\", url }`.",
-        "parameters": [
-          {
-            "name": "orgId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "image/webp": {
-              "schema": {
-                "type": "string",
-                "format": "binary",
-                "maxLength": 36000
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Updated organization — same OrgDetail shape as GET /api/orgs/{orgId}",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrgDetail"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -14673,7 +14495,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["id", "name", "slug", "logo", "role", "createdAt"],
+                        "required": ["id", "name", "slug", "icon", "color", "role", "createdAt"],
                         "properties": {
                           "id": {
                             "type": "string"
@@ -14684,43 +14506,13 @@
                           "slug": {
                             "type": "string"
                           },
-                          "logo": {
-                            "oneOf": [
-                              {
-                                "type": "object",
-                                "required": ["kind", "emoji"],
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "const": "emoji"
-                                  },
-                                  "emoji": {
-                                    "type": "string",
-                                    "description": "Exactly one emoji."
-                                  }
-                                },
-                                "additionalProperties": false
-                              },
-                              {
-                                "type": "object",
-                                "required": ["kind", "url"],
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "const": "image"
-                                  },
-                                  "url": {
-                                    "type": "string",
-                                    "description": "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good."
-                                  }
-                                },
-                                "additionalProperties": false
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ],
-                            "description": "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial."
+                          "icon": {
+                            "type": ["string", "null"],
+                            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+                          },
+                          "color": {
+                            "type": ["string", "null"],
+                            "description": "The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta[\"dev.appstrate/ui\"].color`, `null` when that is not a palette key."
                           },
                           "role": {
                             "type": "string",
@@ -14754,7 +14546,8 @@
                       "id": "org_abc123",
                       "name": "Acme Corp",
                       "slug": "acme",
-                      "logo": null,
+                      "icon": null,
+                      "color": null,
                       "role": "owner",
                       "permissions": ["org:read", "org:update", "members:invite"],
                       "createdAt": "2026-01-10T08:00:00Z"
@@ -16462,7 +16255,8 @@
                   "id": "550e8400-e29b-41d4-a716-446655440000",
                   "name": "Acme Corp",
                   "slug": "acme-corp",
-                  "logo": null,
+                  "icon": null,
+                  "color": null,
                   "role": "member",
                   "permissions": ["org:read", "spaces:read"],
                   "createdAt": "2026-01-10T08:00:00Z",
@@ -22592,6 +22386,8 @@
                   "object": "space",
                   "orgId": "550e8400-e29b-41d4-a716-446655440000",
                   "name": "My SaaS App",
+                  "icon": null,
+                  "color": null,
                   "isDefault": false,
                   "settings": {
                     "allowedRedirectDomains": ["myapp.com", "staging.myapp.com"]
@@ -22678,6 +22474,8 @@
                       "object": "space",
                       "orgId": "550e8400-e29b-41d4-a716-446655440000",
                       "name": "Default",
+                      "icon": null,
+                      "color": null,
                       "isDefault": true,
                       "settings": {
                         "allowedRedirectDomains": []
@@ -22701,6 +22499,8 @@
                       "object": "space",
                       "orgId": "550e8400-e29b-41d4-a716-446655440000",
                       "name": "My SaaS App",
+                      "icon": "emoji:🚀",
+                      "color": "violet",
                       "isDefault": false,
                       "settings": {
                         "allowedRedirectDomains": ["myapp.com"]
@@ -22795,7 +22595,7 @@
         "operationId": "updateSpace",
         "tags": ["Spaces"],
         "summary": "Update a space",
-        "description": "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility` or `default_role` is a 409 `personal_space_immutable`.",
+        "description": "Update space name, icon, colour, settings, visibility or default role. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon` or `color` is a 409 `personal_space_immutable`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -22820,6 +22620,27 @@
                     "minLength": 1,
                     "maxLength": 100,
                     "description": "Human-readable space name"
+                  },
+                  "icon": {
+                    "type": ["string", "null"],
+                    "maxLength": 16384,
+                    "description": "`lucide:<name>` or `emoji:<one emoji>`; `null` clears it. An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`)."
+                  },
+                  "color": {
+                    "type": ["string", "null"],
+                    "enum": [
+                      "neutral",
+                      "blue",
+                      "emerald",
+                      "violet",
+                      "amber",
+                      "rose",
+                      "cyan",
+                      "pink",
+                      "orange",
+                      null
+                    ],
+                    "description": "A palette key; `null` clears it, the colour then derived from the space id."
                   },
                   "settings": {
                     "type": "object",
@@ -32139,7 +31960,8 @@
           "id",
           "name",
           "slug",
-          "logo",
+          "icon",
+          "color",
           "role",
           "permissions",
           "createdAt",
@@ -32155,43 +31977,13 @@
           "slug": {
             "type": "string"
           },
-          "logo": {
-            "oneOf": [
-              {
-                "type": "object",
-                "required": ["kind", "emoji"],
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "emoji"
-                  },
-                  "emoji": {
-                    "type": "string",
-                    "description": "Exactly one emoji."
-                  }
-                },
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "required": ["kind", "url"],
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "image"
-                  },
-                  "url": {
-                    "type": "string",
-                    "description": "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good."
-                  }
-                },
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial."
+          "icon": {
+            "type": ["string", "null"],
+            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+          },
+          "color": {
+            "type": ["string", "null"],
+            "description": "The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta[\"dev.appstrate/ui\"].color`, `null` when that is not a palette key."
           },
           "role": {
             "type": "string",
@@ -32342,6 +32134,7 @@
       },
       "OrgDetail": {
         "type": "object",
+        "required": ["id", "name", "slug", "icon", "color"],
         "properties": {
           "id": {
             "type": "string"
@@ -32352,43 +32145,13 @@
           "slug": {
             "type": "string"
           },
-          "logo": {
-            "oneOf": [
-              {
-                "type": "object",
-                "required": ["kind", "emoji"],
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "emoji"
-                  },
-                  "emoji": {
-                    "type": "string",
-                    "description": "Exactly one emoji."
-                  }
-                },
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "required": ["kind", "url"],
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "image"
-                  },
-                  "url": {
-                    "type": "string",
-                    "description": "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good."
-                  }
-                },
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial."
+          "icon": {
+            "type": ["string", "null"],
+            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+          },
+          "color": {
+            "type": ["string", "null"],
+            "description": "The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta[\"dev.appstrate/ui\"].color`, `null` when that is not a palette key."
           },
           "createdAt": {
             "type": "string",
@@ -32460,6 +32223,8 @@
         "type": "object",
         "required": [
           "id",
+          "icon",
+          "color",
           "source",
           "type",
           "running_runs",
@@ -32473,12 +32238,12 @@
             "type": "string"
           },
           "icon": {
-            "type": "string",
-            "description": "The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none."
+            "type": ["string", "null"],
+            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
           },
           "color": {
-            "type": "string",
-            "description": "Presentation token from `_meta[\"dev.appstrate/ui\"].color`."
+            "type": ["string", "null"],
+            "description": "The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta[\"dev.appstrate/ui\"].color`, `null` when that is not a palette key."
           },
           "display_name": {
             "type": "string"
@@ -32570,6 +32335,8 @@
         "type": "object",
         "required": [
           "id",
+          "icon",
+          "color",
           "source",
           "scope",
           "version",
@@ -32590,12 +32357,12 @@
             "type": "string"
           },
           "icon": {
-            "type": "string",
-            "description": "The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none."
+            "type": ["string", "null"],
+            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
           },
           "color": {
-            "type": "string",
-            "description": "Presentation token from `_meta[\"dev.appstrate/ui\"].color`."
+            "type": ["string", "null"],
+            "description": "The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta[\"dev.appstrate/ui\"].color`, `null` when that is not a palette key."
           },
           "display_name": {
             "type": "string"
@@ -34937,6 +34704,8 @@
           "object",
           "orgId",
           "name",
+          "icon",
+          "color",
           "isDefault",
           "settings",
           "visibility",
@@ -34967,6 +34736,14 @@
           "name": {
             "type": "string",
             "description": "Human-readable space name"
+          },
+          "icon": {
+            "type": ["string", "null"],
+            "description": "The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse."
+          },
+          "color": {
+            "type": ["string", "null"],
+            "description": "The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta[\"dev.appstrate/ui\"].color`, `null` when that is not a palette key."
           },
           "isDefault": {
             "type": "boolean",

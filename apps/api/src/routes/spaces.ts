@@ -22,6 +22,7 @@ import { pinnedSpaceScopeGuard } from "../middleware/guards.ts";
 import { ApiError, forbidden, invalidRequest, internalError, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { appearanceColorSchema, appearanceIconSchema } from "@appstrate/core/appearance";
 import { listResponse } from "../lib/list-response.ts";
 import { toISO } from "../lib/date-helpers.ts";
 import {
@@ -111,6 +112,8 @@ function spaceWireForCaller(
   c: Context<AppEnv>,
   space: {
     id: string;
+    icon: string | null;
+    color: string | null;
     createdBy: string | null;
     visibility: SpaceVisibility;
     defaultRole: SpaceRolePreset;
@@ -190,6 +193,8 @@ export const updateSpaceSchema = z
       .min(1, "name is required")
       .max(100, "name must be 100 characters or less")
       .optional(),
+    icon: appearanceIconSchema(["lucide", "emoji"]).nullable().optional(),
+    color: appearanceColorSchema.nullable().optional(),
     settings: spaceSettingsSchema.optional(),
     visibility: z.enum(SPACE_VISIBILITIES).optional(),
     default_role: z.enum(SPACE_ROLE_PRESETS).optional(),
@@ -513,6 +518,8 @@ export function createSpacesRouter() {
           resourceId: space.id,
           after: {
             name: data.name,
+            icon: data.icon,
+            color: data.color,
             settings: data.settings,
             visibility: data.visibility,
             defaultRole: default_role,

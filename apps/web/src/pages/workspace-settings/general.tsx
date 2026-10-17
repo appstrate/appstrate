@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Plus, X } from "lucide-react";
+import { useLatestWrite } from "../../hooks/use-latest-write";
 import { usePermissions } from "../../hooks/use-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
@@ -23,6 +24,7 @@ import { useSpaceRoleOptions, type SpaceRolePreset } from "../../hooks/use-roles
 import type { components } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
+import { AppearancePicker } from "../../components/appearance-picker";
 import { ApiError } from "../../api/errors";
 import { toastError } from "../../lib/mutation-error";
 import {
@@ -54,6 +56,8 @@ function GeneralForm({
   spaceId: string;
   space: {
     name: string;
+    icon: string | null;
+    color: string | null;
     isDefault: boolean;
     settings?: { allowedRedirectDomains?: string[] };
     visibility: SpaceVisibility;
@@ -75,7 +79,20 @@ function GeneralForm({
   const [confirmOpen, setConfirmOpen] = useState(false);
   // A visibility leaving `open`, held until its consequence is confirmed.
   const [pendingClose, setPendingClose] = useState<SpaceVisibility | null>(null);
+  // The picker fires a write per arrow key: one in flight, the newest value after it.
+  const writeAppearance = useLatestWrite();
+  const saveAppearance = (change: Extract<SpaceSettingChange, { field: "icon" | "color" }>) => {
+    writeAppearance(change.field, change.value, () =>
+      updateMutation
+        .mutateAsync({ params: { path: { id: spaceId } }, body: spaceUpdateBody(change) })
+        .catch((error: unknown) => {
+          toastError(error);
+          throw error;
+        }),
+    );
+  };
   const nameWrite = fieldWriteState(updateMutation, "name");
+  const appearanceWrite = fieldWriteState(updateMutation, ["icon", "color"]);
   const activeDomains = editedDomains ?? domains;
   const activeVisibility = editedVisibility ?? space.visibility;
   const activeDefaultRole = editedDefaultRole ?? space.default_role;
@@ -160,6 +177,33 @@ function GeneralForm({
           <p className="text-muted-foreground text-sm">{t("spaces.personal.settingsLocked")}</p>
         ) : (
           <>
+            {/* A personal space has no appearance of its own: it is drawn as its owner. */}
+            <SettingRow
+              variant="field"
+              label={t("spaces.appearanceLabel")}
+              description={t("spaces.appearanceDescription")}
+              status={<SaveFeedback {...appearanceWrite} />}
+            >
+              <div className="w-full min-w-0">
+                {/* Keyed: no tab carries over to another space. Never disabled by a pending
+                    write — each arrow key on the colours is a PATCH, and disabling would drop
+                    the focus; the writes are serialised, the last pick wins. */}
+                <AppearancePicker
+                  key={spaceId}
+                  value={{ icon: space.icon, color: space.color }}
+                  allow={["lucide", "emoji"]}
+                  seed={spaceId}
+                  label={space.name}
+                  onChange={(next) => {
+                    if (next.icon !== undefined)
+                      saveAppearance({ field: "icon", value: next.icon });
+                    if (next.color !== undefined)
+                      saveAppearance({ field: "color", value: next.color });
+                  }}
+                />
+              </div>
+            </SettingRow>
+
             <SettingRow
               variant="field"
               label={t("spaces.redirectDomains")}

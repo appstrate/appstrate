@@ -4,7 +4,13 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  addOrgMember,
+  createTestContext,
+  createTestUser,
+  authHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedApiKey,
   seedSpace,
@@ -200,6 +206,155 @@ describe("Spaces API", () => {
         defaultRole: "viewer",
         settings: { allowedRedirectDomains: ["example.com"] },
       });
+    });
+  });
+
+  describe("PATCH /api/spaces/:id — default space visibility", () => {
+    const patchVisibility = (visibility: string) =>
+      app.request(`/api/spaces/${ctx.defaultSpaceId}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility }),
+      });
+    const readVisibility = async () => {
+      const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { visibility: string }).visibility;
+    };
+
+    it("refuses any visibility other than open on the default space (400 on visibility)", async () => {
+      expect(await readVisibility()).toBe("open");
+
+      for (const visibility of ["closed", "private"]) {
+        const res = await patchVisibility(visibility);
+        const body = await expectProblem(res, 400, {
+          code: "invalid_request",
+          param: "visibility",
+        });
+        expect(body.detail, visibility).toBe(
+          "The default space must stay open — every org member lands there.",
+        );
+        expect(await readVisibility(), visibility).toBe("open");
+      }
+    });
+
+    it("accepts open on the default space", async () => {
+      const res = await patchVisibility("open");
+      expect(res.status).toBe(200);
+      expect(await readVisibility()).toBe("open");
+    });
+  });
+
+  describe("PATCH /api/spaces/:id — icon and color", () => {
+    const patchSpace = (headers: Record<string, string>, spaceId: string, body: unknown) =>
+      app.request(`/api/spaces/${spaceId}`, {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const stored = async (spaceId: string) => {
+      const [row] = await db
+        .select({ icon: spaces.icon, color: spaces.color })
+        .from(spaces)
+        .where(eq(spaces.id, spaceId));
+      return row;
+    };
+
+    it("writes a lucide or emoji icon and a colour, read back on GET and the listing", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Branded" });
+      for (const icon of ["lucide:rocket", "emoji:🚀"]) {
+        const res = await patchSpace(authHeaders(ctx), space.id, { icon, color: "amber" });
+        expect(res.status, await res.clone().text()).toBe(200);
+        expect(await res.json()).toMatchObject({ icon, color: "amber" });
+
+        const detail = await app.request(`/api/spaces/${space.id}`, { headers: authHeaders(ctx) });
+        expect(await detail.json()).toMatchObject({ icon, color: "amber" });
+
+        const listed = (await (
+          await app.request("/api/spaces", { headers: authHeaders(ctx) })
+        ).json()) as { data: Array<Record<string, unknown>> };
+        expect(listed.data.find((s) => s.id === space.id)).toMatchObject({ icon, color: "amber" });
+      }
+    });
+
+    it("emits a null icon and colour on every space that has none", async () => {
+      const listed = (await (
+        await app.request("/api/spaces", { headers: authHeaders(ctx) })
+      ).json()) as { data: Array<Record<string, unknown>> };
+      expect(listed.data.length).toBeGreaterThan(0);
+      for (const space of listed.data) {
+        expect(space).toMatchObject({ icon: null, color: null });
+      }
+    });
+
+    it("leaves an absent field unchanged, clears a null one, and audits both", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Clearable" });
+      await patchSpace(authHeaders(ctx), space.id, { icon: "emoji:🧠", color: "neutral" });
+
+      expect((await patchSpace(authHeaders(ctx), space.id, { name: "Renamed" })).status).toBe(200);
+      expect(await stored(space.id)).toEqual({ icon: "emoji:🧠", color: "neutral" });
+
+      const cleared = await patchSpace(authHeaders(ctx), space.id, { icon: null, color: null });
+      expect(await cleared.json()).toMatchObject({ icon: null, color: null });
+      expect(await stored(space.id)).toEqual({ icon: null, color: null });
+
+      const rows = await db
+        .select({ after: auditEvents.after })
+        .from(auditEvents)
+        .where(and(eq(auditEvents.resourceId, space.id), eq(auditEvents.action, "space.updated")));
+      expect(rows.map((r) => r.after)).toContainEqual({ icon: "emoji:🧠", color: "neutral" });
+      expect(rows.map((r) => r.after)).toContainEqual({ icon: null, color: null });
+    });
+
+    it("refuses an image icon and anything outside the grammar (400)", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Strict" });
+      // A valid 64×64 VP8X WebP: an organization would take it, a space does not.
+      const vp8x = [82, 73, 70, 70, 22, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 88, 10, 0, 0, 0];
+      const image = `data:image/webp;base64,${btoa(String.fromCharCode(...vp8x, 0, 0, 0, 0, 63, 0, 0, 63, 0, 0))}`;
+      for (const body of [
+        { icon: image },
+        { icon: "emoji:🧠🚀" },
+        { icon: "logos:slack-icon" },
+        { icon: "rocket" },
+        { color: "#ff0000" },
+        { color: "teal" },
+      ]) {
+        const res = await patchSpace(authHeaders(ctx), space.id, body);
+        expect(res.status, JSON.stringify(body).slice(0, 60)).toBe(400);
+      }
+      expect(await stored(space.id)).toEqual({ icon: null, color: null });
+    });
+
+    it("refuses an icon or colour on a personal space (409 personal_space_immutable)", async () => {
+      const listed = (await (
+        await app.request("/api/spaces", { headers: authHeaders(ctx) })
+      ).json()) as { data: Array<{ id: string; personal: boolean }> };
+      const personal = listed.data.find((s) => s.personal);
+      expect(personal).toBeDefined();
+
+      for (const body of [{ icon: "emoji:🧠" }, { color: "rose" }, { icon: null }]) {
+        await expectProblem(await patchSpace(authHeaders(ctx), personal!.id, body), 409, {
+          code: "personal_space_immutable",
+        });
+      }
+      expect(await stored(personal!.id)).toEqual({ icon: null, color: null });
+      // Its name stays editable.
+      expect((await patchSpace(authHeaders(ctx), personal!.id, { name: "Mine" })).status).toBe(200);
+    });
+
+    it("403s a caller without space-settings:write in that space", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Guarded" });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await patchSpace({ Cookie: member.cookie, "X-Org-Id": ctx.orgId }, space.id, {
+        icon: "emoji:🚀",
+        color: "rose",
+      });
+      expect(res.status).toBe(403);
+      expect(await stored(space.id)).toEqual({ icon: null, color: null });
     });
   });
 

@@ -18,6 +18,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   audited.
   See `scripts/migration/README.md`.
 
+- **Organizations, team spaces and agents carry one visual identity,
+  `{ icon, color }`** (#2046), both always present on the wire, both nullable.
+  `icon` is `lucide:<name>`, `emoji:<one emoji>` or, on an organization only, an
+  image held inline as a base64 data URI (`data:image/webp;base64,…` or
+  `data:image/png;base64,…`, at most 12 000 bytes and 256×256 px; the audit log
+  records it by a hash, never its bytes). A written emoji must be exactly one
+  emoji of Unicode's RGI set and is stored in its RGI form, the only rewrite
+  being a U+FE0F added or removed (`❤` → `❤️`, `👍️` → `👍`, `1⃣` → `1️⃣`).
+  `color` is a palette key (`neutral`, `blue`, `emerald`, `violet`, `amber`,
+  `rose`, `cyan`, `pink`, `orange`); `null` means a hue derived from the id,
+  never `neutral`. An organization's pair is returned by `GET /api/orgs`,
+  `GET /api/me/orgs` and invitation accept and written by `PATCH /api/orgs/{id}`;
+  a space's by the space routes and `PATCH /api/spaces/{id}`, which refuses both
+  on a personal space (`409 personal_space_immutable`): it has no identity of
+  its own. An agent's is its manifest `icon` and `_meta["dev.appstrate/ui"].color`,
+  on the list and the detail, `null` when absent or, for the colour, not a
+  palette key. Migrations `0097_org_logo` (a nullable `organizations.logo`), then
+  `0101_identity_appearance` (renames it `icon`; adds `color` to organizations,
+  `icon` and `color` to spaces; caps each `icon` at 16 384 bytes with a CHECK).
+  **Operators:** only where `0097` was applied before this release (staging, never
+  production), run `scripts/migration/0049-org-icon-images.ts --apply` in the
+  same window as `0101`, right after it: it clears the organization icons `0097`
+  left as `image:<version>` and empties the `orgs` bucket. See
+  `scripts/migration/README.md`.
+
 - **The dashboard is redesigned** (#1937): settings and preferences open as
   routed overlays, every real dialog has a URL, tables share one component, and
   one connection menu and one model picker serve every screen. SPA routes moved
@@ -37,13 +62,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `category`, the provider's HTTP `status` and its own sentence, classified
     once at finalize. Also on the `run_update` realtime event (`modelError`) and
     in the MCP `run_and_wait` result.
-  - **Organizations carry a `logo`** (migration `0097_org_logo`, a nullable
-    column), returned by `GET /api/orgs`, `GET /api/me/orgs` and invitation
-    accept as `{ kind: "emoji", emoji }`, `{ kind: "image", url }` or `null`. An
-    emoji (or `null`) is written by `PATCH /api/orgs/{id}`; an image is uploaded
-    as WebP bytes by `PUT /api/orgs/{id}/logo`, kept in object storage and served
-    by `GET /api/orgs/{id}/logo`, whose URL names the image's version. The audit
-    log records an image logo by its version, never its bytes.
   - **`POST /api/models/apply`** (new) applies a model-provider choice in one
     transaction: an optional new credential, models enabled or disabled, the
     default. It honours `Idempotency-Key`, which widens the core set of
@@ -65,8 +83,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - **Model-provider credentials carry `serves_model_ids`**: on a personal
     credential, the organization models left to members' own credentials that
     it pays for; `[]` on an organization or built-in credential.
-  - **Agents** return optional `icon` and `color` on the list and the detail.
-    `GET /api/files` takes `q` (by name, inside the existing visibility filter).
+  - **Files**: `GET /api/files` takes `q` (by name, inside the existing
+    visibility filter).
   - **Schedules**: `GET`, `POST` and `PATCH /api/schedules/{id}` return an
     `ETag`, and a `PATCH` carrying `If-Match` answers `412` when the schedule
     moved since it was read. When the caller writes a schedule for itself and

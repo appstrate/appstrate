@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono, type Context } from "hono";
-import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
 import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
@@ -36,7 +35,7 @@ import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads
 import { createFilesRouter, createFilePreviewRouter } from "./routes/files.ts";
 import { createAdminStorageDeletionRouter } from "./routes/admin-storage-deletion.ts";
 import { createSpaFallbackHandler } from "./routes/spa.ts";
-import { staticCacheControl } from "./lib/static-cache.ts";
+import { serveSpaBuild } from "./lib/static-cache.ts";
 import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createOrgIntegrationsRouter } from "./routes/org-integrations.ts";
@@ -413,21 +412,10 @@ app.all(
   }),
 );
 
-// Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below).
-// `onFound` attaches the caching policy: Hono's static middleware emits no
-// `Cache-Control` and no validator of its own, so without it every asset is
-// re-downloaded in full on every visit (there is nothing to revalidate against,
-// so no `304` either). Policy + rationale: `lib/static-cache.ts`.
-app.use(
-  "/*",
-  serveStatic({
-    root: "./apps/web/dist",
-    rewriteRequestPath: (path) => (path === "/" || path === "/index.html" ? "/.noop" : path),
-    onFound: (path, c) => {
-      c.header("Cache-Control", staticCacheControl(path));
-    },
-  }),
-);
+// Static files for UI (JS, CSS, images, fonts, the emoji dataset — skip index.html, served with
+// config below), each with its caching policy: Hono's static middleware emits no `Cache-Control`
+// and no validator of its own. Policy + rationale: `lib/static-cache.ts`.
+serveSpaBuild(app, "./apps/web/dist");
 
 // SPA fallback — serve index.html with injected app config for all non-asset
 // routes. This is the ONLY response that carries the SPA document, and so the

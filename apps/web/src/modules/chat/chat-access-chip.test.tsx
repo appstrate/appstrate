@@ -61,6 +61,8 @@ function spaceFixture(role: { kind: "preset" | "custom"; key: string; name: stri
     id: SPACE_ID,
     orgId: ORG_ID,
     name: "Espace",
+    icon: null,
+    color: null,
     isDefault: true,
     settings: {},
     visibility: role ? ("open" as const) : ("closed" as const),

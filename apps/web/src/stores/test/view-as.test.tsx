@@ -71,7 +71,8 @@ const ORGS_AS_PERSONA: Organization[] = [
     id: "org_a",
     name: "Acme",
     slug: "acme",
-    logo: null,
+    icon: null,
+    color: null,
     role: "member",
     permissions: ["org:read"],
     createdAt: "2026-01-01T00:00:00Z",
@@ -395,6 +396,8 @@ function listedSpace(
   return {
     object: "space",
     orgId: "org_a",
+    icon: null,
+    color: null,
     isDefault: false,
     settings: {},
     visibility: "open",

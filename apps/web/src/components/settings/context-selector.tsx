@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { OptionSelect } from "@/components/app-ui/option-select";
+import type { IdentityTileProps } from "@/lib/identity-tile-props";
 
 /** Transparent in the rail so the settings overlay reads as one sheet; bordered from `md`. */
 const TRIGGER = [
@@ -21,7 +23,8 @@ export function ContextSelector({
   value: string;
   label: string;
   disabled?: boolean;
-  options: { id: string; name: string; disabled?: boolean }[];
+  /** `tile`: the `IdentityTile` drawn before the name, in the list and on the trigger. */
+  options: { id: string; name: string; tile: IdentityTileProps; disabled?: boolean }[];
   onValueChange: (value: string) => void;
 }) {
   return (
@@ -34,7 +37,14 @@ export function ContextSelector({
       aria-label={label}
       options={options.map((option) => ({
         value: option.id,
-        label: option.name,
+        // The tile's initials would lead the typeahead text otherwise.
+        textValue: option.name,
+        label: (
+          <span className="flex min-w-0 items-center gap-2">
+            <IdentityTile {...option.tile} className="size-5 rounded-md" />
+            <span className="truncate">{option.name}</span>
+          </span>
+        ),
         disabled: option.disabled,
       }))}
     />

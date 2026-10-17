@@ -64,6 +64,8 @@ function spaceFixture(permissions: string[]) {
     id: SPACE_ID,
     orgId: "org_a",
     name: "Equipe Commerciale",
+    icon: null,
+    color: null,
     isDefault: false,
     settings: {},
     visibility: "open" as const,

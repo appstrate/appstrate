@@ -14,7 +14,6 @@ import {
 import { getOrgById, getOrgMember, provisionMember } from "../services/organizations.ts";
 import { applySpaceAssignments } from "../services/space-assignments.ts";
 import { recordAudit } from "../services/audit.ts";
-import { orgLogoWire } from "../services/org-logo.ts";
 import { auditSpaceAssignments } from "../lib/space-role-assignment.ts";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
 import { getSessionForwardingCookies } from "../lib/auth-cookies.ts";
@@ -196,7 +195,8 @@ router.post("/:token/accept", async (c) => {
     id: org.id,
     name: org.name,
     slug: org.slug,
-    logo: orgLogoWire(org.id, org.logo),
+    icon: org.icon,
+    color: org.color,
     role: claimed.role,
     permissions: listedOrgPermissions(claimed.role),
     created: claimed.created,

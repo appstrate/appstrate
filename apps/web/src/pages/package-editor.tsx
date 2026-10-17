@@ -174,7 +174,11 @@ function AgentEditorInner({
           onChange={editor.onMetadataChange}
           isEdit
           identityChildren={
-            <AgentAppearanceFields manifest={state.manifest} onChange={updateManifest} />
+            <AgentAppearanceFields
+              packageId={packageId}
+              manifest={state.manifest}
+              onChange={updateManifest}
+            />
           }
         >
           <div className="flex flex-col gap-2">

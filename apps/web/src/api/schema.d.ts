@@ -3116,7 +3116,7 @@ export interface paths {
         head?: never;
         /**
          * Update organization
-         * @description Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes `{ kind: "emoji", emoji }` or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.
+         * @description Update organization name, slug, icon and/or colour. Requires `org:update`. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. An uploaded image travels as the `icon` itself, a base64 WebP or PNG data URI; the audit log records the first 16 hex digits of its SHA-256 digest, never its bytes.
          */
         patch: operations["updateOrganization"];
         trace?: never;
@@ -3201,30 +3201,6 @@ export interface paths {
          * @description The caller leaves the organization. Any member may leave, whatever their role; the last owner is refused with `409 last_owner` and must first promote another member to owner, or delete the organization. The decision reads the caller's real membership, so an active `X-View-As` preview changes nothing. Leaving has the effects of a removal: the caller's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window (a re-invitation inside it gives the space back; revoked keys and opaque tokens stay revoked). A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile. Leaving requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403, as is a caller who is not a member.
          */
         post: operations["leaveOrganization"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgId}/logo": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get organization logo image
-         * @description The organization's logo image, for any member. Its `ETag` is the image's version, the `v` of `logo.url`; a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.
-         */
-        get: operations["getOrganizationLogo"];
-        /**
-         * Upload organization logo image
-         * @description Replace the organization logo with a WebP image sent as the raw request body (`Content-Type: image/webp`, at most 36000 bytes, a RIFF container of form type `WEBP`). Requires `org:update`. `logo` becomes `{ kind: "image", url }`.
-         */
-        put: operations["uploadOrganizationLogo"];
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4786,7 +4762,7 @@ export interface paths {
         head?: never;
         /**
          * Update a space
-         * @description Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility` or `default_role` is a 409 `personal_space_immutable`.
+         * @description Update space name, icon, colour, settings, visibility or default role. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon` or `color` is a 409 `personal_space_immutable`.
          */
         patch: operations["updateSpace"];
         trace?: never;
@@ -5565,10 +5541,10 @@ export interface components {
         };
         AgentDetail: {
             id: string;
-            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none. */
-            icon?: string;
-            /** @description Presentation token from `_meta["dev.appstrate/ui"].color`. */
-            color?: string;
+            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+            icon: string | null;
+            /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
+            color: string | null;
             display_name?: string;
             description?: string;
             /** @enum {string} */
@@ -5667,10 +5643,10 @@ export interface components {
         };
         AgentListItem: {
             id: string;
-            /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none. */
-            icon?: string;
-            /** @description Presentation token from `_meta["dev.appstrate/ui"].color`. */
-            color?: string;
+            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+            icon: string | null;
+            /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
+            color: string | null;
             display_name?: string;
             description?: string;
             schema_version?: string;
@@ -6381,21 +6357,13 @@ export interface components {
             account_id?: string;
         };
         OrgDetail: {
-            id?: string;
-            name?: string;
-            slug?: string;
-            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
-            logo?: {
-                /** @constant */
-                kind: "emoji";
-                /** @description Exactly one emoji. */
-                emoji: string;
-            } | {
-                /** @constant */
-                kind: "image";
-                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
-                url: string;
-            } | null;
+            id: string;
+            name: string;
+            slug: string;
+            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+            icon: string | null;
+            /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
+            color: string | null;
             /** Format: date-time */
             createdAt?: string;
             /**
@@ -6628,18 +6596,10 @@ export interface components {
             id: string;
             name: string;
             slug: string;
-            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
-            logo: {
-                /** @constant */
-                kind: "emoji";
-                /** @description Exactly one emoji. */
-                emoji: string;
-            } | {
-                /** @constant */
-                kind: "image";
-                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
-                url: string;
-            } | null;
+            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+            icon: string | null;
+            /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
+            color: string | null;
             /** @enum {string} */
             role: "owner" | "admin" | "member" | "guest";
             /** @description The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces. */
@@ -7326,6 +7286,10 @@ export interface components {
             orgId: string;
             /** @description Human-readable space name */
             name: string;
+            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+            icon: string | null;
+            /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
+            color: string | null;
             /** @description Whether this is the default space */
             isDefault: boolean;
             settings: {
@@ -8289,6 +8253,8 @@ export interface operations {
                      *       "data": [
                      *         {
                      *           "id": "@acme/email-sorter",
+                     *           "icon": "lucide:mail",
+                     *           "color": "blue",
                      *           "display_name": "Email Sorter",
                      *           "description": "Automatically sorts and labels incoming emails",
                      *           "schema_version": "0.1",
@@ -8310,6 +8276,8 @@ export interface operations {
                      *         },
                      *         {
                      *           "id": "@appstrate/code-reviewer",
+                     *           "icon": null,
+                     *           "color": null,
                      *           "display_name": "Code Reviewer",
                      *           "description": "Reviews pull requests and suggests improvements",
                      *           "schema_version": "0.1",
@@ -17073,7 +17041,8 @@ export interface operations {
                      *           "id": "org_abc123",
                      *           "name": "Acme Corp",
                      *           "slug": "acme",
-                     *           "logo": null,
+                     *           "icon": null,
+                     *           "color": null,
                      *           "role": "owner",
                      *           "permissions": [
                      *             "org:read",
@@ -17092,18 +17061,10 @@ export interface operations {
                             id: string;
                             name: string;
                             slug: string;
-                            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
-                            logo: {
-                                /** @constant */
-                                kind: "emoji";
-                                /** @description Exactly one emoji. */
-                                emoji: string;
-                            } | {
-                                /** @constant */
-                                kind: "image";
-                                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
-                                url: string;
-                            } | null;
+                            /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+                            icon: string | null;
+                            /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
+                            color: string | null;
                             /**
                              * @description Org role for member callers; `end_user` for OIDC end-user JWTs.
                              * @enum {string}
@@ -19478,7 +19439,8 @@ export interface operations {
                      *           "id": "550e8400-e29b-41d4-a716-446655440000",
                      *           "name": "Acme Corp",
                      *           "slug": "acme-corp",
-                     *           "logo": null,
+                     *           "icon": null,
+                     *           "color": null,
                      *           "role": "owner",
                      *           "permissions": [
                      *             "org:read",
@@ -19534,7 +19496,8 @@ export interface operations {
                      *       "id": "550e8400-e29b-41d4-a716-446655440001",
                      *       "name": "New Organization",
                      *       "slug": "new-org",
-                     *       "logo": null,
+                     *       "icon": null,
+                     *       "color": null,
                      *       "role": "owner",
                      *       "createdAt": "2026-01-15T10:30:00Z"
                      *     }
@@ -19544,18 +19507,10 @@ export interface operations {
                         id: string;
                         name: string;
                         slug: string;
-                        /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
-                        logo: {
-                            /** @constant */
-                            kind: "emoji";
-                            /** @description Exactly one emoji. */
-                            emoji: string;
-                        } | {
-                            /** @constant */
-                            kind: "image";
-                            /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
-                            url: string;
-                        } | null;
+                        /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
+                        icon: string | null;
+                        /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
+                        color: string | null;
                         /** @enum {string} */
                         role: "owner";
                         /** Format: date-time */
@@ -19593,7 +19548,8 @@ export interface operations {
                      *       "id": "550e8400-e29b-41d4-a716-446655440000",
                      *       "name": "Acme Corp",
                      *       "slug": "acme-corp",
-                     *       "logo": null,
+                     *       "icon": null,
+                     *       "color": null,
                      *       "members": [
                      *         {
                      *           "userId": "usr_abc123",
@@ -19684,13 +19640,13 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     slug?: string;
-                    /** @description `{ "kind": "emoji", "emoji": "<one emoji>" }`, or `null` to clear the logo. */
-                    logo?: {
-                        /** @constant */
-                        kind: "emoji";
-                        /** @description Exactly one emoji. */
-                        emoji: string;
-                    } | null;
+                    /** @description `lucide:<name>`, `emoji:<one emoji>`, or `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px); `null` clears it. An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). */
+                    icon?: string | null;
+                    /**
+                     * @description A palette key; `null` clears it, the colour then derived from the organization id.
+                     * @enum {string|null}
+                     */
+                    color?: "neutral" | "blue" | "emerald" | "violet" | "amber" | "rose" | "cyan" | "pink" | "orange" | null;
                 };
             };
         };
@@ -19897,85 +19853,6 @@ export interface operations {
                 };
             };
             409: components["responses"]["LastOwner"];
-        };
-    };
-    getOrganizationLogo: {
-        parameters: {
-            query?: {
-                /** @description The logo version the caller expects: the `v` of `logo.url`. */
-                v?: string;
-            };
-            header?: never;
-            path: {
-                orgId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The logo image. */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    /** @description The quoted logo version. */
-                    ETag?: string;
-                    /** @description `private, max-age=31536000, immutable` when `v` names the current version, `private, no-cache` otherwise. */
-                    "Cache-Control"?: string;
-                    "X-Content-Type-Options"?: "nosniff";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "image/webp": Blob;
-                };
-            };
-            /** @description Cached copy is still current (`If-None-Match` matched). No body. */
-            304: {
-                headers: {
-                    /** @description The quoted logo version. */
-                    ETag?: string;
-                    /** @description As on the `200`. */
-                    "Cache-Control"?: string;
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description The organization's logo is not an image. */
-            404: components["responses"]["NotFound"];
-        };
-    };
-    uploadOrganizationLogo: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                orgId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "image/webp": Blob;
-            };
-        };
-        responses: {
-            /** @description Updated organization — same OrgDetail shape as GET /api/orgs/{orgId} */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
         };
     };
     inviteMember: {
@@ -25433,6 +25310,8 @@ export interface operations {
                      *           "object": "space",
                      *           "orgId": "550e8400-e29b-41d4-a716-446655440000",
                      *           "name": "Default",
+                     *           "icon": null,
+                     *           "color": null,
                      *           "isDefault": true,
                      *           "settings": {
                      *             "allowedRedirectDomains": []
@@ -25459,6 +25338,8 @@ export interface operations {
                      *           "object": "space",
                      *           "orgId": "550e8400-e29b-41d4-a716-446655440000",
                      *           "name": "My SaaS App",
+                     *           "icon": "emoji:🚀",
+                     *           "color": "violet",
                      *           "isDefault": false,
                      *           "settings": {
                      *             "allowedRedirectDomains": [
@@ -25535,6 +25416,8 @@ export interface operations {
                      *       "object": "space",
                      *       "orgId": "550e8400-e29b-41d4-a716-446655440000",
                      *       "name": "My SaaS App",
+                     *       "icon": null,
+                     *       "color": null,
                      *       "isDefault": false,
                      *       "settings": {
                      *         "allowedRedirectDomains": [
@@ -25672,6 +25555,13 @@ export interface operations {
                 "application/json": {
                     /** @description Human-readable space name */
                     name?: string;
+                    /** @description `lucide:<name>` or `emoji:<one emoji>`; `null` clears it. An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). */
+                    icon?: string | null;
+                    /**
+                     * @description A palette key; `null` clears it, the colour then derived from the space id.
+                     * @enum {string|null}
+                     */
+                    color?: "neutral" | "blue" | "emerald" | "violet" | "amber" | "rose" | "cyan" | "pink" | "orange" | null;
                     /** @description Space settings. Written as a whole: an unknown key is a 400, never a silently dropped value that would erase the stored settings. */
                     settings?: {
                         /** @description Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically. */
@@ -28501,7 +28391,8 @@ export interface operations {
                      *       "id": "550e8400-e29b-41d4-a716-446655440000",
                      *       "name": "Acme Corp",
                      *       "slug": "acme-corp",
-                     *       "logo": null,
+                     *       "icon": null,
+                     *       "color": null,
                      *       "role": "member",
                      *       "permissions": [
                      *         "org:read",

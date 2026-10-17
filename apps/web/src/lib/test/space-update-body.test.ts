@@ -25,6 +25,15 @@ describe("spaceUpdateBody", () => {
     });
   });
 
+  it("sends the icon and the colour each on its own, null clearing it", () => {
+    expect(spaceUpdateBody({ field: "icon", value: "lucide:rocket" })).toEqual({
+      icon: "lucide:rocket",
+    });
+    expect(spaceUpdateBody({ field: "icon", value: null })).toEqual({ icon: null });
+    expect(spaceUpdateBody({ field: "color", value: "violet" })).toEqual({ color: "violet" });
+    expect(spaceUpdateBody({ field: "color", value: null })).toEqual({ color: null });
+  });
+
   it("sends the domain list without the empty rows of editing", () => {
     expect(spaceUpdateBody({ field: "domains", value: [" a.com ", "", "  "] })).toEqual({
       settings: { allowedRedirectDomains: ["a.com"] },
