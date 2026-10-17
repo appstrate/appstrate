@@ -20,7 +20,7 @@
  * fill as Studio's, or the two products would not read as one app.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { relativeAge } from "@appstrate/core/format";
@@ -259,7 +259,12 @@ function ConversationRow({
   if (editing) {
     return (
       <SidebarMenuItem className="px-2">
-        <RenameInput current={session.title ?? ""} onDone={() => setEditing(false)} onSave={save} />
+        <RenameInput
+          t={t}
+          current={session.title ?? ""}
+          onDone={() => setEditing(false)}
+          onSave={save}
+        />
       </SidebarMenuItem>
     );
   }
@@ -356,7 +361,15 @@ function ConversationRow({
  * segment on the same condition, so an unknown conversation costs no segment
  * rather than a segment with a made-up name.
  */
-export function ChatConversationTitle({
+export function ChatConversationTitle(props: {
+  activeId: string | null;
+  t: ChatTranslate;
+  can: ChatCan;
+}) {
+  return <ConversationTitle key={props.activeId} {...props} />;
+}
+
+function ConversationTitle({
   activeId,
   t,
   can,
@@ -381,7 +394,12 @@ export function ChatConversationTitle({
 
   if (editing) {
     return (
-      <RenameInput current={session.title ?? ""} onDone={() => setEditing(false)} onSave={save} />
+      <RenameInput
+        t={t}
+        current={session.title ?? ""}
+        onDone={() => setEditing(false)}
+        onSave={save}
+      />
     );
   }
   return (
@@ -397,36 +415,67 @@ export function ChatConversationTitle({
   );
 }
 
-/** Inline title editor — commits on Enter/blur, cancels on Escape. */
+/** Inline title editor: explicit Save/Enter, Cancel/Escape; blur never writes. */
 function RenameInput({
   current,
   onDone,
   onSave,
+  t,
 }: {
   current: string;
   onDone: () => void;
   onSave: (title: string) => Promise<void>;
+  t: ChatTranslate;
 }) {
   const [value, setValue] = useState(current);
-  const done = useRef(false);
-  const finish = (save: boolean) => {
-    if (done.current) return;
-    done.current = true;
-    const next = value.trim();
-    if (save && next && next !== current) void onSave(next);
-    onDone();
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const next = value.trim();
+  const finish = async () => {
+    if (saving || !next || next === current) return;
+    setSaving(true);
+    setFailed(false);
+    try {
+      await onSave(next);
+      onDone();
+    } catch {
+      // The chat's own fetch is not toasted by the app's mutation cache: say it here.
+      setFailed(true);
+    } finally {
+      setSaving(false);
+    }
   };
   return (
-    <Input
-      autoFocus
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={() => finish(true)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") finish(true);
-        else if (e.key === "Escape") finish(false);
-      }}
-      className="h-7 min-w-0 flex-1 px-1.5 py-0.5"
-    />
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+      <Input
+        autoFocus
+        value={value}
+        disabled={saving}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            void finish();
+          } else if (event.key === "Escape" && !saving) onDone();
+        }}
+        className="h-7 min-w-0 flex-1 px-1.5 py-0.5"
+      />
+      <Button
+        type="button"
+        size="sm"
+        disabled={saving || !next || next === current}
+        onClick={() => void finish()}
+      >
+        {t("common:btn.save")}
+      </Button>
+      <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={onDone}>
+        {t("common:btn.cancel")}
+      </Button>
+      {failed && (
+        <p role="alert" className="text-destructive w-full text-xs">
+          {t("common:saveFeedback.error")}
+        </p>
+      )}
+    </div>
   );
 }

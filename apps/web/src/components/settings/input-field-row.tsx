@@ -42,6 +42,12 @@ export function InputFieldRow({
       <SchemaForm
         wrapper={fieldWrapper}
         formData={value === undefined ? {} : { [fieldKey]: value }}
+        // Author defaults stay on their own layer; mounting or resetting never stages them.
+        experimental_defaultFormStateBehavior={{
+          emptyObjectFields: "skipDefaults",
+          constAsDefaults: "never",
+          arrayMinItems: { populate: "never" },
+        }}
         upload={upload}
         labels={labels}
         disabled={disabled}

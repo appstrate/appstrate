@@ -3,7 +3,7 @@
 /**
  * An agent's per-space generation settings, set from the agent's *Paramètres ›
  * Modèle* section and read back after a reload and over the API. The section
- * saves itself: each pick is written at once, there is no save button.
+ * holds edits locally until its explicit Save button is pressed.
  *
  * The reasoning level travels as `reasoning_level` inside `generation` (the
  * agent model route) and inside `generation_config` (the space placement row).
@@ -71,6 +71,7 @@ test("the shared temperature select preserves an exact saved value, zero, and in
   const saved = waitForModelPatch(page, scope, name);
   await temperature.click();
   await page.getByRole("option", { name: "0", exact: true }).click();
+  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   const response = await saved;
   expect(response.status()).toBe(200);
   expect(response.request().postDataJSON().generation).toEqual({
@@ -82,6 +83,7 @@ test("the shared temperature select preserves an exact saved value, zero, and in
   const inherited = waitForModelPatch(page, scope, name);
   await temperature.click();
   await page.getByRole("option", { name: "Valeur du fournisseur", exact: true }).click();
+  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   const cleared = await inherited;
   expect(cleared.status()).toBe(200);
   expect(cleared.request().postDataJSON().generation).toEqual({ reasoning_level: "off" });
@@ -117,6 +119,7 @@ test("an agent's reasoning level set in the UI persists across a reload and on t
   const saved = waitForModelPatch(page, scope, name);
   await reasoning.click();
   await page.getByRole("option", { name: HIGH, exact: true }).click();
+  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   const response = await saved;
   expect(response.status()).toBe(200);
   expect(response.request().postDataJSON()).toEqual({
@@ -147,6 +150,7 @@ test("an agent's reasoning level set in the UI persists across a reload and on t
   const cleared = waitForModelPatch(page, scope, name);
   await reasoningSelect(page).click();
   await page.getByRole("option", { name: REASONING_INHERIT, exact: true }).click();
+  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   const clearedResponse = await cleared;
   expect(clearedResponse.status()).toBe(200);
   expect(clearedResponse.request().postDataJSON()).toEqual({ modelId: null, generation: null });

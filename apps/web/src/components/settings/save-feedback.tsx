@@ -5,7 +5,7 @@ import { Check } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "@appstrate/ui/components/spinner";
 
-/** Saving / saved / error line of a self-saving setting. Keeps its height so the page never jumps. */
+/** Saving / saved / error line of a setting's write. Keeps its height so the page never jumps. */
 export function SaveFeedback({
   pending,
   success,

@@ -26,6 +26,7 @@ export function SaveBar({
       <span className="text-muted-foreground text-sm">{message}</span>
       <div className="ml-auto flex flex-wrap items-center gap-2 max-lg:ml-0 max-lg:w-full">
         <Button
+          aria-label={t("editor.discardChanges")}
           variant="outline"
           type="button"
           disabled={pending}
@@ -35,6 +36,7 @@ export function SaveBar({
           {t("editor.discardChanges")}
         </Button>
         <PendingButton
+          aria-label={t("btn.save", { ns: "common" })}
           type="button"
           pending={pending}
           disabled={saveDisabled}

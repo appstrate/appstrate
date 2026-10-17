@@ -86,11 +86,14 @@ export function OrgSettingsGeneralPage() {
       void queryClient.invalidateQueries({ queryKey: orgKeys.all });
     },
   });
-  // One mutation writes every row; each row's feedback is the write that carried its field.
-  const save = (change: OrgSettingChange) => {
-    if (!orgId) return;
-    updateOrgMutation.mutate({ params: { path: { orgId } }, body: orgUpdateBody(change) });
-  };
+  // The name is a draft (`InlineTextSetting`): its Save awaits this write.
+  const saveName = (name: string) =>
+    orgId
+      ? updateOrgMutation.mutateAsync({
+          params: { path: { orgId } },
+          body: orgUpdateBody({ field: "name", value: name }),
+        })
+      : Promise.reject(new Error("org_missing"));
   // The picker fires a write per arrow key: one in flight, the newest value after it.
   const writeAppearance = useLatestWrite();
   const saveAppearance = (change: OrgSettingChange) => {
@@ -99,7 +102,6 @@ export function OrgSettingsGeneralPage() {
       updateOrgMutation.mutateAsync({ params: { path: { orgId } }, body: orgUpdateBody(change) }),
     );
   };
-  const nameWrite = fieldWriteState(updateOrgMutation, "name");
   const appearanceWrite = fieldWriteState(updateOrgMutation, ["icon", "color"]);
 
   // No reload needed: `forgetOrg` moves the selection off the gone org.
@@ -147,18 +149,12 @@ export function OrgSettingsGeneralPage() {
             />
           </div>
         </SettingRow>
-        <SettingRow
-          variant="field"
-          label={t("spaces.nameLabel")}
-          description={currentOrg.slug}
-          status={<SaveFeedback {...nameWrite} />}
-        >
+        <SettingRow variant="field" label={t("spaces.nameLabel")} description={currentOrg.slug}>
           {canUpdateOrg ? (
             <InlineTextSetting
               value={currentOrg.name}
-              disabled={nameWrite.pending}
               aria-label={t("spaces.nameLabel")}
-              onCommit={(name) => save({ field: "name", value: name })}
+              onCommit={saveName}
             />
           ) : (
             <span className="text-sm">{currentOrg.name}</span>

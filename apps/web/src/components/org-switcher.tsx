@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { requestScopeChange } from "../hooks/use-unsaved-changes";
+
 /**
  * Organization and workspace switcher, at the head of the header trail: two columns, the
  * organizations and the workspaces OF THE ONE BEING EXPLORED (clicking an organization
@@ -157,14 +159,15 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
    * remembered there first so the space resolver enters it rather than the default; the
    * current page may not exist there, so `useLandAfterOrgSwitch` moves it.
    */
-  const applyContext = (orgId: string, spaceId: string) => {
-    if (orgId !== currentOrg.id) {
-      spaceStore.getState().remember(orgId, spaceId);
-      switchOrg(orgId);
-      landAfterOrgSwitch();
-    } else switchSpace(spaceId);
-    closeSwitcherAndSidebar();
-  };
+  const applyContext = (orgId: string, spaceId: string) =>
+    requestScopeChange(() => {
+      if (orgId !== currentOrg.id) {
+        spaceStore.getState().remember(orgId, spaceId);
+        switchOrg(orgId);
+        landAfterOrgSwitch();
+      } else switchSpace(spaceId);
+      closeSwitcherAndSidebar();
+    });
 
   const spaceName: ReactNode = currentSpace ? (
     <span className="text-muted-foreground">

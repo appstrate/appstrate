@@ -57,7 +57,6 @@ export function useDraftFileEdits({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const dirty = operations.length > 0;
-  const { blocker } = useUnsavedChanges(dirty);
   useReportEditorDirty(dirty);
 
   const baseEntries = base?.entries ?? index;
@@ -88,6 +87,7 @@ export function useDraftFileEdits({
     setBase(null);
     setSaveError(null);
   };
+  const { blocker } = useUnsavedChanges(dirty, discard);
 
   /** Rejects after recording the refusal, so a caller that must know it failed can tell. */
   const save = async () => {

@@ -3,43 +3,10 @@
 import { describe, expect, it } from "bun:test";
 import {
   domainsChanged,
-  spaceUpdateBody,
+  spaceAppearanceBody,
+  spaceSettingsUpdate,
   visibilityChangeNeedsConfirmation,
 } from "../space-update-body.ts";
-
-describe("spaceUpdateBody", () => {
-  it("renames with the name alone, so a personal space accepts it", () => {
-    // `visibility` or `default_role` in the body is a 409 `personal_space_immutable`
-    // on a personal space, whatever their value.
-    expect(spaceUpdateBody({ field: "name", value: "  Mon espace  " })).toEqual({
-      name: "Mon espace",
-    });
-  });
-
-  it("sends each access setting on its own", () => {
-    expect(spaceUpdateBody({ field: "visibility", value: "closed" })).toEqual({
-      visibility: "closed",
-    });
-    expect(spaceUpdateBody({ field: "defaultRole", value: "operator" })).toEqual({
-      default_role: "operator",
-    });
-  });
-
-  it("sends the icon and the colour each on its own, null clearing it", () => {
-    expect(spaceUpdateBody({ field: "icon", value: "lucide:rocket" })).toEqual({
-      icon: "lucide:rocket",
-    });
-    expect(spaceUpdateBody({ field: "icon", value: null })).toEqual({ icon: null });
-    expect(spaceUpdateBody({ field: "color", value: "violet" })).toEqual({ color: "violet" });
-    expect(spaceUpdateBody({ field: "color", value: null })).toEqual({ color: null });
-  });
-
-  it("sends the domain list without the empty rows of editing", () => {
-    expect(spaceUpdateBody({ field: "domains", value: [" a.com ", "", "  "] })).toEqual({
-      settings: { allowedRedirectDomains: ["a.com"] },
-    });
-  });
-});
 
 describe("domainsChanged", () => {
   it("is false for a field left untouched, an added empty row included", () => {
@@ -61,5 +28,40 @@ describe("visibilityChangeNeedsConfirmation", () => {
     expect(visibilityChangeNeedsConfirmation("open", "private")).toBe(true);
     expect(visibilityChangeNeedsConfirmation("closed", "private")).toBe(false);
     expect(visibilityChangeNeedsConfirmation("private", "open")).toBe(false);
+  });
+});
+
+describe("spaceSettingsUpdate", () => {
+  const baseline = {
+    name: "Before",
+    domains: ["old.test"],
+  };
+  it("renames with the trimmed name alone, so a personal space accepts it", () => {
+    // `visibility` or `default_role` in the body is a 409 `personal_space_immutable`
+    // on a personal space, whatever their value.
+    expect(spaceSettingsUpdate(baseline, { ...baseline, name: "  After  " })).toEqual({
+      name: "After",
+    });
+  });
+  it("combines the edited fields, the domain list without the empty rows of editing", () => {
+    const next = { name: "After", domains: [" new.test ", "", "  "] };
+    expect(spaceSettingsUpdate(baseline, next)).toEqual({
+      name: "After",
+      settings: { allowedRedirectDomains: ["new.test"] },
+    });
+  });
+  it("sends nothing for an added empty domain row", () => {
+    expect(spaceSettingsUpdate(baseline, { ...baseline, domains: ["old.test", ""] })).toEqual({});
+  });
+});
+
+describe("spaceAppearanceBody", () => {
+  it("sends the icon and the colour each on its own, null clearing it", () => {
+    expect(spaceAppearanceBody({ field: "icon", value: "lucide:rocket" })).toEqual({
+      icon: "lucide:rocket",
+    });
+    expect(spaceAppearanceBody({ field: "icon", value: null })).toEqual({ icon: null });
+    expect(spaceAppearanceBody({ field: "color", value: "violet" })).toEqual({ color: "violet" });
+    expect(spaceAppearanceBody({ field: "color", value: null })).toEqual({ color: null });
   });
 });

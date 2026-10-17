@@ -13,8 +13,10 @@ import { useSpace, useUpdateSpace, useDeleteSpace } from "../../hooks/use-spaces
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { SettingsSkeleton } from "../../components/loading-skeletons";
+import { ManualSave } from "../../components/settings/manual-save";
 import { SaveFeedback } from "../../components/settings/save-feedback";
 import { fieldWriteState } from "../../lib/field-write-state";
+import { useSettingDraft } from "../../hooks/use-setting-draft";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { Label } from "@appstrate/ui/components/label";
 import { SPACE_VISIBILITIES } from "@appstrate/core/permissions";
@@ -23,15 +25,14 @@ import { SpaceRoleSelect } from "../../components/space-role-select";
 import { useSpaceRoleOptions, type SpaceRolePreset } from "../../hooks/use-roles";
 import type { components } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
-import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { AppearancePicker } from "../../components/appearance-picker";
 import { ApiError } from "../../api/errors";
 import { toastError } from "../../lib/mutation-error";
 import {
-  domainsChanged,
-  spaceUpdateBody,
+  spaceAppearanceBody,
+  spaceSettingsUpdate,
+  type SpaceAppearanceChange,
   visibilityChangeNeedsConfirmation,
-  type SpaceSettingChange,
 } from "../../lib/space-update-body";
 
 type SpaceVisibility = components["schemas"]["SpaceObject"]["visibility"];
@@ -46,7 +47,7 @@ export function WorkspaceSettingsGeneralPage() {
   if (error) return <ErrorState error={error} />;
   if (!space) return <ErrorState />;
 
-  return <GeneralForm spaceId={spaceId} space={space} />;
+  return <GeneralForm key={spaceId} spaceId={spaceId} space={space} />;
 }
 
 function GeneralForm({
@@ -72,30 +73,19 @@ function GeneralForm({
   const updateMutation = useUpdateSpace();
   const deleteMutation = useDeleteSpace();
 
-  const domains = space.settings?.allowedRedirectDomains ?? [];
-  const [editedDomains, setEditedDomains] = useState<string[] | null>(null);
+  // The text fields are one draft with Save; visibility and default role are single
+  // choices, written as they are picked.
+  const draft = useSettingDraft({
+    name: space.name,
+    domains: space.settings?.allowedRedirectDomains ?? [],
+  });
+  const activeDomains = draft.value.domains;
   const [editedVisibility, setEditedVisibility] = useState<SpaceVisibility | null>(null);
   const [editedDefaultRole, setEditedDefaultRole] = useState<SpaceRolePreset | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  // A visibility leaving `open`, held until its consequence is confirmed.
-  const [pendingClose, setPendingClose] = useState<SpaceVisibility | null>(null);
-  // The picker fires a write per arrow key: one in flight, the newest value after it.
-  const writeAppearance = useLatestWrite();
-  const saveAppearance = (change: Extract<SpaceSettingChange, { field: "icon" | "color" }>) => {
-    writeAppearance(change.field, change.value, () =>
-      updateMutation
-        .mutateAsync({ params: { path: { id: spaceId } }, body: spaceUpdateBody(change) })
-        .catch((error: unknown) => {
-          toastError(error);
-          throw error;
-        }),
-    );
-  };
-  const nameWrite = fieldWriteState(updateMutation, "name");
-  const appearanceWrite = fieldWriteState(updateMutation, ["icon", "color"]);
-  const activeDomains = editedDomains ?? domains;
   const activeVisibility = editedVisibility ?? space.visibility;
   const activeDefaultRole = editedDefaultRole ?? space.default_role;
+  const [pendingClose, setPendingClose] = useState<SpaceVisibility | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // The assignable presets come from the org's role catalogue, which a space
   // admin may read without owning it.
@@ -110,239 +100,247 @@ function GeneralForm({
     .filter((role) => role.kind === "preset")
     .map((role) => ({ value: role.key, label: t(`roles.preset.${role.key}`) }));
 
-  // Each control commits on its own — "the control IS the setting". No Save
-  // button under this form: in the settings surfaces a change is a change
-  // without pressing something else.
-  const save = (
-    change: SpaceSettingChange,
-    { onSuccess, onError }: { onSuccess?: () => void; onError?: () => void } = {},
-  ) => {
+  // The space mutation leaves its refusals to the caller (`useUpdateSpace`). A refused
+  // choice shows the stored value again, not the one the server refused.
+  const commitVisibility = (next: SpaceVisibility) => {
+    setEditedVisibility(next);
     updateMutation.mutate(
-      { params: { path: { id: spaceId } }, body: spaceUpdateBody(change) },
+      { params: { path: { id: spaceId } }, body: { visibility: next } },
       {
-        onSuccess,
+        onSuccess: () => setPendingClose(null),
         onError: (error) => {
           toastError(error);
-          onError?.();
+          setEditedVisibility(null);
         },
       },
     );
   };
-
-  // A refused write shows the stored value again, not the one the server refused.
-  const commitVisibility = (next: SpaceVisibility) => {
-    setEditedVisibility(next);
-    save(
-      { field: "visibility", value: next },
-      { onSuccess: () => setPendingClose(null), onError: () => setEditedVisibility(null) },
-    );
-  };
-
   const chooseVisibility = (next: SpaceVisibility) => {
     if (next === activeVisibility) return;
     if (visibilityChangeNeedsConfirmation(activeVisibility, next)) setPendingClose(next);
     else commitVisibility(next);
   };
-
   const commitDefaultRole = (next: SpaceRolePreset) => {
     setEditedDefaultRole(next);
-    save({ field: "defaultRole", value: next }, { onError: () => setEditedDefaultRole(null) });
+    updateMutation.mutate(
+      { params: { path: { id: spaceId } }, body: { default_role: next } },
+      {
+        onError: (error) => {
+          toastError(error);
+          setEditedDefaultRole(null);
+        },
+      },
+    );
   };
-
-  const commitDomains = (next: string[]) => {
-    setEditedDomains(next);
-    if (domainsChanged(domains, next)) {
-      save({ field: "domains", value: next }, { onError: () => setEditedDomains(null) });
-    }
+  // The picker fires a write per arrow key: one in flight, the newest value after it.
+  const writeAppearance = useLatestWrite();
+  const saveAppearance = (change: SpaceAppearanceChange) => {
+    writeAppearance(change.field, change.value, () =>
+      updateMutation
+        .mutateAsync({ params: { path: { id: spaceId } }, body: spaceAppearanceBody(change) })
+        .catch((error: unknown) => {
+          toastError(error);
+          throw error;
+        }),
+    );
+  };
+  const setDomains = (next: string[]) => draft.set((previous) => ({ ...previous, domains: next }));
+  const save = async () => {
+    const sent = draft.value;
+    const saved = await updateMutation
+      .mutateAsync({
+        params: { path: { id: spaceId } },
+        body: spaceSettingsUpdate(draft.baseline, sent),
+      })
+      .catch((error: unknown) => {
+        toastError(error);
+        throw error;
+      });
+    draft.accept(sent, {
+      name: saved.name,
+      domains: saved.settings?.allowedRedirectDomains ?? [],
+    });
   };
 
   return (
     <>
-      <SettingsGroup title={t("workspaceSettings.sectionGeneral")}>
-        <SettingRow
-          variant="field"
-          label={t("spaces.nameLabel")}
-          status={<SaveFeedback {...nameWrite} />}
-        >
-          <InlineTextSetting
-            value={space.name}
-            disabled={nameWrite.pending}
-            aria-label={t("spaces.nameLabel")}
-            placeholder={t("spaces.namePlaceholder")}
-            onCommit={(name) => save({ field: "name", value: name })}
-          />
-        </SettingRow>
+      <fieldset disabled={updateMutation.isPending}>
+        <SettingsGroup title={t("workspaceSettings.sectionGeneral")}>
+          <SettingRow variant="field" label={t("spaces.nameLabel")}>
+            <Input
+              value={draft.value.name}
+              disabled={updateMutation.isPending}
+              aria-label={t("spaces.nameLabel")}
+              placeholder={t("spaces.namePlaceholder")}
+              onChange={(event) =>
+                draft.set((previous) => ({ ...previous, name: event.target.value }))
+              }
+            />
+          </SettingRow>
 
-        {space.personal ? (
-          <p className="text-muted-foreground text-sm">{t("spaces.personal.settingsLocked")}</p>
-        ) : (
-          <>
-            {/* A personal space has no appearance of its own: it is drawn as its owner. */}
-            <SettingRow
-              variant="field"
-              label={t("spaces.appearanceLabel")}
-              description={t("spaces.appearanceDescription")}
-              status={<SaveFeedback {...appearanceWrite} />}
-            >
-              <div className="w-full min-w-0">
-                {/* Keyed: no tab carries over to another space. Never disabled by a pending
-                    write — each arrow key on the colours is a PATCH, and disabling would drop
-                    the focus; the writes are serialised, the last pick wins. */}
-                <AppearancePicker
-                  key={spaceId}
-                  value={{ icon: space.icon, color: space.color }}
-                  allow={["lucide", "emoji"]}
-                  seed={spaceId}
-                  label={space.name}
-                  onChange={(next) => {
-                    if (next.icon !== undefined)
-                      saveAppearance({ field: "icon", value: next.icon });
-                    if (next.color !== undefined)
-                      saveAppearance({ field: "color", value: next.color });
-                  }}
-                />
-              </div>
-            </SettingRow>
-
-            <SettingRow
-              variant="field"
-              label={t("spaces.redirectDomains")}
-              description={t("spaces.redirectDomainsHint")}
-              status={<SaveFeedback {...fieldWriteState(updateMutation, "settings")} />}
-            >
-              <div className="flex w-full flex-col gap-2">
-                {activeDomains.map((domain, index) => (
-                  <div key={index} className="flex w-full items-center gap-2">
-                    <Input
-                      type="text"
-                      value={domain}
-                      className="min-w-0 flex-1"
-                      onChange={(e) =>
-                        setEditedDomains((prev) =>
-                          (prev ?? domains).map((d, i) => (i === index ? e.target.value : d)),
-                        )
-                      }
-                      // Commits when you leave the field, like every other setting
-                      // here; Enter is the same answer for a single-line input. The
-                      // row controls stay enabled during a write: disabling them on
-                      // the blur would swallow the click that caused it.
-                      onBlur={() => commitDomains(activeDomains)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") e.currentTarget.blur();
-                      }}
-                      placeholder="example.com"
-                      aria-label={t("spaces.domainAriaLabel", { index: index + 1 })}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={t("spaces.removeDomain")}
-                      onClick={() => commitDomains(activeDomains.filter((_, i) => i !== index))}
-                    >
-                      <X />
-                    </Button>
-                  </div>
-                ))}
-                {/* Adding one does not save: an empty row is not a domain. It
-                commits when the field it opened is filled and left. */}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="self-start"
-                  onClick={() => setEditedDomains([...(activeDomains ?? []), ""])}
-                >
-                  <Plus className="mr-1.5" />
-                  {t("spaces.addDomain")}
-                </Button>
-              </div>
-            </SettingRow>
-
-            {/* Who reaches this space without an explicit membership row (RBAC
-            spec §3.1). Radios rather than a select: the three answers differ
-            in consequence, not in degree, and each needs its sentence. */}
-            <SettingRow
-              variant="field"
-              label={t("spaces.visibilityLabel")}
-              description={t("spaces.visibilityHint")}
-              status={<SaveFeedback {...fieldWriteState(updateMutation, "visibility")} />}
-            >
-              <div className="flex w-full flex-col gap-3">
-                <RadioGroup
-                  value={activeVisibility}
-                  onValueChange={(value) => chooseVisibility(value as SpaceVisibility)}
-                  disabled={space.isDefault || updateMutation.isPending}
-                  aria-label={t("spaces.visibilityLabel")}
-                >
-                  {SPACE_VISIBILITIES.map((value) => (
-                    <div key={value} className="flex items-start gap-2">
-                      <RadioGroupItem
-                        value={value}
-                        id={`space-visibility-${value}`}
-                        className="mt-1 shrink-0"
-                      />
-                      <Label
-                        htmlFor={`space-visibility-${value}`}
-                        className="flex min-w-0 flex-col items-start gap-1"
-                      >
-                        <span>{t(`spaces.visibility.${value}`)}</span>
-                        <span className="text-muted-foreground text-sm leading-relaxed font-normal">
-                          {t(`spaces.visibilityDesc.${value}`)}
-                        </span>
-                      </Label>
-                    </div>
-                  ))}
-                </RadioGroup>
-                <p className="text-muted-foreground text-xs">{t("spaces.adminAccessHint")}</p>
-                {space.isDefault && (
-                  <p className="text-muted-foreground text-xs">
-                    {t("spaces.visibilityDefaultLocked")}
-                  </p>
-                )}
-              </div>
-            </SettingRow>
-
-            {/* Only an `open` space has implicit members, so only it has a preset
-            to give them. */}
-            {activeVisibility === "open" && (
+          {space.personal ? (
+            <p className="text-muted-foreground text-sm">{t("spaces.personal.settingsLocked")}</p>
+          ) : (
+            <>
+              {/* A personal space has no appearance of its own: it is drawn as its owner.
+                  A single choice, written as it is picked. */}
               <SettingRow
                 variant="field"
-                label={t("spaces.defaultRoleLabel")}
-                description={t("spaces.defaultRoleHint")}
-                status={<SaveFeedback {...fieldWriteState(updateMutation, "default_role")} />}
+                label={t("spaces.appearanceLabel")}
+                description={t("spaces.appearanceDescription")}
+                status={<SaveFeedback {...fieldWriteState(updateMutation, ["icon", "color"])} />}
               >
-                <div className="flex w-full flex-col gap-2">
-                  <SpaceRoleSelect
-                    id="space-default-role"
-                    className="w-full sm:w-[240px]"
-                    value={activeDefaultRole}
-                    options={presetOptions}
-                    fallbackLabel={t(`roles.preset.${activeDefaultRole}`)}
-                    disabled={updateMutation.isPending}
-                    loading={rolesLoading || !rolesKnown}
-                    onValueChange={(value) => commitDefaultRole(value as SpaceRolePreset)}
+                <div className="w-full min-w-0">
+                  {/* Keyed: no tab carries over to another space. Never disabled by a pending
+                      write — each arrow key on the colours is a PATCH, and disabling would drop
+                      the focus; the writes are serialised, the last pick wins. */}
+                  <AppearancePicker
+                    key={spaceId}
+                    value={{ icon: space.icon, color: space.color }}
+                    allow={["lucide", "emoji"]}
+                    seed={spaceId}
+                    label={space.name}
+                    onChange={(next) => {
+                      if (next.icon !== undefined)
+                        saveAppearance({ field: "icon", value: next.icon });
+                      if (next.color !== undefined)
+                        saveAppearance({ field: "color", value: next.color });
+                    }}
                   />
-                  <p className="text-muted-foreground text-xs">
-                    {t(`roles.presetDesc.${activeDefaultRole}`)}
-                  </p>
-                  <RoleCatalogState
-                    pending={null}
-                    isLoading={rolesLoading}
-                    rolesKnown={rolesKnown}
-                    error={rolesError}
-                    refetch={() => void refetchRoles()}
-                    emptyMessage={
-                      presetOptions.length === 0 ? t("spaces.noAssignablePresets") : null
-                    }
-                  />
-                  <p className="text-muted-foreground text-xs">{t("spaces.defaultRoleImpact")}</p>
                 </div>
               </SettingRow>
-            )}
-          </>
-        )}
-      </SettingsGroup>
+
+              <SettingRow
+                variant="field"
+                label={t("spaces.redirectDomains")}
+                description={t("spaces.redirectDomainsHint")}
+              >
+                <div className="flex w-full flex-col gap-2">
+                  {activeDomains.map((domain, index) => (
+                    <div key={index} className="flex w-full items-center gap-2">
+                      <Input
+                        type="text"
+                        value={domain}
+                        className="min-w-0 flex-1"
+                        onChange={(e) =>
+                          setDomains(
+                            activeDomains.map((d, i) => (i === index ? e.target.value : d)),
+                          )
+                        }
+                        placeholder="example.com"
+                        aria-label={t("spaces.domainAriaLabel", { index: index + 1 })}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={t("spaces.removeDomain")}
+                        onClick={() => setDomains(activeDomains.filter((_, i) => i !== index))}
+                      >
+                        <X />
+                      </Button>
+                    </div>
+                  ))}
+                  {/* An empty row is not a domain: Save ignores it until it is filled. */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-start"
+                    onClick={() => setDomains([...activeDomains, ""])}
+                  >
+                    <Plus className="mr-1.5" />
+                    {t("spaces.addDomain")}
+                  </Button>
+                </div>
+              </SettingRow>
+
+              {/* Who reaches this space without an explicit membership row (RBAC
+            spec §3.1). Radios rather than a select: the three answers differ
+            in consequence, not in degree, and each needs its sentence. */}
+              <SettingRow
+                variant="field"
+                label={t("spaces.visibilityLabel")}
+                description={t("spaces.visibilityHint")}
+                status={<SaveFeedback {...fieldWriteState(updateMutation, "visibility")} />}
+              >
+                <div className="flex w-full flex-col gap-3">
+                  <RadioGroup
+                    value={activeVisibility}
+                    onValueChange={(value) => chooseVisibility(value as SpaceVisibility)}
+                    disabled={space.isDefault || updateMutation.isPending}
+                    aria-label={t("spaces.visibilityLabel")}
+                  >
+                    {SPACE_VISIBILITIES.map((value) => (
+                      <div key={value} className="flex items-start gap-2">
+                        <RadioGroupItem
+                          value={value}
+                          id={`space-visibility-${value}`}
+                          className="mt-1 shrink-0"
+                        />
+                        <Label
+                          htmlFor={`space-visibility-${value}`}
+                          className="flex min-w-0 flex-col items-start gap-1"
+                        >
+                          <span>{t(`spaces.visibility.${value}`)}</span>
+                          <span className="text-muted-foreground text-sm leading-relaxed font-normal">
+                            {t(`spaces.visibilityDesc.${value}`)}
+                          </span>
+                        </Label>
+                      </div>
+                    ))}
+                  </RadioGroup>
+                  <p className="text-muted-foreground text-xs">{t("spaces.adminAccessHint")}</p>
+                  {space.isDefault && (
+                    <p className="text-muted-foreground text-xs">
+                      {t("spaces.visibilityDefaultLocked")}
+                    </p>
+                  )}
+                </div>
+              </SettingRow>
+
+              {/* Only an `open` space has implicit members, so only it has a preset
+            to give them. */}
+              {activeVisibility === "open" && (
+                <SettingRow
+                  variant="field"
+                  label={t("spaces.defaultRoleLabel")}
+                  description={t("spaces.defaultRoleHint")}
+                  status={<SaveFeedback {...fieldWriteState(updateMutation, "default_role")} />}
+                >
+                  <div className="flex w-full flex-col gap-2">
+                    <SpaceRoleSelect
+                      id="space-default-role"
+                      className="w-full sm:w-[240px]"
+                      value={activeDefaultRole}
+                      options={presetOptions}
+                      fallbackLabel={t(`roles.preset.${activeDefaultRole}`)}
+                      disabled={updateMutation.isPending}
+                      loading={rolesLoading || !rolesKnown}
+                      onValueChange={(value) => commitDefaultRole(value as SpaceRolePreset)}
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      {t(`roles.presetDesc.${activeDefaultRole}`)}
+                    </p>
+                    <RoleCatalogState
+                      pending={null}
+                      isLoading={rolesLoading}
+                      rolesKnown={rolesKnown}
+                      error={rolesError}
+                      refetch={() => void refetchRoles()}
+                      emptyMessage={
+                        presetOptions.length === 0 ? t("spaces.noAssignablePresets") : null
+                      }
+                    />
+                    <p className="text-muted-foreground text-xs">{t("spaces.defaultRoleImpact")}</p>
+                  </div>
+                </SettingRow>
+              )}
+            </>
+          )}
+        </SettingsGroup>
+      </fieldset>
+      <ManualSave dirty={draft.dirty} onSave={save} onDiscard={draft.reset} />
 
       {/* The danger zone is a settings group like any other. Its exception is
           the CONTROL — a button that opens a confirm — which is what the row
