@@ -137,9 +137,10 @@ async function extractBodyBytes(
  * that hole:
  *
  *   1. Before creating anything, `realpath` the nearest existing ancestor of
- *      the parent and confirm it is inside the workspace root, so a symlinked
- *      intermediate directory (e.g. `/workspace/out -> /etc`) that
- *      `resolveSafePath` accepted on its logical name is refused with no
+ *      the parent and confirm it is inside the workspace root.
+ *      `resolveSafePath` admits any path under its allowed roots (the
+ *      workspace and `/tmp`), but `toFile` must stay in the workspace — which
+ *      includes refusing a symlinked directory that leads out of it — with no
  *      directory created outside. The parent is re-checked after `mkdir`.
  *   2. Open the final path with `O_NOFOLLOW`, so the open fails with `ELOOP`
  *      when the final component is itself a symlink. An `lstat` pre-check
@@ -157,7 +158,7 @@ async function writeBodyConfined(workspace: string, abs: string, bytes: Uint8Arr
   const assertInside = (real: string) => {
     if (real !== root && !real.startsWith(rootPrefix)) {
       throw new Error(
-        "api_call responseMode.toFile: refusing to write — target directory escapes the workspace via a symlink",
+        "api_call responseMode.toFile: refusing to write — target directory is outside the workspace",
       );
     }
   };

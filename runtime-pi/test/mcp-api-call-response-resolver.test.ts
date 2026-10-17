@@ -146,7 +146,7 @@ describe("shapeApiCallResponse — toFile under a symlinked workspace root", () 
     symlinkSync(dir, join(base, "real", "out"));
     const result = withStatus([{ type: "text", text: "x" }], 200);
     await expect(shapeApiCallResponse(result, baseOpts(workspace, "out/f.txt"))).rejects.toThrow(
-      /target directory escapes the workspace/,
+      /target directory is outside the workspace/,
     );
     expect(() => readFileSync(join(dir, "f.txt"))).toThrow();
   });
@@ -158,8 +158,18 @@ describe("shapeApiCallResponse — toFile under a symlinked workspace root", () 
     const result = withStatus([{ type: "text", text: "x" }], 200);
     await expect(
       shapeApiCallResponse(result, baseOpts(workspace, "out/sub/deeper/f.txt")),
-    ).rejects.toThrow(/symlink/);
+    ).rejects.toThrow(/target directory is outside the workspace/);
     expect(existsSync(join(dir, "sub"))).toBe(false);
+  });
+
+  it("refuses an absolute path in the other allowed root and creates nothing", async () => {
+    const { workspace } = linkedWorkspace();
+    const dir = (outside = join("/tmp", `apicall-abs-${crypto.randomUUID()}`));
+    const result = withStatus([{ type: "text", text: "x" }], 200);
+    await expect(
+      shapeApiCallResponse(result, baseOpts(workspace, join(dir, "y.txt"))),
+    ).rejects.toThrow(/target directory is outside the workspace/);
+    expect(existsSync(dir)).toBe(false);
   });
 
   it("creates a deep new path under the linked root", async () => {
