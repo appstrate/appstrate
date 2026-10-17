@@ -12,12 +12,14 @@
  * the recipient's own decision.
  */
 
-import { and, eq, inArray, ne, or, isNull } from "drizzle-orm";
+import { and, eq, ne, or, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, packages, spacePackages, spaces, user } from "@appstrate/db/schema";
 import { forbidden, notFound } from "../lib/errors.ts";
 import { loadPlaceablePackage, placePackage, type PlacementAuthority } from "./space-packages.ts";
+import { withdrawPlacement } from "./package-placement.ts";
+import type { PlacementRemovalAuthority } from "../lib/package-access.ts";
 
 /**
  * The `user` row of the person who shared, joined ALONGSIDE the personal-space
@@ -87,9 +89,7 @@ export async function sharePackage(params: {
   const { packageId, spaceId, orgId, placeAs, enabled } = params;
   // The org boundary is asserted HERE, in the service, where {@link
   // revokePackageShare} asserts it too: `space_packages` carries no `org_id`,
-  // so nothing below would stop a row naming another tenant's space. It takes a
-  // statement of its own where the revoke takes one clause because a DELETE has
-  // a WHERE to hang `inArray(…, inOrg)` on and an `INSERT … VALUES` has none.
+  // so nothing below would stop a row naming another tenant's space.
   return db.transaction(async (tx) => {
     const [target] = await tx
       .select({ id: spaces.id })
@@ -104,27 +104,33 @@ export async function sharePackage(params: {
 }
 
 /**
- * Withdraw a placement outside the package's home — ONE delete of its
- * `space_packages` row, settings and all. Deactivating deletes nothing: it
- * keeps the row. The other act that deletes one is the `keep: false` branch of
- * `reconcilePlacementsAfterRehome` (`services/package-placement.ts`), which
- * withdraws the old home's row when a home move leaves it nothing.
+ * Withdraw a placement outside the package's home — {@link withdrawPlacement}:
+ * its `space_packages` row, settings and all, and the package's schedules in
+ * that space, in one transaction. Deactivating deletes nothing: it keeps the
+ * row. The other act that withdraws one is the `keep: false` branch of
+ * `reconcilePlacementsAfterRehome` (`services/package-placement.ts`).
  *
- * @returns `false` when there was no row outside the home, which the route
- *   renders as 404.
+ * @returns which side's authority withdrew it, and the disabled schedules,
+ *   whose jobs the caller removes once committed.
+ * @throws 404 when the space holds no placement outside the home this
+ *   transaction holds, or is a personal space other than `personalOwnerId`'s;
+ *   403 when `authorityFor` refuses against that home.
  */
 export async function revokePackageShare(params: {
   packageId: string;
   spaceId: string;
   orgId: string;
-  /** The route's own rule, asked against the home this transaction holds — see {@link sharePackage}. */
-  authorizeHome: (homeSpaceId: string | null) => boolean;
-}): Promise<boolean> {
-  const { packageId, spaceId, orgId, authorizeHome } = params;
-  // The org predicate lands in the delete's WHERE: the table has no `org_id`,
-  // so `(space_id, package_id)` alone would act on a row pointing at a space
-  // this organization does not own.
-  const inOrg = db.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
+  /**
+   * The one personal space the withdrawal may name — the recipient's a `user`
+   * target resolved to, else the caller's own. Somebody else's, named by id,
+   * answers the 404 a missing row answers, so that id stays opaque (§3.6).
+   */
+  personalOwnerId: string | null;
+  /** The route's rule (`assertPlacementRemovalAccess`), asked against the home this transaction holds. */
+  authorityFor: (homeSpaceId: string | null) => PlacementRemovalAuthority | null;
+}): Promise<{ authority: PlacementRemovalAuthority; disabledScheduleIds: string[] }> {
+  const { packageId, spaceId, orgId, personalOwnerId, authorityFor } = params;
+  const notPlaced = () => notFound(`Package '${packageId}' is not placed in that space`);
   return db.transaction(async (tx) => {
     // The authority, against the LOCKED home, for the reason `sharePackage`
     // states: a `PUT …/{scope}/{name}/home` committing between the route's
@@ -137,23 +143,35 @@ export async function revokePackageShare(params: {
       .limit(1)
       .for("share");
     if (!pkg) throw notFound(`Package '${packageId}' not found in this organization`);
-    if (!authorizeHome(pkg.homeSpaceId)) {
+    const authority = authorityFor(pkg.homeSpaceId);
+    if (!authority) {
       throw forbidden(
         `Withdrawing a placement of '${packageId}' requires the share permission in its home space — the package moved home while this request was in flight.`,
       );
     }
-    if (pkg.homeSpaceId === spaceId) return false;
-    const removed = await tx
-      .delete(spacePackages)
+    if (pkg.homeSpaceId === spaceId) throw notPlaced();
+    // The org boundary is asserted here: `space_packages` carries no `org_id`,
+    // so `(space_id, package_id)` alone would act on a row pointing at a space
+    // this organization does not own.
+    const [target] = await tx
+      .select({ id: spaces.id })
+      .from(spaces)
       .where(
         and(
-          eq(spacePackages.packageId, packageId),
-          eq(spacePackages.spaceId, spaceId),
-          inArray(spacePackages.spaceId, inOrg),
+          eq(spaces.id, spaceId),
+          eq(spaces.orgId, orgId),
+          personalOwnerId === null
+            ? isNull(spaces.ownerUserId)
+            : or(isNull(spaces.ownerUserId), eq(spaces.ownerUserId, personalOwnerId)),
         ),
       )
-      .returning({ packageId: spacePackages.packageId });
-    return removed.length > 0;
+      .limit(1);
+    if (!target) throw notPlaced();
+    const { removed, disabledScheduleIds } = await withdrawPlacement(tx, packageId, spaceId);
+    // Thrown rather than returned so the schedules' disable rolls back with it:
+    // a space that held no row had nothing withdrawn.
+    if (!removed) throw notPlaced();
+    return { authority, disabledScheduleIds };
   });
 }
 

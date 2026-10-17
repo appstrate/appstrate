@@ -10,10 +10,12 @@
  * home only {@link placePackage} does. Deactivating keeps the row, so
  * deactivating and reactivating keeps every setting the space chose.
  *
- * A row is deleted only when the placement is withdrawn: `revokePackageShare`
+ * A row is deleted only when the placement is withdrawn, through
+ * `withdrawPlacement` (`services/package-placement.ts`), which disables the
+ * package's schedules there too: `revokePackageShare`
  * (`services/package-shares.ts`) and the `keep: false` branch of
- * `reconcilePlacementsAfterRehome` (`services/package-placement.ts`) — plus the
- * cascades of the package's deletion and the space's.
+ * `reconcilePlacementsAfterRehome` — plus the cascades of the package's
+ * deletion and the space's.
  * `setBlockUserConnections` (`services/integration-pins-service.ts`) writes here
  * too, but only UPDATES a column in place on an existing row.
  */

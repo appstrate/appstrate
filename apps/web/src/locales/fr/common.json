@@ -419,8 +419,6 @@
   "library.cannotActivate": "Vous n'avez pas la permission d'activer ce package dans cet espace",
   "library.cannotDeactivate": "Vous n'avez pas la permission de désactiver ce package dans cet espace",
   "library.cannotShareHere": "Ce package n'est pas placé dans cet espace et vous n'avez pas la permission de l'y partager",
-  "catalogue.pendingOffers": "{{count}} élément partagé, pas encore activé",
-  "catalogue.pendingOffers_other": "{{count}} éléments partagés, pas encore activés",
   "library.column.chatEnforced": "Imposé dans le chat",
   "library.chatEnforce.toggle": "Imposer {{package}} dans le chat de l'espace {{space}}",
   "library.chatEnforce.cannot": "Vous n'avez pas la permission de modifier les skills de cet espace",

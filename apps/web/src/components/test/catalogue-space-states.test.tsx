@@ -2,8 +2,8 @@
 
 /**
  * What the catalogue says of a package in each space: a placed-but-off switch is told apart from
- * a package never placed there, an offered switch says what switching it on consents to, and the
- * sheet's offer says what the package will run with there.
+ * a package never placed there, a shared placement that is off says what switching it on consents
+ * to, and the sheet names who shared it.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -28,7 +28,6 @@ await i18nModule.default.changeLanguage("fr");
 const SPACES: LibrarySpace[] = [
   { id: "spc_on", name: "Allumé", isDefault: true },
   { id: "spc_off", name: "Éteint", isDefault: false },
-  { id: "spc_offer", name: "Proposé", isDefault: false },
   { id: "spc_none", name: "Absent", isDefault: false },
 ];
 
@@ -51,9 +50,8 @@ const PACKAGE: LibraryPackageItem = {
       via: "shared",
       state: "inactive",
       chat_enforced: false,
-      shared_by: null,
+      shared_by: { user_id: "usr_bob", name: "Bob Martin" },
     },
-    { space_id: "spc_offer", via: "shared", state: "none", chat_enforced: false, shared_by: null },
   ],
 };
 const PLACEMENT = cataloguePlacement(PACKAGE, "spc_on");
@@ -92,30 +90,36 @@ describe("a package's cell in each space", () => {
     expect(html.spc_on).not.toContain(`>${settingsFr["catalogue.filter.inactive"]}<`);
   });
 
-  it("says on an offered switch what switching it on consents to", () => {
-    expect(html.spc_offer).toContain(settingsFr["catalogue.offeredHere"]);
-    expect(html.spc_offer).toContain(`title="${settingsFr["catalogue.sheet.offerCredentials"]}"`);
-    expect(html.spc_off).not.toContain(settingsFr["catalogue.sheet.offerCredentials"]);
+  it("says on a shared placement that is off what switching it on consents to", () => {
+    expect(html.spc_off).toContain(`title="${settingsFr["catalogue.sheet.offerCredentials"]}"`);
+    expect(html.spc_on).not.toContain(settingsFr["catalogue.sheet.offerCredentials"]);
+    expect(html.spc_none).not.toContain(settingsFr["catalogue.sheet.offerCredentials"]);
   });
 });
 
-describe("the sheet's offer", () => {
-  it("says the package will run there with that space's credentials", () => {
-    const html = render(
-      <CataloguePreview
-        item={PACKAGE}
-        type="skill"
-        spaces={SPACES}
-        placement={PLACEMENT}
-        gateOf={() => ALLOWED}
-        mayConfigureIn={() => true}
-        integrations={[]}
-        agents={[]}
-        busy={false}
-        onSetActive={() => {}}
-      />,
-    );
-    expect(html).toContain(settingsFr["catalogue.sheet.offer"].replace("{{space}}", "Proposé"));
-    expect(html).toContain(settingsFr["catalogue.sheet.offerCredentials"]);
+describe("the sheet", () => {
+  const sheet = render(
+    <CataloguePreview
+      item={PACKAGE}
+      type="skill"
+      spaces={SPACES}
+      placement={PLACEMENT}
+      gateOf={() => ALLOWED}
+      mayConfigureIn={() => true}
+      integrations={[]}
+      agents={[]}
+      busy={false}
+      onSetActive={() => {}}
+    />,
+  );
+
+  it("reads a shared placement that is off like any inactive one, and names who shared it", () => {
+    const inactive = settingsFr["catalogue.filter.inactive"];
+    const by = settingsFr["catalogue.sheet.sharedBy"].replace("{{name}}", "Bob Martin");
+    expect(sheet).toContain(`${inactive} · ${by}`);
+  });
+
+  it("no longer announces a pending offer", () => {
+    expect(sheet).not.toContain("a partagé cet élément");
   });
 });

@@ -11,6 +11,7 @@ import {
   CalendarPlus,
   Trash2,
   PackageMinus,
+  PackageX,
   PackagePlus,
   SlidersHorizontal,
   FolderInput,
@@ -31,8 +32,12 @@ import { packagePermission } from "@appstrate/core/permissions";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useDeletePackage } from "../../hooks/use-packages";
 import { usePackageActivation } from "../../hooks/use-library";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import { splitPackageRef } from "../../lib/package-paths";
+import { catalogueHref } from "../../lib/catalogue-link";
 import { ConfirmModal } from "../confirm-modal";
+import { RemoveFromSpaceConfirm } from "../remove-from-space-confirm";
 import { ForkPackageModal } from "../fork-package-modal";
 import { isOwnedSource } from "./owned-source";
 import { MoveHomeSpaceDialog } from "./move-home-space-dialog";
@@ -127,6 +132,9 @@ export function PackageActionsDropdown({
   const deletePkg = useDeletePackage(type);
   const [movingHome, setMovingHome] = useState(false);
   const [forking, setForking] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const spaceId = useCurrentSpaceId();
+  const spaceLabelOf = useSpaceLabelOf();
   const share = useUrlModal(SHARE_PARAM);
   const navigate = useNavigate();
   const catalogue = useCatalogueEntry(type, packageId, catalogueVersion);
@@ -261,6 +269,15 @@ export function PackageActionsDropdown({
       onSelect: () => askConfirm("deactivate"),
     },
     {
+      id: "remove-here",
+      group: "administration",
+      icon: PackageX,
+      label: t("catalogue.removeHere", { ns: "settings" }),
+      destructive: true,
+      hidden: !activation.mayRemove,
+      onSelect: () => setRemoving(true),
+    },
+    {
       id: "move-home",
       group: "administration",
       icon: FolderInput,
@@ -342,6 +359,22 @@ export function PackageActionsDropdown({
           type={type}
         />
       )}
+
+      <RemoveFromSpaceConfirm
+        target={
+          removing && spaceId
+            ? {
+                packageId,
+                name: displayName,
+                spaceId,
+                spaceName: spaceLabelOf(spaceId) ?? spaceId,
+              }
+            : null
+        }
+        onClose={() => setRemoving(false)}
+        // The package page is read from the space it was just taken out of: leave for the catalogue.
+        onRemoved={() => navigate(catalogueHref(type))}
+      />
 
       <ConfirmModal
         open={confirmOpen}

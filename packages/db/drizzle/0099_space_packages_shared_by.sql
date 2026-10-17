@@ -4,6 +4,8 @@
 -- `package_shares` rows are folded into `space_packages` by `scripts/migration/0046`, which
 -- needs this column, so the table stays until the follow-up release drops it (drizzle applies the
 -- batch in one transaction and the scripts run after it — nothing can run between the two).
+-- `schedule_disabled_reason` gains 'package_removed' (a withdrawn placement disables the package's
+-- schedules there); a later migration must not use it, for the reason 0094 states.
 --
 -- COST: ADD COLUMN without a default and DROP DEFAULT are catalog-only; the index build holds
 -- SHARE on `space_packages` (one row per placement) for its duration. Fenced like 0059/0070 and
@@ -15,4 +17,5 @@ ALTER TABLE "space_packages" ADD COLUMN "shared_by" text;--> statement-breakpoin
 ALTER TABLE "space_packages" ADD CONSTRAINT "space_packages_shared_by_user_id_fk" FOREIGN KEY ("shared_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "idx_space_packages_shared_by" ON "space_packages" USING btree ("shared_by");--> statement-breakpoint
 SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint
-SET LOCAL lock_timeout = DEFAULT;
+SET LOCAL lock_timeout = DEFAULT;--> statement-breakpoint
+ALTER TYPE "public"."schedule_disabled_reason" ADD VALUE 'package_removed';

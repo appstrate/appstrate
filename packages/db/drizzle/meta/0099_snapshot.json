@@ -9848,7 +9848,8 @@
         "connection_deleted",
         "connection_unshared",
         "connection_set_unnamed",
-        "connection_choice_invalid"
+        "connection_choice_invalid",
+        "package_removed"
       ]
     }
   },

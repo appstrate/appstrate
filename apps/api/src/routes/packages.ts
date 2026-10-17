@@ -26,6 +26,7 @@ import {
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
 import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
+import { removeScheduleJobs } from "../services/scheduler.ts";
 import { ensurePersonalSpaceFor, findPersonalSpace } from "../services/spaces.ts";
 import { createPackageShareNotification } from "../services/state/notifications.ts";
 import { getOrgMember } from "../services/organizations.ts";
@@ -93,6 +94,7 @@ import {
   assertExistingPackageActivationAccess,
   assertPackageMutationAccess,
   assertPackageShareAccess,
+  assertPlacementRemovalAccess,
   callerPlacementAuthority,
   heldPlacementAuthority,
   homeWireForCaller,
@@ -424,8 +426,8 @@ export const packageHomeSpaceSchema = z
      * home keeps reading and running the package through the `space_packages`
      * row it holds, so nothing it had scheduled stops.
      *
-     * `false` completes the move instead — the old home's row goes, in the
-     * same transaction. It is a field rather than a second route because it is
+     * `false` completes the move instead — the old home's row goes, and the
+     * package's schedules there are disabled, in the same transaction. It is a field rather than a second route because it is
      * one act with one modifier.
      *
      * The flag governs a space that holds a row. A space that held none is LEFT
@@ -433,8 +435,8 @@ export const packageHomeSpaceSchema = z
      * the home has moved (`reconcilePlacementsAfterRehome`).
      *
      * Asking it costs no authority beyond the move's own `<type>:write` in
-     * BOTH homes. Requiring `<type>:share` as well — the permission
-     * `DELETE …/shares/{target}` asks — would mean a builder holding `write`
+     * BOTH homes. Requiring `<type>:share` as well — the home side's
+     * permission on `DELETE …/shares/{target}` — would mean a builder holding `write`
      * and not `share` could never move a package cleanly, only ever leave a
      * copy behind; and withdrawing an access is the safe direction, which
      * §6.9 already says when it calls revoking the lighter act.
@@ -2055,13 +2057,13 @@ export function createPackagesRouter() {
         // rather than `pkg.homeSpaceId`: a concurrent move may have changed the
         // home under us and the branch above re-authorized against THAT row, so
         // the space being left is the one this transaction holds.
-        if (locked.homeSpaceId) {
-          await reconcilePlacementsAfterRehome(tx, {
-            packageId,
-            newHomeSpaceId: target,
-            previousHome: { spaceId: locked.homeSpaceId, keep: body.keep_in_previous_home },
-          });
-        }
+        const disabledScheduleIds = locked.homeSpaceId
+          ? await reconcilePlacementsAfterRehome(tx, {
+              packageId,
+              newHomeSpaceId: target,
+              previousHome: { spaceId: locked.homeSpaceId, keep: body.keep_in_previous_home },
+            })
+          : [];
         // The new home ACTIVATES it, exactly as creation does — arriving in a
         // space that cannot run it would make the move a two-step act with no
         // second button. Through the activation door itself, in THIS
@@ -2069,10 +2071,12 @@ export function createPackagesRouter() {
         // `keepExistingDecision`: a space that deliberately switched the package
         // off keeps that decision — the move is about authority, not about what
         // this space runs.
-        return activatePackageWithin(tx, { orgId, spaceId: target }, packageId, {
+        const activation = await activatePackageWithin(tx, { orgId, spaceId: target }, packageId, {
           keepExistingDecision: true,
         });
+        return { ...activation, disabledScheduleIds };
       });
+      await removeScheduleJobs(activation.disabledScheduleIds);
       // The OLD home can be a personal space — its owner moving a package out
       // to a team. Its id is withheld from the trail exactly as
       // `package.shared` withholds it (§3.6), and the owner is recorded
@@ -2102,7 +2106,13 @@ export function createPackagesRouter() {
         // and belongs in the trail beside the move that performed it. It rides
         // on THIS event rather than a second `package.unshared`, because one
         // act is one entry and the entry should name what did it.
-        after: { homeSpaceId: target, keptInPreviousHome: body.keep_in_previous_home },
+        after: {
+          homeSpaceId: target,
+          keptInPreviousHome: body.keep_in_previous_home,
+          ...(activation.disabledScheduleIds.length > 0
+            ? { disabledScheduleIds: activation.disabledScheduleIds }
+            : {}),
+        },
       });
       // Symmetric with the HTTP door: recorded only when the destination
       // actually started running the package, and naming the act that did it —
@@ -2355,15 +2365,19 @@ export function createPackagesRouter() {
   });
 
   // The path segment is the target as the LISTING published it: a space id for
-  // a space share, a member's user id for a share made to a person. There is
-  // deliberately no third spelling — the id of somebody else's personal space
-  // is never on the wire (plan decision 5b), so it cannot be the handle here.
+  // a space share, a member's user id for a share made to a person. A recipient
+  // names the space they stand in — their own personal space by its id or by
+  // their user id. The id of somebody else's personal space is never on the
+  // wire (plan decision 5b), so it is not a handle here: it answers the 404 a
+  // missing row answers.
+  //
+  // Either side may withdraw (`assertPlacementRemovalAccess`): the home's
+  // `<type>:share`, or the target's deactivation grant.
   router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:target`, async (c) => {
     const packageId = getItemId(c);
     const target = c.req.param("target")!;
     const orgId = c.get("orgId");
-    const revokeSpaces = await packageAccessSpaces(c);
-    const revokePkg = await assertPackageShareAccess(c, packageId);
+    const ownerId = callerPersonalOwnerId(c, orgId);
 
     let spaceId: string;
     let recipientUserId: string | null = null;
@@ -2376,7 +2390,17 @@ export function createPackagesRouter() {
     if (target.startsWith("spc_")) {
       assertSpaceId(target, "target");
       spaceId = target;
+      // The caller's own personal space is audited as its owner, like a `user` target.
+      const own = (await packageAccessSpaces(c)).find(
+        (space) => space.id === target && space.ownerUserId !== null,
+      );
+      if (own) recipientUserId = own.ownerUserId;
     } else {
+      // Somebody else's personal space is the home side's alone to withdraw
+      // from, and resolving a person reads the org directory: the home
+      // authority is asked BEFORE that read, so a caller without it learns
+      // nothing about who is a member.
+      if (target !== ownerId) await assertPackageShareAccess(c, packageId);
       const membership = await getOrgMember(orgId, target);
       if (!membership) throw notFound(`User '${target}' not found in this organization`);
       // READ-ONLY, unlike the share route: a revoke must not be the act that
@@ -2388,28 +2412,30 @@ export function createPackagesRouter() {
       recipientUserId = target;
     }
 
-    const revoked = await revokePackageShare({
+    const { authorityFor } = await assertPlacementRemovalAccess(c, packageId, spaceId);
+    const { authority, disabledScheduleIds } = await revokePackageShare({
       packageId,
       spaceId,
       orgId,
-      authorizeHome: (homeSpaceId) =>
-        holdsHomeAuthority(
-          { homeSpaceId },
-          revokeSpaces,
-          packagePermission(revokePkg.type, "share"),
-        ),
+      personalOwnerId: recipientUserId ?? ownerId,
+      authorityFor,
     });
-    if (!revoked) throw notFound(`Package '${packageId}' is not shared with '${target}'`);
+    await removeScheduleJobs(disabledScheduleIds);
     await recordAuditFromContext(c, {
       action: "package.unshared",
       resourceType: "package",
       resourceId: packageId,
-      // The subject as the caller named it — a person for a `user` target, and
-      // never the personal space it resolved to, for the reason `package.shared`
-      // states. CamelCase throughout, carve-out 4m (`docs/CASING_CONVENTIONS.md`).
-      after: recipientUserId
-        ? { recipientUserId, targetKind: "user" }
-        : { spaceId, targetKind: "space" },
+      // The subject as the caller named it — a person for a personal space, and
+      // never the space it resolved to, for the reason `package.shared` states.
+      // `authority` says which side withdrew it. CamelCase throughout, carve-out
+      // 4m (`docs/CASING_CONVENTIONS.md`).
+      after: {
+        ...(recipientUserId
+          ? { recipientUserId, targetKind: "user" }
+          : { spaceId, targetKind: "space" }),
+        authority,
+        ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+      },
     });
     return c.body(null, 204);
   });

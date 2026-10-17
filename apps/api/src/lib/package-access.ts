@@ -709,12 +709,82 @@ export async function callerPlacementAuthority(
   };
 }
 
+/** Which side's authority withdrew a placement — recorded on `package.unshared`. */
+export type PlacementRemovalAuthority = "home" | "recipient";
+
+/**
+ * Authority to WITHDRAW the placement of a package from `targetSpaceId` — held
+ * by EITHER side (RBAC spec §6.10): the home's `<type>:share`, the authority
+ * that placed it, or the target's own deactivation grant, waived in the
+ * caller's own personal space exactly as the activation door waives it (§3.6).
+ * A space refuses what was placed in it without asking the author.
+ *
+ * The same 404/403 split as {@link assertPackageShareAccess} when neither side
+ * holds. Returns the rule as a predicate over the home, which
+ * `revokePackageShare` re-asks against the home it LOCKS: the home half can
+ * move under the request, the target half cannot.
+ */
+export async function assertPlacementRemovalAccess(
+  c: Context<AppEnv>,
+  packageId: string,
+  targetSpaceId: string,
+): Promise<{
+  pkg: PackageAccessRow;
+  authorityFor: (homeSpaceId: string | null) => PlacementRemovalAuthority | null;
+}> {
+  const { pkg, accessible } = await loadGovernedPackage(c, packageId, "share");
+  const share = packagePermission(pkg.type, "share");
+  const target = accessible.find((space) => space.id === targetSpaceId);
+  const ownerId = callerPersonalOwnerId(c, c.get("orgId"));
+  const recipientSide =
+    target !== undefined &&
+    ((ownerId !== null && target.ownerUserId === ownerId) ||
+      target.permissions.has(spacePackagePermission(pkg.type, "deactivate")));
+  const authorityFor = (homeSpaceId: string | null): PlacementRemovalAuthority | null =>
+    holdsHomeAuthority({ homeSpaceId }, accessible, share)
+      ? "home"
+      : recipientSide
+        ? "recipient"
+        : null;
+  if (authorityFor(pkg.homeSpaceId) === null) {
+    await refuseHomeAuthority(
+      c,
+      packageId,
+      pkg,
+      accessible,
+      share,
+      `Withdrawing '${packageId}' from that space requires '${share}' in its home space, or '${spacePackagePermission(pkg.type, "deactivate")}' in that space.`,
+    );
+  }
+  return { pkg, authorityFor };
+}
+
 /** The home rule itself, for each of the three verbs that ask it. */
 async function assertHomeAuthority(
   c: Context<AppEnv>,
   packageId: string,
   action: "write" | "delete" | "share",
 ): Promise<PackageAccessRow> {
+  const { pkg, accessible } = await loadGovernedPackage(c, packageId, action);
+  const permission = packagePermission(pkg.type, action);
+  if (holdsHomeAuthority(pkg, accessible, permission)) return pkg;
+  const verb = action === "share" ? "Sharing" : "Modifying";
+  return refuseHomeAuthority(
+    c,
+    packageId,
+    pkg,
+    accessible,
+    permission,
+    `${verb} '${packageId}' requires '${permission}' in its home space.`,
+  );
+}
+
+/** An organization package and the caller's reach — a system one is refused outright. */
+async function loadGovernedPackage(
+  c: Context<AppEnv>,
+  packageId: string,
+  action: "write" | "delete" | "share",
+): Promise<{ pkg: PackageAccessRow; accessible: PackageAccessSpace[] }> {
   const orgId = c.get("orgId");
   const [pkg, accessible] = await Promise.all([
     loadPackageRow(packageId, orgId),
@@ -732,16 +802,31 @@ async function assertHomeAuthority(
         : "Cannot modify a system package.",
     );
   }
-  const permission = packagePermission(pkg.type, action);
-  if (holdsHomeAuthority(pkg, accessible, permission)) return pkg;
-  // Refused. Whether the caller may even KNOW this id exists is the read
-  // question, answered by the one predicate that answers it — an unreachable
-  // package stays a 404 rather than becoming an existence oracle. Only this
-  // path pays for the placements.
-  assertPackageIsReachable(packageId, pkg, await loadPlacementSpaces(packageId, orgId), accessible);
+  return { pkg, accessible };
+}
+
+/**
+ * Refused. Whether the caller may even KNOW this id exists is the read
+ * question, answered by the one predicate that answers it — an unreachable
+ * package stays a 404 rather than becoming an existence oracle. Only this path
+ * pays for the placements.
+ */
+async function refuseHomeAuthority(
+  c: Context<AppEnv>,
+  packageId: string,
+  pkg: PackageAccessRow,
+  accessible: PackageAccessSpace[],
+  permission: Permission,
+  detail: string,
+): Promise<never> {
+  assertPackageIsReachable(
+    packageId,
+    pkg,
+    await loadPlacementSpaces(packageId, c.get("orgId")),
+    accessible,
+  );
   reportPermissionDenial(c, permission);
-  const verb = action === "share" ? "Sharing" : "Modifying";
-  throw forbidden(`${verb} '${packageId}' requires '${permission}' in its home space.`);
+  throw forbidden(detail);
 }
 
 /**

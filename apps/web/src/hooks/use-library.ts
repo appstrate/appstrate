@@ -10,7 +10,7 @@ import { useCurrentSpaceId } from "./use-current-space";
 import { agentsKeys, invalidatePaths, packageKeys } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
-import { activationGate } from "../lib/catalogue-gates";
+import { activationGate, mayRemoveFromSpace } from "../lib/catalogue-gates";
 
 /** `GET /api/library`: every package and where it is PLACED. The space form (`/api/spaces/{id}/library`) is the same shape narrowed to one space. */
 export type LibraryResponse =
@@ -20,7 +20,7 @@ export type LibraryPackageItem = LibraryResponse["packages"]["agent"][number];
 
 export type LibrarySpace = LibraryResponse["spaces"][number];
 
-/** Where one package sits in one space: how it got there (`via`) and whether it runs (`state`); `"none"` is a placement with no local instance, e.g. a pending offer. */
+/** Where one package sits in one space: how it got there (`via`) and whether it runs (`state`); `"none"` is no row here (the deployment default is off). */
 export type LibraryPlacement = LibraryPackageItem["placements"][number];
 
 /** `GET /api/library`, graded by the server (an admin's whole map, else the union of the caller's spaces); `enabled: false` reads nothing. */
@@ -291,6 +291,8 @@ export function usePackageActivation(packageId: string) {
   return {
     mayActivate: may(true),
     mayDeactivate: may(false),
+    /** A placement someone else put here, which this caller may take out of the space. */
+    mayRemove: !!row && mayRemoveFromSpace(row, spaceId),
     activate: (options?: { onSuccess?: () => void }) => set(true, options),
     deactivate: (options?: { onSuccess?: () => void }) => set(false, options),
     pending: setActive.isPending,

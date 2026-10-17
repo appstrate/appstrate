@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { toast } from "sonner";
+import i18n from "../i18n";
 import { $api, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useInvalidatePaths } from "./use-invalidate-paths";
@@ -47,4 +49,25 @@ export function useRevokePackageShare() {
   return $api.useMutation("delete", "/api/packages/{scope}/{name}/shares/{target}", {
     onSuccess: invalidate,
   });
+}
+
+/** Removes a package from a space (the sharer withdrawing an audience, or the recipient leaving a placement): the server drops the row, its settings, and disables its schedules there. */
+export function useRemovePackageFromSpace() {
+  const revoke = useRevokePackageShare();
+  return {
+    isPending: revoke.isPending,
+    remove: (
+      target: { packageId: string; spaceId: string; spaceName: string },
+      options?: { onSuccess?: () => void },
+    ) =>
+      revoke.mutate(
+        { params: { path: { ...splitPackageRef(target.packageId), target: target.spaceId } } },
+        {
+          onSuccess: () => {
+            toast.success(i18n.t("settings:catalogue.revoked", { space: target.spaceName }));
+            options?.onSuccess?.();
+          },
+        },
+      ),
+  };
 }

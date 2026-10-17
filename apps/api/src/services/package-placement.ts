@@ -12,10 +12,11 @@
  * it leaves ({@link reconcilePlacementsAfterRehome}).
  */
 
-import { and, eq, isNotNull, ne, or } from "drizzle-orm";
+import { and, asc, eq, isNotNull, ne, or } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { packages, spacePackages } from "@appstrate/db/schema";
-import type { DbOrTx } from "../lib/db-helpers.ts";
+import { packages, schedules, spacePackages } from "@appstrate/db/schema";
+import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
+import { disableSchedules } from "./schedules-naming-connection.ts";
 
 /**
  * Drizzle filter: is the package PLACED in `spaceId`? — shipped with the
@@ -93,9 +94,12 @@ export async function isPlacedElsewhere(
  *
  * Runs INSIDE the caller's transaction (`PUT /api/packages/{scope}/{name}/home`):
  * the move and the placement it releases commit together or not at all.
+ *
+ * @returns the schedules {@link withdrawPlacement} disabled, whose jobs the
+ *   caller removes once committed.
  */
 export async function reconcilePlacementsAfterRehome(
-  tx: DbOrTx,
+  tx: Tx,
   params: {
     packageId: string;
     newHomeSpaceId: string;
@@ -103,21 +107,74 @@ export async function reconcilePlacementsAfterRehome(
      * The home being LEFT, and what becomes of its placement. `PUT …/home`
      * passes a human's answer for it.
      *
-     * `keep: true` leaves its row, if any, where it is: the row places the
-     * package there from now on, and a space that held no row had nothing
-     * running to rescue.
+     * `keep: true` leaves its row where it is: the row places the package
+     * there from now on.
      *
-     * `keep: false` deletes its row, settings and all — the act
-     * `revokePackageShare` performs for any other space.
+     * `keep: false` withdraws it ({@link withdrawPlacement}) — the act
+     * `revokePackageShare` performs for any other space. A space that held no
+     * row is withdrawn from whatever the flag says: nothing places the package
+     * there once the home has moved, so its schedules go off all the same.
      */
     previousHome: { spaceId: string; keep: boolean };
   },
-): Promise<void> {
+): Promise<string[]> {
   const { packageId, newHomeSpaceId, previousHome } = params;
-  if (previousHome.keep || previousHome.spaceId === newHomeSpaceId) return;
-  await tx
+  if (previousHome.spaceId === newHomeSpaceId) return [];
+  if (previousHome.keep) {
+    const [row] = await tx
+      .select({ packageId: spacePackages.packageId })
+      .from(spacePackages)
+      .where(
+        and(
+          eq(spacePackages.packageId, packageId),
+          eq(spacePackages.spaceId, previousHome.spaceId),
+        ),
+      )
+      .limit(1);
+    if (row) return [];
+  }
+  return (await withdrawPlacement(tx, packageId, previousHome.spaceId)).disabledScheduleIds;
+}
+
+/**
+ * Withdraw the placement of `packageId` from `spaceId` — the ONE delete of a
+ * `space_packages` row, settings and all, for both acts that withdraw one
+ * (`revokePackageShare`, {@link reconcilePlacementsAfterRehome}).
+ *
+ * The package is gone from the space, so EVERY schedule of it there is
+ * disabled in the same transaction rather than left armed to fail each fire
+ * with "not placed" — whoever's they are, as a connection unshare disables the
+ * schedules naming it. Locked in id order, in one statement
+ * (`schedules-naming-connection.ts`), with `package_removed`: re-placing the
+ * package does not re-arm a schedule on its own.
+ *
+ * The org boundary is the caller's (`spaceId` is one of its spaces).
+ *
+ * @returns whether a row went, and the disabled schedules, whose jobs the
+ *   caller removes once committed.
+ */
+export async function withdrawPlacement(
+  tx: Tx,
+  packageId: string,
+  spaceId: string,
+): Promise<{ removed: boolean; disabledScheduleIds: string[] }> {
+  const removed = await tx
     .delete(spacePackages)
+    .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, spaceId)))
+    .returning({ packageId: spacePackages.packageId });
+  const armed = await tx
+    .select({ id: schedules.id })
+    .from(schedules)
     .where(
-      and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, previousHome.spaceId)),
-    );
+      and(
+        eq(schedules.packageId, packageId),
+        eq(schedules.spaceId, spaceId),
+        eq(schedules.enabled, true),
+      ),
+    )
+    .orderBy(asc(schedules.id))
+    .for("update");
+  const disabledScheduleIds = armed.map((row) => row.id);
+  await disableSchedules(tx, disabledScheduleIds, "package_removed");
+  return { removed: removed.length > 0, disabledScheduleIds };
 }

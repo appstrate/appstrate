@@ -8,14 +8,14 @@
 import type { PackageType } from "@appstrate/core/validation";
 
 /** The route's `:reading` segment. */
-const CATALOGUE_READINGS = ["placed", "discover", "shared"] as const;
+const CATALOGUE_READINGS = ["placed", "discover"] as const;
 export type CatalogueReading = (typeof CATALOGUE_READINGS)[number];
 
 export function isCatalogueReading(value: string): value is CatalogueReading {
   return (CATALOGUE_READINGS as readonly string[]).includes(value);
 }
 
-/** The route's `:type` segment, in the rail's order. Every reading names one, `shared` included. */
+/** The route's `:type` segment, in the rail's order.  */
 export const CATALOGUE_KINDS = [
   "agent",
   "skill",
@@ -69,5 +69,3 @@ export function catalogueVersionFor(page: {
   if (!page.isHistoricalVersion || page.source === "system") return undefined;
   return page.version || undefined;
 }
-
-export const CATALOGUE_SHARED_HREF = `/catalogue/shared/${CATALOGUE_KINDS[0]}`;

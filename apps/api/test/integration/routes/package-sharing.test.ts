@@ -561,7 +561,11 @@ describe("authority — `<type>:share` in the home space", () => {
 
     expect((await revokeShare(author.headers(homeId), AGENT, recipient.userId)).status).toBe(204);
     const unshared = await getDbRow(auditEvents, eq(auditEvents.action, "package.unshared"));
-    expect(unshared.after).toEqual({ recipientUserId: recipient.userId, targetKind: "user" });
+    expect(unshared.after).toEqual({
+      recipientUserId: recipient.userId,
+      targetKind: "user",
+      authority: "home",
+    });
     expect(JSON.stringify(unshared.after)).not.toContain(recipient.personalSpaceId);
   });
 
