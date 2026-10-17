@@ -6,7 +6,7 @@
  * that leaves a `must_choose_connection` open for the schedule's actor (their one
  * own connection that no pin, org default or `connection_overrides` names
  * included, unless the write is for another member), or freezes a pick that actor cannot reach (`override_connection_unavailable`) or
- * that an admin pin or enforced org default outranks (`override_outranked`), is a `409 missing_integration_connection` carrying only those items. Every
+ * that adds to a set an admin pin or enforced org default imposes and closes (`override_outranked`), is a `409 missing_integration_connection` carrying only those items. Every
  * other connection verdict is accepted — it is repaired without editing the
  * schedule — and a non-required integration a fire would start without is
  * named in the write's `warnings`, to a caller writing for itself: one writing
@@ -385,7 +385,7 @@ describe("schedule writes — the connection choice is made up front", () => {
   });
 
   for (const governance of ["admin pin", "enforced org default"] as const) {
-    it(`refuses an override outside an ${governance} (override_outranked), writing nothing`, async () => {
+    it(`refuses an override adding to an ${governance} closed to additions (override_outranked), writing nothing`, async () => {
       await seedAgentWithIntegration();
       const governed = await seedIntegrationConnection(ctx, INTEGRATION);
       const outside = await seedIntegrationConnection(ctx, INTEGRATION);
@@ -395,11 +395,48 @@ describe("schedule writes — the connection choice is made up front", () => {
       const body = await expectRefusal(res, ["override_outranked"]);
       expect(body.errors[0]!.field).toBe(`integrations.${INTEGRATION}`);
       expect(await db.select().from(schedules)).toHaveLength(0);
-      // Control: an override inside the governing set is accepted.
+      // Control: an override inside the governing set adds nothing, and is accepted.
       const inside = await create({ connection_overrides: { [INTEGRATION]: [governed] } });
       expect(inside.status).toBe(201);
     });
   }
+
+  it("accepts an override adding to an admin pin open to additions", async () => {
+    await seedAgentWithIntegration();
+    const governed = await seedIntegrationConnection(ctx, INTEGRATION);
+    const added = await seedIntegrationConnection(ctx, INTEGRATION);
+    await db.insert(integrationPins).values({
+      spaceId: ctx.defaultSpaceId,
+      packageId: AGENT,
+      integrationId: INTEGRATION,
+      userId: null,
+      connectionIds: [governed],
+      allowAdditionalConnections: true,
+    });
+
+    const res = await create({ connection_overrides: { [INTEGRATION]: [added] } });
+    expect(res.status).toBe(201);
+    const [row] = await db.select().from(schedules);
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [added] });
+  });
+
+  it("accepts `[]` on a required integration an admin pin imposes: it adds nothing", async () => {
+    await seedSchedulableAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: {
+        ...agentManifest(true),
+        integrations_configuration: { [INTEGRATION]: { tools: ["search"], required: true } },
+      },
+    });
+    const governed = await seedIntegrationConnection(ctx, INTEGRATION);
+    await nameSet("admin pin", governed);
+
+    const res = await create({ connection_overrides: { [INTEGRATION]: [] } });
+    expect(res.status).toBe(201);
+  });
 
   it("refuses a colleague's real private connection like an unknown id, naming neither label nor account", async () => {
     await seedAgentWithIntegration();

@@ -6,10 +6,10 @@
  * Runs every validation that has no durable side effect:
  *   1. Manifest shape (AFPS + inline caps)
  *   1b. Integration tool/scope selections against each integration's PINNED catalog
- *   1c. `connection_overrides` keys against the integrations the manifest declares,
- *       and no `[]` for one it marks `required`
+ *   1c. `connection_overrides` keys against the integrations the manifest declares
  *   2. input against the manifest's own AJV schema
- *   3. Agent readiness (prompt, skills, tools, integrations)
+ *   3. Agent readiness (prompt, skills, tools, integrations — a `[]` override on a `required`
+ *      integration nothing imposes a set on is judged here, as `required_integration_unbound`)
  *
  * Two modes:
  *   - "fail-fast" (default) — throws on the first failing stage. Used by
@@ -63,7 +63,7 @@ export interface InlineRunPreflightResult {
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
   /**
-   * Caller's per-integration connection picks (cascade layer 3, the launch override), read off
+   * Caller's per-integration connection picks (the launch override), read off
    * the body ONCE below and carried here. Nothing else on the inline path feeds
    * them to the readiness gate, so without this a `must_choose_connection` 409
    * is inescapable here; and every consumer — both readiness branches and
@@ -205,7 +205,7 @@ export async function runInlinePreflight(params: {
   }
 
   // ----- 1c. `connection_overrides` keys against the declared integrations -----
-  // A refused key is left out of readiness, which would report its `[]` again.
+  // A refused key is left out of readiness: it names no declared integration, and the 400 above reports it.
   let readinessOverrides = body.connection_overrides;
   if (manifest) {
     const refusals = connectionOverrideRefusals(

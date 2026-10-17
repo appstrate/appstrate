@@ -54,6 +54,22 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
 
 - **`acceptsCompletionMessage`** (`@appstrate/core/connect-handshake`) is now a
   type guard: a `true` narrows `event.data` to `IntegrationConnectCompletion`.
+- **BREAKING: `ConnectionResolutionErrorCode` gains `connection_set_too_large`**
+  (`@appstrate/core/integration`, in `CONNECTION_RESOLUTION_ERROR_CODES` and so in
+  `MISSING_INTEGRATION_CONNECTION_CODES` and `READINESS_ERROR_CODES`) — the set an
+  admin pin or an enforced org default imposes plus the connections a selection
+  adds to it would bind more than `MAX_CONNECTIONS_PER_INTEGRATION`; the union is
+  refused, never truncated. `source` is the adding layer and `boundConnectionIds`
+  the deduped union. An imposed set is no longer narrowed: a launch override
+  naming only its members, or `[]`, adds nothing and the whole set binds;
+  `override_outranked` now means an override adding a connection to a set that
+  allows no addition. Exhaustive switches over the union must handle it. (#2043)
+- **BREAKING: `OVERRIDE_REFUSAL_CODES` / `OverrideRefusalCode` lose
+  `required_integration_unbound`** (`@appstrate/core/integration`) — `[]` on a
+  `required` integration is no longer refused at the write: under an imposed set
+  it adds nothing and the set satisfies the integration. Where nothing imposes
+  one, resolution answers `required_integration_unbound` (a
+  `ConnectionResolutionErrorCode`, unchanged) as a 409 item instead. (#2043)
 
 ## [16.0.0] — 2026-10-14
 

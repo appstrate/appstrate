@@ -442,8 +442,10 @@ type ConnectionSelectionContext = { spaceId: string; actor: Actor } & ProxySelec
 /**
  * The credential proxy's connection of `packageId`. Under a run, a member of its bound set, a
  * colleague's shared row included: the kickoff applied every layer. Outside a run, one of the
- * rows in reach: `usable` walks the cascade, pins aside; under `own` no org default
- * applies, and an integration an ENFORCED one governs answers `call_permission_required`. `null` when nothing
+ * rows in reach: `usable` walks the cascade, pins aside — under an ENFORCED org default a named
+ * id must be one of its members and is picked alone (the resolver would bind the imposed set
+ * whole), an unnamed call binds the default; under `own` no org default applies, and an
+ * integration an enforced one governs answers `call_permission_required`. `null` when nothing
  * answers, as for an id out of reach (a colleague's row or none). The pick passes health checks.
  */
 export async function selectAccessibleConnection(
@@ -486,9 +488,23 @@ export async function selectAccessibleConnection(
     }
   } else {
     const spaceDefaults = await listOrgDefaultsForResolver(context.spaceId);
+    const spaceDefault = spaceDefaults[packageId];
+    const enforcedIds = spaceDefault?.enforce ? spaceDefault.connectionIds : null;
     if (reach === "usable") {
+      if (named && enforcedIds) {
+        if (!enforcedIds.includes(named)) {
+          throw proxyProblem(
+            "connection_not_in_org_default",
+            `X-Connection-Id names a connection outside the enforced org default of '${packageId}', ` +
+              `which binds every call in this space: name one of its members, or none.`,
+            "X-Connection-Id",
+          );
+        }
+        // The named member alone: the resolver would bind the imposed set whole.
+        delete spaceDefaults[packageId];
+      }
       orgDefaults = spaceDefaults;
-    } else if (spaceDefaults[packageId]?.enforce) {
+    } else if (enforcedIds) {
       throw proxyProblem(
         "call_permission_required",
         `Integration '${packageId}' is governed by an enforced org default in this space: it is ` +
@@ -517,14 +533,6 @@ export async function selectAccessibleConnection(
       ? "No single connection applies"
       : "Only connections shared by other members exist";
     throw mustChoose(packageId, candidates, reason);
-  }
-  if (error?.code === "override_outranked") {
-    throw proxyProblem(
-      "connection_not_in_org_default",
-      `X-Connection-Id names a connection outside the enforced org default of '${packageId}', ` +
-        `which binds every call in this space: name one of its members, or none.`,
-      "X-Connection-Id",
-    );
   }
   if (error) throw resolutionConflict(error);
 

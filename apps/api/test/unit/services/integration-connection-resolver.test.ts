@@ -1,25 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the pure `resolveConnections()` function — the cascade
- * that decides which connectionS a run binds per integration. Every layer
- * yields a SET; each chosen row carries its own `authKey`, OAuth and
+ * Unit tests for the pure `resolveConnections()` function — which connectionS a run binds per
+ * integration. Every layer yields a SET; each chosen row carries its own `authKey`, OAuth and
  * api_key are interchangeable.
  *
  * Pure function, no DB. All inputs are arrays + plain objects.
  *
- * Cascade order (highest → lowest):
- *   1. integration_pins (user_id IS NULL)        → admin force, per-agent
- *   2. integration_org_defaults (enforce)        → org-wide force
- *   3. launch override                           → the run's or the schedule's picks
- *   4. integration_pins (user_id = actor.id)     → member preference
- *   5. integration_org_defaults (soft)           → org-wide default (binds whole or fails, like 1-4)
- *   6. fallback: own + shared accessible
- *      → exactly one OWN = auto (must_choose under `noFallback`), two or more =
- *        must_choose; no own row = not_connected / must_choose when `required`, else bound to
- *        none + warning
+ * effective = floor ∪ selection, selection ⊆ ceiling:
+ *   - governed by an admin pin (user_id IS NULL), else an enforced org default: the floor is that
+ *     set, bound whole; the selection is the launch override, else the member pin when the admin
+ *     pin opens additions (and no enforced default closes them), else nothing. Closed, an
+ *     override adding an id is `override_outranked`; an override naming floor ids or `[]` adds
+ *     nothing. No soft default, no fallback.
+ *   - ungoverned, the cascade: launch override → member pin → soft org default → fallback (exactly
+ *     one OWN = auto, must_choose under `noFallback`; two or more = must_choose; no own row =
+ *     not_connected / must_choose when `required`, else bound to none + warning).
  *
- * A layer set to `[]` is "none": it wins, binding none (or failing when `required`).
+ * Ungoverned, a layer set to `[]` is "none": it wins, binding none (or failing when `required`).
  * An integration switched off in the space is not resolved (a warning, or an error when `required`).
  */
 
@@ -36,6 +34,7 @@ import {
 import { connectOfferTarget } from "../../../src/services/connect/preflight-connect-offer.ts";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
+  MAX_CONNECTIONS_PER_INTEGRATION,
   type ConnectionResolutionSource,
   type ConnectionResolutionWarningCode,
   type IntegrationManifest,
@@ -134,8 +133,11 @@ function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionR
 }
 
 let pinSeq = 0;
-/** One pin row — the whole bound set of its (agent, integration, scope). */
-function pin(connectionIds: string | string[], opts?: { userId?: string | null }): PinRow {
+/** One pin row — the whole bound set of its (agent, integration, scope); additions closed. */
+function pin(
+  connectionIds: string | string[],
+  opts?: { userId?: string | null; allowAdditions?: boolean },
+): PinRow {
   pinSeq += 1;
   return {
     id: `pin_${pinSeq}`,
@@ -144,9 +146,15 @@ function pin(connectionIds: string | string[], opts?: { userId?: string | null }
     integrationId: INTEG,
     userId: opts?.userId ?? null,
     connectionIds: typeof connectionIds === "string" ? [connectionIds] : connectionIds,
+    allowAdditionalConnections: opts?.allowAdditions ?? false,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
+}
+
+/** Sugar — an admin pin that lets a selection add connections to its set. */
+function openPin(connectionIds: string | string[]): PinRow {
+  return pin(connectionIds, { allowAdditions: true });
 }
 
 /** Sugar — the launch-override layer, as a run and as a schedule fire feed it. */
@@ -258,7 +266,7 @@ describe("resolveConnections — admin pin (cascade layer 1)", () => {
     expect(result.errors[0]!.source).toBe("schedule_override");
   });
 
-  it("an override naming a subset of the pin binds exactly that subset", () => {
+  it("an override naming a subset of the pin adds nothing: the whole pin binds", () => {
     const a = conn({});
     const b = conn({});
     const result = resolveConnections({
@@ -269,7 +277,8 @@ describe("resolveConnections — admin pin (cascade layer 1)", () => {
     });
     expect(result.errors).toEqual([]);
     expect(result.resolved[INTEG]!.map((r) => [r.connectionId, r.source])).toEqual([
-      [b.id, "run_override"],
+      [a.id, "admin_pin"],
+      [b.id, "admin_pin"],
     ]);
   });
 
@@ -2321,7 +2330,7 @@ describe("resolveConnections — connection sets", () => {
     ]);
   });
 
-  it("an ENFORCE org default of 2 is narrowed by an override naming one of its members", () => {
+  it("an ENFORCE org default of 2 binds whole under an override naming one of its members", () => {
     const defA = conn({ label: "web-1", sharedSpaceIds: [SPACE_ID] });
     const defB = conn({ authKey: "pat", label: "db", sharedSpaceIds: [SPACE_ID] });
     const result = resolveConnections({
@@ -2331,8 +2340,10 @@ describe("resolveConnections — connection sets", () => {
       orgDefaults: { [INTEG]: { connectionIds: [defA.id, defB.id], enforce: true } },
       launchOverrides: runOverride({ [INTEG]: [defB.id] }),
     });
+    expect(result.errors).toEqual([]);
     expect(result.resolved[INTEG]!.map((r) => [r.connectionId, r.source])).toEqual([
-      [defB.id, "run_override"],
+      [defA.id, "org_default_enforced"],
+      [defB.id, "org_default_enforced"],
     ]);
   });
 
@@ -2796,38 +2807,23 @@ describe("resolveConnections — a layer absent, set to `[]`, or naming a set", 
 
     for (const launch of [runOverride, scheduleOverride]) {
       const source = launch({}).source;
-      it(`${source} \`[]\`: none is a subset — non-required binds none`, () => {
-        const c = conn({});
-        for (const g of governed(c)) {
-          const result = resolveConnections({
-            requirements: [req(oauth2Manifest())],
-            accessibleConnections: [c],
-            pins: [],
-            ...g.input,
-            launchOverrides: launch({ [INTEG]: [] }),
-          });
-          expect(result.errors).toEqual([]);
-          expect(result.resolved).toEqual({ [INTEG]: [] });
-        }
-      });
-
-      it(`${source} \`[]\`: required → required_integration_unbound, not override_outranked`, () => {
-        const c = conn({});
-        for (const g of governed(c)) {
-          const result = resolveConnections({
-            requirements: [requiredReq(oauth2Manifest())],
-            accessibleConnections: [c],
-            pins: [],
-            ...g.input,
-            launchOverrides: launch({ [INTEG]: [] }),
-          });
-          expect(result.errors).toHaveLength(1);
-          expect(result.errors[0]).toMatchObject({
-            code: "required_integration_unbound",
-            source,
-          });
-        }
-      });
+      for (const required of [false, true]) {
+        it(`${source} \`[]\` adds nothing — the imposed set binds whole (required ${required})`, () => {
+          const c = conn({});
+          for (const g of governed(c)) {
+            const result = resolveConnections({
+              requirements: [{ ...req(oauth2Manifest()), required }],
+              accessibleConnections: [c],
+              pins: [],
+              ...g.input,
+              launchOverrides: launch({ [INTEG]: [] }),
+            });
+            expect(result.errors).toEqual([]);
+            expect(result.warnings).toEqual([]);
+            expect(result.resolved[INTEG]).toMatchObject([{ connectionId: c.id }]);
+          }
+        });
+      }
     }
 
     it("an admin pin of `[]` outranks any override that names a connection", () => {
@@ -2849,6 +2845,333 @@ describe("resolveConnections — a layer absent, set to `[]`, or naming a set", 
       pins: [pin([])],
     });
     expect(result).toEqual({ resolved: {}, errors: [], warnings: [] });
+  });
+});
+
+describe("resolveConnections — an imposed set and its additions (floor ∪ selection)", () => {
+  const ENFORCE = (...ids: string[]) => ({ [INTEG]: { connectionIds: ids, enforce: true } });
+  const SOFT = (...ids: string[]) => ({ [INTEG]: { connectionIds: ids, enforce: false } });
+  const bound = (result: ReturnType<typeof resolveConnections>) =>
+    result.resolved[INTEG]?.map((r) => [r.connectionId, r.source]);
+  const shared = (over: Partial<ConnectionRow> = {}) =>
+    conn({ userId: "user_colleague", sharedSpaceIds: [SPACE_ID], ...over });
+
+  describe("additions closed", () => {
+    it("an override naming a subset of the floor binds the whole floor", () => {
+      const a = conn({});
+      const b = conn({});
+      for (const launch of [runOverride, scheduleOverride]) {
+        const result = resolveConnections({
+          requirements: [req(oauth2Manifest())],
+          accessibleConnections: [a, b],
+          pins: [pin([a.id, b.id])],
+          launchOverrides: launch({ [INTEG]: [a.id] }),
+        });
+        expect(result.errors).toEqual([]);
+        expect(bound(result)).toEqual([
+          [a.id, "admin_pin"],
+          [b.id, "admin_pin"],
+        ]);
+      }
+    });
+
+    it("an override of `[]` binds the whole floor", () => {
+      const a = conn({});
+      const b = conn({});
+      const result = resolveConnections({
+        requirements: [requiredReq(oauth2Manifest())],
+        accessibleConnections: [a, b],
+        pins: [pin([a.id, b.id])],
+        launchOverrides: runOverride({ [INTEG]: [] }),
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([
+        [a.id, "admin_pin"],
+        [b.id, "admin_pin"],
+      ]);
+    });
+
+    it("an override adding an id outside the floor is override_outranked, the message saying so", () => {
+      const a = conn({});
+      const outside = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [a, outside],
+        pins: [pin(a.id)],
+        launchOverrides: runOverride({ [INTEG]: [a.id, outside.id] }),
+      });
+      expect(result.resolved[INTEG]).toBeUndefined();
+      expect(result.errors[0]).toMatchObject({
+        code: "override_outranked",
+        source: "run_override",
+      });
+      expect(result.errors[0]!.message).toContain("the set an admin pin imposes");
+      expect(result.errors[0]!.message).toContain("allows no addition");
+    });
+
+    it("a member pin adds nothing to a closed floor (masked, never outranked)", () => {
+      const a = conn({});
+      const mine = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [a, mine],
+        pins: [pin(a.id), memberPin(mine.id)],
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([[a.id, "admin_pin"]]);
+    });
+
+    it("an enforced default + an override naming a subset binds the whole default", () => {
+      const a = shared();
+      const b = shared();
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [a, b],
+        pins: [],
+        orgDefaults: ENFORCE(a.id, b.id),
+        launchOverrides: scheduleOverride({ [INTEG]: [b.id] }),
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([
+        [a.id, "org_default_enforced"],
+        [b.id, "org_default_enforced"],
+      ]);
+    });
+
+    it("an enforced default is always closed: an addition is override_outranked", () => {
+      const a = shared();
+      const mine = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [a, mine],
+        pins: [],
+        orgDefaults: ENFORCE(a.id),
+        launchOverrides: runOverride({ [INTEG]: [mine.id] }),
+      });
+      expect(result.errors[0]).toMatchObject({
+        code: "override_outranked",
+        source: "run_override",
+      });
+      expect(result.errors[0]!.message).toContain("the set an enforced org default imposes");
+    });
+  });
+
+  describe("additions open", () => {
+    it("binds floor ∪ member pin, floor first, each row carrying its own source", () => {
+      const team = shared({ label: "team" });
+      const mine = conn({ label: "mine" });
+      const other = shared({ label: "other" });
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [mine, other, team],
+        pins: [openPin(team.id), memberPin([other.id, mine.id])],
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([
+        [team.id, "admin_pin"],
+        [other.id, "member_pin"],
+        [mine.id, "member_pin"],
+      ]);
+    });
+
+    it("a launch override is the selection, beating the member pin", () => {
+      const team = shared();
+      const pinned = conn({});
+      const picked = conn({});
+      for (const launch of [runOverride, scheduleOverride]) {
+        const result = resolveConnections({
+          requirements: [req(oauth2Manifest())],
+          accessibleConnections: [team, pinned, picked],
+          pins: [openPin(team.id), memberPin(pinned.id)],
+          launchOverrides: launch({ [INTEG]: [picked.id] }),
+        });
+        expect(result.errors).toEqual([]);
+        expect(bound(result)).toEqual([
+          [team.id, "admin_pin"],
+          [picked.id, launch({}).source],
+        ]);
+      }
+    });
+
+    it("an override of `[]` binds the floor only, the member pin aside", () => {
+      const team = shared();
+      const pinned = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [team, pinned],
+        pins: [openPin(team.id), memberPin(pinned.id)],
+        launchOverrides: runOverride({ [INTEG]: [] }),
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([[team.id, "admin_pin"]]);
+    });
+
+    it("dedupes a selection repeating a floor id or itself, keeping the first place", () => {
+      const a = shared();
+      const b = shared();
+      const mine = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [a, b, mine],
+        pins: [openPin([a.id, b.id])],
+        launchOverrides: runOverride({ [INTEG]: [mine.id, b.id, mine.id, a.id] }),
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([
+        [a.id, "admin_pin"],
+        [b.id, "admin_pin"],
+        [mine.id, "run_override"],
+      ]);
+    });
+
+    it("with no selection binds the floor only: no soft default, no fallback", () => {
+      const team = shared();
+      const mine = conn({});
+      for (const noFallback of [false, true]) {
+        const result = resolveConnections({
+          requirements: [req(oauth2Manifest())],
+          accessibleConnections: [team, mine],
+          pins: [openPin(team.id)],
+          orgDefaults: SOFT(mine.id),
+          noFallback,
+        });
+        expect(result.errors).toEqual([]);
+        expect(bound(result)).toEqual([[team.id, "admin_pin"]]);
+      }
+    });
+
+    it("an enforced default closes an open admin pin", () => {
+      const team = shared();
+      const def = shared();
+      const mine = conn({});
+      const masked = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [team, def, mine],
+        pins: [openPin(team.id), memberPin(mine.id)],
+        orgDefaults: ENFORCE(def.id),
+      });
+      expect(masked.errors).toEqual([]);
+      expect(bound(masked)).toEqual([[team.id, "admin_pin"]]);
+
+      const refused = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [team, def, mine],
+        pins: [openPin(team.id)],
+        orgDefaults: ENFORCE(def.id),
+        launchOverrides: runOverride({ [INTEG]: [mine.id] }),
+      });
+      expect(refused.errors[0]).toMatchObject({ code: "override_outranked" });
+      expect(refused.errors[0]!.message).toContain("the set an admin pin imposes");
+    });
+
+    it("an unavailable addition fails on the addition's layer, never dropped", () => {
+      const team = shared();
+      const viaOverride = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [team],
+        pins: [openPin(team.id)],
+        launchOverrides: scheduleOverride({ [INTEG]: ["conn_ghost"] }),
+      });
+      expect(viaOverride.resolved[INTEG]).toBeUndefined();
+      expect(viaOverride.errors[0]).toMatchObject({
+        code: "override_connection_unavailable",
+        source: "schedule_override",
+      });
+
+      const viaPin = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [team],
+        pins: [openPin(team.id), memberPin("conn_ghost")],
+      });
+      expect(viaPin.errors[0]).toMatchObject({
+        code: "pinned_connection_unavailable",
+        source: "member_pin",
+      });
+      expect(viaPin.errors[0]!.message).toContain("Your pinned connection 'conn_ghost'");
+    });
+
+    it("a floor member needing reconnection fails the union on the floor's layer, no substitution", () => {
+      const dead = shared({ needsReconnection: true });
+      const mine = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [dead, mine],
+        pins: [openPin(dead.id), memberPin(mine.id)],
+      });
+      expect(result.resolved[INTEG]).toBeUndefined();
+      expect(result.errors[0]).toMatchObject({
+        code: "needs_reconnection",
+        source: "admin_pin",
+        connectionId: dead.id,
+        boundConnectionIds: [dead.id, mine.id],
+      });
+    });
+
+    it("an unavailable floor member fails on the floor's layer before any addition", () => {
+      const mine = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [mine],
+        pins: [openPin("conn_ghost"), memberPin(mine.id)],
+      });
+      expect(result.errors[0]).toMatchObject({
+        code: "pinned_connection_unavailable",
+        source: "admin_pin",
+      });
+    });
+
+    it(`a union past ${MAX_CONNECTIONS_PER_INTEGRATION} is connection_set_too_large, naming the adding layer`, () => {
+      const floor = Array.from({ length: 5 }, () => shared());
+      const extra = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION - 4 }, () => conn({}));
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [...floor, ...extra],
+        pins: [openPin(floor.map((c) => c.id))],
+        launchOverrides: scheduleOverride({ [INTEG]: [floor[0]!.id, ...extra.map((c) => c.id)] }),
+      });
+      expect(result.resolved[INTEG]).toBeUndefined();
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toMatchObject({
+        code: "connection_set_too_large",
+        source: "schedule_override",
+        boundConnectionIds: [...floor, ...extra].map((c) => c.id),
+      });
+      expect(translateResolutionError(result.errors[0]!)).toMatchObject({
+        code: "connection_set_too_large",
+        title: "Connection Set Too Large",
+        source: "schedule_override",
+      });
+
+      // Control: one fewer addition reaches the cap exactly and binds.
+      const atCap = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [...floor, ...extra],
+        pins: [openPin(floor.map((c) => c.id))],
+        launchOverrides: runOverride({ [INTEG]: extra.slice(1).map((c) => c.id) }),
+      });
+      expect(atCap.errors).toEqual([]);
+      expect(atCap.resolved[INTEG]).toHaveLength(MAX_CONNECTIONS_PER_INTEGRATION);
+    });
+
+    it("an under-scoped addition names its own layer's remedy", () => {
+      const scoped = {
+        ...oauth2Manifest(),
+        tools_policy: { t1: { required_scopes: { oauth: ["repo"] } } },
+      } as unknown as IntegrationManifest;
+      const team = shared({ scopesGranted: ["repo"] });
+      const mine = conn({ scopesGranted: [] });
+      const result = resolveConnections({
+        requirements: [req(scoped, ["t1"])],
+        accessibleConnections: [team, mine],
+        pins: [openPin(team.id), memberPin(mine.id)],
+      });
+      expect(result.errors[0]).toMatchObject({
+        code: "insufficient_scopes",
+        source: "member_pin",
+        connectionId: mine.id,
+      });
+      expect(translateResolutionError(result.errors[0]!).remedy).toBe("upgrade_or_new");
+    });
   });
 });
 

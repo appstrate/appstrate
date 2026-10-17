@@ -337,28 +337,31 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
     });
 
-    it.each(["/api/runs/inline", "/api/runs/inline/validate"])(
-      "400s on %s when the integration is required",
-      async (path) => {
-        await seedIntegration(INTEGRATION);
-        await seedConnection(INTEGRATION);
+    // Not a static refusal of the key: resolution judges `[]` (under an imposed set it adds
+    // nothing), so both doors answer the resolver's verdict, the launch as its 409.
+    it.each([
+      ["/api/runs/inline", 409, "missing_integration_connection"],
+      ["/api/runs/inline/validate", 400, "validation_failed"],
+    ])("refuses on %s when the integration is required (%i)", async (path, status, code) => {
+      await seedIntegration(INTEGRATION);
+      await seedConnection(INTEGRATION);
 
-        const res = await post(path, {
-          manifest: inlineManifest([INTEGRATION], { required: [INTEGRATION] }),
-          prompt: "do the thing",
-          connection_overrides: { [INTEGRATION]: [] },
-        });
+      const res = await post(path, {
+        manifest: inlineManifest([INTEGRATION], { required: [INTEGRATION] }),
+        prompt: "do the thing",
+        connection_overrides: { [INTEGRATION]: [] },
+      });
 
-        expect(res.status).toBe(400);
-        const body = (await res.json()) as ProblemDetails;
-        // One item, fail-fast or accumulated: readiness judges the launch without the refused key.
-        expect(body.code).toBe("validation_failed");
-        expect(body.errors!.map((e) => [e.field, e.code])).toEqual([
-          [`connection_overrides.${INTEGRATION}`, "required_integration_unbound"],
-        ]);
-        expect(await db.select().from(runs)).toHaveLength(0);
-      },
-    );
+      expect(res.status).toBe(status);
+      const body = (await res.json()) as Omit<ProblemDetails, "errors"> & {
+        errors: { field: string; code: string; source?: string }[];
+      };
+      expect(body.code).toBe(code);
+      expect(body.errors.map((e) => [e.field, e.code, e.source])).toEqual([
+        [`integrations.${INTEGRATION}`, "required_integration_unbound", "run_override"],
+      ]);
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
   });
 
   // An empty connection id is falsy at the resolver's `resolveOne`, so the
