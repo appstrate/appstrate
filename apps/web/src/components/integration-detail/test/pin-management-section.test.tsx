@@ -27,8 +27,8 @@ const { $api } = await import("../../../api/client.ts");
 const { render } = await import("../../../test/render.tsx");
 const { spaceStore } = await import("../../../stores/space-store.ts");
 const { usePinColumns } = await import("../pin-columns.tsx");
-const { PinDeleteConfirm, PinFormFields, PinManagementSection } =
-  await import("../pin-management-section.tsx");
+const { PinManagementSection } = await import("../pin-management-section.tsx");
+const { PinDeleteConfirm, PinFormFields } = await import("../pin-editor.tsx");
 const { initialPinDraft, pinDraftVerdict } = await import("../../../lib/admin-pin-payload.ts");
 const settingsFr = (await import("../../../locales/fr/settings.json")).default;
 const settingsEn = (await import("../../../locales/en/settings.json")).default;
@@ -228,7 +228,7 @@ function formFields(
   const patches: unknown[] = [];
   const element = (
     <PinFormFields
-      editing={stored !== null}
+      agentFixed={stored !== null}
       agents={[{ agent_package_id: AGENT, display_name: "Ops" }]}
       connections={connections}
       unavailableIds={unavailableIds}

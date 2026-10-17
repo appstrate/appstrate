@@ -276,7 +276,16 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
     connexions » by default, « Ces connexions, plus celles de l'utilisateur » disabled with its
     reason under the field, `additionsRefusal`), then the one sentence saying whom saving
     affects (`pinDraftVerdict`), and one PUT (`adminPinBody`). « Supprimer » only opens its
-    `ConfirmModal`, which says what the members and the schedules lose;
+    `ConfirmModal`, which says what the members and the schedules lose. **The same pin is edited
+    from the agent's Connexions**: for a caller holding `integrations:configure`, each row's « … »
+    holds « Imposer des connexions » (no pin yet, and only for an agent active in the space) or
+    « Modifier les connexions imposées » and « Retirer l'épinglage », which open that same form,
+    its Agent fixed to the agent, and that same confirmation. Both screens read and write through
+    one hook (`usePinEditor`, `integration-detail/pin-editor.tsx`: the pins, the shared
+    connections, the consuming agents, the default's enforcement, the two dialogs), so a write
+    on either refreshes both and the readiness the connections cell reads. A member sees no menu,
+    and the cell stays their view (padlock, « Épinglée par un admin »), never a link to the pin;
+    a schedule's rows have no menu (a pin binds the agent);
   - the **identity of a schedule** (`ScheduleActorConnectionChoice`, in Identité, Connexions and
     the creation modal): after a 409 the refused candidates as boxes and « Aucune connexion » as a
     box of its own when optional; where nothing was refused, a line says the identity's usual
@@ -372,8 +381,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   `DataTable` (aligned columns, needs width), `CardGrid` (`components/card-grid.tsx`,
   `auto-fill`, no breakpoints) and `ItemList` (`components/item-list.tsx`, stacked
   self-contained blocks, asks nothing of its container: use it in a panel, a modal
-  or a narrow tab). A settings list is a table, not cards (except a list that never exceeds a handful of
-  rows, such as an agent's connections: plain rows). A matrix (packages by
+  or a narrow tab). A settings list is a table, not cards, except a list that never exceeds a handful of rows and
+  whose rows hold a control that needs the width: an agent's and a schedule's Connexions are an
+  `ItemList` (`package-detail/agent-integrations-block.tsx`: one block per integration, with name,
+  id and access on the left, status and the admin's « … » on the right, and the connections cell
+  under them at full width), so a phone keeps every part without scrolling. A matrix (packages by
   workspace) is the one raw shadcn `Table`.
 - `DataTable` (`components/data-table.tsx`, the shadcn `Table`) under a `ListToolbar`
   (`components/list-toolbar.tsx`: search, filters behind one button, column menu;

@@ -9,14 +9,20 @@
  * for a required integration.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { QueryClient } from "@tanstack/react-query";
+import type { IntegrationPin } from "@appstrate/shared-types";
 import type { components } from "../../api/schema";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { AgentIntegrationsBlock } = await import("../package-detail/agent-integrations-block.tsx");
+const { pinRowActions } = await import("../package-detail/pin-row-actions.ts");
+const { PinFormFields, PinFormModal } = await import("../integration-detail/pin-editor.tsx");
+const { orgStore } = await import("../../stores/org-store.ts");
+const { spaceStore } = await import("../../stores/space-store.ts");
 const { $api } = await import("../../api/client.ts");
 const { AMBER_TEXT } = await import("../integration-connect/connection-picker-states.tsx");
 const { render } = await import("../../test/render.tsx");
@@ -315,3 +321,218 @@ describe("AgentIntegrationsBlock — the integration's own detail does not land"
     expect(html).toContain(`${AMBER_TEXT} text-xs`);
   });
 });
+
+describe("AgentIntegrationsBlock — the list", () => {
+  it("is one self-contained block per integration, under the list's accessible name", () => {
+    const html = renderCard(unbound());
+    expect(html).toContain(`aria-label="${label("connectionsTable.label")}"`);
+    expect(html).toContain(`data-testid="integration-row-${GMAIL}"`);
+    expect(html).toContain(label("connectionsTable.account"));
+    expect(html).toContain(label("connectionsTable.unbound"));
+    expect(html).not.toContain("<table");
+  });
+
+  it("shows no status on a schedule's blocks", () => {
+    const html = renderAs(["integrations:read"], { schedule: true });
+    expect(html).toContain(`data-testid="integration-row-${GMAIL}"`);
+    expect(html).toContain(label("connectionsTable.account"));
+    for (const status of ["inactive", "checking", "required", "unbound", "ready"]) {
+      expect(html).not.toContain(`>${label(`connectionsTable.${status}`)}<`);
+    }
+  });
+});
+
+// ─── The admin pin, from the agent's rows ──────────────────────────────────
+
+const ORG = "org_a";
+const SPACE = "spc_a";
+const scoped = { "X-Org-Id": ORG, "X-Space-Id": SPACE };
+const MENU = "Actions pour Gmail";
+
+function adminPin(over: Partial<IntegrationPin> = {}): IntegrationPin {
+  return {
+    agent_package_id: AGENT,
+    integration_package_id: GMAIL,
+    connection_ids: [],
+    allow_additional_connections: false,
+    agent_active: true,
+    createdAt: "2026-10-17T10:00:00Z",
+    updatedAt: "2026-10-17T10:00:00Z",
+    ...over,
+  };
+}
+
+/** The agent's rows for a caller holding `permissions` in the space, its pins and agents read. */
+function renderAs(permissions: string[], opts: { schedule?: boolean } = {}): string {
+  const qc = new QueryClient();
+  const key = (path: string, params: Record<string, unknown>) =>
+    $api.queryOptions("get", path as "/api/integrations/{packageId}", {
+      params: params as never,
+    }).queryKey;
+  qc.setQueryData(key("/api/spaces", { header: { "X-Org-Id": ORG } }), {
+    object: "list",
+    data: [
+      {
+        object: "space",
+        id: SPACE,
+        orgId: ORG,
+        name: "Default",
+        icon: null,
+        color: null,
+        isDefault: true,
+        settings: {},
+        visibility: "open",
+        default_role: "viewer",
+        personal: false,
+        access: "member",
+        role: null,
+        permissions,
+        created_by: null,
+        createdAt: "2026-09-05T10:00:00Z",
+        updatedAt: "2026-09-05T10:00:00Z",
+      },
+    ],
+    hasMore: false,
+  });
+  const integration = { path: { packageId: GMAIL }, header: scoped };
+  qc.setQueryData(key("/api/integrations/{packageId}", integration), {
+    manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } },
+    auths: [],
+    active: true,
+  });
+  const list = (data: unknown[]) => ({ object: "list", data, hasMore: false });
+  qc.setQueryData(key("/api/integrations/{packageId}/pins", integration), list([]));
+  qc.setQueryData(key("/api/integrations/{packageId}/connections", integration), list([]));
+  qc.setQueryData(
+    key("/api/integrations/{packageId}/consuming-agents", integration),
+    list([{ agent_package_id: AGENT, display_name: "Mailer" }]),
+  );
+  const org = spyOn(orgStore, "getInitialState").mockReturnValue({
+    ...orgStore.getInitialState(),
+    id: ORG,
+  });
+  const space = spyOn(spaceStore, "getInitialState").mockReturnValue({
+    ...spaceStore.getInitialState(),
+    id: SPACE,
+  });
+  try {
+    return render(
+      <AgentIntegrationsBlock
+        entries={[{ id: GMAIL, version: "1.0.0", tools: undefined, scopes: undefined }]}
+        agentPackageId={AGENT}
+        {...(opts.schedule && { scheduleOverrides: { value: {}, onChange: () => {} } })}
+      />,
+      { queryClient: qc },
+    );
+  } finally {
+    org.mockRestore();
+    space.mockRestore();
+  }
+}
+
+describe("AgentIntegrationsBlock — the admin pin in the row's « … »", () => {
+  it("is offered to a caller holding integrations:configure, and to nobody else", () => {
+    expect(renderAs(["integrations:read", "integrations:configure"])).toContain(
+      `aria-label="${MENU}"`,
+    );
+    const member = renderAs(["integrations:read", "integrations:connect"]);
+    expect(member).not.toContain(MENU);
+  });
+
+  it("is not offered on a schedule's rows: a pin binds the agent, not the schedule", () => {
+    const html = renderAs(["integrations:read", "integrations:configure"], { schedule: true });
+    expect(html).not.toContain(MENU);
+  });
+
+  const t = (key: string) => i18n.t(`agents:${key}`);
+  function actionsFor(
+    pin: IntegrationPin | undefined,
+    opts: { active?: boolean; loaded?: boolean } = {},
+  ) {
+    const added: (string | undefined)[] = [];
+    const edited: IntegrationPin[] = [];
+    const removed: IntegrationPin[] = [];
+    const loaded = opts.loaded ?? true;
+    const actions = pinRowActions({
+      t,
+      integrationId: GMAIL,
+      agentPackageId: AGENT,
+      pin,
+      agentActive: opts.active ?? true,
+      editor: {
+        add: loaded ? (agent) => added.push(agent) : undefined,
+        edit: loaded ? (p) => edited.push(p) : undefined,
+        remove: (p) => removed.push(p),
+      },
+    });
+    return { actions, added, edited, removed };
+  }
+
+  it("imposes connections when the agent has none, on the form fixed to this agent", () => {
+    const { actions, added } = actionsFor(undefined);
+    expect(actions.map((a) => [a.id, a.label, a.hidden === true])).toEqual([
+      ["impose", "Imposer des connexions", false],
+    ]);
+    actions[0]!.onSelect!();
+    expect(added).toEqual([AGENT]);
+  });
+
+  it("offers no « Imposer » for an agent not active in the space, nor before the connections load", () => {
+    expect(actionsFor(undefined, { active: false }).actions[0]).toMatchObject({ hidden: true });
+    expect(actionsFor(undefined, { loaded: false }).actions[0]).toMatchObject({
+      disabled: true,
+      onSelect: undefined,
+    });
+  });
+
+  it("edits or removes a stored pin, removing only through its confirmation", () => {
+    const stored = adminPin({ connection_ids: [candidate(true).id] });
+    const { actions, edited, removed } = actionsFor(stored);
+    expect(actions.map((a) => [a.id, a.label, a.destructive === true])).toEqual([
+      ["edit-pin", "Modifier les connexions imposées", false],
+      ["remove-pin", "Retirer l’épinglage", true],
+    ]);
+    actions[0]!.onSelect!();
+    expect(edited).toEqual([stored]);
+    // « Retirer » names the pin to confirm: the editor opens `PinDeleteConfirm`, whose button deletes.
+    actions[1]!.onSelect!();
+    expect(removed).toEqual([stored]);
+    expect(actionsFor(stored, { loaded: false }).actions[0]).toMatchObject({ disabled: true });
+  });
+
+  it("opens the integration page's form with this agent chosen and fixed", () => {
+    let tree: ReactNode = null;
+    function Probe(): null {
+      tree = PinFormModal({
+        packageId: GMAIL,
+        pin: null,
+        agents: [{ agent_package_id: AGENT, display_name: "Mailer" }],
+        agentId: AGENT,
+        connections: [],
+        enforcedDefault: false,
+        onClose: () => {},
+      });
+      return null;
+    }
+    render(<Probe />);
+    const fields = findElement(tree, PinFormFields);
+    expect(fields?.props).toMatchObject({ agentFixed: true, draft: { agent: AGENT } });
+  });
+});
+
+/** The first element of `type` in an element tree. */
+function findElement<P>(
+  node: ReactNode,
+  type: (props: P) => ReactNode,
+): ReactElement<P> | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findElement(child, type);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!isValidElement<{ children?: ReactNode }>(node)) return undefined;
+  if (node.type === type) return node as unknown as ReactElement<P>;
+  return findElement(node.props.children, type);
+}
