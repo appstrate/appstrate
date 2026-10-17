@@ -381,8 +381,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
      button, a link that does something) has no tier and is always drawn. The type
      forbids a `tier` on a control, and `DataTable` itself drops any tier given to a
      control or to the row's « … » column (`components/test/data-table.test.tsx`), so
-     mark every column that holds a control. When a table does not fit, it scrolls sideways
-     and holds its name column (the first read column, with the ticks before it)
+     mark every column that holds a control. When a table does not fit, it scrolls
+     sideways and holds its name column (the first read column, with the ticks before it)
      and its row's end (the headerless « … » column) in place (`sticky`), so a row
      is always named and its actions are always in reach. A scroll is better than
      a lost control, and a « … » menu is not the place for a dropdown: a control

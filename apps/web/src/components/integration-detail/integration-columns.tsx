@@ -4,8 +4,6 @@
  * The column sets of the integration detail's two tables (`connections-table.tsx`,
  * `clients-table.tsx`).
  *
- * A column set is data, beside its tables.
- *
  * Both are the same FAMILY as the models, credentials and proxies tables. A
  * stable provenance value gets its own text column; badges are reserved for
  * row states that benefit from visual emphasis.
@@ -211,8 +209,7 @@ export function useIntegrationClientColumns({
  * its share editor wait for 36rem; the method, the owner, the granted
  * scopes and the expiry wait for 56rem because they are the longest and least
  * often read facts. The floors are written so that the whole set, method
- * included, holds in 56rem and a 1440px page needs no
- * sideways scroll.
+ * included, holds in 56rem and a 1440px page needs no sideways scroll.
  */
 export function useConnectionColumns({
   packageId,

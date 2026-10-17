@@ -9,8 +9,6 @@
  * to read it when it is a preset or not yours to change, to edit it when it
  * is. Previewing it and deleting it live in the menu, the second being the
  * one destructive deed.
- *
- * Out of the page, as data.
  */
 import { useTranslation } from "react-i18next";
 import { Eye, Trash2 } from "lucide-react";
