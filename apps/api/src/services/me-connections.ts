@@ -19,7 +19,6 @@ import { db } from "@appstrate/db/client";
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import {
   spacePackages,
-  packageShares,
   integrationConnections,
   integrationPins,
   organizationMembers,
@@ -40,7 +39,7 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import { activeHereSql } from "./package-activation.ts";
-import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
+import { placementRowJoin } from "./package-placement.ts";
 import {
   connectionLocks,
   connectionReach,
@@ -258,8 +257,8 @@ export async function listMeConnections(
   // Count the agents each space RUNS that declare this integration in their
   // dependencies — "reused by N agents" is a statement about runs, so the
   // question is the ONE activation rule ({@link activeHereSql}) and not the
-  // presence of a `space_packages` row: a deactivated agent, and an ORPHAN row
-  // naming a package the space has lost, execute nowhere and reuse nothing.
+  // presence of a `space_packages` row: a deactivated agent executes nowhere
+  // and reuses nothing.
   //
   // That rule is per-space, so this is ONE query per space a row serves
   // (never per connection, never per integration), written in
@@ -276,13 +275,12 @@ export async function listMeConnections(
               .select({ id: packages.id, integrationIds: declaredIntegrationIds })
               .from(packages)
               .leftJoin(spacePackages, placementRowJoin(packages.id, sp.id))
-              .leftJoin(packageShares, placementShareJoin(packages.id, sp.id))
               .where(
                 and(
                   eq(packages.type, "agent"),
                   orgOrSystemFilter(sp.orgId),
                   notEphemeralFilter(),
-                  activeHereSql(sp.id),
+                  activeHereSql(),
                 ),
               ),
           ] as const,

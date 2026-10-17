@@ -62,7 +62,7 @@ import { assertVersionNotLower, findHigherPublishedVersion } from "./package-ver
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
-import { activatePackage } from "./space-packages.ts";
+import { activatePackage, type PlacementAuthority } from "./space-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -333,7 +333,7 @@ export async function importBundle(
   bundle: Bundle,
   scope: BundleAssemblyScope,
   userId: string,
-  mayShareRoot: (packageId: string) => Promise<boolean>,
+  placeRootAs: (packageId: string) => Promise<PlacementAuthority | null>,
 ): Promise<ImportBundleResult> {
   const imported: ImportedPackageResult[] = [];
   const warnings: string[] = [];
@@ -611,14 +611,14 @@ export async function importBundle(
   // A root the import CREATED is homed here, so the placement rule is already
   // satisfied. A root that existed and lives in ANOTHER space is not: this is a
   // re-import into a second space, and activating it there is the same act as
-  // `POST /api/spaces/{id}/packages` — it needs the offer. So it takes the same
-  // door: when the caller holds `<type>:share` in the root's home, the offer is
-  // written with the placement, in one transaction; when they do not,
-  // `activatePackage` refuses and the result says `root_active: false`.
+  // `POST /api/spaces/{id}/packages` — it needs a placement. So it takes the
+  // same door: when the caller holds `<type>:share` in the root's home, the
+  // root is placed through `placePackage` with its preconditions; when they do
+  // not, `activatePackage` refuses and the result says `root_active: false`.
   let rootActive = false;
   try {
-    const mayShare = await mayShareRoot(rootParsed.packageId);
-    await activatePackage(scope, rootParsed.packageId, mayShare ? { shareBy: userId } : undefined);
+    const placeAs = await placeRootAs(rootParsed.packageId);
+    await activatePackage(scope, rootParsed.packageId, placeAs ? { placeAs } : undefined);
     rootActive = true;
   } catch (err) {
     // An unreachable or unofferable root is what a caller has to diagnose, and
@@ -775,7 +775,7 @@ export async function handleImportBundle(
   scope: BundleAssemblyScope,
   userId: string,
   authorize: (bundle: Bundle) => Promise<void>,
-  mayShareRoot: (packageId: string) => Promise<boolean>,
+  placeRootAs: (packageId: string) => Promise<PlacementAuthority | null>,
 ): Promise<ImportBundleResult> {
   const { bundle, conflicts } = await preflightBundleImport(bytes, scope, authorize);
   if (conflicts.length > 0) {
@@ -788,5 +788,5 @@ export async function handleImportBundle(
       .join("; ");
     throw conflict("bundle_conflict", `Bundle conflicts with existing packages: ${summary}`);
   }
-  return importBundle(bundle, scope, userId, mayShareRoot);
+  return importBundle(bundle, scope, userId, placeRootAs);
 }

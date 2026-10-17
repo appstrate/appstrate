@@ -20,7 +20,7 @@ import {
 import {
   seedEndUser,
   seedPackage,
-  seedPlacedPackage,
+  seedSpacePackage,
   seedSchedule,
   seedSpace,
 } from "../../helpers/seed.ts";
@@ -190,7 +190,7 @@ describe("connection shares", () => {
   });
 
   it("a target blocking user connections takes a sharer configuring it there", async () => {
-    await seedPlacedPackage(other, INTEGRATION, { blockUserConnections: true });
+    await seedSpacePackage(other, INTEGRATION, { blockUserConnections: true });
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
     await expect(
       shareConnection({

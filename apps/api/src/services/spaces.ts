@@ -24,7 +24,7 @@ import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-
 import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
-import { isPlacedElsewhere, reconcilePlacementsAfterRehome } from "./package-placement.ts";
+import { isPlacedElsewhere } from "./package-placement.ts";
 import { countInProgressRuns } from "./state/runs.ts";
 import {
   nothingUnshared,
@@ -725,17 +725,14 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
  *
  * A homed package's write authority is this space (§6.9), so it cannot follow
  * the space out and `deleteSpace` refuses while one exists. The question is
- * PLACED ELSEWHERE, by the ONE predicate that answers it everywhere else
- * ({@link placementReadFilter}, `services/package-placement.ts`). The home is
- * the placement that is leaving, so it is excluded rather than consulted:
+ * PLACED ELSEWHERE ({@link isPlacedElsewhere}, `services/package-placement.ts`).
+ * The home is the placement that is leaving, so it is excluded rather than
+ * consulted:
  *
- *   - yes → re-homed to the organization's DEFAULT space, AND given the offer
- *     that keeps each of the other spaces placed
- *     ({@link reconcilePlacementsAfterRehome}). The default space is where a
- *     package that belongs to no team lives, and it needs no offer of its own
- *     because it HOSTS the package from here on. The offer to the others is not
- *     a courtesy: a row without one is a placement nothing places, and the space
- *     would lose the package from every page while its schedules failed.
+ *   - yes → re-homed to the organization's DEFAULT space, where a package that
+ *     belongs to no team lives. Every other space keeps the `space_packages`
+ *     row that places it there, so nothing else is written: each keeps the
+ *     package on every page, and its schedules keep firing.
  *
  *     What this HANDS OVER is deliberate: the package — draft included —
  *     becomes readable and writable from the default space, under its own
@@ -746,12 +743,12 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
  *     It was placed in that one space and nowhere else, so it was private to a
  *     person who is gone.
  *
- *     An OFFER counts as a placement here, like everywhere else — asking for a
- *     `space_packages` row instead would destroy a published package its author
- *     had offered to a colleague who had not switched it on yet. "Taken up" is
- *     nobody's axis: Drive splits a departing user's files on SHARED versus not,
- *     Figma keeps a shared draft readable by everyone it was shared with, and
- *     n8n makes transfer-or-delete an operator's choice.
+ *     A row switched off counts as a placement here, like everywhere else —
+ *     asking for `enabled` instead would destroy a published package its author
+ *     had shared with a colleague who had not switched it on yet. "Switched on"
+ *     is nobody's axis: Drive splits a departing user's files on SHARED versus
+ *     not, Figma keeps a shared draft readable by everyone it was shared with,
+ *     and n8n makes transfer-or-delete an operator's choice.
  *
  * ONE transaction, and every refusal comes BEFORE the first package mutation.
  * Both are load-bearing: `deleteSpace` can still refuse (a run went in flight),
@@ -832,9 +829,7 @@ export async function emptyAndDeletePersonalSpace(
     let deletedPackages = 0;
     for (const pkg of homed) {
       // PLACED elsewhere — the ONE placement rule, asked of every space but the
-      // one being emptied, by the module that owns it. An offer places the
-      // package exactly as a row does, so "present elsewhere" is never read
-      // twice.
+      // one being emptied, by the module that owns it.
       if (await isPlacedElsewhere(tx, { packageId: pkg.id, exceptSpaceId: spaceId })) {
         if (!defaultSpace) {
           throw conflict(
@@ -852,26 +847,6 @@ export async function emptyAndDeletePersonalSpace(
           .update(packages)
           .set({ homeSpaceId: defaultSpace.id })
           .where(eq(packages.id, pkg.id));
-        // Re-homing MOVES one of the two placements, and every space that
-        // still holds a `space_packages` row needs the other or it is left
-        // with a placement nothing places. The same reconciliation the home
-        // MOVE runs, called for the same reason — see
-        // `reconcilePlacementsAfterRehome`. It also drops the destination's own
-        // offer if one existed: the default space now HOMES the package, and a
-        // package is not offered to the space it lives in. Every space still
-        // running the package keeps it on every page, and its schedules keep
-        // firing.
-        //
-        // A package placed elsewhere by an OFFER alone reaches this branch too,
-        // and for it the reconciliation is a no-op on the insert half: the offer
-        // that placed it is untouched by the move and keeps placing it. Only its
-        // delete half can fire, and only if the departing author had offered the
-        // package to the default space — which now HOMES it.
-        await reconcilePlacementsAfterRehome(tx, {
-          packageId: pkg.id,
-          orgId,
-          newHomeSpaceId: defaultSpace.id,
-        });
         rehomedPackages++;
         continue;
       }

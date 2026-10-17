@@ -32,7 +32,7 @@ import {
   reconstructPackageZip,
 } from "../../../src/services/bundle-import.ts";
 import { db } from "@appstrate/db/client";
-import { packages, packageShares, packageVersions, spacePackages } from "@appstrate/db/schema";
+import { packages, packageVersions, spacePackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -43,7 +43,7 @@ import { describeRequiresPostgres } from "../../helpers/tier.ts";
 /** Service-level tests exercise the import itself; route guards are tested at the HTTP layer. */
 const noAuthorize = async () => {};
 /** No sharing authority: these cases are about the import, not about placing a root elsewhere. */
-const noShare = async () => false;
+const noShare = async () => null;
 
 // `importBundle` reads the platform run limits; the HTTP harness initializes them at boot.
 initRunLimits();
@@ -583,13 +583,13 @@ describe("importBundle — a root below its highest published version", () => {
  *
  * The import creates the packages it does not know; a root that already exists
  * is a package with a home, and putting it into a second space is the same act
- * as `POST /api/spaces/{id}/packages` — it needs the offer. So the import takes
- * the same door: the caller who may make that offer gets the root installed
- * WITH its `package_shares` row, and the caller who may not gets
- * `root_active: false` instead of a silently half-finished import.
+ * as `POST /api/spaces/{id}/packages` — it needs a placement. So the import
+ * takes the same door: the caller who may place it gets the root placed and
+ * switched on, and the caller who may not gets `root_active: false` instead of
+ * a silently half-finished import.
  *
  * The authority itself is a question about the HTTP caller, so it arrives as a
- * required callback — both doors pass `holdsPackageShareAuthority` built from
+ * required callback — both doors pass `heldPlacementAuthority` built from
  * their own request (`POST /api/packages/import-bundle` and the
  * `import_package_file` MCP tool), so one act keeps one rule and no caller can
  * reach the placement without an answer.
@@ -642,28 +642,19 @@ describe("importBundle — a root homed in another space", () => {
     expect(homed?.homeSpaceId).toBe(ctx.defaultSpaceId);
   });
 
-  it("installs it with the offer when the caller may make one", async () => {
+  it("places it switched on, naming the placer, when the caller may place it", async () => {
     const result = await importBundle(
       rootBundle(),
       { orgId: ctx.orgId, spaceId: otherSpaceId },
       ctx.user.id,
-      async () => true,
+      async () => ({ sharedBy: ctx.user.id, authorizeHome: () => true }),
     );
     expect(result.root_active).toBe(true);
-    // The installation and the placement that authorizes it, both present —
-    // an installation with no placement is exactly the state `0016` repairs.
-    expect(
-      await db
-        .select()
-        .from(spacePackages)
-        .where(and(eq(spacePackages.packageId, ROOT), eq(spacePackages.spaceId, otherSpaceId))),
-    ).toHaveLength(1);
-    expect(
-      await db
-        .select()
-        .from(packageShares)
-        .where(and(eq(packageShares.packageId, ROOT), eq(packageShares.spaceId, otherSpaceId))),
-    ).toHaveLength(1);
+    const placed = await db
+      .select({ enabled: spacePackages.enabled, sharedBy: spacePackages.sharedBy })
+      .from(spacePackages)
+      .where(and(eq(spacePackages.packageId, ROOT), eq(spacePackages.spaceId, otherSpaceId)));
+    expect(placed).toEqual([{ enabled: true, sharedBy: ctx.user.id }]);
   });
 
   it("reports `root_active: false` and places nothing when the caller may not", async () => {
@@ -673,7 +664,7 @@ describe("importBundle — a root homed in another space", () => {
       rootBundle(),
       { orgId: ctx.orgId, spaceId: otherSpaceId },
       ctx.user.id,
-      async () => false,
+      async () => null,
     );
     expect(result.root_active).toBe(false);
     expect(
@@ -681,12 +672,6 @@ describe("importBundle — a root homed in another space", () => {
         .select()
         .from(spacePackages)
         .where(and(eq(spacePackages.packageId, ROOT), eq(spacePackages.spaceId, otherSpaceId))),
-    ).toHaveLength(0);
-    expect(
-      await db
-        .select()
-        .from(packageShares)
-        .where(and(eq(packageShares.packageId, ROOT), eq(packageShares.spaceId, otherSpaceId))),
     ).toHaveLength(0);
   });
 });

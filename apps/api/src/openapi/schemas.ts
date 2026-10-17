@@ -3049,13 +3049,13 @@ export const schemas = {
         type: "string",
         enum: ["home", "shared", "system"],
         description:
-          "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (it was offered to this space), `system` (a built-in package, readable in every space).",
+          "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `system` (a built-in package, readable in every space).",
       },
       state: {
         type: "string",
         enum: ["active", "inactive", "none"],
         description:
-          "Whether the space RUNS it. `active`: yes. `inactive`: it was switched off here, and its per-space model, proxy and input settings are kept. `none`: nothing has switched it on yet — a pending offer is exactly this. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
+          "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
       },
       chat_enforced: {
         type: "boolean",
@@ -3065,7 +3065,7 @@ export const schemas = {
       shared_by: {
         type: ["object", "null"],
         description:
-          'Who offered it — on `via: "shared"` placements only. `null` there when the offer came from a home move rather than from a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.',
+          'Who placed it here — on `via: "shared"` placements only. `null` there when the row was left by a home move rather than placed by a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.',
         required: ["user_id", "name"],
         properties: {
           user_id: { type: "string" },
@@ -3118,7 +3118,7 @@ export const schemas = {
   PackageShare: {
     type: "object",
     description:
-      "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it.",
+      "One entry of a package's AUDIENCE: a space the package is placed in outside its home — its `space_packages` row there. The placement grants READ; whether the space RUNS the package is the row's `enabled`.",
     required: ["object", "target", "shared_by", "enabled", "createdAt"],
     properties: {
       object: { type: "string", enum: ["package_share"] },
@@ -3126,7 +3126,7 @@ export const schemas = {
       shared_by: {
         type: ["object", "null"],
         description:
-          "Who shared it. `null` once that account is gone, and `null` once they have left this organization.",
+          "Who placed it there. `null` once that account is gone, once they have left this organization, and on a row a home move left behind.",
         required: ["user_id", "name"],
         properties: {
           user_id: { type: "string" },
@@ -3136,9 +3136,13 @@ export const schemas = {
       enabled: {
         type: "boolean",
         description:
-          "Whether the package is switched on in the target space (`space_packages.enabled`); false when the target holds no row for it.",
+          "Whether the package is switched on in the target space (`space_packages.enabled`). A placement lands on when the sharer may activate in the target, and off otherwise, for the target's members to switch on.",
       },
-      createdAt: { type: "string", format: "date-time" },
+      createdAt: {
+        type: "string",
+        format: "date-time",
+        description: "When the placement row was created (`space_packages.installed_at`).",
+      },
     },
   },
   PackageHome: {
@@ -3162,7 +3166,7 @@ export const schemas = {
         type: "array",
         items: { type: "string" },
         description:
-          "Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space it is offered to; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404.",
+          "Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space holding a `space_packages` row for it; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404.",
       },
     },
   },

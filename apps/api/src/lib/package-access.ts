@@ -3,14 +3,7 @@
 import type { Context } from "hono";
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  packages,
-  packageShares,
-  spaceMembers,
-  spacePackages,
-  spaceRoles,
-  spaces,
-} from "@appstrate/db/schema";
+import { packages, spaceMembers, spacePackages, spaceRoles, spaces } from "@appstrate/db/schema";
 import { assertDependencyOverrideKeysDeclared } from "./launch-schemas.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
@@ -21,7 +14,7 @@ import {
   VERSION_SELECTOR_PUBLISHED,
 } from "../services/agent-version-resolver.ts";
 import { getLatestVersionId } from "../services/package-versions.ts";
-import { isPackageActiveHere } from "../services/space-packages.ts";
+import { isPackageActiveHere, type PlacementAuthority } from "../services/space-packages.ts";
 import { activeHereSql } from "../services/package-activation.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
 import {
@@ -56,7 +49,7 @@ import {
 } from "./space-role.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
-import { placementRowJoin, placementShareJoin } from "../services/package-placement.ts";
+import { placementRowJoin } from "../services/package-placement.ts";
 
 /**
  * The read guard of the three agent routes `agents:run` also opens: the list,
@@ -89,11 +82,6 @@ export function agentReadIsSummary(c: Context<AppEnv>): boolean {
  * is. Reachable wherever a custom space role grants `<type>:write` without the
  * activation string — both presets that write also activate.
  *
- * A bare `space_packages` row is not enough either, for the reason the
- * activation rule conjoins placement: an ORPHAN row reads as active nowhere,
- * so leaning on it would let the leftover of a revoked offer stand in for the
- * offer itself.
- *
  * The deployment's own default is an activation nobody performed and waives the
  * grant on its own: a system package, and an integration `SYSTEM_INTEGRATIONS`
  * names, are already on with no row at all.
@@ -107,18 +95,16 @@ export async function assertExistingPackageActivationAccess(
   const [active] = await db
     .select({ id: packages.id })
     .from(packages)
-    // Both of `activeHereSql`'s LEFT JOINs, and they are the question rather
-    // than decoration: without the first the row half is always NULL and every
-    // package falls back to the deployment default, without the second every
-    // offered package reads as unplaced and its row stops counting.
+    // `activeHereSql`'s LEFT JOIN, and it is the question rather than
+    // decoration: without it the row half is always NULL and every package
+    // falls back to the deployment default.
     .leftJoin(spacePackages, placementRowJoin(packages.id, target))
-    .leftJoin(packageShares, placementShareJoin(packages.id, target))
     .where(
       and(
         eq(packages.id, packageId),
         orgOrSystemFilter(c.get("orgId")),
         notEphemeralFilter(),
-        activeHereSql(target),
+        activeHereSql(),
       ),
     )
     .limit(1);
@@ -255,8 +241,7 @@ async function resolvePackageAccessSpaces(
  * Does a package's PLACEMENT grant read from these spaces? — the IN-MEMORY form
  * of the rule `placementReadFilter` states in SQL
  * (`services/package-placement.ts`, which carries the reasoning; RBAC spec
- * §6.9, §6.10). Homed there, or shared there. A `space_packages` row is not a
- * third placement.
+ * §6.9, §6.10). Homed there, or holding a `space_packages` row there.
  *
  * Its readers differ only in the set they compare against — the org-wide
  * catalog check below, the current-space gate ({@link isPackageReadableInSpace}),
@@ -264,17 +249,16 @@ async function resolvePackageAccessSpaces(
  * other half of the rule and stays with each reader.
  *
  * READ only. RUNNING asks this AND one more ({@link agentExecutionBlock}:
- * placed here *and* ACTIVE here), which is why a share is not an activation —
- * an agent runs with the recipient's credentials, so the recipient switches it
- * on themselves.
+ * placed here *and* ACTIVE here) — a row placed with `enabled = false` is
+ * readable and runs nowhere until the space switches it on.
  */
 export function placementGrantsRead(
   pkg: { homeSpaceId: string | null },
-  sharedIn: Iterable<string>,
+  placedIn: Iterable<string>,
   readable: ReadonlySet<string>,
 ): boolean {
   if (pkg.homeSpaceId !== null && readable.has(pkg.homeSpaceId)) return true;
-  for (const spaceId of sharedIn) if (readable.has(spaceId)) return true;
+  for (const spaceId of placedIn) if (readable.has(spaceId)) return true;
   return false;
 }
 
@@ -293,16 +277,16 @@ export async function isPackageReadableInSpace(
     .select({
       source: packages.source,
       homeSpaceId: packages.homeSpaceId,
-      sharedHere: packageShares.packageId,
+      rowHere: spacePackages.packageId,
     })
     .from(packages)
-    .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
     .where(and(eq(packages.id, packageId), notEphemeralFilter()))
     .limit(1);
   if (!row) return false;
   if (row.source === "system") return true;
   const here = new Set([spaceId]);
-  return placementGrantsRead(row, row.sharedHere ? here : [], here);
+  return placementGrantsRead(row, row.rowHere ? here : [], here);
 }
 
 /**
@@ -319,7 +303,7 @@ export type AgentExecutionBlock = "not_placed" | "not_active";
  * Two halves, and both must answer yes — they are different questions and
  * neither implies the other:
  *
- *   - PLACED here: homed here, offered here, or shipped with the deployment
+ *   - PLACED here: homed here, holding a row here, or shipped with the deployment
  *     ({@link isPackageReadableInSpace} — the same rule the reads use);
  *   - ACTIVE here: the placement row's `enabled`, or the deployment's default
  *     where there is no row (`isPackageActiveHere` / `activeHereSql`).
@@ -328,9 +312,7 @@ export type AgentExecutionBlock = "not_placed" | "not_active";
  * the HTTP door (`requireActiveAgent`, `middleware/guards.ts`, mounted by
  * `POST …/run`, `POST …/schedules` and `GET …/bundle`), the remote-run resolver
  * (`services/registry-run-resolver.ts`, behind `POST /api/runs/remote`) and the
- * scheduler tick, which fires on its own with no request to refuse. The
- * activation half ALONE would let an ORPHAN placement execute from a cron in a
- * space every HTTP door refuses to serve it to.
+ * scheduler tick, which fires on its own with no request to refuse.
  *
  * A VERDICT rather than a throw: each caller renders the refusal on its own
  * channel — a 404 with a code at the HTTP door, the resolver's own 404 pair, a
@@ -371,12 +353,12 @@ export async function assertCatalogPackageAccess(
   source?: ForeignOrgStanding,
 ) {
   const sourceOrgId = source?.orgId ?? c.get("orgId");
-  const [pkg, accessible, sharedIn] = await Promise.all([
+  const [pkg, accessible, placedIn] = await Promise.all([
     loadPackageRow(packageId, sourceOrgId),
     packageAccessSpaces(c, source),
-    loadPackageShares(packageId, sourceOrgId),
+    loadPlacementSpaces(packageId, sourceOrgId),
   ]);
-  assertPackageIsReachable(packageId, pkg, sharedIn, accessible);
+  assertPackageIsReachable(packageId, pkg, placedIn, accessible);
   return pkg;
 }
 
@@ -415,21 +397,21 @@ async function loadPackageRow(packageId: string, orgId: string) {
 }
 
 /**
- * Every space of `orgId` the package is SHARED into — the one placement
- * {@link placementGrantsRead} needs beyond the home, which is a column on the
- * row itself.
+ * Every space of `orgId` holding a `space_packages` row for the package — the
+ * placements {@link placementGrantsRead} needs beyond the home, which is a
+ * column on the package row itself.
  *
  * Split out from the row read because the write path never needs it: authority
- * is the home alone, so the shares are loaded only when a refusal has to decide
- * between 403 and 404.
+ * is the home alone, so the placements are loaded only when a refusal has to
+ * decide between 403 and 404.
  */
-async function loadPackageShares(packageId: string, orgId: string): Promise<string[]> {
-  const shared = await db
-    .select({ spaceId: packageShares.spaceId })
-    .from(packageShares)
-    .innerJoin(spaces, eq(spaces.id, packageShares.spaceId))
-    .where(and(eq(packageShares.packageId, packageId), eq(spaces.orgId, orgId)));
-  return shared.map((row) => row.spaceId);
+async function loadPlacementSpaces(packageId: string, orgId: string): Promise<string[]> {
+  const placed = await db
+    .select({ spaceId: spacePackages.spaceId })
+    .from(spacePackages)
+    .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
+    .where(and(eq(spacePackages.packageId, packageId), eq(spaces.orgId, orgId)));
+  return placed.map((row) => row.spaceId);
 }
 
 /**
@@ -439,7 +421,7 @@ async function loadPackageShares(packageId: string, orgId: string): Promise<stri
  * PLACEMENT is the whole rule, with no exception beside it. A package of the
  * organization is always homed in one of its spaces
  * (`packages_org_package_has_home`), so reaching it means reaching that space
- * or one the package was offered to; an owner or admin gets there because they
+ * or one the package is placed in; an owner or admin gets there because they
  * reach every team space, not through an authority of their own. That is what
  * keeps a draft sitting switched off in a member's PERSONAL space out of an
  * admin's reach, which is the one thing §3.6 refuses.
@@ -447,10 +429,10 @@ async function loadPackageShares(packageId: string, orgId: string): Promise<stri
 function assertPackageIsReachable(
   packageId: string,
   pkg: PackageAccessRow,
-  sharedIn: readonly string[],
+  placedIn: readonly string[],
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): void {
-  if (packageReadSpaces(pkg, sharedIn, accessible).length === 0) {
+  if (packageReadSpaces(pkg, placedIn, accessible).length === 0) {
     throw notFound(`Package '${packageId}' not found`);
   }
 }
@@ -463,14 +445,14 @@ function assertPackageIsReachable(
  */
 function packageReadSpaces(
   pkg: PackageAccessRow,
-  sharedIn: readonly string[],
+  placedIn: readonly string[],
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): PackageAccessSpace[] {
   const opens = packageSightPermissions(pkg.type);
   return accessible.filter(
     (space) =>
       opens.some((permission) => space.permissions.has(permission)) &&
-      (isSystemPackageRow(pkg) || placementGrantsRead(pkg, sharedIn, new Set([space.id]))),
+      (isSystemPackageRow(pkg) || placementGrantsRead(pkg, placedIn, new Set([space.id]))),
   );
 }
 
@@ -480,7 +462,7 @@ function packageReadSpaces(
  *
  * That is the question the per-type detail cannot answer: it reads from the
  * current space alone, so a package homed in the caller's personal space and
- * offered nowhere is a 404 from every team space. A client holding only an id
+ * placed nowhere else is a 404 from every team space. A client holding only an id
  * — the CLI, pointed at a working folder — asks here which space to address.
  *
  * `null` exactly when {@link assertCatalogPackageAccess} would refuse, from the
@@ -494,13 +476,13 @@ export async function resolvePackageHome(
   packageId: string,
 ): Promise<PackageHome | null> {
   const orgId = c.get("orgId");
-  const [pkg, accessible, sharedIn] = await Promise.all([
+  const [pkg, accessible, placedIn] = await Promise.all([
     findPackageRow(packageId, orgId),
     packageAccessSpaces(c),
-    loadPackageShares(packageId, orgId),
+    loadPlacementSpaces(packageId, orgId),
   ]);
   if (!pkg) return null;
-  const readSpaces = packageReadSpaces(pkg, sharedIn, accessible);
+  const readSpaces = packageReadSpaces(pkg, placedIn, accessible);
   if (readSpaces.length === 0) return null;
   const rank = (id: string) => (id === pkg.homeSpaceId ? 0 : 1);
   const readSpaceIds = readSpaces
@@ -543,56 +525,45 @@ export async function assertPackageMutationAccess(
 }
 
 /**
- * The home rule asked as a QUESTION rather than as a refusal — the ONE
- * predicate behind every "may this caller write / share this package" decision
- * that must not throw. `verb` picks which permission the HOME space has to
- * carry; nothing else about the two answers differs, which is why they are one
- * function.
+ * The home rule asked as a QUESTION rather than as a refusal — `write` governs
+ * the DRAFT, the author's working copy, which executes for whoever can WRITE the
+ * package and for nobody else. Four callers each answer something of their own
+ * (a `403 draft_not_writable`, a published fallback, a projection) and none
+ * wants the assert's 404/403 split, so the rule is stated as a boolean once
+ * here rather than re-derived four times.
  *
- * `write` governs the DRAFT — the author's working copy, which executes for
- * whoever can WRITE the package and for nobody else. Four callers each answer
- * something of their own (a `403 draft_not_writable`, a published fallback, a
- * projection) and none wants the assert's 404/403 split, so the rule is stated
- * as a boolean once here rather than re-derived four times.
+ * Module-local on purpose. Every caller outside this file reaches it through
+ * one of the three wordings below — {@link assertDraftSelectorAllowed},
+ * {@link assertDependencyDraftOverridesAllowed},
+ * {@link defaultDefinitionSelector} — so a route cannot invent a fourth way of
+ * spelling the same refusal.
  *
- * `share` is {@link assertPackageShareAccess}'s, for the one caller that has to
- * CHOOSE rather than refuse: a bundle import whose root lives in another space
- * activates it with the offer when the caller may make one, and reports
- * `root_active: false` when they may not.
- *
- * `false`, never a throw, for every refusal either assert would spell out.
+ * `false`, never a throw, for every refusal the assert would spell out.
  */
-async function holdsPackageAuthority(
-  c: Context<AppEnv>,
-  packageId: string,
-  verb: "write" | "share",
-): Promise<boolean> {
+async function holdsPackageWriteAuthority(c: Context<AppEnv>, packageId: string): Promise<boolean> {
   const orgId = c.get("orgId");
   const pkg = await findPackageRow(packageId, orgId);
   if (!pkg) return false;
   if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) return false;
   const accessible = await packageAccessSpaces(c);
-  return holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, verb));
+  return holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, "write"));
 }
 
 /**
- * The `write` half, module-local on purpose. Every caller outside this file
- * reaches it through one of the three wordings below —
- * {@link assertDraftSelectorAllowed},
- * {@link assertDependencyDraftOverridesAllowed},
- * {@link defaultDefinitionSelector} — so a route cannot invent a fourth way of
- * spelling the same refusal.
+ * {@link assertPackageShareAccess} asked as a QUESTION, for the one caller that
+ * has to CHOOSE rather than refuse: a bundle import whose root lives in another
+ * space places it here when the caller may ({@link callerPlacementAuthority}),
+ * and reports `root_active: false` when they may not (`null`).
  */
-async function holdsPackageWriteAuthority(c: Context<AppEnv>, packageId: string): Promise<boolean> {
-  return holdsPackageAuthority(c, packageId, "write");
-}
-
-/** The `share` half, for the bundle import that chooses instead of refusing. */
-export async function holdsPackageShareAuthority(
+export async function heldPlacementAuthority(
   c: Context<AppEnv>,
   packageId: string,
-): Promise<boolean> {
-  return holdsPackageAuthority(c, packageId, "share");
+): Promise<PlacementAuthority | null> {
+  const orgId = c.get("orgId");
+  const pkg = await findPackageRow(packageId, orgId);
+  if (!pkg || isSystemPackageRow(pkg) || pkg.orgId !== orgId) return null;
+  const authority = await callerPlacementAuthority(c, pkg.type);
+  return authority.authorizeHome(pkg.homeSpaceId) ? authority : null;
 }
 
 /**
@@ -720,6 +691,24 @@ export async function assertPackageShareAccess(
   return assertHomeAuthority(c, packageId, "share");
 }
 
+/**
+ * The caller as a placer — the row's `shared_by` and the share authority
+ * {@link assertPackageShareAccess} just checked, as a predicate the placement
+ * door re-asks against the home it has LOCKED (`placePackage`,
+ * `services/space-packages.ts`).
+ */
+export async function callerPlacementAuthority(
+  c: Context<AppEnv>,
+  type: PackageType,
+): Promise<PlacementAuthority> {
+  const accessible = await packageAccessSpaces(c);
+  const permission = packagePermission(type, "share");
+  return {
+    sharedBy: c.get("user").id,
+    authorizeHome: (homeSpaceId) => holdsHomeAuthority({ homeSpaceId }, accessible, permission),
+  };
+}
+
 /** The home rule itself, for each of the three verbs that ask it. */
 async function assertHomeAuthority(
   c: Context<AppEnv>,
@@ -749,7 +738,7 @@ async function assertHomeAuthority(
   // question, answered by the one predicate that answers it — an unreachable
   // package stays a 404 rather than becoming an existence oracle. Only this
   // path pays for the placements.
-  assertPackageIsReachable(packageId, pkg, await loadPackageShares(packageId, orgId), accessible);
+  assertPackageIsReachable(packageId, pkg, await loadPlacementSpaces(packageId, orgId), accessible);
   reportPermissionDenial(c, permission);
   const verb = action === "share" ? "Sharing" : "Modifying";
   throw forbidden(`${verb} '${packageId}' requires '${permission}' in its home space.`);
@@ -865,9 +854,9 @@ function isSystemPackageRow(pkg: { source: string }): boolean {
  * accessible space and answers `false`, which is the safe half.
  *
  * Exported because the home can MOVE between the moment a route authorizes and
- * the moment it writes: `POST …/shares` re-asks it against the home it has
- * LOCKED, inside the transaction that writes the offer
- * (`services/package-shares.ts`). It takes the home id rather than a Context so
+ * the moment it writes: the placement door re-asks it against the home it has
+ * LOCKED, inside the transaction that writes the row (`placePackage`,
+ * `services/space-packages.ts`). It takes the home id rather than a Context so
  * a caller holding a locked row can ask about THAT row.
  */
 export function holdsHomeAuthority(

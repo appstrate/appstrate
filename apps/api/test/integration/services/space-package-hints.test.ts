@@ -138,8 +138,9 @@ describe("listActivePackageHints — bounded in SQL", () => {
 /**
  * The caller-context hints and the per-type index page, over one fixture that
  * holds every shape a space can be in: a system package with no row, the same
- * with a row saying `false`, a local package switched on, one switched off, an
- * offer nobody took up, and an ORPHAN row.
+ * with a row saying `false`, a local package switched on, one switched off, one
+ * placed here from another home and never switched on, the same switched on,
+ * and one placed only in another space.
  *
  * Both listings are compared against the SAME written-out set, rather than
  * against each other: "they agree" is worth nothing when they agree on the
@@ -173,7 +174,7 @@ describe("the hints and the type index render one set", () => {
     return ((await res.json()) as { data: { id: string }[] }).data.map((row) => row.id);
   }
 
-  it("agrees cell for cell — system, local, offered, orphaned", async () => {
+  it("agrees cell for cell — system, local, placed from elsewhere", async () => {
     const home = ctx.defaultSpaceId;
     const elsewhere = (await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" })).id;
 
@@ -188,14 +189,17 @@ describe("the hints and the type index render one set", () => {
     // 4. A local agent homed here and switched OFF.
     await seedPackage({ id: "@twoviews/local-off", orgId: ctx.orgId, homeSpaceId: home });
     await seedSpacePackage(home, "@twoviews/local-off", { enabled: false });
-    // 5. OFFERED here and never taken up — placed, not active.
+    // 5. Placed here from another home and never switched on — placed, not active.
     await seedPackage({ id: "@twoviews/offered", orgId: ctx.orgId, homeSpaceId: elsewhere });
     await seedPackageShare(home, "@twoviews/offered");
-    // 6. An ORPHAN row: `enabled`, with neither a home here nor an offer.
-    await seedPackage({ id: "@twoviews/orphan", orgId: ctx.orgId, homeSpaceId: elsewhere });
-    await seedSpacePackage(home, "@twoviews/orphan");
+    // 6. Placed here from another home and switched ON.
+    await seedPackage({ id: "@twoviews/placed-on", orgId: ctx.orgId, homeSpaceId: elsewhere });
+    await seedSpacePackage(home, "@twoviews/placed-on");
+    // 7. Placed and switched on in ANOTHER space only — nothing here.
+    await seedPackage({ id: "@twoviews/elsewhere", orgId: ctx.orgId, homeSpaceId: elsewhere });
+    await seedSpacePackage(elsewhere, "@twoviews/elsewhere");
 
-    const expected = ["@asys/system-agent", "@twoviews/local-on"];
+    const expected = ["@asys/system-agent", "@twoviews/local-on", "@twoviews/placed-on"];
 
     const hinted = (await listRunnableAgents(scope, { limit: 50 })).agents.map((a) => a.packageId);
     const indexed = await indexIds("/api/packages/agents");

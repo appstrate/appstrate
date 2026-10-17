@@ -15,14 +15,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  packageShares,
-  spacePackages,
-  packages,
-  runs,
-  uploads,
-  chatSessions,
-} from "@appstrate/db/schema";
+import { spacePackages, packages, runs, uploads, chatSessions } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import type { Actor } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
@@ -604,9 +597,9 @@ describe("mcp file-backed package workflow", () => {
 
   it("places a root homed elsewhere by the same rule the REST import uses", async () => {
     // R7 says a re-import places its root the way `POST /api/spaces/{id}/packages`
-    // does: the offer is written with the installation when the caller may make
-    // one. One act, one rule — this tool asks the same `holdsPackageShareAuthority`
-    // predicate the REST import route asks, off its own request.
+    // does: through the placement door when the caller may place it. One act,
+    // one rule — this tool asks the same `heldPlacementAuthority` the REST
+    // import route asks, off its own request.
     //
     // The fixture homes the root in ANOTHER team space of the organization and
     // places it nowhere else, which is the reachable half of that rule: a
@@ -643,19 +636,19 @@ describe("mcp file-backed package workflow", () => {
     expect(result.isError, JSON.stringify(envelope)).toBe(false);
     expect(result.data).toMatchObject({ root_package_id: packageId, root_active: true });
 
-    // The offer AND the installation, in the same transaction — asserting only
-    // the flag would pass on an install that placed the package with no
-    // audience row behind it.
-    const shares = await db
-      .select({ spaceId: packageShares.spaceId })
-      .from(packageShares)
-      .where(eq(packageShares.packageId, packageId));
-    expect(shares.map((row) => row.spaceId)).toEqual([ctx.defaultSpaceId]);
+    // The placement, switched on and naming its placer — asserting only the
+    // flag would pass on an install that wrote no row.
     const installs = await db
-      .select({ spaceId: spacePackages.spaceId })
+      .select({
+        spaceId: spacePackages.spaceId,
+        enabled: spacePackages.enabled,
+        sharedBy: spacePackages.sharedBy,
+      })
       .from(spacePackages)
       .where(eq(spacePackages.packageId, packageId));
-    expect(installs.map((row) => row.spaceId)).toEqual([ctx.defaultSpaceId]);
+    expect(installs).toEqual([
+      { spaceId: ctx.defaultSpaceId, enabled: true, sharedBy: ctx.user.id },
+    ]);
   });
 
   function packageArchive(includeEntryPoint: boolean, source = "// server\n"): Uint8Array {

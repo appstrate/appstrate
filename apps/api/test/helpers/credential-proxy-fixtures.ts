@@ -7,7 +7,7 @@ import { spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { db } from "./db.ts";
 import type { TestContext } from "./auth.ts";
-import { seedPackage, seedPackageShare, seedPublishedVersion } from "./seed.ts";
+import { seedPackage, seedPublishedVersion } from "./seed.ts";
 
 /**
  * Seed a local integration, publish its manifest as `latest` (the version the proxy reads), and
@@ -26,8 +26,9 @@ export async function seedProxyIntegration(
     draftManifest: manifest,
   });
   await seedPublishedVersion(manifest.name, manifest.version);
-  await seedPackageShare(ctx.defaultSpaceId, manifest.name);
-  await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: manifest.name });
+  await db
+    .insert(spacePackages)
+    .values({ enabled: true, spaceId: ctx.defaultSpaceId, packageId: manifest.name });
 }
 
 /** Add a connection owned by the context user on `authKey`, labelled `accountId`; returns its id. */

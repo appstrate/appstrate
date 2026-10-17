@@ -66,6 +66,7 @@ import { validateDomainList } from "../services/redirect-validation.ts";
 import {
   assertCatalogPackageAccess,
   assertPackageShareAccess,
+  callerPlacementAuthority,
   isPackageReadableInSpace,
 } from "../lib/package-access.ts";
 import {
@@ -223,8 +224,8 @@ export const activatePackageSchema = z
 // write the package — not frozen on the row.
 //
 // No `enabled` either: activation is its own act, with its own pair of doors
-// (`POST` / `DELETE` on this collection), so the placement rule and the offer
-// that may have to be created with it are stated once instead of twice. The
+// (`POST` / `DELETE` on this collection), so the placement rule and the
+// placement that may have to be created with it are stated once instead of twice. The
 // schema is `.strict()`, so a body still sending either field is a 400 rather
 // than a silent no-op.
 export const updatePackageSchema = z
@@ -323,10 +324,10 @@ async function coarseSpacePackageGate(
  * (RBAC spec §3.6): in the caller's OWN personal space the `activate` /
  * `deactivate` grants are not required — ownership is the authorization. A
  * `guest` holds only `operator` there, which carries none of them, so requiring
- * them would mean a recipient could never take up a package offered to them.
- * Both gates are skipped together; the CATALOG read is not, so an unreachable
- * package stays a 404 in their own space too, and the offer is re-checked under
- * a row lock inside `activatePackage`. `configure` keeps its grant even there:
+ * them would mean a recipient could never switch on a package placed there for
+ * them. Both gates are skipped together; the CATALOG read is not, so an
+ * unreachable package stays a 404 in their own space too, and the placement is
+ * re-checked under a row lock inside `activatePackage`. `configure` keeps its grant even there:
  * choosing a model spends the organization's LLM budget.
  */
 async function gateSpacePackageWrite(
@@ -797,11 +798,11 @@ export function createSpacesRouter() {
   // every setting the space had chosen. 201 when this call put the package on,
   // 200 when it already was — which covers a system integration, on with no row.
   //
-  // When the package is neither HOMED nor SHARED here, this route can CREATE
-  // the share — but only for a caller holding `<type>:share` in its home
-  // (`assertPackageShareAccess`: 404 unreachable, 403 reachable but not theirs
-  // to hand out). Activating is therefore not a way around `share`. An API key
-  // never carries it, so a key activates the already-placed and nothing else.
+  // When the package is not placed here, this route can PLACE it — but only for
+  // a caller holding `<type>:share` in its home (`assertPackageShareAccess`:
+  // 404 unreachable, 403 reachable but not theirs to hand out). Activating is
+  // therefore not a way around `share`. An API key never carries it, so a key
+  // activates the already-placed and nothing else.
   //
   // No permission guard is mounted: the gate below reads the package's own rows
   // (`gateSpacePackageWrite`, `assertPackageShareAccess`).
@@ -819,17 +820,18 @@ export function createSpacesRouter() {
     await gateSpacePackageWrite(c, orgId, data.packageId, "activate", { ownSpace });
 
     // Read first, to decide whether the caller must ALSO prove `<type>:share`.
-    // The authoritative check is `activatePackage`'s, under the share row's
-    // lock, in the transaction that writes: a revoke racing this read makes the
-    // activation refuse rather than commit a placement nothing backs.
+    // The authoritative check is `activatePackage`'s, under the row's lock, in
+    // the transaction that writes: without `placeAs`, a withdrawal racing this
+    // read makes the activation refuse rather than recreate the row.
     const placed = await isPackageReadableInSpace(spaceId, data.packageId);
-    let activation;
-    if (placed) {
-      activation = await activatePackage(scope, data.packageId);
-    } else {
-      await assertPackageShareAccess(c, data.packageId);
-      activation = await activatePackage(scope, data.packageId, { shareBy: c.get("user").id });
-    }
+    const activation = placed
+      ? await activatePackage(scope, data.packageId)
+      : await activatePackage(scope, data.packageId, {
+          placeAs: await callerPlacementAuthority(
+            c,
+            (await assertPackageShareAccess(c, data.packageId)).type,
+          ),
+        });
     // Whether this call is what put the package ON — the activation rule read
     // before the write. A package the deployment already switches on with no
     // row at all (a system package, an integration named by
@@ -837,9 +839,8 @@ export function createSpacesRouter() {
     // after it: the row it gains records a decision that changes nothing.
     const turnedOn = !activation.wasActive;
     // The AUDIENCE changed — recorded off what the transaction actually wrote,
-    // not off the read above: a concurrent activation may have put the offer in
-    // first, and an entry naming an act that did not happen is worse than no
-    // entry.
+    // not off the read above: a concurrent call may have placed it first, and
+    // an entry naming an act that did not happen is worse than no entry.
     //
     // `targetKind: "space"` because that is what was named: this route takes a
     // space id, never a person (a personal space's id stays off the wire, and
@@ -1008,8 +1009,7 @@ export function createSpacesRouter() {
   // the sticky opt-out. That default is the activation rule's, not a reading of
   // `source`: a `system`-provenance integration this deployment does NOT offer
   // is off already and falls into the case below. 404 for anything else with no
-  // row — an offer nobody has taken up is not on, and writing the row would
-  // turn it into "switched off", a decision its recipient never made.
+  // row: there is nothing to switch off.
   router.delete(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");

@@ -3,7 +3,7 @@
 import { eq, and, or, ne, desc, sql } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages, packageShares } from "@appstrate/db/schema";
+import { spacePackages, packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { type PackageTypeConfig } from "./config.ts";
 import { buildStoredManifest } from "./manifest.ts";
@@ -21,7 +21,7 @@ import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { activeHereSql } from "../package-activation.ts";
-import { placementRowJoin, placementShareJoin } from "../package-placement.ts";
+import { placementRowJoin } from "../package-placement.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(public packageId: string) {
@@ -261,11 +261,10 @@ function integrationIndexFields(manifest: IntegrationManifest) {
 export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceId: string) {
   // The index page of a type answers ONE question — "what can I launch here?"
   // — so it renders the ACTIVE set and nothing else ({@link activeHereSql}:
-  // the placement row's verdict where the package is placed, the deployment's
-  // default where there is no row). "What is PLACED here, and in what state?"
-  // is the other question, and it has its own page: the space library
-  // (`GET /api/spaces/{id}/library`), which is where an offer is taken up and
-  // a switched-off package is switched back on.
+  // the placement row's verdict, the deployment's default where there is no
+  // row). "What is PLACED here, and in what state?" is the other question, and
+  // it has its own page: the space library (`GET /api/spaces/{id}/library`),
+  // which is where a switched-off package is switched on.
   //
   // One rule rather than two views of the same list: the caller-context hints
   // the model is given, the run gate and this page agree by construction, so
@@ -295,13 +294,12 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceI
     })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
-    .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
     .where(
       and(
         orgOrSystemFilter(orgId),
         eq(packages.type, cfg.type),
         notEphemeralFilter(),
-        activeHereSql(spaceId),
+        activeHereSql(),
       ),
     )
     .orderBy(

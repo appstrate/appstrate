@@ -15,7 +15,7 @@ import { resolveIntegrationSpawns } from "../../../src/services/integration-spaw
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   loadAccessibleConnectionById,
   persistCredentialBundle,
@@ -87,7 +87,7 @@ async function seedIntegration(ctx: TestContext, manifest: IntegrationManifest) 
     source: "local",
     draftManifest: manifest,
   });
-  await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+  await seedSpacePackage(ctx.defaultSpaceId, INTEG);
 }
 
 async function seedConnection(

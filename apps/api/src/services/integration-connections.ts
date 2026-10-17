@@ -40,7 +40,6 @@ import {
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
-  packageShares,
   integrationConnections,
   integrationConnectionShares,
   integrationOauthClients,
@@ -76,7 +75,7 @@ import {
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
 import { isActiveHere } from "./package-activation.ts";
-import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
+import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import {
   setExactlyOneDefault,
   isUniqueViolation,
@@ -646,12 +645,6 @@ interface IntegrationActivation {
  *      inactive until somebody switches it on — the deployment ships far more
  *      integration packages than it offers.
  *
- * Rule 1 is conditioned on PLACEMENT, which is why this reads the catalogue
- * row and the offer as well as `space_packages`: a row with neither a home nor
- * a share behind it is a decision about an integration this space has lost,
- * and honouring it would resolve that integration's credentials for a run the
- * placement rule refuses to show the package to.
- *
  * Deactivating a system integration that has no row materializes one with
  * `enabled = false` (see the enable/disable upsert), which then wins via rule 1
  * — that is what makes the opt-out sticky.
@@ -670,11 +663,8 @@ export async function resolveIntegrationActivations(
       packageId: spacePackages.packageId,
       enabled: spacePackages.enabled,
       blockUserConnections: spacePackages.blockUserConnections,
-      placed: sql<boolean>`${placementReadFilter(spaceId)}`,
     })
     .from(spacePackages)
-    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, spaceId))
     .where(
       and(
         eq(spacePackages.spaceId, spaceId),
@@ -685,19 +675,11 @@ export async function resolveIntegrationActivations(
   for (const id of packageIds) {
     const row = byId.get(id);
     result.set(id, {
-      // One rule, one implementation: the row wins where the package is
-      // placed, the deployment's default decides when there is none. `source`
-      // is not read for an integration — `SYSTEM_INTEGRATIONS` is the offer,
-      // not the package's provenance — so the catalogue join above serves the
-      // placement question alone.
-      active: isActiveHere({ id, type: "integration", source: null }, row, row?.placed ?? false),
-      // PLACEMENT gates the lock exactly as it gates `active` above, and it
-      // must: `isUserConnectionCreationBlocked`
-      // (`services/integration-connection-resolver.ts`) is the reader that
-      // ENFORCES this flag, and it conjoins the same rule — so an orphan row
-      // reported here as `true` would draw a padlock on the Integrations list
-      // and the detail page while `POST …/connect` let every member through.
-      blockUserConnections: (row?.placed ?? false) && row?.blockUserConnections === true,
+      // One rule, one implementation: the row wins, the deployment's default
+      // decides when there is none. `source` is not read for an integration —
+      // `SYSTEM_INTEGRATIONS` is the offer, not the package's provenance.
+      active: isActiveHere({ id, type: "integration", source: null }, row),
+      blockUserConnections: row?.blockUserConnections === true,
     });
   }
   return result;
@@ -4180,7 +4162,7 @@ export async function assertIsIntegration(scope: SpaceScope, packageId: string):
   const [row] = await db
     .select({ type: packages.type })
     .from(packages)
-    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .where(
       and(
         eq(packages.id, packageId),

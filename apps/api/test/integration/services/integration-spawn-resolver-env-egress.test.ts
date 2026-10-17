@@ -20,7 +20,7 @@ import { resolveIntegrationSpawns } from "../../../src/services/integration-spaw
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -90,7 +90,7 @@ async function resolveWith(
     source: "local",
     draftManifest: manifest,
   });
-  await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+  await seedSpacePackage(ctx.defaultSpaceId, INTEG);
   const serverManifest = mcpServerManifest({
     name: SERVER,
     version: "0.1.0",
