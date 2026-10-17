@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context } from "hono";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, spaceMembers, spacePackages, spaceRoles, spaces } from "@appstrate/db/schema";
+import {
+  packages,
+  runs,
+  spaceMembers,
+  spacePackages,
+  spaceRoles,
+  spaces,
+} from "@appstrate/db/schema";
 import { assertDependencyOverrideKeysDeclared } from "./launch-schemas.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
@@ -265,6 +272,36 @@ export async function isPackageReadableInSpace(
   if (row.source === "system") return true;
   const here = new Set([spaceId]);
   return placementGrantsRead(row, row.rowHere ? here : [], here);
+}
+
+/**
+ * True when `packageId` is an ephemeral inline shadow of this org with a run in
+ * this space that `visibility` admits — the one way a shadow, which no
+ * placement reaches, is readable. A shadow is 1:1 with its run, so its read
+ * rule is the run's: pass `runVisibilityFilter(c)` (`lib/run-visibility.ts`).
+ */
+export async function isInlineShadowRunReadable(
+  orgId: string,
+  spaceId: string,
+  packageId: string,
+  visibility: SQL | undefined,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: runs.id })
+    .from(runs)
+    .innerJoin(packages, eq(packages.id, runs.packageId))
+    .where(
+      and(
+        eq(runs.packageId, packageId),
+        eq(runs.orgId, orgId),
+        eq(runs.spaceId, spaceId),
+        eq(packages.orgId, orgId),
+        eq(packages.ephemeral, true),
+        visibility,
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
 }
 
 /**

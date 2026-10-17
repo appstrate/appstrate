@@ -64,6 +64,24 @@ export function isMarkdownFile(mime: string, name: string): boolean {
   return name.toLowerCase().endsWith(".md") && m.startsWith("text/");
 }
 
+/** The preview URL a mounted viewer shows for a file. */
+export interface PinnedPreviewUrl {
+  fileId: string;
+  url: string | null | undefined;
+}
+
+/**
+ * Keeps the first preview URL received for `fileId`: every metadata read mints a new token, and a
+ * new `src` reloads the frame, losing its page's state. The token serves the first load only.
+ */
+export function pinPreviewUrl(
+  pinned: PinnedPreviewUrl,
+  fileId: string,
+  url: string | null | undefined,
+): PinnedPreviewUrl {
+  return pinned.fileId === fileId && (pinned.url || !url) ? pinned : { fileId, url };
+}
+
 /** A Lucide file icon for a MIME type (small mapping, neutral `File` fallback). */
 export function mimeIconFor(mime: string): LucideIcon {
   const m = mime.toLowerCase();
@@ -142,6 +160,7 @@ export function mimeKind(mime: string): string {
   if (normalized.startsWith("image/")) return "image";
   if (normalized.startsWith("audio/")) return "audio";
   if (normalized.startsWith("video/")) return "video";
+  if (normalized === "text/html" || normalized === "application/xhtml+xml") return "html";
   if (normalized.startsWith("text/")) return "text";
   if (
     normalized.includes("zip") ||

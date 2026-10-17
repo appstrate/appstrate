@@ -279,9 +279,16 @@ const responseModeSchema = z
   })
   .optional();
 
-const httpUrl = z.url({ protocol: /^https?$/ });
-/** A URL-valued credential field, then nothing or a path: `{{site_url}}/wp-json/…`. */
-const URL_FIELD_TARGET = new RegExp(`^${PLACEHOLDER.source}(?:/.*)?$`);
+/**
+ * An absolute http(s) URL, `{{field}}`s allowed after the scheme. A pattern, not `z.url()`:
+ * its `format: "uri"` refuses `{` and `}` in the validator the agent's tool call meets first.
+ * A backslash is refused in the authority: WHATWG reads it as a path delimiter.
+ * Pattern flags do not reach the JSON schema, hence the spelled-out case.
+ * Pattern only, so every validator applies the same rule; the rendered URL is parsed at send time.
+ */
+const httpUrl = z.string().regex(/^[Hh][Tt][Tt][Pp][Ss]?:\/\/[^\s/?#\\]+(?:[/?#].*)?$/);
+/** A URL-valued credential field, then nothing, `/`, `?` or `#`: `{{site_url}}/wp-json/…`. */
+const URL_FIELD_TARGET = new RegExp(`^${PLACEHOLDER.source}(?:[/?#].*)?$`);
 
 /** Zod schema for `api_call` arguments — validated at runtime in execute(). */
 export const apiCallRequestSchema = z.object({
@@ -294,7 +301,7 @@ export const apiCallRequestSchema = z.object({
       error: "target must be an absolute http(s) URL or start with a {{field}} holding one",
     })
     .describe(
-      "Absolute URL of the upstream endpoint, or a {{field}} holding the base URL followed by a path. Any other {{field}} is percent-encoded as one URL component: write the URL's own `/`, `?` and `&` in the target",
+      "Absolute URL of the upstream endpoint, or a {{field}} holding the base URL followed by a path or query. Any other {{field}} is percent-encoded as one URL component: write the URL's own `/`, `?` and `&` in the target",
     ),
   headers: z
     .record(z.string(), z.string())
