@@ -171,6 +171,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The run page of an inline run no longer gets two 404s** (#2068).
+  `GET …/persistence` answered `agent_not_found` for the run's shadow agent, so
+  the memories and pinned slots an inline run wrote with `note`/`pin` were
+  unreachable. The read route now serves them to a caller who may read the
+  run in that space; every other agent route is unchanged.
 - **An `api_call` target can carry a `{{field}}` in its path or query**
   (#2063). The target's published JSON schema said `format: "uri"`, which the
   agent's tool-argument validator applies before the call leaves the agent: it
