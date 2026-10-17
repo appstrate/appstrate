@@ -9,6 +9,7 @@ import { keysetPaging } from "../lib/keyset-paging";
 import { downloadOrToast } from "../lib/blob-download";
 import { invalidateOrgDetail, invalidatePaths, invalidateRunDetails } from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
+import { fileContextHeader, type FileContext } from "../lib/file-link";
 import { usePermissions } from "./use-permissions";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 
@@ -71,15 +72,20 @@ export function useFilesPaged(filters: Pick<FileListFilters, "search" | "purpose
   });
 }
 
-/** A single file's metadata with a freshly-minted `preview_url` (short-lived signed token): never cached, refetched on each open. */
-export function useFile(id: string) {
+/**
+ * A single file's metadata with a freshly-minted `preview_url` (short-lived signed token): never
+ * cached, refetched on each open. An explicit `context` (a reader link) is asked in ITS space,
+ * which the server judges: the current space's grants do not gate it, and no store changes.
+ */
+export function useFile(id: string, context?: FileContext) {
   const scope = useOrgScope();
   const { can } = usePermissions();
+  const enabled = !!id && (context !== undefined || (can("files:read") && scope.enabled));
   return $api.useQuery(
     "get",
     "/api/files/{id}",
-    { params: { path: { id }, header: scope.header } },
-    { enabled: can("files:read") && scope.enabled && !!id, staleTime: 0, gcTime: 0 },
+    { params: { path: { id }, header: fileContextHeader(context) ?? scope.header } },
+    { enabled, staleTime: 0, gcTime: 0 },
   );
 }
 
@@ -112,19 +118,23 @@ export function useKeepFile() {
  * headers; fetch follows the `307` to a presigned URL). `downloadOrToast` keeps the inert type:
  * the content route echoes the uploader-controlled `row.mime`, which can be `text/html`.
  */
-export function useFileDownload() {
+export function useFileDownload(context?: FileContext) {
   return useCallback(
     (id: string, name: string) =>
       downloadOrToast(
-        () => client.GET("/api/files/{id}/content", { params: { path: { id } }, parseAs: "blob" }),
+        () =>
+          client.GET("/api/files/{id}/content", {
+            params: { path: { id }, header: fileContextHeader(context) },
+            parseAs: "blob",
+          }),
         name,
       ),
-    [],
+    [context],
   );
 }
 
 /** Copy a text file's content to the clipboard (the Artifact frame's "copy"). A failed read is toasted here; a refused clipboard, by `useCopyToClipboard`. */
-export function useFileTextCopy() {
+export function useFileTextCopy(context?: FileContext) {
   const { t } = useTranslation("files");
   const { copied, copy } = useCopyToClipboard();
   const copyFile = useCallback(
@@ -132,7 +142,7 @@ export function useFileTextCopy() {
       let text: string;
       try {
         const { data } = await client.GET("/api/files/{id}/content", {
-          params: { path: { id } },
+          params: { path: { id }, header: fileContextHeader(context) },
           parseAs: "text",
         });
         text = data ?? "";
@@ -142,7 +152,7 @@ export function useFileTextCopy() {
       }
       await copy(text);
     },
-    [t, copy],
+    [t, copy, context],
   );
   return { copied, copy: copyFile };
 }

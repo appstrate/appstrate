@@ -14,7 +14,15 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
-Ships as `0.13.0`, before `@appstrate/core` 16.0.0, which requires `^0.13.0`.
+### Fixed
+
+- **`urlTemplateAuthority`** ends the authority at a backslash: WHATWG reads `\` as a
+  path delimiter for http(s), so a target such as `https://a.com\@evil.com/` yields
+  `https://a.com` instead of `https://a.com\@evil.com` (#2063).
+
+## [0.13.0] — 2026-10-12
+
+Shipped before `@appstrate/core` 16.0.0, which requires `^0.13.0`.
 
 ### Added
 

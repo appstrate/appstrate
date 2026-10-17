@@ -28,7 +28,7 @@ import {
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
-import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
+import { requireActiveAgent, requireAgent, requireAgentOrInlineRun } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
@@ -494,7 +494,7 @@ export function createAgentsRouter() {
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/persistence`,
     requirePermission("persistence", "read"),
-    requireAgent(),
+    requireAgentOrInlineRun(),
     async (c) => {
       const agent = c.get("package");
       const spaceId = c.get("spaceId");

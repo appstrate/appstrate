@@ -78,7 +78,7 @@ const CALLERS = [
   {
     file: "../../hooks/use-files.ts",
     from: '"../lib/blob-download"',
-    calls: ['parseAs: "blob" }), name'],
+    calls: ['parseAs: "blob", }), name'],
     /**
      * `useFileImageSrc` builds ONE object URL of its own, for an
      * `<img src>` thumbnail — a preview, not a download, and no `<a download>`
