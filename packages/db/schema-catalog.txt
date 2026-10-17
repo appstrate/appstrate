@@ -177,6 +177,7 @@ column integration_org_defaults.id uuid not null default gen_random_uuid()
 column integration_org_defaults.integration_package_id text not null
 column integration_org_defaults.space_id text not null
 column integration_org_defaults.updated_at timestamp with time zone not null default now()
+column integration_pins.allow_additional_connections boolean not null default false
 column integration_pins.connection_ids uuid[] not null
 column integration_pins.created_at timestamp with time zone not null default now()
 column integration_pins.id uuid not null default gen_random_uuid()
@@ -754,6 +755,8 @@ constraint integration_org_defaults integration_org_defaults_connection_ids_card
 constraint integration_org_defaults integration_org_defaults_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_org_defaults integration_org_defaults_pkey PRIMARY KEY (id)
 constraint integration_org_defaults integration_org_defaults_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint integration_pins integration_pins_additions_admin_only CHECK (((user_id IS NULL) OR (NOT allow_additional_connections)))
+constraint integration_pins integration_pins_additions_need_imposed CHECK (((NOT allow_additional_connections) OR (cardinality(connection_ids) > 0)))
 constraint integration_pins integration_pins_connection_ids_cardinality CHECK (((cardinality(connection_ids) >= 0) AND (cardinality(connection_ids) <= 20)))
 constraint integration_pins integration_pins_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_pins integration_pins_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE

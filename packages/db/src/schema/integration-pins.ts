@@ -1,27 +1,58 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-(space, agent, integration, user?) connection pin — the SET of
- * connections (`connection_ids`) a run of that agent binds.
+ * Per-(space, agent, integration, user?) connection pin. Two scopes share this
+ * table, discriminated by `user_id`, and they answer different questions:
  *
- * Two scopes share this table, discriminated by `user_id`:
+ *   - `user_id IS NULL` — **admin pin**: the FLOOR every run of this agent binds,
+ *     whoever runs it. Written via admin-only endpoints. Always bound in pin
+ *     order; no launch override (run or schedule), member pin, soft org default
+ *     or fallback can narrow or replace it. `allow_additional_connections`
+ *     decides what may ADD to it: `false` (closed) — nothing, an override naming
+ *     an id outside the floor is `override_outranked`; `true` (open) — the run's
+ *     selection (launch override, else the member pin) is bound after the floor,
+ *     deduped, from the actor's accessible rows. An enforced org default on the
+ *     same (space, integration) closes it whatever the flag (the writers refuse
+ *     the pair with 409 `connection_additions_conflict`). A member pin never
+ *     survives under a closed admin pin: every admin pin write or delete where
+ *     the pin IS or WAS closed deletes the member pins of its (space, agent,
+ *     integration) in the same transaction — masked, they never come back
+ *     unasked. Only none → open, open → open and deleting an open pin keep them
+ *     (deleting an open pin drops them all under an enforced org default,
+ *     which masks them from then on, and else those strictly narrowing the floor —
+ *     only floor ids, fewer than it holds, `{}` included: they added nothing
+ *     and would otherwise bind fewer connections as written).
  *
- *   - `user_id IS NULL` — **admin force pin**. Applies to every actor
- *     running this agent. Written via admin-only endpoints. Cannot be
- *     overridden by the launch override (run or schedule), member pins, or fallback.
+ *   - `user_id IS NOT NULL` — **member pin**: the member's own SELECTION for
+ *     their runs of this agent, written via `/api/me/integration-pins/...` by the
+ *     member themselves. Ungoverned it binds as is; under an open admin pin it is
+ *     the addition to the floor. It is written only where it binds: under a
+ *     closed admin pin or an enforced org default the write is refused (409
+ *     `connection_additions_blocked`). An enforced org default follows the
+ *     closed admin pin's rule: every org default write or delete where the
+ *     default IS or WAS enforced deletes every member pin of its (space,
+ *     integration) in the same transaction (a closed admin pin left none, and
+ *     the enforced default closes an open one), so no row an enforced default
+ *     came to govern survives it. Stored as
+ *     named, floor ids included. Never open (CHECK below).
  *
- *   - `user_id IS NOT NULL` — **member preference pin**. The member's
- *     persisted "for MY runs of this agent, use MY connections X, Y" choice.
- *     Written via `/api/me/integration-pins/...` by the member themselves.
- *
- * A pin must reference connections accessible to the actor at run time.
- * For admin pins, validation lives in the pin service (admin can't pin
- * a member's personal connection — would let them coerce credentials by
- * sleight of hand). For member pins, validation also lives in the
- * service (member can only pin a connection they themselves can see).
+ * Effective set = floor ∪ selection (the resolver, `integration-connection-resolver.ts`).
+ * A pin must reference connections reachable here: an admin pin only connections
+ * SHARED into the space (an admin pinning a member's personal connection would
+ * coerce their credential onto everyone), a member pin also their own; both
+ * checked by the pin service on write and by the resolver at run time.
  */
 
-import { pgTable, text, uuid, timestamp, index, uniqueIndex, check } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  uuid,
+  boolean,
+  timestamp,
+  index,
+  uniqueIndex,
+  check,
+} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { spaces } from "./spaces.ts";
@@ -50,6 +81,8 @@ export const integrationPins = pgTable(
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     /** The bound set; `{}` pins to no connection (no row = no pin). */
     connectionIds: uuid("connection_ids").array().notNull(),
+    /** Admin pin only: whether the run's selection may add to the floor (see the table doc). */
+    allowAdditionalConnections: boolean("allow_additional_connections").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -74,6 +107,16 @@ export const integrationPins = pgTable(
     check(
       "integration_pins_connection_ids_cardinality",
       sql`cardinality(connection_ids) BETWEEN 0 AND 20`,
+    ),
+    // A member pin is a selection, never a floor: only an admin pin opens.
+    check(
+      "integration_pins_additions_admin_only",
+      sql`user_id IS NULL OR NOT allow_additional_connections`,
+    ),
+    // An empty floor imposes nothing to add to: `[]` stays a pin to no connection, closed.
+    check(
+      "integration_pins_additions_need_imposed",
+      sql`NOT allow_additional_connections OR cardinality(connection_ids) > 0`,
     ),
   ],
 );
