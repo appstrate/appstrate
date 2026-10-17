@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { TFunction } from "i18next";
-import { runErrorText, runErrorTone } from "../run-error.ts";
+import { runErrorText } from "../run-error.ts";
 
 /** Echoes the key and its values, so the test reads which sentence was chosen. */
 const t = ((key: string, values?: Record<string, unknown>) =>
@@ -61,13 +61,5 @@ describe("runErrorText", () => {
     expect(failed("400 {}", modelError("invalid_request", 400, null))).toBe("400 {}");
     expect(failed("fetch failed", modelError("unknown", null, null))).toBe("fetch failed");
     expect(failed(null)).toBe("");
-  });
-});
-
-describe("runErrorTone", () => {
-  it("mutes a cancelled run's error and reds every other", () => {
-    expect(runErrorTone({ status: "cancelled" })).toBe("text-muted-foreground");
-    expect(runErrorTone({ status: "failed" })).toBe("text-destructive");
-    expect(runErrorTone({ status: "timeout" })).toBe("text-destructive");
   });
 });
