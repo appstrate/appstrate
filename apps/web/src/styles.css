@@ -327,55 +327,47 @@
   background-color: transparent;
 }
 
-/* Previous / next arrows on a horizontal scroller, drawn by the browser
-   (`::scroll-button()`, CSS Overflow 5): a click scrolls about one scrollport
-   and the arrow disables itself at the end, with no JavaScript. Chromium only
-   (135+); elsewhere no arrow is generated and the row scrolls as before. The
-   accessible names come from the scroller's `data-scroll-prev` and
-   `data-scroll-next` attributes, so the caller translates them. The chevron
-   is a lucide icon; an SVG in `background-image` cannot read `currentColor`,
-   so each theme carries its own stroke colour (`--foreground`). */
+/* Previous / next arrows drawn by the browser (`::scroll-button()`): a click
+   scrolls about one scrollport, the arrow disables itself at the end, no
+   JavaScript. Chromium 135+ only; elsewhere the row just scrolls. Accessible
+   names come from the scroller's `data-scroll-prev` / `data-scroll-next`. A
+   `background-image` SVG cannot read `currentColor`, so the chevron's stroke
+   is `--foreground` written out per theme. */
 @utility scroll-buttons-x {
   anchor-name: --scroll-buttons-x;
-  --scroll-button-prev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2318181B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m15 18-6-6 6-6'/%3E%3C/svg%3E");
-  --scroll-button-next: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2318181B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
+  --scroll-button-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2318181B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
 
   .dark & {
-    --scroll-button-prev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FAFAFA' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m15 18-6-6 6-6'/%3E%3C/svg%3E");
-    --scroll-button-next: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FAFAFA' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
+    --scroll-button-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FAFAFA' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
   }
 
-  /* With `scroll-fade-x`, the mask would erase the arrows too: they paint as
-     part of the scroller. Two opaque discs under the arrows keep them whole;
-     the layers add up instead of intersecting. */
-  &.scroll-fade-x {
-    --scroll-fade-mask:
-      var(--scroll-fade-inline),
-      radial-gradient(circle at 1.5rem 50%, #000 calc(1rem + 2px), transparent calc(1rem + 3px)),
-      radial-gradient(
-        circle at calc(100% - 1.5rem) 50%,
-        #000 calc(1rem + 2px),
-        transparent calc(1rem + 3px)
-      );
-    -webkit-mask-composite: source-over;
-    mask-composite: add;
+  /* The arrows paint as part of the scroller, so `scroll-fade-x`'s mask would
+     erase them: add an opaque disc under each one. */
+  @supports selector(::scroll-button(*)) {
+    &.scroll-fade-x {
+      --scroll-fade-mask:
+        var(--scroll-fade-inline),
+        radial-gradient(circle at 1.5rem 50%, #000 1.125rem, transparent 1.2rem),
+        radial-gradient(circle at calc(100% - 1.5rem) 50%, #000 1.125rem, transparent 1.2rem);
+      mask-composite: add;
+    }
   }
 
   &::scroll-button(*) {
     position: absolute;
-    box-sizing: border-box;
     position-anchor: --scroll-buttons-x;
     top: anchor(center);
     translate: 0 -50%;
     z-index: 10;
-    width: 2rem;
-    height: 2rem;
+    box-sizing: border-box;
+    width: --spacing(8);
+    height: --spacing(8);
     border: 1px solid var(--border);
     border-radius: 9999px;
-    background: var(--background) center / 1rem no-repeat;
-    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    background: var(--background) var(--scroll-button-icon) center / --spacing(4) no-repeat;
+    box-shadow: var(--shadow-xs);
     cursor: pointer;
-    transition: opacity 150ms ease-in-out;
+    transition: opacity var(--transition-duration-fast) ease-in-out;
   }
   &::scroll-button(*):hover {
     background-color: var(--accent);
@@ -390,12 +382,11 @@
   }
   &::scroll-button(inline-start) {
     content: "" / attr(data-scroll-prev);
-    left: calc(anchor(left) + 0.5rem);
-    background-image: var(--scroll-button-prev);
+    left: calc(anchor(left) + --spacing(2));
+    scale: -1 1;
   }
   &::scroll-button(inline-end) {
     content: "" / attr(data-scroll-next);
-    right: calc(anchor(right) + 0.5rem);
-    background-image: var(--scroll-button-next);
+    right: calc(anchor(right) + --spacing(2));
   }
 }
