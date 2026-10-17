@@ -151,6 +151,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `api_call` integration the exported agent declares, as a local bundle
     read from disk already did.
 
+### Added
+
+- **Garmin LiveTrack — an agent reads where a Garmin device is (#2064).**
+  `@appstrate/garmin-livetrack@1.0.0` reads the owner's last known position and
+  LiveTrack sessions through `api_call`, from one `custom` auth whose only field
+  is the owner's public personal link (`https://livetrack.garmin.com/<name>`);
+  nothing secret is injected. Garmin has no public API: the integration reads
+  the undocumented JSON API behind the LiveTrack web page and may break if
+  Garmin changes it. Its `INTEGRATION.md` gives the call sequence: load the
+  page (`{{livetrack_url}}`, spilled to a workspace file) for its CSRF token and
+  `garminGuid`, list the sessions, read the latest session's track points, each
+  API call sending `Livetrack-Csrf-Token` while the run's cookie jar replays the
+  `livetrack_csrf` cookie. Only sessions visible to everyone are read;
+  passcode-protected links are refused with a clear message.
+
 ### Fixed
 
 - **A link to a catalogue sheet opens it from the package id alone** (#2013).
