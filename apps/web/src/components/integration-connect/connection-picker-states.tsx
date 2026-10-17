@@ -113,10 +113,9 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
 }
 
 /**
- * The locked set, read-only. A stored override within it narrows it, so that subset is what
- * binds (`[]`: none) and what the picker is judged on; one reaching outside it is refused
- * (`override_outranked`), which is said. Either can be cleared back to the locked set; in
- * override mode, `[]` (if not required) narrows any lock.
+ * A lock closed to additions, read-only: the locked set is what binds, whatever is chosen. A
+ * stored override within it is a no-op; one reaching outside it is refused (`override_outranked`),
+ * which is said. Either can be cleared, back to the cascade the lock governs anyway.
  */
 export function LockedPicker({
   integrationId,
@@ -134,17 +133,12 @@ export function LockedPicker({
     lockedBy,
     candidateIds,
     gatesRun,
-    required,
     setLabel,
   } = picker;
   const storedOverride = overrideMode ? explicitIds : null;
   const outranked = storedOverride?.some((id) => !lockedConnectionIds.includes(id)) ?? false;
-  const bindingIds = storedOverride !== null && !outranked ? storedOverride : lockedConnectionIds;
-  const lockedUnavailableIds = unavailableConnectionIds(bindingIds, candidateIds);
-  const clearable = outranked || storedOverride?.length === 0;
+  const lockedUnavailableIds = unavailableConnectionIds(lockedConnectionIds, candidateIds);
   const warn = outranked || gatesRun;
-  const offersNone =
-    overrideMode && !required && lockedConnectionIds.length > 0 && storedOverride?.length !== 0;
   return (
     <StatusPicker
       integrationId={integrationId}
@@ -152,9 +146,9 @@ export function LockedPicker({
       icon={warn ? <AlertTriangle /> : <Lock />}
       tone={warn ? AMBER_TEXT : undefined}
       label={
-        bindingIds.length === 0
+        lockedConnectionIds.length === 0
           ? t("detail.integrationMemberPicker.none")
-          : setLabel(bindingIds, lockedUnavailableIds)
+          : setLabel(lockedConnectionIds, lockedUnavailableIds)
       }
       badge={
         <Badge variant="secondary" className="ml-1 text-[0.6rem]">
@@ -162,29 +156,12 @@ export function LockedPicker({
             lockedBy === "org_default"
               ? "detail.integrationMemberPicker.lockedByEnforcedDefault"
               : "detail.integrationMemberPicker.lockedByAdminPin",
-            { count: bindingIds.length },
+            { count: lockedConnectionIds.length },
           )}
         </Badge>
       }
     >
-      {offersNone && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-auto py-1 text-left text-xs"
-          onClick={() => void persist([])}
-          data-testid={`member-pick-none-${integrationId}`}
-        >
-          <span className="flex min-w-0 flex-col">
-            <span>{t("detail.integrationMemberPicker.none")}</span>
-            <span className="text-muted-foreground text-[0.65rem]">
-              {t("detail.integrationMemberPicker.noneHint")}
-            </span>
-          </span>
-        </Button>
-      )}
-      {clearable && (
+      {storedOverride !== null && (
         <ClearChoiceButton
           onClick={() => void persist(null)}
           testId={`member-pick-clear-${integrationId}`}
@@ -195,14 +172,25 @@ export function LockedPicker({
           {t("error.overrideOutranked")}
         </PickerWarning>
       )}
-      {lockedUnavailableIds.length > 0 && (
-        <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
-          {t("detail.integrationMemberPicker.lockedUnavailableWarning", {
-            count: lockedUnavailableIds.length,
-          })}
-        </PickerWarning>
-      )}
+      <LockedUnavailableWarning integrationId={integrationId} ids={lockedUnavailableIds} />
     </StatusPicker>
+  );
+}
+
+/** Locked connections no longer offered: only an admin can fix the pin or the space default. */
+export function LockedUnavailableWarning({
+  integrationId,
+  ids,
+}: {
+  integrationId: string;
+  ids: readonly string[];
+}) {
+  const { t } = useTranslation(["agents", "settings"]);
+  if (ids.length === 0) return null;
+  return (
+    <PickerWarning testId={`member-pick-locked-unavailable-warning-${integrationId}`}>
+      {t("detail.integrationMemberPicker.lockedUnavailableWarning", { count: ids.length })}
+    </PickerWarning>
   );
 }
 

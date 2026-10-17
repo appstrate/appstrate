@@ -37,7 +37,7 @@ interface AgentIntegrationsBlockProps {
 }
 
 interface ScheduleOverrides {
-  /** The stored picks: a missing integration inherits, an empty set binds none. */
+  /** The stored picks: a missing integration inherits, an empty set binds none (under an imposed set: adds none). */
   value: Readonly<Record<string, string[]>>;
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
   version?: string;

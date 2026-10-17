@@ -11,6 +11,8 @@ import { keepAvailable, unavailableConnectionIds } from "../../lib/connection-se
 import {
   useIntegrationOrgDefault,
   useIntegrationConnections,
+  useIntegrationPins,
+  useAgentsConsumingIntegration,
   useUpsertIntegrationOrgDefault,
   useDeleteIntegrationOrgDefault,
 } from "../../hooks/use-integrations";
@@ -33,6 +35,8 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
   const { data: orgDefault, isLoading, isError, refetch } = useIntegrationOrgDefault(packageId);
   const { data: connections, isLoading: connectionsLoading } = useIntegrationConnections(packageId);
+  const { data: pins } = useIntegrationPins(packageId);
+  const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
   const upsert = useUpsertIntegrationOrgDefault();
   const remove = useDeleteIntegrationOrgDefault();
 
@@ -57,6 +61,21 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   // A stored default whose members are all unshared has nothing to write a mode change with (the
   // server refuses them): its connections are picked, or dropped, first.
   const modeLocked = !!orgDefault && pendingValue === null && connectionIds.length === 0;
+  // An enforced default accepts no addition: it cannot be set while an admin pin of this
+  // integration lets runs add to it (the server answers 409), so those agents are named. The
+  // server ignores the pins of agents inactive in the space (`agent_active`), so only active
+  // ones count; a name is the consuming agent's, else the package id.
+  const openPinAgents = (pins ?? [])
+    .filter(
+      (p) =>
+        p.integration_package_id === packageId && p.allow_additional_connections && p.agent_active,
+    )
+    .map(
+      (p) =>
+        consumingAgents?.find((a) => a.agent_package_id === p.agent_package_id)?.display_name ??
+        p.agent_package_id,
+    );
+  const forcedLocked = openPinAgents.length > 0 && mode !== "forced";
   /** An empty set removes the default; `keepMode` holds the mode while the list is empty. */
   const save = async (nextIds: string[], nextEnforce: boolean, keepMode: string | null = null) => {
     setPendingValue({ connection_ids: nextIds, enforce: nextEnforce });
@@ -133,12 +152,21 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
                 value,
                 label: t(`integration.admin.usage.${value}`),
                 disabled:
-                  value !== "choice" && (shared.length === 0 || (modeLocked && value !== mode)),
+                  (value !== "choice" && (shared.length === 0 || (modeLocked && value !== mode))) ||
+                  (value === "forced" && forcedLocked),
               }))}
             />
             <p className="text-muted-foreground mt-2 text-sm">
               {t(`integration.admin.usage.${mode}Help`)}
             </p>
+            {(mode === "forced" || orgDefault?.enforce === true) && (
+              <p
+                className="text-muted-foreground mt-1 text-sm"
+                data-testid="org-default-clears-choices"
+              >
+                {t("integration.admin.orgDefault.clearsMemberChoices")}
+              </p>
+            )}
             {shared.length === 0 ? (
               <p className="text-muted-foreground text-xs italic">
                 {t("integration.admin.orgDefault.noPinnableConnections")}
@@ -148,6 +176,14 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
                 {t("integration.admin.orgDefault.pickBeforeMode")}
               </p>
             ) : null}
+            {shared.length > 0 && forcedLocked && (
+              <p className="text-muted-foreground text-xs" data-testid="org-default-forced-locked">
+                {t("integration.admin.orgDefault.forcedNeedsClosedPins", {
+                  count: openPinAgents.length,
+                  agents: openPinAgents.join(", "),
+                })}
+              </p>
+            )}
           </div>
           {shared.length > 0 && mode !== "choice" ? (
             <div className="min-w-0">

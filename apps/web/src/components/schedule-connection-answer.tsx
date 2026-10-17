@@ -8,8 +8,9 @@ import { ScheduleConnectionRefusals } from "./schedule-connection-refusals";
 /**
  * The answer to a schedule write refused over connections (`409 missing_integration_connection`):
  * why each integration was refused — said until its pick moves — and the picks that answer it.
- * Every refusal is shown, a destructive one too (`override_outranked`,
- * `required_integration_unbound`): a picker alone would leave it unexplained.
+ * Every refusal is shown, a destructive one too (`override_outranked`, an addition to a set
+ * closed to additions; `connection_set_too_large`; `required_integration_unbound`): a picker
+ * alone would leave it unexplained.
  */
 export function ScheduleConnectionAnswer({
   choices,

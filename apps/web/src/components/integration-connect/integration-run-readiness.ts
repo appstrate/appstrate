@@ -14,6 +14,11 @@ interface ResolutionView {
   /** The admin pin's set (`[]` pins none), else an enforced org default's. */
   lockedConnectionIds: string[];
   lockedBy: "admin_pin" | "org_default" | null;
+  /**
+   * The locked set always binds, and the run's pick (a launch override, else the member's pin)
+   * adds to it: only under an admin pin open to additions. Closed, nothing adds to a lock.
+   */
+  additionsAllowed: boolean;
   /** The soft org default's whole stored set, incl. members candidates hide. */
   softDefaultIds: string[];
   /** Connection health, not run relevance (the server's `run_blocking`): bound, with no error. */
@@ -34,6 +39,7 @@ export function describeResolution(resolution: IntegrationAgentResolution): Reso
   return {
     lockedConnectionIds: lock?.ids ?? [],
     lockedBy: lock?.by ?? null,
+    additionsAllowed: resolution.additional_connections_allowed,
     softDefaultIds: source === "org_default" ? orgDefault : [],
     resolved: code === null && resolution.resolved_connection_ids.length > 0,
     emptyPickerPrompt:

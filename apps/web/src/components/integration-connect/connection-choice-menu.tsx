@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Ban, Check, ChevronDown, Users, type LucideIcon } from "lucide-react";
+import { Ban, Check, ChevronDown, Lock, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
@@ -63,11 +63,16 @@ interface ConnectionChoiceMenuProps {
   storedMode: ChoiceMode | null;
   /** « Hériter », absent where inheriting is no answer (what the server would take is no choice). */
   inherit?: { description: ReactNode };
-  /** « Aucune connexion », absent for an integration that is required. */
-  none?: { description: ReactNode };
+  /** « Aucune connexion » (or `label`), absent for an integration that is required. */
+  none?: { label?: string; description: ReactNode };
   rows: readonly ChoiceRow[];
-  /** What is ticked, the draft included. */
+  /** What is ticked, the draft included; never an imposed connection. */
   checkedIds: readonly string[];
+  /**
+   * Rows an admin imposes: drawn ticked, with a padlock and `hint`, and never toggled. They are
+   * no part of the choice (`checkedIds`, the modes) but count towards the cap.
+   */
+  imposed?: { ids: readonly string[]; hint: string };
   /** Stored members no longer offered: listed unticked, so the next write visibly drops them. */
   unavailableIds?: readonly string[];
   unavailableRow: { label: string; hint?: string };
@@ -103,6 +108,7 @@ export function ConnectionChoiceMenu({
   none,
   rows,
   checkedIds,
+  imposed,
   unavailableIds = NONE,
   unavailableRow,
   busy = false,
@@ -137,7 +143,10 @@ export function ConnectionChoiceMenu({
   const ticking = checkedIds.length > 0;
   // Ticking a connection is choosing: the mode follows the boxes.
   const shown: ChoiceMode | null = ticking || choosing ? "choose" : storedMode;
-  const atCap = checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION;
+  const imposedIds = imposed?.ids ?? NONE;
+  // What binds once applied: the imposed rows, then the ticks.
+  const boundCount = imposedIds.length + checkedIds.length;
+  const atCap = boundCount >= MAX_CONNECTIONS_PER_INTEGRATION;
   const TriggerIcon = trigger.icon;
 
   return (
@@ -203,16 +212,17 @@ export function ConnectionChoiceMenu({
               className={showModes ? "border-border mb-1 ml-4 border-l" : undefined}
             >
               {rows.map((row) => {
-                const isChecked = checkedIds.includes(row.id);
+                const isImposed = imposedIds.includes(row.id);
+                const isChecked = isImposed || checkedIds.includes(row.id);
                 return (
                   <DropdownMenuCheckboxItem
                     key={row.id}
                     checked={isChecked}
-                    disabled={busy || (!isChecked && (atCap || row.disabled === true))}
+                    disabled={busy || isImposed || (!isChecked && (atCap || row.disabled === true))}
                     // Toggling must not close the menu: a set is ticked box by box.
                     onSelect={(e) => {
                       e.preventDefault();
-                      onToggle(row.id);
+                      if (!isImposed) onToggle(row.id);
                     }}
                     className="gap-2"
                     data-testid={`${testPrefix}-option-${row.id}`}
@@ -225,6 +235,15 @@ export function ConnectionChoiceMenu({
                       {row.description && (
                         <span className="text-muted-foreground text-[0.65rem] break-words">
                           {row.description}
+                        </span>
+                      )}
+                      {isImposed && imposed && (
+                        <span
+                          className="text-muted-foreground flex items-center gap-1 text-[0.65rem]"
+                          data-testid={`${testPrefix}-imposed-${row.id}`}
+                        >
+                          <Lock className="size-3 shrink-0" />
+                          {imposed.hint}
                         </span>
                       )}
                       {row.extra}
@@ -271,7 +290,7 @@ export function ConnectionChoiceMenu({
               data-testid={`${testPrefix}-none-${testKey}`}
             >
               <ChoiceLabel
-                label={t("detail.integrationMemberPicker.none")}
+                label={none.label ?? t("detail.integrationMemberPicker.none")}
                 description={none.description}
               />
             </DropdownMenuRadioItem>
@@ -292,7 +311,7 @@ export function ConnectionChoiceMenu({
             >
               <Check />
               <span className="font-medium">
-                {t("detail.integrationMemberPicker.apply", { count: checkedIds.length })}
+                {t("detail.integrationMemberPicker.apply", { count: boundCount })}
               </span>
             </DropdownMenuItem>
           </>

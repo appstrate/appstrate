@@ -13,6 +13,7 @@ import {
   FailedPicker,
   LoadingPicker,
   LockedPicker,
+  LockedUnavailableWarning,
   NoClientPicker,
   PickerWarning,
   ReconfigurePicker,
@@ -25,7 +26,8 @@ const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
  * Per-integration connection picker (dropdown). Rows are checkboxes composing a draft set
  * (up to `MAX_CONNECTIONS_PER_INTEGRATION`) that "Valider" writes in one go; a single
  * candidate binds directly. Only `persistence` differs between surfaces: where the pick lands
- * (member pin vs. an override held in a form).
+ * (member pin vs. an override held in a form). Under a lock closed to additions it is read-only;
+ * open to them, the menu stays and the pick is the additions.
  */
 export function IntegrationConnectionPicker({
   integration,
@@ -72,6 +74,9 @@ function LoadedPicker({ persistence = DEFAULT_PERSISTENCE, ...options }: LoadedP
   const {
     canAddConnection,
     lockedBy,
+    additionsAllowed,
+    imposedUnavailableIds,
+    tooLarge,
     emptyPickerPrompt,
     canConnect,
     integrationPath,
@@ -90,18 +95,20 @@ function LoadedPicker({ persistence = DEFAULT_PERSISTENCE, ...options }: LoadedP
     return <ReconfigurePicker integrationId={integrationId} />;
   }
 
-  // An admin force (pin or enforced org default) renders read-only: a member pin loses to it.
-  if (lockedBy !== null) {
+  // An admin force (pin or enforced org default) closed to additions renders read-only: nothing
+  // chosen adds to it, or removes from it.
+  if (lockedBy !== null && !additionsAllowed) {
     return <LockedPicker integrationId={integrationId} picker={picker} />;
   }
 
   // Dead end (blocked, nothing to pick): explanatory button, unless a stored set is left to clear.
-  if (!canAddConnection && !hasCandidates && explicitIds === null) {
+  // An open lock is never one: its set binds, and the menu says so.
+  if (!additionsAllowed && !canAddConnection && !hasCandidates && explicitIds === null) {
     return <BlockedPicker integrationId={integrationId} canConnect={canConnect} />;
   }
 
   // No connection and no connectable auth (no OAuth client): point at admin setup, not a 403 dropdown.
-  if (!hasCandidates && authKeys.length === 0 && explicitIds === null) {
+  if (!additionsAllowed && !hasCandidates && authKeys.length === 0 && explicitIds === null) {
     return (
       <NoClientPicker
         integrationId={integrationId}
@@ -122,6 +129,12 @@ function LoadedPicker({ persistence = DEFAULT_PERSISTENCE, ...options }: LoadedP
               : "detail.integrationMemberPicker.unavailableWarning",
             { count: unavailableIds.length },
           )}
+        </PickerWarning>
+      )}
+      <LockedUnavailableWarning integrationId={integrationId} ids={imposedUnavailableIds} />
+      {tooLarge && (
+        <PickerWarning testId={`member-pick-too-large-warning-${integrationId}`}>
+          {t("error.connectionSetTooLarge")}
         </PickerWarning>
       )}
       {deadConns.length > 0 && (

@@ -13,6 +13,7 @@ import {
   keepAvailable,
   canApplyConnectionSet,
   checkedConnectionIds,
+  imposedThenAdded,
   placeCreatedConnection,
   shownConnectionPick,
   unavailableConnectionIds,
@@ -37,6 +38,21 @@ describe("toggleCapped", () => {
     // Control: the same call one below the cap does add.
     expect(toggleCapped(full, "new")).toBe(full);
     expect(toggleCapped(belowCap, "new")).toEqual([...belowCap, "new"]);
+  });
+
+  it("caps at what an imposed set leaves", () => {
+    expect(toggleCapped(["a"], "b", 1)).toEqual(["a"]);
+    expect(toggleCapped(["a"], "a", 1)).toEqual([]);
+    expect(toggleCapped([], "b", 0)).toEqual([]);
+  });
+});
+
+describe("imposedThenAdded", () => {
+  it("binds the imposed set whole, in its order, then the additions it lacks", () => {
+    expect(imposedThenAdded(["t1", "t2"], ["p", "t1", "q"])).toEqual(["t1", "t2", "p", "q"]);
+    expect(imposedThenAdded(["t1"], [])).toEqual(["t1"]);
+    // An addition is never cut to fit: the server refuses the union over the cap.
+    expect(imposedThenAdded(["t1"], ["t1"])).toEqual(["t1"]);
   });
 });
 
@@ -163,6 +179,17 @@ describe("placeCreatedConnection", () => {
 
   it("returns a full set unchanged: the cap refuses the addition", () => {
     expect(placeCreatedConnection({ boundIds: full, createdId: "conn_new" })).toBe(full);
+  });
+
+  it("caps the additions at what an imposed set leaves", () => {
+    const additions = ["conn_a"];
+    expect(placeCreatedConnection({ boundIds: additions, createdId: "conn_new", max: 1 })).toBe(
+      additions,
+    );
+    expect(placeCreatedConnection({ boundIds: additions, createdId: "conn_new", max: 2 })).toEqual([
+      "conn_a",
+      "conn_new",
+    ]);
   });
 
   describe("replacing an under-scoped member", () => {

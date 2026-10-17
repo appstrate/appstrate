@@ -76,6 +76,7 @@ function unbound(over: Partial<Resolution> = {}): Resolution {
     member_pinned_connection_ids: null,
     org_default_connection_ids: null,
     org_default_enforced: false,
+    additional_connections_allowed: false,
     can_add_connection: true,
     candidates: [],
     ...over,

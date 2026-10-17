@@ -89,6 +89,7 @@ function resolution(overrides: Partial<Resolution>): Resolution {
     member_pinned_connection_ids: null,
     org_default_connection_ids: null,
     org_default_enforced: false,
+    additional_connections_allowed: false,
     can_add_connection: true,
     candidates: [candidate(WEB, "web"), candidate(DB, "db")],
     ...overrides,
@@ -153,6 +154,7 @@ function renderPicker(
 }
 
 const WARNING = `member-pick-unavailable-warning-${INTEGRATION}`;
+const LOCKED_WARNING = `member-pick-locked-unavailable-warning-${INTEGRATION}`;
 
 describe("IntegrationConnectionPicker — a stored member is gone", () => {
   it("counts the whole stored set and names how many are unavailable", () => {
@@ -322,7 +324,8 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).toContain(`member-pick-locked-${INTEGRATION}`);
     expect(html).not.toContain(GONE);
     expect(html).toContain(t("unavailableCount", { count: 1 }));
-    expect(html).toContain(WARNING);
+    expect(html).toContain(LOCKED_WARNING);
+    expect(html).toContain(t("lockedUnavailableWarning", { count: 1 }));
     expect(html).toContain("text-warning");
   });
 
@@ -343,21 +346,21 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(renderPicker(locked, false)).not.toContain(clear);
   });
 
-  it("shows an override stored within the lock as what binds, with nothing to clear", () => {
-    // The server accepts a subset of the locked set: it narrows the lock, it is not outranked.
+  it("shows the whole lock under an override stored within it, a no-op that can be cleared", () => {
+    // Nothing narrows a lock: the server binds the locked set whatever a subset of it says.
     const html = renderPicker(
       resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB, DB] }),
       false,
       { mode: "override", value: [DB], onChange: () => {} },
     );
     expect(html).toContain(`member-pick-locked-${INTEGRATION}`);
-    expect(html).toContain(">db<");
-    expect(html).not.toContain("web · db");
-    expect(html).not.toContain(`member-pick-clear-${INTEGRATION}`);
+    expect(html).toContain("web · db");
+    expect(html).not.toContain(`member-pick-outranked-warning-${INTEGRATION}`);
+    expect(html).toContain(`member-pick-clear-${INTEGRATION}`);
   });
 
-  it("judges an override narrowing a lock on what it binds, not on the locked set", () => {
-    // The admin pin holds a dead member, so the cascade blocks; the override binds `db` alone.
+  it("judges a lock on the locked set, whatever an override within it names", () => {
+    // The admin pin holds a dead member, so the cascade blocks: no override within it escapes.
     const deadWeb = { ...candidate(WEB, "web"), needs_reconnection: true };
     const locked = resolution({
       source: "admin_pin",
@@ -369,16 +372,14 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
       value,
       onChange: () => {},
     });
-    const narrowed = renderPicker(locked, true, override([DB]));
-    expect(narrowed).toContain(`member-pick-locked-${INTEGRATION}`);
-    expect(narrowed).toContain(">db<");
-    expect(narrowed).not.toContain("text-warning");
-    // Control: unset, the locked set binds, and narrowed to the dead member it still gates.
-    expect(renderPicker(locked, true, override(null))).toContain("text-warning");
-    expect(renderPicker(locked, true, override([WEB]))).toContain("text-warning");
-    // "No connection" under a healthy lock gates only an integration the agent requires.
+    for (const value of [null, [DB], [WEB], []]) {
+      const html = renderPicker(locked, true, override(value));
+      expect(html).toContain(`member-pick-locked-${INTEGRATION}`);
+      expect(html).toContain("text-warning");
+    }
+    // "No connection" under a healthy lock binds the lock: it gates nothing, required or not.
     const healthy = resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB, DB] });
-    expect(renderPicker(healthy, false, override([]), true)).toContain("text-warning");
+    expect(renderPicker(healthy, false, override([]), true)).not.toContain("text-warning");
     expect(renderPicker(healthy, false, override([]))).not.toContain("text-warning");
   });
 
@@ -700,15 +701,15 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     expect(html).toContain(t("none"));
   });
 
-  it("under a lock, a stored 'no connection' override binds none and can be cleared", () => {
+  it("under a lock, a stored 'no connection' override still binds the lock, and can be cleared", () => {
     const html = renderPicker(
       resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB] }),
       false,
       { mode: "override", value: [], onChange: () => {} },
     );
     expect(html).toContain(`member-pick-locked-${INTEGRATION}`);
-    expect(html).toContain(t("none"));
-    expect(html).not.toContain(">web<");
+    expect(html).not.toContain(t("none"));
+    expect(html).toContain(">web<");
     expect(html).toContain(`member-pick-clear-${INTEGRATION}`);
   });
 
@@ -727,8 +728,8 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     expect(html).not.toContain(t("none"));
   });
 
-  // `[]` is a subset of any lock, so a launch override may narrow it to none.
-  it("under a lock, offers a 'no connection' override for an integration the agent does not require", () => {
+  // Nothing removes a locked connection, so « Aucune connexion » is no answer under a lock.
+  it("never offers 'no connection' under a lock, whatever the persistence", () => {
     const none = `member-pick-none-${INTEGRATION}`;
     const unset: Persistence = { mode: "override", value: null, onChange: () => {} };
     const pinned = resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB] });
@@ -741,22 +742,10 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     for (const locked of [pinned, enforced]) {
       const html = renderPicker(locked, false, unset);
       expect(html).toContain(`member-pick-locked-${INTEGRATION}`);
-      expect(html).toContain(none);
-      // Never for a required integration, nor on a member pin (it loses to the lock anyway).
+      expect(html).not.toContain(none);
       expect(renderPicker(locked, false, unset, true)).not.toContain(none);
       expect(renderPicker(locked, false)).not.toContain(none);
     }
-    // Already none: through the stored override, or the admin's own pin to none.
-    expect(
-      renderPicker(pinned, false, { mode: "override", value: [], onChange: () => {} }),
-    ).not.toContain(none);
-    expect(
-      renderPicker(
-        resolution({ source: null, admin_pinned_connection_ids: [], resolved_connection_ids: [] }),
-        false,
-        unset,
-      ),
-    ).not.toContain(none);
   });
 
   it("reads out the three modes as radios, and the connections under « Choisir » as boxes", () => {
@@ -825,6 +814,197 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     );
     expect(loading).toContain(`member-picker-${INTEGRATION}`);
     expect(loading).not.toContain(`member-pick-none-${INTEGRATION}`);
+  });
+});
+
+describe("IntegrationConnectionPicker — an admin pin open to additions", () => {
+  const t = (key: string, opts?: Record<string, unknown>) =>
+    i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
+  const THIRD = "55555555-5555-4555-8555-555555555555";
+  const open = (over: Partial<Resolution> = {}) =>
+    resolution({
+      source: "admin_pin",
+      admin_pinned_connection_ids: [WEB],
+      additional_connections_allowed: true,
+      resolved_connection_ids: [WEB],
+      candidates: [candidate(WEB, "web"), candidate(DB, "db"), candidate(THIRD, "third")],
+      ...over,
+    });
+  const override = (value: string[] | null, onChange: (ids: string[] | null) => void = () => {}) =>
+    ({ mode: "override", value, onChange }) as const;
+  const select = (props: Record<string, unknown> | undefined) =>
+    (props!.onSelect as (e: { preventDefault: () => void }) => void)({ preventDefault() {} });
+
+  it("keeps the menu, its trigger naming the whole set that binds, the imposed one first", () => {
+    const html = renderPicker(
+      open({ member_pinned_connection_ids: [DB], resolved_connection_ids: [WEB, DB] }),
+      false,
+    );
+    expect(html).not.toContain(`member-pick-locked-${INTEGRATION}`);
+    expect(html).toContain(`member-pick-${INTEGRATION}`);
+    expect(html).toContain("web · db");
+    // An override replaces the member's additions; unset, it inherits them.
+    expect(
+      renderPicker(open({ member_pinned_connection_ids: [DB] }), false, override([THIRD])),
+    ).toContain("web · third");
+    expect(
+      renderPicker(open({ member_pinned_connection_ids: [DB] }), false, override(null)),
+    ).toContain("web · db");
+  });
+
+  it("ticks the imposed connection, padlocked and out of reach, and the additions as chosen", () => {
+    const tree = menuOf(pickerFor(open({ member_pinned_connection_ids: [DB] })));
+    expect(propsOf(tree, `member-pick-option-${WEB}`)).toMatchObject({
+      checked: true,
+      disabled: true,
+    });
+    expect(propsOf(tree, `member-pick-imposed-${WEB}`)).toBeDefined();
+    expect(textsOf(tree)).toContain(t("imposedHint"));
+    expect(propsOf(tree, `member-pick-option-${DB}`)).toMatchObject({
+      checked: true,
+      disabled: false,
+    });
+    expect(propsOf(tree, `member-pick-imposed-${DB}`)).toBeUndefined();
+    expect(propsOf(tree, `member-pick-option-${THIRD}`)).toMatchObject({ checked: false });
+  });
+
+  it("answers « no addition » instead of « Hériter » or « Aucune connexion » for the member's pin", () => {
+    const tree = menuOf(pickerFor(open(), { required: true }));
+    expect(propsOf(tree, `member-pick-reset-${INTEGRATION}`)).toBeUndefined();
+    // Offered for a required integration too: the imposed set binds it.
+    const none = propsOf(tree, `member-pick-none-${INTEGRATION}`);
+    expect(none).toMatchObject({ checked: true });
+    expect((none!.children as ReactElement<{ label: string }>).props.label).toBe(t("noAddition"));
+    // An override keeps « Hériter », the member's own additions.
+    const overridden = menuOf(pickerFor(open(), { persistence: override(null) }));
+    expect(propsOf(overridden, `member-pick-reset-${INTEGRATION}`)).toMatchObject({
+      checked: true,
+    });
+  });
+
+  it("writes the additions alone, never an imposed id, in both persistences", async () => {
+    const changes: Array<string[] | null> = [];
+    const drafting = pickerFor(open(), {
+      persistence: override(null, (ids) => changes.push(ids)),
+      tick: DB,
+    });
+    expect(drafting.checkedIds).toEqual([DB]);
+    select(propsOf(menuOf(drafting), `member-pick-apply-${INTEGRATION}`));
+    await Bun.sleep(0);
+    expect(changes).toEqual([[DB]]);
+
+    const put = spyOn(client, "PUT").mockResolvedValue({ data: {} });
+    try {
+      const member = pickerFor(open(), { tick: THIRD });
+      select(propsOf(menuOf(member), `member-pick-apply-${INTEGRATION}`));
+      await Bun.sleep(0);
+      const calls = put.mock.calls as unknown as Array<[string, { body: unknown }]>;
+      expect(calls.map(([path, init]) => [path, init.body])).toEqual([
+        [
+          "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
+          { connection_ids: [THIRD] },
+        ],
+      ]);
+    } finally {
+      put.mockRestore();
+    }
+  });
+
+  it("writes « no addition » as `[]` for an override and as no pin for the member", async () => {
+    const changes: Array<string[] | null> = [];
+    const overridden = pickerFor(open(), {
+      persistence: override([DB], (ids) => changes.push(ids)),
+    });
+    select(propsOf(menuOf(overridden), `member-pick-none-${INTEGRATION}`));
+    await Bun.sleep(0);
+    expect(changes).toEqual([[]]);
+
+    const del = spyOn(client, "DELETE").mockResolvedValue({
+      data: { schedules_disabled_count: 0 },
+    });
+    try {
+      const member = pickerFor(open({ member_pinned_connection_ids: [DB] }));
+      select(propsOf(menuOf(member), `member-pick-none-${INTEGRATION}`));
+      await Bun.sleep(0);
+      const paths = (del.mock.calls as unknown as Array<[string]>).map(([path]) => path);
+      expect(paths).toEqual([
+        "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
+      ]);
+    } finally {
+      del.mockRestore();
+    }
+  });
+
+  it("reads an imposed id stored in a pick as no addition: it was a narrowing, now a no-op", () => {
+    const narrowed = pickerFor(open(), { persistence: override([WEB]) });
+    expect(narrowed.checkedIds).toEqual([]);
+    expect(narrowed.storedMode).toBe("none");
+    const mixed = pickerFor(open(), { persistence: override([WEB, DB]) });
+    expect(mixed.checkedIds).toEqual([DB]);
+    expect(mixed.storedMode).toBe("choose");
+  });
+
+  it("counts the imposed set towards the cap: what it leaves is all that can be ticked", () => {
+    const imposed = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION - 1 }, (_, i) =>
+      candidate(`c${i}`, `c${i}`),
+    );
+    const res = open({
+      admin_pinned_connection_ids: imposed.map((c) => c.id),
+      resolved_connection_ids: imposed.map((c) => c.id),
+      candidates: [...imposed, candidate(DB, "db"), candidate(THIRD, "third")],
+    });
+    const picker = pickerFor(res, { tick: DB });
+    expect(picker.checkedIds).toEqual([DB]);
+    const tree = menuOf(picker);
+    expect(propsOf(tree, `member-pick-option-${THIRD}`)).toMatchObject({ disabled: true });
+    expect(propsOf(tree, `member-pick-option-${DB}`)).toMatchObject({ disabled: false });
+    // One place left, two candidates: nothing ticked, both are open.
+    const idle = menuOf(pickerFor(res));
+    expect(propsOf(idle, `member-pick-option-${THIRD}`)).toMatchObject({ disabled: false });
+  });
+
+  it("says an imposed connection is unavailable apart from the additions, and gates on it", () => {
+    const html = renderPicker(
+      open({
+        error_code: "pinned_connection_unavailable",
+        admin_pinned_connection_ids: [WEB, GONE],
+        resolved_connection_ids: [],
+      }),
+      true,
+    );
+    expect(html).toContain(LOCKED_WARNING);
+    expect(html).not.toContain(WARNING);
+    expect(html).toContain(t("unavailableCount", { count: 1 }));
+    expect(html).toContain("text-warning");
+  });
+
+  it("judges an override on the whole set it binds: a dead addition or a dead imposed one", () => {
+    const deadDb = { ...candidate(DB, "db"), needs_reconnection: true };
+    const withDeadDb = open({
+      candidates: [candidate(WEB, "web"), deadDb, candidate(THIRD, "third")],
+    });
+    expect(renderPicker(withDeadDb, false, override([DB]))).toContain("text-warning");
+    expect(renderPicker(withDeadDb, false, override([THIRD]))).not.toContain("text-warning");
+    const deadWeb = { ...candidate(WEB, "web"), needs_reconnection: true };
+    const withDeadWeb = open({ candidates: [deadWeb, candidate(DB, "db")] });
+    expect(renderPicker(withDeadWeb, false, override([]))).toContain("text-warning");
+  });
+
+  it("says when the imposed set and a stored override exceed the cap together", () => {
+    const imposed = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) =>
+      candidate(`c${i}`, `c${i}`),
+    );
+    const html = renderPicker(
+      open({
+        admin_pinned_connection_ids: imposed.map((c) => c.id),
+        resolved_connection_ids: imposed.map((c) => c.id),
+        candidates: [...imposed, candidate(DB, "db")],
+      }),
+      false,
+      override([DB]),
+    );
+    expect(html).toContain(`member-pick-too-large-warning-${INTEGRATION}`);
+    expect(html).toContain("text-warning");
   });
 });
 
@@ -1166,6 +1346,68 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     };
     expect(await closes(true)).toEqual([false]);
     expect(await closes(false)).toEqual([]);
+  });
+
+  // Under an admin pin open to additions the pick holds the additions alone.
+  const openPin = (res: Partial<Resolution>) =>
+    answer({
+      source: "admin_pin",
+      admin_pinned_connection_ids: [WEB],
+      additional_connections_allowed: true,
+      resolved_connection_ids: [WEB],
+      ...res,
+    });
+
+  it("adds a connection created under an open pin as an addition, never writing the imposed one", async () => {
+    const { mounted, picked, picker } = await setup(
+      [openPin({}), openPin({ candidates: ALL })],
+      settles,
+    );
+    await picker.triggerConnect("primary");
+    expect(picked).toEqual([[ADDED]]);
+    mounted.unsubscribe();
+  });
+
+  it("writes the member's pin with its additions and the created one, the imposed set left out", async () => {
+    const put = spyOn(client, "PUT").mockResolvedValue({ data: {} });
+    try {
+      const pinned = { member_pinned_connection_ids: [DB], resolved_connection_ids: [WEB, DB] };
+      const { mounted, picker } = await mount(
+        [openPin(pinned), openPin({ ...pinned, candidates: ALL }), openPin(pinned)],
+        settles,
+        { mode: "pin" },
+      );
+      await picker.triggerConnect("primary");
+      const calls = put.mock.calls as unknown as Array<[string, { body: unknown }]>;
+      expect(calls.map(([, init]) => init.body)).toEqual([{ connection_ids: [DB, ADDED] }]);
+      mounted.unsubscribe();
+    } finally {
+      put.mockRestore();
+    }
+  });
+
+  it("refuses a created connection the imposed set leaves no room for, and says so", async () => {
+    const warned = spyOn(toast, "warning").mockImplementation(() => 0);
+    try {
+      const imposed = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) =>
+        candidate(`c${i}`, `c${i}`),
+      );
+      const imposedIds = imposed.map((c) => c.id);
+      const full = { admin_pinned_connection_ids: imposedIds, resolved_connection_ids: imposedIds };
+      const { mounted, picked, picker } = await setup(
+        [
+          openPin({ ...full, candidates: imposed }),
+          openPin({ ...full, candidates: [...imposed, candidate(ADDED, "new")] }),
+        ],
+        settles,
+      );
+      await picker.triggerConnect("primary");
+      expect(picked).toEqual([]);
+      expect(warned).toHaveBeenCalledTimes(1);
+      mounted.unsubscribe();
+    } finally {
+      warned.mockRestore();
+    }
   });
 
   it("writes nothing and says nothing when the settled popup created no connection", async () => {

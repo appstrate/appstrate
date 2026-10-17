@@ -5,14 +5,27 @@ import type { IntegrationConnection } from "../hooks/use-integrations";
 import type { RunOverridesValue } from "./schedule-payload";
 import { sameSet } from "./strings";
 
-/** At the cap an addition is refused and `ids` comes back unchanged. */
-export function toggleCapped(ids: string[], id: string): string[] {
+/** At the cap (`max`, what an imposed set leaves) an addition is refused and `ids` comes back unchanged. */
+export function toggleCapped(
+  ids: string[],
+  id: string,
+  max: number = MAX_CONNECTIONS_PER_INTEGRATION,
+): string[] {
   if (ids.includes(id)) return ids.filter((x) => x !== id);
-  if (ids.length >= MAX_CONNECTIONS_PER_INTEGRATION) return ids;
+  if (ids.length >= max) return ids;
   return [...ids, id];
 }
 
-/** A cascade layer's stored set: `null` defers to the next layer, `[]` wins and binds none. */
+/** What binds under an imposed set: all of it, in its order, then the additions it lacks. */
+export function imposedThenAdded(imposedIds: string[], addedIds: string[]): string[] {
+  return [...imposedIds, ...addedIds.filter((id) => !imposedIds.includes(id))];
+}
+
+/**
+ * A cascade layer's stored set: `null` defers to the next layer, `[]` wins and binds none. Under an
+ * imposed set (an admin pin or an enforced default) a launch override or a member pin only adds
+ * to it, so there `[]` means no addition and the imposed set still binds.
+ */
 export type ConnectionSet = string[] | null;
 
 /** `null` removes the key; an emptied map drops `connection_overrides`. */
@@ -88,17 +101,21 @@ export function unavailableConnectionIds(storedIds: string[], candidateIds: stri
   return storedIds.filter((id) => !candidateIds.includes(id));
 }
 
-/** `boundIds` plus `createdId`; `replacing` is swapped 1-for-1. At the cap `boundIds` comes back unchanged. */
+/**
+ * `boundIds` plus `createdId`; `replacing` is swapped 1-for-1. At the cap (`max`, what an
+ * imposed set leaves) `boundIds` comes back unchanged.
+ */
 export function placeCreatedConnection(input: {
   boundIds: string[];
   createdId: string;
   replacing?: string;
+  max?: number;
 }): string[] {
-  const { boundIds, createdId, replacing } = input;
+  const { boundIds, createdId, replacing, max = MAX_CONNECTIONS_PER_INTEGRATION } = input;
   if (replacing !== undefined && boundIds.includes(replacing)) {
     return boundIds.map((id) => (id === replacing ? createdId : id));
   }
-  return boundIds.length >= MAX_CONNECTIONS_PER_INTEGRATION ? boundIds : [...boundIds, createdId];
+  return boundIds.length >= max ? boundIds : [...boundIds, createdId];
 }
 
 /** Admin pickers list org-wide shared connections whose labels can collide across members, so the owner is part of the identity. */

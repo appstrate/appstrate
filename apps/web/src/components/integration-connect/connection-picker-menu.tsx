@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Ban, Users, Plus, RefreshCw, Settings } from "lucide-react";
+import { AlertTriangle, Ban, Lock, Users, Plus, RefreshCw, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
@@ -14,7 +14,11 @@ import type { ConnectionPicker } from "./use-connection-picker";
 
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
-/** The agent's connection picker: the one choice menu, fed by the readiness verdict. */
+/**
+ * The agent's connection picker: the one choice menu, fed by the readiness verdict. Under an
+ * admin pin open to additions its connections are listed first, ticked and padlocked, and the
+ * choice is the additions alone.
+ */
 export function PickerMenu({
   integrationId,
   picker,
@@ -27,8 +31,14 @@ export function PickerMenu({
   const spaceLabelOf = useSpaceLabelOf();
   const {
     gatesRun,
-    candidates,
     canAddConnection,
+    additionsAllowed,
+    imposedIds,
+    imposedUnavailableIds,
+    menuCandidates,
+    storedMode,
+    offersInherit,
+    noneValue,
     canConnect,
     integrationPath,
     canOpenIntegration,
@@ -128,6 +138,13 @@ export function PickerMenu({
   })();
   // The first match wins. A "+" says "add": only the entry that connects carries it.
   const trigger = (() => {
+    // Open to additions: the whole set that binds, the imposed connections first.
+    if (additionsAllowed) {
+      return {
+        icon: Lock,
+        label: setLabel(shownIds, [...imposedUnavailableIds, ...unavailableIds]),
+      };
+    }
     if (unavailableIds.length > 0) {
       return { icon: Users, label: setLabel(shownIds, unavailableIds) };
     }
@@ -154,7 +171,7 @@ export function PickerMenu({
       ? { icon: Users, label: t("detail.integrationMemberPicker.chooseLabel") }
       : { icon: Plus, label: t("detail.integrationMemberPicker.connectLabel") };
   })();
-  const rows: ChoiceRow[] = candidates.map((c) => {
+  const rows: ChoiceRow[] = menuCandidates.map((c) => {
     const fit = c.scope_fit;
     const missing = missingScopeLabels(c).join(", ");
     // Only the connection owner can renew via OAuth — a foreign
@@ -226,11 +243,29 @@ export function PickerMenu({
         icon: gatesRun ? AlertTriangle : trigger.icon,
         warn: gatesRun,
       }}
-      storedMode={explicitIds === null ? "inherit" : pickedNone ? "none" : "choose"}
-      inherit={{ description: inheritDescription }}
-      {...(required ? {} : { none: { description: t("detail.integrationMemberPicker.noneHint") } })}
+      storedMode={storedMode}
+      {...(offersInherit ? { inherit: { description: inheritDescription } } : {})}
+      {...(additionsAllowed
+        ? {
+            // The imposed set is never empty, so « no addition » is open to a required one too.
+            none: {
+              label: t("detail.integrationMemberPicker.noAddition"),
+              description: t("detail.integrationMemberPicker.noAdditionHint"),
+            },
+          }
+        : required
+          ? {}
+          : { none: { description: t("detail.integrationMemberPicker.noneHint") } })}
       rows={rows}
       checkedIds={checkedIds}
+      {...(additionsAllowed
+        ? {
+            imposed: {
+              ids: imposedIds,
+              hint: t("detail.integrationMemberPicker.imposedHint"),
+            },
+          }
+        : {})}
       unavailableIds={unavailableIds}
       unavailableRow={{
         label: t("detail.integrationMemberPicker.unavailableRow"),
@@ -243,13 +278,14 @@ export function PickerMenu({
           return;
         }
         // One connection to pick from: ticking it writes at once, unticking it goes back to the
-        // cascade, the only other answer that is not « none ».
-        void persist(checkedIds.includes(id) ? null : [id]).then((ok) => {
+        // cascade, the only other answer that is not « none » (open to additions, to no addition).
+        const unticked = additionsAllowed ? noneValue : null;
+        void persist(checkedIds.includes(id) ? unticked : [id]).then((ok) => {
           if (ok) onOpenChange(false);
         });
       }}
       onInherit={() => void persist(null)}
-      onNone={() => void persist([])}
+      onNone={() => void persist(noneValue)}
       {...(!oneClick && hasCandidates
         ? {
             apply: {

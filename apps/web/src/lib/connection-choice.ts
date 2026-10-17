@@ -26,6 +26,7 @@ const SCHEDULE_CHOICE_CODES = [
   "override_connection_unavailable",
   "auth_serves_no_selected_tool",
   "override_outranked",
+  "connection_set_too_large",
   "required_integration_unbound",
 ] as const satisfies readonly MissingIntegrationConnectionCode[];
 
@@ -139,6 +140,8 @@ export function refusalReasonKey(choice: ConnectionRefusal): string {
       return "error.authServesNoSelectedTool";
     case "override_outranked":
       return "error.overrideOutranked";
+    case "connection_set_too_large":
+      return "error.connectionSetTooLarge";
     case "required_integration_unbound":
       return "error.requiredIntegrationUnbound";
   }

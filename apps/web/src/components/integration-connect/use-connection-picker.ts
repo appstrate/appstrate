@@ -29,6 +29,7 @@ import {
   canApplyConnectionSet,
   checkedConnectionIds,
   type ConnectionSet,
+  imposedThenAdded,
   keepAvailable,
   placeCreatedConnection,
   shownConnectionPick,
@@ -47,9 +48,11 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *   holds then.
  *
  * Unset is "Hériter"; `[]` is "no connection" (offered only if the agent does not require the
- * integration). Locks (admin pin, enforced org default) render read-only: a member pin loses to
- * them and an override outside the locked set is refused (`override_outranked`); "no connection"
- * narrows any lock, so it stays pickable.
+ * integration). A lock (admin pin, enforced org default) always binds whole: nothing chosen
+ * removes a member of it. Closed, it renders read-only: a member pin is masked, an override
+ * within it is a no-op and one reaching outside it is refused (`override_outranked`). Open to
+ * additions, the pick holds the additions only, never a locked id: `[]` (and, for the member's
+ * pin, no pin) is "no addition".
  */
 export type ConnectionPickerPersistence =
   | { mode: "pin" }
@@ -137,8 +140,13 @@ export function useConnectionPicker(
     member_pinned_connection_ids: memberPinnedConnectionIds,
     can_add_connection: canAddConnection,
   } = resolution;
-  const { lockedConnectionIds, lockedBy, softDefaultIds, emptyPickerPrompt } =
+  const { lockedConnectionIds, lockedBy, additionsAllowed, softDefaultIds, emptyPickerPrompt } =
     describeResolution(resolution);
+  // Open to additions, the locked set always binds and the pick only adds to it: it is kept out
+  // of the pick, of the ticks and of every write. Closed (or no lock), nothing is imposed here.
+  const imposedIds = additionsAllowed ? lockedConnectionIds : [];
+  const notImposed = (ids: string[]) => ids.filter((id) => !imposedIds.includes(id));
+  const additionCap = MAX_CONNECTIONS_PER_INTEGRATION - imposedIds.length;
 
   const byId = (id: string): IntegrationCandidate | undefined =>
     candidates.find((c) => c.id === id);
@@ -152,6 +160,13 @@ export function useConnectionPicker(
       : (c.owner_name ?? t("detail.integrationMemberPicker.ownerUnknown"));
 
   const candidateIds = candidates.map((c) => c.id);
+  // What a tick can choose: every candidate, the imposed ones aside.
+  const addableIds = notImposed(candidateIds);
+  // The menu lists the imposed connections first, in their order, then the others as ranked.
+  const menuCandidates = [
+    ...imposedIds.flatMap((id) => byId(id) ?? []),
+    ...candidates.filter((c) => !imposedIds.includes(c.id)),
+  ];
   const setLabel = (ids: string[], unavailable: string[]): string =>
     unavailable.length > 0
       ? `${t("detail.integrationMemberPicker.selectedCount", { count: ids.length })} · ${t(
@@ -160,18 +175,29 @@ export function useConnectionPicker(
         )}`
       : ids.map((id) => byId(id)!.label).join(" · ");
 
-  const explicitIds: ConnectionSet = overrideMode ? persistence.value : memberPinnedConnectionIds;
-  const shownPick = shownConnectionPick({
-    explicitIds,
-    memberPinIds: memberPinnedConnectionIds,
-    softDefaultIds,
-    resolvedIds: resolvedConnectionIds,
-  });
-  const shownIds = shownPick ?? [];
+  // An imposed id stored in a pick (written before the lock opened) adds nothing: it is dropped.
+  const storedIds: ConnectionSet = overrideMode ? persistence.value : memberPinnedConnectionIds;
+  const explicitIds: ConnectionSet = storedIds === null ? null : notImposed(storedIds);
+  // Open: the imposed set, then the additions (an unset override inherits the member's pin's).
+  const shownIds = additionsAllowed
+    ? imposedThenAdded(
+        imposedIds,
+        explicitIds ?? (overrideMode ? notImposed(memberPinnedConnectionIds ?? []) : []),
+      )
+    : (shownConnectionPick({
+        explicitIds,
+        memberPinIds: memberPinnedConnectionIds,
+        softDefaultIds,
+        resolvedIds: resolvedConnectionIds,
+      }) ?? []);
+  const shownAddedIds = notImposed(shownIds);
   const pickedNone = explicitIds?.length === 0;
   const fromDefault = explicitIds === null && softDefaultIds.length > 0;
-  // A shown member that is no candidate blocks the run.
-  const unavailableIds = unavailableConnectionIds(shownIds, candidateIds);
+  // A shown member that is no candidate blocks the run: an imposed one is the admin's to fix.
+  const unavailableIds = unavailableConnectionIds(shownAddedIds, candidateIds);
+  const imposedUnavailableIds = unavailableConnectionIds(imposedIds, candidateIds);
+  // The server refuses a union over the cap (`connection_set_too_large`) rather than cut it.
+  const tooLarge = shownIds.length > MAX_CONNECTIONS_PER_INTEGRATION;
   // Kept to the candidates: a tick the user cannot see cannot be removed.
   const judge = (ids: string[]) => {
     const conns = keepAvailable(ids, candidateIds).map((id) => byId(id)!);
@@ -183,19 +209,36 @@ export function useConnectionPicker(
   };
   const shown = judge(shownIds);
   // Turns the picker amber. The server's `run_blocking` judges the cascade but not a set
-  // override, judged here on the pick itself.
+  // override, judged here on what it binds. Under a closed lock the lock binds whatever the
+  // override says, so the cascade's verdict stands (an outranked override is said apart).
+  const closedLock = lockedBy !== null && !additionsAllowed;
   const gatesRun =
-    overrideMode && explicitIds !== null
+    overrideMode && explicitIds !== null && !closedLock
       ? shown.underScoped.length > 0 ||
         shown.dead.length > 0 ||
         unavailableIds.length > 0 ||
-        (pickedNone && required)
+        imposedUnavailableIds.length > 0 ||
+        tooLarge ||
+        (pickedNone && required && imposedIds.length === 0)
       : runBlocking;
-  // Ticks are what is CHOSEN, never what the cascade would bind.
-  const checkedIds = checkedConnectionIds({ draft, explicitIds, candidateIds });
+  // Ticks are what is CHOSEN, never what the cascade would bind nor what is imposed.
+  const checkedIds = checkedConnectionIds({ draft, explicitIds, candidateIds: addableIds });
   const ticked = judge(checkedIds);
-  // Warnings judge what "Valider" would write once a tick moved, else the shown pick.
-  const warned = draft === null ? shown : ticked;
+  // Warnings judge what "Valider" would write once a tick moved, else the shown additions: an
+  // imposed connection is the admin's to fix, said by the locked warning and the amber trigger.
+  const warned = draft === null ? judge(shownAddedIds) : ticked;
+  // Open: « Hériter » is the member's pin, which only an override defers to; « Aucun ajout »
+  // binds the imposed set alone, through `[]` in an override and no pin for the member.
+  const offersInherit = !additionsAllowed || overrideMode;
+  const storedMode =
+    explicitIds === null
+      ? offersInherit
+        ? ("inherit" as const)
+        : ("none" as const)
+      : explicitIds.length === 0
+        ? ("none" as const)
+        : ("choose" as const);
+  const noneValue: ConnectionSet = additionsAllowed && !overrideMode ? null : [];
   // What "Hériter" would bind: the verdict (it ignores an override); under a member pin the
   // verdict is the pin, so only the soft space default can be named.
   const orgDefaultIds = resolution.org_default_connection_ids ?? [];
@@ -210,12 +253,13 @@ export function useConnectionPicker(
         ? ("org_default" as const)
         : null;
   const inheritedUnbound = unboundLabel(resolution.warning);
-  const oneClick = candidates.length === 1;
+  const oneClick = addableIds.length === 1;
   const hasCandidates = candidates.length > 0;
   const busy = upsertPin.isPending || deletePin.isPending;
   const canApply = canApplyConnectionSet(ticked.conns, explicitIds, draft !== null) && !busy;
 
-  // `null` clears the pick, `[]` stores "no connection". False = refused; the mutation toasted why.
+  // `null` clears the pick, `[]` stores "no connection" (under an open lock, no addition).
+  // False = refused; the mutation toasted why.
   const persist = async (connectionIds: ConnectionSet): Promise<boolean> => {
     if (overrideMode) persistence.onChange(connectionIds);
     else {
@@ -235,7 +279,8 @@ export function useConnectionPicker(
     return true;
   };
 
-  const toggle = (connectionId: string) => setDraft(toggleCapped(checkedIds, connectionId));
+  const toggle = (connectionId: string) =>
+    setDraft(toggleCapped(checkedIds, connectionId, additionCap));
 
   /**
    * Connects a NEW connection, then writes the shown pick with it added (in place of `replacing`).
@@ -263,9 +308,11 @@ export function useConnectionPicker(
     const createdId = refetchedIds.find((id) => !before.has(id));
     if (!createdId) return;
     const placed = placeCreatedConnection({
-      // The pick shown when the connect started (the refetched cascade may already count the new one).
-      boundIds: keepAvailable(shownIds, refetchedIds),
+      // The pick shown when the connect started (the refetched cascade may already count the
+      // new one); under an open lock its additions, the new one being one more.
+      boundIds: keepAvailable(shownAddedIds, refetchedIds),
       createdId,
+      max: additionCap,
       ...(opts?.replacing ? { replacing: opts.replacing } : {}),
     });
     if (!placed.includes(createdId)) {
@@ -297,6 +344,14 @@ export function useConnectionPicker(
     canAddConnection,
     lockedConnectionIds,
     lockedBy,
+    additionsAllowed,
+    imposedIds,
+    imposedUnavailableIds,
+    tooLarge,
+    menuCandidates,
+    storedMode,
+    offersInherit,
+    noneValue,
     emptyPickerPrompt,
     inheritedConns,
     inheritedSource,
