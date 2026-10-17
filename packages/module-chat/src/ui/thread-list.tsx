@@ -438,9 +438,9 @@ function RenameInput({
     try {
       await onSave(next);
       onDone();
-    } catch (error) {
+    } catch {
+      // The chat's own fetch is not toasted by the app's mutation cache: say it here.
       setFailed(true);
-      throw error;
     } finally {
       setSaving(false);
     }
@@ -455,7 +455,7 @@ function RenameInput({
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
-            void finish().catch(() => {});
+            void finish();
           } else if (event.key === "Escape" && !saving) onDone();
         }}
         className="h-7 min-w-0 flex-1 px-1.5 py-0.5"
@@ -464,7 +464,7 @@ function RenameInput({
         type="button"
         size="sm"
         disabled={saving || !next || next === current}
-        onClick={() => void finish().catch(() => {})}
+        onClick={() => void finish()}
       >
         {t("common:btn.save")}
       </Button>
