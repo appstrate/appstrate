@@ -47,7 +47,7 @@
 
 import { mkdir, lstat, realpath, open } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, sep } from "node:path";
 import { resolveSafePath } from "@appstrate/afps-runtime/resolvers";
 import { apiCallStatusLine } from "@appstrate/mcp-transport";
 import { spillResourcesToWorkspace, type RuntimeEventEmitter } from "@appstrate/runner-pi";
@@ -146,10 +146,11 @@ async function extractBodyBytes(
  *      clearer error for the common already-exists case.
  */
 async function writeBodyConfined(workspace: string, abs: string, bytes: Uint8Array): Promise<void> {
-  const root = resolve(workspace);
-  const rootPrefix = root.endsWith(sep) ? root : root + sep;
   const parent = dirname(abs);
   await mkdir(parent, { recursive: true });
+  // Realpath, like `realParent`: a workspace under a symlink (macOS `/var`) is no escape.
+  const root = await realpath(workspace);
+  const rootPrefix = root.endsWith(sep) ? root : root + sep;
 
   // Floor 1 — the parent dir must not resolve (through any symlink) outside
   // the workspace. `realpath` follows every link in the chain.

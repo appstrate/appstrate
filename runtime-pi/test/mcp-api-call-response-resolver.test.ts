@@ -9,18 +9,13 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { API_CALL_ERROR_META_KEY, UPSTREAM_META_KEY } from "@appstrate/mcp-transport";
 import { shapeApiCallResponse } from "../mcp/api-call-response-resolver.ts";
 
-// `realpathSync`: on macOS `tmpdir()` is `/var/folders/…`, a symlink to
-// `/private/var/folders/…`. `writeBodyConfined` resolves the target's parent
-// with `realpath` before comparing it to the workspace root, so an unresolved
-// root makes every write look like a symlink escape. Real runs mount a real
-// directory; only the fixture needs this.
-const ws = () => realpathSync(mkdtempSync(join(tmpdir(), "apicall-resp-")));
+const ws = () => mkdtempSync(join(tmpdir(), "apicall-resp-"));
 const noop = () => {};
 const baseOpts = (workspace: string, toFile?: string) => ({
   workspace,
@@ -117,6 +112,35 @@ describe("shapeApiCallResponse — responseMode.toFile", () => {
     const descriptor = JSON.parse((out.content[0] as { text: string }).text);
     expect(descriptor.status).toBe(502);
     expect(descriptor.code).toBeUndefined();
+  });
+});
+
+describe("shapeApiCallResponse — toFile under a symlinked workspace root", () => {
+  // macOS process-mode runs: TMPDIR `/var/…` is a symlink to `/private/var/…`.
+  const linkedWorkspace = () => {
+    const base = ws();
+    mkdirSync(join(base, "real"));
+    symlinkSync(join(base, "real"), join(base, "link"));
+    return { base, workspace: join(base, "link") };
+  };
+
+  it("writes a plain relative path", async () => {
+    const { base, workspace } = linkedWorkspace();
+    const result = withStatus([{ type: "text", text: "<kml/>" }], 200);
+    const out = await shapeApiCallResponse(result, baseOpts(workspace, "garmin/last.kml"));
+    expect(out.isError).toBeUndefined();
+    expect(readFileSync(join(base, "real", "garmin", "last.kml"), "utf8")).toBe("<kml/>");
+  });
+
+  it("still refuses a symlinked subdirectory that points outside", async () => {
+    const { base, workspace } = linkedWorkspace();
+    mkdirSync(join(base, "outside"));
+    symlinkSync(join(base, "outside"), join(base, "real", "out"));
+    const result = withStatus([{ type: "text", text: "x" }], 200);
+    await expect(shapeApiCallResponse(result, baseOpts(workspace, "out/f.txt"))).rejects.toThrow(
+      /symlink/,
+    );
+    expect(() => readFileSync(join(base, "outside", "f.txt"))).toThrow();
   });
 });
 
