@@ -121,13 +121,13 @@ describe("GET /preview/files/:id — hardened HTML preview", () => {
     expect(res.status).toBe(200);
 
     const appOrigin = new URL(getEnv().APP_URL).origin;
-    // The meta copy; the header copy is this plus the `sandbox` directive, which
-    // a meta context ignores (so it would be dead text on the tag).
+    // The meta copy; the header copy adds `frame-ancestors` and `sandbox`, which a
+    // meta context ignores (so they would be dead text on the tag).
     const expectedMetaCsp =
       `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; ` +
       `img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; ` +
-      `form-action 'none'; frame-ancestors ${appOrigin}; base-uri 'none'`;
-    const expectedHeaderCsp = `${expectedMetaCsp}; sandbox allow-scripts`;
+      `form-action 'none'; base-uri 'none'`;
+    const expectedHeaderCsp = `${expectedMetaCsp}; frame-ancestors ${appOrigin}; sandbox allow-scripts`;
 
     expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(res.headers.get("content-security-policy")).toBe(expectedHeaderCsp);
