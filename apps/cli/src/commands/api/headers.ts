@@ -30,7 +30,12 @@ export function buildHeaders(args: {
     if (colon === -1) continue; // silently ignore malformed — matches curl
     const name = raw.slice(0, colon).trim();
     const value = raw.slice(colon + 1).trim();
-    if (name) out[name] = value;
+    if (!name) continue;
+    // HTTP names are case-insensitive: a later header replaces any spelling of the same name.
+    for (const key of Object.keys(out)) {
+      if (key.toLowerCase() === name.toLowerCase()) delete out[key];
+    }
+    out[name] = value;
   }
   return out;
 }
