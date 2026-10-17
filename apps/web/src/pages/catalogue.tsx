@@ -7,27 +7,22 @@
  */
 import { Navigate, useLocation, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { PackageType } from "@appstrate/core/validation";
 import { OrgCatalogueModal } from "../components/org-catalogue-modal";
 import {
   catalogueKindAddress,
+  catalogueViewOf,
   CATALOGUE_KINDS,
-  CATALOGUE_PACKAGE_PARAM,
-  CATALOGUE_VERSION_PARAM,
   isCatalogueKind,
-  isCatalogueReading,
-  type CatalogueReading,
 } from "../lib/catalogue-link";
-import { searchOf } from "../lib/url-search";
 import { useOverlayBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import { PanelUnavailable } from "../components/overlay-unavailable";
 
-/** `/catalogue` lands on the first kind of Découvrir; query and entry state ride along. */
+/** `/catalogue` lands on the first kind, on Découvrir unless the query says otherwise; query and entry state ride along. */
 export function CatalogueIndexRedirect() {
   const { search, hash, state } = useLocation();
   return (
     <Navigate
-      to={catalogueKindAddress("discover", CATALOGUE_KINDS[0], { search, hash })}
+      to={catalogueKindAddress(CATALOGUE_KINDS[0], { search, hash })}
       replace
       state={state}
     />
@@ -35,26 +30,14 @@ export function CatalogueIndexRedirect() {
 }
 
 export function CataloguePage() {
-  const { reading = "", type = "" } = useParams();
-  const location = useLocation();
+  const { type = "" } = useParams();
+  const { search } = useLocation();
   const { t } = useTranslation("common");
   useOverlayBreadcrumb([{ label: t("nav.catalogue") }]);
 
-  // A reading or a kind the catalogue does not have is an address that does not exist.
-  if (!isCatalogueReading(reading) || !isCatalogueKind(type)) return <PanelUnavailable />;
+  // A view or a kind the catalogue does not have is an address that does not exist.
+  const view = catalogueViewOf(search);
+  if (!isCatalogueKind(type) || view === null) return <PanelUnavailable />;
 
-  return (
-    <OrgCatalogueModal
-      reading={reading}
-      type={type}
-      hrefOf={(nextReading: CatalogueReading, nextType: PackageType) => {
-        // The state filter is reading-specific, so it is dropped on a reading change.
-        const query = new URLSearchParams(location.search);
-        query.delete(CATALOGUE_PACKAGE_PARAM);
-        query.delete(CATALOGUE_VERSION_PARAM);
-        if (nextReading !== reading) query.delete("state");
-        return catalogueKindAddress(nextReading, nextType, { search: searchOf(query), hash: "" });
-      }}
-    />
-  );
+  return <OrgCatalogueModal view={view} type={type} />;
 }

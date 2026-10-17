@@ -150,6 +150,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `api_call` integration the exported agent declares, as a local bundle
     read from disk already did.
 
+- **The catalogue's view moved from the path to the query** (#2013). A kind has
+  one address, `/catalogue/<type>`, showing Découvrir; the per-space table is
+  `/catalogue/<type>?view=spaces`. The old `/catalogue/discover/<type>` and
+  `/catalogue/placed/<type>` addresses are not redirected: they show the page
+  unavailable. Interface only.
+
 ### Fixed
 
 - **A link to a catalogue sheet opens it from the package id alone** (#2013).

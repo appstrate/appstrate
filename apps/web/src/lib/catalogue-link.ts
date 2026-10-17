@@ -1,19 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The catalogue's addresses: `/catalogue/:reading/:type`. Links open on Découvrir,
- * and given a package on that package's sheet.
+ * The catalogue's addresses: `/catalogue/:type`, the kind, and the view in the
+ * query. Links open on Découvrir, and given a package on that package's sheet.
  */
 
 import type { PackageType } from "@appstrate/core/validation";
-
-/** The route's `:reading` segment. */
-const CATALOGUE_READINGS = ["placed", "discover"] as const;
-export type CatalogueReading = (typeof CATALOGUE_READINGS)[number];
-
-export function isCatalogueReading(value: string): value is CatalogueReading {
-  return (CATALOGUE_READINGS as readonly string[]).includes(value);
-}
+import { searchOf } from "./url-search";
 
 /** The route's `:type` segment, in the rail's order.  */
 export const CATALOGUE_KINDS = [
@@ -36,8 +29,22 @@ export const CATALOGUE_TYPE_LABEL_KEY: Record<PackageType, string> = {
 };
 
 /** The sheet's package, and the published version it is read at (`?package=…&version=…`). */
-export const CATALOGUE_PACKAGE_PARAM = "package";
+const CATALOGUE_PACKAGE_PARAM = "package";
 export const CATALOGUE_VERSION_PARAM = "version";
+
+/**
+ * One set seen two ways: Découvrir's cards, or the table of where each package is
+ * placed (`?view=spaces`). Découvrir is the param's absence, so each view has one address.
+ */
+export type CatalogueView = "discover" | "spaces";
+const CATALOGUE_VIEW_PARAM = "view";
+
+/** The view an address asks for, or `null` for one the catalogue does not have. */
+export function catalogueViewOf(search: string): CatalogueView | null {
+  const value = new URLSearchParams(search).get(CATALOGUE_VIEW_PARAM);
+  if (value === null) return "discover";
+  return value === "spaces" ? value : null;
+}
 
 /**
  * `version` only means something beside a `packageId`: the sheet reads that
@@ -47,35 +54,52 @@ export function catalogueHref(
   type: PackageType,
   options: { packageId?: string; version?: string } = {},
 ): string {
-  const base = cataloguePath("discover", type);
+  const base = cataloguePath(type);
   if (!options.packageId) return base;
   const query = new URLSearchParams({ [CATALOGUE_PACKAGE_PARAM]: options.packageId });
   if (options.version) query.set(CATALOGUE_VERSION_PARAM, options.version);
   return `${base}?${query.toString().replace(/\+/g, "%20")}`;
 }
 
-function cataloguePath(reading: CatalogueReading, type: PackageType): string {
-  return `/catalogue/${reading}/${type}`;
+function cataloguePath(type: PackageType): string {
+  return `/catalogue/${type}`;
 }
 
-/** A reading and kind's address, keeping the current query (the sheet's `package`, `version`) and hash. */
+/** A kind's address, keeping the current query (the view, the sheet's `package`, `version`) and hash. */
 export function catalogueKindAddress(
-  reading: CatalogueReading,
   type: PackageType,
   from: { search: string; hash: string },
 ): string {
-  return `${cataloguePath(reading, type)}${from.search}${from.hash}`;
+  return `${cataloguePath(type)}${from.search}${from.hash}`;
 }
 
 /** Where the address must move for a package's sheet to open on its own kind, or `null` when it already can. */
 export function catalogueSheetAddress(
-  reading: CatalogueReading,
   active: PackageType,
   target: PackageType | undefined,
   from: { search: string; hash: string },
 ): string | null {
   if (target === undefined || target === active) return null;
-  return catalogueKindAddress(reading, target, from);
+  return catalogueKindAddress(target, from);
+}
+
+/**
+ * The list of a kind in a view, as the rail and the view switch link to it: the
+ * sheet closes, search and filters stay, except the state filter, which only the
+ * per-space table has, when the view changes.
+ */
+export function catalogueListAddress(
+  type: PackageType,
+  view: CatalogueView,
+  search: string,
+): string {
+  const query = new URLSearchParams(search);
+  query.delete(CATALOGUE_PACKAGE_PARAM);
+  query.delete(CATALOGUE_VERSION_PARAM);
+  if (view !== catalogueViewOf(search)) query.delete("state");
+  if (view === "discover") query.delete(CATALOGUE_VIEW_PARAM);
+  else query.set(CATALOGUE_VIEW_PARAM, view);
+  return `${cataloguePath(type)}${searchOf(query)}`;
 }
 
 /**

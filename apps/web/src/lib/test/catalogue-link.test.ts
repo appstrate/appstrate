@@ -4,53 +4,52 @@ import { describe, it, expect } from "bun:test";
 import {
   catalogueHref,
   catalogueKindAddress,
+  catalogueListAddress,
   catalogueSheetAddress,
   catalogueVersionFor,
+  catalogueViewOf,
   isCatalogueKind,
-  isCatalogueReading,
 } from "../catalogue-link.ts";
 
 describe("catalogueHref", () => {
   it("opens Découvrir on the kind", () => {
-    expect(catalogueHref("skill")).toBe("/catalogue/discover/skill");
+    expect(catalogueHref("skill")).toBe("/catalogue/skill");
   });
 
   it("opens one package's sheet when it names one", () => {
     expect(catalogueHref("agent", { packageId: "@acme/radar-ia" })).toBe(
-      "/catalogue/discover/agent?package=%40acme%2Fradar-ia",
+      "/catalogue/agent?package=%40acme%2Fradar-ia",
     );
   });
 
   it("opens an MCP server on its own kind", () => {
-    expect(catalogueHref("mcp-server")).toBe("/catalogue/discover/mcp-server");
+    expect(catalogueHref("mcp-server")).toBe("/catalogue/mcp-server");
   });
 
   it("opens the sheet at a published version when it names one", () => {
     expect(catalogueHref("skill", { packageId: "@acme/redactor", version: "1.2.0" })).toBe(
-      "/catalogue/discover/skill?package=%40acme%2Fredactor&version=1.2.0",
+      "/catalogue/skill?package=%40acme%2Fredactor&version=1.2.0",
     );
   });
 
   it("encodes a pre-release version and ignores a version with no package", () => {
     expect(catalogueHref("agent", { packageId: "@acme/a", version: "2.0.0-beta.1+build" })).toBe(
-      "/catalogue/discover/agent?package=%40acme%2Fa&version=2.0.0-beta.1%2Bbuild",
+      "/catalogue/agent?package=%40acme%2Fa&version=2.0.0-beta.1%2Bbuild",
     );
-    expect(catalogueHref("agent", { version: "1.0.0" })).toBe("/catalogue/discover/agent");
+    expect(catalogueHref("agent", { version: "1.0.0" })).toBe("/catalogue/agent");
   });
 });
 
 describe("catalogueKindAddress", () => {
-  it("keeps the other params and the hash", () => {
-    const from = { search: "?package=%40acme%2Fa&state=active", hash: "#tab" };
-    expect(catalogueKindAddress("placed", "integration", from)).toBe(
-      "/catalogue/placed/integration?package=%40acme%2Fa&state=active#tab",
+  it("keeps the view, the other params and the hash", () => {
+    const from = { search: "?view=spaces&package=%40acme%2Fa&state=active", hash: "#tab" };
+    expect(catalogueKindAddress("integration", from)).toBe(
+      "/catalogue/integration?view=spaces&package=%40acme%2Fa&state=active#tab",
     );
   });
 
   it("adds nothing when the address has no query", () => {
-    expect(catalogueKindAddress("discover", "agent", { search: "", hash: "" })).toBe(
-      "/catalogue/discover/agent",
-    );
+    expect(catalogueKindAddress("agent", { search: "", hash: "" })).toBe("/catalogue/agent");
   });
 });
 
@@ -58,20 +57,20 @@ describe("catalogueSheetAddress", () => {
   const from = { search: "?package=%40acme%2Fredactor&version=1.2.0", hash: "#notes" };
 
   it("leaves the address alone when no package is named", () => {
-    expect(catalogueSheetAddress("discover", "agent", undefined, from)).toBeNull();
+    expect(catalogueSheetAddress("agent", undefined, from)).toBeNull();
   });
 
   it("leaves the address alone when the package is of the kind shown", () => {
-    expect(catalogueSheetAddress("discover", "skill", "skill", from)).toBeNull();
-    expect(catalogueSheetAddress("placed", "agent", "agent", from)).toBeNull();
+    expect(catalogueSheetAddress("skill", "skill", from)).toBeNull();
   });
 
-  it("moves a package of another kind to its kind, in the same reading", () => {
-    expect(catalogueSheetAddress("discover", "agent", "skill", from)).toBe(
-      "/catalogue/discover/skill?package=%40acme%2Fredactor&version=1.2.0#notes",
+  it("moves a package of another kind to its kind, in the same view", () => {
+    expect(catalogueSheetAddress("agent", "skill", from)).toBe(
+      "/catalogue/skill?package=%40acme%2Fredactor&version=1.2.0#notes",
     );
-    expect(catalogueSheetAddress("placed", "agent", "integration", from)).toBe(
-      "/catalogue/placed/integration?package=%40acme%2Fredactor&version=1.2.0#notes",
+    const spaces = { search: "?view=spaces&package=%40acme%2Fredactor", hash: "" };
+    expect(catalogueSheetAddress("agent", "integration", spaces)).toBe(
+      "/catalogue/integration?view=spaces&package=%40acme%2Fredactor",
     );
   });
 });
@@ -97,16 +96,43 @@ describe("catalogueVersionFor", () => {
   });
 });
 
-describe("catalogue addresses", () => {
-  it("name a reading and a kind", () => {
-    expect(isCatalogueReading("placed")).toBe(true);
-    expect(isCatalogueKind("mcp-server")).toBe(true);
+describe("catalogueListAddress", () => {
+  it("closes the sheet and keeps search and filters on a kind change", () => {
+    const search = "?view=spaces&q=radar&state=active&package=%40acme%2Fa&version=1.0.0";
+    expect(catalogueListAddress("skill", "spaces", search)).toBe(
+      "/catalogue/skill?view=spaces&q=radar&state=active",
+    );
   });
 
-  it("refuse a reading or a kind the catalogue does not have", () => {
-    expect(isCatalogueReading("origin")).toBe(false);
-    expect(isCatalogueReading("shared")).toBe(false);
+  it("drops the state filter when the view changes, either way", () => {
+    expect(catalogueListAddress("agent", "discover", "?view=spaces&q=radar&state=active")).toBe(
+      "/catalogue/agent?q=radar",
+    );
+    expect(catalogueListAddress("agent", "spaces", "?origin=local&state=active")).toBe(
+      "/catalogue/agent?origin=local&view=spaces",
+    );
+  });
+
+  it("writes Découvrir as no view at all", () => {
+    expect(catalogueListAddress("mcp-server", "discover", "")).toBe("/catalogue/mcp-server");
+  });
+});
+
+describe("catalogue addresses", () => {
+  it("name a kind, and a view in the query", () => {
+    expect(isCatalogueKind("mcp-server")).toBe(true);
+    expect(catalogueViewOf("")).toBe("discover");
+    expect(catalogueViewOf("?q=radar")).toBe("discover");
+    expect(catalogueViewOf("?view=spaces&q=radar")).toBe("spaces");
+  });
+
+  it("refuse a kind or a view the catalogue does not have", () => {
     expect(isCatalogueKind("all")).toBe(false);
     expect(isCatalogueKind("agents")).toBe(false);
+    expect(isCatalogueKind("discover")).toBe(false);
+    // Découvrir has one address, the param's absence; the retired readings name nothing.
+    expect(catalogueViewOf("?view=discover")).toBeNull();
+    expect(catalogueViewOf("?view=placed")).toBeNull();
+    expect(catalogueViewOf("?view=")).toBeNull();
   });
 });
