@@ -10,7 +10,7 @@
  * copying the link and cancelling follow, cancelling last because it is
  * destructive.
  *
- * Out of the table component so `column-tiers.test.tsx` can measure it.
+ * Out of the table component, as data.
  */
 import { useTranslation } from "react-i18next";
 import { Link2, Pencil, Trash2 } from "lucide-react";

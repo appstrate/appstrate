@@ -14,7 +14,7 @@
  * which a value with a picker beside it is not.
  *
  * Out of the page for the same reason as `model-columns.tsx`: a column set is
- * data, and it has to be reachable by `column-tiers.test.tsx`.
+ * data, beside its table.
  */
 
 import { useTranslation } from "react-i18next";

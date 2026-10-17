@@ -3,8 +3,7 @@
 /**
  * The column set of the providers table (Settings › Models, Preferences › My providers).
  *
- * A column set is data, not a screen, and lives beside its table so that
- * `column-tiers.test.tsx` can hold it to the tier rule. The rows are
+ * A column set is data, not a screen, and lives beside its table. The rows are
  * `ProviderRow`s (`lib/model-providers.ts`): a key or the instance, and the models it makes
  * usable. One State column says what is worth saying (`rowStates`), nothing when all is well.
  * Everything a row can do is in its « … » menu; a click on an organization key's row chooses
