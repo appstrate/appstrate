@@ -15,6 +15,7 @@ import { describe, it, expect } from "bun:test";
 import { z } from "zod";
 import {
   apiCallRequestSchema,
+  apiCallTargetJsonSchema,
   makeApiCallTool,
   ABSOLUTE_MAX_RESPONSE_SIZE,
 } from "../../src/resolvers/http-call-core.ts";
@@ -330,6 +331,34 @@ describe("apiCallRequestSchema — invalid inputs", () => {
 // byte would either inject extra headers or split the multipart envelope.
 // The schema rejects them at parse time so the transport layer never has
 // to think about it.
+
+describe("apiCallRequestSchema — target", () => {
+  const accepts = (target: string) =>
+    apiCallRequestSchema.safeParse({ method: "GET", target }).success;
+
+  it("accepts an http(s) URL with {{field}}s in the path, query or host", () => {
+    expect(accepts("https://share.garmin.com/feed/share/{{mapshare_id}}")).toBe(true);
+    expect(accepts("https://api.example.com/x?id={{id}}&k={{ key }}")).toBe(true);
+    expect(accepts("https://{{tenant}}.example.com/x")).toBe(true);
+    expect(accepts("HTTPS://api.example.com/x")).toBe(true);
+    expect(accepts("{{base_url}}/x")).toBe(true);
+  });
+
+  it("rejects a non-http(s) scheme, an empty host and garbage", () => {
+    for (const target of [
+      "ftp://api.example.com/x",
+      "javascript:alert(1)",
+      "https://",
+      "not a url",
+    ]) {
+      expect(accepts(target)).toBe(false);
+    }
+  });
+
+  it("publishes no `format: uri`, which refuses `{` and `}`", () => {
+    expect(JSON.stringify(apiCallTargetJsonSchema)).not.toContain('"format"');
+  });
+});
 
 describe("apiCallRequestSchema — multipart header-injection guard", () => {
   const baseRequest = (

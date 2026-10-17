@@ -279,7 +279,15 @@ const responseModeSchema = z
   })
   .optional();
 
-const httpUrl = z.url({ protocol: /^https?$/ });
+/**
+ * An absolute http(s) URL, `{{field}}`s allowed after the scheme. A pattern, not `z.url()`:
+ * its `format: "uri"` refuses `{` and `}` in the validator the agent's tool call meets first.
+ * Pattern flags do not reach the JSON schema, hence the spelled-out case.
+ */
+const httpUrl = z
+  .string()
+  .regex(/^[Hh][Tt][Tt][Pp][Ss]?:\/\/[^\s/?#]+(?:[/?#].*)?$/)
+  .refine((value) => URL.canParse(value));
 /** A URL-valued credential field, then nothing or a path: `{{site_url}}/wp-json/…`. */
 const URL_FIELD_TARGET = new RegExp(`^${PLACEHOLDER.source}(?:/.*)?$`);
 

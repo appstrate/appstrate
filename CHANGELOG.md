@@ -171,6 +171,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **An `api_call` target can carry a `{{field}}` in its path or query**
+  (#2060). The target's published JSON schema said `format: "uri"`, which the
+  agent's tool-argument validator applies before the call leaves the agent: it
+  refused `{` and `}`, so `https://share.garmin.com/feed/share/{{mapshare_id}}`
+  (or Twilio's `/Accounts/{{account_sid}}/…`) never reached the sidecar,
+  although the sidecar renders such a field as one percent-encoded component.
+  The schema is now a pattern on `http(s)://` (still checked as a parsable
+  URL), and the validator also refuses `ftp:` or `javascript:` targets it used
+  to let through.
+- **`responseMode.toFile` writes under a workspace reached through a symlink**
+  (#2060). The escape check compared the real path of the target directory to
+  the workspace path as given, so under `RUN_ADAPTER=process` on macOS (the
+  temp dir is `/var` → `/private/var`) every `toFile` was refused as "escapes
+  the workspace via a symlink". The workspace root is now resolved the same
+  way; a symlinked subdirectory pointing outside is still refused.
+
 - **A link to a catalogue sheet opens it from the package id alone** (#2013).
   `/catalogue?package=<id>[&version=…]`, or a link naming the wrong kind,
   lands on the package's own kind instead of closing the sheet. Interface only.
