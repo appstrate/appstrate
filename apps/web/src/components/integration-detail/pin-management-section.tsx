@@ -3,86 +3,75 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { Label } from "@appstrate/ui/components/label";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { FormItem } from "@/components/app-ui/form-item";
 import { OptionSelect } from "@/components/app-ui/option-select";
+import type { IntegrationConnection, IntegrationPin } from "@appstrate/shared-types";
 import { SettingsHeading } from "../settings/settings-heading";
 import { ConfirmModal } from "../confirm-modal";
 import { DataTable } from "../data-table";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
-import type { IntegrationPin } from "@appstrate/shared-types";
+import { FormModal } from "../form-modal";
 import { usePinColumns } from "./pin-columns";
+import { ConnectionCheckboxList } from "./connection-checkbox-list";
 import {
   useIntegrationPins,
   useIntegrationConnections,
-  type IntegrationConnection,
   useAgentsConsumingIntegration,
   useIntegrationOrgDefault,
   useUpsertIntegrationPin,
   useDeleteIntegrationPin,
 } from "../../hooks/use-integrations";
-import type { ConnectionSet } from "../../lib/connection-set";
+import { unavailableConnectionIds } from "../../lib/connection-set";
 import {
-  additionsRefusal,
   ADDITIONS_REFUSAL_KEYS,
-  adminPinBody,
   PIN_MODE_HELP_KEYS,
   PIN_MODE_KEYS,
   PIN_MODES,
-  pinMode,
-  switchedModeBody,
+  PIN_SAVE_CONSEQUENCE_KEYS,
+  initialPinDraft,
+  pinDraftVerdict,
+  type PinDraft,
   type PinMode,
 } from "../../lib/admin-pin-payload";
-import { ConnectionSetPicker } from "../integration-connect/connection-choice-menu";
-import { connectionSetOption } from "../integration-connect/connection-set-option";
 
 /**
  * Per-agent pins: one per (agent, integration), holding the whole imposed SET and its mode (runs
  * use exactly that set, or that set plus the user's connections), both replaced on write. With an
  * org default in place, these are per-agent EXCEPTIONS. An empty set pins "no connection"; whether
- * that blocks a run is the running version's `required` to say.
+ * that blocks a run is the running version's `required` to say. The table only reads: a pin is
+ * added and edited in one form modal, and deleted only through its confirmation.
  */
 export function PinManagementSection({ packageId }: { packageId: string }) {
-  const { t } = useTranslation(["settings", "agents"]);
+  const { t } = useTranslation(["settings", "common"]);
   const { data: pins, isLoading: pinsLoading, error: pinsError } = useIntegrationPins(packageId);
   const { data: connections, isLoading: connectionsLoading } = useIntegrationConnections(packageId);
   const { data: consumingAgents, isLoading: agentsLoading } =
     useAgentsConsumingIntegration(packageId);
   const deletePin = useDeleteIntegrationPin();
-  const changeMode = useUpsertIntegrationPin();
   // An enforced default accepts only « exact »: no pin of this integration may leave it meanwhile.
   const { data: orgDefault } = useIntegrationOrgDefault(packageId);
   const enforcedDefault = orgDefault?.enforce === true;
 
-  const [adding, setAdding] = useState(false);
+  // `pin: null` adds one. Both are mounted only while open: closing abandons the draft.
+  const [form, setForm] = useState<{ pin: IntegrationPin | null } | null>(null);
   const [toDelete, setToDelete] = useState<IntegrationPin | null>(null);
-  // Every change of mode clears the members' own choices for the agent, so it is confirmed.
-  const [toChange, setToChange] = useState<IntegrationPin | null>(null);
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_here);
-
-  // Lookup helpers for the table
   const agentDisplayName = (id: string) =>
     consumingAgents?.find((a) => a.agent_package_id === id)?.display_name ?? id;
+  // Until the connections load, a stored member cannot be told unavailable: no edit yet.
+  const onEdit = connections ? (pin: IntegrationPin) => setForm({ pin }) : undefined;
 
   const columns = usePinColumns({
     agentName: (pin) => agentDisplayName(pin.agent_package_id),
     pinnable: pinnableConnections,
     connections,
     isDeleting: (pin) => deletePin.isPending && toDelete?.agent_package_id === pin.agent_package_id,
+    onEdit,
     onDelete: setToDelete,
-    enforcedDefault,
-    isChangingMode: (pin) =>
-      changeMode.isPending &&
-      changeMode.variables?.params.path.agentPackageId === pin.agent_package_id,
-    onChangeMode: setToChange,
   });
 
-  // Only include agents not already pinned.
-  const alreadyPinnedAgentIds = new Set(
-    (pins ?? [])
-      .filter((p) => p.integration_package_id === packageId)
-      .map((p) => p.agent_package_id),
-  );
+  const alreadyPinnedAgentIds = new Set((pins ?? []).map((p) => p.agent_package_id));
   const pinnableAgents = (consumingAgents ?? []).filter(
     (a) => !alreadyPinnedAgentIds.has(a.agent_package_id),
   );
@@ -103,6 +92,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
           columns={columns}
           rows={pins ?? []}
           rowKey={(pin) => pin.agent_package_id}
+          rowAction={onEdit}
           isLoading={pinsLoading || agentsLoading}
           failure={pinsError}
           empty={
@@ -113,69 +103,54 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
         />
       </div>
 
-      {/* Add new pin — "no connection" needs no shared connection. */}
       {agentsLoading || connectionsLoading || pinsLoading ? (
         <Skeleton className="h-8 w-32" />
       ) : pinnableAgents.length === 0 ? (
         <p className="text-muted-foreground text-xs italic">
           {t("integration.admin.pinManagement.noConsumingAgents")}
         </p>
-      ) : !adding ? (
-        <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setForm({ pin: null })}
+          data-testid="pin-add"
+        >
           {t("integration.admin.pinManagement.add")}
         </Button>
-      ) : (
-        <NewPinForm
+      )}
+
+      {form && (
+        <PinFormModal
           packageId={packageId}
-          agents={pinnableAgents}
+          pin={form.pin}
+          agents={
+            form.pin
+              ? [
+                  {
+                    agent_package_id: form.pin.agent_package_id,
+                    display_name: agentDisplayName(form.pin.agent_package_id),
+                  },
+                ]
+              : pinnableAgents
+          }
           connections={pinnableConnections}
           enforcedDefault={enforcedDefault}
-          onDone={() => setAdding(false)}
+          onClose={() => setForm(null)}
         />
       )}
 
-      <ConfirmModal
-        open={toDelete !== null}
-        onClose={() => setToDelete(null)}
-        onConfirm={() => {
-          if (!toDelete) return;
-          deletePin.mutate(
-            { params: { path: { packageId, agentPackageId: toDelete.agent_package_id } } },
-            { onSuccess: () => setToDelete(null) },
-          );
-        }}
-        title={t("integration.admin.pinManagement.delete")}
-        description={t("integration.admin.pinManagement.deleteConfirm", {
-          agent: toDelete ? agentDisplayName(toDelete.agent_package_id) : "",
-        })}
-        confirmLabel={t("btn.delete", { ns: "common" })}
-        isPending={deletePin.isPending}
-      >
-        {/* A closed pin takes every member choice with it; an open one, those that only narrowed it; either may disable schedules. */}
-        {toDelete && (
-          <p className="text-muted-foreground text-sm" data-testid="pin-delete-clears-choices">
-            {t(
-              toDelete.allow_additional_connections
-                ? "integration.admin.pinManagement.deleteOpenClearsChoices"
-                : "integration.admin.pinManagement.deleteClosedClearsChoices",
-            )}
-          </p>
-        )}
-      </ConfirmModal>
-
-      {toChange && (
-        <PinModeConfirm
-          pin={toChange}
-          agent={agentDisplayName(toChange.agent_package_id)}
-          isPending={changeMode.isPending}
-          onClose={() => setToChange(null)}
+      {/* Mounted only for the pin the menu named: no stale target, and only its button deletes. */}
+      {toDelete && (
+        <PinDeleteConfirm
+          pin={toDelete}
+          agent={agentDisplayName(toDelete.agent_package_id)}
+          isPending={deletePin.isPending}
+          onClose={() => setToDelete(null)}
           onConfirm={() =>
-            changeMode.mutate(
-              {
-                params: { path: { packageId, agentPackageId: toChange.agent_package_id } },
-                body: switchedModeBody(toChange),
-              },
-              { onSuccess: () => setToChange(null) },
+            deletePin.mutate(
+              { params: { path: { packageId, agentPackageId: toDelete.agent_package_id } } },
+              { onSuccess: () => setToDelete(null) },
             )
           }
         />
@@ -185,12 +160,10 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
 }
 
 /**
- * Changing a pin's mode: the server deletes the members' own choices for the agent whenever the pin
- * is « exact » before or after (a member pin never survives under it), so either way the body says
- * so; moving to « plus » repeats what a run may then combine, moving to « exact » that the schedules
- * whose overrides add connections fail at their next run and stay disabled.
+ * The one way to delete a pin. A closed pin takes every member choice with it; an open one, those
+ * that only narrowed it (all of them under an enforced default); either may disable schedules.
  */
-export function PinModeConfirm({
+export function PinDeleteConfirm({
   pin,
   agent,
   isPending,
@@ -203,159 +176,190 @@ export function PinModeConfirm({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const { t } = useTranslation("settings");
-  const toPlus = pinMode(pin) === "exact";
+  const { t } = useTranslation(["settings", "common"]);
   return (
     <ConfirmModal
       open
       onClose={onClose}
       onConfirm={onConfirm}
-      title={t(
-        toPlus
-          ? "integration.admin.pinManagement.toPlusTitle"
-          : "integration.admin.pinManagement.toExactTitle",
-        { agent },
-      )}
-      description={t("integration.admin.pinManagement.clearsMemberChoices")}
-      confirmLabel={t("integration.admin.pinManagement.changeMode")}
-      variant="default"
+      title={t("integration.admin.pinManagement.delete")}
+      description={t("integration.admin.pinManagement.deleteConfirm", { agent })}
+      confirmLabel={t("btn.delete", { ns: "common" })}
       isPending={isPending}
     >
-      <p className="text-muted-foreground text-sm">
+      <p className="text-muted-foreground text-sm" data-testid="pin-delete-clears-choices">
         {t(
-          toPlus
-            ? "integration.admin.pinManagement.modePlusHelp"
-            : "integration.admin.pinManagement.toExactSchedules",
+          pin.allow_additional_connections
+            ? "integration.admin.pinManagement.deleteOpenClearsChoices"
+            : "integration.admin.pinManagement.deleteClosedClearsChoices",
         )}
       </p>
     </ConfirmModal>
   );
 }
 
-/**
- * Pins one agent to a set of connections, or to none, in « exact » mode unless the admin picks
- * « plus » (never over none, nor while the space enforces a default); `onDone` closes it.
- */
-export function NewPinForm({
+interface PinFormProps {
+  packageId: string;
+  /** The pin edited, `null` for a new one. */
+  pin: IntegrationPin | null;
+  /** The agent of the pin edited, or the agents without a pin. */
+  agents: { agent_package_id: string; display_name: string }[];
+  /** The connections shared into the space. */
+  connections: IntegrationConnection[];
+  enforcedDefault: boolean;
+  onClose: () => void;
+}
+
+/** Adds or edits one pin: its agent, its set, its mode; one PUT on submit. */
+function PinFormModal({
   packageId,
+  pin,
   agents,
   connections,
   enforcedDefault,
-  onDone,
-}: {
-  packageId: string;
-  agents: { agent_package_id: string; display_name: string }[];
-  connections: IntegrationConnection[];
-  enforcedDefault: boolean;
-  onDone: () => void;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
+  onClose,
+}: PinFormProps) {
+  const { t } = useTranslation("settings");
   const upsertPin = useUpsertIntegrationPin();
-  const [newAgent, setNewAgent] = useState("");
-  const [newConnectionIds, setNewConnectionIds] = useState<ConnectionSet>(null);
-  const [chosenMode, setChosenMode] = useState<PinMode>("exact");
-  // Only shared connections are offered here: none can be unavailable.
-  const refusal = additionsRefusal(
-    { connection_ids: newConnectionIds, allow_additional_connections: false },
-    // The agents offered are the active ones.
-    { enforcedDefault, unavailableIds: [], agentInactive: false },
-  );
-  // « plus » unavailable reads « exact », whatever was chosen before the set emptied.
-  const mode: PinMode = refusal === null ? chosenMode : "exact";
-
-  const onSubmitNewPin = () => {
-    if (!newAgent || newConnectionIds === null) return;
-    upsertPin.mutate(
-      {
-        params: { path: { packageId, agentPackageId: newAgent } },
-        body: adminPinBody({
-          connection_ids: newConnectionIds,
-          allow_additional_connections: mode === "plus",
-        }),
-      },
-      { onSuccess: onDone },
-    );
-  };
-
+  const [draft, setDraft] = useState(() => initialPinDraft(pin));
+  const unavailableIds = pin
+    ? unavailableConnectionIds(
+        pin.connection_ids,
+        connections.map((c) => c.id),
+      )
+    : [];
+  const verdict = pinDraftVerdict({
+    stored: pin,
+    connectionIds: draft.connectionIds,
+    chosenMode: draft.chosenMode,
+    enforcedDefault,
+    unavailableIds,
+    // The agents offered for a new pin are the active ones.
+    agentInactive: pin ? !pin.agent_active : false,
+  });
+  const canSubmit = draft.agent !== "" && verdict.savable;
   return (
-    <div className="flex flex-col gap-3" data-testid="pin-add-form">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="min-w-[12rem] flex-1">
-          <Label htmlFor="pin-add-agent" className="mb-2 block text-sm">
-            {t("integration.admin.pinManagement.colAgent")}
-          </Label>
-          <OptionSelect
-            id="pin-add-agent"
-            value={newAgent}
-            onValueChange={setNewAgent}
-            placeholder={t("integration.admin.pinManagement.colAgent")}
-            data-testid="pin-add-agent"
-            options={agents.map((a) => ({ value: a.agent_package_id, label: a.display_name }))}
-          />
-        </div>
-        <div className="min-w-[12rem] flex-1">
-          <p className="mb-2 block text-sm font-medium">
-            {t("integration.admin.pinManagement.colConnections")}
-          </p>
-          {connections.length === 0 && (
-            <p className="text-muted-foreground mb-1 text-xs italic">
-              {t("integration.admin.pinManagement.noPinnableConnections")}
-            </p>
-          )}
-          <ConnectionSetPicker
-            options={connections.map(connectionSetOption)}
-            value={newConnectionIds}
-            onChange={setNewConnectionIds}
-            testPrefix="pin-add-pick"
-            testKey="connections"
-            allowNone
-            noneHint={t("integration.admin.pinManagement.noneHint")}
-          />
-        </div>
-      </div>
-      <div className="max-w-md">
-        <Label htmlFor="pin-add-mode" className="mb-2 block text-sm">
-          {t("integration.admin.pinManagement.colMode")}
-        </Label>
+    <FormModal
+      title={
+        pin
+          ? t("integration.admin.pinManagement.editTitle", {
+              agent: agents[0]?.display_name ?? pin.agent_package_id,
+            })
+          : t("integration.admin.pinManagement.addTitle")
+      }
+      onClose={onClose}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!canSubmit) return;
+        upsertPin.mutate(
+          { params: { path: { packageId, agentPackageId: draft.agent } }, body: verdict.body },
+          { onSuccess: onClose },
+        );
+      }}
+      isPending={upsertPin.isPending}
+      submitLabel={pin ? undefined : t("integration.admin.pinManagement.add")}
+      submitDisabled={!canSubmit}
+      submitTestId="pin-form-submit"
+    >
+      <PinFormFields
+        editing={pin !== null}
+        agents={agents}
+        connections={connections}
+        unavailableIds={unavailableIds}
+        draft={draft}
+        verdict={verdict}
+        onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))}
+      />
+    </FormModal>
+  );
+}
+
+/** The fields, without the dialog chrome (a Radix dialog renders nothing without a DOM). */
+export function PinFormFields({
+  editing,
+  agents,
+  connections,
+  unavailableIds,
+  draft,
+  verdict,
+  onChange,
+}: {
+  editing: boolean;
+  agents: PinFormProps["agents"];
+  connections: IntegrationConnection[];
+  /** Stored members no longer shared: listed, ticked until unticked. */
+  unavailableIds: string[];
+  draft: PinDraft;
+  verdict: ReturnType<typeof pinDraftVerdict>;
+  onChange: (patch: Partial<PinDraft>) => void;
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <>
+      <FormItem id="pin-form-agent" label={t("integration.admin.pinManagement.colAgent")}>
         <OptionSelect
-          id="pin-add-mode"
-          value={mode}
-          onValueChange={(value) => setChosenMode(value as PinMode)}
-          disabled={upsertPin.isPending}
-          data-testid="pin-add-mode"
-          options={PIN_MODES.map((value) => ({
-            value,
-            label: t(PIN_MODE_KEYS[value]),
-            disabled: value === "plus" && refusal !== null,
-          }))}
+          value={draft.agent}
+          onValueChange={(agent) => onChange({ agent })}
+          // An edited pin keeps its agent: another agent is another pin.
+          disabled={editing}
+          placeholder={t("integration.admin.pinManagement.chooseAgent")}
+          data-testid="pin-form-agent"
+          options={agents.map((a) => ({ value: a.agent_package_id, label: a.display_name }))}
         />
-        <p className="text-muted-foreground mt-2 text-sm">{t(PIN_MODE_HELP_KEYS[mode])}</p>
-        {refusal && (
-          <p className="text-muted-foreground mt-1 text-xs" data-testid="pin-add-mode-refusal">
-            {t(ADDITIONS_REFUSAL_KEYS[refusal])}
+      </FormItem>
+
+      <fieldset className="flex min-w-0 flex-col gap-2">
+        <legend className="mb-2 text-sm font-medium">
+          {t("integration.admin.pinManagement.colConnections")}
+        </legend>
+        {connections.length === 0 && unavailableIds.length === 0 && (
+          <p className="text-muted-foreground text-xs italic">
+            {t("integration.admin.pinManagement.noPinnableConnections")}
           </p>
         )}
-        {/* « exact » clears the members' own choices for the agent; « plus » keeps them. */}
-        {mode === "exact" && (
-          <p className="text-muted-foreground mt-1 text-sm" data-testid="pin-add-clears-choices">
-            {t("integration.admin.pinManagement.clearsMemberChoices")}
+        <ConnectionCheckboxList
+          idPrefix="pin-form-connection"
+          connections={connections}
+          unavailableIds={unavailableIds}
+          value={draft.connectionIds}
+          onChange={(connectionIds) => onChange({ connectionIds })}
+        />
+        {draft.connectionIds.length === 0 && (
+          <p className="text-muted-foreground text-xs" data-testid="pin-form-none">
+            {t("integration.admin.pinManagement.noneChecked")}
           </p>
         )}
-      </div>
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onSubmitNewPin}
-          disabled={!newAgent || newConnectionIds === null || upsertPin.isPending}
-          data-testid="pin-add-submit"
+      </fieldset>
+
+      <div className="flex flex-col gap-1">
+        <FormItem
+          id="pin-form-mode"
+          label={t("integration.admin.pinManagement.colMode")}
+          hint={t(PIN_MODE_HELP_KEYS[verdict.mode])}
         >
-          {t("integration.admin.pinManagement.add")}
-        </Button>
-        <Button variant="ghost" size="sm" disabled={upsertPin.isPending} onClick={onDone}>
-          {t("btn.cancel", { ns: "common" })}
-        </Button>
+          <OptionSelect
+            value={verdict.mode}
+            onValueChange={(value) => onChange({ chosenMode: value as PinMode })}
+            data-testid="pin-form-mode"
+            options={PIN_MODES.map((value) => ({
+              value,
+              label: t(PIN_MODE_KEYS[value]),
+              disabled: value === "plus" && verdict.refusal !== null,
+            }))}
+          />
+        </FormItem>
+        {verdict.refusal && (
+          <p className="text-muted-foreground text-xs" data-testid="pin-form-mode-refusal">
+            {t(ADDITIONS_REFUSAL_KEYS[verdict.refusal])}
+          </p>
+        )}
       </div>
-    </div>
+
+      {verdict.consequence && (
+        <p className="text-muted-foreground text-sm" data-testid="pin-form-consequence">
+          {t(PIN_SAVE_CONSEQUENCE_KEYS[verdict.consequence])}
+        </p>
+      )}
+    </>
   );
 }

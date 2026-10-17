@@ -250,3 +250,19 @@ describe("the space default's effect on members' own choices", () => {
     expect(section([])).not.toContain(note);
   });
 });
+
+describe("the space default's connections", () => {
+  const box = (id: string) => `data-testid="org-default-pick-${id}"`;
+
+  it("are the shared connections as boxes, the stored ones ticked", () => {
+    const html = section([SHARED]);
+    expect(html).toMatch(new RegExp(`aria-checked="true"[^>]*${box(SHARED)}`));
+    expect(html).not.toContain('role="menu"');
+  });
+
+  it("list a stored member no longer shared unticked, and never tickable again", () => {
+    const html = section([SHARED, GONE]);
+    expect(html).toMatch(new RegExp(`aria-checked="false"[^>]*disabled=""[^>]*${box(GONE)}`));
+    expect(html).toContain(settingsFr["integration.admin.unavailableConnection"]);
+  });
+});

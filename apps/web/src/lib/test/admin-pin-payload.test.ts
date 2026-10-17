@@ -3,12 +3,18 @@
 /**
  * The admin pin PUT replaces the whole pin, its mode included: an absent
  * `allow_additional_connections` reads « exact ». Every body the SPA sends therefore names the flag,
- * and a mode change rewrites the stored set, so a set naming a connection no longer shared cannot
- * change mode in either direction.
+ * and every write rewrites the stored set, so a set naming a connection no longer shared (or the
+ * pin of an agent inactive in the space) cannot be saved at all.
  */
 
 import { describe, expect, it } from "bun:test";
-import { additionsRefusal, adminPinBody, pinMode, switchedModeBody } from "../admin-pin-payload";
+import {
+  additionsRefusal,
+  adminPinBody,
+  initialPinDraft,
+  pinDraftVerdict,
+  pinMode,
+} from "../admin-pin-payload";
 
 const WEB = "11111111-1111-4111-8111-111111111111";
 const DB = "22222222-2222-4222-8222-222222222222";
@@ -33,27 +39,6 @@ describe("pinMode", () => {
   it("reads « exact » off a closed pin, the default, and « plus » off an open one", () => {
     expect(pinMode({ allow_additional_connections: false })).toBe("exact");
     expect(pinMode({ allow_additional_connections: true })).toBe("plus");
-  });
-});
-
-describe("switchedModeBody", () => {
-  it("names the other mode's flag and rewrites the stored set as it is, in its order", () => {
-    const stored = {
-      agent_package_id: "@acme/ops",
-      integration_package_id: "@acme/drive",
-      connection_ids: [DB, WEB],
-      allow_additional_connections: false,
-      createdAt: "2026-10-17T10:00:00Z",
-      updatedAt: "2026-10-17T10:00:00Z",
-    };
-    expect(switchedModeBody(stored)).toEqual({
-      connection_ids: [DB, WEB],
-      allow_additional_connections: true,
-    });
-    expect(switchedModeBody({ ...stored, allow_additional_connections: true })).toEqual({
-      connection_ids: [DB, WEB],
-      allow_additional_connections: false,
-    });
   });
 });
 
@@ -106,5 +91,112 @@ describe("additionsRefusal", () => {
         agentInactive: true,
       }),
     ).toBe("inactive_agent");
+  });
+});
+
+describe("initialPinDraft", () => {
+  it("starts a new pin with no agent, no connection and « exact »", () => {
+    expect(initialPinDraft(null)).toEqual({ agent: "", connectionIds: [], chosenMode: "exact" });
+  });
+
+  it("starts an edited pin on its own agent, set (unavailable members included) and mode", () => {
+    expect(
+      initialPinDraft({
+        agent_package_id: "@acme/ops",
+        connection_ids: [DB, WEB],
+        allow_additional_connections: true,
+      }),
+    ).toEqual({ agent: "@acme/ops", connectionIds: [DB, WEB], chosenMode: "plus" });
+  });
+});
+
+describe("pinDraftVerdict", () => {
+  const space = { enforcedDefault: false, unavailableIds: [], agentInactive: false };
+  const stored = (connection_ids: string[], allow_additional_connections: boolean) => ({
+    connection_ids,
+    allow_additional_connections,
+  });
+
+  it("sends a new pin's set and mode, the flag always named", () => {
+    expect(
+      pinDraftVerdict({ ...space, stored: null, connectionIds: [WEB, DB], chosenMode: "plus" }),
+    ).toEqual({
+      mode: "plus",
+      refusal: null,
+      savable: true,
+      consequence: null,
+      body: { connection_ids: [WEB, DB], allow_additional_connections: true },
+    });
+    expect(
+      pinDraftVerdict({ ...space, stored: null, connectionIds: [], chosenMode: "exact" }),
+    ).toMatchObject({
+      savable: true,
+      consequence: "clears_choices",
+      body: { connection_ids: [], allow_additional_connections: false },
+    });
+  });
+
+  it("reads « exact » when « plus » is refused, whatever was chosen", () => {
+    expect(
+      pinDraftVerdict({ ...space, stored: null, connectionIds: [], chosenMode: "plus" }),
+    ).toMatchObject({
+      mode: "exact",
+      refusal: "no_imposed_connection",
+      body: { allow_additional_connections: false },
+    });
+    expect(
+      pinDraftVerdict({
+        ...space,
+        enforcedDefault: true,
+        stored: null,
+        connectionIds: [WEB],
+        chosenMode: "plus",
+      }),
+    ).toMatchObject({ mode: "exact", refusal: "enforced_default", savable: true });
+  });
+
+  it("has nothing to save while the edited pin is unchanged, its set's order aside", () => {
+    expect(
+      pinDraftVerdict({
+        ...space,
+        stored: stored([WEB, DB], false),
+        connectionIds: [DB, WEB],
+        chosenMode: "exact",
+      }),
+    ).toMatchObject({ savable: false, consequence: null });
+  });
+
+  it("names whom saving affects by the move it makes", () => {
+    const verdict = (from: boolean, ids: string[], to: "exact" | "plus") =>
+      pinDraftVerdict({ ...space, stored: stored([WEB], from), connectionIds: ids, chosenMode: to })
+        .consequence;
+    expect(verdict(false, [DB], "exact")).toBe("clears_choices");
+    expect(verdict(false, [WEB], "plus")).toBe("clears_choices");
+    expect(verdict(true, [WEB], "exact")).toBe("clears_choices_and_schedules");
+    expect(verdict(true, [WEB, DB], "plus")).toBeNull();
+  });
+
+  it("refuses to save a set naming an unavailable connection until it is unticked", () => {
+    const gone = { ...space, unavailableIds: [DB], stored: stored([WEB, DB], false) };
+    expect(
+      pinDraftVerdict({ ...gone, connectionIds: [WEB, DB], chosenMode: "exact" }),
+    ).toMatchObject({ refusal: "unavailable_connection", savable: false });
+    expect(pinDraftVerdict({ ...gone, connectionIds: [WEB], chosenMode: "exact" })).toMatchObject({
+      refusal: null,
+      savable: true,
+      body: { connection_ids: [WEB] },
+    });
+  });
+
+  it("refuses to save the pin of an agent inactive in the space", () => {
+    expect(
+      pinDraftVerdict({
+        ...space,
+        agentInactive: true,
+        stored: stored([WEB], false),
+        connectionIds: [WEB, DB],
+        chosenMode: "exact",
+      }),
+    ).toMatchObject({ refusal: "inactive_agent", savable: false });
   });
 });

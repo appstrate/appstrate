@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An admin's per-agent pins of an integration. "Aucune connexion" pins none — so it is offered even
- * when no connection is shared to pin (in the form that opens behind "Ajouter") — and a stored pin
- * to none reads as such. A pin's mode, named by its effect: « Exactement ces connexions » (the
- * default) or « Ces connexions, plus celles de l’utilisateur », a select per pin in the table and
- * one in the new-pin form. « plus » is refused over no imposed connection, and while the space
- * enforces a default for the integration (the server refuses both); a table select changes neither
- * way while its stored set names an unavailable connection (the rewrite would 404). A member pin
- * never survives under an « exact » admin pin, so every change is confirmed by a dialog saying the
- * members' choices go, and the form says it while it reads « exact ».
+ * An admin's per-agent pins of an integration. The table only reads (Agent, Connexions, Mode in
+ * words); its « … » holds « Modifier » and « Supprimer ». « Ajouter » and « Modifier » open one form:
+ * Agent (fixed when editing), the shared connections as boxes (none ticked pins « Aucune
+ * connexion »), Mode (« Exactement ces connexions » by default, « Ces connexions, plus celles de
+ * l’utilisateur » disabled with its reason), then the one sentence saying whom saving affects.
+ * A pin is deleted only from its confirmation.
+ *
+ * The form's fields are rendered without the dialog chrome (a Radix dialog renders nothing without
+ * a DOM), its draft and verdict from `lib/admin-pin-payload.ts`, whose payloads are pinned there.
  */
 
 import { afterAll, describe, expect, it, spyOn } from "bun:test";
@@ -17,7 +17,7 @@ import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import type { IntegrationPin } from "@appstrate/shared-types";
 import type { DataColumn } from "../../data-table.tsx";
-import type { MenuItem } from "../../../test/connection-menu-tree.tsx";
+import type { MenuAction } from "../../../lib/menu-action.ts";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
@@ -27,9 +27,9 @@ const { $api } = await import("../../../api/client.ts");
 const { render } = await import("../../../test/render.tsx");
 const { spaceStore } = await import("../../../stores/space-store.ts");
 const { usePinColumns } = await import("../pin-columns.tsx");
-const { PinModeConfirm, NewPinForm, PinManagementSection } =
+const { PinDeleteConfirm, PinFormFields, PinManagementSection } =
   await import("../pin-management-section.tsx");
-const { descriptionOf, menuItems } = await import("../../../test/connection-menu-tree.tsx");
+const { initialPinDraft, pinDraftVerdict } = await import("../../../lib/admin-pin-payload.ts");
 const settingsFr = (await import("../../../locales/fr/settings.json")).default;
 const settingsEn = (await import("../../../locales/en/settings.json")).default;
 
@@ -42,49 +42,56 @@ const GMAIL = "@acme/gmail";
 const SPACE = "spc_here";
 const header = { "X-Org-Id": undefined, "X-Space-Id": SPACE };
 const path = { packageId: GMAIL };
+const AGENT = "@acme/ops";
+const WEB = "11111111-1111-4111-8111-111111111111";
+const DB = "22222222-2222-4222-8222-222222222222";
+const GONE = "33333333-3333-4333-8333-333333333333";
 
-const SHARED = {
-  id: "11111111-1111-4111-8111-111111111111",
-  label: "Équipe",
-  account_id: "team@acme.test",
-  auth_key: "oauth",
-  scope: "org" as const,
-  spaceId: null,
-  shared_here: true,
-};
+const fr = (key: string) => settingsFr[`integration.admin.pinManagement.${key}` as never] as string;
+const EXACT = fr("modeExact");
+const PLUS = fr("modePlus");
 
-function renderSection(opts: {
-  pins?: { agent_package_id: string; connection_ids: string[]; agent_active?: boolean }[];
-  connections?: (typeof SHARED)[];
-}): string {
-  const qc = new QueryClient();
-  const keys = {
-    pins: $api.queryOptions("get", "/api/integrations/{packageId}/pins", {
-      params: { path, header },
-    }).queryKey,
-    connections: $api.queryOptions("get", "/api/integrations/{packageId}/connections", {
-      params: { path, header },
-    }).queryKey,
-    agents: $api.queryOptions("get", "/api/integrations/{packageId}/consuming-agents", {
-      params: { path, header },
-    }).queryKey,
+function connection(id: string, label: string) {
+  return {
+    id,
+    label,
+    account_id: `${label}@acme.test`,
+    auth_key: "oauth",
+    scope: "org" as const,
+    spaceId: null,
+    shared_here: true,
+    owner_name: null,
+    variables: null,
   };
-  // Fixtures, not wire-complete rows: the section reads only these fields.
-  const seed = (key: readonly unknown[], data: unknown[]) =>
-    qc.setQueryData(key, { object: "list", data, hasMore: false });
-  seed(
-    keys.pins,
-    (opts.pins ?? []).map((p) => ({
-      agent_active: true,
-      ...p,
-      integration_package_id: GMAIL,
-      createdAt: "2026-10-01T00:00:00Z",
-      updatedAt: "2026-10-01T00:00:00Z",
-    })),
-  );
-  seed(keys.connections, opts.connections ?? []);
-  seed(keys.agents, [
-    { agent_package_id: "@acme/mailer", display_name: "Mailer" },
+}
+const WEB_CONNECTION = connection(WEB, "Équipe");
+const DB_CONNECTION = connection(DB, "Base");
+
+function pin(over: Partial<IntegrationPin> = {}): IntegrationPin {
+  return {
+    agent_package_id: AGENT,
+    integration_package_id: GMAIL,
+    connection_ids: [WEB],
+    allow_additional_connections: false,
+    agent_active: true,
+    createdAt: "2026-10-17T10:00:00Z",
+    updatedAt: "2026-10-17T10:00:00Z",
+    ...over,
+  };
+}
+
+function renderSection(opts: { pins?: IntegrationPin[]; connections?: unknown[] }): string {
+  const qc = new QueryClient();
+  const key = (p: string) =>
+    $api.queryOptions("get", p as "/api/integrations/{packageId}/pins", {
+      params: { path, header },
+    }).queryKey;
+  const seed = (p: string, data: unknown[]) =>
+    qc.setQueryData(key(p), { object: "list", data, hasMore: false });
+  seed("/api/integrations/{packageId}/pins", opts.pins ?? []);
+  seed("/api/integrations/{packageId}/connections", opts.connections ?? []);
+  seed("/api/integrations/{packageId}/consuming-agents", [
+    { agent_package_id: AGENT, display_name: "Ops" },
     { agent_package_id: "@acme/triage", display_name: "Triage" },
   ]);
   // SSR reads Zustand's hydration snapshot: only shared-into-this-space rows are pinnable.
@@ -99,144 +106,28 @@ function renderSection(opts: {
   }
 }
 
-function Form({
-  connections,
-  onItems,
-}: {
-  connections: (typeof SHARED)[];
-  onItems: (items: Map<string, MenuItem>) => void;
-}) {
-  const tree: ReactNode = NewPinForm({
-    packageId: GMAIL,
-    agents: [{ agent_package_id: "@acme/mailer", display_name: "Mailer" }],
-    connections: connections as never,
-    enforcedDefault: false,
-    onDone: () => {},
-  });
-  onItems(menuItems(tree));
-  return null;
-}
-
-/** The form behind "Ajouter", with the connections shared into the space: the items of its menu. */
-function formItems(connections: (typeof SHARED)[]): Map<string, MenuItem> {
-  let items = new Map<string, MenuItem>();
-  render(<Form connections={connections} onItems={(found) => (items = found)} />, {
-    queryClient: new QueryClient(),
-  });
-  return items;
-}
-
-/** The form rendered closed, as the page shows it. */
-function renderForm(connections: (typeof SHARED)[]): string {
-  return render(
-    <NewPinForm
-      packageId={GMAIL}
-      agents={[{ agent_package_id: "@acme/mailer", display_name: "Mailer" }]}
-      connections={connections as never}
-      enforcedDefault={false}
-      onDone={() => {}}
-    />,
-    { queryClient: new QueryClient() },
-  );
-}
-
-const t = (key: string) => i18n.t(`settings:integration.admin.pinManagement.${key}`);
-
-describe("PinManagementSection, 'Aucune connexion'", () => {
-  it("is a mode of the connection menu, beside the shared connections", () => {
-    const items = formItems([SHARED]);
-    expect(items.get("pin-add-pick-none-connections")).toMatchObject({ value: "none" });
-    expect(items.get("pin-add-pick-choose-connections")).toMatchObject({ value: "choose" });
-    expect(items.has(`pin-add-pick-option-${SHARED.id}`)).toBe(true);
-    // An exception to the default: « Hériter » is the pin's absence, which the table's delete does.
-    expect(items.has("pin-add-pick-reset-connections")).toBe(false);
-    expect(renderForm([SHARED])).toContain("pin-add-pick-connections");
-  });
-
-  it("says both outcomes, since the agent may require the integration", async () => {
-    const hint = () =>
-      descriptionOf(formItems([SHARED]).get("pin-add-pick-none-connections")?.children);
-    expect(hint()).toBe("L'agent s'exécute sans cette intégration, ou ne démarre pas s'il l'exige");
-    await i18n.changeLanguage("en");
-    try {
-      expect(hint()).toBe(
-        "The agent runs without this integration, or does not start if it requires it",
-      );
-    } finally {
-      // The i18n instance is shared by the whole process: never leave English behind.
-      await i18n.changeLanguage("fr");
-    }
-  });
-
-  it("is offered even when no connection is shared, which only stops pinning one", () => {
-    const items = formItems([]);
-    expect(items.has("pin-add-pick-none-connections")).toBe(true);
-    const html = renderForm([]);
-    expect(html).toContain('data-testid="pin-add-submit"');
-    expect(html).toContain(t("noPinnableConnections"));
-  });
-
-  it("reads a stored pin to none as 'Aucune connexion'", () => {
-    const html = renderSection({
-      pins: [{ agent_package_id: "@acme/mailer", connection_ids: [] }],
-      connections: [SHARED],
-    });
-    const row = html.match(/<tr[^>]*>(?:(?!<\/tr>).)*Mailer.*?<\/tr>/s)?.[0] ?? "";
-    expect(row).toContain(i18n.t("agents:detail.integrationMemberPicker.none"));
-  });
-});
-
-const AGENT = "@acme/ops";
-const WEB = "11111111-1111-4111-8111-111111111111";
-
-function pin(over: Partial<IntegrationPin> = {}): IntegrationPin {
-  return {
-    agent_package_id: AGENT,
-    integration_package_id: "@acme/drive",
-    connection_ids: [WEB],
-    allow_additional_connections: false,
-    agent_active: true,
-    createdAt: "2026-10-17T10:00:00Z",
-    updatedAt: "2026-10-17T10:00:00Z",
-    ...over,
-  };
-}
-
-const WEB_CONNECTION = { ...SHARED, id: WEB } as never;
-
-/**
- * The mode cell of a pin, with what its select hands back when changed. Only WEB is shared here,
- * once the integration's connections are `loaded`.
- */
-function modeCell(row: IntegrationPin, enforcedDefault: boolean, loaded = true) {
-  const connections = loaded ? [WEB_CONNECTION] : undefined;
+/** The pins table's columns, with the pins its « … » hands back. */
+function pinColumns(opts: { loaded?: boolean } = {}) {
+  const connections = opts.loaded === false ? undefined : [WEB_CONNECTION as never];
+  const edited: IntegrationPin[] = [];
+  const deleted: IntegrationPin[] = [];
   let columns: DataColumn<IntegrationPin>[] = [];
-  const changed: IntegrationPin[] = [];
-  function Probe({
-    onColumns,
-  }: {
-    onColumns: (found: DataColumn<IntegrationPin>[]) => void;
-  }): ReactElement | null {
-    const found = usePinColumns({
+  function Probe(): ReactElement | null {
+    columns = usePinColumns({
       agentName: () => "Ops",
       pinnable: connections ?? [],
       connections,
       isDeleting: () => false,
-      onDelete: () => {},
-      enforcedDefault,
-      isChangingMode: () => false,
-      onChangeMode: (p) => changed.push(p),
+      onEdit: connections ? (p) => edited.push(p) : undefined,
+      onDelete: (p) => deleted.push(p),
     });
-    onColumns(found);
     return null;
   }
-  render(<Probe onColumns={(found) => (columns = found)} />);
-  const column = columns.find((c) => c.id === "mode")!;
-  const cell = column.cell(row) as ReactElement;
-  return { column, html: render(cell), cell, changed };
+  render(<Probe />);
+  return { columns, edited, deleted };
 }
 
-/** The props of the element carrying `testId`, found in an element tree. */
+/** The props of the first element carrying `testId`, found in an element tree. */
 function propsOf(node: ReactNode, testId: string): Record<string, unknown> | undefined {
   if (Array.isArray(node)) {
     for (const child of node) {
@@ -250,118 +141,322 @@ function propsOf(node: ReactNode, testId: string): Record<string, unknown> | und
   return propsOf(node.props.children as ReactNode, testId);
 }
 
-const EXACT = settingsFr["integration.admin.pinManagement.modeExact"];
-const PLUS = settingsFr["integration.admin.pinManagement.modePlus"];
+describe("the pins table", () => {
+  it("reads Agent, Connexions and Mode, with no control in its cells", () => {
+    const html = renderSection({
+      pins: [
+        pin({ connection_ids: [WEB, GONE] }),
+        pin({ agent_package_id: "@acme/triage", allow_additional_connections: true }),
+      ],
+      connections: [WEB_CONNECTION],
+    });
+    for (const head of ["Agent", "Connexions", "Mode"]) expect(html).toContain(`>${head}<`);
+    expect(html).toContain(EXACT);
+    expect(html).toContain(PLUS);
+    // An unavailable member is named as such, in the warning tone.
+    expect(html).toContain(
+      `<span class="text-warning">${settingsFr["integration.admin.unavailableConnection"]}</span>`,
+    );
+    expect(html).not.toContain('role="combobox"');
+    expect(html).not.toContain('data-testid="pin-mode-');
+  });
 
-/** The labels of a mode select's options, and which are unavailable. */
+  it("reads a pin to none as « Aucune connexion »", () => {
+    const html = renderSection({ pins: [pin({ connection_ids: [] })], connections: [] });
+    expect(html).toContain(fr("noConnection"));
+  });
+
+  it("holds « Modifier » then « Supprimer » in each row's menu, and the mode as plain text", () => {
+    const { columns, edited, deleted } = pinColumns();
+    expect(columns.find((c) => c.id === "mode")?.control).toBeUndefined();
+    const actions = (
+      columns[columns.length - 1]!.cell(pin()) as ReactElement<{ actions: MenuAction[] }>
+    ).props.actions;
+    expect(actions.map((a) => [a.id, a.label, a.destructive === true])).toEqual([
+      ["edit", "Modifier", false],
+      ["delete", "Supprimer", true],
+    ]);
+    actions[0]!.onSelect!();
+    expect(edited).toEqual([pin()]);
+    // « Supprimer » only names the pin to confirm: the caller opens the confirmation.
+    actions[1]!.onSelect!();
+    expect(deleted).toEqual([pin()]);
+  });
+
+  it("offers no edit until the connections load", () => {
+    const { columns } = pinColumns({ loaded: false });
+    const edit = (
+      columns[columns.length - 1]!.cell(pin()) as ReactElement<{ actions: MenuAction[] }>
+    ).props.actions[0]!;
+    expect(edit).toMatchObject({ id: "edit", disabled: true, onSelect: undefined });
+  });
+
+  it("offers « Ajouter » while an agent has no pin", () => {
+    const html = renderSection({ pins: [pin()], connections: [WEB_CONNECTION] });
+    expect(html).toContain('data-testid="pin-add"');
+    const full = renderSection({
+      pins: [pin(), pin({ agent_package_id: "@acme/triage" })],
+      connections: [WEB_CONNECTION],
+    });
+    expect(full).not.toContain('data-testid="pin-add"');
+    expect(full).toContain(fr("noConsumingAgents"));
+  });
+});
+
+/** The form's fields for `stored` (`null` adds), after `edit` changed the draft. */
+function formFields(
+  stored: IntegrationPin | null,
+  opts: {
+    edit?: Partial<ReturnType<typeof initialPinDraft>>;
+    enforcedDefault?: boolean;
+    connections?: unknown[];
+  } = {},
+) {
+  const connections = (opts.connections ?? [WEB_CONNECTION, DB_CONNECTION]) as never[];
+  const draft = { ...initialPinDraft(stored), ...opts.edit };
+  const unavailableIds = stored
+    ? stored.connection_ids.filter((id) => !connections.some((c: { id: string }) => c.id === id))
+    : [];
+  const verdict = pinDraftVerdict({
+    stored,
+    connectionIds: draft.connectionIds,
+    chosenMode: draft.chosenMode,
+    enforcedDefault: opts.enforcedDefault ?? false,
+    unavailableIds,
+    agentInactive: stored ? !stored.agent_active : false,
+  });
+  const patches: unknown[] = [];
+  const element = (
+    <PinFormFields
+      editing={stored !== null}
+      agents={[{ agent_package_id: AGENT, display_name: "Ops" }]}
+      connections={connections}
+      unavailableIds={unavailableIds}
+      draft={draft}
+      verdict={verdict}
+      onChange={(patch) => patches.push(patch)}
+    />
+  );
+  let tree: ReactNode = null;
+  function Probe(): null {
+    tree = PinFormFields(element.props);
+    return null;
+  }
+  render(<Probe />);
+  return { html: render(element), tree, verdict, patches };
+}
+
 function optionsOf(props: Record<string, unknown>) {
   return (props.options as { value: string; label: string; disabled?: boolean }[]).map(
     ({ value, label, disabled }) => ({ value, label, disabled: disabled === true }),
   );
 }
 
-describe("the pins table's mode column", () => {
-  it("is a control column, never waiting for room", () => {
-    expect(modeCell(pin(), false).column).toMatchObject({ control: true });
-    expect(modeCell(pin(), false).column.header).toBe("Mode");
+describe("the pin form, adding", () => {
+  it("asks for an agent among those without a pin, every shared connection a box, none ticked", () => {
+    const { html, verdict } = formFields(null);
+    expect(html).toContain(fr("chooseAgent"));
+    expect(html).toContain(`data-testid="pin-form-connection-${WEB}"`);
+    expect(html).toContain(`data-testid="pin-form-connection-${DB}"`);
+    expect(html).not.toContain('aria-checked="true"');
+    // None ticked is a pin to « Aucune connexion », said under the boxes.
+    expect(html).toContain(fr("noneChecked"));
+    expect(verdict.mode).toBe("exact");
   });
 
-  it("reads each pin's mode, and asks to change it with the stored pin", () => {
-    const exact = modeCell(pin(), false);
-    expect(exact.html).not.toContain('disabled=""');
-    const props = propsOf(exact.cell, `pin-mode-${AGENT}`)!;
-    expect(props.value).toBe("exact");
-    expect(optionsOf(props).map((o) => o.label)).toEqual([EXACT, PLUS]);
-    // Re-picking the current mode is not a change.
-    (props.onValueChange as (value: string) => void)("exact");
-    expect(exact.changed).toEqual([]);
-    (props.onValueChange as (value: string) => void)("plus");
-    expect(exact.changed).toEqual([pin()]);
-
-    const plus = modeCell(pin({ allow_additional_connections: true }), false);
-    expect(propsOf(plus.cell, `pin-mode-${AGENT}`)!.value).toBe("plus");
+  it("starts on « exact », with « plus » disabled while no connection is ticked, and says why", () => {
+    const { html, tree } = formFields(null);
+    const mode = propsOf(tree, "pin-form-mode")!;
+    expect(mode.value).toBe("exact");
+    expect(optionsOf(mode)).toEqual([
+      { value: "exact", label: EXACT, disabled: false },
+      { value: "plus", label: PLUS, disabled: true },
+    ]);
+    expect(html).toContain(fr("modeExactHelp"));
+    expect(html).toContain(fr("additionsNeedConnection"));
   });
 
-  it("refuses « plus » for a pin to none, or under an enforced default, and says why", () => {
-    const none = modeCell(pin({ connection_ids: [] }), false);
-    expect(none.html).toContain('disabled=""');
-    expect(none.html).toContain(
-      settingsFr["integration.admin.pinManagement.additionsNeedConnection"],
-    );
-    const enforced = modeCell(pin(), true);
-    expect(enforced.html).toContain('disabled=""');
-    expect(enforced.html).toContain(
-      settingsFr["integration.admin.pinManagement.additionsEnforcedDefault"],
-    );
+  it("offers « plus » once a connection is ticked, except under an enforced default", () => {
+    const ticked = formFields(null, { edit: { connectionIds: [WEB] } });
+    expect(optionsOf(propsOf(ticked.tree, "pin-form-mode")!)[1]!.disabled).toBe(false);
+    expect(ticked.html).not.toContain('data-testid="pin-form-mode-refusal"');
+    const enforced = formFields(null, { edit: { connectionIds: [WEB] }, enforcedDefault: true });
+    expect(optionsOf(propsOf(enforced.tree, "pin-form-mode")!)[1]!.disabled).toBe(true);
+    expect(enforced.html).toContain(fr("additionsEnforcedDefault"));
   });
 
-  it("always lets a « plus » pin go back to « exact »", () => {
-    const html = modeCell(pin({ allow_additional_connections: true }), true).html;
-    expect(html).not.toContain('disabled=""');
-  });
-});
-
-describe("the pins table's mode select over an unavailable connection", () => {
-  const GONE = "33333333-3333-4333-8333-333333333333";
-  const reason = settingsFr["integration.admin.pinManagement.additionsUnavailableConnection"];
-
-  it("changes neither way, and says why", () => {
-    for (const allow of [false, true]) {
-      const html = modeCell(
-        pin({ connection_ids: [WEB, GONE], allow_additional_connections: allow }),
-        false,
-      ).html;
-      expect(html).toContain('disabled=""');
-      expect(html).toContain(reason);
-    }
+  it("says, in « exact », that the members' choices for the agent go, and nothing in « plus »", () => {
+    expect(formFields(null).html).toContain(fr("clearsMemberChoices"));
+    const plus = formFields(null, { edit: { connectionIds: [WEB], chosenMode: "plus" } });
+    expect(plus.html).not.toContain('data-testid="pin-form-consequence"');
   });
 
-  it("waits, saying nothing, while the connections load", () => {
-    const html = modeCell(pin(), false, false).html;
-    expect(html).toContain('disabled=""');
-    expect(html).not.toContain(reason);
+  it("sends the ticked set and the mode, the flag always named", () => {
+    expect(formFields(null, { edit: { connectionIds: [DB, WEB] } }).verdict.body).toEqual({
+      connection_ids: [DB, WEB],
+      allow_additional_connections: false,
+    });
+    expect(
+      formFields(null, { edit: { connectionIds: [WEB], chosenMode: "plus" } }).verdict.body,
+    ).toEqual({ connection_ids: [WEB], allow_additional_connections: true });
+    expect(formFields(null).verdict.body).toEqual({
+      connection_ids: [],
+      allow_additional_connections: false,
+    });
   });
 });
 
-describe("the pins table's mode select over an agent not active in the space", () => {
-  const reason = settingsFr["integration.admin.pinManagement.additionsInactiveAgent"];
-
-  it("changes neither way, and says why", () => {
-    for (const allow of [false, true]) {
-      const html = modeCell(
-        pin({ allow_additional_connections: allow, agent_active: false }),
-        false,
-      ).html;
-      expect(html).toContain('disabled=""');
-      expect(html).toContain(reason);
-    }
+describe("the pin form, editing", () => {
+  it("shows the pin's agent fixed, its set ticked and its mode", () => {
+    const { html, tree } = formFields(pin({ allow_additional_connections: true }));
+    expect(propsOf(tree, "pin-form-agent")).toMatchObject({ value: AGENT, disabled: true });
+    expect(html).toMatch(
+      new RegExp(`aria-checked="true"[^>]*data-testid="pin-form-connection-${WEB}"`),
+    );
+    expect(propsOf(tree, "pin-form-mode")!.value).toBe("plus");
   });
 
-  it("leaves an active agent's select alone", () => {
-    const html = modeCell(pin(), false).html;
-    expect(html).not.toContain('disabled=""');
-    expect(html).not.toContain(reason);
+  it("has nothing to save, and says nothing, until the pin changes", () => {
+    const same = formFields(pin());
+    expect(same.verdict.savable).toBe(false);
+    expect(same.html).not.toContain('data-testid="pin-form-consequence"');
+    expect(formFields(pin(), { edit: { connectionIds: [WEB, DB] } }).verdict.savable).toBe(true);
   });
 
-  it("is read from the pin's own agent_active, which the consuming-agents list does not decide", () => {
-    // `@acme/mailer` is in the consuming-agents list, yet the server says the pin's agent is inactive.
-    const inactive = renderSection({
-      pins: [
-        { agent_package_id: "@acme/mailer", connection_ids: [SHARED.id], agent_active: false },
+  it("says each consequence of saving by the move it makes", () => {
+    const cases: [IntegrationPin, Partial<ReturnType<typeof initialPinDraft>>, string | null][] = [
+      [pin(), { connectionIds: [DB] }, fr("clearsMemberChoices")],
+      [pin(), { chosenMode: "plus" }, fr("clearsMemberChoices")],
+      [
+        pin({ allow_additional_connections: true }),
+        { chosenMode: "exact" },
+        fr("clearsMemberChoicesAndSchedules"),
       ],
-      connections: [SHARED],
+      [pin({ allow_additional_connections: true }), { connectionIds: [WEB, DB] }, null],
+    ];
+    for (const [stored, edit, sentence] of cases) {
+      const { html } = formFields(stored, { edit });
+      if (sentence) expect(html).toContain(sentence);
+      else expect(html).not.toContain('data-testid="pin-form-consequence"');
+    }
+  });
+
+  it("lists an unavailable member ticked, refuses to save it, and saves once it is unticked", () => {
+    const stored = pin({ connection_ids: [WEB, GONE] });
+    const broken = formFields(stored);
+    expect(broken.html).toMatch(
+      new RegExp(`aria-checked="true"[^>]*data-testid="pin-form-connection-${GONE}"`),
+    );
+    expect(broken.html).toContain(settingsFr["integration.admin.unavailableConnection"]);
+    expect(broken.html).toContain(fr("additionsUnavailableConnection"));
+    expect(broken.verdict.savable).toBe(false);
+
+    const fixed = formFields(stored, { edit: { connectionIds: [WEB] } });
+    // Unticked, it stays listed and cannot be ticked again.
+    expect(fixed.html).toMatch(
+      new RegExp(
+        `aria-checked="false"[^>]*disabled=""[^>]*data-testid="pin-form-connection-${GONE}"`,
+      ),
+    );
+    expect(fixed.verdict).toMatchObject({
+      savable: true,
+      refusal: null,
+      body: { connection_ids: [WEB], allow_additional_connections: false },
     });
-    expect(inactive).toContain(reason);
-    // And the reverse: absent from the list, yet active.
-    const active = renderSection({
-      pins: [{ agent_package_id: "@acme/gone", connection_ids: [SHARED.id], agent_active: true }],
-      connections: [SHARED],
+  });
+
+  it("refuses to save the pin of an agent not active in the space, and says why", () => {
+    const { html, tree, verdict } = formFields(pin({ agent_active: false }), {
+      edit: { connectionIds: [WEB, DB] },
     });
-    expect(active).not.toContain(reason);
+    expect(optionsOf(propsOf(tree, "pin-form-mode")!)[1]!.disabled).toBe(true);
+    expect(html).toContain(fr("additionsInactiveAgent"));
+    expect(verdict.savable).toBe(false);
+  });
+
+  it("sends a « plus » pin back to « exact » with its set, even under an enforced default", () => {
+    const { verdict } = formFields(pin({ allow_additional_connections: true }), {
+      edit: { chosenMode: "exact" },
+      enforcedDefault: true,
+    });
+    expect(verdict).toMatchObject({
+      savable: true,
+      body: { connection_ids: [WEB], allow_additional_connections: false },
+    });
   });
 });
 
-describe("the delete confirmation's note", () => {
+describe("the pin form's sentences", () => {
+  it("names both modes by their effect, in both languages", () => {
+    expect([EXACT, PLUS]).toEqual([
+      "Exactement ces connexions",
+      "Ces connexions, plus celles de l’utilisateur",
+    ]);
+    expect([
+      settingsEn["integration.admin.pinManagement.modeExact"],
+      settingsEn["integration.admin.pinManagement.modePlus"],
+    ]).toEqual(["Exactly these connections", "These connections, plus the user’s"]);
+  });
+
+  it("says each consequence in one sentence, the schedules ones failing, disabled and kept so", () => {
+    const key = "integration.admin.pinManagement.clearsMemberChoicesAndSchedules";
+    expect(settingsFr[key]).toMatch(/échoueront.*désactivées, sans réactivation/);
+    expect(settingsEn[key]).toMatch(/will fail.*be disabled, without being re-enabled/);
+    for (const lang of [settingsFr, settingsEn]) {
+      for (const k of ["clearsMemberChoices", "clearsMemberChoicesAndSchedules"]) {
+        const sentence = lang[`integration.admin.pinManagement.${k}` as never] as string;
+        expect(sentence.match(/[.!?](\s|$)/g)).toHaveLength(1);
+      }
+    }
+  });
+});
+
+/** The confirmation of deleting `row`: the props it hands `ConfirmModal`, and its button's deed. */
+function deleteConfirm(row: IntegrationPin) {
+  const confirmed: string[] = [];
+  let props: Record<string, unknown> = {};
+  function Probe(): null {
+    const element = PinDeleteConfirm({
+      pin: row,
+      agent: "Ops",
+      isPending: false,
+      onClose: () => {},
+      onConfirm: () => confirmed.push(row.agent_package_id),
+    }) as ReactElement<Record<string, unknown>>;
+    props = element.props;
+    return null;
+  }
+  render(<Probe />);
+  return { props, confirmed };
+}
+
+describe("deleting a pin", () => {
+  it("is a destructive confirmation that deletes only from its own button", () => {
+    const { props, confirmed } = deleteConfirm(pin());
+    expect(props).toMatchObject({
+      open: true,
+      title: fr("delete"),
+      description:
+        "Ops reviendra à la règle générale de l’intégration : la connexion spécifique sera retirée.",
+      confirmLabel: "Supprimer",
+    });
+    expect(props.variant).toBeUndefined();
+    expect(confirmed).toEqual([]);
+    (props.onConfirm as () => void)();
+    expect(confirmed).toEqual([AGENT]);
+  });
+
+  it("says what a closed and an open pin take with them", () => {
+    expect(render(deleteConfirm(pin()).props.children as ReactElement)).toContain(
+      fr("deleteClosedClearsChoices"),
+    );
+    expect(
+      render(
+        deleteConfirm(pin({ allow_additional_connections: true })).props.children as ReactElement,
+      ),
+    ).toContain(fr("deleteOpenClearsChoices"));
+  });
+
   it("says, for an open pin, that an enforced space default clears every member's choices", () => {
     const key = "integration.admin.pinManagement.deleteOpenClearsChoices";
     expect(settingsFr[key]).toMatch(/Sous un défaut obligatoire de l’espace, tous les choix/);
@@ -378,118 +473,5 @@ describe("the delete confirmation's note", () => {
         expect(sentence.match(/[.!?](\s|$)/g)).toHaveLength(1);
       }
     }
-  });
-});
-
-/** The confirmation a mode change of `row` opens: the props it hands `ConfirmModal`. */
-function modeConfirm(row: IntegrationPin): Record<string, unknown> {
-  let props: Record<string, unknown> = {};
-  function Probe(): null {
-    const element = PinModeConfirm({
-      pin: row,
-      agent: "Ops",
-      isPending: false,
-      onClose: () => {},
-      onConfirm: () => {},
-    }) as ReactElement<Record<string, unknown>>;
-    props = element.props;
-    return null;
-  }
-  render(<Probe />);
-  return props;
-}
-
-describe("the confirmation of a mode change", () => {
-  const cleared = settingsFr["integration.admin.pinManagement.clearsMemberChoices"];
-  const help = settingsFr["integration.admin.pinManagement.modePlusHelp"];
-  const schedules = settingsFr["integration.admin.pinManagement.toExactSchedules"];
-
-  it("to « plus »: says the members' choices go, and what a run may then combine", () => {
-    const props = modeConfirm(pin());
-    expect(props.title).toBe("Passer Ops en « Ces connexions, plus celles de l’utilisateur » ?");
-    expect(props.confirmLabel).toBe("Changer de mode");
-    expect(props.description).toBe(cleared);
-    const html = render(props.children as ReactElement);
-    expect(html).toContain("gardez « Exactement ces connexions » pour un agent sensible");
-    expect(html).not.toContain(schedules);
-  });
-
-  it("to « exact »: says the members' choices go, and that schedules adding connections get disabled", () => {
-    const props = modeConfirm(pin({ allow_additional_connections: true }));
-    expect(props.title).toBe("Passer Ops en « Exactement ces connexions » ?");
-    expect(props.confirmLabel).toBe("Changer de mode");
-    expect(props.description).toBe(cleared);
-    const html = render(props.children as ReactElement);
-    expect(html).toContain(schedules);
-    expect(html).not.toContain(help);
-  });
-
-  it("says, in both languages, that the schedules fail, are disabled, and stay so", () => {
-    const key = "integration.admin.pinManagement.toExactSchedules";
-    expect(settingsFr[key]).toMatch(/échoueront.*désactivées.*ne les réactivera pas/);
-    expect(settingsEn[key]).toMatch(/will fail.*be disabled.*will not re-enable/);
-  });
-
-  it("names both modes by their effect, in both languages", () => {
-    expect([EXACT, PLUS]).toEqual([
-      "Exactement ces connexions",
-      "Ces connexions, plus celles de l’utilisateur",
-    ]);
-    expect([
-      settingsEn["integration.admin.pinManagement.modeExact"],
-      settingsEn["integration.admin.pinManagement.modePlus"],
-    ]).toEqual(["Exactly these connections", "These connections, plus the user’s"]);
-  });
-});
-
-/** The new-pin form's mode select, as the form hands it, with `connections` shared. */
-function formMode(connections: (typeof SHARED)[], enforcedDefault = false) {
-  let props: Record<string, unknown> = {};
-  function Probe(): null {
-    const tree: ReactNode = NewPinForm({
-      packageId: GMAIL,
-      agents: [{ agent_package_id: "@acme/mailer", display_name: "Mailer" }],
-      connections: connections as never,
-      enforcedDefault,
-      onDone: () => {},
-    });
-    props = propsOf(tree, "pin-add-mode")!;
-    return null;
-  }
-  render(<Probe />, { queryClient: new QueryClient() });
-  return props;
-}
-
-describe("the new pin's mode", () => {
-  const form = () =>
-    render(
-      <NewPinForm
-        packageId="@acme/drive"
-        agents={[{ agent_package_id: AGENT, display_name: "Ops" }]}
-        connections={[]}
-        enforcedDefault={false}
-        onDone={() => {}}
-      />,
-    );
-
-  it("starts on « exact », says what it does, and offers « plus » only once a connection is imposed", () => {
-    const props = formMode([SHARED]);
-    expect(props.value).toBe("exact");
-    expect(optionsOf(props)).toEqual([
-      { value: "exact", label: EXACT, disabled: false },
-      // No connection chosen yet: nothing is imposed to add to.
-      { value: "plus", label: PLUS, disabled: true },
-    ]);
-    const html = form();
-    expect(html).toContain('id="pin-add-mode"');
-    expect(html).toContain(settingsFr["integration.admin.pinManagement.modeExactHelp"]);
-    expect(html).toContain('data-testid="pin-add-mode-refusal"');
-    expect(html).toContain(settingsFr["integration.admin.pinManagement.additionsNeedConnection"]);
-  });
-
-  it("says, while it reads « exact », that the members' choices for the agent go", () => {
-    const html = form();
-    expect(html).toContain('data-testid="pin-add-clears-choices"');
-    expect(html).toContain(settingsFr["integration.admin.pinManagement.clearsMemberChoices"]);
   });
 });

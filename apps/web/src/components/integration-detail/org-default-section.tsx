@@ -18,8 +18,7 @@ import {
 } from "../../hooks/use-integrations";
 import { SettingsSkeleton } from "../loading-skeletons";
 import { SaveFeedback } from "../settings/save-feedback";
-import { ConnectionSetPicker } from "../integration-connect/connection-choice-menu";
-import { connectionSetOption } from "../integration-connect/connection-set-option";
+import { ConnectionCheckboxList } from "./connection-checkbox-list";
 
 /**
  * Org-wide default connections for this integration — the cross-agent
@@ -187,13 +186,15 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
           </div>
           {shared.length > 0 && mode !== "choice" ? (
             <div className="min-w-0">
-              <p className="mb-3 text-sm font-medium">{connectionsLabel}</p>
-              <ConnectionSetPicker
-                options={shared.map(connectionSetOption)}
-                value={connectionIds.length > 0 ? connectionIds : null}
-                onChange={(next) => void save(next ?? [], mode === "forced", mode)}
-                testPrefix="org-default-pick"
-                testKey="connections"
+              <p id="org-default-connections-label" className="mb-3 text-sm font-medium">
+                {connectionsLabel}
+              </p>
+              <ConnectionCheckboxList
+                idPrefix="org-default-pick"
+                aria-labelledby="org-default-connections-label"
+                connections={shared}
+                value={connectionIds}
+                onChange={(next) => void save(next, mode === "forced", mode)}
                 unavailableIds={unavailableIds}
                 disabled={isLoading || isError || pendingValue !== null}
               />
