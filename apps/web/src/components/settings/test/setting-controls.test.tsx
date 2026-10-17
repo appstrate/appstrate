@@ -10,10 +10,10 @@ await i18nReady;
 await i18n.changeLanguage("fr");
 
 describe("InlineTextSetting", () => {
-  const html = render(<InlineTextSetting value="Acme" maxLength={100} onCommit={() => {}} />);
+  const html = render(<InlineTextSetting value="Acme" maxLength={100} onCommit={async () => {}} />);
 
-  it("marks itself an inline edit, which `keepOpenWhileRenaming` keeps the dialog open for", () => {
-    expect(html).toContain('data-inline-editing=""');
+  it("starts clean without a save bar", () => {
+    expect(html).not.toContain("Modifications non enregistrées");
   });
 
   it("takes the server's length limit", () => {

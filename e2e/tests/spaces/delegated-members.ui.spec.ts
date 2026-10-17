@@ -147,13 +147,13 @@ test("space settings retain edits and expose a forbidden save response", async (
       : route.continue(),
   );
   await page.goto("/workspace-settings/general");
-  // The name saves itself on Enter or blur; there is no form and no save button.
+  // A refused manual save retains the typed name.
   const name = page.getByRole("textbox", { name: "Nom", exact: true });
   await name.fill("Unpersisted name");
   const refused = page.waitForResponse(
     (response) => response.request().method() === "PATCH" && response.status() === 403,
   );
-  await name.press("Enter");
+  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   await refused;
   // The refusal is toasted, and what was typed stays typed.
   await expect(

@@ -283,7 +283,7 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
 
   // ── Configured while off: choosing a model is a read-write on the placement,
   //    not a run, so the route takes it ──
-  // Paramètres › Modèle saves itself on every pick: no save button.
+  // Paramètres › Modèle persists only after Save.
   await page.getByRole("tab", { name: "Paramètres", exact: true }).click();
   await page.getByRole("link", { name: "Modèle", exact: true }).click();
   const modelWrite = page.waitForResponse(
@@ -296,6 +296,7 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
     .filter({ hasText: /^Par défaut \(Moyen\)$/ })
     .click();
   await page.getByRole("option", { name: "Élevé", exact: true }).click();
+  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   expect((await modelWrite).status(), "PATCH …/model on a switched-off agent").toBe(200);
 
   // ── Switched back on from the banner itself ──

@@ -105,7 +105,7 @@ export function useEditorState({
   const createPkg = useCreatePackage(packageType);
   const updatePkg = useUpdatePackage(packageType, packageId ?? "");
   const isDirty = preparingFiles || JSON.stringify(state) !== JSON.stringify(initialSnapshot);
-  const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
+  const { blocker, allowNavigation } = useUnsavedChanges(isDirty, () => setState(initialSnapshot));
   useReportEditorDirty(isDirty);
   const updateManifest = useCallback(
     (patch: Record<string, unknown>) =>

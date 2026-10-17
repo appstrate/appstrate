@@ -197,11 +197,8 @@ function EmailRow() {
 }
 
 /**
- * The display name, as a setting rather than a form.
- *
- * "The control IS the setting": a name is a one-word change, and a Save button
- * put two clicks and a mode change in front of it. It commits on blur or Enter
- * and reverts on Escape, like the organization's name and the workspace's.
+ * The display name, as a setting rather than a form: saved by Save or Enter, cancelled by
+ * Cancel or Escape, never on blur (`InlineTextSetting`), like the organization's name.
  */
 function DisplayNameRow() {
   const { t } = useTranslation(["settings", "common"]);
@@ -209,23 +206,12 @@ function DisplayNameRow() {
   const updateDisplayName = useUpdateDisplayName();
 
   return (
-    <SettingRow
-      variant="field"
-      label={t("preferences.displayName")}
-      status={
-        <SaveFeedback
-          pending={updateDisplayName.isPending}
-          success={updateDisplayName.isSuccess}
-          error={updateDisplayName.isError}
-        />
-      }
-    >
+    <SettingRow variant="field" label={t("preferences.displayName")}>
       <InlineTextSetting
         value={profile?.displayName ?? ""}
-        disabled={updateDisplayName.isPending}
         maxLength={100}
         aria-label={t("preferences.displayName")}
-        onCommit={(displayName) => updateDisplayName.mutate({ body: { displayName } })}
+        onCommit={(displayName) => updateDisplayName.mutateAsync({ body: { displayName } })}
       />
     </SettingRow>
   );

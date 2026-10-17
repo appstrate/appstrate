@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { requestScopeChange } from "../../hooks/use-unsaved-changes";
+
 /**
  * One settings shell for three scopes: organization, workspace and the
  * caller's own account (`/preferences`).
@@ -134,8 +136,10 @@ export function UnifiedSettingsLayout() {
         tile: orgTile(org),
       }))}
       onValueChange={(id) => {
-        switchOrg(id);
-        landAfterOrgSwitch();
+        requestScopeChange(() => {
+          switchOrg(id);
+          landAfterOrgSwitch();
+        });
       }}
     />
   );
@@ -151,7 +155,7 @@ export function UnifiedSettingsLayout() {
         tile: spaceTile(space, viewer),
         disabled: !isSpaceEnterable(space),
       }))}
-      onValueChange={switchSpace}
+      onValueChange={(id) => requestScopeChange(() => switchSpace(id))}
     />
   );
   const selectors: Partial<Record<SettingsScope, ReactNode>> = {

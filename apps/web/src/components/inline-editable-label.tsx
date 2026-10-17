@@ -3,14 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@appstrate/ui/components/input";
-import { Spinner } from "@appstrate/ui/components/spinner";
+import { Button } from "@appstrate/ui/components/button";
 import { commitRename } from "../lib/inline-rename";
 
 /**
  * A table row's name, renamed in place — the app's ONE rename affordance. It opens only
  * when the row's « Renommer » entry sets `editing` (no click-to-edit, no hover pencil).
  * Raised above the row's cover in both states, so its `title` reads and the field takes
- * clicks. Saves on blur or Enter, cancels on Escape, and fires `onSave` only when the
+ * clicks. Saves on explicit confirmation or Enter, cancels on Escape, and fires `onSave` only when the
  * trimmed value changed. It truncates: a long name must not eat the column's floor.
  */
 export function InlineEditableLabel({
@@ -58,7 +58,7 @@ export function InlineEditableLabel({
     const outcome = await commitRename(draft, value, onSave);
     savingRef.current = false;
     setSaving(false);
-    // A failed write keeps edit mode and the draft, so a commit on blur erases nothing.
+    // A failed save keeps the editor open; the mutation's own toast reports it.
     if (outcome !== "failed") setEditing(false);
   };
 
@@ -86,7 +86,6 @@ export function InlineEditableLabel({
         disabled={saving}
         placeholder={placeholder}
         onChange={(e) => setTyped(e.target.value)}
-        onBlur={() => void commit()}
         onKeyDown={(e) => {
           if (e.key === "Enter") void commit();
           if (e.key === "Escape" && !savingRef.current) setEditing(false);
@@ -96,7 +95,18 @@ export function InlineEditableLabel({
         className="h-7 w-full min-w-0 text-sm font-medium"
         data-testid={testId}
       />
-      {saving && <Spinner className="shrink-0" aria-label={t("loading")} />}
+      <Button type="button" size="sm" disabled={saving} onClick={() => void commit()}>
+        {t("btn.save")}
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        disabled={saving}
+        onClick={() => setEditing(false)}
+      >
+        {t("btn.cancel")}
+      </Button>
     </div>
   );
 }

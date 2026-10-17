@@ -18,9 +18,10 @@ interface UnsavedChangesModalProps {
   blocker: UnsavedBlocker;
   /** If provided, shows a "Save draft" button. Should return a promise that resolves on success. */
   onSaveDraft?: () => Promise<void>;
+  saveLabel?: string;
 }
 
-export function UnsavedChangesModal({ blocker, onSaveDraft }: UnsavedChangesModalProps) {
+export function UnsavedChangesModal({ blocker, onSaveDraft, saveLabel }: UnsavedChangesModalProps) {
   const { t } = useTranslation("common");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -33,7 +34,7 @@ export function UnsavedChangesModal({ blocker, onSaveDraft }: UnsavedChangesModa
       await onSaveDraft();
       blocker.proceed();
     } catch {
-      // The editor shows why.
+      // The refusal is toasted, and the editor keeps its draft for a retry.
       blocker.reset();
     } finally {
       setIsSaving(false);
@@ -54,9 +55,9 @@ export function UnsavedChangesModal({ blocker, onSaveDraft }: UnsavedChangesModa
           <Button variant="ghost" onClick={() => blocker.proceed()} disabled={isSaving}>
             {t("unsaved.discard")}
           </Button>
-          {onSaveDraft && (
+          {onSaveDraft && !blocker.othersDirty && (
             <PendingButton onClick={handleSave} pending={isSaving}>
-              {t("unsaved.saveDraft")}
+              {saveLabel ?? t("unsaved.saveDraft")}
             </PendingButton>
           )}
         </AlertDialogFooter>

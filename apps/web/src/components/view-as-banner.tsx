@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { requestScopeChange } from "../hooks/use-unsaved-changes";
+
 import { useEffect } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -69,12 +71,13 @@ export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}
   const noSpace = !inPersonaSpace && !!spaces && !spaces.some(isSpaceEnterable);
 
   // Back to the space the preview moved the admin out of, then home (as on the way in).
-  const exit = () => {
-    const back = exitViewAs();
-    if (!back || back === currentSpaceId) return;
-    switchSpace(back);
-    navigate("/", { replace: true });
-  };
+  const exit = () =>
+    requestScopeChange(() => {
+      const back = exitViewAs();
+      if (!back || back === currentSpaceId) return;
+      switchSpace(back);
+      navigate("/", { replace: true });
+    });
 
   return (
     <Alert

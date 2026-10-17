@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { requestScopeChange } from "../hooks/use-unsaved-changes";
+
 import { useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -114,8 +116,15 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
       const orgs = await fetchOrgsAs(persona);
       // Committing a preview the user already left would persist it, with nothing to undo it.
       if (abandoned.current) return;
-      const moves = !!space && !!roleOption && space.id !== currentSpaceId;
-      enterViewAs(persona, orgs, moves ? currentSpaceId : null);
+      setEntering(false);
+      requestScopeChange(() => {
+        const moves = !!space && !!roleOption && space.id !== currentSpaceId;
+        enterViewAs(persona, orgs, moves ? currentSpaceId : null);
+        if (space && roleOption) switchSpace(space.id);
+        close();
+        if (moves) navigate("/", { replace: true });
+        else closeOverlay();
+      });
     } catch (err) {
       if (abandoned.current) return;
       setEntering(false);
@@ -124,13 +133,6 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
       toast.error(code ? t(`viewAs.stopped.${code}`, { ns: "common" }) : t("viewAs.enterFailed"));
       return;
     }
-    // Land where the persona's role applies (elsewhere it is only its org role).
-    const movesSpace = !!space && !!roleOption && space.id !== currentSpaceId;
-    if (space && roleOption) switchSpace(space.id);
-    // The settings overlay goes with it: back to the screen it covered, or home if the space changed.
-    close();
-    if (movesSpace) navigate("/", { replace: true });
-    else closeOverlay();
   };
 
   return (

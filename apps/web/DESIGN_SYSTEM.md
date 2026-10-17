@@ -186,42 +186,52 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   beside the label) or `action` (button opposite its explanation). Groups:
   `SettingsGroup` (same file); headings: `SettingsHeading`
   (`components/settings/settings-heading.tsx`, `level` `page` or `group`).
-- **No Edit button, no edit mode, no Save button.** A control saves itself (a
-  schedule's Paramètres is the exception: its sections edit one draft that a
-  `SaveBar` sends as one write, since a move of the actor or the version is judged
-  with the connections of the state it moves to): a
-  select, switch or toggle on change; a text on blur or Enter, Escape reverts
-  (`InlineTextSetting`, `components/settings/inline-text-setting.tsx`); typing or
-  a slider after a 650 ms pause. A rename in a table is `InlineEditableLabel`
-  (`components/inline-editable-label.tsx`), the one rename affordance, and it is
-  **opened by the row's menu only**: a click on the name does nothing and no pencil
-  appears on hover (both are noise next to the « … »). The row's « Edit » never
-  renames, it edits what the name does not (a provider's key), in a modal with no
-  name field; « Rename » is its own menu entry that puts the name in edit. A name
-  outside a table (a page title) is renamed in its own settings, as a text
-  setting (`InlineTextSetting`, « Général »), never in the header.
-- **Several values valid only together** are assembled in a modal that commits
-  once (model, proxy, OAuth client, webhook). **A list of independently valid
-  values** commits each entry on its own.
-- **One return of a write, everywhere** (agent, schedule, organisation,
-  workspace, preferences, integration rules): `SaveFeedback`
+- **One rule decides whether a change waits for Save.** Text, and values that only
+  make sense together, are a draft with Save / Cancel; a single choice (a select, a
+  switch, a radio, a file or an emoji picked) and a named action apply at once.
+  Typing, leaving a field, waiting, hiding the page or unmounting never persists a
+  draft.
+  - Drafts: `useSettingDraft` + `ManualSave` (its `SaveBar`), one form and one write
+    per group of related values (a space's name and domains, input values and locks,
+    model and generation, schedule and connections, an integration's default set and
+    mode). A single text field uses `InlineTextSetting` (Save or Enter, Cancel or
+    Escape). Keep API and permission boundaries explicit.
+  - At once: theme, language, cards/table choice, column widths and visibility, the
+    chat's model/generation/authoring choices, an agent's proxy, a space's visibility
+    and default role, the icon and colour of an organization or a space, activating a
+    package in a space, a space member's role, sharing a connection, an organization
+    policy switch, and the deeds (Send, Run, Delete, Connect, Set as default). One whose effect reaches others asks first with a
+    `ConfirmModal`: imposing a skill on a space's chat, an organization member's
+    owner or access-revoking role, closing an open space.
+  - Operational state and navigation history (auth, selected org/space, sidebar,
+    pairing recovery, sent messages, runs and logs) are not drafts.
+- Clean forms follow refreshed data. Dirty forms preserve their edits on refetch
+  and failure; a refusal is the mutation's toast. Save accepts the sent values only
+  after success; Cancel restores the latest stored values. Disable editing during a
+  write. A change of organization or space drops a draft once the guard has asked:
+  the switch drops the scope's caches, and a form renders only from its loaded
+  data, so it unmounts. Keep it that way (no placeholder data across scopes).
+- `useUnsavedChanges` guards navigation, reload and scope changes
+  (`requestScopeChange`). Leaving asks once for every dirty form; "save and leave"
+  is offered only when a single form is dirty, and waits for its success.
+- An inline rename (`InlineEditableLabel`, a chat title) is a named action opened
+  from a menu: Save or Enter saves, Escape cancels, and leaving cancels it without
+  asking; blur never writes.
+- **Every write has one return, never two.** A draft's return is its save bar: Save
+  shows pending, the bar leaves on success, a refusal is the mutation's toast and
+  the draft stays. A change applied at once returns with `SaveFeedback`
   (`components/settings/save-feedback.tsx`: Enregistrement… / Enregistré / Erreur
-  d'enregistrement). It sits with the control: in the `status` of its
-  `SettingRow` (under a field, beside a switch), or at the foot of a section
-  whose controls share one write. When one mutation writes several rows, each
+  d'enregistrement) in the `status` of its `SettingRow` (beside a switch, under a
+  select), never next to a save bar. When one mutation writes several rows, each
   row reports only the write that carried its own key. A spinner or silence is
-  not a return; a failure is also a toast, and the field keeps what was typed.
+  not a return; a failure is also a toast.
   The one exception is a write whose answer is not « saved » (an email change
   that sends a confirmation): its toast says so and the row shows only the
   pending line.
-- Two writes are exceptions to the no-Save rule, each with one explicit button.
-  A write the server cannot take in parts (a schedule's new actor that must name
-  its connections in the same write): the extra fields appear under the control.
-  The account's login email (`EmailChangeField`, `pages/preferences/general.tsx`):
-  without SMTP it changes at once, so a half-typed address never commits on blur;
-  the button waits for another valid address, and an invalid one is said under
-  the field. A package's files and definition are drafts with an explicit save
-  (`useUnsavedChanges`, section 12).
+- Package files and definitions keep their existing draft saves; publication is
+  a separate action. The account's login email keeps its explicit submission
+  and verification flow. Several settings backed by different endpoints are not
+  silently combined into a partial global save.
 - **Under a field: a note on the left, a control on the right.** A note is text
   (where the value comes from, why it is locked, with its `Lock` icon); a
   control acts (Verrouiller). `InputFieldRow`
@@ -258,7 +268,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
     `ConnectionCheckboxList` (`integration-detail/connection-checkbox-list.tsx`, the shared
     connections, capped, a stored member no longer shared listed as « Connexion indisponible »:
     ticked it can be unticked, never ticked again). The space default (`OrgDefaultSection`) lists it
-    beside its usage select (an empty set is « no default », which the select says). The **pins**
+    beside its usage select (an empty set is « no default », which the select says), the set and its enforcement mode saved together by the section's save bar. The **pins**
     (`PinManagementSection`) are a read-only `DataTable` (Agent, Connexions imposées, Mode in
     words) whose « … » holds « Modifier » and « Supprimer »; « Ajouter » and « Modifier » open one
     `FormModal`: Agent (an `OptionSelect` of the agents without a pin, fixed when editing), the
